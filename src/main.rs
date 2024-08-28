@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::fs::{self, File};
-use std::io::{Read, Write, BufReader, BufWriter, BufRead};
+use std::io::{Read, Write, BufReader, BufWriter, BufRead, Seek, SeekFrom};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use rayon::prelude::*;
 use flate2::read::MultiGzDecoder;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, anyhow};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
 use human_bytes::human_bytes;
@@ -16,9 +16,8 @@ use log::{info, warn, error, LevelFilter};
 use env_logger::Builder;
 use num_cpus;
 use crossbeam_channel::{bounded, Sender, Receiver};
-use memmap2::MmapOptions;
+use memmap2::{Mmap, MmapOptions};
 
-// CLI arguments
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -29,20 +28,18 @@ struct Args {
     output: String,
 }
 
-// Represents a VCF file
 struct VcfFile {
     path: PathBuf,
     chromosome: String,
+    is_compressed: bool,
 }
 
-// Represents a chunk of data from a VCF file
 struct Chunk {
     data: Vec<u8>,
     chromosome: String,
 }
 
 fn main() -> Result<()> {
-    // Initialize logging
     Builder::new().filter_level(LevelFilter::Info).init();
 
     let args = Args::parse();
@@ -50,7 +47,6 @@ fn main() -> Result<()> {
     info!("Input directory: {}", args.input);
     info!("Output file: {}", args.output);
 
-    // Create and run Tokio runtime
     let runtime = Runtime::new().context("Failed to create Tokio runtime")?;
     runtime.block_on(async {
         process_vcf_files(&args.input, &args.output).await
@@ -60,7 +56,6 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-// Main processing function
 async fn process_vcf_files(input_dir: &str, output_file: &str) -> Result<()> {
     let vcf_files = discover_and_sort_vcf_files(input_dir)
         .context("Failed to discover and sort VCF files")?;
@@ -78,7 +73,7 @@ async fn process_vcf_files(input_dir: &str, output_file: &str) -> Result<()> {
     sys.refresh_all();
 
     let total_memory = sys.total_memory();
-    let max_memory_usage = total_memory / 2; // Use up to 50% of total system memory
+    let max_memory_usage = total_memory / 2;
     info!("Total system memory: {}, Max allowed usage: {}", 
           human_bytes(total_memory as f64), 
           human_bytes(max_memory_usage as f64));
@@ -89,7 +84,6 @@ async fn process_vcf_files(input_dir: &str, output_file: &str) -> Result<()> {
     let (chunk_sender, chunk_receiver) = bounded(num_threads * 2);
     let output_file = Arc::new(Mutex::new(BufWriter::new(File::create(output_file)?)));
 
-    // Extract and write header
     let header = extract_header(&vcf_files[0])?;
     {
         let mut output = output_file.lock().unwrap();
@@ -113,11 +107,14 @@ async fn process_vcf_files(input_dir: &str, output_file: &str) -> Result<()> {
 
     let memory_usage = Arc::new(AtomicUsize::new(0));
 
-    // Process files in parallel
     vcf_files.into_par_iter().for_each(|file| {
         let chunk_sender = chunk_sender.clone();
         let memory_usage = memory_usage.clone();
-        let result = process_file(&file, chunk_size, memory_usage, max_memory_usage, chunk_sender);
+        let result = if file.is_compressed {
+            process_compressed_file(&file, chunk_size, memory_usage.clone(), max_memory_usage, chunk_sender)
+        } else {
+            process_uncompressed_file(&file, chunk_size, memory_usage.clone(), max_memory_usage, chunk_sender)
+        };
         if let Err(e) = result {
             error!("Error processing file {:?}: {}", file.path, e);
         }
@@ -125,7 +122,7 @@ async fn process_vcf_files(input_dir: &str, output_file: &str) -> Result<()> {
         overall_pb.inc(1);
     });
 
-    drop(chunk_sender); // Close the channel
+    drop(chunk_sender);
     writer_handle.await??;
 
     overall_pb.finish_with_message("Concatenation completed");
@@ -133,7 +130,6 @@ async fn process_vcf_files(input_dir: &str, output_file: &str) -> Result<()> {
     Ok(())
 }
 
-// Discover and sort VCF files
 fn discover_and_sort_vcf_files(dir: &str) -> Result<Vec<VcfFile>> {
     info!("Discovering VCF files in: {}", dir);
     let progress_bar = ProgressBar::new_spinner();
@@ -150,6 +146,7 @@ fn discover_and_sort_vcf_files(dir: &str) -> Result<Vec<VcfFile>> {
                     Some(Ok(VcfFile {
                         path: path.clone(),
                         chromosome: get_chromosome(&path).ok()?,
+                        is_compressed: extension == "gz",
                     }))
                 } else {
                     None
@@ -170,7 +167,6 @@ fn discover_and_sort_vcf_files(dir: &str) -> Result<Vec<VcfFile>> {
     Ok(sorted_files)
 }
 
-// Custom chromosome sorting function
 fn custom_chromosome_sort(a: &str, b: &str) -> std::cmp::Ordering {
     let order = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "X", "Y", "MT"];
     let a_pos = order.iter().position(|&x| x == a);
@@ -178,7 +174,6 @@ fn custom_chromosome_sort(a: &str, b: &str) -> std::cmp::Ordering {
     a_pos.cmp(&b_pos)
 }
 
-// Extract chromosome from VCF file
 fn get_chromosome(path: &Path) -> Result<String> {
     let file = File::open(path)?;
     let mut reader: Box<dyn Read> = if path.extension().and_then(|ext| ext.to_str()) == Some("gz") {
@@ -213,7 +208,6 @@ fn get_chromosome(path: &Path) -> Result<String> {
         .context("Failed to extract chromosome from VCF file")
 }
 
-// Extract header from VCF file
 fn extract_header(file: &VcfFile) -> Result<String> {
     let mut header = String::new();
     let reader = create_reader(&file.path)?;
@@ -232,7 +226,6 @@ fn extract_header(file: &VcfFile) -> Result<String> {
     Ok(header)
 }
 
-// Calculate chunk size based on available memory
 fn calculate_chunk_size(max_memory_usage: u64, num_threads: usize) -> usize {
     let total_chunk_memory = (max_memory_usage as f64 * 0.8) as u64;
     let memory_per_thread = total_chunk_memory / num_threads as u64;
@@ -245,9 +238,11 @@ fn calculate_chunk_size(max_memory_usage: u64, num_threads: usize) -> usize {
     chunk_size as usize
 }
 
-// Process a single VCF file
-fn process_file(
-    file: &VcfFile, 
+
+
+
+fn process_uncompressed_file(
+    file: &VcfFile,
     chunk_size: usize,
     memory_usage: Arc<AtomicUsize>,
     max_memory_usage: u64,
@@ -260,15 +255,22 @@ fn process_file(
     let file_size = mmap.len();
 
     while offset < file_size {
-        let end = std::cmp::min(offset + chunk_size, file_size);
-        let chunk_data = mmap[offset..end].to_vec();
+        let mut end = std::cmp::min(offset + chunk_size, file_size);
+        let mut chunk_data = mmap[offset..end].to_vec();
+
+        // Ensure chunk ends with a complete line
+        if end < file_size {
+            if let Some(newline_pos) = chunk_data.iter().rposition(|&b| b == b'\n') {
+                chunk_data.truncate(newline_pos + 1);
+                end = offset + newline_pos + 1;
+            }
+        }
 
         let chunk_size = chunk_data.len();
         let current_usage = memory_usage.fetch_add(chunk_size, Ordering::SeqCst);
-        info!("Processing file: {:?}, Added chunk of size {}. New memory usage: {}", 
+        info!("Processing file: {:?}, Added chunk of size {}. New memory usage: {}",
               file.path, human_bytes(chunk_size as f64), human_bytes((current_usage + chunk_size) as f64));
 
-        // Wait if memory usage is too high
         while memory_usage.load(Ordering::SeqCst) as u64 > max_memory_usage {
             warn!("Memory usage exceeded limit. Waiting for memory to be freed...");
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -285,7 +287,54 @@ fn process_file(
     Ok(())
 }
 
-// Write chunks to output file
+
+fn process_compressed_file(
+    file: &VcfFile,
+    chunk_size: usize,
+    memory_usage: Arc<AtomicUsize>,
+    max_memory_usage: u64,
+    chunk_sender: Sender<Chunk>
+) -> Result<()> {
+    let mut reader = create_reader(&file.path)?;
+    let mut buffer = vec![0; chunk_size];
+
+    loop {
+        let bytes_read = reader.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let mut chunk_data = buffer[..bytes_read].to_vec();
+
+        // Ensure chunk ends with a complete line
+        if bytes_read == chunk_size {
+            if let Some(newline_pos) = chunk_data.iter().rposition(|&b| b == b'\n') {
+                chunk_data.truncate(newline_pos + 1);
+                // We can't seek in a BufRead, so we'll just have to accept some potential overlap
+            }
+        }
+
+        let chunk_size = chunk_data.len();
+        let current_usage = memory_usage.fetch_add(chunk_size, Ordering::SeqCst);
+        info!("Processing file: {:?}, Added chunk of size {}. New memory usage: {}",
+              file.path, human_bytes(chunk_size as f64), human_bytes((current_usage + chunk_size) as f64));
+
+        while memory_usage.load(Ordering::SeqCst) as u64 > max_memory_usage {
+            warn!("Memory usage exceeded limit. Waiting for memory to be freed...");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        chunk_sender.send(Chunk {
+            data: chunk_data,
+            chromosome: file.chromosome.clone(),
+        })?;
+    }
+
+    Ok(())
+}
+
+
+
 async fn chunk_writer(
     chunk_receiver: Receiver<Chunk>,
     output_file: Arc<Mutex<BufWriter<File>>>,
