@@ -1,0 +1,19 @@
+[package]
+name = "vcf_concat"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.3", features = ["derive"] }
+tokio = { version = "1.28", features = ["full"] }
+flate2 = "1.0"
+anyhow = "1.0"
+rayon = "1.7"
+indicatif = "0.17"
+colored = "2.0"
+human_bytes = "0.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = 'abort'
