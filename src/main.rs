@@ -18,14 +18,27 @@ use memmap2::MmapOptions;
 use sysinfo::{System, SystemExt, ProcessExt, Pid};
 use std::thread;
 use std::collections::HashMap;
+use std::time::{Instant, Duration};
 
 
 const UPDATE_FREQUENCY_BYTES: usize = 1000 * 1024 * 1024; // MB
+const PRINT_INTERVAL: Duration = Duration::from_secs(5); // Print every 5 seconds
 
-#[derive(Default)]
+
+impl Default for ChromosomeProgress {
+    fn default() -> Self {
+        ChromosomeProgress {
+            total_bytes: 0,
+            processed_bytes: 0,
+            last_print: Instant::now(),
+        }
+    }
+}
+
 struct ChromosomeProgress {
     total_bytes: u64,
     processed_bytes: u64,
+    last_print: Instant,
 }
 
 #[derive(Parser, Debug)]
@@ -365,7 +378,7 @@ fn process_compressed_file(
                         chromosome: file.chromosome.clone(),
                     }, &chunk_sender, &chromosome_progress)?;
                                     
-                println!("Chunk sent successfully for file: {:?}, size: {}", file.path, chunk_size);
+                //println!("Chunk sent successfully for file: {:?}, size: {}", file.path, chunk_size);
             }
 
             // Simple backpressure
@@ -407,13 +420,18 @@ fn send_chunk(
     let mut progress = chromosome_progress.lock().unwrap();
     let chr_progress = progress.get_mut(&chunk.chromosome).unwrap();
     chr_progress.processed_bytes += chunk_size as u64;
-    let percent = (chr_progress.processed_bytes as f64 / chr_progress.total_bytes as f64) * 100.0;
-    println!("Chromosome {}: {:.2}% complete ({} / {})",
-        chunk.chromosome,
-        percent,
-        human_bytes(chr_progress.processed_bytes as f64),
-        human_bytes(chr_progress.total_bytes as f64)
-    );
+    
+    let now = Instant::now();
+    if now.duration_since(chr_progress.last_print) >= PRINT_INTERVAL {
+        let percent = (chr_progress.processed_bytes as f64 / chr_progress.total_bytes as f64) * 100.0;
+        println!("Chromosome {}: {:.2}% complete ({} / {})",
+            chunk.chromosome,
+            percent,
+            human_bytes(chr_progress.processed_bytes as f64),
+            human_bytes(chr_progress.total_bytes as f64)
+        );
+        chr_progress.last_print = now;
+    }
 
     // Send chunk
     chunk_sender.send(chunk).map_err(|_| VcfError::ChannelSend("Chunk receiver disconnected".to_string()))
@@ -427,14 +445,14 @@ fn chunk_writer(
     println!("Chunk writer started and waiting for chunks");
     let mut current_chromosome = String::new();
     let mut total_bytes_written = 0;
-    let mut last_update_bytes = 0;
+    let mut last_update_time = Instant::now();
     let mut sys = System::new_all();
 
     while let Ok(chunk) = chunk_receiver.recv() {
-        println!("Received chunk for chromosome: {}, size: {} bytes", chunk.chromosome, chunk.data.len());
+        //println!("Received chunk for chromosome: {}, size: {} bytes", chunk.chromosome, chunk.data.len());
         
         if chunk.chromosome != current_chromosome {
-            println!("Switching to chromosome: {}", chunk.chromosome);
+            //println!("Switching to chromosome: {}", chunk.chromosome);
             current_chromosome = chunk.chromosome;
         }
 
@@ -443,12 +461,13 @@ fn chunk_writer(
             let mut output = output_file.lock().map_err(|e| VcfError::Parse(e.to_string()))?;
             output.write_all(&chunk.data)?;
             output.flush()?;
-            println!("Wrote chunk of size {} bytes to file", chunk_size);
+            //println!("Wrote chunk of size {} bytes to file", chunk_size);
         }
 
         total_bytes_written += chunk_size;
 
-        if total_bytes_written - last_update_bytes >= UPDATE_FREQUENCY_BYTES {
+        let now = Instant::now();
+        if now.duration_since(last_update_time) >= PRINT_INTERVAL {
             sys.refresh_process(Pid::from(std::process::id() as usize));
             if let Some(process) = sys.process(Pid::from(std::process::id() as usize)) {
                 let used_ram = process.memory();
@@ -471,17 +490,13 @@ fn chunk_writer(
             } else {
                 println!("Failed to get process information");
             }
-            last_update_bytes = total_bytes_written;
+            last_update_time = now;
         }
     }
 
     println!("Chunk writer finished. Total data processed: {}", human_bytes(total_bytes_written as f64));
     Ok(())
 }
-
-
-
-
 
 
 fn create_reader(path: &Path) -> Result<Box<dyn BufRead>, VcfError> {
