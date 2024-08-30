@@ -96,6 +96,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 
+
+
+
 async fn process_vcf_files(args: &Args) -> Result<(), VcfError> {
     let vcf_files = discover_and_sort_vcf_files(&args.input)?;
 
@@ -221,7 +224,6 @@ fn discover_and_sort_vcf_files(dir: &str) -> Result<Vec<VcfFile>, VcfError> {
 
 fn custom_chromosome_sort(a: &str, b: &str) -> std::cmp::Ordering {
     let order = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "X", "Y", "MT"];
-    // consider chr prefix
     let a_pos = order.iter().position(|&x| x == a);
     let b_pos = order.iter().position(|&x| x == b);
     a_pos.cmp(&b_pos)
@@ -318,6 +320,9 @@ fn process_uncompressed_file(
 
     Ok(())
 }
+
+
+
 
 
 fn process_compressed_file(
@@ -473,6 +478,11 @@ fn chunk_writer(
     println!("Chunk writer finished. Total data processed: {}", human_bytes(total_bytes_written as f64));
     Ok(())
 }
+
+
+
+
+
 
 fn create_reader(path: &Path) -> Result<Box<dyn BufRead>, VcfError> {
     let file = File::open(path)?;
