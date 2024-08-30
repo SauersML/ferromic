@@ -133,6 +133,8 @@ async fn process_vcf_files(args: &Args) -> Result<(), VcfError> {
           human_bytes(total_memory as f64),
           human_bytes(max_memory_usage as f64));
 
+    let memory_usage = Arc::new(AtomicUsize::new(0));
+
     let (chunk_sender, chunk_receiver) = crossbeam_channel::unbounded();
     let output_file = Arc::new(Mutex::new(BufWriter::new(File::create(&args.output)?)));
 
@@ -161,8 +163,9 @@ async fn process_vcf_files(args: &Args) -> Result<(), VcfError> {
     let progress_bars = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
     let progress_bars_clone = progress_bars.clone();
     let multi_progress_clone = multi_progress.clone();
+    let memory_usage_clone = memory_usage.clone();
     let writer_handle = thread::spawn(move || {
-        chunk_writer(chunk_receiver, output_file, chromosome_progress_clone, multi_progress_clone, progress_bars_clone)
+        chunk_writer(chunk_receiver, output_file, chromosome_progress_clone, multi_progress_clone, progress_bars_clone, memory_usage_clone)
     });
 
     for file in &vcf_files {
@@ -188,7 +191,6 @@ async fn process_vcf_files(args: &Args) -> Result<(), VcfError> {
     }).collect::<Result<_, VcfError>>()?;
     let progress_bars = Arc::new(Mutex::new(progress_bars));
 
-    let memory_usage = Arc::new(AtomicUsize::new(0));
 
     let worker_results: Vec<Result<(), VcfError>> = vcf_files.into_par_iter().map(|file| {
         let chunk_sender = chunk_sender.clone();
@@ -361,47 +363,37 @@ fn process_compressed_file(
     memory_usage: Arc<AtomicUsize>,
     max_memory_usage: u64,
     chunk_sender: Sender<Chunk>,
-    chromosome_progress: Arc<Mutex<HashMap<String, ChromosomeProgress>>>, progress_bars: Arc<Mutex<HashMap<String, ProgressBar>>>
+    chromosome_progress: Arc<Mutex<HashMap<String, ChromosomeProgress>>>,
+    progress_bars: Arc<Mutex<HashMap<String, ProgressBar>>>
 ) -> Result<(), VcfError> {
     println!("Starting to process compressed file: {:?}", file.path);
     let mut reader = create_reader(&file.path)?;
     println!("Reader created for file: {:?}", file.path);
     let mut buffer = vec![0; chunk_size];
-    let mut accumulated_data = Vec::new();
+    let mut line_buffer = Vec::new();
 
     loop {
-        //println!("Attempting to read from file: {:?}", file.path);
         let bytes_read = reader.read(&mut buffer)?;
-        //println!("Read {} bytes from file: {:?}", bytes_read, file.path);
-        
-        if bytes_read == 0 && accumulated_data.is_empty() {
+        if bytes_read == 0 && line_buffer.is_empty() {
             break;
         }
 
-        accumulated_data.extend_from_slice(&buffer[..bytes_read]);
-
-        if accumulated_data.len() >= chunk_size || bytes_read == 0 {
-            // Ensure chunk ends with a complete line
-            if let Some(newline_pos) = accumulated_data.iter().rposition(|&b| b == b'\n') {
-                let chunk_data = accumulated_data.split_off(newline_pos + 1);
-                let chunk_size = chunk_data.len();
+        let mut start = 0;
+        for (end, &byte) in buffer[..bytes_read].iter().enumerate() {
+            if byte == b'\n' {
+                line_buffer.extend_from_slice(&buffer[start..=end]);
                 
-                let current_usage = memory_usage.fetch_add(chunk_size, Ordering::SeqCst);
-                debug!("Processing file: {:?}, Added chunk of size {}. New memory usage: {}",
-                      file.path, human_bytes(chunk_size as f64), human_bytes((current_usage + chunk_size) as f64));
-
-                        send_chunk(Chunk {
-                            data: chunk_data,
-                            chromosome: file.chromosome.clone(),
-                        }, &chunk_sender, &chromosome_progress, &progress_bars)?;
-                                    
-                //println!("Chunk sent successfully for file: {:?}, size: {}", file.path, chunk_size);
+                send_chunk_with_backpressure(&Chunk {
+                    data: line_buffer.split_off(0),
+                    chromosome: file.chromosome.clone(),
+                }, &chunk_sender, &chromosome_progress, &progress_bars, &memory_usage, max_memory_usage)?;
+                
+                start = end + 1;
             }
+        }
 
-            // Simple backpressure
-            if chunk_sender.len() > 1000 {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
+        if start < bytes_read {
+            line_buffer.extend_from_slice(&buffer[start..bytes_read]);
         }
 
         if bytes_read == 0 {
@@ -409,22 +401,33 @@ fn process_compressed_file(
         }
     }
 
-    // Send any remaining data
-    if !accumulated_data.is_empty() {
-        let chunk_size = accumulated_data.len();
-        let current_usage = memory_usage.fetch_add(chunk_size, Ordering::SeqCst);
-        debug!("Processing file: {:?}, Added final chunk of size {}. New memory usage: {}",
-              file.path, human_bytes(chunk_size as f64), human_bytes((current_usage + chunk_size) as f64));
-                send_chunk(Chunk {
-                    data: accumulated_data,
-                    chromosome: file.chromosome.clone(),
-                }, &chunk_sender, &chromosome_progress, &progress_bars)?;
-        //println!("Final chunk sent successfully for file: {:?}, size: {}", file.path, chunk_size);
-    }
+    send_chunk_with_backpressure(&Chunk {
+        data: line_buffer,
+        chromosome: file.chromosome.clone(),
+    }, &chunk_sender, &chromosome_progress, &progress_bars, &memory_usage, max_memory_usage)?;
 
     Ok(())
 }
 
+fn send_chunk_with_backpressure(
+    chunk: &Chunk,
+    chunk_sender: &Sender<Chunk>,
+    chromosome_progress: &Arc<Mutex<HashMap<String, ChromosomeProgress>>>,
+    progress_bars: &Arc<Mutex<HashMap<String, ProgressBar>>>,
+    memory_usage: &Arc<AtomicUsize>,
+    max_memory_usage: u64,
+) -> Result<(), VcfError> {
+    loop {
+        let current_usage = memory_usage.load(Ordering::SeqCst);
+        if current_usage as u64 + chunk.data.len() as u64 <= max_memory_usage {
+            send_chunk(chunk.clone(), chunk_sender, chromosome_progress, progress_bars)?;
+            memory_usage.fetch_add(chunk.data.len(), Ordering::SeqCst);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Ok(())
+}
 
 fn send_chunk(
     chunk: Chunk,
@@ -460,7 +463,8 @@ fn chunk_writer(
     output_file: Arc<Mutex<BufWriter<File>>>,
     chromosome_progress: Arc<Mutex<HashMap<String, ChromosomeProgress>>>,
     multi_progress: Arc<MultiProgress>,
-    progress_bars: Arc<Mutex<HashMap<String, ProgressBar>>>
+    progress_bars: Arc<Mutex<HashMap<String, ProgressBar>>>,
+    memory_usage: Arc<AtomicUsize>
 ) -> Result<(), VcfError> {
     println!("Chunk writer started and waiting for chunks");
     let mut total_bytes_written = 0;
@@ -501,6 +505,7 @@ fn chunk_writer(
         }
 
         total_bytes_written += chunk_size;
+        memory_usage.fetch_sub(chunk_size, Ordering::SeqCst);
 
         // Update chromosome progress
         {
