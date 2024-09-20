@@ -1,5 +1,5 @@
 [package]
-name = "vcf_concat"
+name = "ferromic"
 version = "0.1.0"
 edition = "2021"
 
