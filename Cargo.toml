@@ -18,6 +18,9 @@ num_cpus = "1.15"
 crossbeam-channel = "0.5"
 memmap2 = "0.5"
 thiserror = "1.0"
+colored = "2.0"
+itertools = "0.10"
+rust-htslib = "0.40"
 
 [profile.release]
 lto = true
