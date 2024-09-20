@@ -1,10 +1,13 @@
 use clap::Parser;
 use colored::*;
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
-use rust_htslib::bcf::{Read, Reader};
+use rayon::prelude::*;
 use std::collections::HashSet;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -19,45 +22,73 @@ struct Args {
     region: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Variant {
-    position: u32,
-    genotypes: Vec<u8>,
+    position: i64,
+    genotypes: Vec<Option<u8>>,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[derive(Debug)]
+enum VcfError {
+    Io(std::io::Error),
+    Parse(String),
+    InvalidRegion(String),
+    NoVcfFiles,
+    InconsistentSampleCount,
+}
+
+impl std::fmt::Display for VcfError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            VcfError::Io(err) => write!(f, "IO error: {}", err),
+            VcfError::Parse(msg) => write!(f, "Parse error: {}", msg),
+            VcfError::InvalidRegion(msg) => write!(f, "Invalid region: {}", msg),
+            VcfError::NoVcfFiles => write!(f, "No VCF files found"),
+            VcfError::InconsistentSampleCount => write!(f, "Inconsistent sample count"),
+        }
+    }
+}
+
+impl From<std::io::Error> for VcfError {
+    fn from(err: std::io::Error) -> VcfError {
+        VcfError::Io(err)
+    }
+}
+
+fn main() -> Result<(), VcfError> {
     let args = Args::parse();
-    
+
     println!("{}", "Starting VCF diversity analysis...".green());
 
     let (start, end) = parse_region(&args.region)?;
     let vcf_files = find_vcf_files(&args.vcf_folder, &args.chr)?;
 
-    println!("{}", format!("Processing {} VCF file(s)", vcf_files.len()).cyan());
+    println!(
+        "{}",
+        format!("Processing {} VCF file(s)", vcf_files.len()).cyan()
+    );
 
-    let mut all_variants = Vec::new();
-    for file in &vcf_files {
-        println!("{}", format!("Reading file: {}", file.display()).yellow());
-        let variants = process_vcf(file, &args.chr, start, end)?;
-        all_variants.extend(variants);
-    }
+    let (variants, sample_names) = process_vcf_files(&vcf_files, &args.chr, start, end)?;
 
     println!("{}", "Calculating diversity statistics...".blue());
 
-    let n = count_samples(&vcf_files[0])?;
+    let n = sample_names.len();
     let seq_length = end - start + 1;
-    let num_segsites = count_segregating_sites(&all_variants);
-    
-    let pairwise_diffs = calculate_pairwise_differences(&all_variants);
-    let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count)| count).sum();
+    let num_segsites = count_segregating_sites(&variants);
+
+    let pairwise_diffs = calculate_pairwise_differences(&variants, &sample_names);
+    let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
 
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
     println!("\n{}", "Results:".green().bold());
     println!("#Pairwise nucleotide substitutions");
-    for ((sample1, sample2), count) in pairwise_diffs {
-        println!("{}\t{}\t{}", sample1, sample2, count);
+    for (sample_pair, count, positions) in pairwise_diffs {
+        println!(
+            "{}\t{}\t{}\t{:?}",
+            sample_pair.0, sample_pair.1, count, positions
+        );
     }
 
     println!("\nSeqLength:{}", seq_length);
@@ -68,74 +99,199 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn parse_region(region: &str) -> Result<(u32, u32), Box<dyn std::error::Error>> {
+fn parse_region(region: &str) -> Result<(i64, i64), VcfError> {
     let parts: Vec<&str> = region.split('-').collect();
     if parts.len() != 2 {
-        return Err("Invalid region format. Use start-end".into());
+        return Err(VcfError::InvalidRegion(
+            "Invalid region format. Use start-end".to_string(),
+        ));
     }
-    let start: u32 = parts[0].parse()?;
-    let end: u32 = parts[1].parse()?;
+    let start: i64 = parts[0]
+        .parse()
+        .map_err(|_| VcfError::InvalidRegion("Invalid start position".to_string()))?;
+    let end: i64 = parts[1]
+        .parse()
+        .map_err(|_| VcfError::InvalidRegion("Invalid end position".to_string()))?;
+    if start >= end {
+        return Err(VcfError::InvalidRegion(
+            "Start position must be less than end position".to_string(),
+        ));
+    }
     Ok((start, end))
 }
 
-fn find_vcf_files(folder: &str, chr: &str) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+fn find_vcf_files(folder: &str, chr: &str) -> Result<Vec<PathBuf>, VcfError> {
     let path = Path::new(folder);
-    let chr_specific_file = path.join(format!("chr{}*.vcf", chr));
-    
-    if let Ok(file) = chr_specific_file.canonicalize() {
-        Ok(vec![file])
+
+    let chr_specific_files: Vec<_> = fs::read_dir(path)?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with(&format!("chr{}", chr)) && n.ends_with(".vcf"))
+                .unwrap_or(false)
+        })
+        .map(|entry| entry.path())
+        .collect();
+
+    if !chr_specific_files.is_empty() {
+        Ok(chr_specific_files)
     } else {
         let entries: Vec<_> = fs::read_dir(path)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.path().extension().and_then(|s| s.to_str()) == Some("vcf"))
             .map(|entry| entry.path())
             .collect();
-        Ok(entries)
-    }
-}
-
-fn process_vcf(file: &Path, chr: &str, start: u32, end: u32) -> Result<Vec<Variant>, Box<dyn std::error::Error>> {
-    let mut reader = Reader::from_path(file)?;
-    reader.set_threads(4)?;
-    
-    let region = format!("{}:{}-{}", chr, start, end);
-    reader.set_region(&region)?;
-
-    let mut variants = Vec::new();
-    let mut record = reader.empty_record();
-    
-    while reader.read(&mut record)? {
-        let pos = record.pos() + 1;  // 0-based to 1-based
-        if pos >= start && pos <= end {
-            let genotypes = record.genotypes()?.genotypes().iter()
-                .map(|gt| gt.allele().unwrap_or(0) as u8)
-                .collect();
-            variants.push(Variant { position: pos, genotypes });
+        if entries.is_empty() {
+            Err(VcfError::NoVcfFiles)
+        } else {
+            Ok(entries)
         }
     }
-
-    Ok(variants)
 }
 
-fn count_samples(file: &Path) -> Result<usize, Box<dyn std::error::Error>> {
-    let reader = Reader::from_path(file)?;
-    Ok(reader.header().sample_count() as usize)
+fn process_vcf_files(
+    files: &[PathBuf],
+    chr: &str,
+    start: i64,
+    end: i64,
+) -> Result<(Vec<Variant>, Vec<String>), VcfError> {
+    let mut all_variants = Vec::new();
+    let mut sample_names = Vec::new();
+
+    let progress_bar = ProgressBar::new(files.len() as u64);
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("##-"),
+    );
+
+    for (i, file) in files.iter().enumerate() {
+        progress_bar.set_message(format!("Processing file: {}", file.display()));
+        let (variants, file_sample_names) = process_vcf(file, chr, start, end)?;
+
+        if i == 0 {
+            sample_names = file_sample_names;
+        } else if sample_names != file_sample_names {
+            return Err(VcfError::InconsistentSampleCount);
+        }
+
+        all_variants.extend(variants);
+        progress_bar.inc(1);
+    }
+
+    progress_bar.finish_with_message("VCF processing complete");
+    Ok((all_variants, sample_names))
+}
+
+fn process_vcf(
+    file: &Path,
+    chr: &str,
+    start: i64,
+    end: i64,
+) -> Result<(Vec<Variant>, Vec<String>), VcfError> {
+    let file = File::open(file)?;
+    let reader = BufReader::new(file);
+    let mut variants = Vec::new();
+    let mut sample_names = Vec::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with("##") {
+            continue;
+        }
+        if line.starts_with("#CHROM") {
+            sample_names = line.split_whitespace().skip(9).map(String::from).collect();
+            continue;
+        }
+
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields[0] != chr {
+            continue;
+        }
+
+        let pos: i64 = fields[1]
+            .parse()
+            .map_err(|_| VcfError::Parse(format!("Invalid position at line: {}", line)))?;
+        if pos < start || pos > end {
+            continue;
+        }
+
+        let genotypes: Vec<Option<u8>> = fields[9..]
+            .iter()
+            .map(|gt| gt.split('|').next().and_then(|allele| allele.parse().ok()))
+            .collect();
+
+        if genotypes.len() != sample_names.len() {
+            eprintln!(
+                "{}",
+                format!("Warning: Inconsistent sample count at position {}", pos).yellow()
+            );
+        }
+
+        if genotypes.iter().any(|g| g.is_none()) {
+            eprintln!(
+                "{}",
+                format!("Warning: Missing data at position {}", pos).yellow()
+            );
+        }
+
+        variants.push(Variant {
+            position: pos,
+            genotypes,
+        });
+    }
+
+    Ok((variants, sample_names))
 }
 
 fn count_segregating_sites(variants: &[Variant]) -> usize {
-    variants.iter()
-        .filter(|v| v.genotypes.iter().collect::<HashSet<_>>().len() > 1)
+    variants
+        .iter()
+        .filter(|v| {
+            v.genotypes
+                .iter()
+                .filter_map(|&g| g)
+                .collect::<HashSet<_>>()
+                .len()
+                > 1
+        })
         .count()
 }
 
-fn calculate_pairwise_differences(variants: &[Variant]) -> Vec<((usize, usize), usize)> {
-    let n = variants[0].genotypes.len();
-    (0..n).combinations(2)
+fn calculate_pairwise_differences(
+    variants: &[Variant],
+    sample_names: &[String],
+) -> Vec<((String, String), usize, Vec<i64>)> {
+    let n = sample_names.len();
+    let variants = Arc::new(variants.to_vec());
+
+    (0..n)
+        .combinations(2)
+        .par_bridge()
         .map(|pair| {
-            let diff_count = variants.iter()
-                .filter(|v| v.genotypes[pair[0]] != v.genotypes[pair[1]])
-                .count();
-            ((pair[0], pair[1]), diff_count)
+            let variants = Arc::clone(&variants);
+            let (i, j) = (pair[0], pair[1]);
+            let mut diff_count = 0;
+            let mut diff_positions = Vec::new();
+
+            for v in variants.iter() {
+                if let (Some(gi), Some(gj)) = (v.genotypes[i], v.genotypes[j]) {
+                    if gi != gj {
+                        diff_count += 1;
+                        diff_positions.push(v.position);
+                    }
+                }
+            }
+
+            (
+                (sample_names[i].clone(), sample_names[j].clone()),
+                diff_count,
+                diff_positions,
+            )
         })
         .collect()
 }
@@ -144,11 +300,11 @@ fn harmonic(n: usize) -> f64 {
     (1..n).map(|i| 1.0 / i as f64).sum()
 }
 
-fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: u32) -> f64 {
+fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
     seg_sites as f64 / harmonic(n - 1) / seq_length as f64
 }
 
-fn calculate_pi(tot_pair_diff: usize, n: usize, seq_length: u32) -> f64 {
+fn calculate_pi(tot_pair_diff: usize, n: usize, seq_length: i64) -> f64 {
     let num_comparisons = n * (n - 1) / 2;
     tot_pair_diff as f64 / num_comparisons as f64 / seq_length as f64
 }
