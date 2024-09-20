@@ -23,3 +23,15 @@ thiserror = "1.0"
 lto = true
 codegen-units = 1
 panic = 'abort'
+
+[[bin]]
+name = "ferromic"
+path = "src/main.rs"
+
+[[bin]]
+name = "vcf_merge"
+path = "src/merge.rs"
+
+[[bin]]
+name = "vcf_stats"
+path = "src/stats.rs"
