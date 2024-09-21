@@ -4,7 +4,7 @@ use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -36,7 +36,6 @@ enum VcfError {
     InvalidRegion(String),
     NoVcfFiles,
     InconsistentSampleCount,
-    Compression(String),
 }
 
 impl std::fmt::Display for VcfError {
@@ -47,7 +46,6 @@ impl std::fmt::Display for VcfError {
             VcfError::InvalidRegion(msg) => write!(f, "Invalid region: {}", msg),
             VcfError::NoVcfFiles => write!(f, "No VCF files found"),
             VcfError::InconsistentSampleCount => write!(f, "Inconsistent sample count"),
-            VcfError::Compression(msg) => write!(f, "Compression error: {}", msg),
         }
     }
 }
@@ -129,7 +127,8 @@ fn find_vcf_files(folder: &str, chr: &str) -> Result<Vec<PathBuf>, VcfError> {
     let chr_specific_files: Vec<_> = fs::read_dir(path)?
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
-            let file_name = entry.path().file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let path = entry.path();
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             file_name.starts_with(&format!("chr{}", chr)) &&
                 (file_name.ends_with(".vcf") || file_name.ends_with(".vcf.gz"))
         })
@@ -142,7 +141,8 @@ fn find_vcf_files(folder: &str, chr: &str) -> Result<Vec<PathBuf>, VcfError> {
         let entries: Vec<_> = fs::read_dir(path)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
-                let extension = entry.path().extension().and_then(|s| s.to_str()).unwrap_or("");
+                let path = entry.path();
+                let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
                 extension == "vcf" || extension == "gz"
             })
             .map(|entry| entry.path())
