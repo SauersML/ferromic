@@ -161,15 +161,24 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
         .map(|entry| entry.path())
         .collect();
 
-    if chr_specific_files.len() == 1 {
-        Ok(chr_specific_files[0].clone())
-    } else if chr_specific_files.is_empty() {
-        Err(VcfError::NoVcfFiles)
-    } else {
-        Err(VcfError::Parse(format!(
-            "Multiple VCF files found for chromosome {}",
-            chr
-        )))
+    match chr_specific_files.len() {
+        0 => Err(VcfError::NoVcfFiles),
+        1 => Ok(chr_specific_files[0].clone()),
+        _ => {
+            println!("{}", "Multiple VCF files found:".yellow());
+            for (i, file) in chr_specific_files.iter().enumerate() {
+                println!("{}. {}", i + 1, file.display());
+            }
+            
+            println!("Please enter the number of the file you want to use:");
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            let choice: usize = input.trim().parse().map_err(|_| VcfError::Parse("Invalid input".to_string()))?;
+            
+            chr_specific_files.get(choice - 1)
+                .cloned()
+                .ok_or_else(|| VcfError::Parse("Invalid file number".to_string()))
+        }
     }
 }
 
