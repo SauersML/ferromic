@@ -97,8 +97,8 @@ fn main() -> Result<(), VcfError> {
     println!("\n{}", "Results:".green().bold());
     println!("#Example pairwise nucleotide substitutions from this run");
     let mut rng = thread_rng();
-    for (sample_pair, count, positions) in pairwise_diffs.iter().take(5) {
-        let sample_positions: Vec<_> = positions.iter().take(5).cloned().collect();
+    for (sample_pair, count, positions) in pairwise_diffs.choose_multiple(&mut rng, 5) {
+        let sample_positions: Vec<_> = positions.choose_multiple(&mut rng, 5.min(positions.len())).cloned().collect();
         println!(
             "{}\t{}\t{}\t{:?}",
             sample_pair.0, sample_pair.1, count, sample_positions
