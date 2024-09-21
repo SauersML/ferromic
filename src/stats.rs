@@ -1,9 +1,10 @@
 use clap::Parser;
 use colored::*;
+use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use rayon::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -35,6 +36,7 @@ enum VcfError {
     InvalidRegion(String),
     NoVcfFiles,
     InconsistentSampleCount,
+    Compression(String),
 }
 
 impl std::fmt::Display for VcfError {
@@ -45,6 +47,7 @@ impl std::fmt::Display for VcfError {
             VcfError::InvalidRegion(msg) => write!(f, "Invalid region: {}", msg),
             VcfError::NoVcfFiles => write!(f, "No VCF files found"),
             VcfError::InconsistentSampleCount => write!(f, "Inconsistent sample count"),
+            VcfError::Compression(msg) => write!(f, "Compression error: {}", msg),
         }
     }
 }
@@ -126,12 +129,9 @@ fn find_vcf_files(folder: &str, chr: &str) -> Result<Vec<PathBuf>, VcfError> {
     let chr_specific_files: Vec<_> = fs::read_dir(path)?
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
-            entry
-                .path()
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|n| n.starts_with(&format!("chr{}", chr)) && n.ends_with(".vcf"))
-                .unwrap_or(false)
+            let file_name = entry.path().file_name().and_then(|n| n.to_str()).unwrap_or("");
+            file_name.starts_with(&format!("chr{}", chr)) &&
+                (file_name.ends_with(".vcf") || file_name.ends_with(".vcf.gz"))
         })
         .map(|entry| entry.path())
         .collect();
@@ -141,7 +141,10 @@ fn find_vcf_files(folder: &str, chr: &str) -> Result<Vec<PathBuf>, VcfError> {
     } else {
         let entries: Vec<_> = fs::read_dir(path)?
             .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.path().extension().and_then(|s| s.to_str()) == Some("vcf"))
+            .filter(|entry| {
+                let extension = entry.path().extension().and_then(|s| s.to_str()).unwrap_or("");
+                extension == "vcf" || extension == "gz"
+            })
             .map(|entry| entry.path())
             .collect();
         if entries.is_empty() {
@@ -187,14 +190,24 @@ fn process_vcf_files(
     Ok((all_variants, sample_names))
 }
 
+fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead>, VcfError> {
+    let file = File::open(path)?;
+    
+    if path.extension().and_then(|s| s.to_str()) == Some("gz") {
+        let decoder = MultiGzDecoder::new(file);
+        Ok(Box::new(BufReader::new(decoder)))
+    } else {
+        Ok(Box::new(BufReader::new(file)))
+    }
+}
+
 fn process_vcf(
     file: &Path,
     chr: &str,
     start: i64,
     end: i64,
 ) -> Result<(Vec<Variant>, Vec<String>), VcfError> {
-    let file = File::open(file)?;
-    let reader = BufReader::new(file);
+    let reader = open_vcf_reader(file)?;
     let mut variants = Vec::new();
     let mut sample_names = Vec::new();
 
