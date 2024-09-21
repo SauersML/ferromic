@@ -165,19 +165,33 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
         0 => Err(VcfError::NoVcfFiles),
         1 => Ok(chr_specific_files[0].clone()),
         _ => {
-            println!("{}", "Multiple VCF files found:".yellow());
-            for (i, file) in chr_specific_files.iter().enumerate() {
-                println!("{}. {}", i + 1, file.display());
+            // Check for an exact match first
+            let exact_match = chr_specific_files.iter().find(|&file| {
+                let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let chr_pattern = format!("chr{}", chr);
+                file_name.starts_with(&chr_pattern) && 
+                    file_name.chars().nth(chr_pattern.len())
+                        .map(|c| !c.is_ascii_digit())
+                        .unwrap_or(true)
+            });
+
+            if let Some(exact_file) = exact_match {
+                Ok(exact_file.clone())
+            } else {
+                println!("{}", "Multiple VCF files found:".yellow());
+                for (i, file) in chr_specific_files.iter().enumerate() {
+                    println!("{}. {}", i + 1, file.display());
+                }
+                
+                println!("Please enter the number of the file you want to use:");
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                let choice: usize = input.trim().parse().map_err(|_| VcfError::Parse("Invalid input".to_string()))?;
+                
+                chr_specific_files.get(choice - 1)
+                    .cloned()
+                    .ok_or_else(|| VcfError::Parse("Invalid file number".to_string()))
             }
-            
-            println!("Please enter the number of the file you want to use:");
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input)?;
-            let choice: usize = input.trim().parse().map_err(|_| VcfError::Parse("Invalid input".to_string()))?;
-            
-            chr_specific_files.get(choice - 1)
-                .cloned()
-                .ok_or_else(|| VcfError::Parse("Invalid file number".to_string()))
         }
     }
 }
