@@ -2,13 +2,14 @@ use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
-use memmap2::Mmap;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -31,7 +32,7 @@ struct Variant {
 
 #[derive(Debug)]
 enum VcfError {
-    Io(std::io::Error),
+    Io(io::Error),
     Parse(String),
     InvalidRegion(String),
     NoVcfFiles,
@@ -50,8 +51,8 @@ impl std::fmt::Display for VcfError {
     }
 }
 
-impl From<std::io::Error> for VcfError {
-    fn from(err: std::io::Error) -> VcfError {
+impl From<io::Error> for VcfError {
+    fn from(err: io::Error) -> VcfError {
         VcfError::Io(err)
     }
 }
@@ -88,14 +89,24 @@ fn main() -> Result<(), VcfError> {
     let num_segsites = count_segregating_sites(&variants);
     let raw_variant_count = variants.len();
 
-    let pairwise_diffs = calculate_pairwise_differences(&variants, n);
-    let tot_pair_diff: usize = pairwise_diffs.iter().sum();
+    let pairwise_diffs = calculate_pairwise_differences(&variants, &sample_names);
+    let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
 
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
     println!("\n{}", "Results:".green().bold());
-    println!("SeqLength:{}", seq_length);
+    println!("#Example pairwise nucleotide substitutions from this run");
+    let mut rng = thread_rng();
+    for (sample_pair, count, positions) in pairwise_diffs.choose_multiple(&mut rng, 5) {
+        let sample_positions: Vec<_> = positions.choose_multiple(&mut rng, 5.min(positions.len())).cloned().collect();
+        println!(
+            "{}\t{}\t{}\t{:?}",
+            sample_pair.0, sample_pair.1, count, sample_positions
+        );
+    }
+
+    println!("\nSeqLength:{}", seq_length);
     println!("NumSegsites:{}", num_segsites);
     println!("RawVariantCount:{}", raw_variant_count);
     println!("WattersonTheta:{:.6}", w_theta);
@@ -174,7 +185,7 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
                 
                 println!("Please enter the number of the file you want to use:");
                 let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
+                io::stdin().read_line(&mut input)?;
                 let choice: usize = input.trim().parse().map_err(|_| VcfError::Parse("Invalid input".to_string()))?;
                 
                 chr_specific_files.get(choice - 1)
@@ -185,46 +196,54 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     }
 }
 
+fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead>, VcfError> {
+    let file = File::open(path)?;
+    
+    if path.extension().and_then(|s| s.to_str()) == Some("gz") {
+        let decoder = MultiGzDecoder::new(file);
+        Ok(Box::new(BufReader::new(decoder)))
+    } else {
+        Ok(Box::new(BufReader::new(file)))
+    }
+}
+
 fn process_vcf(
     file: &Path,
     chr: &str,
     start: i64,
     end: i64,
 ) -> Result<(Vec<Variant>, Vec<String>, i64), VcfError> {
-    let file = File::open(file)?;
-    let mmap = unsafe { Mmap::map(&file)? };
-    let content = std::str::from_utf8(&mmap).map_err(|_| VcfError::Parse("Invalid UTF-8".to_string()))?;
-
+    let mut reader = open_vcf_reader(file)?;
     let mut variants = Vec::new();
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
 
-    let progress_bar = ProgressBar::new(content.lines().count() as u64);
-    let style = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-        .expect("Failed to create progress style");
-    progress_bar.set_style(style);
+    let file_size = fs::metadata(file)?.len();
+    let progress_bar = ProgressBar::new(file_size);
+    progress_bar.set_style(ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
+        .expect("Failed to create progress style")
+        .progress_chars("=>-"));
 
-    for line in content.lines() {
-        if line.starts_with("##") {
-            if line.starts_with("##contig=<ID=") && line.contains(&format!("ID={}", chr)) {
-                if let Some(length_str) = line.split(',').find(|s| s.starts_with("length=")) {
+    let mut buffer = String::new();
+    while reader.read_line(&mut buffer)? > 0 {
+        if buffer.starts_with("##") {
+            if buffer.starts_with("##contig=<ID=") && buffer.contains(&format!("ID={}", chr)) {
+                if let Some(length_str) = buffer.split(',').find(|s| s.starts_with("length=")) {
                     chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
                 }
             }
-            continue;
-        }
-        if line.starts_with("#CHROM") {
-            validate_vcf_header(line)?;
-            sample_names = line.split_whitespace().skip(9).map(String::from).collect();
-            continue;
-        }
-
-        if let Some(variant) = parse_variant(line, chr, start, end)? {
-            variants.push(variant);
+        } else if buffer.starts_with("#CHROM") {
+            validate_vcf_header(&buffer)?;
+            sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
+        } else {
+            if let Some(variant) = parse_variant(&buffer, chr, start, end)? {
+                variants.push(variant);
+            }
         }
 
-        progress_bar.inc(1);
+        progress_bar.set_position(reader.seek(SeekFrom::Current(0))?);
+        buffer.clear();
     }
 
     progress_bar.finish_with_message("Variant processing complete");
@@ -290,25 +309,28 @@ fn count_segregating_sites(variants: &[Variant]) -> usize {
 
 fn calculate_pairwise_differences(
     variants: &[Variant],
-    n: usize,
-) -> Vec<usize> {
+    sample_names: &[String],
+) -> Vec<((String, String), usize, Vec<i64>)> {
+    let n = sample_names.len();
     let variants = Arc::new(variants);
 
-    (0..n)
-        .into_par_iter()
-        .flat_map(|i| {
-            let variants = Arc::clone(&variants);
-            (i+1..n).into_par_iter().map(move |j| {
-                variants.iter().filter(|v| {
-                    if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
-                        gi != gj
-                    } else {
-                        false
+    (0..n).into_par_iter().flat_map(|i| {
+        (i+1..n).into_par_iter().map(move |j| {
+            let mut diff_count = 0;
+            let mut diff_positions = Vec::new();
+
+            for v in variants.iter() {
+                if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
+                    if gi != gj {
+                        diff_count += 1;
+                        diff_positions.push(v.position);
                     }
-                }).count()
-            }).collect::<Vec<_>>()
-        })
-        .collect()
+                }
+            }
+
+            ((sample_names[i].clone(), sample_names[j].clone()), diff_count, diff_positions)
+        }).collect::<Vec<_>>()
+    }).collect()
 }
 
 fn harmonic(n: usize) -> f64 {
