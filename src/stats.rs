@@ -75,7 +75,6 @@ fn main() -> Result<(), VcfError> {
 
     println!("{}", "Calculating diversity statistics...".blue());
 
-    let n = sample_names.len();
     let seq_length = if end == i64::MAX {
         variants.last().map(|v| v.position).unwrap_or(0).max(chr_length) - start + 1
     } else {
