@@ -2,15 +2,13 @@ use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
-use itertools::Itertools;
+use memmap2::Mmap;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -28,8 +26,6 @@ struct Args {
 #[derive(Debug, Clone)]
 struct Variant {
     position: i64,
-    ref_allele: String,
-    alt_alleles: Vec<String>,
     genotypes: Vec<Option<Vec<u8>>>,
 }
 
@@ -74,38 +70,32 @@ fn main() -> Result<(), VcfError> {
 
     println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-    let (variants, sample_names) = process_vcf(&vcf_file, &args.chr, start, end)?;
+    let (variants, sample_names, chr_length) = process_vcf(&vcf_file, &args.chr, start, end)?;
 
     println!("{}", "Calculating diversity statistics...".blue());
 
     let n = sample_names.len();
     let seq_length = if end == i64::MAX {
-        variants.last().map(|v| v.position).unwrap_or(0) - start + 1
+        variants.last().map(|v| v.position).unwrap_or(0).max(chr_length) - start + 1
     } else {
         end - start + 1
     };
 
+    if end == i64::MAX && variants.last().map(|v| v.position).unwrap_or(0) < chr_length {
+        println!("{}", "Warning: The sequence length may be underestimated. Consider using the --region parameter for more accurate results.".yellow());
+    }
+
     let num_segsites = count_segregating_sites(&variants);
     let raw_variant_count = variants.len();
 
-    let pairwise_diffs = calculate_pairwise_differences(&variants, &sample_names);
-    let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
+    let pairwise_diffs = calculate_pairwise_differences(&variants, n);
+    let tot_pair_diff: usize = pairwise_diffs.iter().sum();
 
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
     println!("\n{}", "Results:".green().bold());
-    println!("#Example pairwise nucleotide substitutions from this run");
-    let mut rng = thread_rng();
-    for (sample_pair, count, positions) in pairwise_diffs.choose_multiple(&mut rng, 5) {
-        let sample_positions: Vec<_> = positions.choose_multiple(&mut rng, 5.min(positions.len())).cloned().collect();
-        println!(
-            "{}\t{}\t{}\t{:?}",
-            sample_pair.0, sample_pair.1, count, sample_positions
-        );
-    }
-
-    println!("\nSeqLength:{}", seq_length);
+    println!("SeqLength:{}", seq_length);
     println!("NumSegsites:{}", num_segsites);
     println!("RawVariantCount:{}", raw_variant_count);
     println!("WattersonTheta:{:.6}", w_theta);
@@ -165,7 +155,6 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
         0 => Err(VcfError::NoVcfFiles),
         1 => Ok(chr_specific_files[0].clone()),
         _ => {
-            // Check for an exact match first
             let exact_match = chr_specific_files.iter().find(|&file| {
                 let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 let chr_pattern = format!("chr{}", chr);
@@ -196,48 +185,43 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     }
 }
 
-fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead>, VcfError> {
-    let file = File::open(path)?;
-    
-    if path.extension().and_then(|s| s.to_str()) == Some("gz") {
-        let decoder = MultiGzDecoder::new(file);
-        Ok(Box::new(BufReader::new(decoder)))
-    } else {
-        Ok(Box::new(BufReader::new(file)))
-    }
-}
-
 fn process_vcf(
     file: &Path,
     chr: &str,
     start: i64,
     end: i64,
-) -> Result<(Vec<Variant>, Vec<String>), VcfError> {
-    let reader = open_vcf_reader(file)?;
+) -> Result<(Vec<Variant>, Vec<String>, i64), VcfError> {
+    let file = File::open(file)?;
+    let mmap = unsafe { Mmap::map(&file)? };
+    let content = std::str::from_utf8(&mmap).map_err(|_| VcfError::Parse("Invalid UTF-8".to_string()))?;
+
     let mut variants = Vec::new();
     let mut sample_names = Vec::new();
+    let mut chr_length = 0;
 
-    let progress_bar = ProgressBar::new_spinner();
-    let style = ProgressStyle::default_spinner()
-        .template("{spinner:.green} {msg}")
+    let progress_bar = ProgressBar::new(content.lines().count() as u64);
+    let style = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
         .expect("Failed to create progress style");
     progress_bar.set_style(style);
-    progress_bar.set_message("Processing variants...");
 
-    for line in reader.lines() {
-        let line = line?;
+    for line in content.lines() {
         if line.starts_with("##") {
+            if line.starts_with("##contig=<ID=") && line.contains(&format!("ID={}", chr)) {
+                if let Some(length_str) = line.split(',').find(|s| s.starts_with("length=")) {
+                    chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
+                }
+            }
             continue;
         }
         if line.starts_with("#CHROM") {
-            validate_vcf_header(&line)?;
+            validate_vcf_header(line)?;
             sample_names = line.split_whitespace().skip(9).map(String::from).collect();
             continue;
         }
 
-        let variant = parse_variant(&line, chr, start, end)?;
-        if let Some(v) = variant {
-            variants.push(v);
+        if let Some(variant) = parse_variant(line, chr, start, end)? {
+            variants.push(variant);
         }
 
         progress_bar.inc(1);
@@ -245,7 +229,7 @@ fn process_vcf(
 
     progress_bar.finish_with_message("Variant processing complete");
 
-    Ok((variants, sample_names))
+    Ok((variants, sample_names, chr_length))
 }
 
 fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
@@ -256,10 +240,6 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
         return Err(VcfError::InvalidVcfFormat("Invalid VCF header format".to_string()));
     }
     Ok(())
-}
-
-fn is_valid_allele(allele: &str) -> bool {
-    allele.chars().all(|c| matches!(c, 'A' | 'C' | 'G' | 'T' | 'N'))
 }
 
 fn parse_variant(line: &str, chr: &str, start: i64, end: i64) -> Result<Option<Variant>, VcfError> {
@@ -278,13 +258,6 @@ fn parse_variant(line: &str, chr: &str, start: i64, end: i64) -> Result<Option<V
         return Ok(None);
     }
 
-    let ref_allele = fields[3].to_string();
-    let alt_alleles: Vec<String> = fields[4].split(',').map(String::from).collect();
-
-    if !is_valid_allele(&ref_allele) || !alt_alleles.iter().all(|a| is_valid_allele(a)) {
-        return Err(VcfError::Parse("Invalid REF or ALT allele".to_string()));
-    }
-
     let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
         .map(|gt| {
             gt.split(':').next().and_then(|alleles| {
@@ -297,15 +270,13 @@ fn parse_variant(line: &str, chr: &str, start: i64, end: i64) -> Result<Option<V
 
     Ok(Some(Variant {
         position: pos,
-        ref_allele,
-        alt_alleles,
         genotypes,
     }))
 }
 
 fn count_segregating_sites(variants: &[Variant]) -> usize {
     variants
-        .iter()
+        .par_iter()
         .filter(|v| {
             let alleles: HashSet<_> = v.genotypes
                 .iter()
@@ -319,34 +290,23 @@ fn count_segregating_sites(variants: &[Variant]) -> usize {
 
 fn calculate_pairwise_differences(
     variants: &[Variant],
-    sample_names: &[String],
-) -> Vec<((String, String), usize, Vec<i64>)> {
-    let n = sample_names.len();
-    let variants = Arc::new(variants.to_vec());
+    n: usize,
+) -> Vec<usize> {
+    let variants = Arc::new(variants);
 
     (0..n)
-        .combinations(2)
-        .par_bridge()
-        .map(|pair| {
+        .into_par_iter()
+        .flat_map(|i| {
             let variants = Arc::clone(&variants);
-            let (i, j) = (pair[0], pair[1]);
-            let mut diff_count = 0;
-            let mut diff_positions = Vec::new();
-
-            for v in variants.iter() {
-                if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
-                    if gi != gj {
-                        diff_count += 1;
-                        diff_positions.push(v.position);
+            (i+1..n).into_par_iter().map(move |j| {
+                variants.iter().filter(|v| {
+                    if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
+                        gi != gj
+                    } else {
+                        false
                     }
-                }
-            }
-
-            (
-                (sample_names[i].clone(), sample_names[j].clone()),
-                diff_count,
-                diff_positions,
-            )
+                }).count()
+            }).collect::<Vec<_>>()
         })
         .collect()
 }
