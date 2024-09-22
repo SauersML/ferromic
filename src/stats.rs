@@ -207,6 +207,7 @@ fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead>, VcfError> {
     }
 }
 
+
 fn process_vcf(
     file: &Path,
     chr: &str,
@@ -218,12 +219,25 @@ fn process_vcf(
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
 
-    let file_size = fs::metadata(file)?.len();
-    let progress_bar = ProgressBar::new(file_size);
-    progress_bar.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
-        .expect("Failed to create progress style")
-        .progress_chars("=>-"));
+    let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
+    let progress_bar = if is_gzipped {
+        ProgressBar::new_spinner()
+    } else {
+        let file_size = fs::metadata(file)?.len();
+        ProgressBar::new(file_size)
+    };
+
+    let style = if is_gzipped {
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈")
+    } else {
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
+            .progress_chars("=>-")
+    };
+
+    progress_bar.set_style(style);
 
     let mut buffer = String::new();
     while let Ok(bytes_read) = reader.read_line(&mut buffer) {
@@ -246,7 +260,11 @@ fn process_vcf(
             }
         }
 
-        progress_bar.inc(bytes_read as u64);
+        if is_gzipped {
+            progress_bar.inc(1);
+        } else {
+            progress_bar.inc(bytes_read as u64);
+        }
         buffer.clear();
     }
 
@@ -281,12 +299,21 @@ fn parse_variant(line: &str, chr: &str, start: i64, end: i64) -> Result<Option<V
         return Ok(None);
     }
 
+    let alt_alleles: Vec<&str> = fields[4].split(',').collect();
+    if alt_alleles.len() > 1 {
+        println!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. This may lead to underestimation of genetic diversity (pi).", pos).yellow());
+    }
+
     let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
         .map(|gt| {
             gt.split(':').next().and_then(|alleles| {
-                alleles.split(|c| c == '|' || c == '/')
+                let parsed = alleles.split(|c| c == '|' || c == '/')
                     .map(|allele| allele.parse().ok())
-                    .collect::<Option<Vec<u8>>>()
+                    .collect::<Option<Vec<u8>>>();
+                if parsed.is_none() {
+                    println!("{}", format!("Warning: Missing data detected at position {}.", pos).yellow());
+                }
+                parsed
             })
         })
         .collect();
