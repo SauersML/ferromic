@@ -89,20 +89,21 @@ fn main() -> Result<(), VcfError> {
     let num_segsites = count_segregating_sites(&variants);
     let raw_variant_count = variants.len();
 
-    let pairwise_diffs = calculate_pairwise_differences(&variants, &sample_names);
+    let n = sample_names.len();
+    let pairwise_diffs = calculate_pairwise_differences(&variants, n);
     let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
 
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
     println!("\n{}", "Results:".green().bold());
-    println!("#Example pairwise nucleotide substitutions from this run");
+    println!("Example pairwise nucleotide substitutions from this run:");
     let mut rng = thread_rng();
-    for (sample_pair, count, positions) in pairwise_diffs.choose_multiple(&mut rng, 5) {
+    for &((i, j), count, ref positions) in pairwise_diffs.choose_multiple(&mut rng, 5) {
         let sample_positions: Vec<_> = positions.choose_multiple(&mut rng, 5.min(positions.len())).cloned().collect();
         println!(
             "{}\t{}\t{}\t{:?}",
-            sample_pair.0, sample_pair.1, count, sample_positions
+            sample_names[i], sample_names[j], count, sample_positions
         );
     }
 
@@ -226,7 +227,11 @@ fn process_vcf(
         .progress_chars("=>-"));
 
     let mut buffer = String::new();
-    while reader.read_line(&mut buffer)? > 0 {
+    while let Ok(bytes_read) = reader.read_line(&mut buffer) {
+        if bytes_read == 0 {
+            break;
+        }
+        
         if buffer.starts_with("##") {
             if buffer.starts_with("##contig=<ID=") && buffer.contains(&format!("ID={}", chr)) {
                 if let Some(length_str) = buffer.split(',').find(|s| s.starts_with("length=")) {
@@ -242,7 +247,7 @@ fn process_vcf(
             }
         }
 
-        progress_bar.set_position(reader.seek(SeekFrom::Current(0))?);
+        progress_bar.inc(bytes_read as u64);
         buffer.clear();
     }
 
@@ -309,12 +314,12 @@ fn count_segregating_sites(variants: &[Variant]) -> usize {
 
 fn calculate_pairwise_differences(
     variants: &[Variant],
-    sample_names: &[String],
-) -> Vec<((String, String), usize, Vec<i64>)> {
-    let n = sample_names.len();
-    let variants = Arc::new(variants);
+    n: usize,
+) -> Vec<((usize, usize), usize, Vec<i64>)> {
+    let variants = Arc::new(variants.to_vec());
 
     (0..n).into_par_iter().flat_map(|i| {
+        let variants = Arc::clone(&variants);
         (i+1..n).into_par_iter().map(move |j| {
             let mut diff_count = 0;
             let mut diff_positions = Vec::new();
@@ -328,7 +333,7 @@ fn calculate_pairwise_differences(
                 }
             }
 
-            ((sample_names[i].clone(), sample_names[j].clone()), diff_count, diff_positions)
+            ((i, j), diff_count, diff_positions)
         }).collect::<Vec<_>>()
     }).collect()
 }
