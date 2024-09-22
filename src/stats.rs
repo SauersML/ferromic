@@ -338,7 +338,7 @@ fn calculate_pairwise_differences(
 }
 
 fn harmonic(n: usize) -> f64 {
-    (1..n).map(|i| 1.0 / i as f64).sum()
+    (1..=n).map(|i| 1.0 / i as f64).sum()
 }
 
 fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
