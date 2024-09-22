@@ -229,8 +229,8 @@ fn process_vcf(
 
     let style = if is_gzipped {
         ProgressStyle::default_spinner()
-            .template("{spinner:.green} {msg}")
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈")
+            .template("{spinner:.bold.green} 🧬 {msg} 🧬 [{elapsed_precise}]")
+            .tick_chars("A⟷T C⟷G T⟷A G⟷C")
     } else {
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
