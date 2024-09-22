@@ -5,7 +5,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, SeekFrom};
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use rand::seq::SliceRandom;
