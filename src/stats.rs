@@ -301,7 +301,7 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
         .from_path(path)
         .map_err(|e| VcfError::Io(e.into()))?;
 
-    let headers = reader.headers().map_err(|e| VcfError::Io(e.into()))?;
+    let headers = reader.headers().map_err(|e| VcfError::Io(e.into()))?.clone();
     let sample_names: Vec<String> = headers.iter().skip(7).map(String::from).collect();
 
     // Check if the number of sample names is consistent
