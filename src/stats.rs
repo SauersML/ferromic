@@ -452,19 +452,28 @@ fn process_vcf(
     }
 
     // Set up channels for communication between threads
+    let (vcf_sender, vcf_receiver) = bounded(1000);
     let (line_sender, line_receiver) = bounded(1000);
     let (result_sender, result_receiver) = bounded(1000);
+
+    // Spawn VCF reader thread
+    let vcf_reader_thread = thread::spawn(move || -> Result<(), VcfError> {
+        let reader = vcf_manager.get_reader(chr)?;
+        let mut buffer = String::new();
+        while reader.read_line(&mut buffer)? > 0 {
+            vcf_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
+            buffer.clear();
+        }
+        drop(vcf_sender);
+        Ok(())
+    });
 
     // Spawn producer thread
     let producer_thread = {
         let line_sender = line_sender.clone();
-        let chr = chr.to_string();
         thread::spawn(move || -> Result<(), VcfError> {
-            let mut reader = vcf_manager.get_reader(&chr)?;
-            let mut buffer = String::new();
-            while reader.read_line(&mut buffer)? > 0 {
-                line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
-                buffer.clear();
+            while let Ok(line) = vcf_receiver.recv() {
+                line_sender.send(line).map_err(|_| VcfError::ChannelSend)?;
             }
             drop(line_sender);
             Ok(())
@@ -522,13 +531,14 @@ fn process_vcf(
     });
 
     // Wait for all threads to complete
+    vcf_reader_thread.join().expect("VCF reader thread panicked")?;
     producer_thread.join().expect("Producer thread panicked")?;
     for thread in consumer_threads {
         thread.join().expect("Consumer thread panicked")?;
     }
     drop(result_sender); // Close the result channel
     collector_thread.join().expect("Collector thread panicked")?;
-
+    
     // Signal that processing is complete
     processing_complete.store(true, Ordering::Relaxed);
 
