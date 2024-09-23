@@ -304,12 +304,25 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     let headers = reader.headers().map_err(|e| VcfError::Io(e.into()))?;
     let sample_names: Vec<String> = headers.iter().skip(7).map(String::from).collect();
 
+    // Check if the number of sample names is consistent
+    if sample_names.is_empty() {
+        eprintln!("{}", "Error: No sample names found in the configuration file header after skipping the first 7 columns. Please ensure the config file is properly formatted with tabs separating all columns, including sample names.".red());
+        return Err(VcfError::Parse("No sample names found in config file header.".to_string()));
+    }
+
     let mut entries = Vec::new();
     let mut invalid_genotypes = 0;
     let mut total_genotypes = 0;
 
-    for result in reader.records() {
+    for (line_num, result) in reader.records().enumerate() {
         let record = result.map_err(|e| VcfError::Io(e.into()))?;
+
+        // Check if the record has the expected number of fields
+        if record.len() != headers.len() {
+            eprintln!("{}", format!("Error: Record on line {} does not have the same number of fields as the header. Expected {}, found {}. Please check for missing tabs in the config file.", line_num + 2, headers.len(), record.len()).red());
+            return Err(VcfError::Parse(format!("Mismatched number of fields in record on line {}", line_num + 2)));
+        }
+
         let seqname = record.get(0).ok_or(VcfError::Parse("Missing seqname".to_string()))?.to_string();
         let start: i64 = record.get(1).ok_or(VcfError::Parse("Missing start".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid start".to_string()))?;
         let end: i64 = record.get(2).ok_or(VcfError::Parse("Missing end".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid end".to_string()))?;
@@ -340,6 +353,8 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
                 } else {
                     invalid_genotypes += 1;
                 }
+            } else {
+                eprintln!("Warning: More genotype fields than sample names at line {}.", line_num + 2);
             }
         }
 
@@ -356,6 +371,7 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
     Ok(entries)
 }
+
 
 
 
