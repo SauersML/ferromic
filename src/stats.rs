@@ -306,11 +306,20 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
             total_genotypes += 1;
             if i < sample_names.len() + 7 {
                 let sample_name = &sample_names[i - 7];
-                if field.len() >= 3 && field.chars().nth(1) == Some('|') {
-                    let left: u8 = field.chars().next().unwrap().to_digit(10).map(|d| d as u8).unwrap_or(2);
-                    let right: u8 = field.chars().nth(2).unwrap().to_digit(10).map(|d| d as u8).unwrap_or(2);
-                    if left <= 1 && right <= 1 {
-                        samples.insert(sample_name.clone(), (left, right));
+                if field.contains('|') {
+                    let mut parts = field.split('|');
+                    let left_str = parts.next().unwrap_or("");
+                    let right_str = parts.next().unwrap_or("");
+                    // Remove any non-digit characters
+                    let left_str = left_str.chars().take_while(|c| c.is_digit(10)).collect::<String>();
+                    let right_str = right_str.chars().take_while(|c| c.is_digit(10)).collect::<String>();
+                    // Parse left and right as digits
+                    if let (Ok(left), Ok(right)) = (left_str.parse::<u8>(), right_str.parse::<u8>()) {
+                        if left <= 1 && right <= 1 {
+                            samples.insert(sample_name.clone(), (left, right));
+                        } else {
+                            invalid_genotypes += 1;
+                        }
                     } else {
                         invalid_genotypes += 1;
                     }
