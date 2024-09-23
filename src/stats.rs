@@ -329,7 +329,8 @@ fn process_vcf(
     progress_bar.set_style(style);
 
     let mut buffer = String::new();
-    let chunk_size = 1024 * 1024; // 1 MB chunks
+    let update_interval = Duration::from_millis(100);
+    let mut last_update = Instant::now();
 
     while reader.read_to_string(&mut buffer)? > 0 {
         let chunk = buffer.clone();
@@ -363,7 +364,15 @@ fn process_vcf(
             }
         });
 
-        progress_bar.inc(chunk.len() as u64);
+        if is_gzipped {
+            let now = Instant::now();
+            if now.duration_since(last_update) >= update_interval {
+                progress_bar.tick();
+                last_update = now;
+            }
+        } else {
+            progress_bar.inc(chunk.len() as u64);
+        }
     }
 
     progress_bar.finish_with_message("Variant processing complete");
