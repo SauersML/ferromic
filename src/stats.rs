@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
@@ -325,7 +325,7 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     }
 }
 
-fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send>, VcfError> {
+fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send + Seek>, VcfError> {
     let file = File::open(path)?;
     
     if path.extension().and_then(|s| s.to_str()) == Some("gz") {
