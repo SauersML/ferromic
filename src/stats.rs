@@ -451,17 +451,19 @@ fn process_vcf(
 
     // Spawn consumer threads
     let num_threads = num_cpus::get();
-    let sample_filter = sample_filter.clone();
+    let sample_filter = Arc::new(sample_filter);
+    let sample_names = Arc::new(sample_names);
     let consumer_threads: Vec<_> = (0..num_threads)
         .map(|_| {
             let line_receiver = line_receiver.clone();
             let result_sender = result_sender.clone();
             let chr = chr.to_string();
-            let sample_filter = sample_filter.clone();
+            let sample_filter = Arc::clone(&sample_filter);
+            let sample_names = Arc::clone(&sample_names);
             thread::spawn(move || -> Result<(), VcfError> {
                 while let Ok(line) = line_receiver.recv() {
                     let mut local_missing_data_info = MissingDataInfo::default();
-                    match parse_variant(&line, &chr, start, end, &mut local_missing_data_info, haplotype_group, sample_filter.as_ref(), &sample_names) {
+                    match parse_variant(&line, &chr, start, end, &mut local_missing_data_info, haplotype_group, sample_filter.as_ref().as_ref(), &sample_names) {
                         Ok(Some(variant)) => {
                             result_sender.send(Ok((variant, local_missing_data_info))).map_err(|_| VcfError::ChannelSend)?;
                         },
@@ -514,7 +516,7 @@ fn process_vcf(
     let final_variants = Arc::try_unwrap(variants).expect("Variants still have multiple owners").into_inner();
     let final_missing_data_info = Arc::try_unwrap(missing_data_info).expect("Missing data info still has multiple owners").into_inner();
 
-    Ok((final_variants, sample_names, chr_length, final_missing_data_info))
+    Ok((final_variants, Arc::try_unwrap(sample_names).unwrap(), chr_length, final_missing_data_info))
 }
 
 
