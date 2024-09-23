@@ -230,7 +230,6 @@ fn process_vcf(
     end: i64,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
     let mut reader = open_vcf_reader(file)?;
-    let mut variants = Vec::new();
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
     let mut missing_data_info = MissingDataInfo::default();
@@ -324,32 +323,39 @@ fn process_vcf(
     progress_bar.set_style(style);
 
     let mut buffer = String::new();
-    while let Ok(bytes_read) = reader.read_line(&mut buffer) {
-        if bytes_read == 0 {
-            break;
-        }
-        
-        if buffer.starts_with("##") {
-            if buffer.starts_with("##contig=<ID=") && buffer.contains(&format!("ID={}", chr)) {
-                if let Some(length_str) = buffer.split(',').find(|s| s.starts_with("length=")) {
-                    chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
-                }
-            }
-        } else if buffer.starts_with("#CHROM") {
-            validate_vcf_header(&buffer)?;
-            sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
-        } else {
-            if let Some(variant) = parse_variant(&buffer, chr, start, end, &mut missing_data_info)? {
-                variants.push(variant);
-            }
-        }
+    let chunk_size = 1024 * 1024; // 1 MB chunks
 
-        if is_gzipped {
-            progress_bar.inc(1);
-        } else {
-            progress_bar.inc(bytes_read as u64);
-        }
+    let variants: Vec<Variant> = Vec::new();
+    let mut header_processed = false;
+
+    while reader.read_to_string(&mut buffer)? > 0 {
+        let chunk = buffer.clone();
         buffer.clear();
+
+        let chunk_variants: Vec<Variant> = chunk.par_lines()
+            .filter_map(|line| {
+                if !header_processed {
+                    if line.starts_with("##") {
+                        if line.starts_with("##contig=<ID=") && line.contains(&format!("ID={}", chr)) {
+                            if let Some(length_str) = line.split(',').find(|s| s.starts_with("length=")) {
+                                chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
+                            }
+                        }
+                        return None;
+                    } else if line.starts_with("#CHROM") {
+                        if let Ok(()) = validate_vcf_header(line) {
+                            sample_names = line.split_whitespace().skip(9).map(String::from).collect();
+                            header_processed = true;
+                        }
+                        return None;
+                    }
+                }
+                parse_variant(line, chr, start, end, &mut missing_data_info).transpose()
+            })
+            .collect();
+
+        variants.extend(chunk_variants);
+        progress_bar.inc(chunk.len() as u64);
     }
 
     progress_bar.finish_with_message("Variant processing complete");
