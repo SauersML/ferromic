@@ -543,7 +543,7 @@ fn parse_variant(
     }
 
     let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter().enumerate()
-        .filter_map(|(i, gt)| {
+        .map(|(i, gt)| {
             missing_data_info.total_data_points += 1;
             gt.split(':').next().and_then(|alleles| {
                 let parsed = alleles.split(|c| c == '|' || c == '/')
@@ -556,17 +556,20 @@ fn parse_variant(
                 if let (Some(hg), Some(sf)) = (haplotype_group, sample_filter) {
                     if let Some(&(left, right)) = sf.get(&format!("Sample_{}", i)) {
                         if (hg == 0 && left == 0) || (hg == 1 && right == 1) {
-                            return parsed.map(|mut v| {
+                            parsed.map(|mut v| {
                                 if hg == 1 && v.len() > 1 {
                                     vec![v[1]]
                                 } else {
                                     v.truncate(1);
                                     v
                                 }
-                            });
+                            })
+                        } else {
+                            None
                         }
+                    } else {
+                        None
                     }
-                    None
                 } else {
                     parsed
                 }
@@ -597,7 +600,7 @@ fn process_config_entries(
 
         let mut results = Vec::new();
         for haplotype_group in &[0, 1] {
-            let (variants, sample_names, chr_length, _) = process_vcf(
+            let (variants, _, _, _) = process_vcf(
                 &vcf_file,
                 &entry.seqname,
                 entry.start,
