@@ -21,19 +21,19 @@ use std::thread;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
+    #[arg(short, long = "vcf_folder")]
     vcf_folder: String,
 
-    #[arg(short, long)]
+    #[arg(short, long = "chr")]
     chr: Option<String>,
 
-    #[arg(short, long)]
+    #[arg(short, long = "region")]
     region: Option<String>,
 
-    #[arg(long)]
+    #[arg(long = "config_file")]
     config_file: Option<String>,
 
-    #[arg(short, long)]
+    #[arg(short, long = "output_file")]
     output_file: Option<String>,
 }
 
@@ -119,13 +119,18 @@ fn main() -> Result<(), VcfError> {
     println!("{}", "Starting VCF diversity analysis...".green());
 
     if let Some(config_file) = args.config_file.as_ref() {
+        println!("Config file provided: {}", config_file);
         let config_entries = parse_config_file(Path::new(config_file))?;
         let output_file = args.output_file.as_ref().map(Path::new).unwrap_or_else(|| Path::new("output.csv"));
+        println!("Output file: {}", output_file.display());
         process_config_entries(&config_entries, &args.vcf_folder, output_file)?;
     } else if let Some(chr) = args.chr.as_ref() {
+        println!("Chromosome provided: {}", chr);
         let (start, end) = if let Some(region) = args.region.as_ref() {
+            println!("Region provided: {}", region);
             parse_region(region)?
         } else {
+            println!("No region provided, using default region covering most of the chromosome.");
             (1, i64::MAX) // Default region covering the entire chromosome
         };
         let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
