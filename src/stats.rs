@@ -735,7 +735,7 @@ fn process_config_entries(
                     continue;
                 }
             };
-            match process_vcf(&vcf_file, &entry.seqname, entry.start, entry.end, None, Some(&entry.samples)) {
+            match process_vcf(&vcf_file, &entry.seqname, entry.start, entry.end, None, Some(entry.samples.clone())) {
                 Ok(data) => {
                     variants_cache.insert(entry.seqname.clone(), data.clone());
                     data
