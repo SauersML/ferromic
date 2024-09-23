@@ -375,14 +375,21 @@ fn process_vcf(
             thread::spawn(move || -> Result<(), VcfError> {
                 while let Ok(line) = line_receiver.recv() {
                     let mut local_missing_data_info = MissingDataInfo::default();
-                    if let Ok(Some(variant)) = parse_variant(&line, &chr, start, end, &mut local_missing_data_info) {
-                        result_sender.send((variant, local_missing_data_info)).map_err(|_| VcfError::ChannelSend)?;
+                    match parse_variant(&line, &chr, start, end, &mut local_missing_data_info) {
+                        Ok(Some(variant)) => {
+                            result_sender.send(Ok((variant, local_missing_data_info)))?;
+                        },
+                        Ok(None) => {},
+                        Err(e) => {
+                            result_sender.send(Err(e))?;
+                        }
                     }
                 }
                 Ok(())
             })
         })
         .collect();
+
 
     // Collector thread
     let collector_thread = thread::spawn({
