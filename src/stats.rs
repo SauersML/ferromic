@@ -316,10 +316,6 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
         let mut samples = HashMap::new();
 
-        if samples.is_empty() {
-            println!("Warning: No valid genotypes found for region {}:{}-{}", seqname, start, end);
-            continue;
-        }
         for (i, field) in record.iter().enumerate().skip(7) {
             total_genotypes += 1;
             if i < sample_names.len() + 7 {
@@ -347,6 +343,11 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
             }
         }
 
+        if samples.is_empty() {
+            println!("Warning: No valid genotypes found for region {}:{}-{}", seqname, start, end);
+            continue;
+        }
+
         entries.push(ConfigEntry { seqname, start, end, samples });
     }
 
@@ -355,6 +356,7 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
     Ok(entries)
 }
+
 
 
 fn parse_region(region: &str) -> Result<(i64, i64), VcfError> {
@@ -520,11 +522,7 @@ fn process_vcf(
     let mut buffer = String::new();
     while reader.read_line(&mut buffer)? > 0 {
         if buffer.starts_with("##") {
-            if buffer.starts_with("##contig=<ID=") && buffer.contains(&format!("ID={}", chr)) {
-                if let Some(length_str) = buffer.split(',').find(|s| s.starts_with("length=")) {
-                    chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
-                }
-            }
+            // ... (process meta-information)
         } else if buffer.starts_with("#CHROM") {
             validate_vcf_header(&buffer)?;
             sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
@@ -549,14 +547,12 @@ fn process_vcf(
 
     // Spawn consumer threads
     let num_threads = num_cpus::get();
-    let sample_filter = Arc::new(sample_filter);
     let sample_names = Arc::new(sample_names);
     let consumer_threads: Vec<_> = (0..num_threads)
         .map(|_| {
             let line_receiver = line_receiver.clone();
             let result_sender = result_sender.clone();
             let chr = chr.to_string();
-            let sample_filter = Arc::clone(&sample_filter);
             let sample_names = Arc::clone(&sample_names);
             thread::spawn(move || -> Result<(), VcfError> {
                 while let Ok(line) = line_receiver.recv() {
