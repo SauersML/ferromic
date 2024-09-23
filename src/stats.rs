@@ -12,7 +12,7 @@ use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
-use csv::{Writer, WriterBuilder};
+use csv::{Writer};
 use crossbeam_channel::{bounded};
 use std::time::{Duration};
 use std::sync::Arc;
