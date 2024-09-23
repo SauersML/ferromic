@@ -2,7 +2,7 @@ use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Mutex};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
