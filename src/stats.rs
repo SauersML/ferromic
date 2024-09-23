@@ -129,9 +129,14 @@ impl VcfFileManager {
     }
 
     fn get_reader(&mut self, chr: &str) -> Result<&mut Box<dyn BufRead + Send>, VcfError> {
+        println!("Current chromosome: {}, Requested chromosome: {}", self.current_chr, chr);
         if self.current_chr != chr {
+            println!("Finding VCF file for chromosome: {}", chr);
             let vcf_file = find_vcf_file(&self.vcf_folder, chr)?;
+            println!("Found VCF file: {:?}", vcf_file);
+            println!("Opening VCF reader");
             self.reader = Some(open_vcf_reader(&vcf_file)?);
+            println!("VCF reader opened successfully");
             self.current_chr = chr.to_string();
         }
         self.reader.as_mut().ok_or(VcfError::NoVcfFiles)
@@ -445,8 +450,13 @@ fn process_vcf(
     // Process header
     let mut buffer = String::new();
     {
+        let mut line_count = 0;
         let reader = vcf_manager.get_reader(chr)?;
         while reader.read_line(&mut buffer)? > 0 {
+            line_count += 1;
+            if line_count % 100 == 0 {
+                println!("Processed {} header lines", line_count);
+            }
             if buffer.starts_with("##") {
                 if buffer.starts_with("##contig=<ID=") && buffer.contains(&format!("ID={}", chr)) {
                     if let Some(length_str) = buffer.split(',').find(|s| s.starts_with("length=")) {
