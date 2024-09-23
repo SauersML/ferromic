@@ -118,77 +118,127 @@ fn main() -> Result<(), VcfError> {
 
     println!("{}", "Starting VCF diversity analysis...".green());
 
-    let (start, end) = match args.region {
-        Some(ref region) => parse_region(region)?,
-        None => (0, i64::MAX),
-    };
+    if let Some(config_file) = args.config_file.as_ref() {
+        let config_entries = parse_config_file(Path::new(config_file))?;
+        let output_file = args.output_file.as_ref().map(Path::new).unwrap_or_else(|| Path::new("output.csv"));
+        process_config_entries(&config_entries, &args.vcf_folder, output_file)?;
+    } else if let (Some(chr), Some(region)) = (args.chr.as_ref(), args.region.as_ref()) {
+        let (start, end) = parse_region(region)?;
+        let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
 
-    let vcf_file = find_vcf_file(&args.vcf_folder, &args.chr)?;
+        println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-    println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
+        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, None, None)?;
 
-    let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, &args.chr, start, end)?;
+        println!("{}", "Calculating diversity statistics...".blue());
 
-    println!("{}", "Calculating diversity statistics...".blue());
+        let seq_length = if end == i64::MAX {
+            variants.last().map(|v| v.position).unwrap_or(0).max(chr_length) - start + 1
+        } else {
+            end - start + 1
+        };
 
-    let seq_length = if end == i64::MAX {
-        variants.last().map(|v| v.position).unwrap_or(0).max(chr_length) - start + 1
+        if end == i64::MAX && variants.last().map(|v| v.position).unwrap_or(0) < chr_length {
+            println!("{}", "Warning: The sequence length may be underestimated. Consider using the --region parameter for more accurate results.".yellow());
+        }
+
+        let num_segsites = count_segregating_sites(&variants);
+        let raw_variant_count = variants.len();
+
+        let n = sample_names.len();
+        let pairwise_diffs = calculate_pairwise_differences(&variants, n);
+        let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
+
+        let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
+        let pi = calculate_pi(tot_pair_diff, n, seq_length);
+
+        println!("\n{}", "Results:".green().bold());
+        println!("Example pairwise nucleotide substitutions from this run:");
+        let mut rng = thread_rng();
+        for &((i, j), count, ref positions) in pairwise_diffs.choose_multiple(&mut rng, 5) {
+            let sample_positions: Vec<_> = positions.choose_multiple(&mut rng, 5.min(positions.len())).cloned().collect();
+            println!(
+                "{}\t{}\t{}\t{:?}",
+                sample_names[i], sample_names[j], count, sample_positions
+            );
+        }
+
+        println!("\nSequence Length:{}", seq_length);
+        println!("Number of Segregating Sites:{}", num_segsites);
+        println!("Raw Variant Count:{}", raw_variant_count);
+        println!("Watterson Theta:{:.6}", w_theta);
+        println!("pi:{:.6}", pi);
+
+        if variants.is_empty() {
+            println!("{}", "Warning: No variants found in the specified region.".yellow());
+        }
+
+        if num_segsites == 0 {
+            println!("{}", "Warning: All sites are monomorphic.".yellow());
+        }
+
+        if num_segsites != raw_variant_count {
+            println!("{}", format!("Note: Number of segregating sites ({}) differs from raw variant count ({}).", num_segsites, raw_variant_count).yellow());
+        }
+
+        let missing_data_percentage = (missing_data_info.missing_data_points as f64 / missing_data_info.total_data_points as f64) * 100.0;
+        println!("\n{}", "Missing Data Information:".yellow().bold());
+        println!("Number of missing variants: {}", missing_data_info.missing_data_points);
+        println!("Percentage of missing data: {:.2}%", missing_data_percentage);
+        println!("Positions with missing data: {:?}", missing_data_info.positions_with_missing);
     } else {
-        end - start + 1
-    };
-
-    if end == i64::MAX && variants.last().map(|v| v.position).unwrap_or(0) < chr_length {
-        println!("{}", "Warning: The sequence length may be underestimated. Consider using the --region parameter for more accurate results.".yellow());
+        return Err(VcfError::Parse("Either config file or chromosome and region must be specified".to_string()));
     }
 
-    let num_segsites = count_segregating_sites(&variants);
-    let raw_variant_count = variants.len();
-
-    let n = sample_names.len();
-    let pairwise_diffs = calculate_pairwise_differences(&variants, n);
-    let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
-
-    let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
-    let pi = calculate_pi(tot_pair_diff, n, seq_length);
-
-    println!("\n{}", "Results:".green().bold());
-    println!("Example pairwise nucleotide substitutions from this run:");
-    let mut rng = thread_rng();
-    for &((i, j), count, ref positions) in pairwise_diffs.choose_multiple(&mut rng, 5) {
-        let sample_positions: Vec<_> = positions.choose_multiple(&mut rng, 5.min(positions.len())).cloned().collect();
-        println!(
-            "{}\t{}\t{}\t{:?}",
-            sample_names[i], sample_names[j], count, sample_positions
-        );
-    }
-
-    println!("\nSequence Length:{}", seq_length);
-    println!("Number of Segregating Sites:{}", num_segsites);
-    println!("Raw Variant Count:{}", raw_variant_count);
-    println!("Watterson Theta:{:.6}", w_theta);
-    println!("pi:{:.6}", pi);
-
-    // Checks and warnings
-    if variants.is_empty() {
-        println!("{}", "Warning: No variants found in the specified region.".yellow());
-    }
-
-    if num_segsites == 0 {
-        println!("{}", "Warning: All sites are monomorphic.".yellow());
-    }
-
-    if num_segsites != raw_variant_count {
-        println!("{}", format!("Note: Number of segregating sites ({}) differs from raw variant count ({}).", num_segsites, raw_variant_count).yellow());
-    }
-
-    // Print missing data information
-    let missing_data_percentage = (missing_data_info.missing_data_points as f64 / missing_data_info.total_data_points as f64) * 100.0;
-    println!("\n{}", "Missing Data Information:".yellow().bold());
-    println!("Number of missing variants: {}", missing_data_info.missing_data_points);
-    println!("Percentage of missing data: {:.2}%", missing_data_percentage);
-    println!("Positions with missing data: {:?}", missing_data_info.positions_with_missing);
-
+    println!("{}", "Analysis complete.".green());
     Ok(())
+}
+
+fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(b'\t')
+        .from_path(path)
+        .map_err(|e| VcfError::Io(e.into()))?;
+
+    let headers = reader.headers().map_err(|e| VcfError::Io(e.into()))?;
+    let sample_names: Vec<String> = headers.iter().skip(7).map(String::from).collect();
+
+    let mut entries = Vec::new();
+    let mut invalid_genotypes = 0;
+    let mut total_genotypes = 0;
+
+    for result in reader.records() {
+        let record = result.map_err(|e| VcfError::Io(e.into()))?;
+        let seqname = record.get(0).ok_or(VcfError::Parse("Missing seqname".to_string()))?.to_string();
+        let start: i64 = record.get(1).ok_or(VcfError::Parse("Missing start".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid start".to_string()))?;
+        let end: i64 = record.get(2).ok_or(VcfError::Parse("Missing end".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid end".to_string()))?;
+
+        let mut samples = HashMap::new();
+        for (i, field) in record.iter().enumerate().skip(7) {
+            total_genotypes += 1;
+            if i < sample_names.len() + 7 {
+                let sample_name = &sample_names[i - 7];
+                if field.len() >= 3 && field.chars().nth(1) == Some('|') {
+                    let left: u8 = field.chars().next().unwrap().to_digit(10).map(|d| d as u8).unwrap_or(2);
+                    let right: u8 = field.chars().nth(2).unwrap().to_digit(10).map(|d| d as u8).unwrap_or(2);
+                    if left <= 1 && right <= 1 {
+                        samples.insert(sample_name.clone(), (left, right));
+                    } else {
+                        invalid_genotypes += 1;
+                    }
+                } else {
+                    invalid_genotypes += 1;
+                }
+            }
+        }
+
+        entries.push(ConfigEntry { seqname, start, end, samples });
+    }
+
+    let invalid_percentage = (invalid_genotypes as f64 / total_genotypes as f64) * 100.0;
+    println!("Number of invalid genotypes: {} ({:.2}%)", invalid_genotypes, invalid_percentage);
+
+    Ok(entries)
 }
 
 
@@ -277,6 +327,8 @@ fn process_vcf(
     chr: &str,
     start: i64,
     end: i64,
+    haplotype_group: Option<u8>,
+    sample_filter: Option<HashMap<String, (u8, u8)>>,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
@@ -384,15 +436,17 @@ fn process_vcf(
 
     // Spawn consumer threads
     let num_threads = num_cpus::get();
+    let sample_filter = sample_filter.clone();
     let consumer_threads: Vec<_> = (0..num_threads)
         .map(|_| {
             let line_receiver = line_receiver.clone();
             let result_sender = result_sender.clone();
             let chr = chr.to_string();
+            let sample_filter = sample_filter.clone();
             thread::spawn(move || -> Result<(), VcfError> {
                 while let Ok(line) = line_receiver.recv() {
                     let mut local_missing_data_info = MissingDataInfo::default();
-                    match parse_variant(&line, &chr, start, end, &mut local_missing_data_info) {
+                    match parse_variant(&line, &chr, start, end, &mut local_missing_data_info, haplotype_group, sample_filter.as_ref()) {
                         Ok(Some(variant)) => {
                             result_sender.send(Ok((variant, local_missing_data_info))).map_err(|_| VcfError::ChannelSend)?;
                         },
@@ -459,7 +513,15 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     Ok(())
 }
 
-fn parse_variant(line: &str, chr: &str, start: i64, end: i64, missing_data_info: &mut MissingDataInfo) -> Result<Option<Variant>, VcfError> {
+fn parse_variant(
+    line: &str,
+    chr: &str,
+    start: i64,
+    end: i64,
+    missing_data_info: &mut MissingDataInfo,
+    haplotype_group: Option<u8>,
+    sample_filter: Option<&HashMap<String, (u8, u8)>>,
+) -> Result<Option<Variant>, VcfError> {
     let fields: Vec<&str> = line.split_whitespace().collect();
     if fields.len() < 10 {
         return Err(VcfError::Parse("Invalid VCF line format".to_string()));
@@ -480,8 +542,8 @@ fn parse_variant(line: &str, chr: &str, start: i64, end: i64, missing_data_info:
         eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. This may lead to underestimation of genetic diversity (pi).", pos).yellow());
     }
 
-    let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
-        .map(|gt| {
+    let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter().enumerate()
+        .filter_map(|(i, gt)| {
             missing_data_info.total_data_points += 1;
             gt.split(':').next().and_then(|alleles| {
                 let parsed = alleles.split(|c| c == '|' || c == '/')
@@ -491,7 +553,23 @@ fn parse_variant(line: &str, chr: &str, start: i64, end: i64, missing_data_info:
                     missing_data_info.missing_data_points += 1;
                     missing_data_info.positions_with_missing.insert(pos);
                 }
-                parsed
+                if let (Some(hg), Some(sf)) = (haplotype_group, sample_filter) {
+                    if let Some(&(left, right)) = sf.get(&format!("Sample_{}", i)) {
+                        if (hg == 0 && left == 0) || (hg == 1 && right == 1) {
+                            return parsed.map(|mut v| {
+                                if hg == 1 && v.len() > 1 {
+                                    vec![v[1]]
+                                } else {
+                                    v.truncate(1);
+                                    v
+                                }
+                            });
+                        }
+                    }
+                    None
+                } else {
+                    parsed
+                }
             })
         })
         .collect();
@@ -500,6 +578,71 @@ fn parse_variant(line: &str, chr: &str, start: i64, end: i64, missing_data_info:
         position: pos,
         genotypes,
     }))
+}
+
+fn process_config_entries(
+    config_entries: &[ConfigEntry],
+    vcf_folder: &str,
+    output_file: &Path,
+) -> Result<(), VcfError> {
+    let mut writer = WriterBuilder::new().from_path(output_file).map_err(|e| VcfError::Io(e.into()))?;
+    writer.write_record(&[
+        "chr", "region_start", "region_end", "0_sequence_length", "1_sequence_length",
+        "0_segregating_sites", "1_segregating_sites", "0_w_theta", "1_w_theta", "0_pi", "1_pi",
+    ]).map_err(|e| VcfError::Io(e.into()))?;
+
+    for entry in config_entries {
+        let vcf_file = find_vcf_file(vcf_folder, &entry.seqname)?;
+        println!("{}", format!("Processing region {}:{}-{}", entry.seqname, entry.start, entry.end).cyan());
+
+        let mut results = Vec::new();
+        for haplotype_group in &[0, 1] {
+            let (variants, sample_names, chr_length, _) = process_vcf(
+                &vcf_file,
+                &entry.seqname,
+                entry.start,
+                entry.end,
+                Some(*haplotype_group),
+                Some(entry.samples.clone()),
+            )?;
+
+            let seq_length = entry.end - entry.start + 1;
+            let num_segsites = count_segregating_sites(&variants);
+            let n = variants.first().map(|v| v.genotypes.len()).unwrap_or(0);
+            let pairwise_diffs = calculate_pairwise_differences(&variants, n);
+            let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
+
+            let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
+            let pi = calculate_pi(tot_pair_diff, n, seq_length);
+
+            results.push(RegionStats {
+                chr: entry.seqname.clone(),
+                region_start: entry.start,
+                region_end: entry.end,
+                sequence_length: seq_length,
+                segregating_sites: num_segsites,
+                w_theta,
+                pi,
+            });
+        }
+
+        writer.write_record(&[
+            &results[0].chr,
+            &results[0].region_start.to_string(),
+            &results[0].region_end.to_string(),
+            &results[0].sequence_length.to_string(),
+            &results[1].sequence_length.to_string(),
+            &results[0].segregating_sites.to_string(),
+            &results[1].segregating_sites.to_string(),
+            &results[0].w_theta.to_string(),
+            &results[1].w_theta.to_string(),
+            &results[0].pi.to_string(),
+            &results[1].pi.to_string(),
+        ]).map_err(|e| VcfError::Io(e.into()))?;
+    }
+
+    writer.flush().map_err(|e| VcfError::Io(e.into()))?;
+    Ok(())
 }
 
 fn count_segregating_sites(variants: &[Variant]) -> usize {
