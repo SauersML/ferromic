@@ -114,10 +114,10 @@ fn main() -> Result<(), VcfError> {
         );
     }
 
-    println!("\nSeqLength:{}", seq_length);
-    println!("NumSegsites:{}", num_segsites);
-    println!("RawVariantCount:{}", raw_variant_count);
-    println!("WattersonTheta:{:.6}", w_theta);
+    println!("\nSequence Length:{}", seq_length);
+    println!("Number of Segregating Sites:{}", num_segsites);
+    println!("Raw Variant Count:{}", raw_variant_count);
+    println!("Watterson Theta:{:.6}", w_theta);
     println!("pi:{:.6}", pi);
 
     // Checks and warnings
@@ -311,7 +311,7 @@ fn process_vcf(
             
                 "▒░░▄▅▆▇████▒▓██▓▒░░▒▓██▓▒░░▒▓██▓",
             
-                "░░▒▅▆▇██████▓██▓░░▒▓██▓▒░░▒▓██▓▒"
+                "░░▒▅▆▇██████▓█▓░░▒▓██▓▒░░▒▓██▓▒░"
             
             ])
     } else {
