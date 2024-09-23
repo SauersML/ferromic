@@ -431,6 +431,7 @@ fn process_vcf(
         progress_bar.finish_with_message("Variant processing complete");
     });
 
+
     // Process header
     let mut buffer = String::new();
     {
@@ -457,16 +458,23 @@ fn process_vcf(
     let (result_sender, result_receiver) = bounded(1000);
 
     // Spawn VCF reader thread
-    let vcf_reader_thread = thread::spawn(move || -> Result<(), VcfError> {
-        let reader = vcf_manager.get_reader(chr)?;
-        let mut buffer = String::new();
-        while reader.read_line(&mut buffer)? > 0 {
-            vcf_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
-            buffer.clear();
-        }
-        drop(vcf_sender);
-        Ok(())
-    });
+    let vcf_reader_thread = {
+        let vcf_sender = vcf_sender.clone();
+        let chr = chr.to_string();
+        let vcf_folder = vcf_manager.vcf_folder.clone();
+        thread::spawn(move || -> Result<(), VcfError> {
+            let mut vcf_manager = VcfFileManager::new(vcf_folder);
+            let reader = vcf_manager.get_reader(&chr)?;
+            let mut buffer = String::new();
+            while reader.read_line(&mut buffer)? > 0 {
+                vcf_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
+                buffer.clear();
+            }
+            drop(vcf_sender);
+            Ok(())
+        })
+    };
+
 
     // Spawn producer thread
     let producer_thread = {
