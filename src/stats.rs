@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Seek};
+use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
@@ -18,6 +18,8 @@ use crossbeam_channel::{bounded};
 use std::time::{Duration};
 use std::sync::Arc;
 use std::thread;
+
+
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -70,10 +72,88 @@ struct MissingDataInfo {
     positions_with_missing: HashSet<i64>,
 }
 
+
+trait BufReadSeek: BufRead + Seek + Send {}
+impl<T: BufRead + Seek + Send> BufReadSeek for T {}
+
 struct CachedReader {
-    reader: Box<dyn BufRead + Send + Seek>,
+    reader: Box<dyn BufReadSeek>,
     chromosome: String,
 }
+
+fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufReadSeek>, VcfError> {
+    let file = File::open(path)?;
+    
+    if path.extension().and_then(|s| s.to_str()) == Some("gz") {
+        let decoder = MultiGzDecoder::new(file);
+        let reader = BufReader::new(decoder);
+        Ok(Box::new(SeekableGzipReader::new(reader)?))
+    } else {
+        Ok(Box::new(BufReader::new(file)))
+    }
+}
+
+
+struct SeekableGzipReader<R: Read + Seek> {
+    inner: MultiGzDecoder<R>,
+    pos: u64,
+}
+
+impl<R: Read + Seek> SeekableGzipReader<R> {
+    fn new(reader: R) -> io::Result<Self> {
+        Ok(Self {
+            inner: MultiGzDecoder::new(reader),
+            pos: 0,
+        })
+    }
+}
+
+impl<R: Read + Seek> Read for SeekableGzipReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let bytes_read = self.inner.read(buf)?;
+        self.pos += bytes_read as u64;
+        Ok(bytes_read)
+    }
+}
+
+impl<R: Read + Seek> Seek for SeekableGzipReader<R> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        match pos {
+            SeekFrom::Start(offset) => {
+                if offset < self.pos {
+                    self.inner = MultiGzDecoder::new(self.inner.into_inner()?);
+                    self.pos = 0;
+                }
+                let mut buf = [0u8; 1024];
+                while self.pos < offset {
+                    let to_read = std::cmp::min(buf.len() as u64, offset - self.pos) as usize;
+                    let bytes_read = self.read(&mut buf[..to_read])?;
+                    if bytes_read == 0 {
+                        break;
+                    }
+                }
+                Ok(self.pos)
+            }
+            _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "Unsupported seek operation")),
+        }
+    }
+}
+
+impl<R: Read + Seek> BufRead for SeekableGzipReader<R> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        self.inner.fill_buf()
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.inner.consume(amt);
+        self.pos += amt as u64;
+    }
+}
+
+
+
+
+
 
 #[derive(Debug)]
 enum VcfError {
@@ -148,7 +228,7 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, None, None)?;
+        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, None, None, None)?;
 
         println!("{}", "Calculating diversity statistics...".blue());
 
