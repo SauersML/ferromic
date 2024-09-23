@@ -186,8 +186,9 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, None, None, None)?;
-
+        let mut reader = open_vcf_reader(&vcf_file)?;
+        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&mut reader, chr, start, end, None, None)?;
+        
         println!("{}", "Calculating diversity statistics...".blue());
 
         let seq_length = if end == i64::MAX {
@@ -368,7 +369,7 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     }
 }
 
-fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send>, VcfError> {
+fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send + Seek>, VcfError> {
     let file = File::open(path)?;
     
     if path.extension().and_then(|s| s.to_str()) == Some("gz") {
@@ -387,12 +388,6 @@ fn process_vcf(
     haplotype_group: Option<u8>,
     sample_filter: Option<&HashMap<String, (u8, u8)>>,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
-    let mut reader: Box<dyn BufRead + Send> = if let Some(cr) = cached_reader {
-        Box::new(cr)
-    } else {
-        open_vcf_reader(file)?
-    };
-
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
     let variants = Arc::new(Mutex::new(Vec::new()));
@@ -687,7 +682,7 @@ fn process_config_entries(
             };
 
             match process_vcf(
-                &mut reader,
+                reader,
                 &entry.seqname,
                 entry.start,
                 entry.end,
