@@ -30,7 +30,7 @@ struct Args {
     #[arg(short, long)]
     region: Option<String>,
 
-    #[arg(short, long)]
+    #[arg(long)]
     config_file: Option<String>,
 
     #[arg(short, long)]
