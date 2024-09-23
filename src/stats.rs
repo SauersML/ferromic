@@ -701,6 +701,8 @@ let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
     }))
 }
 
+
+
 fn process_config_entries(
     config_entries: &[ConfigEntry],
     vcf_folder: &str,
@@ -712,90 +714,104 @@ fn process_config_entries(
         "0_segregating_sites", "1_segregating_sites", "0_w_theta", "1_w_theta", "0_pi", "1_pi",
     ]).map_err(|e| VcfError::Io(e.into()))?;
 
-    let mut variants_cache: HashMap<String, (Vec<Variant>, Vec<String>, i64, MissingDataInfo)> = HashMap::new();
+    // Collect regions per chromosome
+    let mut regions_per_chr: HashMap<String, Vec<&ConfigEntry>> = HashMap::new();
+    for entry in config_entries {
+        regions_per_chr.entry(entry.seqname.clone())
+            .or_insert_with(Vec::new)
+            .push(entry);
+    }
 
-    for (index, entry) in config_entries.iter().enumerate() {
-        println!("Processing entry {}/{}: {}:{}-{}", index + 1, config_entries.len(), entry.seqname, entry.start, entry.end);
+    for (chr, entries) in regions_per_chr {
+        println!("Processing chromosome: {}", chr);
 
-        // Check if the variants for this chromosome are already loaded
-        let variants_data = if let Some(cached_data) = variants_cache.get(&entry.seqname) {
-            cached_data.clone()
-        } else {
-            // Find and process the VCF file
-            let vcf_file = match find_vcf_file(vcf_folder, &entry.seqname) {
-                Ok(file) => file,
-                Err(e) => {
-                    eprintln!("Error finding VCF file for {}: {:?}", entry.seqname, e);
-                    continue;
-                }
-            };
-            match process_vcf(&vcf_file, &entry.seqname, entry.start, entry.end) {
-                Ok(data) => {
-                    variants_cache.insert(entry.seqname.clone(), data.clone());
-                    data
-                },
-                Err(e) => {
-                    eprintln!("Error processing VCF file for {}: {:?}", entry.seqname, e);
-                    continue;
-                }
+        // Compute min and max positions
+        let min_start = entries.iter().map(|e| e.start).min().unwrap_or(0);
+        let max_end = entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX);
+
+        // Process VCF file for this chromosome
+        let vcf_file = match find_vcf_file(vcf_folder, &chr) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("Error finding VCF file for {}: {:?}", chr, e);
+                continue;
+            }
+        };
+
+        println!("Processing VCF file for chromosome {} from {} to {}", chr, min_start, max_end);
+
+        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end) {
+            Ok(data) => data,
+            Err(e) => {
+                eprintln!("Error processing VCF file for {}: {:?}", chr, e);
+                continue;
             }
         };
 
         let (all_variants, sample_names, _chr_length, _missing_data_info) = variants_data;
 
-        let mut results = Vec::new();
-        for haplotype_group in &[0u8, 1u8] {
-            // Filter variants for the region
-            let region_variants = all_variants.iter()
-                .filter(|v| v.position >= entry.start && v.position <= entry.end)
-                .cloned()
-                .collect::<Vec<_>>();
+        for entry in entries {
+            println!("Processing entry: {}:{}-{}", entry.seqname, entry.start, entry.end);
 
-            // Process the variants
-            match process_variants(&region_variants, &sample_names, *haplotype_group, &entry.samples, entry.start, entry.end) {
-                Ok((num_segsites, w_theta, pi)) => {
-                    results.push(RegionStats {
-                        chr: entry.seqname.clone(),
-                        region_start: entry.start,
-                        region_end: entry.end,
-                        sequence_length: entry.end - entry.start + 1,
-                        segregating_sites: num_segsites,
-                        w_theta,
-                        pi,
-                    });
-                },
-                Err(e) => {
-                    eprintln!("Error processing variants for {}:{}-{}, haplotype group {}: {:?}", 
-                              entry.seqname, entry.start, entry.end, haplotype_group, e);
-                    continue;
+            let mut results = Vec::new();
+            for haplotype_group in &[0u8, 1u8] {
+                // Filter variants for the region
+                let region_variants = all_variants.iter()
+                    .filter(|v| v.position >= entry.start && v.position <= entry.end)
+                    .cloned()
+                    .collect::<Vec<_>>();
+
+                // Check if there are variants in the region
+                if region_variants.is_empty() {
+                    eprintln!("{}", format!("Warning: No variants found in region {}:{}-{}", entry.seqname, entry.start, entry.end).yellow());
+                }
+
+                // Process the variants
+                match process_variants(&region_variants, &sample_names, *haplotype_group, &entry.samples, entry.start, entry.end) {
+                    Ok((num_segsites, w_theta, pi)) => {
+                        results.push(RegionStats {
+                            chr: entry.seqname.clone(),
+                            region_start: entry.start,
+                            region_end: entry.end,
+                            sequence_length: entry.end - entry.start + 1,
+                            segregating_sites: num_segsites,
+                            w_theta,
+                            pi,
+                        });
+                    },
+                    Err(e) => {
+                        eprintln!("Error processing variants for {}:{}-{}, haplotype group {}: {:?}", 
+                                  entry.seqname, entry.start, entry.end, haplotype_group, e);
+                        continue;
+                    }
                 }
             }
-        }
 
-        if results.len() == 2 {
-            match writer.write_record(&[
-                &results[0].chr,
-                &results[0].region_start.to_string(),
-                &results[0].region_end.to_string(),
-                &results[0].sequence_length.to_string(),
-                &results[1].sequence_length.to_string(),
-                &results[0].segregating_sites.to_string(),
-                &results[1].segregating_sites.to_string(),
-                &results[0].w_theta.to_string(),
-                &results[1].w_theta.to_string(),
-                &results[0].pi.to_string(),
-                &results[1].pi.to_string(),
-            ]) {
-                Ok(_) => {
-                    println!("Successfully wrote record for {}:{}-{}", entry.seqname, entry.start, entry.end);
-                    writer.flush().map_err(|e| VcfError::Io(e.into()))?;
-                },
-                Err(e) => {
-                    eprintln!("Error writing record for {}:{}-{}: {:?}", entry.seqname, entry.start, entry.end, e);
+            if results.len() == 2 {
+                match writer.write_record(&[
+                    &results[0].chr,
+                    &results[0].region_start.to_string(),
+                    &results[0].region_end.to_string(),
+                    &results[0].sequence_length.to_string(),
+                    &results[1].sequence_length.to_string(),
+                    &results[0].segregating_sites.to_string(),
+                    &results[1].segregating_sites.to_string(),
+                    &results[0].w_theta.to_string(),
+                    &results[1].w_theta.to_string(),
+                    &results[0].pi.to_string(),
+                    &results[1].pi.to_string(),
+                ]) {
+                    Ok(_) => {
+                        println!("Successfully wrote record for {}:{}-{}", entry.seqname, entry.start, entry.end);
+                        writer.flush().map_err(|e| VcfError::Io(e.into()))?;
+                    },
+                    Err(e) => {
+                        eprintln!("Error writing record for {}:{}-{}: {:?}", entry.seqname, entry.start, entry.end, e);
+                    }
                 }
+            } else {
+                eprintln!("Incomplete results for {}:{}-{}, skipping", entry.seqname, entry.start, entry.end);
             }
-        } else {
-            eprintln!("Incomplete results for {}:{}-{}, skipping", entry.seqname, entry.start, entry.end);
         }
     }
 
@@ -803,6 +819,8 @@ fn process_config_entries(
     println!("Processing complete. Check the output file: {:?}", output_file);
     Ok(())
 }
+
+
 
 
 fn count_segregating_sites(variants: &[Variant]) -> usize {
