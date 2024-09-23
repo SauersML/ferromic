@@ -536,7 +536,16 @@ fn process_vcf(
             thread::spawn(move || -> Result<(), VcfError> {
                 while let Ok(line) = line_receiver.recv() {
                     let mut local_missing_data_info = MissingDataInfo::default();
-                    match parse_variant(&line, &chr, start, end, &mut local_missing_data_info, haplotype_group, sample_filter.as_ref().as_ref(), &sample_names) {
+                    match parse_variant(
+                        &line,
+                        &chr,
+                        start,
+                        end,
+                        &mut local_missing_data_info,
+                        haplotype_group,
+                        sample_filter.as_ref().as_ref(),
+                        &sample_names
+                    ) {
                         Ok(Some(variant)) => {
                             result_sender.send(Ok((variant, local_missing_data_info))).map_err(|_| VcfError::ChannelSend)?;
                         },
@@ -704,11 +713,13 @@ fn process_config_entries(
             cached_data.clone()
         } else {
             // Find and process the VCF file
-            let vcf_file = find_vcf_file(vcf_folder, &entry.seqname)?;
-            let data = process_vcf(&vcf_file, &entry.seqname, entry.start, entry.end, None, Some(&entry.samples))?;
-            variants_cache.insert(entry.seqname.clone(), data.clone());
-            data
-        };
+            let vcf_file = match find_vcf_file(vcf_folder, &entry.seqname) {
+                Ok(file) => file,
+                Err(e) => {
+                    eprintln!("Error finding VCF file for {}: {:?}", entry.seqname, e);
+                    continue;
+                }
+            };
             match process_vcf(&vcf_file, &entry.seqname, entry.start, entry.end, None, Some(&entry.samples)) {
                 Ok(data) => {
                     variants_cache.insert(entry.seqname.clone(), data.clone());
