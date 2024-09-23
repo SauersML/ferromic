@@ -226,10 +226,10 @@ fn process_variants(
 
     for (sample_name, &(left, right)) in sample_filter.iter() {
         // Find the sample in sample_names
-        let vcf_sample_name = sample_names.iter().enumerate()
+        let vcf_sample_index = sample_names.iter().enumerate()
             .find(|&(_i, name)| name.contains(sample_name))
             .map(|(i, _name)| i);
-        if let Some(i) = vcf_sample_name {
+        if let Some(i) = vcf_sample_index {
             if haplotype_group == 0 && left == 0 {
                 haplotype_indices.push((i, 0)); // left haplotype
             }
@@ -251,7 +251,7 @@ fn process_variants(
         for &(i, allele_idx) in &haplotype_indices {
             if let Some(Some(alleles)) = variant.genotypes.get(i) {
                 if let Some(allele) = alleles.get(allele_idx) {
-                    genotypes.push(Some(*allele));
+                    genotypes.push(Some(vec![*allele]));
                 } else {
                     genotypes.push(None);
                 }
@@ -700,8 +700,8 @@ fn process_config_entries(
         println!("Processing entry {}/{}: {}:{}-{}", index + 1, config_entries.len(), entry.seqname, entry.start, entry.end);
 
         // Check if the variants for this chromosome are already loaded
-        let (variants, sample_names, _chr_length, _missing_data_info) = if let Some(cached) = variants_cache.get(&entry.seqname) {
-            cached.clone()
+        let variants_data = if let Some(cached_data) = variants_cache.get(&entry.seqname) {
+            cached_data.clone()
         } else {
             // Find and process the VCF file
             let vcf_file = match find_vcf_file(vcf_folder, &entry.seqname) {
@@ -711,10 +711,10 @@ fn process_config_entries(
                     continue;
                 }
             };
-            match process_vcf(&vcf_file, &entry.seqname, 1, i64::MAX, None, None) {
-                Ok(result) => {
-                    variants_cache.insert(entry.seqname.clone(), result.clone());
-                    result
+            match process_vcf(&vcf_file, &entry.seqname) {
+                Ok(data) => {
+                    variants_cache.insert(entry.seqname.clone(), data.clone());
+                    data
                 },
                 Err(e) => {
                     eprintln!("Error processing VCF file for {}: {:?}", entry.seqname, e);
@@ -723,10 +723,12 @@ fn process_config_entries(
             }
         };
 
+        let (all_variants, sample_names, _chr_length, _missing_data_info) = variants_data;
+
         let mut results = Vec::new();
-        for haplotype_group in &[0, 1] {
+        for haplotype_group in &[0u8, 1u8] {
             // Filter variants for the region
-            let region_variants = variants.iter()
+            let region_variants = all_variants.iter()
                 .filter(|v| v.position >= entry.start && v.position <= entry.end)
                 .cloned()
                 .collect::<Vec<_>>();
@@ -752,7 +754,6 @@ fn process_config_entries(
             }
         }
 
-        // Write results as before
         if results.len() == 2 {
             match writer.write_record(&[
                 &results[0].chr,
@@ -784,7 +785,6 @@ fn process_config_entries(
     println!("Processing complete. Check the output file: {:?}", output_file);
     Ok(())
 }
-
 
 
 fn count_segregating_sites(variants: &[Variant]) -> usize {
