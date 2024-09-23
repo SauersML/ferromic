@@ -209,6 +209,79 @@ fn main() -> Result<(), VcfError> {
     Ok(())
 }
 
+
+fn process_variants(
+    variants: &[Variant],
+    sample_names: &[String],
+    haplotype_group: u8,
+    sample_filter: &HashMap<String, (u8, u8)>,
+    region_start: i64,
+    region_end: i64,
+) -> Result<(usize, f64, f64), VcfError> {
+    // Build a mapping from sample name to index in sample_names
+    let sample_name_to_index: HashMap<&str, usize> = sample_names.iter().enumerate().map(|(i, name)| (name.as_str(), i)).collect();
+
+    // Build the list of indices of the haplotypes we are interested in
+    let mut haplotype_indices = Vec::new();
+
+    for (sample_name, &(left, right)) in sample_filter.iter() {
+        // Find the sample in sample_names
+        let vcf_sample_name = sample_names.iter().enumerate()
+            .find(|&(_i, name)| name.contains(sample_name))
+            .map(|(i, _name)| i);
+        if let Some(i) = vcf_sample_name {
+            if haplotype_group == 0 && left == 0 {
+                haplotype_indices.push((i, 0)); // left haplotype
+            }
+            if haplotype_group == 1 && right == 1 {
+                haplotype_indices.push((i, 1)); // right haplotype
+            }
+        }
+    }
+
+    if haplotype_indices.is_empty() {
+        return Err(VcfError::Parse("No haplotypes found for the specified group".to_string()));
+    }
+
+    // For each variant, extract the genotypes of the haplotypes we are interested in
+    let mut filtered_variants = Vec::new();
+
+    for variant in variants {
+        let mut genotypes = Vec::new();
+        for &(i, allele_idx) in &haplotype_indices {
+            if let Some(Some(alleles)) = variant.genotypes.get(i) {
+                if let Some(allele) = alleles.get(allele_idx) {
+                    genotypes.push(Some(*allele));
+                } else {
+                    genotypes.push(None);
+                }
+            } else {
+                genotypes.push(None);
+            }
+        }
+        filtered_variants.push(Variant {
+            position: variant.position,
+            genotypes,
+        });
+    }
+
+    // Now, calculate the number of segregating sites
+    let num_segsites = count_segregating_sites(&filtered_variants);
+
+    // Number of samples (haplotypes)
+    let n = haplotype_indices.len();
+
+    // Calculate pairwise differences
+    let pairwise_diffs = calculate_pairwise_differences(&filtered_variants, n);
+    let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
+
+    let seq_length = region_end - region_start + 1;
+    let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
+    let pi = calculate_pi(tot_pair_diff, n, seq_length);
+
+    Ok((num_segsites, w_theta, pi))
+}
+
 fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(b'\t')
@@ -621,55 +694,65 @@ fn process_config_entries(
         "0_segregating_sites", "1_segregating_sites", "0_w_theta", "1_w_theta", "0_pi", "1_pi",
     ]).map_err(|e| VcfError::Io(e.into()))?;
 
+    let mut variants_cache: HashMap<String, (Vec<Variant>, Vec<String>, i64, MissingDataInfo)> = HashMap::new();
+
     for (index, entry) in config_entries.iter().enumerate() {
         println!("Processing entry {}/{}: {}:{}-{}", index + 1, config_entries.len(), entry.seqname, entry.start, entry.end);
-        
-        let vcf_file = match find_vcf_file(vcf_folder, &entry.seqname) {
-            Ok(file) => file,
-            Err(e) => {
-                eprintln!("Error finding VCF file for {}: {:?}", entry.seqname, e);
-                continue;
+
+        // Check if the variants for this chromosome are already loaded
+        let (variants, sample_names, _chr_length, _missing_data_info) = if let Some(cached) = variants_cache.get(&entry.seqname) {
+            cached.clone()
+        } else {
+            // Find and process the VCF file
+            let vcf_file = match find_vcf_file(vcf_folder, &entry.seqname) {
+                Ok(file) => file,
+                Err(e) => {
+                    eprintln!("Error finding VCF file for {}: {:?}", entry.seqname, e);
+                    continue;
+                }
+            };
+            match process_vcf(&vcf_file, &entry.seqname, 1, i64::MAX, None, None) {
+                Ok(result) => {
+                    variants_cache.insert(entry.seqname.clone(), result.clone());
+                    result
+                },
+                Err(e) => {
+                    eprintln!("Error processing VCF file for {}: {:?}", entry.seqname, e);
+                    continue;
+                }
             }
         };
 
         let mut results = Vec::new();
         for haplotype_group in &[0, 1] {
-            match process_vcf(
-                &vcf_file,
-                &entry.seqname,
-                entry.start,
-                entry.end,
-                Some(*haplotype_group),
-                Some(entry.samples.clone()),
-            ) {
-                Ok((variants, _, _, _)) => {
-                    let seq_length = entry.end - entry.start + 1;
-                    let num_segsites = count_segregating_sites(&variants);
-                    let n = variants.first().map(|v| v.genotypes.len()).unwrap_or(0);
-                    let pairwise_diffs = calculate_pairwise_differences(&variants, n);
-                    let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
+            // Filter variants for the region
+            let region_variants = variants.iter()
+                .filter(|v| v.position >= entry.start && v.position <= entry.end)
+                .cloned()
+                .collect::<Vec<_>>();
 
-                    let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
-                    let pi = calculate_pi(tot_pair_diff, n, seq_length);
-
+            // Process the variants
+            match process_variants(&region_variants, &sample_names, *haplotype_group, &entry.samples, entry.start, entry.end) {
+                Ok((num_segsites, w_theta, pi)) => {
                     results.push(RegionStats {
                         chr: entry.seqname.clone(),
                         region_start: entry.start,
                         region_end: entry.end,
-                        sequence_length: seq_length,
+                        sequence_length: entry.end - entry.start + 1,
                         segregating_sites: num_segsites,
                         w_theta,
                         pi,
                     });
                 },
                 Err(e) => {
-                    eprintln!("Error processing VCF for {}:{}-{}, haplotype group {}: {:?}", 
+                    eprintln!("Error processing variants for {}:{}-{}, haplotype group {}: {:?}", 
                               entry.seqname, entry.start, entry.end, haplotype_group, e);
                     continue;
                 }
             }
         }
 
+        // Write results as before
         if results.len() == 2 {
             match writer.write_record(&[
                 &results[0].chr,
@@ -701,6 +784,8 @@ fn process_config_entries(
     println!("Processing complete. Check the output file: {:?}", output_file);
     Ok(())
 }
+
+
 
 fn count_segregating_sites(variants: &[Variant]) -> usize {
     variants
