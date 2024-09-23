@@ -232,9 +232,10 @@ fn process_vcf(
     end: i64,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
     let mut reader = open_vcf_reader(file)?;
-    let mut sample_names = Vec::new();
-    let mut chr_length = 0;
-    let missing_data_info = Mutex::new(MissingDataInfo::default());
+    let sample_names = Arc::new(Mutex::new(Vec::new()));
+    let chr_length = AtomicI64::new(0);
+    let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
+    let header_processed = AtomicBool::new(false);
 
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
     let progress_bar = if is_gzipped {
@@ -325,45 +326,48 @@ fn process_vcf(
     progress_bar.set_style(style);
 
     let mut buffer = String::new();
-    let chunk_size = 1024 * 1024; // 1 MB chunks
-
-    let mut variants = Vec::new();
-    let mut header_processed = false;
+    let variants = Arc::new(Mutex::new(Vec::new()));
 
     while reader.read_to_string(&mut buffer)? > 0 {
         let chunk = buffer.clone();
         buffer.clear();
 
-        let chunk_variants: Vec<Variant> = chunk.par_lines()
-            .filter_map(|line| {
-                if !header_processed {
-                    if line.starts_with("##") {
-                        if line.starts_with("##contig=<ID=") && line.contains(&format!("ID={}", chr)) {
-                            if let Some(length_str) = line.split(',').find(|s| s.starts_with("length=")) {
-                                chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
-                            }
+        chunk.par_lines().for_each(|line| {
+            if !header_processed.load(Ordering::Relaxed) {
+                if line.starts_with("##") {
+                    if line.starts_with("##contig=<ID=") && line.contains(&format!("ID={}", chr)) {
+                        if let Some(length_str) = line.split(',').find(|s| s.starts_with("length=")) {
+                            let length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
+                            chr_length.store(length, Ordering::Relaxed);
                         }
-                        return None;
-                    } else if line.starts_with("#CHROM") {
-                        if let Ok(()) = validate_vcf_header(line) {
-                            sample_names = line.split_whitespace().skip(9).map(String::from).collect();
-                            header_processed = true;
-                        }
-                        return None;
+                    }
+                } else if line.starts_with("#CHROM") {
+                    if validate_vcf_header(line).is_ok() {
+                        let mut names = sample_names.lock().unwrap();
+                        *names = line.split_whitespace().skip(9).map(String::from).collect();
+                        header_processed.store(true, Ordering::Relaxed);
                     }
                 }
+            } else {
                 let mut missing_data_info = missing_data_info.lock().unwrap();
-                parse_variant(line, chr, start, end, &mut missing_data_info).transpose().ok()
-            })
-            .collect();
+                if let Ok(Some(variant)) = parse_variant(line, chr, start, end, &mut missing_data_info) {
+                    let mut variants = variants.lock().unwrap();
+                    variants.push(variant);
+                }
+            }
+        });
 
-        variants.extend(chunk_variants);
         progress_bar.inc(chunk.len() as u64);
     }
 
     progress_bar.finish_with_message("Variant processing complete");
 
-    Ok((variants, sample_names, chr_length, missing_data_info.into_inner().unwrap()))
+    let final_variants = Arc::try_unwrap(variants).unwrap().into_inner().unwrap();
+    let final_sample_names = Arc::try_unwrap(sample_names).unwrap().into_inner().unwrap();
+    let final_chr_length = chr_length.load(Ordering::Relaxed);
+    let final_missing_data_info = Arc::try_unwrap(missing_data_info).unwrap().into_inner().unwrap();
+
+    Ok((final_variants, final_sample_names, final_chr_length, final_missing_data_info))
 }
 
 fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
