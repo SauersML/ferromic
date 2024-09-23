@@ -113,7 +113,6 @@ impl From<io::Error> for VcfError {
     }
 }
 
-#[derive(Clone)]
 struct VcfFileManager {
     current_chr: String,
     reader: Option<Box<dyn BufRead + Send>>,
@@ -136,6 +135,16 @@ impl VcfFileManager {
             self.current_chr = chr.to_string();
         }
         self.reader.as_mut().ok_or(VcfError::NoVcfFiles)
+    }
+}
+
+impl Clone for VcfFileManager {
+    fn clone(&self) -> Self {
+        VcfFileManager {
+            current_chr: self.current_chr.clone(),
+            reader: None,
+            vcf_folder: self.vcf_folder.clone(),
+        }
     }
 }
 
