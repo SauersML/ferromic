@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use std::sync::Mutex;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -232,7 +233,7 @@ fn process_vcf(
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
-    let mut missing_data_info = MissingDataInfo::default();
+    let missing_data_info = Mutex::new(MissingDataInfo::default());
 
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
     let progress_bar = if is_gzipped {
@@ -325,7 +326,7 @@ fn process_vcf(
     let mut buffer = String::new();
     let chunk_size = 1024 * 1024; // 1 MB chunks
 
-    let variants: Vec<Variant> = Vec::new();
+    let mut variants = Vec::new();
     let mut header_processed = false;
 
     while reader.read_to_string(&mut buffer)? > 0 {
@@ -350,7 +351,8 @@ fn process_vcf(
                         return None;
                     }
                 }
-                parse_variant(line, chr, start, end, &mut missing_data_info).transpose()
+                let mut missing_data_info = missing_data_info.lock().unwrap();
+                parse_variant(line, chr, start, end, &mut missing_data_info).transpose().ok()
             })
             .collect();
 
@@ -360,7 +362,7 @@ fn process_vcf(
 
     progress_bar.finish_with_message("Variant processing complete");
 
-    Ok((variants, sample_names, chr_length, missing_data_info))
+    Ok((variants, sample_names, chr_length, missing_data_info.into_inner().unwrap()))
 }
 
 fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
