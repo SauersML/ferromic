@@ -352,18 +352,17 @@ fn process_vcf(
                         header_processed.store(true, Ordering::Relaxed);
                     }
                 }
-            } else {
-                let mut local_missing_data_info = MissingDataInfo::default();
-                if let Ok(Some(variant)) = parse_variant(line, chr, start, end, &mut local_missing_data_info) {
-                    variants.lock().push(variant);
-                    let mut missing_data_info = missing_data_info.lock();
-                    missing_data_info.total_data_points += local_missing_data_info.total_data_points;
-                    missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
-                    missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
-                }
+        } else {
+            let mut local_missing_data_info = MissingDataInfo::default();
+            if let Ok(Some(variant)) = parse_variant(&line, chr, start, end, &mut local_missing_data_info) {
+                variants.lock().push(variant);
+                let mut missing_data_info = missing_data_info.lock();
+                missing_data_info.total_data_points += local_missing_data_info.total_data_points;
+                missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
+                missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
             }
-        });
-
+        }
+    
         if is_gzipped {
             let now = Instant::now();
             if now.duration_since(last_update) >= update_interval {
@@ -371,7 +370,7 @@ fn process_vcf(
                 last_update = now;
             }
         } else {
-            progress_bar.inc(chunk.len() as u64);
+            progress_bar.inc(line.len() as u64);
         }
     }
 
