@@ -352,14 +352,11 @@ fn process_vcf(
             } else {
                 let mut local_missing_data_info = MissingDataInfo::default();
                 if let Ok(Some(variant)) = parse_variant(line, chr, start, end, &mut local_missing_data_info) {
-                    let mut variants_lock = variants.lock();
-                    variants_lock.push(variant);
-                    drop(variants_lock);
-
-                    let mut missing_data_info_lock = missing_data_info.lock();
-                    missing_data_info_lock.total_data_points += local_missing_data_info.total_data_points;
-                    missing_data_info_lock.missing_data_points += local_missing_data_info.missing_data_points;
-                    missing_data_info_lock.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
+                    variants.lock().push(variant);
+                    let mut missing_data_info = missing_data_info.lock();
+                    missing_data_info.total_data_points += local_missing_data_info.total_data_points;
+                    missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
+                    missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
                 }
             }
         });
