@@ -30,6 +30,13 @@ struct Variant {
     genotypes: Vec<Option<Vec<u8>>>,
 }
 
+#[derive(Debug, Default)]
+struct MissingDataInfo {
+    total_data_points: usize,
+    missing_data_points: usize,
+    positions_with_missing: HashSet<i64>,
+}
+
 #[derive(Debug)]
 enum VcfError {
     Io(io::Error),
@@ -57,6 +64,7 @@ impl From<io::Error> for VcfError {
     }
 }
 
+
 fn main() -> Result<(), VcfError> {
     let args = Args::parse();
 
@@ -71,7 +79,7 @@ fn main() -> Result<(), VcfError> {
 
     println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-    let (variants, sample_names, chr_length) = process_vcf(&vcf_file, &args.chr, start, end)?;
+    let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, &args.chr, start, end)?;
 
     println!("{}", "Calculating diversity statistics...".blue());
 
@@ -112,7 +120,7 @@ fn main() -> Result<(), VcfError> {
     println!("WattersonTheta:{:.6}", w_theta);
     println!("pi:{:.6}", pi);
 
-    // Sanity checks and warnings
+    // Checks and warnings
     if variants.is_empty() {
         println!("{}", "Warning: No variants found in the specified region.".yellow());
     }
@@ -125,8 +133,15 @@ fn main() -> Result<(), VcfError> {
         println!("{}", format!("Note: Number of segregating sites ({}) differs from raw variant count ({}).", num_segsites, raw_variant_count).yellow());
     }
 
+    // Print missing data information
+    let missing_data_percentage = (missing_data_info.missing_data_points as f64 / missing_data_info.total_data_points as f64) * 100.0;
+    println!("\n{}", "Missing Data Information:".yellow().bold());
+    println!("Percentage of missing data: {:.2}%", missing_data_percentage);
+    println!("Positions with missing data: {:?}", missing_data_info.positions_with_missing);
+
     Ok(())
 }
+
 
 fn parse_region(region: &str) -> Result<(i64, i64), VcfError> {
     let parts: Vec<&str> = region.split('-').collect();
@@ -213,11 +228,12 @@ fn process_vcf(
     chr: &str,
     start: i64,
     end: i64,
-) -> Result<(Vec<Variant>, Vec<String>, i64), VcfError> {
+) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
     let mut reader = open_vcf_reader(file)?;
     let mut variants = Vec::new();
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
+    let mut missing_data_info = MissingDataInfo::default();
 
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
     let progress_bar = if is_gzipped {
@@ -323,7 +339,7 @@ fn process_vcf(
             validate_vcf_header(&buffer)?;
             sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
         } else {
-            if let Some(variant) = parse_variant(&buffer, chr, start, end)? {
+            if let Some(variant) = parse_variant(&buffer, chr, start, end, &mut missing_data_info)? {
                 variants.push(variant);
             }
         }
@@ -338,7 +354,7 @@ fn process_vcf(
 
     progress_bar.finish_with_message("Variant processing complete");
 
-    Ok((variants, sample_names, chr_length))
+    Ok((variants, sample_names, chr_length, missing_data_info))
 }
 
 fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
@@ -351,7 +367,8 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     Ok(())
 }
 
-fn parse_variant(line: &str, chr: &str, start: i64, end: i64) -> Result<Option<Variant>, VcfError> {
+
+fn parse_variant(line: &str, chr: &str, start: i64, end: i64, missing_data_info: &mut MissingDataInfo) -> Result<Option<Variant>, VcfError> {
     let fields: Vec<&str> = line.split_whitespace().collect();
     if fields.len() < 10 {
         return Err(VcfError::Parse("Invalid VCF line format".to_string()));
@@ -369,17 +386,19 @@ fn parse_variant(line: &str, chr: &str, start: i64, end: i64) -> Result<Option<V
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
     if alt_alleles.len() > 1 {
-        println!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. This may lead to underestimation of genetic diversity (pi).", pos).yellow());
+        eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. This may lead to underestimation of genetic diversity (pi).", pos).yellow());
     }
 
     let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
         .map(|gt| {
+            missing_data_info.total_data_points += 1;
             gt.split(':').next().and_then(|alleles| {
                 let parsed = alleles.split(|c| c == '|' || c == '/')
                     .map(|allele| allele.parse().ok())
                     .collect::<Option<Vec<u8>>>();
                 if parsed.is_none() {
-                    println!("{}", format!("Warning: Missing data detected at position {}.", pos).yellow());
+                    missing_data_info.missing_data_points += 1;
+                    missing_data_info.positions_with_missing.insert(pos);
                 }
                 parsed
             })
@@ -391,6 +410,7 @@ fn parse_variant(line: &str, chr: &str, start: i64, end: i64) -> Result<Option<V
         genotypes,
     }))
 }
+
 
 fn count_segregating_sites(variants: &[Variant]) -> usize {
     variants
