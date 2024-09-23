@@ -659,6 +659,7 @@ fn process_config_entries(
         ]).map_err(|e| VcfError::Io(e.into()))?;
     }
 
+    writer.write_record(&[...]).map_err(|e| VcfError::Io(e.into()))?;
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
     Ok(())
 }
