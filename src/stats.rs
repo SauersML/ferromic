@@ -113,6 +113,31 @@ impl From<io::Error> for VcfError {
     }
 }
 
+struct VcfFileManager {
+    current_chr: String,
+    reader: Option<Box<dyn BufRead + Send>>,
+    vcf_folder: String,
+}
+
+impl VcfFileManager {
+    fn new(vcf_folder: String) -> Self {
+        VcfFileManager {
+            current_chr: String::new(),
+            reader: None,
+            vcf_folder,
+        }
+    }
+
+    fn get_reader(&mut self, chr: &str) -> Result<&mut Box<dyn BufRead + Send>, VcfError> {
+        if self.current_chr != chr {
+            let vcf_file = find_vcf_file(&self.vcf_folder, chr)?;
+            self.reader = Some(open_vcf_reader(&vcf_file)?);
+            self.current_chr = chr.to_string();
+        }
+        self.reader.as_mut().ok_or(VcfError::NoVcfFiles)
+    }
+}
+
 
 fn main() -> Result<(), VcfError> {
     let args = Args::parse();
@@ -137,13 +162,14 @@ fn main() -> Result<(), VcfError> {
             parse_region(region)?
         } else {
             println!("No region provided, using default region covering most of the chromosome.");
-            (1, i64::MAX) // Default region covering the entire chromosome
+            (1, i64::MAX)
         };
-        let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
 
-        println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
+        let mut vcf_manager = VcfFileManager::new(args.vcf_folder.clone());
 
-        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, None, None)?;
+        println!("{}", format!("Processing VCF file for chromosome: {}", chr).cyan());
+
+        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&mut vcf_manager, chr, start, end, None, None)?;
 
         println!("{}", "Calculating diversity statistics...".blue());
 
@@ -338,24 +364,24 @@ fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send>, VcfError> {
 
 
 fn process_vcf(
-    file: &Path,
+    vcf_manager: &mut VcfFileManager,
     chr: &str,
     start: i64,
     end: i64,
     haplotype_group: Option<u8>,
     sample_filter: Option<HashMap<String, (u8, u8)>>,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
-    let mut reader = open_vcf_reader(file)?;
+    let mut reader = vcf_manager.get_reader(chr)?;
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
     let variants = Arc::new(Mutex::new(Vec::new()));
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
 
-    let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
+    let is_gzipped = vcf_manager.current_chr.ends_with(".gz");
     let progress_bar = if is_gzipped {
         ProgressBar::new_spinner()
     } else {
-        let file_size = fs::metadata(file)?.len();
+        let file_size = fs::metadata(&vcf_manager.current_file_path)?.len();
         ProgressBar::new(file_size)
     };
 
@@ -621,21 +647,15 @@ fn process_config_entries(
         "0_segregating_sites", "1_segregating_sites", "0_w_theta", "1_w_theta", "0_pi", "1_pi",
     ]).map_err(|e| VcfError::Io(e.into()))?;
 
+    let mut vcf_manager = VcfFileManager::new(vcf_folder.to_string());
+
     for (index, entry) in config_entries.iter().enumerate() {
         println!("Processing entry {}/{}: {}:{}-{}", index + 1, config_entries.len(), entry.seqname, entry.start, entry.end);
-        
-        let vcf_file = match find_vcf_file(vcf_folder, &entry.seqname) {
-            Ok(file) => file,
-            Err(e) => {
-                eprintln!("Error finding VCF file for {}: {:?}", entry.seqname, e);
-                continue;
-            }
-        };
 
         let mut results = Vec::new();
         for haplotype_group in &[0, 1] {
             match process_vcf(
-                &vcf_file,
+                &mut vcf_manager,
                 &entry.seqname,
                 entry.start,
                 entry.end,
