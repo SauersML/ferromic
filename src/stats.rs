@@ -6,6 +6,7 @@ use parking_lot::{Mutex};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
@@ -115,6 +116,11 @@ impl From<io::Error> for VcfError {
 
 fn main() -> Result<(), VcfError> {
     let args = Args::parse();
+
+    // Set Rayon to use all logical CPUs
+    let num_logical_cpus = num_cpus::get();
+    ThreadPoolBuilder::new().num_threads(num_logical_cpus).build_global().unwrap();
+    
 
     println!("{}", "Starting VCF diversity analysis...".green());
 
@@ -279,8 +285,10 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
         .filter(|entry| {
             let path = entry.path();
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            (file_name.starts_with(&format!("chr{}", chr)) || file_name.starts_with(chr)) &&
-                (file_name.ends_with(".vcf") || file_name.ends_with(".vcf.gz"))
+            let chr_pattern = format!("chr{}", chr);
+            (file_name.starts_with(&chr_pattern) || file_name.starts_with(chr)) &&
+                (file_name.ends_with(".vcf") || file_name.ends_with(".vcf.gz")) &&
+                file_name.chars().nth(chr_pattern.len()).map_or(false, |c| !c.is_ascii_digit())
         })
         .map(|entry| entry.path())
         .collect();
@@ -292,10 +300,8 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
             let exact_match = chr_specific_files.iter().find(|&file| {
                 let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 let chr_pattern = format!("chr{}", chr);
-                file_name.starts_with(&chr_pattern) && 
-                    file_name.chars().nth(chr_pattern.len())
-                        .map(|c| !c.is_ascii_digit())
-                        .unwrap_or(true)
+                (file_name.starts_with(&chr_pattern) || file_name.starts_with(chr)) &&
+                    file_name.chars().nth(chr_pattern.len()).map_or(false, |c| !c.is_ascii_digit())
             });
 
             if let Some(exact_file) = exact_match {
