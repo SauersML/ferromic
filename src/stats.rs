@@ -122,8 +122,12 @@ fn main() -> Result<(), VcfError> {
         let config_entries = parse_config_file(Path::new(config_file))?;
         let output_file = args.output_file.as_ref().map(Path::new).unwrap_or_else(|| Path::new("output.csv"));
         process_config_entries(&config_entries, &args.vcf_folder, output_file)?;
-    } else if let (Some(chr), Some(region)) = (args.chr.as_ref(), args.region.as_ref()) {
-        let (start, end) = parse_region(region)?;
+    } else if let Some(chr) = args.chr.as_ref() {
+        let (start, end) = if let Some(region) = args.region.as_ref() {
+            parse_region(region)?
+        } else {
+            (1, i64::MAX) // Default region covering the entire chromosome
+        };
         let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
@@ -187,7 +191,7 @@ fn main() -> Result<(), VcfError> {
         println!("Percentage of missing data: {:.2}%", missing_data_percentage);
         println!("Positions with missing data: {:?}", missing_data_info.positions_with_missing);
     } else {
-        return Err(VcfError::Parse("Either config file or chromosome and region must be specified".to_string()));
+        return Err(VcfError::Parse("Either config file or chromosome must be specified".to_string()));
     }
 
     println!("{}", "Analysis complete.".green());
