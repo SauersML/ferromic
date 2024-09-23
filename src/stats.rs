@@ -331,27 +331,26 @@ fn process_vcf(
     let mut buffer = String::new();
     let update_interval = Duration::from_millis(100);
     let mut last_update = Instant::now();
-
-    while reader.read_to_string(&mut buffer)? > 0 {
-        let chunk = buffer.clone();
+    
+    while reader.read_line(&mut buffer)? > 0 {
+        let line = buffer.clone();
         buffer.clear();
-
-        chunk.par_lines().for_each(|line| {
-            if !header_processed.load(Ordering::Relaxed) {
-                if line.starts_with("##") {
-                    if line.starts_with("##contig=<ID=") && line.contains(&format!("ID={}", chr)) {
-                        if let Some(length_str) = line.split(',').find(|s| s.starts_with("length=")) {
-                            let length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
-                            chr_length.store(length, Ordering::Relaxed);
-                        }
-                    }
-                } else if line.starts_with("#CHROM") {
-                    if validate_vcf_header(line).is_ok() {
-                        let mut names = sample_names.write();
-                        *names = line.split_whitespace().skip(9).map(String::from).collect();
-                        header_processed.store(true, Ordering::Relaxed);
+    
+        if !header_processed.load(Ordering::Relaxed) {
+            if line.starts_with("##") {
+                if line.starts_with("##contig=<ID=") && line.contains(&format!("ID={}", chr)) {
+                    if let Some(length_str) = line.split(',').find(|s| s.starts_with("length=")) {
+                        let length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
+                        chr_length.store(length, Ordering::Relaxed);
                     }
                 }
+            } else if line.starts_with("#CHROM") {
+                if validate_vcf_header(&line).is_ok() {
+                    let mut names = sample_names.write();
+                    *names = line.split_whitespace().skip(9).map(String::from).collect();
+                    header_processed.store(true, Ordering::Relaxed);
+                }
+            }
         } else {
             let mut local_missing_data_info = MissingDataInfo::default();
             if let Ok(Some(variant)) = parse_variant(&line, chr, start, end, &mut local_missing_data_info) {
@@ -373,7 +372,6 @@ fn process_vcf(
             progress_bar.inc(line.len() as u64);
         }
     }
-
     progress_bar.finish_with_message("Variant processing complete");
 
     let final_variants = variants.into_inner();
