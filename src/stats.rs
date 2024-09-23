@@ -73,83 +73,41 @@ struct MissingDataInfo {
 }
 
 
-trait BufReadSeek: BufRead + Seek + Send {}
-impl<T: BufRead + Seek + Send> BufReadSeek for T {}
-
 struct CachedReader {
-    reader: Box<dyn BufReadSeek>,
-    chromosome: String,
+    content: Vec<u8>,
+    position: usize,
 }
 
-fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufReadSeek>, VcfError> {
-    let file = File::open(path)?;
-    
-    if path.extension().and_then(|s| s.to_str()) == Some("gz") {
-        let decoder = MultiGzDecoder::new(file);
-        let reader = BufReader::new(decoder);
-        Ok(Box::new(SeekableGzipReader::new(reader)?))
-    } else {
-        Ok(Box::new(BufReader::new(file)))
-    }
-}
-
-
-struct SeekableGzipReader<R: Read + Seek> {
-    inner: MultiGzDecoder<R>,
-    pos: u64,
-}
-
-impl<R: Read + Seek> SeekableGzipReader<R> {
-    fn new(reader: R) -> io::Result<Self> {
+impl CachedReader {
+    fn new(mut reader: Box<dyn BufRead + Send>) -> Result<Self, VcfError> {
+        let mut content = Vec::new();
+        reader.read_to_end(&mut content)?;
         Ok(Self {
-            inner: MultiGzDecoder::new(reader),
-            pos: 0,
+            content,
+            position: 0,
         })
     }
 }
 
-impl<R: Read + Seek> Read for SeekableGzipReader<R> {
+impl Read for CachedReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let bytes_read = self.inner.read(buf)?;
-        self.pos += bytes_read as u64;
-        Ok(bytes_read)
+        let available = self.content.len() - self.position;
+        let amt = std::cmp::min(available, buf.len());
+        buf[..amt].copy_from_slice(&self.content[self.position..self.position + amt]);
+        self.position += amt;
+        Ok(amt)
     }
 }
 
-impl<R: Read + Seek> Seek for SeekableGzipReader<R> {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        match pos {
-            SeekFrom::Start(offset) => {
-                if offset < self.pos {
-                    self.inner = MultiGzDecoder::new(self.inner.into_inner()?);
-                    self.pos = 0;
-                }
-                let mut buf = [0u8; 1024];
-                while self.pos < offset {
-                    let to_read = std::cmp::min(buf.len() as u64, offset - self.pos) as usize;
-                    let bytes_read = self.read(&mut buf[..to_read])?;
-                    if bytes_read == 0 {
-                        break;
-                    }
-                }
-                Ok(self.pos)
-            }
-            _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "Unsupported seek operation")),
-        }
-    }
-}
-
-impl<R: Read + Seek> BufRead for SeekableGzipReader<R> {
+impl BufRead for CachedReader {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        self.inner.fill_buf()
+        Ok(&self.content[self.position..])
     }
 
     fn consume(&mut self, amt: usize) {
-        self.inner.consume(amt);
-        self.pos += amt as u64;
+        self.position = std::cmp::min(self.position + amt, self.content.len());
     }
 }
-
 
 
 
@@ -410,7 +368,7 @@ fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     }
 }
 
-fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send + Seek>, VcfError> {
+fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send>, VcfError> {
     let file = File::open(path)?;
     
     if path.extension().and_then(|s| s.to_str()) == Some("gz") {
@@ -421,20 +379,16 @@ fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send + Seek>, VcfErr
     }
 }
 
-
 fn process_vcf(
-    file: &Path,
+    reader: &mut dyn BufRead,
     chr: &str,
     start: i64,
     end: i64,
     haplotype_group: Option<u8>,
-    sample_filter: Option<HashMap<String, (u8, u8)>>,
-    cached_reader: Option<Arc<Mutex<CachedReader>>>,
+    sample_filter: Option<&HashMap<String, (u8, u8)>>,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
-    let mut reader = if let Some(cr) = cached_reader {
-        let mut cr = cr.lock();
-        cr.reader.seek(std::io::SeekFrom::Start(0))?;
-        &mut cr.reader
+    let mut reader: Box<dyn BufRead + Send> = if let Some(cr) = cached_reader {
+        Box::new(cr)
     } else {
         open_vcf_reader(file)?
     };
@@ -706,7 +660,7 @@ fn process_config_entries(
         "0_segregating_sites", "1_segregating_sites", "0_w_theta", "1_w_theta", "0_pi", "1_pi",
     ]).map_err(|e| VcfError::Io(e.into()))?;
 
-    let mut cached_reader: Option<Arc<Mutex<CachedReader>>> = None;
+    let mut cached_reader: Option<(String, Box<dyn BufRead + Send>)> = None;
 
     for (index, entry) in config_entries.iter().enumerate() {
         println!("Processing entry {}/{}: {}:{}-{}", index + 1, config_entries.len(), entry.seqname, entry.start, entry.end);
@@ -719,25 +673,26 @@ fn process_config_entries(
             }
         };
 
-        if cached_reader.as_ref().map_or(true, |cr| cr.lock().chromosome != entry.seqname) {
-            cached_reader = Some(Arc::new(Mutex::new(CachedReader {
-                reader: open_vcf_reader(&vcf_file)?,
-                chromosome: entry.seqname.clone(),
-            })));
+        if cached_reader.as_ref().map_or(true, |(chr, _)| chr != &entry.seqname) {
+            cached_reader = Some((entry.seqname.clone(), open_vcf_reader(&vcf_file)?));
         }
-
-        let cached_reader_clone = Arc::clone(cached_reader.as_ref().unwrap());
 
         let mut results = Vec::new();
         for haplotype_group in &[0, 1] {
+            let mut reader = if let Some((_, ref mut reader)) = cached_reader {
+                reader.seek(std::io::SeekFrom::Start(0))?;
+                reader
+            } else {
+                open_vcf_reader(&vcf_file)?
+            };
+
             match process_vcf(
-                &vcf_file,
+                &mut reader,
                 &entry.seqname,
                 entry.start,
                 entry.end,
                 Some(*haplotype_group),
-                Some(entry.samples.clone()),
-                Some(cached_reader_clone.clone()),
+                Some(&entry.samples),
             ) {
                 Ok((variants, _, _, _)) => {
                     let seq_length = entry.end - entry.start + 1;
