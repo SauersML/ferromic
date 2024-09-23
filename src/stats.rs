@@ -113,6 +113,7 @@ impl From<io::Error> for VcfError {
     }
 }
 
+#[derive(Clone)]
 struct VcfFileManager {
     current_chr: String,
     reader: Option<Box<dyn BufRead + Send>>,
