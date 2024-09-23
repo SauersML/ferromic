@@ -352,7 +352,7 @@ fn process_vcf(
                     }
                 }
                 let mut missing_data_info = missing_data_info.lock().unwrap();
-                parse_variant(line, chr, start, end, &mut missing_data_info).transpose().ok()
+                parse_variant(line, chr, start, end, &mut missing_data_info).transpose()?.ok()
             })
             .collect();
 
