@@ -372,13 +372,11 @@ fn process_vcf(
     haplotype_group: Option<u8>,
     sample_filter: Option<HashMap<String, (u8, u8)>>,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
-    let reader = vcf_manager.get_reader(chr)?;
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
     let variants = Arc::new(Mutex::new(Vec::new()));
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
 
-    let is_gzipped = vcf_manager.current_chr.ends_with(".gz");
     let progress_bar = ProgressBar::new_spinner();
 
     let style = ProgressStyle::default_spinner()
@@ -435,19 +433,22 @@ fn process_vcf(
 
     // Process header
     let mut buffer = String::new();
-    while reader.read_line(&mut buffer)? > 0 {
-        if buffer.starts_with("##") {
-            if buffer.starts_with("##contig=<ID=") && buffer.contains(&format!("ID={}", chr)) {
-                if let Some(length_str) = buffer.split(',').find(|s| s.starts_with("length=")) {
-                    chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
+    {
+        let reader = vcf_manager.get_reader(chr)?;
+        while reader.read_line(&mut buffer)? > 0 {
+            if buffer.starts_with("##") {
+                if buffer.starts_with("##contig=<ID=") && buffer.contains(&format!("ID={}", chr)) {
+                    if let Some(length_str) = buffer.split(',').find(|s| s.starts_with("length=")) {
+                        chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
+                    }
                 }
+            } else if buffer.starts_with("#CHROM") {
+                validate_vcf_header(&buffer)?;
+                sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
+                break;
             }
-        } else if buffer.starts_with("#CHROM") {
-            validate_vcf_header(&buffer)?;
-            sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
-            break;
+            buffer.clear();
         }
-        buffer.clear();
     }
 
     // Set up channels for communication between threads
@@ -456,6 +457,7 @@ fn process_vcf(
 
     // Spawn producer thread
     let producer_thread = thread::spawn(move || -> Result<(), VcfError> {
+        let mut reader = vcf_manager.get_reader(chr)?;
         while reader.read_line(&mut buffer)? > 0 {
             line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
             buffer.clear();
