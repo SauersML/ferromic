@@ -11,6 +11,8 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashMap;
+use csv::Writer;
 use crossbeam_channel::{bounded};
 use std::time::{Duration};
 use std::sync::Arc;
@@ -27,6 +29,25 @@ struct Args {
 
     #[arg(short, long)]
     region: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ConfigEntry {
+    seqname: String,
+    start: i64,
+    end: i64,
+    samples: HashMap<String, (u8, u8)>,
+}
+
+#[derive(Debug)]
+struct RegionStats {
+    chr: String,
+    region_start: i64,
+    region_end: i64,
+    sequence_length: i64,
+    segregating_sites: usize,
+    w_theta: f64,
+    pi: f64,
 }
 
 #[derive(Debug, Clone)]
