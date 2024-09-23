@@ -463,9 +463,9 @@ fn process_vcf(
     }
 
     // Set up channels for communication between threads
-    let (vcf_sender, vcf_receiver) = bounded(1000);
-    let (line_sender, line_receiver) = bounded(1000);
-    let (result_sender, result_receiver) = bounded(1000);
+    let (vcf_sender, vcf_receiver) = bounded(10000);
+    let (line_sender, line_receiver) = bounded(10000);
+    let (result_sender, result_receiver) = bounded(10000);
 
     // Spawn VCF reader thread
     let vcf_reader_thread = {
