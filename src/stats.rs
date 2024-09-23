@@ -143,7 +143,7 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, None, None)?;
+        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end)?;
 
         println!("{}", "Calculating diversity statistics...".blue());
 
