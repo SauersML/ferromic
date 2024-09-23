@@ -377,12 +377,13 @@ fn process_vcf(
     let variants = Arc::new(Mutex::new(Vec::new()));
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
 
-    let is_gzipped = reader.get_ref().is::<MultiGzDecoder<File>>();
-    let style = if is_gzipped {
-        ProgressStyle::default_spinner()
-            .template("{spinner:.bold.green} 🧬 {msg} 🧬 [{elapsed_precise}]")
-            .expect("Failed to create spinner template")
-            .tick_strings(&[
+    let is_gzipped = vcf_manager.current_chr.ends_with(".gz");
+    let progress_bar = ProgressBar::new_spinner();
+
+    let style = ProgressStyle::default_spinner()
+        .template("{spinner:.bold.green} 🧬 {msg} 🧬 [{elapsed_precise}]")
+        .expect("Failed to create spinner template")
+        .tick_strings(&[
                 "░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░",
                 "▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░",
                 "▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒",
