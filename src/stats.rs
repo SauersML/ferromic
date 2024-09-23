@@ -11,6 +11,7 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use crossbeam_channel::{bounded, Sender, Receiver};
 use std::time::{Duration, Instant};
 use std::sync::Arc;
 use std::thread;
@@ -235,11 +236,11 @@ fn process_vcf(
     end: i64,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
     let mut reader = open_vcf_reader(file)?;
-    let sample_names = RwLock::new(Vec::new());
-    let chr_length = AtomicI64::new(0);
-    let missing_data_info = Mutex::new(MissingDataInfo::default());
-    let header_processed = AtomicBool::new(false);
-    let variants = Mutex::new(Vec::new());
+    let sample_names = Arc::new(RwLock::new(Vec::new()));
+    let chr_length = Arc::new(AtomicI64::new(0));
+    let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
+    let header_processed = Arc::new(AtomicBool::new(false));
+    let variants = Arc::new(Mutex::new(Vec::new()));
 
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
     let progress_bar = if is_gzipped {
@@ -308,38 +309,88 @@ fn process_vcf(
         progress_bar.finish_with_message("Variant processing complete");
     });
 
-    let mut buffer = String::new();
-    
-    while reader.read_line(&mut buffer)? > 0 {
-        let line = buffer.clone();
-        buffer.clear();
-    
-        if !header_processed.load(Ordering::Relaxed) {
-            if line.starts_with("##") {
-                if line.starts_with("##contig=<ID=") && line.contains(&format!("ID={}", chr)) {
-                    if let Some(length_str) = line.split(',').find(|s| s.starts_with("length=")) {
-                        let length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
-                        chr_length.store(length, Ordering::Relaxed);
+    // Set up channels for communication between threads
+    let (line_sender, line_receiver) = bounded(1000); // Adjust buffer size as needed
+    let (result_sender, result_receiver) = bounded(1000);
+
+    // Spawn producer thread
+    let producer_thread = {
+        let line_sender = line_sender.clone();
+        let header_processed = header_processed.clone();
+        let sample_names = sample_names.clone();
+        let chr_length = chr_length.clone();
+        thread::spawn(move || -> Result<(), VcfError> {
+            let mut buffer = String::new();
+            while reader.read_line(&mut buffer)? > 0 {
+                let line = buffer.clone();
+                buffer.clear();
+
+                if !header_processed.load(Ordering::Relaxed) {
+                    if line.starts_with("##") {
+                        if line.starts_with("##contig=<ID=") && line.contains(&format!("ID={}", chr)) {
+                            if let Some(length_str) = line.split(',').find(|s| s.starts_with("length=")) {
+                                let length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
+                                chr_length.store(length, Ordering::Relaxed);
+                            }
+                        }
+                    } else if line.starts_with("#CHROM") {
+                        if validate_vcf_header(&line).is_ok() {
+                            let mut names = sample_names.write();
+                            *names = line.split_whitespace().skip(9).map(String::from).collect();
+                            header_processed.store(true, Ordering::Relaxed);
+                        }
+                    }
+                } else {
+                    line_sender.send(line)?;
+                }
+            }
+            drop(line_sender); // Close the channel when done
+            Ok(())
+        })
+    };
+
+    // Spawn consumer threads
+    let num_threads = num_cpus::get();
+    let consumer_threads: Vec<_> = (0..num_threads)
+        .map(|_| {
+            let line_receiver = line_receiver.clone();
+            let result_sender = result_sender.clone();
+            let chr = chr.to_string();
+            thread::spawn(move || -> Result<(), VcfError> {
+                while let Ok(line) = line_receiver.recv() {
+                    let mut local_missing_data_info = MissingDataInfo::default();
+                    if let Ok(Some(variant)) = parse_variant(&line, &chr, start, end, &mut local_missing_data_info) {
+                        result_sender.send((variant, local_missing_data_info))?;
                     }
                 }
-            } else if line.starts_with("#CHROM") {
-                if validate_vcf_header(&line).is_ok() {
-                    let mut names = sample_names.write();
-                    *names = line.split_whitespace().skip(9).map(String::from).collect();
-                    header_processed.store(true, Ordering::Relaxed);
-                }
-            }
-        } else {
-            let mut local_missing_data_info = MissingDataInfo::default();
-            if let Ok(Some(variant)) = parse_variant(&line, chr, start, end, &mut local_missing_data_info) {
+                Ok(())
+            })
+        })
+        .collect();
+
+    // Collector thread
+    let collector_thread = thread::spawn({
+        let variants = variants.clone();
+        let missing_data_info = missing_data_info.clone();
+        move || -> Result<(), VcfError> {
+            while let Ok((variant, local_missing_data_info)) = result_receiver.recv() {
                 variants.lock().push(variant);
-                let mut missing_data_info = missing_data_info.lock();
-                missing_data_info.total_data_points += local_missing_data_info.total_data_points;
-                missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
-                missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
+                let mut global_missing_data_info = missing_data_info.lock();
+                global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
+                global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
+                global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
             }
+            Ok(())
         }
+    });
+
+    // Wait for all threads to complete
+    producer_thread.join().expect("Producer thread panicked")?;
+    for thread in consumer_threads {
+        thread.join().expect("Consumer thread panicked")?;
     }
+    drop(result_sender); // Close the result channel
+    collector_thread.join().expect("Collector thread panicked")?;
 
     // Signal that processing is complete
     processing_complete.store(true, Ordering::Relaxed);
@@ -347,14 +398,13 @@ fn process_vcf(
     // Wait for the progress thread to finish
     progress_thread.join().expect("Couldn't join progress thread");
 
-    let final_variants = variants.into_inner();
-    let final_sample_names = sample_names.into_inner();
+    let final_variants = Arc::try_unwrap(variants).expect("Variants still have multiple owners").into_inner();
+    let final_sample_names = Arc::try_unwrap(sample_names).expect("Sample names still have multiple owners").into_inner();
     let final_chr_length = chr_length.load(Ordering::Relaxed);
-    let final_missing_data_info = missing_data_info.into_inner();
+    let final_missing_data_info = Arc::try_unwrap(missing_data_info).expect("Missing data info still has multiple owners").into_inner();
 
     Ok((final_variants, final_sample_names, final_chr_length, final_missing_data_info))
 }
-
 
 fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     let fields: Vec<&str> = header.split_whitespace().collect();
