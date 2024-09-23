@@ -11,8 +11,8 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use crossbeam_channel::{bounded, Sender, Receiver};
-use std::time::{Duration, Instant};
+use crossbeam_channel::{bounded};
+use std::time::{Duration};
 use std::sync::Arc;
 use std::thread;
 
@@ -49,6 +49,20 @@ enum VcfError {
     InvalidRegion(String),
     NoVcfFiles,
     InvalidVcfFormat(String),
+    ChannelSend,
+    ChannelRecv,
+}
+
+impl<T> From<crossbeam_channel::SendError<T>> for VcfError {
+    fn from(_: crossbeam_channel::SendError<T>) -> Self {
+        VcfError::ChannelSend
+    }
+}
+
+impl From<crossbeam_channel::RecvError> for VcfError {
+    fn from(_: crossbeam_channel::RecvError) -> Self {
+        VcfError::ChannelRecv
+    }
 }
 
 impl std::fmt::Display for VcfError {
@@ -341,7 +355,7 @@ fn process_vcf(
                         }
                     }
                 } else {
-                    line_sender.send(line)?;
+                    line_sender.send(line).map_err(|_| VcfError::ChannelSend)?;
                 }
             }
             drop(line_sender); // Close the channel when done
@@ -360,7 +374,7 @@ fn process_vcf(
                 while let Ok(line) = line_receiver.recv() {
                     let mut local_missing_data_info = MissingDataInfo::default();
                     if let Ok(Some(variant)) = parse_variant(&line, &chr, start, end, &mut local_missing_data_info) {
-                        result_sender.send((variant, local_missing_data_info))?;
+                        result_sender.send((variant, local_missing_data_info)).map_err(|_| VcfError::ChannelSend)?;
                     }
                 }
                 Ok(())
@@ -373,7 +387,7 @@ fn process_vcf(
         let variants = variants.clone();
         let missing_data_info = missing_data_info.clone();
         move || -> Result<(), VcfError> {
-            while let Ok((variant, local_missing_data_info)) = result_receiver.recv() {
+            while let Ok((variant, local_missing_data_info)) = result_receiver.recv().map_err(|_| VcfError::ChannelRecv)? {
                 variants.lock().push(variant);
                 let mut global_missing_data_info = missing_data_info.lock();
                 global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
