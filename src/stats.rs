@@ -12,6 +12,7 @@ use std::sync::Arc;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::sync::Mutex;
+use parking_lot::{Mutex, RwLock};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -232,10 +233,11 @@ fn process_vcf(
     end: i64,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
     let mut reader = open_vcf_reader(file)?;
-    let sample_names = Arc::new(Mutex::new(Vec::new()));
+    let sample_names = RwLock::new(Vec::new());
     let chr_length = AtomicI64::new(0);
-    let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
+    let missing_data_info = Mutex::new(MissingDataInfo::default());
     let header_processed = AtomicBool::new(false);
+    let variants = Mutex::new(Vec::new());
 
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
     let progress_bar = if is_gzipped {
@@ -326,7 +328,7 @@ fn process_vcf(
     progress_bar.set_style(style);
 
     let mut buffer = String::new();
-    let variants = Arc::new(Mutex::new(Vec::new()));
+    let chunk_size = 1024 * 1024; // 1 MB chunks
 
     while reader.read_to_string(&mut buffer)? > 0 {
         let chunk = buffer.clone();
@@ -343,16 +345,22 @@ fn process_vcf(
                     }
                 } else if line.starts_with("#CHROM") {
                     if validate_vcf_header(line).is_ok() {
-                        let mut names = sample_names.lock().unwrap();
+                        let mut names = sample_names.write();
                         *names = line.split_whitespace().skip(9).map(String::from).collect();
                         header_processed.store(true, Ordering::Relaxed);
                     }
                 }
             } else {
-                let mut missing_data_info = missing_data_info.lock().unwrap();
-                if let Ok(Some(variant)) = parse_variant(line, chr, start, end, &mut missing_data_info) {
-                    let mut variants = variants.lock().unwrap();
-                    variants.push(variant);
+                let mut local_missing_data_info = MissingDataInfo::default();
+                if let Ok(Some(variant)) = parse_variant(line, chr, start, end, &mut local_missing_data_info) {
+                    let mut variants_lock = variants.lock();
+                    variants_lock.push(variant);
+                    drop(variants_lock);
+
+                    let mut missing_data_info_lock = missing_data_info.lock();
+                    missing_data_info_lock.total_data_points += local_missing_data_info.total_data_points;
+                    missing_data_info_lock.missing_data_points += local_missing_data_info.missing_data_points;
+                    missing_data_info_lock.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
                 }
             }
         });
@@ -362,13 +370,14 @@ fn process_vcf(
 
     progress_bar.finish_with_message("Variant processing complete");
 
-    let final_variants = Arc::try_unwrap(variants).unwrap().into_inner().unwrap();
-    let final_sample_names = Arc::try_unwrap(sample_names).unwrap().into_inner().unwrap();
+    let final_variants = variants.into_inner();
+    let final_sample_names = sample_names.into_inner();
     let final_chr_length = chr_length.load(Ordering::Relaxed);
-    let final_missing_data_info = Arc::try_unwrap(missing_data_info).unwrap().into_inner().unwrap();
+    let final_missing_data_info = missing_data_info.into_inner();
 
     Ok((final_variants, final_sample_names, final_chr_length, final_missing_data_info))
 }
+
 
 fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     let fields: Vec<&str> = header.split_whitespace().collect();
