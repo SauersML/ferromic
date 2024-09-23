@@ -371,17 +371,17 @@ fn process_vcf(
     haplotype_group: Option<u8>,
     sample_filter: Option<HashMap<String, (u8, u8)>>,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
-    let mut reader = vcf_manager.get_reader(chr)?;
+    let reader = vcf_manager.get_reader(chr)?;
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
     let variants = Arc::new(Mutex::new(Vec::new()));
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
 
-    let is_gzipped = vcf_manager.current_chr.ends_with(".gz");
+    let is_gzipped = reader.get_ref().is::<MultiGzDecoder<File>>();
     let progress_bar = if is_gzipped {
         ProgressBar::new_spinner()
     } else {
-        let file_size = fs::metadata(&vcf_manager.current_file_path)?.len();
+        let file_size = reader.get_ref().as_file().metadata()?.len();
         ProgressBar::new(file_size)
     };
 
