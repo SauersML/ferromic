@@ -2,17 +2,16 @@ use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use parking_lot::{Mutex, RwLock};
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
-use std::sync::Mutex;
-use parking_lot::{Mutex, RwLock};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
