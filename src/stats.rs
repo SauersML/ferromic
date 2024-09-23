@@ -268,6 +268,7 @@ fn process_variants(
     // Now, calculate the number of segregating sites
     let num_segsites = count_segregating_sites(&filtered_variants);
 
+
     // Number of samples (haplotypes)
     let n = haplotype_indices.len();
 
@@ -302,6 +303,11 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
         let end: i64 = record.get(2).ok_or(VcfError::Parse("Missing end".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid end".to_string()))?;
 
         let mut samples = HashMap::new();
+
+        if samples.is_empty() {
+            println!("Warning: No valid genotypes found for region {}:{}-{}", seqname, start, end);
+            continue;
+        }
         for (i, field) in record.iter().enumerate().skip(7) {
             total_genotypes += 1;
             if i < sample_names.len() + 7 {
