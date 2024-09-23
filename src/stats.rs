@@ -218,30 +218,38 @@ fn process_variants(
     region_start: i64,
     region_end: i64,
 ) -> Result<(usize, f64, f64), VcfError> {
-    // Build a mapping from sample name to index in sample_names
-    let sample_name_to_index: HashMap<&str, usize> = sample_names.iter().enumerate().map(|(i, name)| (name.as_str(), i)).collect();
+    // Build a mapping from VCF sample IDs to indices
+    let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
+    for (i, name) in sample_names.iter().enumerate() {
+        let sample_id = extract_sample_id(name);
+        if vcf_sample_id_to_index.contains_key(sample_id) {
+            eprintln!("Error: Duplicate sample ID '{}' found in VCF samples.", sample_id);
+            return Err(VcfError::Parse(format!("Duplicate sample ID '{}' in VCF.", sample_id)));
+        }
+        vcf_sample_id_to_index.insert(sample_id, i);
+    }
 
     // Build the list of indices of the haplotypes we are interested in
     let mut haplotype_indices = Vec::new();
 
     for (sample_name, &(left, right)) in sample_filter.iter() {
-        // Find the sample in sample_names
-        let vcf_sample_index = sample_names.iter().enumerate()
-            .find(|&(_i, name)| name.contains(sample_name))
-            .map(|(i, _name)| i);
-        if let Some(i) = vcf_sample_index {
+        if let Some(&i) = vcf_sample_id_to_index.get(sample_name.as_str()) {
             if haplotype_group == 0 && left == 0 {
                 haplotype_indices.push((i, 0)); // left haplotype
             }
             if haplotype_group == 1 && right == 1 {
                 haplotype_indices.push((i, 1)); // right haplotype
             }
+        } else {
+            eprintln!("Warning: Sample '{}' from config file not found in VCF samples.", sample_name);
         }
     }
 
     if haplotype_indices.is_empty() {
-        return Err(VcfError::Parse("No haplotypes found for the specified group".to_string()));
+        return Err(VcfError::Parse(format!("No haplotypes found for the specified group {}", haplotype_group)));
     }
+
+    println!("Number of haplotypes in group {}: {}", haplotype_group, haplotype_indices.len());
 
     // For each variant, extract the genotypes of the haplotypes we are interested in
     let mut filtered_variants = Vec::new();
@@ -268,9 +276,12 @@ fn process_variants(
     // Now, calculate the number of segregating sites
     let num_segsites = count_segregating_sites(&filtered_variants);
 
-
     // Number of samples (haplotypes)
     let n = haplotype_indices.len();
+
+    if n <= 1 {
+        return Err(VcfError::Parse("Not enough haplotypes for calculation".to_string()));
+    }
 
     // Calculate pairwise differences
     let pairwise_diffs = calculate_pairwise_differences(&filtered_variants, n);
@@ -282,6 +293,7 @@ fn process_variants(
 
     Ok((num_segsites, w_theta, pi))
 }
+
 
 fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     let mut reader = csv::ReaderBuilder::new()
@@ -430,8 +442,6 @@ fn process_vcf(
     chr: &str,
     start: i64,
     end: i64,
-    haplotype_group: Option<u8>,
-    sample_filter: Option<HashMap<String, (u8, u8)>>,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
@@ -557,9 +567,7 @@ fn process_vcf(
                         start,
                         end,
                         &mut local_missing_data_info,
-                        haplotype_group,
-                        sample_filter.as_ref().as_ref(),
-                        &sample_names
+                        &sample_names,
                     ) {
                         Ok(Some(variant)) => {
                             result_sender.send(Ok((variant, local_missing_data_info))).map_err(|_| VcfError::ChannelSend)?;
@@ -633,8 +641,6 @@ fn parse_variant(
     start: i64,
     end: i64,
     missing_data_info: &mut MissingDataInfo,
-    haplotype_group: Option<u8>,
-    sample_filter: Option<&HashMap<String, (u8, u8)>>,
     sample_names: &[String],
 ) -> Result<Option<Variant>, VcfError> {
     let fields: Vec<&str> = line.split_whitespace().collect();
@@ -657,49 +663,25 @@ fn parse_variant(
         eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. This may lead to underestimation of genetic diversity (pi).", pos).yellow());
     }
 
-    let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter().enumerate()
-        .map(|(i, gt)| {
-            missing_data_info.total_data_points += 1;
-            gt.split(':').next().and_then(|alleles| {
-                let parsed = alleles.split(|c| c == '|' || c == '/')
-                    .map(|allele| allele.parse().ok())
-                    .collect::<Option<Vec<u8>>>();
-                if parsed.is_none() {
-                    missing_data_info.missing_data_points += 1;
-                    missing_data_info.positions_with_missing.insert(pos);
-                }
-                if let (Some(hg), Some(sf)) = (haplotype_group, sample_filter) {
-                    let vcf_sample_name = &sample_names[i];
-                    let config_sample_name = sf.keys()
-                        .find(|&name| vcf_sample_name.contains(name))
-                        .cloned();
-                    
-                    if let Some(config_name) = config_sample_name {
-                        if let Some(&(left, right)) = sf.get(&config_name) {
-                            if (hg == 0 && left == 0) || (hg == 1 && right == 1) {
-                                parsed.map(|mut v| {
-                                    if hg == 1 && v.len() > 1 {
-                                        vec![v[1]]
-                                    } else {
-                                        v.truncate(1);
-                                        v
-                                    }
-                                })
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    parsed
-                }
-            })
-        })
-        .collect();
+let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
+    .map(|gt| {
+        missing_data_info.total_data_points += 1;
+        let alleles_str = gt.split(':').next().unwrap_or(".");
+        if alleles_str == "." || alleles_str == "./." || alleles_str == ".|." {
+            missing_data_info.missing_data_points += 1;
+            missing_data_info.positions_with_missing.insert(pos);
+            return None;
+        }
+        let alleles = alleles_str.split(|c| c == '|' || c == '/')
+            .map(|allele| allele.parse::<u8>().ok())
+            .collect::<Option<Vec<u8>>>();
+        if alleles.is_none() {
+            missing_data_info.missing_data_points += 1;
+            missing_data_info.positions_with_missing.insert(pos);
+        }
+        alleles
+    })
+    .collect();
 
     Ok(Some(Variant {
         position: pos,
@@ -735,7 +717,7 @@ fn process_config_entries(
                     continue;
                 }
             };
-            match process_vcf(&vcf_file, &entry.seqname, entry.start, entry.end, None, Some(entry.samples.clone())) {
+            match process_vcf(&vcf_file, &entry.seqname, entry.start, entry.end) {
                 Ok(data) => {
                     variants_cache.insert(entry.seqname.clone(), data.clone());
                     data
@@ -849,6 +831,10 @@ fn calculate_pairwise_differences(
             ((i, j), diff_count, diff_positions)
         }).collect::<Vec<_>>()
     }).collect()
+}
+
+fn extract_sample_id(name: &str) -> &str {
+    name.rsplit('_').next().unwrap_or(name)
 }
 
 fn harmonic(n: usize) -> f64 {
