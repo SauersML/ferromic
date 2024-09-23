@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 use std::sync::Arc;
+use std::thread;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
