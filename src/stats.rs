@@ -456,15 +456,20 @@ fn process_vcf(
     let (result_sender, result_receiver) = bounded(1000);
 
     // Spawn producer thread
-    let producer_thread = thread::spawn(move || -> Result<(), VcfError> {
-        let mut reader = vcf_manager.get_reader(chr)?;
-        while reader.read_line(&mut buffer)? > 0 {
-            line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
-            buffer.clear();
-        }
-        drop(line_sender);
-        Ok(())
-    });
+    let producer_thread = {
+        let line_sender = line_sender.clone();
+        let chr = chr.to_string();
+        thread::spawn(move || -> Result<(), VcfError> {
+            let mut reader = vcf_manager.get_reader(&chr)?;
+            let mut buffer = String::new();
+            while reader.read_line(&mut buffer)? > 0 {
+                line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
+                buffer.clear();
+            }
+            drop(line_sender);
+            Ok(())
+        })
+    };
 
     // Spawn consumer threads
     let num_threads = num_cpus::get();
