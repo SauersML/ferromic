@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
@@ -113,46 +113,6 @@ impl From<io::Error> for VcfError {
     }
 }
 
-struct VcfFileManager {
-    current_chr: String,
-    reader: Option<Box<dyn BufRead + Send>>,
-    vcf_folder: String,
-}
-
-impl VcfFileManager {
-    fn new(vcf_folder: String) -> Self {
-        VcfFileManager {
-            current_chr: String::new(),
-            reader: None,
-            vcf_folder,
-        }
-    }
-
-    fn get_reader(&mut self, chr: &str) -> Result<&mut Box<dyn BufRead + Send>, VcfError> {
-        println!("Current chromosome: {}, Requested chromosome: {}", self.current_chr, chr);
-        if self.current_chr != chr {
-            println!("Finding VCF file for chromosome: {}", chr);
-            let vcf_file = find_vcf_file(&self.vcf_folder, chr)?;
-            println!("Found VCF file: {:?}", vcf_file);
-            println!("Opening VCF reader");
-            self.reader = Some(open_vcf_reader(&vcf_file)?);
-            println!("VCF reader opened successfully");
-            self.current_chr = chr.to_string();
-        }
-        self.reader.as_mut().ok_or(VcfError::NoVcfFiles)
-    }
-}
-
-impl Clone for VcfFileManager {
-    fn clone(&self) -> Self {
-        VcfFileManager {
-            current_chr: self.current_chr.clone(),
-            reader: None,
-            vcf_folder: self.vcf_folder.clone(),
-        }
-    }
-}
-
 
 fn main() -> Result<(), VcfError> {
     let args = Args::parse();
@@ -177,14 +137,13 @@ fn main() -> Result<(), VcfError> {
             parse_region(region)?
         } else {
             println!("No region provided, using default region covering most of the chromosome.");
-            (1, i64::MAX)
+            (1, i64::MAX) // Default region covering the entire chromosome
         };
+        let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
 
-        let mut vcf_manager = VcfFileManager::new(args.vcf_folder.clone());
+        println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        println!("{}", format!("Processing VCF file for chromosome: {}", chr).cyan());
-
-        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&mut vcf_manager, chr, start, end, None, None)?;
+        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, None, None)?;
 
         println!("{}", "Calculating diversity statistics...".blue());
 
@@ -378,26 +337,33 @@ fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send>, VcfError> {
 }
 
 
-
 fn process_vcf(
-    vcf_manager: &mut VcfFileManager,
+    file: &Path,
     chr: &str,
     start: i64,
     end: i64,
     haplotype_group: Option<u8>,
     sample_filter: Option<HashMap<String, (u8, u8)>>,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
+    let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
     let variants = Arc::new(Mutex::new(Vec::new()));
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
 
-    let progress_bar = ProgressBar::new_spinner();
+    let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
+    let progress_bar = if is_gzipped {
+        ProgressBar::new_spinner()
+    } else {
+        let file_size = fs::metadata(file)?.len();
+        ProgressBar::new(file_size)
+    };
 
-    let style = ProgressStyle::default_spinner()
-        .template("{spinner:.bold.green} 🧬 {msg} 🧬 [{elapsed_precise}]")
-        .expect("Failed to create spinner template")
-        .tick_strings(&[
+    let style = if is_gzipped {
+        ProgressStyle::default_spinner()
+            .template("{spinner:.bold.green} 🧬 {msg} 🧬 [{elapsed_precise}]")
+            .expect("Failed to create spinner template")
+            .tick_strings(&[
                 "░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░",
                 "▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░",
                 "▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒",
@@ -430,7 +396,13 @@ fn process_vcf(
                 "▓▒░▃▄▅▆▇███░▒▓██▓▒░░▒▓██▓▒░░▒▓██",
                 "▒░░▄▅▆▇████▒▓██▓▒░░▒▓██▓▒░░▒▓██▓",
                 "░░▒▅▆▇██████▓█▓░░▒▓██▓▒░░▒▓██▓▒░"
-            ]);
+            ])
+    } else {
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
+            .expect("Failed to create progress bar template")
+            .progress_chars("=>-")
+    };
 
     progress_bar.set_style(style);
 
@@ -446,67 +418,36 @@ fn process_vcf(
         progress_bar.finish_with_message("Variant processing complete");
     });
 
-
     // Process header
     let mut buffer = String::new();
-    {
-        let mut line_count = 0;
-        let reader = vcf_manager.get_reader(chr)?;
-        while reader.read_line(&mut buffer)? > 0 {
-            line_count += 1;
-            if line_count % 100 == 0 {
-                println!("Processed {} header lines", line_count);
-            }
-            if buffer.starts_with("##") {
-                if buffer.starts_with("##contig=<ID=") && buffer.contains(&format!("ID={}", chr)) {
-                    if let Some(length_str) = buffer.split(',').find(|s| s.starts_with("length=")) {
-                        chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
-                    }
+    while reader.read_line(&mut buffer)? > 0 {
+        if buffer.starts_with("##") {
+            if buffer.starts_with("##contig=<ID=") && buffer.contains(&format!("ID={}", chr)) {
+                if let Some(length_str) = buffer.split(',').find(|s| s.starts_with("length=")) {
+                    chr_length = length_str.trim_start_matches("length=").trim_end_matches('>').parse().unwrap_or(0);
                 }
-            } else if buffer.starts_with("#CHROM") {
-                validate_vcf_header(&buffer)?;
-                sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
-                break;
             }
-            buffer.clear();
+        } else if buffer.starts_with("#CHROM") {
+            validate_vcf_header(&buffer)?;
+            sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
+            break;
         }
+        buffer.clear();
     }
 
     // Set up channels for communication between threads
-    let (vcf_sender, vcf_receiver) = bounded(10000);
-    let (line_sender, line_receiver) = bounded(10000);
-    let (result_sender, result_receiver) = bounded(10000);
-
-    // Spawn VCF reader thread
-    let vcf_reader_thread = {
-        let vcf_sender = vcf_sender.clone();
-        let chr = chr.to_string();
-        let vcf_folder = vcf_manager.vcf_folder.clone();
-        thread::spawn(move || -> Result<(), VcfError> {
-            let mut vcf_manager = VcfFileManager::new(vcf_folder);
-            let reader = vcf_manager.get_reader(&chr)?;
-            let mut buffer = String::new();
-            while reader.read_line(&mut buffer)? > 0 {
-                vcf_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
-                buffer.clear();
-            }
-            drop(vcf_sender);
-            Ok(())
-        })
-    };
-
+    let (line_sender, line_receiver) = bounded(1000);
+    let (result_sender, result_receiver) = bounded(1000);
 
     // Spawn producer thread
-    let producer_thread = {
-        let line_sender = line_sender.clone();
-        thread::spawn(move || -> Result<(), VcfError> {
-            while let Ok(line) = vcf_receiver.recv() {
-                line_sender.send(line).map_err(|_| VcfError::ChannelSend)?;
-            }
-            drop(line_sender);
-            Ok(())
-        })
-    };
+    let producer_thread = thread::spawn(move || -> Result<(), VcfError> {
+        while reader.read_line(&mut buffer)? > 0 {
+            line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
+            buffer.clear();
+        }
+        drop(line_sender);
+        Ok(())
+    });
 
     // Spawn consumer threads
     let num_threads = num_cpus::get();
@@ -559,14 +500,13 @@ fn process_vcf(
     });
 
     // Wait for all threads to complete
-    vcf_reader_thread.join().expect("VCF reader thread panicked")?;
     producer_thread.join().expect("Producer thread panicked")?;
     for thread in consumer_threads {
         thread.join().expect("Consumer thread panicked")?;
     }
     drop(result_sender); // Close the result channel
     collector_thread.join().expect("Collector thread panicked")?;
-    
+
     // Signal that processing is complete
     processing_complete.store(true, Ordering::Relaxed);
 
@@ -578,8 +518,6 @@ fn process_vcf(
 
     Ok((final_variants, Arc::try_unwrap(sample_names).unwrap(), chr_length, final_missing_data_info))
 }
-
-
 
 
 fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
@@ -683,15 +621,21 @@ fn process_config_entries(
         "0_segregating_sites", "1_segregating_sites", "0_w_theta", "1_w_theta", "0_pi", "1_pi",
     ]).map_err(|e| VcfError::Io(e.into()))?;
 
-    let mut vcf_manager = VcfFileManager::new(vcf_folder.to_string());
-
     for (index, entry) in config_entries.iter().enumerate() {
         println!("Processing entry {}/{}: {}:{}-{}", index + 1, config_entries.len(), entry.seqname, entry.start, entry.end);
+        
+        let vcf_file = match find_vcf_file(vcf_folder, &entry.seqname) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("Error finding VCF file for {}: {:?}", entry.seqname, e);
+                continue;
+            }
+        };
 
         let mut results = Vec::new();
         for haplotype_group in &[0, 1] {
             match process_vcf(
-                &mut vcf_manager,
+                &vcf_file,
                 &entry.seqname,
                 entry.start,
                 entry.end,
