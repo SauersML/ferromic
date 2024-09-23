@@ -378,13 +378,6 @@ fn process_vcf(
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
 
     let is_gzipped = reader.get_ref().is::<MultiGzDecoder<File>>();
-    let progress_bar = if is_gzipped {
-        ProgressBar::new_spinner()
-    } else {
-        let file_size = reader.get_ref().as_file().metadata()?.len();
-        ProgressBar::new(file_size)
-    };
-
     let style = if is_gzipped {
         ProgressStyle::default_spinner()
             .template("{spinner:.bold.green} 🧬 {msg} 🧬 [{elapsed_precise}]")
