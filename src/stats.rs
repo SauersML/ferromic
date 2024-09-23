@@ -63,7 +63,7 @@ struct Variant {
     genotypes: Vec<Option<Vec<u8>>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct MissingDataInfo {
     total_data_points: usize,
     missing_data_points: usize,
@@ -704,14 +704,12 @@ fn process_config_entries(
             cached_data.clone()
         } else {
             // Find and process the VCF file
-            let vcf_file = match find_vcf_file(vcf_folder, &entry.seqname) {
-                Ok(file) => file,
-                Err(e) => {
-                    eprintln!("Error finding VCF file for {}: {:?}", entry.seqname, e);
-                    continue;
-                }
-            };
-            match process_vcf(&vcf_file, &entry.seqname) {
+            let vcf_file = find_vcf_file(vcf_folder, &entry.seqname)?;
+            let data = process_vcf(&vcf_file, &entry.seqname, entry.start, entry.end, None, Some(&entry.samples))?;
+            variants_cache.insert(entry.seqname.clone(), data.clone());
+            data
+        };
+            match process_vcf(&vcf_file, &entry.seqname, entry.start, entry.end, None, Some(&entry.samples)) {
                 Ok(data) => {
                     variants_cache.insert(entry.seqname.clone(), data.clone());
                     data
