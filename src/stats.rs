@@ -461,8 +461,7 @@ fn process_vcf(
             thread::spawn(move || -> Result<(), VcfError> {
                 while let Ok(line) = line_receiver.recv() {
                     let mut local_missing_data_info = MissingDataInfo::default();
-                    match parse_variant(&line, &chr, start, end, &mut local_missing_data_info, haplotype_group, sample_filter.as_ref()) {
-                        Ok(Some(variant)) => {
+                    match parse_variant(&line, &chr, start, end, &mut local_missing_data_info, haplotype_group, sample_filter.as_ref(), &sample_names) {
                             result_sender.send(Ok((variant, local_missing_data_info))).map_err(|_| VcfError::ChannelSend)?;
                         },
                         Ok(None) => {},
@@ -536,6 +535,7 @@ fn parse_variant(
     missing_data_info: &mut MissingDataInfo,
     haplotype_group: Option<u8>,
     sample_filter: Option<&HashMap<String, (u8, u8)>>,
+    sample_names: &[String],
 ) -> Result<Option<Variant>, VcfError> {
     let fields: Vec<&str> = line.split_whitespace().collect();
     if fields.len() < 10 {
@@ -569,16 +569,25 @@ fn parse_variant(
                     missing_data_info.positions_with_missing.insert(pos);
                 }
                 if let (Some(hg), Some(sf)) = (haplotype_group, sample_filter) {
-                    if let Some(&(left, right)) = sf.get(&format!("Sample_{}", i)) {
-                        if (hg == 0 && left == 0) || (hg == 1 && right == 1) {
-                            parsed.map(|mut v| {
-                                if hg == 1 && v.len() > 1 {
-                                    vec![v[1]]
-                                } else {
-                                    v.truncate(1);
-                                    v
-                                }
-                            })
+                    let vcf_sample_name = &sample_names[i];
+                    let config_sample_name = sf.keys()
+                        .find(|&name| vcf_sample_name.contains(name))
+                        .cloned();
+                    
+                    if let Some(config_name) = config_sample_name {
+                        if let Some(&(left, right)) = sf.get(&config_name) {
+                            if (hg == 0 && left == 0) || (hg == 1 && right == 1) {
+                                parsed.map(|mut v| {
+                                    if hg == 1 && v.len() > 1 {
+                                        vec![v[1]]
+                                    } else {
+                                        v.truncate(1);
+                                        v
+                                    }
+                                })
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
