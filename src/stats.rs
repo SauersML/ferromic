@@ -609,58 +609,84 @@ fn process_config_entries(
         "0_segregating_sites", "1_segregating_sites", "0_w_theta", "1_w_theta", "0_pi", "1_pi",
     ]).map_err(|e| VcfError::Io(e.into()))?;
 
-    for entry in config_entries {
-        let vcf_file = find_vcf_file(vcf_folder, &entry.seqname)?;
-        println!("{}", format!("Processing region {}:{}-{}", entry.seqname, entry.start, entry.end).cyan());
+    for (index, entry) in config_entries.iter().enumerate() {
+        println!("Processing entry {}/{}: {}:{}-{}", index + 1, config_entries.len(), entry.seqname, entry.start, entry.end);
+        
+        let vcf_file = match find_vcf_file(vcf_folder, &entry.seqname) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("Error finding VCF file for {}: {:?}", entry.seqname, e);
+                continue;
+            }
+        };
 
         let mut results = Vec::new();
         for haplotype_group in &[0, 1] {
-            let (variants, _, _, _) = process_vcf(
+            match process_vcf(
                 &vcf_file,
                 &entry.seqname,
                 entry.start,
                 entry.end,
                 Some(*haplotype_group),
                 Some(entry.samples.clone()),
-            )?;
+            ) {
+                Ok((variants, _, _, _)) => {
+                    let seq_length = entry.end - entry.start + 1;
+                    let num_segsites = count_segregating_sites(&variants);
+                    let n = variants.first().map(|v| v.genotypes.len()).unwrap_or(0);
+                    let pairwise_diffs = calculate_pairwise_differences(&variants, n);
+                    let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
 
-            let seq_length = entry.end - entry.start + 1;
-            let num_segsites = count_segregating_sites(&variants);
-            let n = variants.first().map(|v| v.genotypes.len()).unwrap_or(0);
-            let pairwise_diffs = calculate_pairwise_differences(&variants, n);
-            let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
+                    let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
+                    let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
-            let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
-            let pi = calculate_pi(tot_pair_diff, n, seq_length);
-
-            results.push(RegionStats {
-                chr: entry.seqname.clone(),
-                region_start: entry.start,
-                region_end: entry.end,
-                sequence_length: seq_length,
-                segregating_sites: num_segsites,
-                w_theta,
-                pi,
-            });
+                    results.push(RegionStats {
+                        chr: entry.seqname.clone(),
+                        region_start: entry.start,
+                        region_end: entry.end,
+                        sequence_length: seq_length,
+                        segregating_sites: num_segsites,
+                        w_theta,
+                        pi,
+                    });
+                },
+                Err(e) => {
+                    eprintln!("Error processing VCF for {}:{}-{}, haplotype group {}: {:?}", 
+                              entry.seqname, entry.start, entry.end, haplotype_group, e);
+                    continue;
+                }
+            }
         }
 
-        writer.write_record(&[
-            &results[0].chr,
-            &results[0].region_start.to_string(),
-            &results[0].region_end.to_string(),
-            &results[0].sequence_length.to_string(),
-            &results[1].sequence_length.to_string(),
-            &results[0].segregating_sites.to_string(),
-            &results[1].segregating_sites.to_string(),
-            &results[0].w_theta.to_string(),
-            &results[1].w_theta.to_string(),
-            &results[0].pi.to_string(),
-            &results[1].pi.to_string(),
-        ]).map_err(|e| VcfError::Io(e.into()))?;
+        if results.len() == 2 {
+            match writer.write_record(&[
+                &results[0].chr,
+                &results[0].region_start.to_string(),
+                &results[0].region_end.to_string(),
+                &results[0].sequence_length.to_string(),
+                &results[1].sequence_length.to_string(),
+                &results[0].segregating_sites.to_string(),
+                &results[1].segregating_sites.to_string(),
+                &results[0].w_theta.to_string(),
+                &results[1].w_theta.to_string(),
+                &results[0].pi.to_string(),
+                &results[1].pi.to_string(),
+            ]) {
+                Ok(_) => {
+                    println!("Successfully wrote record for {}:{}-{}", entry.seqname, entry.start, entry.end);
+                    writer.flush().map_err(|e| VcfError::Io(e.into()))?;
+                },
+                Err(e) => {
+                    eprintln!("Error writing record for {}:{}-{}: {:?}", entry.seqname, entry.start, entry.end, e);
+                }
+            }
+        } else {
+            eprintln!("Incomplete results for {}:{}-{}, skipping", entry.seqname, entry.start, entry.end);
+        }
     }
 
-    writer.write_record(&[...]).map_err(|e| VcfError::Io(e.into()))?;
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
+    println!("Processing complete. Check the output file: {:?}", output_file);
     Ok(())
 }
 
