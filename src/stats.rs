@@ -2,6 +2,7 @@ use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs::{self, File};
