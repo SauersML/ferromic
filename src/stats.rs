@@ -138,6 +138,7 @@ fn main() -> Result<(), VcfError> {
     // Print missing data information
     let missing_data_percentage = (missing_data_info.missing_data_points as f64 / missing_data_info.total_data_points as f64) * 100.0;
     println!("\n{}", "Missing Data Information:".yellow().bold());
+    println!("Number of missing variants: {}", missing_data_info.missing_data_points);
     println!("Percentage of missing data: {:.2}%", missing_data_percentage);
     println!("Positions with missing data: {:?}", missing_data_info.positions_with_missing);
 
