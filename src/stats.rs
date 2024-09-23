@@ -70,6 +70,11 @@ struct MissingDataInfo {
     positions_with_missing: HashSet<i64>,
 }
 
+struct CachedReader {
+    reader: Box<dyn BufRead + Send + Seek>,
+    chromosome: String,
+}
+
 #[derive(Debug)]
 enum VcfError {
     Io(io::Error),
@@ -344,8 +349,16 @@ fn process_vcf(
     end: i64,
     haplotype_group: Option<u8>,
     sample_filter: Option<HashMap<String, (u8, u8)>>,
+    cached_reader: Option<Arc<Mutex<CachedReader>>>,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
-    let mut reader = open_vcf_reader(file)?;
+    let mut reader = if let Some(cr) = cached_reader {
+        let mut cr = cr.lock();
+        cr.reader.seek(std::io::SeekFrom::Start(0))?;
+        &mut cr.reader
+    } else {
+        open_vcf_reader(file)?
+    };
+
     let mut sample_names = Vec::new();
     let mut chr_length = 0;
     let variants = Arc::new(Mutex::new(Vec::new()));
@@ -409,7 +422,6 @@ fn process_vcf(
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = processing_complete.clone();
 
-    // Spawn a thread to update the progress bar
     let progress_thread = thread::spawn(move || {
         while !processing_complete_clone.load(Ordering::Relaxed) {
             progress_bar.tick();
@@ -418,7 +430,6 @@ fn process_vcf(
         progress_bar.finish_with_message("Variant processing complete");
     });
 
-    // Process header
     let mut buffer = String::new();
     while reader.read_line(&mut buffer)? > 0 {
         if buffer.starts_with("##") {
@@ -435,11 +446,9 @@ fn process_vcf(
         buffer.clear();
     }
 
-    // Set up channels for communication between threads
     let (line_sender, line_receiver) = bounded(1000);
     let (result_sender, result_receiver) = bounded(1000);
 
-    // Spawn producer thread
     let producer_thread = thread::spawn(move || -> Result<(), VcfError> {
         while reader.read_line(&mut buffer)? > 0 {
             line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
@@ -449,7 +458,6 @@ fn process_vcf(
         Ok(())
     });
 
-    // Spawn consumer threads
     let num_threads = num_cpus::get();
     let sample_filter = Arc::new(sample_filter);
     let sample_names = Arc::new(sample_names);
@@ -478,7 +486,6 @@ fn process_vcf(
         })
         .collect();
 
-    // Collector thread
     let collector_thread = thread::spawn({
         let variants = variants.clone();
         let missing_data_info = missing_data_info.clone();
@@ -499,18 +506,15 @@ fn process_vcf(
         }
     });
 
-    // Wait for all threads to complete
     producer_thread.join().expect("Producer thread panicked")?;
     for thread in consumer_threads {
         thread.join().expect("Consumer thread panicked")?;
     }
-    drop(result_sender); // Close the result channel
+    drop(result_sender);
     collector_thread.join().expect("Collector thread panicked")?;
 
-    // Signal that processing is complete
     processing_complete.store(true, Ordering::Relaxed);
 
-    // Wait for the progress thread to finish
     progress_thread.join().expect("Couldn't join progress thread");
 
     let final_variants = Arc::try_unwrap(variants).expect("Variants still have multiple owners").into_inner();
@@ -610,6 +614,7 @@ fn parse_variant(
     }))
 }
 
+
 fn process_config_entries(
     config_entries: &[ConfigEntry],
     vcf_folder: &str,
@@ -620,6 +625,8 @@ fn process_config_entries(
         "chr", "region_start", "region_end", "0_sequence_length", "1_sequence_length",
         "0_segregating_sites", "1_segregating_sites", "0_w_theta", "1_w_theta", "0_pi", "1_pi",
     ]).map_err(|e| VcfError::Io(e.into()))?;
+
+    let mut cached_reader: Option<Arc<Mutex<CachedReader>>> = None;
 
     for (index, entry) in config_entries.iter().enumerate() {
         println!("Processing entry {}/{}: {}:{}-{}", index + 1, config_entries.len(), entry.seqname, entry.start, entry.end);
@@ -632,6 +639,15 @@ fn process_config_entries(
             }
         };
 
+        if cached_reader.as_ref().map_or(true, |cr| cr.lock().chromosome != entry.seqname) {
+            cached_reader = Some(Arc::new(Mutex::new(CachedReader {
+                reader: open_vcf_reader(&vcf_file)?,
+                chromosome: entry.seqname.clone(),
+            })));
+        }
+
+        let cached_reader_clone = Arc::clone(cached_reader.as_ref().unwrap());
+
         let mut results = Vec::new();
         for haplotype_group in &[0, 1] {
             match process_vcf(
@@ -641,6 +657,7 @@ fn process_config_entries(
                 entry.end,
                 Some(*haplotype_group),
                 Some(entry.samples.clone()),
+                Some(cached_reader_clone.clone()),
             ) {
                 Ok((variants, _, _, _)) => {
                     let seq_length = entry.end - entry.start + 1;
@@ -701,6 +718,7 @@ fn process_config_entries(
     println!("Processing complete. Check the output file: {:?}", output_file);
     Ok(())
 }
+
 
 fn count_segregating_sites(variants: &[Variant]) -> usize {
     variants
