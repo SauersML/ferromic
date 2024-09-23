@@ -73,6 +73,8 @@ impl std::fmt::Display for VcfError {
             VcfError::InvalidRegion(msg) => write!(f, "Invalid region: {}", msg),
             VcfError::NoVcfFiles => write!(f, "No VCF files found"),
             VcfError::InvalidVcfFormat(msg) => write!(f, "Invalid VCF format: {}", msg),
+            VcfError::ChannelSend => write!(f, "Error sending data through channel"),
+            VcfError::ChannelRecv => write!(f, "Error receiving data from channel"),
         }
     }
 }
@@ -387,16 +389,23 @@ fn process_vcf(
         let variants = variants.clone();
         let missing_data_info = missing_data_info.clone();
         move || -> Result<(), VcfError> {
-            while let Ok((variant, local_missing_data_info)) = result_receiver.recv().map_err(|_| VcfError::ChannelRecv)? {
-                variants.lock().push(variant);
-                let mut global_missing_data_info = missing_data_info.lock();
-                global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
-                global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
-                global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
+            while let Ok(result) = result_receiver.recv() {
+                match result {
+                    Ok((variant, local_missing_data_info)) => {
+                        variants.lock().push(variant);
+                        let mut global_missing_data_info = missing_data_info.lock();
+                        global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
+                        global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
+                        global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
+                    },
+                    Err(e) => return Err(e),
+                }
             }
             Ok(())
         }
     });
+    
+
 
     // Wait for all threads to complete
     producer_thread.join().expect("Producer thread panicked")?;
