@@ -1,4 +1,3 @@
-use crate::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -9,6 +8,8 @@ fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use tempfile::{NamedTempFile, tempdir};
     use super::*;
 
     #[test]
