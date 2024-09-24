@@ -47,6 +47,35 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_sample_id() {
+        // Standard cases
+        assert_eq!(extract_sample_id("sample_123"), "123");
+        assert_eq!(extract_sample_id("sample_with_multiple_underscores_456"), "456");
+
+        // Edge cases
+        assert_eq!(extract_sample_id("singlepart"), "singlepart");
+        assert_eq!(extract_sample_id(""), "");
+        assert_eq!(extract_sample_id("_"), "");
+        assert_eq!(extract_sample_id("sample_"), "");
+
+        // Complex sample names
+        assert_eq!(extract_sample_id("EAS_JPT_NA18939"), "NA18939");
+        assert_eq!(extract_sample_id("AMR_PEL_HG02059"), "HG02059");
+
+        // Extra cases
+        assert_eq!(extract_sample_id("double__underscore"), "underscore");
+        assert_eq!(extract_sample_id("triple_part_name_789"), "789");
+    }
+
+    #[test]
+    fn test_harmonic() {
+        assert_eq!(harmonic(1), 1.0);
+        assert!((harmonic(2) - 1.5).abs() < 1e-10);
+        assert!((harmonic(3) - (1.0 + 0.5 + 1.0/3.0)).abs() < 1e-10);
+        assert!((harmonic(10) - 2.9289682539682538).abs() < 1e-10);
+    }
+
+    #[test]
     fn test_calculate_pairwise_differences() {
         let variants = vec![
             create_variant(1, vec![Some(vec![0]), Some(vec![0]), Some(vec![1])]),
@@ -87,35 +116,6 @@ mod tests {
                 assert_eq!(count, 0); // Similarly
             }
         }
-    }
-
-    #[test]
-    fn test_extract_sample_id() {
-        // Standard cases
-        assert_eq!(extract_sample_id("sample_123"), "123");
-        assert_eq!(extract_sample_id("sample_with_multiple_underscores_456"), "456");
-
-        // Edge cases
-        assert_eq!(extract_sample_id("singlepart"), "singlepart");
-        assert_eq!(extract_sample_id(""), "");
-        assert_eq!(extract_sample_id("_"), "");
-        assert_eq!(extract_sample_id("sample_"), "");
-
-        // Complex sample names
-        assert_eq!(extract_sample_id("EAS_JPT_NA18939"), "NA18939");
-        assert_eq!(extract_sample_id("AMR_PEL_HG02059"), "HG02059");
-
-        // Extra cases
-        assert_eq!(extract_sample_id("double__underscore"), "underscore");
-        assert_eq!(extract_sample_id("triple_part_name_789"), "789");
-    }
-
-    #[test]
-    fn test_harmonic() {
-        assert_eq!(harmonic(1), 1.0);
-        assert!((harmonic(2) - 1.5).abs() < 1e-10);
-        assert!((harmonic(3) - (1.0 + 0.5 + 1.0/3.0)).abs() < 1e-10);
-        assert!((harmonic(10) - 2.9289682539682538).abs() < 1e-10);
     }
 
     #[test]
