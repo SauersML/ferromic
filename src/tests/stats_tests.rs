@@ -1,8 +1,3 @@
-// Helper function to create a Variant for testing
-fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
-    Variant { position, genotypes }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
