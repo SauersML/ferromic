@@ -813,7 +813,7 @@ mod tests {
         // Variant should be Some because all samples have GQ >= min_gq
         assert!(result.is_some());
 
-        if let Ok(Some(variant)) = result {
+        if let Some(variant) = result {
             assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1])]);
         }
     }
@@ -908,4 +908,5 @@ chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
         assert!(result_group1.1 > 0.0); // w_theta
         assert!(result_group1.2 > 0.0); // pi
     }
+
 }
