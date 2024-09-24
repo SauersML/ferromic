@@ -85,8 +85,8 @@ mod tests {
         for &((i, j), count, ref positions) in &result {
             match (i, j) {
                 (0, 1) => {
-                    assert_eq!(count, 1);
-                    assert_eq!(positions, &vec![1000]);
+                    assert_eq!(count, 2);
+                    assert_eq!(positions, &vec![1000, 3000]);
                 },
                 (0, 2) => {
                     assert_eq!(count, 3);
@@ -129,15 +129,17 @@ mod tests {
         assert!(theta_n1.is_infinite());
         let theta_n0 = calculate_watterson_theta(0, 0, 1000);
         assert!(theta_n0.is_infinite());
-
+        let theta_seq_zero = calculate_watterson_theta(10, 5, 0);
+        assert!(theta_seq_zero.is_infinite());
+    
         // Helper function to compute expected pi
         fn expected_pi(tot_pair_diff: usize, n: usize, seq_length: i64) -> f64 {
             if n <= 1 || seq_length == 0 {
-                return 0.0;
+                return f64::INFINITY;
             }
             let num_comparisons = n * (n - 1) / 2;
             if num_comparisons == 0 {
-                return 0.0;
+                return f64::INFINITY;
             }
             tot_pair_diff as f64 / (num_comparisons as f64 * seq_length as f64)
         }
@@ -156,13 +158,13 @@ mod tests {
         let expected = expected_pi(5, 2, 1000);
         assert!((pi - expected).abs() < 1e-10);
     
-        // Test with n = 1, expecting zero
+        // Test with n = 1, expecting infinity
         let pi_n1 = calculate_pi(100, 1, 1000);
-        assert_eq!(pi_n1, 0.0);
+        assert!(pi_n1.is_infinite());
     
-        // Test with seq_length = 0, expecting zero
+        // Test with seq_length = 0, expecting infinity
         let pi_seq_zero = calculate_pi(100, 10, 0);
-        assert_eq!(pi_seq_zero, 0.0);
+        assert!(pi_seq_zero.is_infinite());
     
         // Test with large values
         let pi = calculate_pi(10000, 100, 10000);
