@@ -225,7 +225,7 @@ fn process_variants(
     sample_filter: &HashMap<String, (u8, u8)>,
     region_start: i64,
     region_end: i64,
-) -> Result<(usize, f64, f64, usize, f64), VcfError> {
+) -> Result<(usize, f64, f64, usize), VcfError> { // Removed allele_frequency
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
@@ -257,9 +257,8 @@ fn process_variants(
     }
 
     let mut num_segsites = 0;
-    let mut total_1_alleles = 0;
-    let mut total_non_missing_alleles = 0;
-    let mut positions_with_multiple_alleles = HashSet::new();
+    let mut tot_pair_diff = 0;
+    let mut n = haplotype_indices.len();
 
     for variant in variants {
         // Skip variants outside the region (redundant if already filtered)
@@ -267,41 +266,35 @@ fn process_variants(
             continue;
         }
 
-        // Collect alleles for the current haplotype group
-        let mut alleles_present = Vec::new();
-        for &(i, allele_idx) in &haplotype_indices {
-            if let Some(Some(alleles)) = variant.genotypes.get(i) {
-                if let Some(&allele) = alleles.get(allele_idx) {
-                    alleles_present.push(allele);
-                }
-            }
-        }
-
         // Determine if the variant is a segregating site
+        let alleles_present: Vec<u8> = haplotype_indices.iter()
+            .filter_map(|&(i, allele_idx)| {
+                variant.genotypes.get(i)
+                    .and_then(|gt| gt.as_ref())
+                    .and_then(|alleles| alleles.get(allele_idx).copied())
+            })
+            .collect();
+
         let unique_alleles: HashSet<_> = alleles_present.iter().cloned().collect();
         if unique_alleles.len() > 1 {
             num_segsites += 1;
-            positions_with_multiple_alleles.insert(variant.position);
         }
 
-        // Count derived alleles (allele == 1)
-        for allele in alleles_present {
-            if allele == 1 {
-                total_1_alleles += 1;
+        // Count pairwise differences
+        for (i, j) in haplotype_indices.iter().tuple_combinations() {
+            if let (Some(allele_i), Some(allele_j)) = (
+                variant.genotypes.get(i.0).and_then(|gt| gt.as_ref()).and_then(|alleles| alleles.get(i.1).copied()),
+                variant.genotypes.get(j.0).and_then(|gt| gt.as_ref()).and_then(|alleles| alleles.get(j.1).copied()),
+            ) {
+                if allele_i != allele_j {
+                    tot_pair_diff += 1;
+                }
             }
-            total_non_missing_alleles += 1;
         }
     }
 
-    let n = haplotype_indices.len();
-
-    // Calculate pairwise differences
-    let pairwise_diffs = calculate_pairwise_differences(&variants, n);
-    let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
-
-    let seq_length = region_end - region_start + 1;
-    let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
-    let pi = calculate_pi(tot_pair_diff, n, seq_length);
+    let w_theta = calculate_watterson_theta(num_segsites, n, region_end - region_start + 1);
+    let pi = calculate_pi(tot_pair_diff, n, region_end - region_start + 1);
 
     Ok((num_segsites, w_theta, pi, n))
 }
@@ -621,6 +614,29 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     println!("Number of invalid genotypes: {} ({:.2}%)", invalid_genotypes, invalid_percentage);
 
     Ok(entries)
+}
+
+
+fn calculate_allele_frequency(
+    sample_filter: &HashMap<String, (u8, u8)>,
+    haplotype_group: u8,
+) -> (usize, usize) { // Returns (number_of_1s, total_haplotypes)
+    let mut num_ones = 0;
+    let mut total = 0;
+
+    for (_sample, &(left, right)) in sample_filter.iter() {
+        let haplotype = match haplotype_group {
+            0 => left,
+            1 => right,
+            _ => continue, // Invalid group, skip
+        };
+        if haplotype == 1 {
+            num_ones += 1;
+        }
+        total += 1;
+    }
+
+    (num_ones, total)
 }
 
 
