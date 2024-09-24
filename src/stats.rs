@@ -377,7 +377,7 @@ fn process_config_entries(
             }
         };
 
-        let (all_variants, sample_names, _chr_length, missing_data_info) = variants_data;
+        let (all_variants, sample_names, _chr_length, _missing_data_info) = variants_data;
 
         for entry in entries {
             println!("Processing entry: {}:{}-{}", entry.seqname, entry.start, entry.end);
@@ -385,135 +385,85 @@ fn process_config_entries(
             // Define regions
             let sequence_length = entry.end - entry.start + 1;
 
-            // Initialize variables to hold results
-            let mut results_unfiltered: Vec<(RegionStats, usize, f64)> = Vec::new();
-            let mut results_filtered: Vec<(RegionStats, usize, f64)> = Vec::new();
+            // Process haplotype_group=0 (unfiltered)
+            let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) = process_variants(
+                &all_variants,
+                &sample_names,
+                0,
+                &entry.samples_unfiltered,
+                entry.start,
+                entry.end,
+            )?;
 
-            // Process unfiltered haplotype groups (0 and 1)
-            for haplotype_group in &[0u8, 1u8] {
-                match process_variants(
-                    &all_variants,
-                    &sample_names,
-                    *haplotype_group,
-                    &entry.samples_unfiltered,
-                    entry.start,
-                    entry.end,
-                ) {
-                    Ok((num_segsites, w_theta, pi, num_haplotypes, allele_freq)) => {
-                        results_unfiltered.push((
-                            RegionStats {
-                                chr: entry.seqname.clone(),
-                                region_start: entry.start,
-                                region_end: entry.end,
-                                sequence_length,
-                                segregating_sites: num_segsites,
-                                w_theta,
-                                pi,
-                            },
-                            num_haplotypes,
-                            allele_freq,
-                        ));
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Error processing unfiltered variants for {}:{}-{}, haplotype group {}: {:?}",
-                            entry.seqname, entry.start, entry.end, haplotype_group, e
-                        );
-                        continue;
-                    }
-                }
-            }
+            // Process haplotype_group=1 (unfiltered)
+            let (num_segsites_1, w_theta_1, pi_1, n_hap_1_no_filter) = process_variants(
+                &all_variants,
+                &sample_names,
+                1,
+                &entry.samples_unfiltered,
+                entry.start,
+                entry.end,
+            )?;
 
-            // Process filtered haplotype groups (0 and 1)
-            for haplotype_group in &[0u8, 1u8] {
-                match process_variants(
-                    &all_variants,
-                    &sample_names,
-                    *haplotype_group,
-                    &entry.samples_filtered,
-                    entry.start,
-                    entry.end,
-                ) {
-                    Ok((num_segsites, w_theta, pi, num_haplotypes, allele_freq)) => {
-                        results_filtered.push((
-                            RegionStats {
-                                chr: entry.seqname.clone(),
-                                region_start: entry.start,
-                                region_end: entry.end,
-                                sequence_length,
-                                segregating_sites: num_segsites,
-                                w_theta,
-                                pi,
-                            },
-                            num_haplotypes,
-                            allele_freq,
-                        ));
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Error processing filtered variants for {}:{}-{}, haplotype group {}: {:?}",
-                            entry.seqname, entry.start, entry.end, haplotype_group, e
-                        );
-                        continue;
-                    }
-                }
-            }
+            // Calculate allele frequency for haplotype_group=1 (no filter)
+            let freq_1_no_filter = calculate_allele_frequency(&entry.samples_unfiltered, 1);
 
-            // Ensure that all required results are present
-            if results_unfiltered.len() == 2 && results_filtered.len() == 2 {
-                // Assign results for clarity
-                let (stats_0_unfilt, num_hap_0_unfilt, freq_0_unfilt) = &results_unfiltered[0];
-                let (stats_1_unfilt, num_hap_1_unfilt, freq_1_unfilt) = &results_unfiltered[1];
+            // Process haplotype_group=0 (filtered)
+            let (num_segsites_0_filt, w_theta_0_filt, pi_0_filt, n_hap_0_filt) = process_variants(
+                &all_variants,
+                &sample_names,
+                0,
+                &entry.samples_filtered,
+                entry.start,
+                entry.end,
+            )?;
 
-                let (stats_0_filt, num_hap_0_filt, freq_0_filt) = &results_filtered[0];
-                let (stats_1_filt, num_hap_1_filt, freq_1_filt) = &results_filtered[1];
+            // Process haplotype_group=1 (filtered)
+            let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) = process_variants(
+                &all_variants,
+                &sample_names,
+                1,
+                &entry.samples_filtered,
+                entry.start,
+                entry.end,
+            )?;
 
-                // Write the aggregated results to CSV
-                match writer.write_record(&[
-                    &entry.seqname,
-                    &entry.start.to_string(),
-                    &entry.end.to_string(),
-                    &stats_0_unfilt.sequence_length.to_string(),
-                    &stats_1_unfilt.sequence_length.to_string(),
-                    &stats_0_unfilt.segregating_sites.to_string(),
-                    &stats_1_unfilt.segregating_sites.to_string(),
-                    &format!("{:.6}", stats_0_unfilt.w_theta),
-                    &format!("{:.6}", stats_1_unfilt.w_theta),
-                    &format!("{:.6}", stats_0_unfilt.pi),
-                    &format!("{:.6}", stats_1_unfilt.pi),
-                    &stats_0_filt.segregating_sites.to_string(),
-                    &stats_1_filt.segregating_sites.to_string(),
-                    &format!("{:.6}", stats_0_filt.w_theta),
-                    &format!("{:.6}", stats_1_filt.w_theta),
-                    &format!("{:.6}", stats_0_filt.pi),
-                    &format!("{:.6}", stats_1_filt.pi),
-                    &num_hap_0_unfilt.to_string(),
-                    &num_hap_1_unfilt.to_string(),
-                    &num_hap_0_filt.to_string(),
-                    &num_hap_1_filt.to_string(),
-                    &format!("{:.6}", freq_1_unfilt),
-                    &format!("{:.6}", freq_1_filt),
-                ]) {
-                    Ok(_) => {
-                        println!(
-                            "Successfully wrote record for {}:{}-{}",
-                            entry.seqname, entry.start, entry.end
-                        );
-                        writer.flush().map_err(|e| VcfError::Io(e.into()))?;
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Error writing record for {}:{}-{}: {:?}",
-                            entry.seqname, entry.start, entry.end, e
-                        );
-                    }
-                }
-            } else {
-                eprintln!(
-                    "Incomplete results for {}:{}-{}, skipping.",
-                    entry.seqname, entry.start, entry.end
-                );
-            }
+            // Calculate allele frequency for haplotype_group=1 (filtered)
+            let freq_1_filt = calculate_allele_frequency(&entry.samples_filtered, 1);
+
+            // Write the aggregated results to CSV
+            writer.write_record(&[
+                &entry.seqname,
+                &entry.start.to_string(),
+                &entry.end.to_string(),
+                &sequence_length.to_string(), // 0_sequence_length
+                &sequence_length.to_string(), // 1_sequence_length
+                &num_segsites_0.to_string(),  // 0_segregating_sites
+                &num_segsites_1.to_string(),  // 1_segregating_sites
+                &format!("{:.6}", w_theta_0), // 0_w_theta
+                &format!("{:.6}", w_theta_1), // 1_w_theta
+                &format!("{:.6}", pi_0),      // 0_pi
+                &format!("{:.6}", pi_1),      // 1_pi
+                &num_segsites_0_filt.to_string(), // 0_segregating_sites_filtered
+                &num_segsites_1_filt.to_string(), // 1_segregating_sites_filtered
+                &format!("{:.6}", w_theta_0_filt), // 0_w_theta_filtered
+                &format!("{:.6}", w_theta_1_filt), // 1_w_theta_filtered
+                &format!("{:.6}", pi_0_filt),      // 0_pi_filtered
+                &format!("{:.6}", pi_1_filt),      // 1_pi_filtered
+                &n_hap_0_no_filter.to_string(),    // 0_num_hap_no_filter
+                &n_hap_1_no_filter.to_string(),    // 1_num_hap_no_filter
+                &n_hap_0_filt.to_string(),         // 0_num_hap_filter
+                &n_hap_1_filt.to_string(),         // 1_num_hap_filter
+                &format!("{:.6}", freq_1_no_filter), // 1_freq_no_filter
+                &format!("{:.6}", freq_1_filt),       // 1_freq_filter
+            ])
+            .map_err(|e| VcfError::Io(e.into()))?;
+
+            println!(
+                "Successfully wrote record for {}:{}-{}",
+                entry.seqname, entry.start, entry.end
+            );
+            writer.flush().map_err(|e| VcfError::Io(e.into()))?;
         }
     }
 
@@ -521,6 +471,7 @@ fn process_config_entries(
     println!("Processing complete. Check the output file: {:?}", output_file);
     Ok(())
 }
+
 
 
 fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
