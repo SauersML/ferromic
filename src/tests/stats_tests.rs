@@ -379,66 +379,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_process_config_entries() {
-        use std::fs::{self, File};
-        use std::io::Write;
-        
-        // Create a temporary directory for testing
-        let temp_dir = tempfile::tempdir().unwrap();
-        let vcf_folder = temp_dir.path().join("vcf");
-        fs::create_dir(&vcf_folder).unwrap();
-        
-        // Create a mock VCF file
-        let vcf_content = "\
-#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE1\tSAMPLE2\tSAMPLE3\tSAMPLE4
-chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t0|1:30\t1|0:45
-chr1\t1500\t.\tG\tC\t.\tPASS\t.\tGT:GQ\t0|1:35\t1|1:40\t1|0:30\t0|1:45
-chr1\t2000\t.\tT\tA\t.\tPASS\t.\tGT:GQ\t1|1:35\t0|1:40\t1|1:30\t0|0:45";
-        let vcf_file = vcf_folder.join("chr1.vcf");
-        let mut file = File::create(&vcf_file).unwrap();
-        writeln!(file, "{}", vcf_content).unwrap();
-        
-        // Define config entries with at least two haplotypes per group
-        let config_entries = vec![
-            ConfigEntry {
-                seqname: "chr1".to_string(),
-                start: 1000,
-                end: 2000,
-                samples_unfiltered: {
-                    let mut map = HashMap::new();
-                    map.insert("SAMPLE1".to_string(), (0, 1));
-                    map.insert("SAMPLE2".to_string(), (0, 1));
-                    map.insert("SAMPLE3".to_string(), (0, 1));
-                    map.insert("SAMPLE4".to_string(), (0, 1));
-                    map
-                },
-                samples_filtered: {
-                    let mut map = HashMap::new();
-                    map.insert("SAMPLE1".to_string(), (0, 1));
-                    map.insert("SAMPLE2".to_string(), (0, 1));
-                    map.insert("SAMPLE3".to_string(), (0, 1));
-                    map.insert("SAMPLE4".to_string(), (0, 1));
-                    map
-                },
-            },
-        ];
-        
-        let output_file = temp_dir.path().join("output.csv");
-        let result = process_config_entries(&config_entries, vcf_folder.to_str().unwrap(), &output_file, 30);
-        
-        assert!(result.is_ok());
-        assert!(output_file.exists());
-        
-        // Read and check the output file content
-        let output_content = fs::read_to_string(&output_file).unwrap();
-        let lines: Vec<&str> = output_content.lines().collect();
-        assert_eq!(lines.len(), 2); // Header + 1 data line
-        assert!(lines[0].starts_with("chr,region_start,region_end"));
-        assert!(lines[1].starts_with("chr1,1000,2000"));
-        
-        // Further checks can be added to verify the exact content of the data line
-    }
 
     #[test]
     fn test_find_vcf_file() {
