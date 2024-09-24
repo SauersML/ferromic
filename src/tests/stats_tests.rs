@@ -573,54 +573,35 @@ chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
     #[test]
     fn test_haplotype_processing() {
         let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 1]), Some(vec![1, 0])]),
-            create_variant(2000, vec![Some(vec![1, 1]), Some(vec![0, 0])]),
+            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
+            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
+            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
         ];
-        let sample_names = vec!["Sample1".to_string(), "Sample2".to_string()];
+        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
         let mut sample_filter = HashMap::new();
-        sample_filter.insert("Sample1".to_string(), (0, 1)); // Left haplotype in group 0, right in group 1
-        sample_filter.insert("Sample2".to_string(), (1, 0)); // Left haplotype in group 1, right in group 0
+        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
     
-        // Process haplotype group 0 (left haplotypes of Sample1 and right haplotypes of Sample2)
-        let result_group0 = process_variants(
-            &variants,
-            &sample_names,
-            0,
-            &sample_filter,
-            1000,
-            2000,
-        ).unwrap();
+        // Process haplotype group 0
+        let result_group0 = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000).unwrap();
     
-        // Expected haplotypes:
-        // Sample1 left haplotype: alleles at positions 1000 and 2000 -> [0, 1]
-        // Sample2 right haplotype: alleles at positions 1000 and 2000 -> [0, 0]
-        // Allele counts for group 0: [0, 1, 0, 0] -> allele '0' occurs 3 times, allele '1' occurs 1 time
+        // **Add this line to declare and initialize `result_group1`**
         let result_group1 = process_variants(&variants, &sample_names, 1, &sample_filter, 1000, 3000).unwrap();
-
-        assert_eq!(result_group0.4, 1.0 / 4.0); // allele_frequency = total '1's / total alleles
+    
+        // Assertions for group0
+        assert_eq!(result_group0.4, 1.0 / 4.0);
+    
+        // **Now, `result_group1` is properly declared and can be used**
         assert_eq!(result_group1.4, 3.0 / 4.0);
-
     
-        // Process haplotype group 1 (right haplotypes of Sample1 and left haplotypes of Sample2)
-        let result_group1 = process_variants(
-            &variants,
-            &sample_names,
-            1,
-            &sample_filter,
-            1000,
-            2000,
-        ).unwrap();
-    
-        // Expected haplotypes:
-        // Sample1 right haplotype: [1, 1]
-        // Sample2 left haplotype: [1, 0]
-        // Allele counts for group 1: [1, 1, 1, 0] -> allele '1' occurs 3 times, allele '0' occurs 1 time
-    
+        // Additional Assertions
         assert_eq!(result_group1.3, 2); // num_haplotypes
-        assert_eq!(result_group1.4, 1.5 / 2.0); // allele_frequency = total '1's / num_haplotypes
+        assert_eq!(result_group1.4, 1.5 / 2.0); // allele_frequency
     
         // Validate segregating sites and diversity measures
         assert!(result_group0.0 > 0); // num_segsites
         assert!(result_group1.0 > 0); // num_segsites
     }
+
 }
