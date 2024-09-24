@@ -148,8 +148,6 @@ mod tests {
         let theta_n0 = calculate_watterson_theta(0, 0, 1000);
         assert!(theta_n0.is_infinite());
 
-        fn test_calculate_pi() {
-
         // Helper function to compute expected pi
         fn expected_pi(tot_pair_diff: usize, n: usize, seq_length: i64) -> f64 {
             if n <= 1 || seq_length == 0 {
