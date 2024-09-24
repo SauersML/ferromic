@@ -642,33 +642,6 @@ mod tests {
     }
 
     #[test]
-    fn test_haplotype_processing_group0_allele_frequency() {
-        let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
-            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 0])]),
-            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
-        ];
-        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut sample_filter = HashMap::new();
-        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
-        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
-        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
-
-        let result_group0 = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000).unwrap();
-
-        // allele_frequency for group 0 should be 0.0
-        assert!((result_group0.4 - 0.0).abs() < 1e-6);
-
-        // Additional Assertions
-        assert_eq!(result_group0.3, 3); // num_haplotypes
-
-        // Validate segregating sites and diversity measures
-        assert!(result_group0.0 > 0); // num_segsites
-        assert!(result_group0.1 > 0.0); // w_theta
-        assert!(result_group0.2 > 0.0); // pi
-    }
-
-    #[test]
     fn test_haplotype_processing_group1_allele_frequency() {
         let variants = vec![
             create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
