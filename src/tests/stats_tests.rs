@@ -422,4 +422,82 @@ mod tests {
         // Clean up
         temp_dir.close().unwrap();
     }
+
+    #[test]
+    fn test_gq_filtering() {
+        let variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|1:40";
+        let chr = "1";
+        let start = 0;
+        let end = 2000;
+        let min_gq = 30;
+        let mut missing_data_info = MissingDataInfo::default();
+        let sample_names = vec!["Sample1".to_string(), "Sample2".to_string()];
+    
+        let result = parse_variant(
+            variant_line,
+            chr,
+            start,
+            end,
+            &mut missing_data_info,
+            &sample_names,
+            min_gq,
+        ).unwrap();
+    
+        // Variant should be None because one sample has GQ < min_gq
+        assert!(result.is_none());
+    }
+
+    
+    #[test]
+    fn test_parse_config_file() {
+        use std::io::Write;
+        let mut config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSample1\tSample2\n".to_string();
+        config_content += "chr1\t1000\t2000\t.\t.\t.\t.\t0|1_lowconf\t1|1\n";
+        config_content += "chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
+    
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "{}", config_content).unwrap();
+    
+        let config_entries = parse_config_file(temp_file.path()).unwrap();
+    
+        assert_eq!(config_entries.len(), 2);
+    
+        // First entry
+        let entry1 = &config_entries[0];
+        assert_eq!(entry1.samples_unfiltered.len(), 2);
+        assert_eq!(entry1.samples_filtered.len(), 1); // Only Sample2 matches exact genotypes
+    
+        // Second entry
+        let entry2 = &config_entries[1];
+        assert_eq!(entry2.samples_unfiltered.len(), 2);
+        assert_eq!(entry2.samples_filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_haplotype_processing() {
+        let variants = vec![
+            create_variant(1, vec![Some(vec![0, 1]), Some(vec![1, 0])]),
+            create_variant(2, vec![Some(vec![1, 1]), Some(vec![0, 0])]),
+        ];
+        let sample_names = vec!["Sample1".to_string(), "Sample2".to_string()];
+        let mut sample_filter = HashMap::new();
+        sample_filter.insert("Sample1".to_string(), (0, 1)); // Left haplotype in group 0, right in group 1
+        sample_filter.insert("Sample2".to_string(), (1, 0)); // Left haplotype in group 1, right in group 0
+    
+        // Process haplotype group 0
+        let result_group0 = process_variants(
+            &variants,
+            &sample_names,
+            0,
+            &sample_filter,
+            1,
+            2,
+        ).unwrap();
+    
+        // Check that haplotypes are correctly assigned
+        // In group 0, we have Sample1 left haplotype and Sample2 right haplotype
+        // So we should have two haplotypes in total
+        assert_eq!(result_group0.3, 2); // num_haplotypes
+    }
+    
 }
