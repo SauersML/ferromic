@@ -647,6 +647,7 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     Ok(())
 }
 
+
 fn parse_variant(
     line: &str,
     chr: &str,
@@ -656,8 +657,13 @@ fn parse_variant(
     sample_names: &[String],
 ) -> Result<Option<Variant>, VcfError> {
     let fields: Vec<&str> = line.split_whitespace().collect();
-    if fields.len() < 10 {
-        return Err(VcfError::Parse("Invalid VCF line format".to_string()));
+    let expected_fields = 9 + sample_names.len(); // 9 fixed fields + sample fields
+    if fields.len() < expected_fields {
+        return Err(VcfError::Parse(format!(
+            "Invalid VCF line format: expected at least {} fields, found {}",
+            expected_fields,
+            fields.len()
+        )));
     }
 
     let vcf_chr = fields[0].trim_start_matches("chr");
@@ -675,32 +681,31 @@ fn parse_variant(
         eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. This may lead to underestimation of genetic diversity (pi).", pos).yellow());
     }
 
-let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
-    .map(|gt| {
-        missing_data_info.total_data_points += 1;
-        let alleles_str = gt.split(':').next().unwrap_or(".");
-        if alleles_str == "." || alleles_str == "./." || alleles_str == ".|." {
-            missing_data_info.missing_data_points += 1;
-            missing_data_info.positions_with_missing.insert(pos);
-            return None;
-        }
-        let alleles = alleles_str.split(|c| c == '|' || c == '/')
-            .map(|allele| allele.parse::<u8>().ok())
-            .collect::<Option<Vec<u8>>>();
-        if alleles.is_none() {
-            missing_data_info.missing_data_points += 1;
-            missing_data_info.positions_with_missing.insert(pos);
-        }
-        alleles
-    })
-    .collect();
+    let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
+        .map(|gt| {
+            missing_data_info.total_data_points += 1;
+            let alleles_str = gt.split(':').next().unwrap_or(".");
+            if alleles_str == "." || alleles_str == "./." || alleles_str == ".|." {
+                missing_data_info.missing_data_points += 1;
+                missing_data_info.positions_with_missing.insert(pos);
+                return None;
+            }
+            let alleles = alleles_str.split(|c| c == '|' || c == '/')
+                .map(|allele| allele.parse::<u8>().ok())
+                .collect::<Option<Vec<u8>>>();
+            if alleles.is_none() {
+                missing_data_info.missing_data_points += 1;
+                missing_data_info.positions_with_missing.insert(pos);
+            }
+            alleles
+        })
+        .collect();
 
     Ok(Some(Variant {
         position: pos,
         genotypes,
     }))
 }
-
 
 
 fn process_config_entries(
