@@ -877,14 +877,32 @@ fn harmonic(n: usize) -> f64 {
 }
 
 fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
-    seg_sites as f64 / harmonic(n - 1) / seq_length as f64
+    // Handle edge cases
+    if n <= 1 || seq_length == 0 {
+        return f64::INFINITY; // Return infinity if only 1 or fewer haplotypes or if sequence length is zero
+    }
+    
+    let harmonic_value = harmonic((n - 1) as i64);
+    if harmonic_value == 0.0 {
+        return f64::INFINITY; // Return infinity to avoid division by zero
+    }
+
+    seg_sites as f64 / harmonic_value / seq_length as f64
 }
 
 fn calculate_pi(tot_pair_diff: usize, n: usize, seq_length: i64) -> f64 {
+    // Handle edge cases
+    if n <= 1 || seq_length == 0 {
+        return f64::INFINITY; // Return infinity if only 1 or fewer haplotypes or if sequence length is zero
+    }
+
     let num_comparisons = n * (n - 1) / 2;
+    if num_comparisons == 0 {
+        return f64::NAN; // Return NaN if there's somehow no valid pairwise comparison
+    }
+
     tot_pair_diff as f64 / num_comparisons as f64 / seq_length as f64
 }
-
 
 #[cfg(test)]
 mod tests {
