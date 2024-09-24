@@ -270,23 +270,24 @@ mod tests {
         let result_0 = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000);
         assert!(result_0.is_ok());
         if let Ok((num_segsites, w_theta, pi)) = result_0 {
-            assert_eq!(num_segsites, 1); // Corrected expected value
-            // Expected theta = 1 / (1 + 1/2) / 2001 ≈ 0.000666
+            assert_eq!(num_segsites, 2);
+            // Expected theta = 2 / (1.5 * 2001) ≈ 0.000666
             assert!((w_theta - 0.000666).abs() < 1e-6);
-            // Expected pi = 2 / (3 * 2001) ≈ 0.000666
+            // Expected pi = 4 / (3 * 2001) ≈ 0.000666
             assert!((pi - 0.000666).abs() < 1e-6);
         }
-    
+        
         // Test haplotype group 1
         let result_1 = process_variants(&variants, &sample_names, 1, &sample_filter, 1000, 3000);
         assert!(result_1.is_ok());
         if let Ok((num_segsites, w_theta, pi)) = result_1 {
-            assert_eq!(num_segsites, 1); // Corrected expected value
-            // Expected theta = 1 / (1 + 1/2) / 2001 ≈ 0.000666
+            assert_eq!(num_segsites, 2);
+            // Expected theta = 2 / (1.5 * 2001) ≈ 0.000666
             assert!((w_theta - 0.000666).abs() < 1e-6);
-            // Expected pi = 2 / (3 * 2001) ≈ 0.000666
+            // Expected pi = 4 / (3 * 2001) ≈ 0.000666
             assert!((pi - 0.000666).abs() < 1e-6);
         }
+
     
         // Test with empty variants
         let empty_result = process_variants(&[], &sample_names, 0, &sample_filter, 1000, 3000);
