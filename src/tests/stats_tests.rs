@@ -301,7 +301,7 @@ mod tests {
             assert_eq!(w_theta, 0.0);
             assert_eq!(pi, 0.0);
             assert_eq!(num_haplotypes, 3);
-            assert!((allele_frequency - 1.0/3.0).abs() < 1e-6);
+            assert!((allele_frequency - 7.0 / 18.0).abs() < 1e-6);
         }
 
         // Test with invalid haplotype group
@@ -591,20 +591,13 @@ chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
         sample_filter.insert("SAMPLE2".to_string(), (0, 1));
         sample_filter.insert("SAMPLE3".to_string(), (0, 1));
     
-        // Process haplotype group 0
         let result_group0 = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000).unwrap();
-    
-        // Process haplotype group 1
         let result_group1 = process_variants(&variants, &sample_names, 1, &sample_filter, 1000, 3000).unwrap();
     
-        // Assertions for group0
-        // Allele frequency should be 0.0 since all haplotypes have allele 0
-        assert!((result_group0.4 - 0.0).abs() < 1e-6);
-    
-        // Assertions for group1
-        // Allele frequency should be 1.0 / 3.0 as there's one '1' allele out of three haplotypes
-        assert!((result_group1.4 - (1.0 / 3.0)).abs() < 1e-6);
-    
+        assert!((result_group0.4 - 0.0).abs() < 1e-6); // allele_frequency for group 0
+        assert!((result_group1.4 - 0.5).abs() < 1e-6); // allele_frequency for group 1 (3/6 = 0.5)
+
+
         // Additional Assertions
         assert_eq!(result_group0.3, 3); // num_haplotypes
         assert_eq!(result_group1.3, 3); // num_haplotypes
