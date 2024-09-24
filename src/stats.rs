@@ -689,7 +689,16 @@ fn parse_variant(
     sample_names: &[String],
     min_gq: u8,
 ) -> Result<Option<Variant>, VcfError> {
-    let fields: Vec<&str> = line.split_whitespace().collect();
+    let fields: Vec<&str> = line.split('\t').collect();
+
+    let required_fixed_fields = 9;
+    if fields.len() < required_fixed_fields + sample_names.len() {
+        return Err(VcfError::Parse(format!(
+            "Invalid VCF line format: expected at least {} fields, found {}",
+            required_fixed_fields + sample_names.len(),
+            fields.len()
+        )));
+    }
 
     let vcf_chr = fields[0].trim_start_matches("chr");
     if vcf_chr != chr.trim_start_matches("chr") {
