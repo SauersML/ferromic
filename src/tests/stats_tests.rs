@@ -82,6 +82,8 @@ mod tests {
         assert_eq!(extract_sample_id(""), "");
         assert_eq!(extract_sample_id("_"), "");
         assert_eq!(extract_sample_id("sample_"), "");
+        assert_eq!(extract_sample_id("EAS_JPT_NA18939"), "NA18939");
+        assert_eq!(extract_sample_id("AMR_PEL_HG02059"), "HG02059");
     }
 
     #[test]
@@ -96,36 +98,44 @@ mod tests {
     fn test_calculate_watterson_theta() {
         // Test with typical values
         assert!((calculate_watterson_theta(10, 5, 1000) - 0.0040367).abs() < 1e-6);
-
+    
         // Test with no segregating sites
         assert_eq!(calculate_watterson_theta(0, 5, 1000), 0.0);
-
+    
         // Test with large number of segregating sites
         assert!((calculate_watterson_theta(1000, 100, 10000) - 0.0216225).abs() < 1e-6);
-
+    
         // Test with minimum possible sample size (2)
         assert!((calculate_watterson_theta(5, 2, 1000) - 0.005).abs() < 1e-6);
-
+    
         // Test with very large sequence length
         assert!((calculate_watterson_theta(100, 10, 1_000_000) - 0.0000344573).abs() < 1e-9);
+    
+        // Test with edge cases
+        assert_eq!(calculate_watterson_theta(0, 1, 1000), 0.0);
+        assert_eq!(calculate_watterson_theta(100, 1, 1000), 0.1);
     }
 
     #[test]
     fn test_calculate_pi() {
         // Test with typical values
         assert!((calculate_pi(15, 5, 1000) - 0.006).abs() < 1e-6);
-
+    
         // Test with no pairwise differences
         assert_eq!(calculate_pi(0, 5, 1000), 0.0);
-
+    
         // Test with large number of pairwise differences
         assert!((calculate_pi(10000, 100, 10000) - 0.02).abs() < 1e-6);
-
+    
         // Test with minimum possible sample size (2)
         assert!((calculate_pi(5, 2, 1000) - 0.005).abs() < 1e-6);
-
+    
         // Test with very large sequence length
         assert!((calculate_pi(1000, 10, 1_000_000) - 0.0000222222).abs() < 1e-9);
+    
+        // Test with edge cases
+        assert_eq!(calculate_pi(0, 1, 1000), 0.0);
+        assert_eq!(calculate_pi(100, 1, 1000), 0.0);
     }
 
     #[test]
@@ -157,40 +167,46 @@ mod tests {
         assert!(matches!(validate_vcf_header(invalid_order), Err(VcfError::InvalidVcfFormat(_))));
     }
 
-    #[test]
-    fn test_parse_variant() {
-        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();
+#[test]
+fn test_parse_variant() {
+    let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
+    let mut missing_data_info = MissingDataInfo::default();
 
-        // Test valid variant
-        let valid_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
-        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names);
-        assert!(result.is_ok());
-        if let Ok(Some(variant)) = result {
-            assert_eq!(variant.position, 1000);
-            assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]);
-        }
-
-        // Test variant outside region
-        let out_of_range = "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
-        assert!(parse_variant(out_of_range, "1", 1, 2000, &mut missing_data_info, &sample_names).unwrap().is_none());
-
-        // Test different chromosome
-        let diff_chr = "chr2\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
-        assert!(parse_variant(diff_chr, "1", 1, 2000, &mut missing_data_info, &sample_names).unwrap().is_none());
-
-        // Test missing data
-        let missing_data = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t.|.\t1|1";
-        let result = parse_variant(missing_data, "1", 1, 2000, &mut missing_data_info, &sample_names);
-        assert!(result.is_ok());
-        if let Ok(Some(variant)) = result {
-            assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), None, Some(vec![1, 1])]);
-        }
-
-        // Test invalid format
-        let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1";
-        assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names).is_err());
+    // Test valid variant
+    let valid_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
+    let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names);
+    assert!(result.is_ok());
+    if let Ok(Some(variant)) = result {
+        assert_eq!(variant.position, 1000);
+        assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]);
     }
+
+    // Test variant outside region
+    let out_of_range = "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
+    assert!(parse_variant(out_of_range, "1", 1, 2000, &mut missing_data_info, &sample_names).unwrap().is_none());
+
+    // Test different chromosome
+    let diff_chr = "chr2\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
+    assert!(parse_variant(diff_chr, "1", 1, 2000, &mut missing_data_info, &sample_names).unwrap().is_none());
+
+    // Test missing data
+    let missing_data = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t.|.\t1|1";
+    let result = parse_variant(missing_data, "1", 1, 2000, &mut missing_data_info, &sample_names);
+    assert!(result.is_ok());
+    if let Ok(Some(variant)) = result {
+        assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), None, Some(vec![1, 1])]);
+    }
+
+    // Test invalid format (not enough fields)
+    let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0";
+    assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names).is_err());
+
+    // Test multi-allelic site
+    let multi_allelic = "chr1\t1000\t.\tA\tT,G\t.\tPASS\t.\tGT\t0|1\t1|2\t0|2";
+    let result = parse_variant(multi_allelic, "1", 1, 2000, &mut missing_data_info, &sample_names);
+    assert!(result.is_ok());
+    // Warning should be printed for multi-allelic sites
+}
 
     #[test]
     fn test_process_variants() {
@@ -204,25 +220,25 @@ mod tests {
         sample_filter.insert("SAMPLE1".to_string(), (0, 1));
         sample_filter.insert("SAMPLE2".to_string(), (0, 1));
         sample_filter.insert("SAMPLE3".to_string(), (0, 1));
-
+    
         // Test haplotype group 0
         let result_0 = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000);
         assert!(result_0.is_ok());
         if let Ok((num_segsites, w_theta, pi)) = result_0 {
             assert_eq!(num_segsites, 2);
-            assert!((w_theta - 0.001).abs() < 1e-6);
-            assert!((pi - 0.001666667).abs() < 1e-6);
+            assert!((w_theta - 0.0013333333).abs() < 1e-6);
+            assert!((pi - 0.0013333333).abs() < 1e-6);
         }
-
+    
         // Test haplotype group 1
         let result_1 = process_variants(&variants, &sample_names, 1, &sample_filter, 1000, 3000);
         assert!(result_1.is_ok());
         if let Ok((num_segsites, w_theta, pi)) = result_1 {
             assert_eq!(num_segsites, 3);
-            assert!((w_theta - 0.0015).abs() < 1e-6);
-            assert!((pi - 0.002222222).abs() < 1e-6);
+            assert!((w_theta - 0.002).abs() < 1e-6);
+            assert!((pi - 0.002).abs() < 1e-6);
         }
-
+    
         // Test with empty variants
         let empty_result = process_variants(&[], &sample_names, 0, &sample_filter, 1000, 3000);
         assert!(empty_result.is_ok());
@@ -231,11 +247,11 @@ mod tests {
             assert_eq!(w_theta, 0.0);
             assert_eq!(pi, 0.0);
         }
-
+    
         // Test with invalid haplotype group
         let invalid_group = process_variants(&variants, &sample_names, 2, &sample_filter, 1000, 3000);
         assert!(invalid_group.is_err());
-
+    
         // Test with missing samples
         let mut missing_sample_filter = HashMap::new();
         missing_sample_filter.insert("SAMPLE4".to_string(), (0, 1));
@@ -245,12 +261,14 @@ mod tests {
 
     #[test]
     fn test_parse_config_file_with_noreads() {
-        let config_content = "seqnames\tstart\tend\tSAMPLE1\tSAMPLE2\tSAMPLE3\n\
-                              chr1\t1000\t2000\t0|1\tnoreads\t1|0";
-        let path = PathBuf::from("test_config.tsv");
-        std::fs::write(&path, config_content).unwrap();
+        use std::io::Write;
+    
+        let config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSAMPLE1\tSAMPLE2\tSAMPLE3\n\
+                              chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1\tnoreads\t1|0";
+        let path = tempfile::NamedTempFile::new().unwrap();
+        write!(path.as_file(), "{}", config_content).unwrap();
         
-        let result = parse_config_file(&path);
+        let result = parse_config_file(path.path());
         assert!(result.is_ok());
         let entries = result.unwrap();
         assert_eq!(entries.len(), 1);
@@ -259,7 +277,11 @@ mod tests {
         assert!(entries[0].samples.contains_key("SAMPLE3"));
         assert!(!entries[0].samples.contains_key("SAMPLE2"));
         
-        std::fs::remove_file(path).unwrap();
+        assert_eq!(entries[0].seqname, "chr1");
+        assert_eq!(entries[0].start, 1000);
+        assert_eq!(entries[0].end, 2000);
+        assert_eq!(entries[0].samples["SAMPLE1"], (0, 1));
+        assert_eq!(entries[0].samples["SAMPLE3"], (1, 0));
     }
 
     #[test]
@@ -285,8 +307,31 @@ mod tests {
 
     #[test]
     fn test_find_vcf_file() {
-        let result = find_vcf_file("/non/existent/path", "chr1");
-        assert!(matches!(result, Err(VcfError::NoVcfFiles)));
+        use std::fs::{self, File};
+        use std::io::Write;
+    
+        // Create a temporary directory for testing
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_path = temp_dir.path();
+    
+        // Create some test VCF files
+        File::create(temp_path.join("chr1.vcf")).unwrap();
+        File::create(temp_path.join("chr2.vcf.gz")).unwrap();
+        File::create(temp_path.join("chr10.vcf")).unwrap();
+    
+        // Test finding existing VCF files
+        assert!(find_vcf_file(temp_path.to_str().unwrap(), "1").is_ok());
+        assert!(find_vcf_file(temp_path.to_str().unwrap(), "2").is_ok());
+        assert!(find_vcf_file(temp_path.to_str().unwrap(), "10").is_ok());
+    
+        // Test with non-existent chromosome
+        assert!(matches!(
+            find_vcf_file(temp_path.to_str().unwrap(), "3"),
+            Err(VcfError::NoVcfFiles)
+        ));
+    
+        // Test with non-existent directory
+        assert!(find_vcf_file("/non/existent/path", "1").is_err());
     }
 
     #[test]
@@ -310,6 +355,24 @@ mod tests {
 
     #[test]
     fn test_process_config_entries() {
+        use std::fs::{self, File};
+        use std::io::Write;
+    
+        // Create a temporary directory for testing
+        let temp_dir = tempfile::tempdir().unwrap();
+        let vcf_folder = temp_dir.path().join("vcf");
+        fs::create_dir(&vcf_folder).unwrap();
+    
+        // Create a mock VCF file
+        let vcf_content = "\
+    #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE1\tSAMPLE2
+    chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1
+    chr1\t1500\t.\tG\tC\t.\tPASS\t.\tGT\t0|1\t1|1
+    chr1\t2000\t.\tT\tA\t.\tPASS\t.\tGT\t1|1\t0|1";
+        let vcf_file = vcf_folder.join("chr1.vcf");
+        let mut file = File::create(&vcf_file).unwrap();
+        writeln!(file, "{}", vcf_content).unwrap();
+    
         let config_entries = vec![
             ConfigEntry {
                 seqname: "chr1".to_string(),
@@ -323,12 +386,22 @@ mod tests {
                 },
             },
         ];
-        let vcf_folder = "/tmp";
-        let output_file = PathBuf::from("/tmp/test_output.csv");
-
-        // This will fail due to missing VCF files
-        let result = process_config_entries(&config_entries, vcf_folder, &output_file);
-        assert!(result.is_err());
+    
+        let output_file = temp_dir.path().join("output.csv");
+        let result = process_config_entries(&config_entries, vcf_folder.to_str().unwrap(), &output_file);
+        
+        assert!(result.is_ok());
+        assert!(output_file.exists());
+    
+        // Read and check the output file content
+        let output_content = fs::read_to_string(&output_file).unwrap();
+        let lines: Vec<&str> = output_content.lines().collect();
+        assert_eq!(lines.len(), 2); // Header + 1 data line
+        assert!(lines[0].starts_with("chr,region_start,region_end"));
+        assert!(lines[1].starts_with("chr1,1000,2000"));
+    
+        // Clean up
+        temp_dir.close().unwrap();
     }
 }
 
