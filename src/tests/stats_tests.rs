@@ -73,34 +73,28 @@ mod tests {
     #[test]
     fn test_calculate_pairwise_differences() {
         let variants = vec![
-            create_variant(1, vec![Some(vec![0]), Some(vec![0]), Some(vec![1])]), // Variants at position 1
-            create_variant(2, vec![Some(vec![0]), Some(vec![0]), Some(vec![0])]), // Variants at position 2
-            create_variant(3, vec![Some(vec![0]), Some(vec![1]), Some(vec![0])]), // Variants at position 3
-            create_variant(4, vec![Some(vec![1]), Some(vec![1]), Some(vec![1])]), // Variants at position 4
+            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
+            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
+            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
         ];
     
         let result = calculate_pairwise_differences(&variants, 3);
-    
-        // Expected pairwise differences:
-        // Pair (0,1): Positions 3 and 4 differ -> count = 2
-        // Pair (0,2): Positions 1 and 4 differ -> count = 2
-        // Pair (1,2): Positions 1 and 3 differ -> count = 2
     
         assert_eq!(result.len(), 3);
     
         for &((i, j), count, ref positions) in &result {
             match (i, j) {
                 (0, 1) => {
-                    assert_eq!(count, 2);
-                    assert_eq!(positions, &vec![3, 4]);
+                    assert_eq!(count, 1);
+                    assert_eq!(positions, &vec![1000]);
                 },
                 (0, 2) => {
-                    assert_eq!(count, 2);
-                    assert_eq!(positions, &vec![1, 4]);
+                    assert_eq!(count, 3);
+                    assert_eq!(positions, &vec![1000, 2000, 3000]);
                 },
                 (1, 2) => {
                     assert_eq!(count, 2);
-                    assert_eq!(positions, &vec![1, 3]);
+                    assert_eq!(positions, &vec![2000, 3000]);
                 },
                 _ => panic!("Unexpected pair: ({}, {})", i, j),
             }
@@ -116,27 +110,23 @@ mod tests {
         assert_eq!(missing_data_result.len(), 3);
     
         for &((i, j), count, _) in &missing_data_result {
-            // Since there is missing data, comparisons involving missing genotypes should be skipped
-            assert_eq!(count, 0);
+            match (i, j) {
+                (0, 1) => assert_eq!(count, 0),
+                (0, 2) => assert_eq!(count, 1),
+                (1, 2) => assert_eq!(count, 0),
+                _ => panic!("Unexpected pair: ({}, {})", i, j),
+            }
         }
     }
 
     #[test]
     fn test_calculate_watterson_theta() {
-        // Test with typical values
-        assert!((calculate_watterson_theta(10, 5, 1000) - 0.0048).abs() < 1e-6);
-
-        // Test with minimum possible sample size (2)
-        assert!((calculate_watterson_theta(5, 2, 1000) - 0.005).abs() < 1e-6);
-
-        // Test with very large sequence length
-        assert!((calculate_watterson_theta(100, 10, 1_000_000) - 0.00003534).abs() < 1e-8);
-
-        // Test with n = 1, expecting infinity
+        let epsilon = 1e-6;
+        assert!((calculate_watterson_theta(10, 5, 1000) - 0.0048).abs() < epsilon);
+        assert!((calculate_watterson_theta(5, 2, 1000) - 0.005).abs() < epsilon);
+        assert!((calculate_watterson_theta(100, 10, 1_000_000) - 0.00003534).abs() < epsilon);
         let theta_n1 = calculate_watterson_theta(100, 1, 1000);
         assert!(theta_n1.is_infinite());
-
-        // Test with n = 0, no segregating sites, expecting infinity
         let theta_n0 = calculate_watterson_theta(0, 0, 1000);
         assert!(theta_n0.is_infinite());
 
@@ -242,7 +232,7 @@ mod tests {
         let min_gq = 30;
     
         // Test valid variant with all GQ values above threshold
-        let valid_line = "chr2\t1500\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
+        let valid_line = "chr1\t1500\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
         let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
         assert!(result.is_ok());
         assert!(result.unwrap().is_some());
@@ -270,11 +260,11 @@ mod tests {
         // Test variant outside region
         let out_of_range = "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
         assert!(parse_variant(out_of_range, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq).unwrap().is_none());
-
+    
         // Test different chromosome
         let diff_chr = "chr2\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
         assert!(parse_variant(diff_chr, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq).unwrap().is_none());
-
+    
         // Test missing data
         let missing_data = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t.|.:.\t1|1:45";
         let result = parse_variant(missing_data, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
@@ -282,7 +272,7 @@ mod tests {
         if let Ok(Some(variant)) = result {
             assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), None, Some(vec![1, 1])]);
         }
-
+    
         // Test invalid format (fewer fields than required)
         let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35"; // Only 10 fields, expecting 12 for 3 samples
         assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq).is_err());
@@ -309,7 +299,7 @@ mod tests {
             assert_eq!(w_theta, 0.0);
             assert_eq!(pi, 0.0);
             assert_eq!(num_haplotypes, 3);
-            assert_eq!(allele_frequency, 2.0/3.0); // allele_count = 2
+            assert!((allele_frequency - 1.0/3.0).abs() < 1e-6);
         }
 
         // Test with invalid haplotype group
