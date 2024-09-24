@@ -961,19 +961,19 @@ fn calculate_pairwise_differences(
             let mut diff_count = 0;
             let mut diff_positions = Vec::new();
 
-                for v in variants.iter() {
-                    if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
-                        if gi != gj {
-                            diff_count += 1;
-                            diff_positions.push(v.position);
-                        }
-                    } else {
-                        // Skip positions where one or both genotypes are missing
-                        continue;
+            for v in variants.iter() {
+                if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
+                    if gi != gj {
+                        diff_count += 1;
+                        diff_positions.push(v.position);
                     }
+                } else {
+                    // Skip positions where one or both genotypes are missing
+                    continue;
                 }
             }
 
+            // Return statement should be inside the closure
             ((i, j), diff_count, diff_positions)
         }).collect::<Vec<_>>()
     }).collect()
