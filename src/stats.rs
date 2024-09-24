@@ -237,8 +237,29 @@ fn process_variants(
         vcf_sample_id_to_index.insert(sample_id, i);
     }
 
-    let mut haplotype_indices = Vec::new();
-    let mut allele_count = 0;
+    // Initialize allele counts
+    let mut allele_counts = HashMap::new();
+    let mut num_haplotypes = 0;
+    
+    // For each variant, extract the genotypes and count alleles
+    for variant in &filtered_variants {
+        for genotype in &variant.genotypes {
+            if let Some(alleles) = genotype {
+                for allele in alleles {
+                    *allele_counts.entry(*allele).or_insert(0) += 1;
+                    num_haplotypes += 1;
+                }
+            }
+        }
+    }
+    
+    // Calculate allele frequencies
+    let total_alleles = num_haplotypes as f64;
+    let allele_frequency = if total_alleles > 0.0 {
+        allele_counts.get(&1).cloned().unwrap_or(0) as f64 / total_alleles
+    } else {
+        0.0
+    };
 
     for (sample_name, &(left, right)) in sample_filter.iter() {
         if let Some(&i) = vcf_sample_id_to_index.get(sample_name.as_str()) {
@@ -294,11 +315,6 @@ fn process_variants(
     }
 
     let num_haplotypes = haplotype_indices.len();
-    let allele_frequency = if num_haplotypes > 0 {
-        allele_count as f64 / num_haplotypes as f64
-    } else {
-        0.0
-    };
 
     // Calculate pairwise differences
     let pairwise_diffs = calculate_pairwise_differences(&filtered_variants, n);
