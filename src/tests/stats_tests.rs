@@ -136,13 +136,13 @@ mod tests {
         // Expected theta = 100 / (2.8289682539682537 * 1,000,000) ≈ 0.00003534
         assert!((calculate_watterson_theta(100, 10, 1_000_000) - 0.00003534).abs() < 1e-8);
     
-        // Test with n = 1, expecting NaN
+        // Test with n = 1, expecting infinity
         let theta_n1 = calculate_watterson_theta(100, 1, 1000);
-        assert!(theta_n1.is_nan(), "Expected Watterson's theta to be NaN when n = 1, got {}", theta_n1);
-    
-        // Test with n = 0, expecting NaN
+        assert!(theta_n1.is_infinite(), "Expected Watterson's theta to be infinity when n = 1, got {}", theta_n1);
+        
+        // Test with n = 0, expecting infinity
         let theta_n0 = calculate_watterson_theta(0, 0, 1000);
-        assert!(theta_n0.is_nan(), "Expected Watterson's theta to be NaN when n = 0, got {}", theta_n0);
+        assert!(theta_n0.is_infinite(), "Expected Watterson's theta to be infinity when n = 0, got {}", theta_n0);
     }
 
     #[test]
@@ -170,13 +170,13 @@ mod tests {
         // Expected pi = 1000 / (45 * 1,000,000) ≈ 0.0000222222
         assert!((calculate_pi(1000, 10, 1_000_000) - 0.0000222222).abs() < 1e-9);
 
-        // Test with n = 1, expecting NaN
+        // Test with n = 1, expecting infinity
         let pi_n1 = calculate_pi(100, 1, 1000);
-        assert!(pi_n1.is_nan(), "Expected pi to be NaN when n = 1, got {}", pi_n1);
-    
-        // Test with n = 0, expecting NaN
+        assert!(pi_n1.is_infinite(), "Expected pi to be infinity when n = 1, got {}", pi_n1);
+        
+        // Test with n = 0, expecting infinity
         let pi_n0 = calculate_pi(0, 0, 1000);
-        assert!(pi_n0.is_nan(), "Expected pi to be NaN when n = 0, got {}", pi_n0);
+        assert!(pi_n0.is_infinite(), "Expected pi to be infinity when n = 0, got {}", pi_n0);
     }
 
     #[test]
