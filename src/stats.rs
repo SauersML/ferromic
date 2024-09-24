@@ -1008,7 +1008,6 @@ fn parse_variant(
 
 
 
-
 fn count_segregating_sites(variants: &[Variant]) -> usize {
     variants
         .par_iter()
