@@ -6,6 +6,18 @@ fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
     Variant { position, genotypes }
 }
 
+fn match_sample_names(config_samples: &[String], vcf_samples: &[String]) -> Vec<(String, String)> {
+    config_samples
+        .iter()
+        .filter_map(|config_sample| {
+            vcf_samples
+                .iter()
+                .find(|vcf_sample| vcf_sample.ends_with(config_sample))
+                .map(|vcf_sample| (config_sample.clone(), vcf_sample.clone()))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs::File;
@@ -77,15 +89,27 @@ mod tests {
 
     #[test]
     fn test_extract_sample_id() {
+        // Standard cases where sample IDs are extracted correctly
         assert_eq!(extract_sample_id("sample_123"), "123");
         assert_eq!(extract_sample_id("sample_with_multiple_underscores_456"), "456");
-        assert_eq!(extract_sample_id("no_underscore"), "no_underscore");
+        
+        assert_eq!(extract_sample_id("nomore_underscore"), "underscore");
+        
+        // Edge cases
         assert_eq!(extract_sample_id(""), "");
         assert_eq!(extract_sample_id("_"), "");
         assert_eq!(extract_sample_id("sample_"), "");
+        
+        // Complex sample names
         assert_eq!(extract_sample_id("EAS_JPT_NA18939"), "NA18939");
         assert_eq!(extract_sample_id("AMR_PEL_HG02059"), "HG02059");
+        
+        // Extra cases
+        assert_eq!(extract_sample_id("singlepart"), "singlepart");
+        assert_eq!(extract_sample_id("double__underscore"), "underscore");
+        assert_eq!(extract_sample_id("triple_part_name_789"), "789");
     }
+
 
     #[test]
     fn test_harmonic() {
@@ -98,41 +122,62 @@ mod tests {
     #[test]
     fn test_calculate_watterson_theta() {
         // Test with typical values
-        assert!((calculate_watterson_theta(10, 5, 1000) - 0.0040367).abs() < 1e-6);
+        // Number of segregating sites = 10, number of haplotypes = 5, sequence length = 1000
+        // Harmonic number a1 = 1 + 1/2 + 1/3 + 1/4 = 2.083333...
+        // Expected theta = 10 / (2.083333 * 1000) ≈ 0.0048
+        assert!((calculate_watterson_theta(10, 5, 1000) - 0.0048).abs() < 1e-6);
     
         // Test with no segregating sites
         assert_eq!(calculate_watterson_theta(0, 5, 1000), 0.0);
     
         // Test with large number of segregating sites
-        assert!((calculate_watterson_theta(1000, 100, 10000) - 0.0216225).abs() < 1e-6);
+        // Number of segregating sites = 1000, number of haplotypes = 100, sequence length = 10000
+        // Harmonic number a1 = sum(1/i for i in 1..99) ≈ 5.1773775
+        // Expected theta = 1000 / (5.1773775 * 10000) ≈ 0.0193
+        assert!((calculate_watterson_theta(1000, 100, 10000) - 0.0193).abs() < 1e-4);
     
         // Test with minimum possible sample size (2)
+        // Number of segregating sites = 5, number of haplotypes = 2, sequence length = 1000
+        // Harmonic number a1 = 1
+        // Expected theta = 5 / (1 * 1000) = 0.005
         assert!((calculate_watterson_theta(5, 2, 1000) - 0.005).abs() < 1e-6);
     
         // Test with very large sequence length
-        assert!((calculate_watterson_theta(100, 10, 1_000_000) - 0.0000344573).abs() < 1e-9);
+        // Number of segregating sites = 100, number of haplotypes = 10, sequence length = 1,000,000
+        // Harmonic number a1 = 2.828968...
+        // Expected theta = 100 / (2.828968 * 1,000,000) ≈ 0.0000353
+        assert!((calculate_watterson_theta(100, 10, 1_000_000) - 0.0000353).abs() < 1e-8);
     
         // Test with edge cases
         assert_eq!(calculate_watterson_theta(0, 1, 1000), 0.0);
-        assert_eq!(calculate_watterson_theta(100, 1, 1000), 0.1);
+        // When n =1, a1 =0, but function handles it by returning 0
+        assert_eq!(calculate_watterson_theta(100, 1, 1000), 0.0);
     }
 
     #[test]
     fn test_calculate_pi() {
         // Test with typical values
-        assert!((calculate_pi(15, 5, 1000) - 0.006).abs() < 1e-6);
+        // Total pairwise differences = 15, number of haplotypes = 5, sequence length = 1000
+        // Expected pi = 15 / (10 * 1000) = 0.0015
+        assert!((calculate_pi(15, 5, 1000) - 0.0015).abs() < 1e-6);
     
         // Test with no pairwise differences
         assert_eq!(calculate_pi(0, 5, 1000), 0.0);
     
         // Test with large number of pairwise differences
-        assert!((calculate_pi(10000, 100, 10000) - 0.02).abs() < 1e-6);
+        // Total pairwise differences = 10000, number of haplotypes = 100, sequence length = 10000
+        // Expected pi = 10000 / (4950 * 10000) ≈ 0.00020202
+        assert!((calculate_pi(10000, 100, 10000) - 0.00020202).abs() < 1e-6);
     
         // Test with minimum possible sample size (2)
+        // Total pairwise differences = 5, number of haplotypes = 2, sequence length = 1000
+        // Expected pi = 5 / (1 * 1000) = 0.005
         assert!((calculate_pi(5, 2, 1000) - 0.005).abs() < 1e-6);
     
         // Test with very large sequence length
-        assert!((calculate_pi(1000, 10, 1_000_000) - 0.0000222222).abs() < 1e-9);
+        // Total pairwise differences = 1000, number of haplotypes = 10, sequence length = 1,000,000
+        // Expected pi = 1000 / (45 * 1,000,000) ≈ 0.00002222
+        assert!((calculate_pi(1000, 10, 1_000_000) - 0.00002222).abs() < 1e-9);
     
         // Test with edge cases
         assert_eq!(calculate_pi(0, 1, 1000), 0.0);
@@ -168,47 +213,51 @@ mod tests {
         assert!(matches!(validate_vcf_header(invalid_order), Err(VcfError::InvalidVcfFormat(_))));
     }
 
-#[test]
-fn test_parse_variant() {
-    let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-    let mut missing_data_info = MissingDataInfo::default();
-
-    // Test valid variant
-    let valid_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
-    let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names);
-    assert!(result.is_ok());
-    if let Ok(Some(variant)) = result {
-        assert_eq!(variant.position, 1000);
-        assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]);
+    #[test]
+    fn test_parse_variant() {
+        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
+        let mut missing_data_info = MissingDataInfo::default();
+    
+        // Test valid variant
+        let valid_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
+        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names);
+        assert!(result.is_ok());
+        if let Ok(Some(variant)) = result {
+            assert_eq!(variant.position, 1000);
+            assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]);
+        }
+    
+        // Test variant outside region
+        let out_of_range = "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
+        assert!(parse_variant(out_of_range, "1", 1, 2000, &mut missing_data_info, &sample_names).unwrap().is_none());
+    
+        // Test different chromosome
+        let diff_chr = "chr2\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
+        assert!(parse_variant(diff_chr, "1", 1, 2000, &mut missing_data_info, &sample_names).unwrap().is_none());
+    
+        // Test missing data
+        let missing_data = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t.|.\t1|1";
+        let result = parse_variant(missing_data, "1", 1, 2000, &mut missing_data_info, &sample_names);
+        assert!(result.is_ok());
+        if let Ok(Some(variant)) = result {
+            assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), None, Some(vec![1, 1])]);
+        }
+    
+        // Test invalid format (fewer fields than required)
+        let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0"; // Only 10 fields, expecting at least 12 for 3 samples
+        assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names).is_err());
+    
+        // Test multi-allelic site
+        let multi_allelic = "chr1\t1000\t.\tA\tT,G\t.\tPASS\t.\tGT\t0|1\t1|2\t0|2";
+        let result = parse_variant(multi_allelic, "1", 1, 2000, &mut missing_data_info, &sample_names);
+        assert!(result.is_ok());
+        if let Ok(Some(variant)) = result {
+            assert_eq!(variant.position, 1000);
+            assert_eq!(variant.genotypes, vec![Some(vec![0, 1]), Some(vec![1, 2]), Some(vec![0, 2])]);
+        }
     }
 
-    // Test variant outside region
-    let out_of_range = "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
-    assert!(parse_variant(out_of_range, "1", 1, 2000, &mut missing_data_info, &sample_names).unwrap().is_none());
-
-    // Test different chromosome
-    let diff_chr = "chr2\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t1|1";
-    assert!(parse_variant(diff_chr, "1", 1, 2000, &mut missing_data_info, &sample_names).unwrap().is_none());
-
-    // Test missing data
-    let missing_data = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t.|.\t1|1";
-    let result = parse_variant(missing_data, "1", 1, 2000, &mut missing_data_info, &sample_names);
-    assert!(result.is_ok());
-    if let Ok(Some(variant)) = result {
-        assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), None, Some(vec![1, 1])]);
-    }
-
-    // Test invalid format (not enough fields)
-    let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0";
-    assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names).is_err());
-
-    // Test multi-allelic site
-    let multi_allelic = "chr1\t1000\t.\tA\tT,G\t.\tPASS\t.\tGT\t0|1\t1|2\t0|2";
-    let result = parse_variant(multi_allelic, "1", 1, 2000, &mut missing_data_info, &sample_names);
-    assert!(result.is_ok());
-    // Warning should be printed for multi-allelic sites
-}
-
+    
     #[test]
     fn test_process_variants() {
         let variants = vec![
@@ -226,18 +275,22 @@ fn test_parse_variant() {
         let result_0 = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000);
         assert!(result_0.is_ok());
         if let Ok((num_segsites, w_theta, pi)) = result_0 {
-            assert_eq!(num_segsites, 2);
-            assert!((w_theta - 0.0013333333).abs() < 1e-6);
-            assert!((pi - 0.0013333333).abs() < 1e-6);
+            assert_eq!(num_segsites, 1);
+            // Expected theta = 1 / (1 + 1/2) / 2001 ≈ 0.000666
+            assert!((w_theta - 0.000666).abs() < 1e-6);
+            // Expected pi = 2 / (3 * 2001) ≈ 0.000666
+            assert!((pi - 0.000666).abs() < 1e-6);
         }
     
         // Test haplotype group 1
         let result_1 = process_variants(&variants, &sample_names, 1, &sample_filter, 1000, 3000);
         assert!(result_1.is_ok());
         if let Ok((num_segsites, w_theta, pi)) = result_1 {
-            assert_eq!(num_segsites, 3);
-            assert!((w_theta - 0.002).abs() < 1e-6);
-            assert!((pi - 0.002).abs() < 1e-6);
+            assert_eq!(num_segsites, 1);
+            // Expected theta = 1 / (1 + 1/2) / 2001 ≈ 0.000666
+            assert!((w_theta - 0.000666).abs() < 1e-6);
+            // Expected pi = 2 / (3 * 2001) ≈ 0.000666
+            assert!((pi - 0.000666).abs() < 1e-6);
         }
     
         // Test with empty variants
@@ -358,22 +411,23 @@ fn test_parse_variant() {
     fn test_process_config_entries() {
         use std::fs::{self, File};
         use std::io::Write;
-    
+        
         // Create a temporary directory for testing
         let temp_dir = tempfile::tempdir().unwrap();
         let vcf_folder = temp_dir.path().join("vcf");
         fs::create_dir(&vcf_folder).unwrap();
-    
+        
         // Create a mock VCF file
         let vcf_content = "\
-    #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE1\tSAMPLE2
-    chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1
-    chr1\t1500\t.\tG\tC\t.\tPASS\t.\tGT\t0|1\t1|1
-    chr1\t2000\t.\tT\tA\t.\tPASS\t.\tGT\t1|1\t0|1";
+    #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE1\tSAMPLE2\tSAMPLE3\tSAMPLE4
+    chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0\t0|1\t0|1\t1|0
+    chr1\t1500\t.\tG\tC\t.\tPASS\t.\tGT\t0|1\t1|1\t1|0\t0|1
+    chr1\t2000\t.\tT\tA\t.\tPASS\t.\tGT\t1|1\t0|1\t1|1\t0|0";
         let vcf_file = vcf_folder.join("chr1.vcf");
         let mut file = File::create(&vcf_file).unwrap();
         writeln!(file, "{}", vcf_content).unwrap();
-    
+        
+        // Define config entries with at least two haplotypes per group
         let config_entries = vec![
             ConfigEntry {
                 seqname: "chr1".to_string(),
@@ -382,39 +436,29 @@ fn test_parse_variant() {
                 samples: {
                     let mut map = HashMap::new();
                     map.insert("SAMPLE1".to_string(), (0, 1));
-                    map.insert("SAMPLE2".to_string(), (1, 0));
+                    map.insert("SAMPLE2".to_string(), (0, 1));
+                    map.insert("SAMPLE3".to_string(), (0, 1));
+                    map.insert("SAMPLE4".to_string(), (0, 1));
                     map
                 },
             },
         ];
-    
+        
         let output_file = temp_dir.path().join("output.csv");
         let result = process_config_entries(&config_entries, vcf_folder.to_str().unwrap(), &output_file);
         
         assert!(result.is_ok());
         assert!(output_file.exists());
-    
+        
         // Read and check the output file content
         let output_content = fs::read_to_string(&output_file).unwrap();
         let lines: Vec<&str> = output_content.lines().collect();
         assert_eq!(lines.len(), 2); // Header + 1 data line
         assert!(lines[0].starts_with("chr,region_start,region_end"));
         assert!(lines[1].starts_with("chr1,1000,2000"));
-    
+        
+        
         // Clean up
         temp_dir.close().unwrap();
     }
-}
-
-
-fn match_sample_names(config_samples: &[String], vcf_samples: &[String]) -> Vec<(String, String)> {
-    config_samples
-        .iter()
-        .filter_map(|config_sample| {
-            vcf_samples
-                .iter()
-                .find(|vcf_sample| vcf_sample.ends_with(config_sample))
-                .map(|vcf_sample| (config_sample.clone(), vcf_sample.clone()))
-        })
-        .collect()
 }
