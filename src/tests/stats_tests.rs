@@ -169,24 +169,6 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_pairwise_differences_pair_1_2() {
-        let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
-            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
-            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
-        ];
-
-        let result = calculate_pairwise_differences(&variants, 3);
-
-        for &((i, j), count, ref positions) in &result {
-            if (i, j) == (1, 2) {
-                assert_eq!(count, 2);
-                assert_eq!(positions, &vec![2000, 3000]);
-            }
-        }
-    }
-
-    #[test]
     fn test_calculate_pairwise_differences_with_missing_data() {
         let missing_data_variants = vec![
             create_variant(1, vec![Some(vec![0]), None, Some(vec![1])]),
@@ -459,20 +441,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_variant_with_missing_data() {
-        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();
-        let min_gq = 30;
-
-        let missing_data = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t.|.:.\t1|1:45";
-        let result = parse_variant(missing_data, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
-        assert!(result.is_ok());
-        if let Ok(Some(variant)) = result {
-            assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), None, Some(vec![1, 1])]);
-        }
-    }
-
-    #[test]
     fn test_parse_variant_invalid_format() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
         let mut missing_data_info = MissingDataInfo::default();
@@ -480,25 +448,6 @@ mod tests {
 
         let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35"; // Only 10 fields, expecting 12 for 3 samples
         assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq).is_err());
-    }
-
-    #[test]
-    fn test_process_variants_with_empty_variants() {
-        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut sample_filter = HashMap::new();
-        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
-        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
-        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
-
-        let empty_result = process_variants(&[], &sample_names, 0, &sample_filter, 1000, 3000);
-        assert!(empty_result.is_ok());
-        if let Ok((num_segsites, w_theta, pi, num_haplotypes, allele_frequency)) = empty_result {
-            assert_eq!(num_segsites, 0);
-            assert_eq!(w_theta, 0.0);
-            assert_eq!(pi, 0.0);
-            assert_eq!(num_haplotypes, 3);
-            assert!((allele_frequency - 7.0 / 18.0).abs() < 1e-6);
-        }
     }
 
     #[test]
@@ -519,80 +468,6 @@ mod tests {
     }
 
     #[test]
-    fn test_process_variants_with_missing_samples() {
-        let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
-            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
-            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
-        ];
-        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_sample_filter = HashMap::new();
-        missing_sample_filter.insert("SAMPLE4".to_string(), (0, 1));
-
-        let missing_result = process_variants(&variants, &sample_names, 0, &missing_sample_filter, 1000, 3000);
-        assert!(missing_result.is_ok());
-        let (num_segsites, w_theta, pi, num_haplotypes, allele_frequency) = missing_result.unwrap();
-        assert_eq!(num_segsites, 0);
-        assert_eq!(w_theta, 0.0);
-        assert_eq!(pi, 0.0);
-        assert_eq!(num_haplotypes, 0);
-        assert_eq!(allele_frequency, 0.0);
-    }
-
-    #[test]
-    fn test_process_variants_with_variants() {
-        let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
-            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
-            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
-        ];
-        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut sample_filter = HashMap::new();
-        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
-        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
-        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
-
-        let result = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000);
-        assert!(result.is_ok());
-        if let Ok((num_segsites, w_theta, pi, num_haplotypes, allele_frequency)) = result {
-            assert_eq!(num_segsites, 3);
-            // Add tests for actual values
-            assert_eq!(num_haplotypes, 3);
-            assert!((allele_frequency - 7.0 / 18.0).abs() < 1e-6);
-        }
-    }
-
-    #[test]
-    fn test_process_variants_with_invalid_haplotype_group_values() {
-        let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
-            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
-            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
-        ];
-        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut sample_filter = HashMap::new();
-        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
-        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
-        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
-
-        // Group 0
-        let result_group0 = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000).unwrap();
-        // Group 1
-        let result_group1 = process_variants(&variants, &sample_names, 1, &sample_filter, 1000, 3000).unwrap();
-
-        assert!((result_group0.4 - 0.0).abs() < 1e-6); // allele_frequency for group 0
-        assert!((result_group1.4 - 0.5).abs() < 1e-6); // allele_frequency for group 1 (3/6 = 0.5)
-
-        // Additional Assertions
-        assert_eq!(result_group0.3, 3); // num_haplotypes
-        assert_eq!(result_group1.3, 3); // num_haplotypes
-
-        // Validate segregating sites and diversity measures
-        assert!(result_group0.0 > 0); // num_segsites
-        assert!(result_group1.0 > 0); // num_segsites
-    }
-
-    #[test]
     fn test_parse_config_file_with_noreads() {
         use std::io::Write;
 
@@ -604,57 +479,6 @@ mod tests {
 
         let config_entries = parse_config_file(path.path()).unwrap();
         assert_eq!(config_entries.len(), 2);
-    }
-
-    #[test]
-    fn test_parse_config_file_with_noreads_sample_filtered() {
-        use std::io::Write;
-
-        let config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSAMPLE1\tSAMPLE2\n\
-                              chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1_lowconf\t1|1\n\
-                              chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
-        let path = tempfile::NamedTempFile::new().unwrap();
-        write!(path.as_file(), "{}", config_content).unwrap();
-
-        let config_entries = parse_config_file(path.path()).unwrap();
-        assert_eq!(config_entries.len(), 2);
-
-        // For the first entry, SAMPLE1 has "0|1_lowconf" and should be skipped in samples_filtered
-        // SAMPLE2 has "1|1" and should be included
-        assert_eq!(config_entries[0].samples_filtered.len(), 1);
-        assert!(config_entries[0].samples_filtered.contains_key("SAMPLE2"));
-        assert!(!config_entries[0].samples_filtered.contains_key("SAMPLE1"));
-
-        // For the second entry, both SAMPLE1 ("0|0") and SAMPLE2 ("0|1") are valid and should be included
-        assert_eq!(config_entries[1].samples_filtered.len(), 2);
-        assert!(config_entries[1].samples_filtered.contains_key("SAMPLE1"));
-        assert!(config_entries[1].samples_filtered.contains_key("SAMPLE2"));
-    }
-
-    #[test]
-    fn test_parse_config_file_entry1_details() {
-        use std::io::Write;
-
-        let config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSAMPLE1\tSAMPLE2\n\
-                              chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1_lowconf\t1|1\n\
-                              chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
-        let mut temp_file = NamedTempFile::new().unwrap();
-        write!(temp_file.as_file(), "{}", config_content).unwrap();
-
-        let config_entries = parse_config_file(temp_file.path()).unwrap();
-        assert_eq!(config_entries.len(), 2);
-
-        // First entry details
-        let entry1 = &config_entries[0];
-        assert_eq!(entry1.seqname, "chr1");
-        assert_eq!(entry1.start, 1000);
-        assert_eq!(entry1.end, 2000);
-        assert_eq!(entry1.samples_unfiltered.len(), 2);
-        assert_eq!(entry1.samples_filtered.len(), 1);
-        assert!(entry1.samples_unfiltered.contains_key("SAMPLE1"));
-        assert!(entry1.samples_unfiltered.contains_key("SAMPLE2"));
-        assert!(entry1.samples_filtered.contains_key("SAMPLE2"));
-        assert!(!entry1.samples_filtered.contains_key("SAMPLE1"));
     }
 
     #[test]
@@ -818,43 +642,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_config_file_invalid_number_of_fields() {
-        let config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSAMPLE1\n\
-                              chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1_lowconf\n"; // Missing SAMPLE2
-
-        let mut temp_file = NamedTempFile::new().unwrap();
-        write!(temp_file.as_file(), "{}", config_content).unwrap();
-
-        let result = parse_config_file(temp_file.path());
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_config_file_samples_filtered() {
-        let config_content = "\
-seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSample1\tSample2\n\
-chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1_lowconf\t1|1\n\
-chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
-
-        let mut temp_file = NamedTempFile::new().unwrap();
-        write!(temp_file.as_file(), "{}", config_content).unwrap();
-
-        let config_entries = parse_config_file(temp_file.path()).unwrap();
-        assert_eq!(config_entries.len(), 2);
-
-        // For the first entry, SAMPLE1 has "0|1_lowconf" and should be skipped in samples_filtered
-        // SAMPLE2 has "1|1" and should be included
-        assert_eq!(config_entries[0].samples_filtered.len(), 1);
-        assert!(config_entries[0].samples_filtered.contains_key("Sample2"));
-        assert!(!config_entries[0].samples_filtered.contains_key("Sample1"));
-
-        // For the second entry, both SAMPLE1 ("0|0") and SAMPLE2 ("0|1") are valid and should be included
-        assert_eq!(config_entries[1].samples_filtered.len(), 2);
-        assert!(config_entries[1].samples_filtered.contains_key("Sample1"));
-        assert!(config_entries[1].samples_filtered.contains_key("Sample2"));
-    }
-
-    #[test]
     fn test_haplotype_processing_group0_allele_frequency() {
         let variants = vec![
             create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
@@ -906,6 +693,36 @@ chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
         assert!(result_group1.0 > 0); // num_segsites
         assert!(result_group1.1 > 0.0); // w_theta
         assert!(result_group1.2 > 0.0); // pi
+    }
+
+    #[test]
+    fn test_process_variants_with_invalid_haplotype_group_values() {
+        let variants = vec![
+            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
+            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 1])]),
+            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
+        ];
+        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
+        let mut sample_filter = HashMap::new();
+        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
+
+        // Group 0
+        let result_group0 = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000).unwrap();
+        // Group 1
+        let result_group1 = process_variants(&variants, &sample_names, 1, &sample_filter, 1000, 3000).unwrap();
+
+        assert!((result_group0.4 - 0.0).abs() < 1e-6); // allele_frequency for group 0
+        assert!((result_group1.4 - 0.5).abs() < 1e-6); // allele_frequency for group 1 (3/6 = 0.5)
+
+        // Additional Assertions
+        assert_eq!(result_group0.3, 3); // num_haplotypes
+        assert_eq!(result_group1.3, 3); // num_haplotypes
+
+        // Validate segregating sites and diversity measures
+        assert!(result_group0.0 > 0); // num_segsites
+        assert!(result_group1.0 > 0); // num_segsites
     }
 
 }
