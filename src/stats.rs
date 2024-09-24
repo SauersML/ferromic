@@ -569,7 +569,7 @@ fn process_vcf(
     let mut buffer = String::new();
     while reader.read_line(&mut buffer)? > 0 {
         if buffer.starts_with("##") {
-            // ... (process meta-information)
+            // ... Nothing
         } else if buffer.starts_with("#CHROM") {
             validate_vcf_header(&buffer)?;
             sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
@@ -670,10 +670,10 @@ fn process_vcf(
 
 
 fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
-    let fields: Vec<&str> = header.split_whitespace().collect();
+    let fields: Vec<&str> = header.split('\t').collect();
     let required_fields = vec!["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"];
-    
-    if fields.len() < required_fields.len() || fields[..required_fields.len()] != required_fields {
+
+    if fields.len() < required_fields.len() || fields[..required_fields.len()] != required_fields[..]) {
         return Err(VcfError::InvalidVcfFormat("Invalid VCF header format".to_string()));
     }
     Ok(())
