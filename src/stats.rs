@@ -669,7 +669,7 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     let fields: Vec<&str> = header.split('\t').collect();
     let required_fields = vec!["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"];
 
-    if fields.len() < required_fields.len() || fields[..required_fields.len()] != required_fields[..]) {
+    if fields.len() < required_fields.len() || fields[..required_fields.len()] != required_fields[..] {
         return Err(VcfError::InvalidVcfFormat("Invalid VCF header format".to_string()));
     }
     Ok(())
