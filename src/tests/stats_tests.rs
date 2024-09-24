@@ -556,8 +556,7 @@ mod tests {
         assert!(result.is_ok());
         if let Ok((num_segsites, w_theta, pi, num_haplotypes, allele_frequency)) = result {
             assert_eq!(num_segsites, 3);
-            assert_eq!(w_theta, /* expected value based on your implementation */);
-            assert_eq!(pi, /* expected value based on your implementation */);
+            // Add tests for actual values
             assert_eq!(num_haplotypes, 3);
             assert!((allele_frequency - 7.0 / 18.0).abs() < 1e-6);
         }
