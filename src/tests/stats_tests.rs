@@ -136,7 +136,7 @@ mod tests {
         let theta_n1 = calculate_watterson_theta(100, 1, 1000);
         assert!(theta_n1.is_infinite());
 
-        // Test with n = 0, expecting infinity
+        // Test with n = 0, no segregating sites, expecting infinity
         let theta_n0 = calculate_watterson_theta(0, 0, 1000);
         assert!(theta_n0.is_infinite());
 
@@ -240,7 +240,19 @@ mod tests {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
         let mut missing_data_info = MissingDataInfo::default();
         let min_gq = 30;
-
+    
+        // Test valid variant with all GQ values above threshold
+        let valid_line = "chr2\t1500\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
+        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    
+        // Test variant with one GQ value below threshold
+        let invalid_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:25\t1|1:45";
+        let result = parse_variant(invalid_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    
         // Test valid variant
         let valid_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
         let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
@@ -249,7 +261,12 @@ mod tests {
             assert_eq!(variant.position, 1000);
             assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]);
         }
-
+    
+        // Test variant with low GQ
+        let low_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:20\t1|1:45";
+        let result = parse_variant(low_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
+        assert!(result.unwrap().is_none());
+    
         // Test variant outside region
         let out_of_range = "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
         assert!(parse_variant(out_of_range, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq).unwrap().is_none());
