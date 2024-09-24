@@ -225,7 +225,7 @@ fn process_variants(
     sample_filter: &HashMap<String, (u8, u8)>,
     region_start: i64,
     region_end: i64,
-) -> Result<(usize, f64, f64, usize), VcfError> { // Removed allele_frequency
+) -> Result<(usize, f64, f64, usize), VcfError> {
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
@@ -620,9 +620,9 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 fn calculate_allele_frequency(
     sample_filter: &HashMap<String, (u8, u8)>,
     haplotype_group: u8,
-) -> (usize, usize) { // Returns (number_of_1s, total_haplotypes)
+) -> f64 { // Returns allele frequency of '1' in the haplotype group
     let mut num_ones = 0;
-    let mut total = 0;
+    let mut total_haplotypes = 0;
 
     for (_sample, &(left, right)) in sample_filter.iter() {
         let haplotype = match haplotype_group {
@@ -633,10 +633,14 @@ fn calculate_allele_frequency(
         if haplotype == 1 {
             num_ones += 1;
         }
-        total += 1;
+        total_haplotypes += 1;
     }
 
-    (num_ones, total)
+    if total_haplotypes > 0 {
+        num_ones as f64 / total_haplotypes as f64
+    } else {
+        f64::NAN // No haplotypes
+    }
 }
 
 
