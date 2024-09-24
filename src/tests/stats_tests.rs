@@ -6,18 +6,6 @@ fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
     Variant { position, genotypes }
 }
 
-fn match_sample_names(config_samples: &[String], vcf_samples: &[String]) -> Vec<(String, String)> {
-    config_samples
-        .iter()
-        .filter_map(|config_sample| {
-            vcf_samples
-                .iter()
-                .find(|vcf_sample| vcf_sample.ends_with(config_sample))
-                .map(|vcf_sample| (config_sample.clone(), vcf_sample.clone()))
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs::File;
@@ -132,7 +120,7 @@ mod tests {
     
         // Test with large number of segregating sites
         // Number of segregating sites = 1000, number of haplotypes = 100, sequence length = 10000
-        // Harmonic number a1 = sum(1/i for i in 1..99) ≈ 5.1773775
+        // Harmonic number a1 ≈ 5.1773775
         // Expected theta = 1000 / (5.1773775 * 10000) ≈ 0.0193
         assert!((calculate_watterson_theta(1000, 100, 10000) - 0.0193).abs() < 1e-4);
     
@@ -144,9 +132,9 @@ mod tests {
     
         // Test with very large sequence length
         // Number of segregating sites = 100, number of haplotypes = 10, sequence length = 1,000,000
-        // Harmonic number a1 = 2.828968...
-        // Expected theta = 100 / (2.828968 * 1,000,000) ≈ 0.0000353
-        assert!((calculate_watterson_theta(100, 10, 1_000_000) - 0.0000353).abs() < 1e-8);
+        // Harmonic number a1 ≈ 2.8289682539682537
+        // Expected theta = 100 / (2.8289682539682537 * 1,000,000) ≈ 0.00003534
+        assert!((calculate_watterson_theta(100, 10, 1_000_000) - 0.00003534).abs() < 1e-8);
     
         // Test with edge cases
         assert_eq!(calculate_watterson_theta(0, 1, 1000), 0.0);
@@ -176,8 +164,8 @@ mod tests {
     
         // Test with very large sequence length
         // Total pairwise differences = 1000, number of haplotypes = 10, sequence length = 1,000,000
-        // Expected pi = 1000 / (45 * 1,000,000) ≈ 0.00002222
-        assert!((calculate_pi(1000, 10, 1_000_000) - 0.00002222).abs() < 1e-9);
+        // Expected pi = 1000 / (45 * 1,000,000) ≈ 0.0000222222
+        assert!((calculate_pi(1000, 10, 1_000_000) - 0.0000222222).abs() < 1e-9);
     
         // Test with edge cases
         assert_eq!(calculate_pi(0, 1, 1000), 0.0);
@@ -244,7 +232,7 @@ mod tests {
         }
     
         // Test invalid format (fewer fields than required)
-        let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0"; // Only 10 fields, expecting at least 12 for 3 samples
+        let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT\t0|0"; // Only 10 fields, expecting 12 for 3 samples
         assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names).is_err());
     
         // Test multi-allelic site
@@ -275,7 +263,7 @@ mod tests {
         let result_0 = process_variants(&variants, &sample_names, 0, &sample_filter, 1000, 3000);
         assert!(result_0.is_ok());
         if let Ok((num_segsites, w_theta, pi)) = result_0 {
-            assert_eq!(num_segsites, 1);
+            assert_eq!(num_segsites, 1); // Corrected expected value
             // Expected theta = 1 / (1 + 1/2) / 2001 ≈ 0.000666
             assert!((w_theta - 0.000666).abs() < 1e-6);
             // Expected pi = 2 / (3 * 2001) ≈ 0.000666
@@ -286,7 +274,7 @@ mod tests {
         let result_1 = process_variants(&variants, &sample_names, 1, &sample_filter, 1000, 3000);
         assert!(result_1.is_ok());
         if let Ok((num_segsites, w_theta, pi)) = result_1 {
-            assert_eq!(num_segsites, 1);
+            assert_eq!(num_segsites, 1); // Corrected expected value
             // Expected theta = 1 / (1 + 1/2) / 2001 ≈ 0.000666
             assert!((w_theta - 0.000666).abs() < 1e-6);
             // Expected pi = 2 / (3 * 2001) ≈ 0.000666
@@ -393,18 +381,6 @@ mod tests {
         let path = PathBuf::from("/non/existent/file.vcf");
         let result = open_vcf_reader(&path);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_match_sample_names() {
-        let config_samples = vec!["NA18939".to_string(), "HG02059".to_string(), "NA19240".to_string()];
-        let vcf_samples = vec!["EAS_JPT_NA18939".to_string(), "AMR_PEL_HG02059".to_string(), "AFR_YRI_NA19240".to_string()];
-        
-        let matched = match_sample_names(&config_samples, &vcf_samples);
-        assert_eq!(matched.len(), 3);
-        assert_eq!(matched[0], ("NA18939".to_string(), "EAS_JPT_NA18939".to_string()));
-        assert_eq!(matched[1], ("HG02059".to_string(), "AMR_PEL_HG02059".to_string()));
-        assert_eq!(matched[2], ("NA19240".to_string(), "AFR_YRI_NA19240".to_string()));
     }
 
     #[test]
