@@ -134,7 +134,7 @@ fn main() -> Result<(), VcfError> {
         let config_entries = parse_config_file(Path::new(config_file))?;
         let output_file = args.output_file.as_ref().map(Path::new).unwrap_or_else(|| Path::new("output.csv"));
         println!("Output file: {}", output_file.display());
-        process_config_entries(&config_entries, &args.vcf_folder, output_file)?;
+        process_config_entries(&config_entries, &args.vcf_folder, output_file, args.min_gq)?;
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
         let (start, end) = if let Some(region) = args.region.as_ref() {
@@ -148,7 +148,7 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end)?;
+        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, args.min_gq)?;
 
         println!("{}", "Calculating diversity statistics...".blue());
 
@@ -308,7 +308,7 @@ fn process_variants(
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
-    Ok((num_segsites, w_theta, pi))
+    Ok((num_segsites, w_theta, pi, num_haplotypes, allele_frequency))
 }
 
 
@@ -494,7 +494,7 @@ fn process_vcf(
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
-    let mut chr_length = 0;
+    let chr_length = 0;
     let variants = Arc::new(Mutex::new(Vec::new()));
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
 
@@ -821,7 +821,7 @@ fn process_config_entries(
 
         println!("Processing VCF file for chromosome {} from {} to {}", chr, min_start, max_end);
 
-        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end) {
+        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq) {
             Ok(data) => data,
             Err(e) => {
                 eprintln!("Error processing VCF file for {}: {:?}", chr, e);
