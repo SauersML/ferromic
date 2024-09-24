@@ -226,51 +226,29 @@ fn process_variants(
     region_start: i64,
     region_end: i64,
 ) -> Result<(usize, f64, f64, usize, f64), VcfError> {
-    // Build a mapping from VCF sample IDs to indices
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
         if vcf_sample_id_to_index.contains_key(sample_id) {
-            eprintln!("Error: Duplicate sample ID '{}' found in VCF samples.", sample_id);
             return Err(VcfError::Parse(format!("Duplicate sample ID '{}' in VCF.", sample_id)));
         }
         vcf_sample_id_to_index.insert(sample_id, i);
     }
 
-    // Initialize allele counts
-    let mut allele_counts = HashMap::new();
-    let mut num_haplotypes = 0;
-    
-    // For each variant, extract the genotypes and count alleles
-    for variant in &filtered_variants {
-        for genotype in &variant.genotypes {
-            if let Some(alleles) = genotype {
-                for allele in alleles {
-                    *allele_counts.entry(*allele).or_insert(0) += 1;
-                    num_haplotypes += 1;
-                }
-            }
-        }
-    }
-    
-    // Calculate allele frequencies
-    let total_alleles = num_haplotypes as f64;
-    let allele_frequency = if total_alleles > 0.0 {
-        allele_counts.get(&1).cloned().unwrap_or(0) as f64 / total_alleles
-    } else {
-        0.0
-    };
+    let mut haplotype_indices = Vec::new();
+    let mut allele_count = 0;
+    let mut total_alleles = 0;
 
     for (sample_name, &(left, right)) in sample_filter.iter() {
         if let Some(&i) = vcf_sample_id_to_index.get(sample_name.as_str()) {
             if haplotype_group == 0 {
-                haplotype_indices.push((i, 0)); // left haplotype
+                haplotype_indices.push((i, 0));
                 allele_count += left as usize;
-            }
-            if haplotype_group == 1 {
-                haplotype_indices.push((i, 1)); // right haplotype
+            } else if haplotype_group == 1 {
+                haplotype_indices.push((i, 1));
                 allele_count += right as usize;
             }
+            total_alleles += 1;
         } else {
             eprintln!("Warning: Sample '{}' from config file not found in VCF samples.", sample_name);
         }
@@ -280,12 +258,18 @@ fn process_variants(
         return Err(VcfError::Parse(format!("No haplotypes found for the specified group {}", haplotype_group)));
     }
 
-    println!("Number of haplotypes in group {}: {}", haplotype_group, haplotype_indices.len());
+    let allele_frequency = if total_alleles > 0 {
+        allele_count as f64 / total_alleles as f64
+    } else {
+        0.0
+    };
 
-    // For each variant, extract the genotypes of the haplotypes we are interested in
+    // Process VCF variants
     let mut filtered_variants = Vec::new();
-
     for variant in variants {
+        if variant.position < region_start || variant.position > region_end {
+            continue;
+        }
         let mut genotypes = Vec::new();
         for &(i, allele_idx) in &haplotype_indices {
             if let Some(Some(alleles)) = variant.genotypes.get(i) {
@@ -304,19 +288,12 @@ fn process_variants(
         });
     }
 
-    // Now, calculate the number of segregating sites
     let num_segsites = count_segregating_sites(&filtered_variants);
-
-    // Number of samples (haplotypes)
     let n = haplotype_indices.len();
-
     if n <= 1 {
         return Err(VcfError::Parse("Not enough haplotypes for calculation".to_string()));
     }
 
-    let num_haplotypes = haplotype_indices.len();
-
-    // Calculate pairwise differences
     let pairwise_diffs = calculate_pairwise_differences(&filtered_variants, n);
     let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
 
@@ -324,7 +301,7 @@ fn process_variants(
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
-    Ok((num_segsites, w_theta, pi, num_haplotypes, allele_frequency))
+    Ok((num_segsites, w_theta, pi, n, allele_frequency))
 }
 
 
