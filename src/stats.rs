@@ -351,11 +351,14 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
             total_genotypes += 1;
             if i < sample_names.len() + 7 {
                 let sample_name = &sample_names[i - 7];
-
+        
+                // Split the field on underscore to remove annotations
+                let genotype_str = field.split('_').next().unwrap_or("");
+        
                 // Parse unfiltered samples (first three characters)
-                if field.len() >= 3 && field.chars().nth(1) == Some('|') {
-                    let left_char = field.chars().nth(0).unwrap();
-                    let right_char = field.chars().nth(2).unwrap();
+                if genotype_str.len() >= 3 && genotype_str.chars().nth(1) == Some('|') {
+                    let left_char = genotype_str.chars().nth(0).unwrap();
+                    let right_char = genotype_str.chars().nth(2).unwrap();
                     if let (Some(left), Some(right)) = (left_char.to_digit(10), right_char.to_digit(10)) {
                         let left = left as u8;
                         let right = right as u8;
@@ -370,11 +373,11 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
                 } else {
                     invalid_genotypes += 1;
                 }
-
+        
                 // Parse filtered samples (exact match to "0|0", "0|1", "1|0", "1|1")
-                if field == "0|0" || field == "0|1" || field == "1|0" || field == "1|1" {
-                    let left = field.chars().nth(0).unwrap().to_digit(10).unwrap() as u8;
-                    let right = field.chars().nth(2).unwrap().to_digit(10).unwrap() as u8;
+                if genotype_str == "0|0" || genotype_str == "0|1" || genotype_str == "1|0" || genotype_str == "1|1" {
+                    let left = genotype_str.chars().nth(0).unwrap().to_digit(10).unwrap() as u8;
+                    let right = genotype_str.chars().nth(2).unwrap().to_digit(10).unwrap() as u8;
                     samples_filtered.insert(sample_name.clone(), (left, right));
                 }
             } else {
