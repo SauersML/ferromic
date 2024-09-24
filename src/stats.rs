@@ -879,3 +879,10 @@ fn calculate_pi(tot_pair_diff: usize, n: usize, seq_length: i64) -> f64 {
     let num_comparisons = n * (n - 1) / 2;
     tot_pair_diff as f64 / num_comparisons as f64 / seq_length as f64
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    include!("tests/stats_tests.rs");
+}
