@@ -136,10 +136,13 @@ mod tests {
         // Expected theta = 100 / (2.8289682539682537 * 1,000,000) ≈ 0.00003534
         assert!((calculate_watterson_theta(100, 10, 1_000_000) - 0.00003534).abs() < 1e-8);
     
-        // Test with edge cases
-        assert_eq!(calculate_watterson_theta(0, 1, 1000), 0.0);
-        // When n =1, a1 =0, but function handles it by returning 0
-        assert_eq!(calculate_watterson_theta(100, 1, 1000), 0.0);
+        // Test with n = 1, expecting NaN
+        let theta_n1 = calculate_watterson_theta(100, 1, 1000);
+        assert!(theta_n1.is_nan(), "Expected Watterson's theta to be NaN when n = 1, got {}", theta_n1);
+    
+        // Test with n = 0, expecting NaN
+        let theta_n0 = calculate_watterson_theta(0, 0, 1000);
+        assert!(theta_n0.is_nan(), "Expected Watterson's theta to be NaN when n = 0, got {}", theta_n0);
     }
 
     #[test]
@@ -166,10 +169,14 @@ mod tests {
         // Total pairwise differences = 1000, number of haplotypes = 10, sequence length = 1,000,000
         // Expected pi = 1000 / (45 * 1,000,000) ≈ 0.0000222222
         assert!((calculate_pi(1000, 10, 1_000_000) - 0.0000222222).abs() < 1e-9);
+
+        // Test with n = 1, expecting NaN
+        let pi_n1 = calculate_pi(100, 1, 1000);
+        assert!(pi_n1.is_nan(), "Expected pi to be NaN when n = 1, got {}", pi_n1);
     
-        // Test with edge cases
-        assert_eq!(calculate_pi(0, 1, 1000), 0.0);
-        assert_eq!(calculate_pi(100, 1, 1000), 0.0);
+        // Test with n = 0, expecting NaN
+        let pi_n0 = calculate_pi(0, 0, 1000);
+        assert!(pi_n0.is_nan(), "Expected pi to be NaN when n = 0, got {}", pi_n0);
     }
 
     #[test]
