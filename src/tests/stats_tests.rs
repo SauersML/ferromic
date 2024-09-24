@@ -595,6 +595,7 @@ chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
         // Sample1 left haplotype: alleles at positions 1000 and 2000 -> [0, 1]
         // Sample2 right haplotype: alleles at positions 1000 and 2000 -> [0, 0]
         // Allele counts for group 0: [0, 1, 0, 0] -> allele '0' occurs 3 times, allele '1' occurs 1 time
+        let result_group1 = process_variants(&variants, &sample_names, 1, &sample_filter, 1000, 3000).unwrap();
 
         assert_eq!(result_group0.4, 1.0 / 4.0); // allele_frequency = total '1's / total alleles
         assert_eq!(result_group1.4, 3.0 / 4.0);
