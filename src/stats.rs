@@ -293,12 +293,6 @@ fn process_variants(
         }
     }
 
-    let allele_frequency = if total_non_missing_alleles > 0 {
-        total_1_alleles as f64 / total_non_missing_alleles as f64
-    } else {
-        f64::NAN // No non-missing alleles
-    };
-
     let n = haplotype_indices.len();
 
     // Calculate pairwise differences
@@ -309,7 +303,7 @@ fn process_variants(
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
-    Ok((num_segsites, w_theta, pi, n, allele_frequency))
+    Ok((num_segsites, w_theta, pi, n))
 }
 
 fn process_config_entries(
