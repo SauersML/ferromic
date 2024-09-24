@@ -882,7 +882,7 @@ fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64
         return f64::INFINITY; // Return infinity if only 1 or fewer haplotypes or if sequence length is zero
     }
     
-    let harmonic_value = harmonic((n - 1) as i64);
+    let harmonic_value = harmonic(n - 1);
     if harmonic_value == 0.0 {
         return f64::INFINITY; // Return infinity to avoid division by zero
     }
