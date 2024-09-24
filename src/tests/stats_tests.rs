@@ -642,4 +642,432 @@ mod tests {
     }
 
 
+    /// Common setup for all group1 tests.
+    fn setup_group1_test() -> (Vec<Variant>, Vec<String>, HashMap<String, (u8, u8)>) {
+        let variants = vec![
+            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
+            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 0])]),
+            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
+        ];
+        let sample_names = vec![
+            "SAMPLE1".to_string(),
+            "SAMPLE2".to_string(),
+            "SAMPLE3".to_string(),
+        ];
+        let mut sample_filter = HashMap::new();
+        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
+
+        (variants, sample_names, sample_filter)
+    }
+
+    #[test]
+    fn test_group1_allele_frequency() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Allele frequency for group1 should be approximately 0.4444 (4/9)
+        let expected_freq_group1 = 4.0 / 9.0;
+        let allele_frequency_diff_group1 = (result_group1.4 - expected_freq_group1).abs();
+        println!(
+            "Allele frequency difference for Group 1: {}",
+            allele_frequency_diff_group1
+        );
+        assert!(
+            allele_frequency_diff_group1 < 1e-6,
+            "Allele frequency for Group 1 is incorrect: expected {}, got {}",
+            expected_freq_group1,
+            result_group1.4
+        );
+    }
+
+    #[test]
+    fn test_group1_number_of_haplotypes() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Number of haplotypes for group1 should be 3
+        let expected_num_hap_group1 = 3;
+        println!(
+            "Number of haplotypes for Group 1 (expected {}): {}",
+            expected_num_hap_group1, result_group1.3
+        );
+        assert_eq!(
+            result_group1.3, expected_num_hap_group1,
+            "Number of haplotypes for Group 1 is incorrect: expected {}, got {}",
+            expected_num_hap_group1, result_group1.3
+        );
+    }
+
+    #[test]
+    fn test_group1_segregating_sites() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Number of segregating sites for group1 should be 2
+        // Segregating sites at positions 1000 and 3000
+        let expected_segsites_group1 = 2;
+        println!(
+            "Number of segregating sites for Group 1 (expected {}): {}",
+            expected_segsites_group1, result_group1.0
+        );
+        assert_eq!(
+            result_group1.0, expected_segsites_group1,
+            "Number of segregating sites for Group 1 is incorrect: expected {}, got {}",
+            expected_segsites_group1, result_group1.0
+        );
+    }
+
+    #[test]
+    fn test_group1_watterson_theta() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Calculate expected Watterson's theta
+        // seg_sites = 2, n = 3, seq_length = 3000 - 1000 +1 = 2001
+        // theta = seg_sites / harmonic(n-1) / seq_length
+        let harmonic = 1.0 / 1.0 + 1.0 / 2.0; // n-1 = 2
+        let expected_w_theta = 2.0 / harmonic / 2001.0;
+
+        let w_theta_diff = (result_group1.1 - expected_w_theta).abs();
+        println!(
+            "Watterson's theta difference for Group 1: {}",
+            w_theta_diff
+        );
+        assert!(
+            w_theta_diff < 1e-6,
+            "Watterson's theta for Group 1 is incorrect: expected {}, got {}",
+            expected_w_theta,
+            result_group1.1
+        );
+    }
+
+    #[test]
+    fn test_group1_nucleotide_diversity_pi() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Calculate expected nucleotide diversity (pi)
+        // pairwise differences: SAMPLE1 vs SAMPLE2: 1, SAMPLE1 vs SAMPLE3:1, SAMPLE2 vs SAMPLE3:2
+        // total_pair_diff = 4
+        // n =3, num_comparisons=3
+        // pi = total_pair_diff / num_comparisons / seq_length = 4 /3 /2001 ≈ 0.000666222
+        let expected_pi = 4.0 / 3.0 / 2001.0;
+
+        let pi_diff = (result_group1.2 - expected_pi).abs();
+        println!("Nucleotide diversity (pi) difference for Group 1: {}", pi_diff);
+        assert!(
+            pi_diff < 1e-6,
+            "Nucleotide diversity (pi) for Group 1 is incorrect: expected {}, got {}",
+            expected_pi,
+            result_group1.2
+        );
+    }
+
+    #[test]
+    fn test_group1_filtered_allele_frequency() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        // Assuming filtering is based on exact genotype matches, but in this setup all genotypes are exact or have '_lowconf' which are excluded in filtered
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Allele frequency after filtering should exclude "_lowconf" genotypes
+        // From the test setup, variants do not have "_lowconf" in group1, so frequency remains the same
+        let expected_freq_group1_filtered = 4.0 / 9.0;
+        let allele_frequency_diff_group1_filtered =
+            (result_group1.4 - expected_freq_group1_filtered).abs();
+        println!(
+            "Filtered allele frequency difference for Group 1: {}",
+            allele_frequency_diff_group1_filtered
+        );
+        assert!(
+            allele_frequency_diff_group1_filtered < 1e-6,
+            "Filtered allele frequency for Group 1 is incorrect: expected {}, got {}",
+            expected_freq_group1_filtered,
+            result_group1.4
+        );
+    }
+
+    #[test]
+    fn test_group1_filtered_number_of_haplotypes() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Number of haplotypes after filtering should be same as before if no filtering applied
+        let expected_num_hap_group1_filtered = 3;
+        println!(
+            "Filtered number of haplotypes for Group 1 (expected {}): {}",
+            expected_num_hap_group1_filtered, result_group1.3
+        );
+        assert_eq!(
+            result_group1.3, expected_num_hap_group1_filtered,
+            "Filtered number of haplotypes for Group 1 is incorrect: expected {}, got {}",
+            expected_num_hap_group1_filtered, result_group1.3
+        );
+    }
+
+    #[test]
+    fn test_group1_filtered_segregating_sites() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Number of segregating sites after filtering should be same as before if no filtering applied
+        let expected_segsites_group1_filtered = 2;
+        println!(
+            "Filtered number of segregating sites for Group 1 (expected {}): {}",
+            expected_segsites_group1_filtered, result_group1.0
+        );
+        assert_eq!(
+            result_group1.0, expected_segsites_group1_filtered,
+            "Filtered number of segregating sites for Group 1 is incorrect: expected {}, got {}",
+            expected_segsites_group1_filtered, result_group1.0
+        );
+    }
+
+    #[test]
+    fn test_group1_filtered_watterson_theta() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Watterson's theta after filtering should be same as before if no filtering applied
+        let harmonic = 1.0 / 1.0 + 1.0 / 2.0; // n-1 =2
+        let expected_w_theta_filtered = 2.0 / harmonic / 2001.0;
+
+        let w_theta_diff_filtered = (result_group1.1 - expected_w_theta_filtered).abs();
+        println!(
+            "Filtered Watterson's theta difference for Group 1: {}",
+            w_theta_diff_filtered
+        );
+        assert!(
+            w_theta_diff_filtered < 1e-6,
+            "Filtered Watterson's theta for Group 1 is incorrect: expected {}, got {}",
+            expected_w_theta_filtered,
+            result_group1.1
+        );
+    }
+
+    #[test]
+    fn test_group1_filtered_nucleotide_diversity_pi() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Pi after filtering should be same as before if no filtering applied
+        let expected_pi_filtered = 4.0 / 3.0 / 2001.0;
+        let pi_diff_filtered = (result_group1.2 - expected_pi_filtered).abs();
+        println!(
+            "Filtered nucleotide diversity (pi) difference for Group 1: {}",
+            pi_diff_filtered
+        );
+        assert!(
+            pi_diff_filtered < 1e-6,
+            "Filtered nucleotide diversity (pi) for Group 1 is incorrect: expected {}, got {}",
+            expected_pi_filtered,
+            result_group1.2
+        );
+    }
+
+    #[test]
+    fn test_group1_missing_data_handling() {
+        let variants = vec![
+            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
+            create_variant(2000, vec![Some(vec![0, 0]), None, Some(vec![0, 0])]), // Missing genotype for SAMPLE2
+            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
+        ];
+        let sample_names = vec![
+            "SAMPLE1".to_string(),
+            "SAMPLE2".to_string(),
+            "SAMPLE3".to_string(),
+        ];
+        let mut sample_filter = HashMap::new();
+        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // Allele frequency should account for missing data
+        // Group1 alleles: [0,1,1], [0,0,0], [1,1,0]
+        // Total non-missing alleles: 8 (one genotype missing)
+        // Number of '1's: 3
+        let expected_freq_group1 = 3.0 / 8.0;
+        let allele_frequency_diff_group1 = (result_group1.4 - expected_freq_group1).abs();
+        println!(
+            "Allele frequency difference for Group 1 with missing data: {}",
+            allele_frequency_diff_group1
+        );
+        assert!(
+            allele_frequency_diff_group1 < 1e-6,
+            "Allele frequency for Group 1 with missing data is incorrect: expected {}, got {}",
+            expected_freq_group1,
+            result_group1.4
+        );
+    }
+
+    #[test]
+    fn test_group1_zero_segregating_sites() {
+        let variants = vec![
+            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 0])]),
+            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 0])]),
+            create_variant(3000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 0])]),
+        ];
+        let sample_names = vec![
+            "SAMPLE1".to_string(),
+            "SAMPLE2".to_string(),
+            "SAMPLE3".to_string(),
+        ];
+        let mut sample_filter = HashMap::new();
+        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
+
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1,
+            &sample_filter,
+            1000,
+            3000,
+        )
+        .unwrap();
+
+        // No segregating sites
+        let expected_segsites_group1 = 0;
+        println!(
+            "Number of segregating sites for Group 1 with zero segsites (expected {}): {}",
+            expected_segsites_group1, result_group1.0
+        );
+        assert_eq!(
+            result_group1.0, expected_segsites_group1,
+            "Number of segregating sites for Group 1 with zero segsites is incorrect: expected {}, got {}",
+            expected_segsites_group1, result_group1.0
+        );
+
+        // Watterson's theta should be 0
+        let expected_w_theta = 0.0;
+        let w_theta_diff = (result_group1.1 - expected_w_theta).abs();
+        println!(
+            "Watterson's theta difference for Group 1 with zero segsites: {}",
+            w_theta_diff
+        );
+        assert!(
+            w_theta_diff < 1e-6,
+            "Watterson's theta for Group 1 with zero segsites is incorrect: expected {}, got {}",
+            expected_w_theta,
+            result_group1.1
+        );
+
+        // Pi should be 0
+        let expected_pi = 0.0;
+        let pi_diff = (result_group1.2 - expected_pi).abs();
+        println!(
+            "Nucleotide diversity (pi) difference for Group 1 with zero segsites: {}",
+            pi_diff
+        );
+        assert!(
+            pi_diff < 1e-6,
+            "Nucleotide diversity (pi) for Group 1 with zero segsites is incorrect: expected {}, got {}",
+            expected_pi,
+            result_group1.2
+        );
+    }
+
+
 }
