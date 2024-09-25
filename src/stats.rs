@@ -768,6 +768,15 @@ fn process_vcf(
             validate_vcf_header(&buffer)?;
             sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
             break;
+            println!(
+                "{}",
+                format!(
+                    "process_vcf: VCF Header processed. Number of samples found: {}",
+                    sample_names.len()
+                )
+                .blue()
+            );
+            println!("process_vcf: Sample Names: {:?}", sample_names);
         }
         buffer.clear();
     }
@@ -778,10 +787,28 @@ fn process_vcf(
 
     // Spawn producer thread
     let producer_thread = thread::spawn(move || -> Result<(), VcfError> {
+        let mut line_count = 0;
         while reader.read_line(&mut buffer)? > 0 {
             line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
             buffer.clear();
+            line_count += 1;
+            
+            if line_count == 1 {
+                println!(
+                    "{}",
+                    "process_vcf: Producer Thread started reading lines.".yellow()
+                );
+            } else if line_count % 100_000 == 0 {
+                println!(
+                    "{}",
+                    format!("process_vcf: Producer Thread has read {} lines so far.", line_count).yellow()
+                );
+            }
         }
+        println!(
+            "{}",
+            format!("process_vcf: Producer Thread finished reading. Total lines read: {}", line_count).green()
+        );
         drop(line_sender);
         Ok(())
     });
@@ -790,13 +817,32 @@ fn process_vcf(
     let num_threads = num_cpus::get();
     let sample_names = Arc::new(sample_names);
     let consumer_threads: Vec<_> = (0..num_threads)
-        .map(|_| {
+        .map(|thread_id| {
             let line_receiver = line_receiver.clone();
             let result_sender = result_sender.clone();
             let chr = chr.to_string();
             let sample_names = Arc::clone(&sample_names);
             thread::spawn(move || -> Result<(), VcfError> {
+                let mut processed_count = 0;
                 while let Ok(line) = line_receiver.recv() {
+                    processed_count += 1;
+                    
+                    if processed_count == 1 {
+                        println!(
+                            "{}",
+                            format!("process_vcf: Consumer Thread {} started processing lines.", thread_id).cyan()
+                        );
+                    } else if processed_count % 10_000 == 0 {
+                        println!(
+                            "{}",
+                            format!(
+                                "process_vcf: Consumer Thread {} has processed {} lines so far.",
+                                thread_id, processed_count
+                            )
+                            .cyan()
+                        );
+                    }
+                    
                     let mut local_missing_data_info = MissingDataInfo::default();
                     match parse_variant(
                         &line,
@@ -816,6 +862,14 @@ fn process_vcf(
                         }
                     }
                 }
+                println!(
+                    "{}",
+                    format!(
+                        "process_vcf: Consumer Thread {} finished processing. Total lines processed: {}",
+                        thread_id, processed_count
+                    )
+                    .cyan()
+                );
                 Ok(())
             })
         })
