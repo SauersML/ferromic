@@ -665,8 +665,8 @@ mod tests {
     #[test]
     fn test_group1_allele_frequency() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
-
-        let result_group1 = process_variants(
+    
+        let (num_segsites, w_theta, pi, n) = process_variants(
             &variants,
             &sample_names,
             1,
@@ -675,10 +675,12 @@ mod tests {
             3000,
         )
         .unwrap();
-
+    
+        let allele_frequency_group1 = calculate_allele_frequency(&sample_filter, 1);
+    
         // Allele frequency for group1 should be approximately 0.4444 (4/9)
         let expected_freq_group1 = 4.0 / 9.0;
-        let allele_frequency_diff_group1 = (result_group1.2 - expected_freq_group1).abs();
+        let allele_frequency_diff_group1 = (allele_frequency_group1 - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1: {}",
             allele_frequency_diff_group1
@@ -687,9 +689,10 @@ mod tests {
             allele_frequency_diff_group1 < 1e-6,
             "Allele frequency for Group 1 is incorrect: expected {}, got {}",
             expected_freq_group1,
-            result_group1.2
+            allele_frequency_group1
         );
     }
+
 
     #[test]
     fn test_group1_number_of_haplotypes() {
