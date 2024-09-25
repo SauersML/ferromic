@@ -167,11 +167,15 @@ fn main() -> Result<(), VcfError> {
         let raw_variant_count = variants.len();
 
         let n = sample_names.len();
+        if n == 0 {
+            return Err(VcfError::Parse("No samples found after processing VCF.".to_string()));
+        }
         let pairwise_diffs = calculate_pairwise_differences(&variants, n);
         let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
-
+        
         let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
         let pi = calculate_pi(tot_pair_diff, n, seq_length);
+
 
         println!("\n{}", "Results:".green().bold());
         println!("Example pairwise nucleotide substitutions from this run:");
