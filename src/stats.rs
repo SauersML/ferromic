@@ -880,7 +880,21 @@ fn process_vcf(
         let variants = variants.clone();
         let missing_data_info = missing_data_info.clone();
         move || -> Result<(), VcfError> {
+            let mut recv_count = 0;
             while let Ok(result) = result_receiver.recv() {
+                recv_count += 1;
+                
+                if recv_count == 1 || recv_count % 10_000 == 0 {
+                    println!(
+                        "{}",
+                        format!(
+                            "process_vcf: Collector Thread has received {} results so far.",
+                            recv_count
+                        )
+                        .magenta()
+                    );
+                }
+
                 match result {
                     Ok((variant, local_missing_data_info)) => {
                         variants.lock().push(variant);
@@ -892,6 +906,15 @@ fn process_vcf(
                     Err(e) => return Err(e),
                 }
             }
+
+            println!(
+                "{}",
+                format!(
+                    "process_vcf: Collector Thread finished receiving. Total results received: {}",
+                    recv_count
+                )
+                .magenta()
+            );
             Ok(())
         }
     });
