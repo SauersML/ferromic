@@ -832,7 +832,7 @@ fn process_vcf(
                             "{}",
                             format!("process_vcf: Consumer Thread {} started processing lines.", thread_id).cyan()
                         );
-                    } else if processed_count % 10 == 0 {
+                    } else if processed_count % 50 == 0 {
                         println!(
                             "{}",
                             format!(
