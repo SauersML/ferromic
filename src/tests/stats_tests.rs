@@ -678,7 +678,7 @@ mod tests {
 
         // Allele frequency for group1 should be approximately 0.4444 (4/9)
         let expected_freq_group1 = 4.0 / 9.0;
-        let allele_frequency_diff_group1 = (result_group1.4 - expected_freq_group1).abs();
+        let allele_frequency_diff_group1 = (result_group1.2 - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1: {}",
             allele_frequency_diff_group1
@@ -687,7 +687,7 @@ mod tests {
             allele_frequency_diff_group1 < 1e-6,
             "Allele frequency for Group 1 is incorrect: expected {}, got {}",
             expected_freq_group1,
-            result_group1.4
+            result_group1.2
         );
     }
 
@@ -829,7 +829,7 @@ mod tests {
         // From the test setup, variants do not have "_lowconf" in group1, so frequency remains the same
         let expected_freq_group1_filtered = 4.0 / 9.0;
         let allele_frequency_diff_group1_filtered =
-            (result_group1.4 - expected_freq_group1_filtered).abs();
+            (result_group1.2 - expected_freq_group1_filtered).abs();
         println!(
             "Filtered allele frequency difference for Group 1: {}",
             allele_frequency_diff_group1_filtered
@@ -838,7 +838,7 @@ mod tests {
             allele_frequency_diff_group1_filtered < 1e-6,
             "Filtered allele frequency for Group 1 is incorrect: expected {}, got {}",
             expected_freq_group1_filtered,
-            result_group1.4
+            result_group1.2
         );
     }
 
@@ -1000,7 +1000,7 @@ mod tests {
         // Number of '1's: 2
         // Total haplotypes: 3
         let expected_freq_group1 = 2.0 / 3.0;
-        let allele_frequency_diff_group1 = (result_group1.4 - expected_freq_group1).abs();
+        let allele_frequency_diff_group1 = (result_group1.2 - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1 with missing data: {}",
             allele_frequency_diff_group1
@@ -1009,7 +1009,7 @@ mod tests {
             allele_frequency_diff_group1 < 1e-6,
             "Allele frequency for Group 1 with missing data is incorrect: expected {}, got {}",
             expected_freq_group1,
-            result_group1.4
+            result_group1.2
         );
     
         // Additionally, verify Watterson's theta and pi
@@ -1075,7 +1075,7 @@ mod tests {
         // Number of '1's: 0
         // Total haplotypes: 3
         let expected_freq_group1 = 0.0;
-        let allele_frequency_diff_group1 = (result_group1.4 - expected_freq_group1).abs();
+        let allele_frequency_diff_group1 = (result_group1.2 - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1 with zero '1's: {}",
             allele_frequency_diff_group1
@@ -1084,7 +1084,7 @@ mod tests {
             allele_frequency_diff_group1 < 1e-6,
             "Allele frequency for Group 1 with zero '1's is incorrect: expected {}, got {}",
             expected_freq_group1,
-            result_group1.4
+            result_group1.2
         );
     
         // No segregating sites
