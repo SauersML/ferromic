@@ -173,9 +173,6 @@ fn main() -> Result<(), VcfError> {
         let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
         let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
-        let min_gq = args.min_gq;
-        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, min_gq)?;
-
         println!("\n{}", "Results:".green().bold());
         println!("Example pairwise nucleotide substitutions from this run:");
         let mut rng = thread_rng();
