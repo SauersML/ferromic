@@ -666,16 +666,18 @@ mod tests {
     fn test_group1_allele_frequency() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
     
+        // Process variants for haplotype_group=1
         let (num_segsites, w_theta, pi, n) = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
         )
         .unwrap();
     
+        // Calculate allele frequency using the correct function
         let allele_frequency_group1 = calculate_allele_frequency(&sample_filter, 1);
     
         // Allele frequency for group1 should be approximately 0.4444 (4/9)
@@ -691,7 +693,10 @@ mod tests {
             expected_freq_group1,
             allele_frequency_group1
         );
+    
+        assert_eq!(num_segsites, 2, "Number of segregating sites should be 2");
     }
+
 
 
     #[test]
@@ -816,23 +821,25 @@ mod tests {
     #[test]
     fn test_group1_filtered_allele_frequency() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
-
-        // Assuming filtering is based on exact genotype matches, but in this setup all genotypes are exact or have '_lowconf' which are excluded in filtered
-        let result_group1 = process_variants(
+    
+        // Process variants for haplotype_group=1 with filtered samples
+        let (num_segsites, w_theta, pi, n) = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
         )
         .unwrap();
-
-        // Allele frequency after filtering should exclude "_lowconf" genotypes
-        // From the test setup, variants do not have "_lowconf" in group1, so frequency remains the same
+    
+        // Calculate allele frequency using the correct function
+        let allele_frequency_group1_filtered = calculate_allele_frequency(&sample_filter, 1);
+    
+        // Allele frequency for group1 should be approximately 0.4444 (4/9)
         let expected_freq_group1_filtered = 4.0 / 9.0;
         let allele_frequency_diff_group1_filtered =
-            (result_group1.2 - expected_freq_group1_filtered).abs();
+            (allele_frequency_group1_filtered - expected_freq_group1_filtered).abs();
         println!(
             "Filtered allele frequency difference for Group 1: {}",
             allele_frequency_diff_group1_filtered
@@ -841,8 +848,10 @@ mod tests {
             allele_frequency_diff_group1_filtered < 1e-6,
             "Filtered allele frequency for Group 1 is incorrect: expected {}, got {}",
             expected_freq_group1_filtered,
-            result_group1.2
+            allele_frequency_group1_filtered
         );
+    
+        assert_eq!(num_segsites, 2, "Number of segregating sites should be 2");
     }
 
     #[test]
@@ -958,7 +967,7 @@ mod tests {
             result_group1.2
         );
     }
-
+    
     #[test]
     fn test_group1_missing_data_handling() {
         // Define sample haplotype groupings as per TSV config
@@ -969,14 +978,35 @@ mod tests {
         let sample_filter_unfiltered = HashMap::from([
             ("SAMPLE1".to_string(), (0, 1)),
             ("SAMPLE2".to_string(), (0, 1)),
-            ("SAMPLE3".to_string(), (0, 1)),
+            ("SAMPLE3".to_string(), (0, 0)),
         ]);
     
         // Define variants (for Watterson's theta and pi)
         let variants = vec![
-            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
-            create_variant(2000, vec![Some(vec![0, 0]), None, Some(vec![0, 0])]), // Missing genotype for SAMPLE2
-            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
+            create_variant(
+                1000,
+                vec![
+                    Some(vec![0, 0]),       // SAMPLE1
+                    Some(vec![0, 1]),       // SAMPLE2
+                    Some(vec![1, 1]),       // SAMPLE3
+                ],
+            ),
+            create_variant(
+                2000,
+                vec![
+                    Some(vec![0, 0]),       // SAMPLE1
+                    None,                    // SAMPLE2 (missing genotype)
+                    Some(vec![0, 0]),       // SAMPLE3
+                ],
+            ), // Missing genotype for SAMPLE2
+            create_variant(
+                3000,
+                vec![
+                    Some(vec![0, 1]),       // SAMPLE1
+                    Some(vec![1, 1]),       // SAMPLE2
+                    Some(vec![0, 0]),       // SAMPLE3
+                ],
+            ),
         ];
     
         let sample_names = vec![
@@ -988,22 +1018,24 @@ mod tests {
         let result_group1 = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter_unfiltered,
             1000,
             3000,
         )
         .unwrap();
     
-        // Calculate allele frequency based on TSV config:
-        // haplotype_group=1:
+        // Calculate allele frequency using the correct function
+        let allele_frequency_group1 = calculate_allele_frequency(&sample_filter_unfiltered, 1);
+    
+        // Calculate expected allele frequency based on the haplotype_group=1:
         // SAMPLE1 hap1=1
         // SAMPLE2 hap1=1
         // SAMPLE3 hap1=0
         // Number of '1's: 2
         // Total haplotypes: 3
         let expected_freq_group1 = 2.0 / 3.0;
-        let allele_frequency_diff_group1 = (result_group1.2 - expected_freq_group1).abs();
+        let allele_frequency_diff_group1 = (allele_frequency_group1 - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1 with missing data: {}",
             allele_frequency_diff_group1
@@ -1012,12 +1044,13 @@ mod tests {
             allele_frequency_diff_group1 < 1e-6,
             "Allele frequency for Group 1 with missing data is incorrect: expected {}, got {}",
             expected_freq_group1,
-            result_group1.2
+            allele_frequency_group1
         );
     
-        // Additionally, verify Watterson's theta and pi
+        // Verify Watterson's theta and pi
         // Expected segregating sites: 2 (positions 1000 and 3000)
-        assert_eq!(result_group1.0, 2, "Number of segregating sites should be 2");
+        let num_segsites = result_group1.0;
+        assert_eq!(num_segsites, 2, "Number of segregating sites should be 2");
     
         // Pi calculation:
         // For haplotype_group=1:
@@ -1028,18 +1061,19 @@ mod tests {
         // (SAMPLE2 vs SAMPLE3): 1 vs 0 -> 1 difference
         // Total differences: 2
         // Number of comparisons: 3
-        // Pi: 2 / 3 / 2001 ≈ 0.000333
+        // Pi: 2 / 3 / 2001 ≈ 0.0003331667
         let expected_pi = 2.0 / 3.0 / 2001.0; // ≈0.000333
-        let pi_diff = (result_group1.2 - expected_pi).abs();
+        let pi_calculated = result_group1.2;
+        let pi_diff = (pi_calculated - expected_pi).abs();
         println!(
             "Pi difference for Group 1: expected ~{:.6}, got {:.6}",
-            expected_pi, result_group1.2
+            expected_pi, pi_calculated
         );
         assert!(
             pi_diff < 1e-6,
             "Pi for Group 1 is incorrect: expected ~{:.6}, got {:.6}",
             expected_pi,
-            result_group1.2
+            pi_calculated
         );
     }
     
