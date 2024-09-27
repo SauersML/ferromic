@@ -397,7 +397,7 @@ fn process_config_entries(
             }
         };
 
-        let (all_variants, sample_names, _chr_length, _missing_data_info) = variants_data;
+        let (all_variants, sample_names, _chr_length, _missing_data_info, filtering_stats) = variants_data;
 
         for entry in entries {
             println!("Processing entry: {}:{}-{}", entry.seqname, entry.start, entry.end);
@@ -787,15 +787,6 @@ fn process_vcf(
             validate_vcf_header(&buffer)?;
             sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
             break;
-            println!(
-                "{}",
-                format!(
-                    "process_vcf: VCF Header processed. Number of samples found: {}",
-                    sample_names.len()
-                )
-                .blue()
-            );
-            println!("process_vcf: Sample Names: {:?}", sample_names);
         }
         buffer.clear();
     }
@@ -862,18 +853,19 @@ fn process_vcf(
                         );
                     }
                     
-                    let mut local_missing_data_info = MissingDataInfo::default();
-                    match parse_variant(
-                        &line,
-                        &chr,
-                        start,
-                        end,
-                        &mut local_missing_data_info,
-                        &sample_names,
-                        min_gq, // Pass min_gq to parse_variant
-                    ) {
+                        let mut local_filtering_stats = FilteringStats::default();
+                        match parse_variant(
+                            &line,
+                            &chr,
+                            start,
+                            end,
+                            &mut local_missing_data_info,
+                            &sample_names,
+                            min_gq,
+                            &mut local_filtering_stats
+                        ) {
                         Ok(Some(variant)) => {
-                            result_sender.send(Ok((variant, local_missing_data_info))).map_err(|_| VcfError::ChannelSend)?;
+                            result_sender.send(Ok((variant, local_missing_data_info, local_filtering_stats))).map_err(|_| VcfError::ChannelSend)?;
                         },
                         Ok(None) => {},
                         Err(e) => {
@@ -918,12 +910,20 @@ fn process_vcf(
                 }
     
                 match result {
-                    Ok((variant, local_missing_data_info)) => {
+                    Ok((variant, local_missing_data_info, local_filtering_stats)) => {
                         variants.lock().push(variant);
                         let mut global_missing_data_info = missing_data_info.lock();
                         global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
                         global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
                         global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
+                        
+                        let mut global_filtering_stats = filtering_stats.lock();
+                        global_filtering_stats.total_variants += local_filtering_stats.total_variants;
+                        global_filtering_stats.filtered_variants += local_filtering_stats.filtered_variants;
+                        global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
+                        global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
+                        global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
+                        global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
                     },
                     Err(e) => {
                         // Record the error but continue consuming messages
