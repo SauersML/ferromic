@@ -887,10 +887,12 @@ fn process_vcf(
         .collect();
 
     // Collector thread
+    let chr_clone = chr.to_string(); // Clone chr to owned String
     let collector_thread = thread::spawn({
         let variants = variants.clone();
         let missing_data_info = missing_data_info.clone();
         let filtering_stats = filtering_stats.clone();
+        let chr = chr_clone;
         move || -> Result<(), VcfError> {
             let mut recv_count = 0;
             let mut error_occurred = None;
