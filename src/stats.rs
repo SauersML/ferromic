@@ -853,6 +853,7 @@ fn process_vcf(
                     }
                     
                     let mut local_missing_data_info = MissingDataInfo::default();
+                    let mut local_filtering_stats = FilteringStats::default();
                     match parse_variant(
                         &line,
                         &chr,
