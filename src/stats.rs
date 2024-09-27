@@ -950,12 +950,12 @@ fn process_vcf(
 
             println!("{}", format!("Filtering statistics for chromosome {}:", chr).green());
             let stats = filtering_stats.lock();
-            println!("Total variants processed: {}", stats.total_variants);
-            println!("Filtered variants: {} ({:.2}%)", stats.filtered_variants, (stats.filtered_variants as f64 / stats.total_variants as f64) * 100.0);
-            println!("Multi-allelic variants: {}", stats.multi_allelic_variants);
-            println!("Low GQ variants: {}", stats.low_gq_variants);
-            println!("Missing data variants: {}", stats.missing_data_variants);
-            println!("Filtered positions: {:?}", stats.filtered_positions);
+            println!("Total variants processed: {}", filtering_stats.total_variants);
+            println!("Filtered variants: {} ({:.2}%)", filtering_stats.filtered_variants, (stats.filtered_variants as f64 / filtering_stats.total_variants as f64) * 100.0);
+            println!("Multi-allelic variants: {}", filtering_stats.multi_allelic_variants);
+            println!("Low GQ variants: {}", filtering_stats.low_gq_variants);
+            println!("Missing data variants: {}", filtering_stats.missing_data_variants);
+            println!("Filtered positions: {:?}", filtering_stats.filtered_positions);
 
             Ok(())
         }
@@ -1004,6 +1004,8 @@ fn parse_variant(
     min_gq: u16,
     filtering_stats: &mut FilteringStats,
 ) -> Result<Option<Variant>, VcfError> {
+    filtering_stats.total_variants += 1;
+
     let fields: Vec<&str> = line.split('\t').collect();
 
     let required_fixed_fields = 9;
