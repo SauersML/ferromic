@@ -1084,7 +1084,7 @@ fn parse_variant(
     if sample_has_low_gq {
         // Skip this variant
         let percent_low_gq = (num_samples_below_gq as f64 / (fields.len() - 9) as f64) * 100.0;
-        eprintln!("Warning: Variant at position {} excluded due to low GQ. {:.2}% of samples had GQ below threshold.", pos, percent_low_gq);
+        //eprintln!("Warning: Variant at position {} excluded due to low GQ. {:.2}% of samples had GQ below threshold.", pos, percent_low_gq);
         filtering_stats.low_gq_variants += 1;
         filtering_stats.filtered_variants += 1;
         filtering_stats.filtered_positions.insert(pos);
