@@ -1013,15 +1013,29 @@ fn parse_variant(
 
     for gt_field in fields[9..].iter() {
         let gt_subfields: Vec<&str> = gt_field.split(':').collect();
+        
+        // Check if GQ index is within the subfields
         if gq_index >= gt_subfields.len() {
-            return Err(VcfError::Parse("GQ value missing in sample genotype field".to_string()));
+            return Err(VcfError::Parse(format!(
+                "GQ value missing in sample genotype field at chr{}:{}",
+                chr, pos
+            )));
         }
+        
         let gq_str = gt_subfields[gq_index];
+        
+        // Attempt to parse GQ value as u16
         let gq_value: u16 = match gq_str.parse() {
             Ok(val) => val,
-            Err(_) => return Err(VcfError::Parse("Invalid GQ value".to_string())),
+            Err(_) => {
+                return Err(VcfError::Parse(format!(
+                    "Invalid GQ value '{}' in sample genotype field at chr{}:{}",
+                    gq_str, chr, pos
+                )));
+            }
         };
     
+        // Check if GQ value is below the minimum threshold
         if gq_value < min_gq {
             sample_has_low_gq = true;
             num_samples_below_gq += 1;
