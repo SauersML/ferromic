@@ -947,19 +947,27 @@ fn process_vcf(
             if let Some(e) = error_occurred {
                 return Err(e);
             }
-
-            println!("{}", format!("Filtering statistics for chromosome {}:", chr).green());
+    
+            // Inserted Mutex Lock
             let stats = filtering_stats.lock();
-            println!("Total variants processed: {}", filtering_stats.total_variants);
-            println!("Filtered variants: {} ({:.2}%)", filtering_stats.filtered_variants, (stats.filtered_variants as f64 / filtering_stats.total_variants as f64) * 100.0);
-            println!("Multi-allelic variants: {}", filtering_stats.multi_allelic_variants);
-            println!("Low GQ variants: {}", filtering_stats.low_gq_variants);
-            println!("Missing data variants: {}", filtering_stats.missing_data_variants);
-            println!("Filtered positions: {:?}", filtering_stats.filtered_positions);
-
+    
+            // Updated `println!` Statements
+            println!("{}", format!("Filtering statistics for chromosome {}:", chr).green());
+            println!("Total variants processed: {}", stats.total_variants);
+            println!(
+                "Filtered variants: {} ({:.2}%)",
+                stats.filtered_variants,
+                (stats.filtered_variants as f64 / stats.total_variants as f64) * 100.0
+            );
+            println!("Multi-allelic variants: {}", stats.multi_allelic_variants);
+            println!("Low GQ variants: {}", stats.low_gq_variants);
+            println!("Missing data variants: {}", stats.missing_data_variants);
+            println!("Filtered positions: {:?}", stats.filtered_positions);
+    
             Ok(())
         }
     });
+
 
     // Wait for all threads to complete
     producer_thread.join().expect("Producer thread panicked")?;
