@@ -222,13 +222,12 @@ fn main() -> Result<(), VcfError> {
         println!("Multi-allelic variants: {}", filtering_stats.multi_allelic_variants);
         println!("Low GQ variants: {}", filtering_stats.low_gq_variants);
         println!("Missing data variants: {}", filtering_stats.missing_data_variants);
-        println!("Filtered positions: {:?}", filtering_stats.filtered_positions);
-
+        
         let missing_data_percentage = (missing_data_info.missing_data_points as f64 / missing_data_info.total_data_points as f64) * 100.0;
         println!("\n{}", "Missing Data Information:".yellow().bold());
-        println!("Number of missing variants: {}", missing_data_info.missing_data_points);
+        println!("Number of missing data points: {}", missing_data_info.missing_data_points);
         println!("Percentage of missing data: {:.2}%", missing_data_percentage);
-        println!("Positions with missing data: {:?}", missing_data_info.positions_with_missing);
+        println!("Number of positions with missing data: {}", missing_data_info.positions_with_missing.len());
     } else {
         return Err(VcfError::Parse("Either config file or chromosome must be specified".to_string()));
     }
@@ -853,17 +852,17 @@ fn process_vcf(
                         );
                     }
                     
-                        let mut local_filtering_stats = FilteringStats::default();
-                        match parse_variant(
-                            &line,
-                            &chr,
-                            start,
-                            end,
-                            &mut local_missing_data_info,
-                            &sample_names,
-                            min_gq,
-                            &mut local_filtering_stats
-                        ) {
+                    let mut local_missing_data_info = MissingDataInfo::default();
+                    match parse_variant(
+                        &line,
+                        &chr,
+                        start,
+                        end,
+                        &mut local_missing_data_info,
+                        &sample_names,
+                        min_gq,
+                        &mut local_filtering_stats
+                    ) {
                         Ok(Some(variant)) => {
                             result_sender.send(Ok((variant, local_missing_data_info, local_filtering_stats))).map_err(|_| VcfError::ChannelSend)?;
                         },
