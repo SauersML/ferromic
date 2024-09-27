@@ -832,7 +832,7 @@ fn process_vcf(
                             "{}",
                             format!("process_vcf: Consumer Thread {} started processing lines.", thread_id).cyan()
                         );
-                    } else if processed_count % 50 == 0 {
+                    } else if processed_count % 20_000 == 0 {
                         println!(
                             "{}",
                             format!(
@@ -881,9 +881,11 @@ fn process_vcf(
         let missing_data_info = missing_data_info.clone();
         move || -> Result<(), VcfError> {
             let mut recv_count = 0;
+            let mut error_occurred = None;
+    
             while let Ok(result) = result_receiver.recv() {
                 recv_count += 1;
-                
+    
                 if recv_count == 1 || recv_count % 10_000 == 0 {
                     println!(
                         "{}",
@@ -894,7 +896,7 @@ fn process_vcf(
                         .magenta()
                     );
                 }
-
+    
                 match result {
                     Ok((variant, local_missing_data_info)) => {
                         variants.lock().push(variant);
@@ -903,10 +905,13 @@ fn process_vcf(
                         global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
                         global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
                     },
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        // Record the error but continue consuming messages
+                        error_occurred = Some(e);
+                    },
                 }
             }
-
+    
             println!(
                 "{}",
                 format!(
@@ -915,6 +920,11 @@ fn process_vcf(
                 )
                 .magenta()
             );
+    
+            // After consuming all messages, check if an error occurred
+            if let Some(e) = error_occurred {
+                return Err(e);
+            }
             Ok(())
         }
     });
