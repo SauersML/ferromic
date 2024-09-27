@@ -63,6 +63,16 @@ struct RegionStats {
     pi: f64,
 }
 
+#[derive(Debug, Default)]
+struct FilteringStats {
+    total_variants: usize,
+    filtered_variants: usize,
+    filtered_positions: HashSet<i64>,
+    missing_data_variants: usize,
+    low_gq_variants: usize,
+    multi_allelic_variants: usize,
+}
+
 #[derive(Debug, Clone)]
 struct Variant {
     position: i64,
@@ -685,12 +695,13 @@ fn process_vcf(
     start: i64,
     end: i64,
     min_gq: u16,
-) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
+) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo, FilteringStats), VcfError> {
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
     let chr_length = 0;
     let variants = Arc::new(Mutex::new(Vec::new()));
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
+    let filtering_stats = Arc::new(Mutex::new(FilteringStats::default()));
 
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
     let progress_bar = if is_gzipped {
@@ -879,6 +890,7 @@ fn process_vcf(
     let collector_thread = thread::spawn({
         let variants = variants.clone();
         let missing_data_info = missing_data_info.clone();
+        let filtering_stats = filtering_stats.clone();
         move || -> Result<(), VcfError> {
             let mut recv_count = 0;
             let mut error_occurred = None;
@@ -925,6 +937,16 @@ fn process_vcf(
             if let Some(e) = error_occurred {
                 return Err(e);
             }
+
+            println!("{}", format!("Filtering statistics for chromosome {}:", chr).green());
+            let stats = filtering_stats.lock();
+            println!("Total variants processed: {}", stats.total_variants);
+            println!("Filtered variants: {} ({:.2}%)", stats.filtered_variants, (stats.filtered_variants as f64 / stats.total_variants as f64) * 100.0);
+            println!("Multi-allelic variants: {}", stats.multi_allelic_variants);
+            println!("Low GQ variants: {}", stats.low_gq_variants);
+            println!("Missing data variants: {}", stats.missing_data_variants);
+            println!("Filtered positions: {:?}", stats.filtered_positions);
+
             Ok(())
         }
     });
@@ -945,8 +967,9 @@ fn process_vcf(
 
     let final_variants = Arc::try_unwrap(variants).expect("Variants still have multiple owners").into_inner();
     let final_missing_data_info = Arc::try_unwrap(missing_data_info).expect("Missing data info still has multiple owners").into_inner();
+    let final_filtering_stats = Arc::try_unwrap(filtering_stats).expect("Filtering stats still have multiple owners").into_inner();
 
-    Ok((final_variants, Arc::try_unwrap(sample_names).unwrap(), chr_length, final_missing_data_info))
+    Ok((final_variants, Arc::try_unwrap(sample_names).unwrap(), chr_length, final_missing_data_info, final_filtering_stats))
 }
 
 
@@ -969,6 +992,7 @@ fn parse_variant(
     missing_data_info: &mut MissingDataInfo,
     sample_names: &[String],
     min_gq: u16,
+    filtering_stats: &mut FilteringStats,
 ) -> Result<Option<Variant>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
@@ -993,6 +1017,9 @@ fn parse_variant(
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
     if alt_alleles.len() > 1 {
+        filtering_stats.multi_allelic_variants += 1;
+        filtering_stats.filtered_variants += 1;
+        filtering_stats.filtered_positions.insert(pos);
         eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. This may lead to underestimation of genetic diversity (pi).", pos).yellow());
     }
 
@@ -1048,6 +1075,9 @@ fn parse_variant(
         // Skip this variant
         let percent_low_gq = (num_samples_below_gq as f64 / (fields.len() - 9) as f64) * 100.0;
         eprintln!("Warning: Variant at position {} excluded due to low GQ. {:.2}% of samples had GQ below threshold.", pos, percent_low_gq);
+        filtering_stats.low_gq_variants += 1;
+        filtering_stats.filtered_variants += 1;
+        filtering_stats.filtered_positions.insert(pos);
         return Ok(None);
     }
 
@@ -1070,7 +1100,14 @@ fn parse_variant(
             alleles
         })
         .collect();
-
+    
+    if genotypes.iter().any(|gt| gt.is_none()) {
+        filtering_stats.missing_data_variants += 1;
+        filtering_stats.filtered_variants += 1;
+        filtering_stats.filtered_positions.insert(pos);
+        return Ok(None);
+    }
+    
     Ok(Some(Variant {
         position: pos,
         genotypes,
