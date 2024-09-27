@@ -159,7 +159,7 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        let (variants, sample_names, chr_length, missing_data_info) = process_vcf(&vcf_file, chr, start, end, args.min_gq)?;
+        let (variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(&vcf_file, chr, start, end, args.min_gq)?;
 
         println!("{}", "Calculating diversity statistics...".blue());
 
@@ -215,6 +215,14 @@ fn main() -> Result<(), VcfError> {
         if num_segsites != raw_variant_count {
             println!("{}", format!("Note: Number of segregating sites ({}) differs from raw variant count ({}).", num_segsites, raw_variant_count).yellow());
         }
+
+        println!("\n{}", "Filtering Statistics:".green().bold());
+        println!("Total variants processed: {}", filtering_stats.total_variants);
+        println!("Filtered variants: {} ({:.2}%)", filtering_stats.filtered_variants, (filtering_stats.filtered_variants as f64 / filtering_stats.total_variants as f64) * 100.0);
+        println!("Multi-allelic variants: {}", filtering_stats.multi_allelic_variants);
+        println!("Low GQ variants: {}", filtering_stats.low_gq_variants);
+        println!("Missing data variants: {}", filtering_stats.missing_data_variants);
+        println!("Filtered positions: {:?}", filtering_stats.filtered_positions);
 
         let missing_data_percentage = (missing_data_info.missing_data_points as f64 / missing_data_info.total_data_points as f64) * 100.0;
         println!("\n{}", "Missing Data Information:".yellow().bold());
