@@ -1029,7 +1029,7 @@ fn parse_variant(
             Ok(val) => val,
             Err(_) => {
                 return Err(VcfError::Parse(format!(
-                    "Invalid GQ value '{}' in sample genotype field at chr{}:{}",
+                    "Invalid GQ value '{}' in sample genotype field at {}:{}",
                     gq_str, chr, pos
                 )));
             }
