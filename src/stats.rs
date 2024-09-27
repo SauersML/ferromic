@@ -832,7 +832,7 @@ fn process_vcf(
                             "{}",
                             format!("process_vcf: Consumer Thread {} started processing lines.", thread_id).cyan()
                         );
-                    } else if processed_count % 50_000 == 0 {
+                    } else if processed_count % 100_000 == 0 {
                         println!(
                             "{}",
                             format!(
@@ -886,7 +886,7 @@ fn process_vcf(
             while let Ok(result) = result_receiver.recv() {
                 recv_count += 1;
     
-                if recv_count == 1 || recv_count % 50_000 == 0 {
+                if recv_count == 1 || recv_count % 100_000 == 0 {
                     println!(
                         "{}",
                         format!(
