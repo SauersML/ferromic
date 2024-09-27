@@ -948,10 +948,8 @@ fn process_vcf(
                 return Err(e);
             }
     
-            // Inserted Mutex Lock
             let stats = filtering_stats.lock();
     
-            // Updated `println!` Statements
             println!("{}", format!("Filtering statistics for chromosome {}:", chr).green());
             println!("Total variants processed: {}", stats.total_variants);
             println!(
