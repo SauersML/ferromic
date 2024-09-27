@@ -39,7 +39,7 @@ struct Args {
     output_file: Option<String>,
 
     #[arg(long = "min_gq", default_value = "30")]
-    min_gq: u8,
+    min_gq: u16,
 }
 
 
@@ -305,7 +305,7 @@ fn process_config_entries(
     config_entries: &[ConfigEntry],
     vcf_folder: &str,
     output_file: &Path,
-    min_gq: u8,
+    min_gq: u16,
 ) -> Result<(), VcfError> {
     let mut writer = WriterBuilder::new()
         .has_headers(true)
@@ -374,7 +374,7 @@ fn process_config_entries(
         let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq) {
             Ok(data) => data,
             Err(e) => {
-                eprintln!("Error processing VCF file for {}: {:?}", chr, e);
+                eprintln!("Error processing VCF file for {}: {}", chr, e);
                 continue;
             }
         };
@@ -684,7 +684,7 @@ fn process_vcf(
     chr: &str,
     start: i64,
     end: i64,
-    min_gq: u8,
+    min_gq: u16,
 ) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo), VcfError> {
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
@@ -832,7 +832,7 @@ fn process_vcf(
                             "{}",
                             format!("process_vcf: Consumer Thread {} started processing lines.", thread_id).cyan()
                         );
-                    } else if processed_count % 20_000 == 0 {
+                    } else if processed_count % 50_000 == 0 {
                         println!(
                             "{}",
                             format!(
@@ -886,7 +886,7 @@ fn process_vcf(
             while let Ok(result) = result_receiver.recv() {
                 recv_count += 1;
     
-                if recv_count == 1 || recv_count % 10_000 == 0 {
+                if recv_count == 1 || recv_count % 50_000 == 0 {
                     println!(
                         "{}",
                         format!(
@@ -968,7 +968,7 @@ fn parse_variant(
     end: i64,
     missing_data_info: &mut MissingDataInfo,
     sample_names: &[String],
-    min_gq: u8,
+    min_gq: u16,
 ) -> Result<Option<Variant>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
@@ -1017,10 +1017,11 @@ fn parse_variant(
             return Err(VcfError::Parse("GQ value missing in sample genotype field".to_string()));
         }
         let gq_str = gt_subfields[gq_index];
-        let gq_value: u8 = match gq_str.parse() {
+        let gq_value: u16 = match gq_str.parse() {
             Ok(val) => val,
             Err(_) => return Err(VcfError::Parse("Invalid GQ value".to_string())),
         };
+    
         if gq_value < min_gq {
             sample_has_low_gq = true;
             num_samples_below_gq += 1;
