@@ -1025,13 +1025,15 @@ fn parse_variant(
         let gq_str = gt_subfields[gq_index];
         
         // Attempt to parse GQ value as u16
-        let gq_value: u16 = match gq_str.parse() {
-            Ok(val) => val,
-            Err(_) => {
-                return Err(VcfError::Parse(format!(
-                    "Invalid GQ value '{}' in sample genotype field at {}:{}",
-                    gq_str, chr, pos
-                )));
+        // Parse GQ value, treating '.' or empty string as 0
+        let gq_value: u16 = match gq_str {
+            "." | "" => 0,
+            _ => match gq_str.parse() {
+                Ok(val) => val,
+                Err(_) => {
+                    eprintln!("Missing GQ value '{}' at {}:{}. Treating as 0.", gq_str, chr, pos);
+                    0
+                }
             }
         };
     
