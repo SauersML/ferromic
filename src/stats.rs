@@ -1109,7 +1109,7 @@ fn parse_variant(
         filtering_stats.low_gq_variants += 1;
         filtering_stats.filtered_variants += 1;
         filtering_stats.filtered_positions.insert(pos);
-        return Ok(None);
+        return Ok(None); // This exlcudes the entire variant for all samples
     }
 
     let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
