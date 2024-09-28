@@ -864,10 +864,9 @@ fn process_vcf(
                         min_gq,
                         &mut local_filtering_stats
                     ) {
-                        Ok(Some(variant)) => {
-                            result_sender.send(Ok((variant, local_missing_data_info, local_filtering_stats))).map_err(|_| VcfError::ChannelSend)?;
+                        Ok(variant_option) => {
+                            result_sender.send(Ok((variant_option, local_missing_data_info, local_filtering_stats))).map_err(|_| VcfError::ChannelSend)?;
                         },
-                        Ok(None) => {},
                         Err(e) => {
                             result_sender.send(Err(e)).map_err(|_| VcfError::ChannelSend)?;
                         }
@@ -912,8 +911,22 @@ fn process_vcf(
                 }
     
                 match result {
-                    Ok((variant, local_missing_data_info, local_filtering_stats)) => {
+                    Ok((Some(variant), local_missing_data_info, local_filtering_stats)) => {
                         variants.lock().push(variant);
+                        let mut global_missing_data_info = missing_data_info.lock();
+                        global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
+                        global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
+                        global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
+                        
+                        let mut global_filtering_stats = filtering_stats.lock();
+                        global_filtering_stats.total_variants += local_filtering_stats.total_variants;
+                        global_filtering_stats.filtered_variants += local_filtering_stats.filtered_variants;
+                        global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
+                        global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
+                        global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
+                        global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
+                    },
+                    Ok((None, local_missing_data_info, local_filtering_stats)) => {
                         let mut global_missing_data_info = missing_data_info.lock();
                         global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
                         global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
