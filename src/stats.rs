@@ -264,7 +264,7 @@ fn process_variants(
                 _ => return Err(VcfError::Parse(format!("Invalid haplotype group: {}", haplotype_group))),
             }
         } else {
-            eprintln!("Warning: Sample '{}' from config file not found in VCF samples.", sample_name);
+            /// ...
         }
     }
 
@@ -397,6 +397,25 @@ fn process_config_entries(
         };
 
         let (all_variants, sample_names, _chr_length, _missing_data_info, filtering_stats) = variants_data;
+
+        // Collect all config samples for this chromosome
+        let all_config_samples: HashSet<String> = entries.iter()
+            .flat_map(|entry| {
+                entry.samples_unfiltered.keys().cloned()
+                    .chain(entry.samples_filtered.keys().cloned())
+            })
+            .collect();
+        
+        // Collect VCF sample names
+        let vcf_sample_set: HashSet<String> = sample_names.iter().cloned().collect();
+        
+        // Find missing samples
+        let missing_samples: Vec<String> = all_config_samples.difference(&vcf_sample_set).cloned().collect();
+        
+        // Print warning if there are missing samples
+        if !missing_samples.is_empty() {
+            eprintln!("Warning: The following samples from config file are missing in VCF for chromosome {}: {:?}", chr, missing_samples);
+        }
 
         for entry in entries {
             println!("Processing entry: {}:{}-{}", entry.seqname, entry.start, entry.end);
