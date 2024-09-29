@@ -244,7 +244,7 @@ fn process_variants(
     sample_filter: &HashMap<String, (u8, u8)>,
     region_start: i64,
     region_end: i64,
-) -> Result<(usize, f64, f64, usize), VcfError> {
+) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
@@ -264,15 +264,13 @@ fn process_variants(
                 _ => return Err(VcfError::Parse(format!("Invalid haplotype group: {}", haplotype_group))),
             }
         } else {
-            // ...
+            // No sample
         }
     }
 
     if haplotype_indices.is_empty() {
-        return Err(VcfError::Parse(format!(
-            "No haplotypes found for the specified group {}.",
-            haplotype_group
-        )));
+        println!("No haplotypes found for the specified group {}.", haplotype_group);
+        return Ok(None);
     }
 
     let mut num_segsites = 0;
@@ -315,7 +313,7 @@ fn process_variants(
     let w_theta = calculate_watterson_theta(num_segsites, n, region_end - region_start + 1);
     let pi = calculate_pi(tot_pair_diff, n, region_end - region_start + 1);
 
-    Ok((num_segsites, w_theta, pi, n))
+    Ok(Some((num_segsites, w_theta, pi, n)))
 }
 
 fn process_config_entries(
@@ -609,7 +607,7 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 fn calculate_allele_frequency(
     sample_filter: &HashMap<String, (u8, u8)>,
     haplotype_group: u8,
-) -> f64 { // Returns allele frequency of '1' in the haplotype group
+) -> Option<f64> { // Returns allele frequency of '1' in the haplotype group
     let mut num_ones = 0;
     let mut total_haplotypes = 0;
 
@@ -624,11 +622,11 @@ fn calculate_allele_frequency(
         }
         total_haplotypes += 1;
     }
-
+    
     if total_haplotypes > 0 {
-        num_ones as f64 / total_haplotypes as f64
+        Some(num_ones as f64 / total_haplotypes as f64)
     } else {
-        f64::NAN // No haplotypes
+        None // No haplotypes
     }
 }
 
