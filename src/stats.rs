@@ -422,47 +422,59 @@ fn process_config_entries(
             let sequence_length = entry.end - entry.start + 1;
 
             // Process haplotype_group=0 (unfiltered)
-            let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) = process_variants(
+            let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) = match process_variants(
                 &all_variants,
                 &sample_names,
                 0,
                 &entry.samples_unfiltered,
                 entry.start,
                 entry.end,
-            )?;
+            )? {
+                Some(values) => values,
+                None => continue, // Skip writing this record
+            };
 
             // Process haplotype_group=1 (unfiltered)
-            let (num_segsites_1, w_theta_1, pi_1, n_hap_1_no_filter) = process_variants(
+            let (num_segsites_1, w_theta_1, pi_1, n_hap_1_no_filter) = match process_variants(
                 &all_variants,
                 &sample_names,
                 1,
                 &entry.samples_unfiltered,
                 entry.start,
                 entry.end,
-            )?;
+            )? {
+                Some(values) => values,
+                None => continue, // Skip writing this record
+            };
 
             // Calculate allele frequency for haplotype_group=1 (no filter)
             let freq_1_no_filter = calculate_allele_frequency(&entry.samples_unfiltered, 1);
 
             // Process haplotype_group=0 (filtered)
-            let (num_segsites_0_filt, w_theta_0_filt, pi_0_filt, n_hap_0_filt) = process_variants(
+            let (num_segsites_0_filt, w_theta_0_filt, pi_0_filt, n_hap_0_filt) = match process_variants(
                 &all_variants,
                 &sample_names,
                 0,
                 &entry.samples_filtered,
                 entry.start,
                 entry.end,
-            )?;
+            )? {
+                Some(values) => values,
+                None => continue, // Skip writing this record
+            };
 
             // Process haplotype_group=1 (filtered)
-            let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) = process_variants(
+            let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) = match process_variants(
                 &all_variants,
                 &sample_names,
                 1,
                 &entry.samples_filtered,
                 entry.start,
                 entry.end,
-            )?;
+            )? {
+                Some(values) => values,
+                None => continue, // Skip writing this record
+            };
 
             // Calculate allele frequency for haplotype_group=1 (filtered)
             let freq_1_filt = calculate_allele_frequency(&entry.samples_filtered, 1);
@@ -490,8 +502,9 @@ fn process_config_entries(
                 &n_hap_1_no_filter.to_string(),    // 1_num_hap_no_filter
                 &n_hap_0_filt.to_string(),         // 0_num_hap_filter
                 &n_hap_1_filt.to_string(),         // 1_num_hap_filter
-                &format!("{:.6}", freq_1_no_filter), // 1_freq_no_filter
-                &format!("{:.6}", freq_1_filt),       // 1_freq_filter
+                // -1.0 should never occur
+                &format!("{:.6}", freq_1_no_filter.unwrap_or(-1.0)), // 1_freq_no_filter
+                &format!("{:.6}", freq_1_filt.unwrap_or(-1.0)),       // 1_freq_filter
             ])
             .map_err(|e| VcfError::Io(e.into()))?;
 
