@@ -164,23 +164,24 @@ fn main() -> Result<(), VcfError> {
         println!("{}", "Calculating diversity statistics...".blue());
 
         let seq_length = if end == i64::MAX {
-            variants.last().map(|v| v.position).unwrap_or(0).max(chr_length) - start + 1
+            unfiltered_variants.last().map(|v| v.position).unwrap_or(0).max(chr_length) - start + 1
         } else {
             end - start + 1
         };
 
-        if end == i64::MAX && variants.last().map(|v| v.position).unwrap_or(0) < chr_length {
+        if end == i64::MAX && unfiltered_variants.last().map(|v| v.position).unwrap_or(0) < chr_length {
             println!("{}", "Warning: The sequence length may be underestimated. Consider using the --region parameter for more accurate results.".yellow());
         }
 
-        let num_segsites = count_segregating_sites(&variants);
-        let raw_variant_count = variants.len();
+        let num_segsites = count_segregating_sites(&unfiltered_variants); // Also need filtered here? Output required in csv: 0_segregating_sites_filtered, 1_segregating_sites_filtered
+        let raw_variant_count = unfiltered_variants.len();
 
         let n = sample_names.len();
         if n == 0 {
             return Err(VcfError::Parse("No samples found after processing VCF.".to_string()));
         }
-        let pairwise_diffs = calculate_pairwise_differences(&variants, n);
+
+        let pairwise_diffs = calculate_pairwise_differences(&unfiltered_variants, n); // Also need filtered here?
         let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
         
         let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
@@ -204,7 +205,7 @@ fn main() -> Result<(), VcfError> {
         println!("Watterson Theta:{:.6}", w_theta);
         println!("pi:{:.6}", pi);
 
-        if variants.is_empty() {
+        if unfiltered_variants.is_empty() {
             println!("{}", "Warning: No variants found in the specified region.".yellow());
         }
 
@@ -296,21 +297,6 @@ fn process_variants(
         let unique_alleles: HashSet<_> = alleles_present.iter().cloned().collect();
         if unique_alleles.len() > 1 {
             num_segsites += 1;
-        }
-
-        // Count pairwise differences
-        if let (Some(Some(alleles_i)), Some(Some(alleles_j))) = (
-            variant.genotypes.get(i.0),
-            variant.genotypes.get(j.0),
-        ) {
-            if let (Some(allele_i), Some(allele_j)) = (
-                alleles_i.get(i.1).copied(),
-                alleles_j.get(j.1).copied(),
-            ) {
-                if allele_i != allele_j {
-                    tot_pair_diff += 1;
-                }
-            }
         }
     }
 
@@ -443,7 +429,7 @@ fn process_config_entries(
 
             // Process haplotype_group=1 (unfiltered)
             let (num_segsites_1, w_theta_1, pi_1, n_hap_1_no_filter) = match process_variants(
-                &all_variants,
+                &unfiltered_variants,
                 &sample_names,
                 1,
                 &entry.samples_unfiltered,
@@ -472,7 +458,7 @@ fn process_config_entries(
 
             // Process haplotype_group=1 (filtered)
             let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) = match process_variants(
-                &all_variants,
+                &unfiltered_variants,
                 &sample_names,
                 1,
                 &entry.samples_filtered,
@@ -934,7 +920,8 @@ fn process_vcf(
     // Collector thread
     let chr_clone = chr.to_string(); // Clone chr to owned String
     let collector_thread = thread::spawn({
-        let variants = variants.clone();
+        let unfiltered_variants = unfiltered_variants.clone();
+        let filtered_variants = filtered_variants.clone();
         let missing_data_info = missing_data_info.clone();
         let filtering_stats = filtering_stats.clone();
         let chr = chr_clone;
@@ -1197,11 +1184,11 @@ fn parse_variant(
         filtering_stats.missing_data_variants += 1;
         // Do not return; continue processing
     }
+
+    let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
     
     // Determine if variant passes filters
     let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
-    let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
-
     
     // Update filtering stats if variant is filtered out
     if !passes_filters {
