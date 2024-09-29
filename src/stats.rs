@@ -264,7 +264,7 @@ fn process_variants(
                 _ => return Err(VcfError::Parse(format!("Invalid haplotype group: {}", haplotype_group))),
             }
         } else {
-            /// ...
+            // ...
         }
     }
 
