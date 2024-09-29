@@ -405,7 +405,10 @@ fn process_config_entries(
             .collect();
         
         // Collect VCF sample names
-        let vcf_sample_set: HashSet<String> = sample_names.iter().cloned().collect();
+        let vcf_sample_set: HashSet<String> = sample_names.iter()
+            .map(|s| extract_sample_id(s).to_string())
+            .collect();
+
         
         // Find missing samples
         let missing_samples: Vec<String> = all_config_samples.difference(&vcf_sample_set).cloned().collect();
