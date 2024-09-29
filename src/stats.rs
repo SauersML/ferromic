@@ -734,7 +734,14 @@ fn process_vcf(
     start: i64,
     end: i64,
     min_gq: u16,
-) -> Result<(Vec<Variant>, Vec<String>, i64, MissingDataInfo, FilteringStats), VcfError> {
+) -> Result<(
+    Vec<Variant>,        // Unfiltered variants
+    Vec<Variant>,        // Filtered variants
+    Vec<String>,         // Sample names
+    i64,                 // Chromosome length
+    MissingDataInfo,
+    FilteringStats,
+), VcfError> {
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
     let chr_length = 0;
