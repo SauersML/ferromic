@@ -159,7 +159,7 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        let (variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(&vcf_file, chr, start, end, args.min_gq)?;
+        let (unfiltered_variants, filtered_variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(&vcf_file, chr, start, end, args.min_gq)?;
 
         println!("{}", "Calculating diversity statistics...".blue());
 
@@ -288,7 +288,8 @@ fn process_variants(
             .filter_map(|&(i, allele_idx)| {
                 variant.genotypes.get(i)
                     .and_then(|gt| gt.as_ref())
-                    .and_then(|alleles| alleles.get(allele_idx).copied())
+                    .and_then(|alleles| alleles.get(allele_idx))
+                    .copied()
             })
             .collect();
 
@@ -298,10 +299,13 @@ fn process_variants(
         }
 
         // Count pairwise differences
-        for (i, j) in haplotype_indices.iter().tuple_combinations() {
+        if let (Some(Some(alleles_i)), Some(Some(alleles_j))) = (
+            variant.genotypes.get(i.0),
+            variant.genotypes.get(j.0),
+        ) {
             if let (Some(allele_i), Some(allele_j)) = (
-                variant.genotypes.get(i.0).and_then(|gt| gt.as_ref()).and_then(|alleles| alleles.get(i.1).copied()),
-                variant.genotypes.get(j.0).and_then(|gt| gt.as_ref()).and_then(|alleles| alleles.get(j.1).copied()),
+                alleles_i.get(i.1).copied(),
+                alleles_j.get(j.1).copied(),
             ) {
                 if allele_i != allele_j {
                     tot_pair_diff += 1;
@@ -394,7 +398,7 @@ fn process_config_entries(
             }
         };
 
-        let (all_variants, sample_names, _chr_length, _missing_data_info, filtering_stats) = variants_data;
+        let (unfiltered_variants, filtered_variants, sample_names, _chr_length, _missing_data_info, filtering_stats) = variants_data;
 
         // Collect all config samples for this chromosome
         let all_config_samples: HashSet<String> = entries.iter()
@@ -426,7 +430,7 @@ fn process_config_entries(
 
             // Process haplotype_group=0 (unfiltered)
             let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) = match process_variants(
-                &all_variants,
+                &unfiltered_variants,
                 &sample_names,
                 0,
                 &entry.samples_unfiltered,
@@ -455,7 +459,7 @@ fn process_config_entries(
 
             // Process haplotype_group=0 (filtered)
             let (num_segsites_0_filt, w_theta_0_filt, pi_0_filt, n_hap_0_filt) = match process_variants(
-                &all_variants,
+                &filtered_variants,
                 &sample_names,
                 0,
                 &entry.samples_filtered,
@@ -745,7 +749,10 @@ fn process_vcf(
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
     let chr_length = 0;
-    let variants = Arc::new(Mutex::new(Vec::new()));
+    
+    let unfiltered_variants = Arc::new(Mutex::new(Vec::new()));
+    let filtered_variants = Arc::new(Mutex::new(Vec::new()));
+
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
     let filtering_stats = Arc::new(Mutex::new(FilteringStats::default()));
 
@@ -950,8 +957,11 @@ fn process_vcf(
                 }
     
                 match result {
-                    Ok((Some(variant), local_missing_data_info, local_filtering_stats)) => {
-                        variants.lock().push(variant);
+                    Ok((Some((variant, passes_filters)), local_missing_data_info, local_filtering_stats)) => {
+                        unfiltered_variants.lock().push(variant.clone());
+                        if passes_filters {
+                            filtered_variants.lock().push(variant);
+                        }
                         let mut global_missing_data_info = missing_data_info.lock();
                         global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
                         global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
@@ -1033,11 +1043,20 @@ fn process_vcf(
     // Wait for the progress thread to finish
     progress_thread.join().expect("Couldn't join progress thread");
 
-    let final_variants = Arc::try_unwrap(variants).expect("Variants still have multiple owners").into_inner();
+    let final_unfiltered_variants = Arc::try_unwrap(unfiltered_variants).expect("Unfiltered variants still have multiple owners").into_inner();
+    let final_filtered_variants = Arc::try_unwrap(filtered_variants).expect("Filtered variants still have multiple owners").into_inner();
+    
     let final_missing_data_info = Arc::try_unwrap(missing_data_info).expect("Missing data info still has multiple owners").into_inner();
     let final_filtering_stats = Arc::try_unwrap(filtering_stats).expect("Filtering stats still have multiple owners").into_inner();
 
-    Ok((final_variants, Arc::try_unwrap(sample_names).unwrap(), chr_length, final_missing_data_info, final_filtering_stats))
+    Ok((
+        final_unfiltered_variants,
+        final_filtered_variants,
+        Arc::try_unwrap(sample_names).unwrap(),
+        chr_length,
+        final_missing_data_info,
+        final_filtering_stats,
+    ))
 }
 
 
@@ -1061,7 +1080,7 @@ fn parse_variant(
     sample_names: &[String],
     min_gq: u16,
     filtering_stats: &mut FilteringStats,
-) -> Result<Option<Variant>, VcfError> {
+) -> Result<Option<(Variant, bool)>, VcfError> {
     filtering_stats.total_variants += 1;
 
     let fields: Vec<&str> = line.split('\t').collect();
@@ -1086,11 +1105,10 @@ fn parse_variant(
     }
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
-    if alt_alleles.len() > 1 {
+    let is_multiallelic = alt_alleles.len() > 1;
+    if is_multiallelic {
         filtering_stats.multi_allelic_variants += 1;
-        filtering_stats.filtered_variants += 1;
-        filtering_stats.filtered_positions.insert(pos);
-        eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. This may lead to underestimation of genetic diversity (pi).", pos).yellow());
+        eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not fully supported.", pos).yellow());
     }
 
     // Parse the FORMAT field to get the indices of the subfields
@@ -1148,7 +1166,10 @@ fn parse_variant(
         filtering_stats.low_gq_variants += 1;
         filtering_stats.filtered_variants += 1;
         filtering_stats.filtered_positions.insert(pos);
-        return Ok(None); // This exlcudes the entire variant for all samples
+
+        let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
+
+        Ok(Some((variant, passes_filters))) // This can exlcude the entire variant for all samples
     }
 
     let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
@@ -1171,17 +1192,40 @@ fn parse_variant(
         })
         .collect();
     
+    // Do not exclude the variant; update the missing data info
     if genotypes.iter().any(|gt| gt.is_none()) {
         filtering_stats.missing_data_variants += 1;
-        filtering_stats.filtered_variants += 1;
-        filtering_stats.filtered_positions.insert(pos);
-        return Ok(None);
+        // Do not return; continue processing
     }
     
-    Ok(Some(Variant {
-        position: pos,
-        genotypes,
-    }))
+    // Determine if variant passes filters
+    let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
+    let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
+
+    
+    // Update filtering stats if variant is filtered out
+    if !passes_filters {
+        filtering_stats.filtered_variants += 1;
+        filtering_stats.filtered_positions.insert(pos);
+        if sample_has_low_gq {
+            filtering_stats.low_gq_variants += 1;
+        }
+        if genotypes.iter().any(|gt| gt.is_none()) {
+            filtering_stats.missing_data_variants += 1;
+        }
+        if alt_alleles.len() > 1 {
+            filtering_stats.multi_allelic_variants += 1;
+        }
+    }
+    
+    // Always return the variant and whether it passes filters
+    Ok(Some((
+        Variant {
+            position: pos,
+            genotypes,
+        },
+        passes_filters,
+    )))
 }
 
 
@@ -1204,7 +1248,7 @@ fn calculate_pairwise_differences(
     variants: &[Variant],
     n: usize,
 ) -> Vec<((usize, usize), usize, Vec<i64>)> {
-    let variants = Arc::new(variants.to_vec());
+    let variants = Arc::new(variants);
 
     (0..n).into_par_iter().flat_map(|i| {
         let variants = Arc::clone(&variants);
