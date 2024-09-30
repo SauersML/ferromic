@@ -1096,6 +1096,7 @@ fn process_vcf(
                         global_filtering_stats.total_variants += local_filtering_stats.total_variants;
                         global_filtering_stats.filtered_variants += local_filtering_stats.filtered_variants;
                         global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
+                        global_filtering_stats.filtered_due_to_mask += local_filtering_stats.filtered_due_to_mask; // **Added Line**
                         global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
                         global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
                         global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
@@ -1110,6 +1111,7 @@ fn process_vcf(
                         global_filtering_stats.total_variants += local_filtering_stats.total_variants;
                         global_filtering_stats.filtered_variants += local_filtering_stats.filtered_variants;
                         global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
+                        global_filtering_stats.filtered_due_to_mask += local_filtering_stats.filtered_due_to_mask; // **Added Line**
                         global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
                         global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
                         global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
@@ -1144,7 +1146,7 @@ fn process_vcf(
                 stats.filtered_variants,
                 (stats.filtered_variants as f64 / stats.total_variants as f64) * 100.0
             );
-            println!("Filtered due to mask: {}", stats.filtered_due_to_mask); // New line added
+            println!("Filtered due to mask: {}", stats.filtered_due_to_mask); // Now correctly updated
             println!("Multi-allelic variants: {}", stats.multi_allelic_variants);
             println!("Low GQ variants: {}", stats.low_gq_variants);
             println!("Missing data variants: {}", stats.missing_data_variants);
