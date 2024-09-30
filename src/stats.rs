@@ -357,8 +357,8 @@ fn process_config_entries(
         "1_num_hap_no_filter",
         "0_num_hap_filter",
         "1_num_hap_filter",
-        "1_freq_no_filter",
-        "1_freq_filter",
+        "inversion_freq_no_filter",
+        "inversion_freq_filter",
     ])
     .map_err(|e| VcfError::Io(e.into()))?;
 
@@ -458,7 +458,7 @@ fn process_config_entries(
             };
 
             // Calculate allele frequency for haplotype_group=1 (no filter)
-            let freq_1_no_filter = calculate_allele_frequency(&entry.samples_unfiltered, 1);
+            let inversion_freq_no_filter = calculate_inversion_allele_frequency(&entry.samples_unfiltered);
 
             // Process haplotype_group=0 (filtered)
             let (num_segsites_0_filt, w_theta_0_filt, pi_0_filt, n_hap_0_filt) = match process_variants(
@@ -487,7 +487,7 @@ fn process_config_entries(
             };
 
             // Calculate allele frequency for haplotype_group=1 (filtered)
-            let freq_1_filt = calculate_allele_frequency(&entry.samples_filtered, 1);
+            let inversion_freq_filt = calculate_inversion_allele_frequency(&entry.samples_filtered);
 
             // Write the aggregated results to CSV
             writer.write_record(&[
@@ -513,8 +513,8 @@ fn process_config_entries(
                 &n_hap_0_filt.to_string(),         // 0_num_hap_filter
                 &n_hap_1_filt.to_string(),         // 1_num_hap_filter
                 // -1.0 should never occur
-                &format!("{:.6}", freq_1_no_filter.unwrap_or(-1.0)), // 1_freq_no_filter
-                &format!("{:.6}", freq_1_filt.unwrap_or(-1.0)),       // 1_freq_filter
+                &format!("{:.6}", inversion_freq_no_filter.unwrap_or(-1.0)), // inversion_freq_no_filter
+                &format!("{:.6}", inversion_freq_filt.unwrap_or(-1.0)),       // inversion_freq_filter
             ])
             .map_err(|e| VcfError::Io(e.into()))?;
 
@@ -626,21 +626,20 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 }
 
 
-fn calculate_allele_frequency(
-    sample_filter: &HashMap<String, (u8, u8)>,
-    haplotype_group: u8,
-) -> Option<f64> { // Returns allele frequency of '1' in the haplotype group
+fn calculate_inversion_allele_frequency(
+    sample_filter: &HashMap<String, (u8, u8)>
+) -> Option<f64> {
     let mut num_ones = 0;
     let mut total_haplotypes = 0;
 
     for (_sample, &(left, right)) in sample_filter.iter() {
-        if left == haplotype_group {
+        if left <= 1 {
             if left == 1 {
                 num_ones += 1;
             }
             total_haplotypes += 1;
         }
-        if right == haplotype_group {
+        if right <= 1 {
             if right == 1 {
                 num_ones += 1;
             }
