@@ -479,7 +479,7 @@ fn process_config_entries(
 
         // Extract variants from the VCF
         let mask_for_chr = mask.and_then(|m| m.get(&chr).cloned()).map(Arc::new);
-        
+
         let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, mask_for_chr.clone()) {
             Ok(data) => data,
             Err(e) => {
@@ -520,7 +520,7 @@ fn process_config_entries(
 
             // Calculate total masked length overlapping with the region
             let total_masked_length = if let Some(mask_for_chr) = mask_for_chr.as_ref() {
-                calculate_masked_length(entry.start, entry.end, mask_for_chr)
+                calculate_masked_length(entry.start, entry.end, &mask_for_chr)
             } else {
                 0
             };
@@ -579,7 +579,7 @@ fn process_config_entries(
 
             // Process haplotype_group=1 (filtered)
             let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) = match process_variants(
-                &filtered_variants,
+                &filtered_variants, // Corrected from &unfiltered_variants to &filtered_variants
                 &sample_names,
                 1,
                 &entry.samples_filtered,
