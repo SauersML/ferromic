@@ -1181,6 +1181,10 @@ fn process_vcf(
         .map_err(|_| VcfError::Parse("Filtering stats still have multiple owners".to_string()))?
         .into_inner();
 
+    let sample_names = Arc::try_unwrap(sample_names)
+        .map_err(|_| VcfError::Parse("Sample names have multiple owners".to_string()))?
+        .into_inner();
+
     Ok((
         final_unfiltered_variants,
         final_filtered_variants,
