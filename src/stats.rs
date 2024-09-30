@@ -257,15 +257,16 @@ fn process_variants(
 
     let mut haplotype_indices = Vec::new();
 
-    for (sample_name, &(left, right)) in sample_filter.iter() {
+    for (sample_name, &(left_tsv, right_tsv)) in sample_filter.iter() {
         if let Some(&i) = vcf_sample_id_to_index.get(sample_name.as_str()) {
-            match haplotype_group {
-                0 => haplotype_indices.push((i, 0)),
-                1 => haplotype_indices.push((i, 1)),
-                _ => return Err(VcfError::Parse(format!("Invalid haplotype group: {}", haplotype_group))),
+            if left_tsv == haplotype_group as u8 {
+                haplotype_indices.push((i, 0)); // Include left haplotype
+            }
+            if right_tsv == haplotype_group as u8 {
+                haplotype_indices.push((i, 1)); // Include right haplotype
             }
         } else {
-            // No sample
+            // Sample not found in VCF
         }
     }
 
@@ -633,21 +634,18 @@ fn calculate_allele_frequency(
     let mut total_haplotypes = 0;
 
     for (_sample, &(left, right)) in sample_filter.iter() {
-        let haplotype = match haplotype_group {
-            0 => left,
-            1 => right,
-            _ => continue, // Invalid group, skip
-        };
-        if haplotype == 1 {
-            num_ones += 1;
+        if left == haplotype_group {
+            if left == 1 {
+                num_ones += 1;
+            }
+            total_haplotypes += 1;
         }
-        total_haplotypes += 1;
-    }
-    
-    if total_haplotypes > 0 {
-        Some(num_ones as f64 / total_haplotypes as f64)
-    } else {
-        None // No haplotypes
+        if right == haplotype_group {
+            if right == 1 {
+                num_ones += 1;
+            }
+            total_haplotypes += 1;
+        }
     }
 }
 
