@@ -1182,8 +1182,7 @@ fn process_vcf(
         .into_inner();
 
     let sample_names = Arc::try_unwrap(sample_names)
-        .map_err(|_| VcfError::Parse("Sample names have multiple owners".to_string()))?
-        .into_inner();
+        .map_err(|_| VcfError::Parse("Sample names have multiple owners".to_string()))?;
 
     Ok((
         final_unfiltered_variants,
