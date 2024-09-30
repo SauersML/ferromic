@@ -283,20 +283,36 @@ fn process_variants(
         if variant.position < region_start || variant.position > region_end {
             continue;
         }
-
+    
+        // Collect the alleles for the haplotypes
+        let mut variant_alleles = Vec::new(); // Alleles of haplotypes at this variant
+    
+        for &(i, allele_idx) in &haplotype_indices {
+            let allele = variant.genotypes.get(i)
+                .and_then(|gt| gt.as_ref())
+                .and_then(|alleles| alleles.get(allele_idx))
+                .copied();
+            variant_alleles.push(allele); // allele is Option<u8>
+        }
+    
         // Determine if the variant is a segregating site
-        let alleles_present: Vec<u8> = haplotype_indices.iter()
-            .filter_map(|&(i, allele_idx)| {
-                variant.genotypes.get(i)
-                    .and_then(|gt| gt.as_ref())
-                    .and_then(|alleles| alleles.get(allele_idx))
-                    .copied()
-            })
-            .collect();
-
+        let alleles_present: Vec<u8> = variant_alleles.iter().filter_map(|&a| a).collect();
         let unique_alleles: HashSet<_> = alleles_present.iter().cloned().collect();
         if unique_alleles.len() > 1 {
             num_segsites += 1;
+        }
+    
+        // Compute pairwise differences
+        for i in 0..n {
+            if let Some(allele_i) = variant_alleles[i] {
+                for j in (i+1)..n {
+                    if let Some(allele_j) = variant_alleles[j] {
+                        if allele_i != allele_j {
+                            tot_pair_diff += 1;
+                        }
+                    }
+                }
+            }
         }
     }
 
