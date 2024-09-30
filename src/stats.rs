@@ -142,7 +142,7 @@ fn main() -> Result<(), VcfError> {
 
     let mask = if let Some(mask_file) = args.mask_file.as_ref() {
         println!("Mask file provided: {}", mask_file);
-        Some(parse_mask_file(Path::new(mask_file))?)
+        Some(Arc::new(parse_mask_file(Path::new(mask_file))?))
     } else {
         None
     };
@@ -358,7 +358,7 @@ fn process_variants(
 
     let mut num_segsites = 0;
     let mut tot_pair_diff = 0;
-    let mut n = haplotype_indices.len();
+    let n = haplotype_indices.len();
 
     for variant in variants {
         // Skip variants outside the region (redundant if already filtered)
@@ -478,9 +478,9 @@ fn process_config_entries(
         );
 
         // Extract variants from the VCF
-        let mask_for_chr = mask.and_then(|m| m.get(&chr).cloned());
-
-        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, mask_for_chr.as_ref()) {
+        let mask_for_chr = mask.and_then(|m| m.get(&chr).cloned()).map(Arc::new);
+        
+        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, mask_for_chr.clone()) {
             Ok(data) => data,
             Err(e) => {
                 eprintln!("Error processing VCF file for {}: {}", chr, e);
@@ -579,7 +579,7 @@ fn process_config_entries(
 
             // Process haplotype_group=1 (filtered)
             let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) = match process_variants(
-                &unfiltered_variants,
+                &filtered_variants,
                 &sample_names,
                 1,
                 &entry.samples_filtered,
@@ -850,7 +850,7 @@ fn process_vcf(
     start: i64,
     end: i64,
     min_gq: u16,
-    mask: Option<&Vec<(i64, i64)>>,
+    mask: Option<Arc<Vec<(i64, i64)>>>,
 ) -> Result<(
     Vec<Variant>,        // Unfiltered variants
     Vec<Variant>,        // Filtered variants
