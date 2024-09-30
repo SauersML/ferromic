@@ -579,7 +579,7 @@ fn process_config_entries(
 
             // Process haplotype_group=1 (filtered)
             let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) = match process_variants(
-                &filtered_variants, // Corrected from &unfiltered_variants to &filtered_variants
+                &filtered_variants,
                 &sample_names,
                 1,
                 &entry.samples_filtered,
