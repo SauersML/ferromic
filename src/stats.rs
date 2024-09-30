@@ -70,6 +70,7 @@ struct RegionStats {
 struct FilteringStats {
     total_variants: usize,
     filtered_variants: usize,
+    filtered_due_to_mask: usize,
     filtered_positions: HashSet<i64>,
     missing_data_variants: usize,
     low_gq_variants: usize,
@@ -1136,17 +1137,17 @@ fn process_vcf(
     
             let stats = filtering_stats.lock();
     
-            println!("{}", format!("Filtering statistics for chromosome {}:", chr).green());
+            println!("\n{}", "Filtering Statistics:".green().bold());
             println!("Total variants processed: {}", stats.total_variants);
             println!(
                 "Filtered variants: {} ({:.2}%)",
                 stats.filtered_variants,
                 (stats.filtered_variants as f64 / stats.total_variants as f64) * 100.0
             );
+            println!("Filtered due to mask: {}", stats.filtered_due_to_mask); // New line added
             println!("Multi-allelic variants: {}", stats.multi_allelic_variants);
             println!("Low GQ variants: {}", stats.low_gq_variants);
             println!("Missing data variants: {}", stats.missing_data_variants);
-            println!("Filtered positions: {:?}", stats.filtered_positions);
     
             Ok(())
         }
@@ -1244,6 +1245,7 @@ fn parse_variant(
         if position_in_mask(pos, mask) {
             // Variant is in masked region
             filtering_stats.filtered_variants += 1;
+            filtering_stats.filtered_due_to_mask += 1;
             filtering_stats.filtered_positions.insert(pos);
             return Ok(None);
         }
