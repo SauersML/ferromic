@@ -154,7 +154,14 @@ fn main() -> Result<(), VcfError> {
         let config_entries = parse_config_file(Path::new(config_file))?;
         let output_file = args.output_file.as_ref().map(Path::new).unwrap_or_else(|| Path::new("output.csv"));
         println!("Output file: {}", output_file.display());
-        process_config_entries(&config_entries, &args.vcf_folder, output_file, args.min_gq, mask.as_ref())?;
+        process_config_entries(
+            &config_entries,
+            &args.vcf_folder,
+            output_file,
+            args.min_gq,
+            mask.as_ref().map(|v| &**v),
+        )?;
+
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
         let (start, end) = if let Some(region) = args.region.as_ref() {
@@ -169,6 +176,7 @@ fn main() -> Result<(), VcfError> {
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
         let mask_for_chr = mask.as_ref().and_then(|m| m.get(chr).cloned());
+        //let mask_for_chr = mask.clone().and_then(|m| m.get(&chr).cloned());
         
         let (unfiltered_variants, filtered_variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(
             &vcf_file,
@@ -176,7 +184,7 @@ fn main() -> Result<(), VcfError> {
             start,
             end,
             args.min_gq,
-            mask_for_chr.as_ref(),
+            mask_for_chr.map(Arc::new),
         )?;
         
         println!("{}", "Calculating diversity statistics...".blue());
@@ -1159,16 +1167,24 @@ fn process_vcf(
     // Wait for the progress thread to finish
     progress_thread.join().expect("Couldn't join progress thread");
 
-    let final_unfiltered_variants = Arc::try_unwrap(unfiltered_variants).expect("Unfiltered variants still have multiple owners").into_inner();
-    let final_filtered_variants = Arc::try_unwrap(filtered_variants).expect("Filtered variants still have multiple owners").into_inner();
-    
-    let final_missing_data_info = Arc::try_unwrap(missing_data_info).expect("Missing data info still has multiple owners").into_inner();
-    let final_filtering_stats = Arc::try_unwrap(filtering_stats).expect("Filtering stats still have multiple owners").into_inner();
+    let final_unfiltered_variants = Arc::try_unwrap(unfiltered_variants)
+        .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
+        .into_inner();
+    let final_filtered_variants = Arc::try_unwrap(filtered_variants)
+        .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
+        .into_inner();
+            
+    let final_missing_data_info = Arc::try_unwrap(missing_data_info)
+        .map_err(|_| VcfError::Parse("Missing data info still have multiple owners".to_string()))?
+        .into_inner();
+    let final_filtering_stats = Arc::try_unwrap(filtering_stats)
+        .map_err(|_| VcfError::Parse("Filtering stats still have multiple owners".to_string()))?
+        .into_inner();
 
     Ok((
         final_unfiltered_variants,
         final_filtered_variants,
-        Arc::try_unwrap(sample_names).unwrap(),
+        sample_names,
         chr_length,
         final_missing_data_info,
         final_filtering_stats,
@@ -1307,7 +1323,7 @@ fn parse_variant(
 
     if sample_has_low_gq {
         // Skip this variant
-        let percent_low_gq = (num_samples_below_gq as f64 / (fields.len() - 9) as f64) * 100.0;
+        //let percent_low_gq = (num_samples_below_gq as f64 / (fields.len() - 9) as f64) * 100.0;
         //eprintln!("Warning: Variant at position {} excluded due to low GQ. {:.2}% of samples had GQ below threshold.", pos, percent_low_gq);
         filtering_stats.low_gq_variants += 1;
         filtering_stats.filtered_variants += 1;
