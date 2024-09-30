@@ -1110,6 +1110,26 @@ fn parse_variant(
 
     let gq_index = gq_index.unwrap();
 
+    let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
+        .map(|gt| {
+            missing_data_info.total_data_points += 1;
+            let alleles_str = gt.split(':').next().unwrap_or(".");
+            if alleles_str == "." || alleles_str == "./." || alleles_str == ".|." {
+                missing_data_info.missing_data_points += 1;
+                missing_data_info.positions_with_missing.insert(pos);
+                return None;
+            }
+            let alleles = alleles_str.split(|c| c == '|' || c == '/')
+                .map(|allele| allele.parse::<u8>().ok())
+                .collect::<Option<Vec<u8>>>();
+            if alleles.is_none() {
+                missing_data_info.missing_data_points += 1;
+                missing_data_info.positions_with_missing.insert(pos);
+            }
+            alleles
+        })
+        .collect();
+
     let mut sample_has_low_gq = false;
     let mut num_samples_below_gq = 0;
 
@@ -1154,30 +1174,16 @@ fn parse_variant(
         filtering_stats.filtered_variants += 1;
         filtering_stats.filtered_positions.insert(pos);
 
+        let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
         let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
 
-        Ok(Some((variant, passes_filters))) // This can exlcude the entire variant for all samples
-    }
+        let variant = Variant {
+            position: pos,
+            genotypes: genotypes.clone(),
+        };
 
-    let genotypes: Vec<Option<Vec<u8>>> = fields[9..].iter()
-        .map(|gt| {
-            missing_data_info.total_data_points += 1;
-            let alleles_str = gt.split(':').next().unwrap_or(".");
-            if alleles_str == "." || alleles_str == "./." || alleles_str == ".|." {
-                missing_data_info.missing_data_points += 1;
-                missing_data_info.positions_with_missing.insert(pos);
-                return None;
-            }
-            let alleles = alleles_str.split(|c| c == '|' || c == '/')
-                .map(|allele| allele.parse::<u8>().ok())
-                .collect::<Option<Vec<u8>>>();
-            if alleles.is_none() {
-                missing_data_info.missing_data_points += 1;
-                missing_data_info.positions_with_missing.insert(pos);
-            }
-            alleles
-        })
-        .collect();
+        return Ok(Some((variant, passes_filters))) // This can exlcude the entire variant for all samples
+    }
     
     // Do not exclude the variant; update the missing data info
     if genotypes.iter().any(|gt| gt.is_none()) {
@@ -1185,10 +1191,8 @@ fn parse_variant(
         // Do not return; continue processing
     }
 
-    let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
-    
-    // Determine if variant passes filters
     let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
+    let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
     
     // Update filtering stats if variant is filtered out
     if !passes_filters {
