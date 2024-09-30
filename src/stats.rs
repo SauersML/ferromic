@@ -40,6 +40,9 @@ struct Args {
 
     #[arg(long = "min_gq", default_value = "30")]
     min_gq: u16,
+
+    #[arg(long = "mask_file")]
+    mask_file: Option<String>,
 }
 
 
@@ -136,7 +139,13 @@ fn main() -> Result<(), VcfError> {
     // Set Rayon to use all logical CPUs
     let num_logical_cpus = num_cpus::get();
     ThreadPoolBuilder::new().num_threads(num_logical_cpus).build_global().unwrap();
-    
+
+    let mask = if let Some(mask_file) = args.mask_file.as_ref() {
+        println!("Mask file provided: {}", mask_file);
+        Some(parse_mask_file(Path::new(mask_file))?)
+    } else {
+        None
+    };
 
     println!("{}", "Starting VCF diversity analysis...".green());
 
@@ -145,7 +154,7 @@ fn main() -> Result<(), VcfError> {
         let config_entries = parse_config_file(Path::new(config_file))?;
         let output_file = args.output_file.as_ref().map(Path::new).unwrap_or_else(|| Path::new("output.csv"));
         println!("Output file: {}", output_file.display());
-        process_config_entries(&config_entries, &args.vcf_folder, output_file, args.min_gq)?;
+        process_config_entries(&config_entries, &args.vcf_folder, output_file, args.min_gq, mask.as_ref())?;
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
         let (start, end) = if let Some(region) = args.region.as_ref() {
@@ -159,8 +168,17 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        let (unfiltered_variants, filtered_variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(&vcf_file, chr, start, end, args.min_gq)?;
-
+        let mask_for_chr = mask.as_ref().and_then(|m| m.get(chr).cloned());
+        
+        let (unfiltered_variants, filtered_variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(
+            &vcf_file,
+            chr,
+            start,
+            end,
+            args.min_gq,
+            mask_for_chr.as_ref(),
+        )?;
+        
         println!("{}", "Calculating diversity statistics...".blue());
 
         let seq_length = if end == i64::MAX {
@@ -238,6 +256,68 @@ fn main() -> Result<(), VcfError> {
 }
 
 
+fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfError> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut mask: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 3 {
+            continue; // Skip invalid lines
+        }
+        let chr = fields[0].to_string();
+        let start: i64 = fields[1].parse().unwrap_or(0);
+        let end: i64 = fields[2].parse().unwrap_or(0);
+        mask.entry(chr).or_default().push((start, end));
+    }
+
+    // Sort the intervals for each chromosome
+    for intervals in mask.values_mut() {
+        intervals.sort_by_key(|&(start, _)| start);
+    }
+
+    Ok(mask)
+}
+
+
+fn position_in_mask(pos: i64, mask: &[(i64, i64)]) -> bool {
+    // Binary search over mask intervals
+    let mut left = 0;
+    let mut right = mask.len();
+
+    while left < right {
+        let mid = (left + right) / 2;
+        let (start, end) = mask[mid];
+        if pos < start {
+            right = mid;
+        } else if pos > end {
+            left = mid + 1;
+        } else {
+            return true; // Position is within a masked interval
+        }
+    }
+
+    false
+}
+
+
+fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 {
+    let mut total = 0;
+    for &(start, end) in mask {
+        let overlap_start = std::cmp::max(region_start, start);
+        let overlap_end = std::cmp::min(region_end, end);
+        if overlap_start <= overlap_end {
+            total += overlap_end - overlap_start + 1;
+        } else if end > region_end {
+            break; // No further overlaps possible
+        }
+    }
+    total
+}
+
+
 fn process_variants(
     variants: &[Variant],
     sample_names: &[String],
@@ -245,6 +325,7 @@ fn process_variants(
     sample_filter: &HashMap<String, (u8, u8)>,
     region_start: i64,
     region_end: i64,
+    adjusted_sequence_length: Option<i64>,
 ) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
@@ -317,8 +398,9 @@ fn process_variants(
         }
     }
 
-    let w_theta = calculate_watterson_theta(num_segsites, n, region_end - region_start + 1);
-    let pi = calculate_pi(tot_pair_diff, n, region_end - region_start + 1);
+    let seq_length = adjusted_sequence_length.unwrap_or(region_end - region_start + 1);
+    let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
+    let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
     Ok(Some((num_segsites, w_theta, pi, n)))
 }
@@ -328,6 +410,7 @@ fn process_config_entries(
     vcf_folder: &str,
     output_file: &Path,
     min_gq: u16,
+    mask: Option<&HashMap<String, Vec<(i64, i64)>>>,
 ) -> Result<(), VcfError> {
     let mut writer = WriterBuilder::new()
         .has_headers(true)
@@ -341,6 +424,8 @@ fn process_config_entries(
         "region_end",
         "0_sequence_length",
         "1_sequence_length",
+        "0_sequence_length_adjusted",
+        "1_sequence_length_adjusted",
         "0_segregating_sites",
         "1_segregating_sites",
         "0_w_theta",
@@ -393,7 +478,9 @@ fn process_config_entries(
         );
 
         // Extract variants from the VCF
-        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq) {
+        let mask_for_chr = mask.and_then(|m| m.get(&chr).cloned());
+
+        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, mask_for_chr.as_ref()) {
             Ok(data) => data,
             Err(e) => {
                 eprintln!("Error processing VCF file for {}: {}", chr, e);
@@ -431,6 +518,20 @@ fn process_config_entries(
             // Define regions
             let sequence_length = entry.end - entry.start + 1;
 
+            // Calculate total masked length overlapping with the region
+            let total_masked_length = if let Some(mask_for_chr) = mask_for_chr.as_ref() {
+                calculate_masked_length(entry.start, entry.end, mask_for_chr)
+            } else {
+                0
+            };
+
+            // Calculate the number of filtered positions within the region
+            let number_of_filtered_positions_in_region = filtering_stats.filtered_positions.iter()
+                .filter(|&&pos| pos >= entry.start && pos <= entry.end)
+                .count() as i64;
+
+            let adjusted_sequence_length = sequence_length - total_masked_length - number_of_filtered_positions_in_region;
+
             // Process haplotype_group=0 (unfiltered)
             let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) = match process_variants(
                 &unfiltered_variants,
@@ -439,6 +540,7 @@ fn process_config_entries(
                 &entry.samples_unfiltered,
                 entry.start,
                 entry.end,
+                None,
             )? {
                 Some(values) => values,
                 None => continue, // Skip writing this record
@@ -452,6 +554,7 @@ fn process_config_entries(
                 &entry.samples_unfiltered,
                 entry.start,
                 entry.end,
+                None,
             )? {
                 Some(values) => values,
                 None => continue, // Skip writing this record
@@ -468,6 +571,7 @@ fn process_config_entries(
                 &entry.samples_filtered,
                 entry.start,
                 entry.end,
+                Some(adjusted_sequence_length),
             )? {
                 Some(values) => values,
                 None => continue, // Skip writing this record
@@ -481,6 +585,7 @@ fn process_config_entries(
                 &entry.samples_filtered,
                 entry.start,
                 entry.end,
+                Some(adjusted_sequence_length),
             )? {
                 Some(values) => values,
                 None => continue, // Skip writing this record
@@ -496,6 +601,8 @@ fn process_config_entries(
                 &entry.end.to_string(),
                 &sequence_length.to_string(), // 0_sequence_length
                 &sequence_length.to_string(), // 1_sequence_length
+                &adjusted_sequence_length.to_string(), // 0_sequence_length_adjusted
+                &adjusted_sequence_length.to_string(), // 1_sequence_length_adjusted
                 &num_segsites_0.to_string(),  // 0_segregating_sites
                 &num_segsites_1.to_string(),  // 1_segregating_sites
                 &format!("{:.6}", w_theta_0), // 0_w_theta
@@ -743,6 +850,7 @@ fn process_vcf(
     start: i64,
     end: i64,
     min_gq: u16,
+    mask: Option<&Vec<(i64, i64)>>,
 ) -> Result<(
     Vec<Variant>,        // Unfiltered variants
     Vec<Variant>,        // Filtered variants
@@ -882,6 +990,7 @@ fn process_vcf(
             let result_sender = result_sender.clone();
             let chr = chr.to_string();
             let sample_names = Arc::clone(&sample_names);
+            let mask = mask.clone();
             thread::spawn(move || -> Result<(), VcfError> {
                 let mut processed_count = 0;
                 while let Ok(line) = line_receiver.recv() {
@@ -913,7 +1022,8 @@ fn process_vcf(
                         &mut local_missing_data_info,
                         &sample_names,
                         min_gq,
-                        &mut local_filtering_stats
+                        &mut local_filtering_stats,
+                        mask.as_deref().map(|v| &v[..]),
                     ) {
                         Ok(variant_option) => {
                             result_sender.send(Ok((variant_option, local_missing_data_info, local_filtering_stats))).map_err(|_| VcfError::ChannelSend)?;
@@ -1086,6 +1196,7 @@ fn parse_variant(
     sample_names: &[String],
     min_gq: u16,
     filtering_stats: &mut FilteringStats,
+    mask: Option<&[(i64, i64)]>,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
     filtering_stats.total_variants += 1;
 
@@ -1108,6 +1219,15 @@ fn parse_variant(
     let pos: i64 = fields[1].parse().map_err(|_| VcfError::Parse("Invalid position".to_string()))?;
     if pos < start || pos > end {
         return Ok(None);
+    }
+
+    if let Some(mask) = mask {
+        if position_in_mask(pos, mask) {
+            // Variant is in masked region
+            filtering_stats.filtered_variants += 1;
+            filtering_stats.filtered_positions.insert(pos);
+            return Ok(None);
+        }
     }
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
