@@ -647,6 +647,12 @@ fn calculate_allele_frequency(
             total_haplotypes += 1;
         }
     }
+
+    if total_haplotypes > 0 {
+        Some(num_ones as f64 / total_haplotypes as f64)
+    } else {
+        None
+    }
 }
 
 
