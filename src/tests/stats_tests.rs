@@ -432,7 +432,7 @@ mod tests {
             _mask,
         );
     
-        // Ensure the function executed without errors
+        // the function executed without errors
         assert!(result.is_ok());
     
         // Assert that the variant is returned but marked as invalid (filtered out)
@@ -496,7 +496,7 @@ mod tests {
             _mask,
         );
     
-        // Ensure the function executed without errors
+        // the function executed without errors
         assert!(result.is_ok());
     
         // Assert that the variant is returned but marked as invalid (filtered out)
@@ -725,7 +725,7 @@ mod tests {
             _mask,
         );
     
-        // Ensure the function executed without errors
+        // the function executed without errors
         assert!(result.is_ok());
     
         // Assert that the variant is returned but marked as invalid (filtered out)
@@ -842,7 +842,7 @@ mod tests {
             adjusted_sequence_length,
         ).unwrap();
     
-        // Corrected function call: remove the extra argument
+        // function call: remove the extra argument
         let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter);
     
         // Calculate expected allele frequency
@@ -1025,7 +1025,7 @@ mod tests {
             adjusted_sequence_length,
         ).unwrap();
     
-        // Corrected function call: remove the extra argument
+        // function call: remove the extra argument
         let allele_frequency_group1_filtered = calculate_inversion_allele_frequency(&sample_filter);
     
         // Calculate expected allele frequency
