@@ -842,15 +842,10 @@ mod tests {
             adjusted_sequence_length,
         ).unwrap();
     
-        let (segsites, w_theta, pi, n_hap) = match result_group1 {
-            Some(data) => data,
-            None => panic!("Expected Some variant data"),
-        };
+        // Corrected function call: remove the extra argument
+        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter);
     
-        // Calculate allele frequency using the corrected function
-        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter, 1);
-    
-        // Allele frequency for group1 should be 1.0 (all hap2=1)
+        // Calculate expected allele frequency
         let expected_freq_group1 = 1.0;
         let allele_frequency_diff_group1 = (allele_frequency_group1.unwrap_or(0.0) - expected_freq_group1).abs();
         println!(
@@ -864,7 +859,7 @@ mod tests {
             allele_frequency_group1.unwrap_or(0.0)
         );
     
-        assert_eq!(segsites, 2, "Number of segregating sites should be 2");
+        assert_eq!(result_group1.unwrap().0, 2, "Number of segregating sites should be 2");
     }
 
     #[test]
@@ -905,8 +900,8 @@ mod tests {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length: Option<i64> = None;
         let _mask: Option<&[(i64, i64)]> = None;
-       let mut _filtering_stats = FilteringStats::default();
-
+        let mut _filtering_stats = FilteringStats::default();
+    
         let result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -916,14 +911,13 @@ mod tests {
             3000,
             adjusted_sequence_length,
         ).unwrap();
-
+    
+        // Correctly unwrap the Option to access the inner tuple
         let (segsites, _w_theta, _pi, _n_hap) = match result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
-
-        // Number of segregating sites for group1 should be 2
-        // Segregating sites at positions 1000 and 3000
+    
         let expected_segsites_group1 = 2;
         println!(
             "Number of segregating sites for Group 1 (expected {}): {}",
@@ -941,8 +935,8 @@ mod tests {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length: Option<i64> = None;
         let _mask: Option<&[(i64, i64)]> = None;
-       let mut _filtering_stats = FilteringStats::default();
-
+        let mut _filtering_stats = FilteringStats::default();
+    
         let result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -952,18 +946,17 @@ mod tests {
             3000,
             adjusted_sequence_length,
         ).unwrap();
-
+    
+        // Correctly unwrap the Option to access the inner tuple
         let (_segsites, w_theta, _pi, _n_hap) = match result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
-
+    
         // Calculate expected Watterson's theta
-        // seg_sites = 2, n = 3, seq_length = 3000 - 1000 +1 = 2001
-        // theta = seg_sites / harmonic(n-1) / seq_length
         let harmonic_value = harmonic(2); // n-1 =2
         let expected_w_theta = 2.0 / harmonic_value / 2001.0;
-
+    
         let w_theta_diff = (w_theta - expected_w_theta).abs();
         println!(
             "Watterson's theta difference for Group 1: {}",
@@ -976,6 +969,7 @@ mod tests {
             w_theta
         );
     }
+
 
     #[test]
     fn test_group1_nucleotide_diversity_pi() {
@@ -993,15 +987,14 @@ mod tests {
             3000,
             adjusted_sequence_length,
         ).unwrap();
-
+    
+        // Correctly unwrap the Option to access the inner tuple
         let (_segsites, _w_theta, pi, _n_hap) = match result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
     
         // Calculate expected nucleotide diversity (pi)
-        // For haplotype_group=1:
-        // All hap2 haplotypes=1, so no differences
         let expected_pi = 0.0;
         let pi_diff = (pi - expected_pi).abs();
         println!(
@@ -1020,9 +1013,7 @@ mod tests {
     fn test_group1_allele_frequency_filtered() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
-        let _mask: Option<&[(i64, i64)]> = None;
-       let mut _filtering_stats = FilteringStats::default();
-
+    
         // Process variants for haplotype_group=1 with adjusted_sequence_length
         let result_group1 = process_variants(
             &variants,
@@ -1033,16 +1024,11 @@ mod tests {
             3000,
             adjusted_sequence_length,
         ).unwrap();
-
-        let (segsites, w_theta, pi, n_hap) = match result_group1 {
-            Some(data) => data,
-            None => panic!("Expected Some variant data"),
-        };
-
-        // Calculate allele frequency using the correct function
-        let allele_frequency_group1_filtered = calculate_inversion_allele_frequency(&sample_filter, 1);
     
-        // Allele frequency for group1 should still be approximately 0.6667 (2/3)
+        // Corrected function call: remove the extra argument
+        let allele_frequency_group1_filtered = calculate_inversion_allele_frequency(&sample_filter);
+    
+        // Calculate expected allele frequency
         let expected_freq_group1_filtered = 2.0 / 3.0;
         let allele_frequency_diff_group1_filtered = (allele_frequency_group1_filtered.unwrap_or(0.0) - expected_freq_group1_filtered).abs();
         println!(
@@ -1056,7 +1042,7 @@ mod tests {
             allele_frequency_group1_filtered.unwrap_or(0.0)
         );
     
-        assert_eq!(segsites, 2, "Number of segregating sites should be 2");
+        assert_eq!(result_group1.unwrap().0, 2, "Number of segregating sites should be 2");
     }
 
     #[test]
@@ -1093,13 +1079,14 @@ mod tests {
         );
     }
 
+
     #[test]
     fn test_group1_filtered_segregating_sites() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
-       let mut _filtering_stats = FilteringStats::default();
-
+        let mut _filtering_stats = FilteringStats::default();
+    
         let result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1108,18 +1095,23 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
-
-        // Number of segregating sites after filtering should be same as before if no filtering applied
+        ).unwrap();
+    
+        // Correctly unwrap the Option to access the inner tuple
+        let (segsites, _w_theta, _pi, _n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
+    
         let expected_segsites_group1_filtered = 2;
         println!(
             "Filtered number of segregating sites for Group 1 (expected {}): {}",
-            expected_segsites_group1_filtered, result_group1.0
+            expected_segsites_group1_filtered, segsites
         );
         assert_eq!(
-            result_group1.0, expected_segsites_group1_filtered,
+            segsites, expected_segsites_group1_filtered,
             "Filtered number of segregating sites for Group 1 is incorrect: expected {}, got {}",
-            expected_segsites_group1_filtered, result_group1.0
+            expected_segsites_group1_filtered, segsites
         );
     }
 
@@ -1128,8 +1120,8 @@ mod tests {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
-       let mut _filtering_stats = FilteringStats::default();
-
+        let mut _filtering_stats = FilteringStats::default();
+    
         let result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1138,13 +1130,19 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
-
-        // Watterson's theta after filtering should be same as before if no filtering applied
+        ).unwrap();
+    
+        // Correctly unwrap the Option to access the inner tuple
+        let (_segsites, w_theta, _pi, _n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
+    
+        // Calculate expected Watterson's theta after filtering
         let harmonic_value = harmonic(2); // n-1 =2
         let expected_w_theta_filtered = 2.0 / harmonic_value / 2001.0;
-
-        let w_theta_diff_filtered = (result_group1.1 - expected_w_theta_filtered).abs();
+    
+        let w_theta_diff_filtered = (w_theta - expected_w_theta_filtered).abs();
         println!(
             "Filtered Watterson's theta difference for Group 1: {}",
             w_theta_diff_filtered
@@ -1153,7 +1151,7 @@ mod tests {
             w_theta_diff_filtered < 1e-6,
             "Filtered Watterson's theta for Group 1 is incorrect: expected {:.6}, got {:.6}",
             expected_w_theta_filtered,
-            result_group1.1
+            w_theta
         );
     }
 
@@ -1172,11 +1170,17 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
+        ).unwrap();
     
-        // Pi after filtering should be 0.0 since all haplotypes are identical
+        // Correctly unwrap the Option to access the inner tuple
+        let (_segsites, _w_theta, pi, _n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
+    
+        // Calculate expected nucleotide diversity (pi) after filtering
         let expected_pi_filtered = 0.0;
-        let pi_diff_filtered = (result_group1.2 - expected_pi_filtered).abs();
+        let pi_diff_filtered = (pi - expected_pi_filtered).abs();
         println!(
             "Filtered nucleotide diversity (pi) difference for Group 1: {}",
             pi_diff_filtered
@@ -1185,7 +1189,7 @@ mod tests {
             pi_diff_filtered < 1e-6,
             "Filtered nucleotide diversity (pi) for Group 1 is incorrect: expected {:.6}, got {:.6}",
             expected_pi_filtered,
-            result_group1.2
+            pi
         );
     }
 
@@ -1329,9 +1333,15 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).expect("Failed to process variants");
+        ).unwrap();
     
-        // Calculate allele frequency based on TSV config:
+        // Correctly unwrap the Option to access the inner tuple
+        let (segsites, _w_theta, _pi, _n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
+    
+        // Calculate expected allele frequency based on TSV config:
         // haplotype_group=1 corresponds to hap2=1
         let expected_freq_group1 = 1.0;
         let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter);
@@ -1351,17 +1361,18 @@ mod tests {
         let expected_segsites_group1 = 0;
         println!(
             "Number of segregating sites for Group 1 with zero segsites (expected {}): {}",
-            expected_segsites_group1, result_group1.0
+            expected_segsites_group1, segsites
         );
         assert_eq!(
-            result_group1.0, expected_segsites_group1,
+            segsites, expected_segsites_group1,
             "Number of segregating sites for Group 1 with zero segsites is incorrect: expected {}, got {}",
-            expected_segsites_group1, result_group1.0
+            expected_segsites_group1, segsites
         );
     
         // Watterson's theta should be 0
         let expected_w_theta = 0.0;
-        let w_theta_diff = (result_group1.1 - expected_w_theta).abs();
+        let w_theta = _w_theta;
+        let w_theta_diff = (w_theta - expected_w_theta).abs();
         println!(
             "Watterson's theta difference for Group 1 with zero segsites: {}",
             w_theta_diff
@@ -1370,12 +1381,13 @@ mod tests {
             w_theta_diff < 1e-6,
             "Watterson's theta for Group 1 with zero segsites is incorrect: expected {}, got {}",
             expected_w_theta,
-            result_group1.1
+            w_theta
         );
     
         // Pi should be 0
+        let pi = _pi;
         let expected_pi = 0.0;
-        let pi_diff = (result_group1.2 - expected_pi).abs();
+        let pi_diff = (pi - expected_pi).abs();
         println!(
             "Nucleotide diversity (pi) difference for Group 1 with zero segsites: {}",
             pi_diff
@@ -1384,7 +1396,7 @@ mod tests {
             pi_diff < 1e-6,
             "Nucleotide diversity (pi) for Group 1 with zero segsites is incorrect: expected {}, got {}",
             expected_pi,
-            result_group1.2
+            pi
         );
     }
 }
