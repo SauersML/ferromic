@@ -406,7 +406,7 @@ use std::io::Write;
         let invalid_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:25\t1|1:45";
         let result = parse_variant(invalid_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(result.unwrap(), Some((expected_variant, false)));
     }
 
     #[test]
@@ -440,7 +440,7 @@ use std::io::Write;
         let low_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:20\t1|1:45";
         let result = parse_variant(low_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(result.unwrap(), Some((expected_variant, false)));
     }
 
     #[test]
