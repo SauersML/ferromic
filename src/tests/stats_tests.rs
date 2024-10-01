@@ -1,14 +1,19 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::{NamedTempFile, tempdir};
-    use std::fs::{self, File};
-    use std::io::{self, Write};
-    use std::path::PathBuf;
+use itertools::Itertools;
+    use tempfile::NamedTempFile;
+    use std::fs::File;
     use std::collections::HashMap;
+use std::io::Write;
 
     // Helper function to create a Variant for testing
     fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
+        Variant { position, genotypes }
+    }
+
+    // Helper function to create a Variant for testing with specific number of haplotypes
+    fn create_variant_with_genotypes(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
         Variant { position, genotypes }
     }
 
@@ -373,23 +378,33 @@ mod tests {
     #[test]
     fn test_parse_variant_valid_all_gq_above_threshold() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();
+        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
+        let mut _filtering_stats = FilteringStats::default();
+        let _mask: Option<&[(i64, i64)]> = None;
 
         let valid_line = "chr1\t1500\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
-        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
+        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
         assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
+        let some_variant = result.unwrap();
+        assert!(some_variant.is_some());
+
+        let (variant, is_valid) = some_variant.unwrap();
+        assert!(is_valid);
+        assert_eq!(variant.position, 1500);
+        assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]);
     }
 
     #[test]
     fn test_parse_variant_one_gq_below_threshold() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();
+        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
+        let mut _filtering_stats = FilteringStats::default();
+        let _mask: Option<&[(i64, i64)]> = None;
 
         let invalid_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:25\t1|1:45";
-        let result = parse_variant(invalid_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
+        let result = parse_variant(invalid_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -397,57 +412,75 @@ mod tests {
     #[test]
     fn test_parse_variant_valid_variant_details() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();
+        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
+        let mut _filtering_stats = FilteringStats::default();
+        let _mask: Option<&[(i64, i64)]> = None;
 
         let valid_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
-        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
+        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
         assert!(result.is_ok());
-        if let Ok(Some(variant)) = result {
+        if let Some((variant, is_valid)) = result.unwrap() {
+            assert!(is_valid);
             assert_eq!(variant.position, 1000);
             assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]);
+        } else {
+            panic!("Expected Some variant, got None");
         }
     }
 
     #[test]
     fn test_parse_variant_low_gq_variant() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();
+        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
+        let mut _filtering_stats = FilteringStats::default();
+        let _mask: Option<&[(i64, i64)]> = None;
 
         let low_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:20\t1|1:45";
-        let result = parse_variant(low_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq);
+        let result = parse_variant(low_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
+        assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
 
     #[test]
     fn test_parse_variant_out_of_range_region() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();
+        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
+        let mut _filtering_stats = FilteringStats::default();
+        let _mask: Option<&[(i64, i64)]> = None;
 
         let out_of_range = "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
-        assert!(parse_variant(out_of_range, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq).unwrap().is_none());
+        let result = parse_variant(out_of_range, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
     fn test_parse_variant_different_chromosome() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();
+        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
+        let mut _filtering_stats = FilteringStats::default();
+        let _mask: Option<&[(i64, i64)]> = None;
 
         let diff_chr = "chr2\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
-        assert!(parse_variant(diff_chr, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq).unwrap().is_none());
+        let result = parse_variant(diff_chr, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
     fn test_parse_variant_invalid_format() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();
+        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
+        let mut _filtering_stats = FilteringStats::default();
+        let _mask: Option<&[(i64, i64)]> = None;
 
         let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35"; // Only 10 fields, expecting 12 for 3 samples
-        assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq).is_err());
+        assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask).is_err());
     }
 
     #[test]
@@ -462,36 +495,43 @@ mod tests {
         sample_filter.insert("SAMPLE1".to_string(), (0, 1));
         sample_filter.insert("SAMPLE2".to_string(), (0, 1));
         sample_filter.insert("SAMPLE3".to_string(), (0, 1));
+        let adjusted_sequence_length: Option<i64> = None;
 
-        let invalid_group = process_variants(&variants, &sample_names, 2, &sample_filter, 1000, 3000);
+        let invalid_group = process_variants(
+            &variants,
+            &sample_names,
+            2, // haplotype_group=2 (invalid, assuming only 0 and 1)
+            &sample_filter,
+            1000,
+            3000,
+            adjusted_sequence_length,
+        );
         assert!(invalid_group.is_err());
     }
 
     #[test]
     fn test_parse_config_file_with_noreads() {
-        use std::io::Write;
 
         let config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSAMPLE1\tSAMPLE2\n\
                               chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1_lowconf\t1|1\n\
                               chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
-        let path = tempfile::NamedTempFile::new().unwrap();
-        write!(path.as_file(), "{}", config_content).unwrap();
+        let path = NamedTempFile::new().expect("Failed to process variants");
+        write!(path.as_file(), "{}", config_content).expect("Failed to process variants");
 
-        let config_entries = parse_config_file(path.path()).unwrap();
+        let config_entries = parse_config_file(path.path()).expect("Failed to process variants");
         assert_eq!(config_entries.len(), 2);
     }
 
     #[test]
     fn test_parse_config_file_entry2_details() {
-        use std::io::Write;
 
         let config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSAMPLE1\tSAMPLE2\n\
                               chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1_lowconf\t1|1\n\
                               chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
-        let mut temp_file = NamedTempFile::new().unwrap();
-        write!(temp_file.as_file(), "{}", config_content).unwrap();
+        let mut temp_file = NamedTempFile::new().expect("Failed to process variants");
+        write!(temp_file.as_file(), "{}", config_content).expect("Failed to process variants");
 
-        let config_entries = parse_config_file(temp_file.path()).unwrap();
+        let config_entries = parse_config_file(temp_file.path()).expect("Failed to process variants");
         assert_eq!(config_entries.len(), 2);
 
         // Second entry details
@@ -510,25 +550,24 @@ mod tests {
     #[test]
     fn test_find_vcf_file_existing_vcfs() {
         use std::fs::{self, File};
-        use std::io::Write;
 
         // Create a temporary directory for testing
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = tempfile::tempdir().expect("Failed to process variants");
         let temp_path = temp_dir.path();
 
         // Create some test VCF files
-        File::create(temp_path.join("chr1.vcf")).unwrap();
-        File::create(temp_path.join("chr2.vcf.gz")).unwrap();
-        File::create(temp_path.join("chr10.vcf")).unwrap();
+        File::create(temp_path.join("chr1.vcf")).expect("Failed to process variants");
+        File::create(temp_path.join("chr2.vcf.gz")).expect("Failed to process variants");
+        File::create(temp_path.join("chr10.vcf")).expect("Failed to process variants");
 
         // Test finding existing VCF files
-        let vcf1 = find_vcf_file(temp_path.to_str().unwrap(), "1").unwrap();
+        let vcf1 = find_vcf_file(temp_path.to_str().unwrap(), "1").expect("Failed to process variants");
         assert!(vcf1.ends_with("chr1.vcf"));
 
-        let vcf2 = find_vcf_file(temp_path.to_str().unwrap(), "2").unwrap();
+        let vcf2 = find_vcf_file(temp_path.to_str().unwrap(), "2").expect("Failed to process variants");
         assert!(vcf2.ends_with("chr2.vcf.gz"));
 
-        let vcf10 = find_vcf_file(temp_path.to_str().unwrap(), "10").unwrap();
+        let vcf10 = find_vcf_file(temp_path.to_str().unwrap(), "10").expect("Failed to process variants");
         assert!(vcf10.ends_with("chr10.vcf"));
     }
 
@@ -537,13 +576,13 @@ mod tests {
         use std::fs::File;
 
         // Create a temporary directory for testing
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = tempfile::tempdir().expect("Failed to process variants");
         let temp_path = temp_dir.path();
 
         // Create some test VCF files
-        File::create(temp_path.join("chr1.vcf")).unwrap();
-        File::create(temp_path.join("chr2.vcf.gz")).unwrap();
-        File::create(temp_path.join("chr10.vcf")).unwrap();
+        File::create(temp_path.join("chr1.vcf")).expect("Failed to process variants");
+        File::create(temp_path.join("chr2.vcf.gz")).expect("Failed to process variants");
+        File::create(temp_path.join("chr10.vcf")).expect("Failed to process variants");
 
         // Test with non-existent chromosome "3"
         let result = find_vcf_file(temp_path.to_str().unwrap(), "3");
@@ -567,10 +606,10 @@ mod tests {
     #[test]
     fn test_open_vcf_reader_uncompressed_file() {
         // Create a temporary uncompressed VCF file
-        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        let temp_file = NamedTempFile::new().expect("Failed to process variants");
         let path = temp_file.path();
-        let mut file = File::create(path).unwrap();
-        writeln!(file, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE1").unwrap();
+        let mut file = File::create(path).expect("Failed to process variants");
+        writeln!(file, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE1").expect("Failed to process variants");
 
         let reader = open_vcf_reader(&path);
         assert!(reader.is_ok());
@@ -579,11 +618,11 @@ mod tests {
     #[test]
     fn test_open_vcf_reader_gzipped_file() {
         // Create a temporary gzipped VCF file
-        let gzipped_file = tempfile::NamedTempFile::new().unwrap();
+        let gzipped_file = NamedTempFile::new().expect("Failed to process variants");
         let path = gzipped_file.path();
         let mut encoder = flate2::write::GzEncoder::new(File::create(path).unwrap(), flate2::Compression::default());
-        writeln!(encoder, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE1").unwrap();
-        encoder.finish().unwrap();
+        writeln!(encoder, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE1").expect("Failed to process variants");
+        encoder.finish().expect("Failed to process variants");
 
         let reader = open_vcf_reader(&path);
         assert!(reader.is_ok());
@@ -591,23 +630,24 @@ mod tests {
 
     #[test]
     fn test_gq_filtering_low_gq_variant() {
-        let variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|1:40";
-        let chr = "1";
-        let start = 0;
-        let end = 2000;
-        let min_gq = 30;
-        let mut missing_data_info = MissingDataInfo::default();
         let sample_names = vec!["Sample1".to_string(), "Sample2".to_string()];
+        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let min_gq = 30;
+        let mut _filtering_stats = FilteringStats::default();
+        let _mask: Option<&[(i64, i64)]> = None;
 
+        let variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|1:40";
         let result = parse_variant(
             variant_line,
-            chr,
-            start,
-            end,
+            "1",
+            1000,
+            2000,
             &mut missing_data_info,
             &sample_names,
             min_gq,
-        ).unwrap();
+            &mut _filtering_stats,
+            _mask,
+        ).expect("Failed to process variants");
 
         // Variant should be None because one sample has GQ < min_gq
         assert!(result.is_none());
@@ -615,33 +655,37 @@ mod tests {
 
     #[test]
     fn test_gq_filtering_valid_variant() {
-        let valid_variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40";
-        let chr = "1";
-        let start = 0;
-        let end = 2000;
-        let min_gq = 30;
-        let mut missing_data_info = MissingDataInfo::default();
         let sample_names = vec!["Sample1".to_string(), "Sample2".to_string()];
+        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let min_gq = 30;
+        let mut _filtering_stats = FilteringStats::default();
+        let _mask: Option<&[(i64, i64)]> = None;
 
+        let valid_variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40";
         let result = parse_variant(
             valid_variant_line,
-            chr,
-            start,
-            end,
+            "1",
+            1000,
+            2000,
             &mut missing_data_info,
             &sample_names,
             min_gq,
-        ).unwrap();
+            &mut _filtering_stats,
+            _mask,
+        ).expect("Failed to process variants");
 
         // Variant should be Some because all samples have GQ >= min_gq
         assert!(result.is_some());
 
-        if let Some(variant) = result {
+        if let Some((variant, is_valid)) = result {
+            assert!(is_valid);
             assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1])]);
+        } else {
+            panic!("Expected Some variant, got None");
         }
     }
 
-
+    // Setup function for Group 1 tests
     fn setup_group1_test() -> (Vec<Variant>, Vec<String>, HashMap<String, (u8, u8)>) {
         // Define the sample names as they appear in the VCF.
         let sample_names = vec![
@@ -705,24 +749,25 @@ mod tests {
     #[test]
     fn test_group1_allele_frequency() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length: Option<i64> = None;
 
         // Process variants for haplotype_group=1
-        let (num_segsites, w_theta, pi, n) = process_variants(
+        let result_group1 = process_variants(
             &variants,
             &sample_names,
             1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).unwrap().expect("Expected Some variant data");
 
         // Calculate allele frequency using the correct function
-        let allele_frequency_group1 = calculate_allele_frequency(&sample_filter, 1);
+        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter);
 
         // Allele frequency for group1 should be approximately 0.6667 (2/3)
         let expected_freq_group1 = 2.0 / 3.0;
-        let allele_frequency_diff_group1 = (allele_frequency_group1 - expected_freq_group1).abs();
+        let allele_frequency_diff_group1 = (allele_frequency_group1.unwrap_or(0.0) - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1: {}",
             allele_frequency_diff_group1
@@ -731,27 +776,26 @@ mod tests {
             allele_frequency_diff_group1 < 1e-6,
             "Allele frequency for Group 1 is incorrect: expected {:.6}, got {:.6}",
             expected_freq_group1,
-            allele_frequency_group1
+            allele_frequency_group1.unwrap_or(0.0)
         );
 
-        assert_eq!(num_segsites, 2, "Number of segregating sites should be 2");
+        assert_eq!(result_group1.0, 2, "Number of segregating sites should be 2");
     }
-
-
 
     #[test]
     fn test_group1_number_of_haplotypes() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length: Option<i64> = None;
 
         let result_group1 = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).unwrap().expect("Expected Some variant data");
 
         // Number of haplotypes for group1 should be 3
         let expected_num_hap_group1 = 3;
@@ -769,16 +813,19 @@ mod tests {
     #[test]
     fn test_group1_segregating_sites() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length: Option<i64> = None;
+        let _mask: Option<&[(i64, i64)]> = None;
+       let mut _filtering_stats = FilteringStats::default();
 
         let result_group1 = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).unwrap().expect("Expected Some variant data");
 
         // Number of segregating sites for group1 should be 2
         // Segregating sites at positions 1000 and 3000
@@ -797,22 +844,25 @@ mod tests {
     #[test]
     fn test_group1_watterson_theta() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length: Option<i64> = None;
+        let _mask: Option<&[(i64, i64)]> = None;
+       let mut _filtering_stats = FilteringStats::default();
 
         let result_group1 = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).unwrap().expect("Expected Some variant data");
 
         // Calculate expected Watterson's theta
         // seg_sites = 2, n = 3, seq_length = 3000 - 1000 +1 = 2001
         // theta = seg_sites / harmonic(n-1) / seq_length
-        let harmonic = 1.0 / 1.0 + 1.0 / 2.0; // n-1 = 2
-        let expected_w_theta = 2.0 / harmonic / 2001.0;
+        let harmonic_value = harmonic(2); // n-1 =2
+        let expected_w_theta = 2.0 / harmonic_value / 2001.0;
 
         let w_theta_diff = (result_group1.1 - expected_w_theta).abs();
         println!(
@@ -821,7 +871,7 @@ mod tests {
         );
         assert!(
             w_theta_diff < 1e-6,
-            "Watterson's theta for Group 1 is incorrect: expected {}, got {}",
+            "Watterson's theta for Group 1 is incorrect: expected {:.6}, got {:.6}",
             expected_w_theta,
             result_group1.1
         );
@@ -830,56 +880,70 @@ mod tests {
     #[test]
     fn test_group1_nucleotide_diversity_pi() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length: Option<i64> = None;
+        let _mask: Option<&[(i64, i64)]> = None;
+       let mut _filtering_stats = FilteringStats::default();
 
         let result_group1 = process_variants(
-            &variants,
-            &sample_names,
-            1,
-            &sample_filter,
-            1000,
-            3000,
-        )
-        .unwrap();
-
-        // Calculate expected nucleotide diversity (pi)
-        // pairwise differences: SAMPLE1 vs SAMPLE2: 1, SAMPLE1 vs SAMPLE3:1, SAMPLE2 vs SAMPLE3:2
-        // total_pair_diff = 4
-        // n =3, num_comparisons=3
-        // pi = total_pair_diff / num_comparisons / seq_length = 4 /3 /2001 ≈ 0.000666222
-        let expected_pi = 4.0 / 3.0 / 2001.0;
-
-        let pi_diff = (result_group1.2 - expected_pi).abs();
-        println!("Nucleotide diversity (pi) difference for Group 1: {}", pi_diff);
-        assert!(
-            pi_diff < 1e-6,
-            "Nucleotide diversity (pi) for Group 1 is incorrect: expected {}, got {}",
-            expected_pi,
-            result_group1.2
-        );
-    }
-
-    #[test]
-    fn test_group1_filtered_allele_frequency() {
-        let (variants, sample_names, sample_filter) = setup_group1_test();
-
-        // Process variants for haplotype_group=1 with filtered samples
-        let (num_segsites, w_theta, pi, n) = process_variants(
             &variants,
             &sample_names,
             1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).unwrap().expect("Expected Some variant data");
+
+        // Calculate expected nucleotide diversity (pi)
+        // For haplotype_group=1:
+        // Sample1 hap1=1
+        // Sample2 hap1=0
+        // Sample3 hap1=1
+        // Pairwise differences:
+        // (Sample1 vs Sample2):1 vs0 -> 1
+        // (Sample1 vs Sample3):1 vs1 -> 0
+        // (Sample2 vs Sample3):0 vs1 -> 1
+        // Total differences: 2
+        // Number of comparisons: 3
+        // pi = 2 / 3 / 2001 ≈ 0.000333
+        let expected_pi = 2.0 / 3.0 / 2001.0;
+        let pi_diff = (result_group1.2 - expected_pi).abs();
+        println!(
+            "Nucleotide diversity (pi) difference for Group 1: {}",
+            pi_diff
+        );
+        assert!(
+            pi_diff < 1e-6,
+            "Nucleotide diversity (pi) for Group 1 is incorrect: expected {:.6}, got {:.6}",
+            expected_pi,
+            result_group1.2
+        );
+    }
+
+    #[test]
+    fn test_group1_allele_frequency_filtered() {
+        let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length = Some(2001); // seq_length = 2001
+        let _mask: Option<&[(i64, i64)]> = None;
+       let mut _filtering_stats = FilteringStats::default();
+
+        // Process variants for haplotype_group=1 with adjusted_sequence_length
+        let result_group1 = process_variants(
+            &variants,
+            &sample_names,
+            1, // haplotype_group=1
+            &sample_filter,
+            1000,
+            3000,
+            adjusted_sequence_length,
+        ).unwrap().expect("Expected Some variant data");
 
         // Calculate allele frequency using the correct function
-        let allele_frequency_group1_filtered = calculate_allele_frequency(&sample_filter, 1);
+        let allele_frequency_group1_filtered = calculate_inversion_allele_frequency(&sample_filter);
 
-        // Allele frequency for group1 should be approximately 0.6667 (2/3)
+        // Allele frequency for group1 should still be approximately 0.6667 (2/3)
         let expected_freq_group1_filtered = 2.0 / 3.0;
-        let allele_frequency_diff_group1_filtered =
-            (allele_frequency_group1_filtered - expected_freq_group1_filtered).abs();
+        let allele_frequency_diff_group1_filtered = (allele_frequency_group1_filtered.unwrap_or(0.0) - expected_freq_group1_filtered).abs();
         println!(
             "Filtered allele frequency difference for Group 1: {}",
             allele_frequency_diff_group1_filtered
@@ -888,25 +952,28 @@ mod tests {
             allele_frequency_diff_group1_filtered < 1e-6,
             "Filtered allele frequency for Group 1 is incorrect: expected {:.6}, got {:.6}",
             expected_freq_group1_filtered,
-            allele_frequency_group1_filtered
+            allele_frequency_group1_filtered.unwrap_or(0.0)
         );
 
-        assert_eq!(num_segsites, 2, "Number of segregating sites should be 2");
+        assert_eq!(result_group1.0, 2, "Number of segregating sites should be 2");
     }
 
     #[test]
     fn test_group1_filtered_number_of_haplotypes() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length = Some(2001); // seq_length = 2001
+        let _mask: Option<&[(i64, i64)]> = None;
+       let mut _filtering_stats = FilteringStats::default();
 
         let result_group1 = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).unwrap().expect("Expected Some variant data");
 
         // Number of haplotypes after filtering should be same as before if no filtering applied
         let expected_num_hap_group1_filtered = 3;
@@ -924,16 +991,19 @@ mod tests {
     #[test]
     fn test_group1_filtered_segregating_sites() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length = Some(2001); // seq_length = 2001
+        let _mask: Option<&[(i64, i64)]> = None;
+       let mut _filtering_stats = FilteringStats::default();
 
         let result_group1 = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).unwrap().expect("Expected Some variant data");
 
         // Number of segregating sites after filtering should be same as before if no filtering applied
         let expected_segsites_group1_filtered = 2;
@@ -951,20 +1021,23 @@ mod tests {
     #[test]
     fn test_group1_filtered_watterson_theta() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length = Some(2001); // seq_length = 2001
+        let _mask: Option<&[(i64, i64)]> = None;
+       let mut _filtering_stats = FilteringStats::default();
 
         let result_group1 = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).unwrap().expect("Expected Some variant data");
 
         // Watterson's theta after filtering should be same as before if no filtering applied
-        let harmonic = 1.0 / 1.0 + 1.0 / 2.0; // n-1 =2
-        let expected_w_theta_filtered = 2.0 / harmonic / 2001.0;
+        let harmonic_value = harmonic(2); // n-1 =2
+        let expected_w_theta_filtered = 2.0 / harmonic_value / 2001.0;
 
         let w_theta_diff_filtered = (result_group1.1 - expected_w_theta_filtered).abs();
         println!(
@@ -973,7 +1046,7 @@ mod tests {
         );
         assert!(
             w_theta_diff_filtered < 1e-6,
-            "Filtered Watterson's theta for Group 1 is incorrect: expected {}, got {}",
+            "Filtered Watterson's theta for Group 1 is incorrect: expected {:.6}, got {:.6}",
             expected_w_theta_filtered,
             result_group1.1
         );
@@ -982,38 +1055,41 @@ mod tests {
     #[test]
     fn test_group1_filtered_nucleotide_diversity_pi() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
+        let adjusted_sequence_length = Some(2001); // seq_length = 2001
+        let _mask: Option<&[(i64, i64)]> = None;
+       let mut _filtering_stats = FilteringStats::default();
 
         let result_group1 = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).expect("Failed to process variants");
 
         // Pi after filtering should be same as before if no filtering applied
-        let expected_pi_filtered = 4.0 / 3.0 / 2001.0;
-        let pi_diff_filtered = (result_group1.2 - expected_pi_filtered).abs();
+        let expected_pi_filtered = 2.0 / 3.0 / 2001.0;
+        let pi_diff_filtered = (result_group1.expect("Expected Some variant data").2 - expected_pi_filtered).abs();
         println!(
             "Filtered nucleotide diversity (pi) difference for Group 1: {}",
             pi_diff_filtered
         );
         assert!(
             pi_diff_filtered < 1e-6,
-            "Filtered nucleotide diversity (pi) for Group 1 is incorrect: expected {}, got {}",
+            "Filtered nucleotide diversity (pi) for Group 1 is incorrect: expected {:.6}, got {:.6}",
             expected_pi_filtered,
-            result_group1.2
+            result_group1.expect("Expected Some variant data").2
         );
     }
-    
+
     #[test]
     fn test_group1_missing_data_handling() {
         // Define sample haplotype groupings as per TSV config
         // For haplotype group 1, assume:
         // SAMPLE1: hap1=1
-        // SAMPLE2: hap1=1
+        // SAMPLE2: hap1=0
         // SAMPLE3: hap1=0
         let sample_filter_unfiltered = HashMap::from([
             ("Sample1".to_string(), (0, 1)),
@@ -1055,6 +1131,10 @@ mod tests {
             "Sample3".to_string(),
         ];
 
+        let adjusted_sequence_length: Option<i64> = None;
+        let _mask: Option<&[(i64, i64)]> = None;
+       let mut _filtering_stats = FilteringStats::default();
+
         let result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1062,20 +1142,20 @@ mod tests {
             &sample_filter_unfiltered,
             1000,
             3000,
-        )
-        .unwrap();
+            adjusted_sequence_length,
+        ).expect("Failed to process variants");
 
         // Calculate allele frequency using the correct function
-        let allele_frequency_group1 = calculate_allele_frequency(&sample_filter_unfiltered, 1);
+        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter_unfiltered);
 
         // Calculate expected allele frequency based on the haplotype_group=1:
-        // Sample1 hap1=1
-        // Sample2 hap1=1
-        // Sample3 hap1=0
-        // Number of '1's: 2
+        // SAMPLE1 hap1=1
+        // SAMPLE2 hap1=0
+        // SAMPLE3 hap1=0
+        // Number of '1's: 1
         // Total haplotypes: 3
-        let expected_freq_group1 = 2.0 / 3.0;
-        let allele_frequency_diff_group1 = (allele_frequency_group1 - expected_freq_group1).abs();
+        let expected_freq_group1 = 1.0 / 3.0;
+        let allele_frequency_diff_group1 = (allele_frequency_group1.unwrap_or(0.0) - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1 with missing data: {}",
             allele_frequency_diff_group1
@@ -1084,26 +1164,26 @@ mod tests {
             allele_frequency_diff_group1 < 1e-6,
             "Allele frequency for Group 1 with missing data is incorrect: expected {:.6}, got {:.6}",
             expected_freq_group1,
-            allele_frequency_group1
+            allele_frequency_group1.unwrap_or(0.0)
         );
 
         // Verify Watterson's theta and pi
         // Expected segregating sites: 2 (positions 1000 and 3000)
-        let num_segsites = result_group1.0;
+        let num_segsites = result_group1.expect("Expected Some variant data").0;
         assert_eq!(num_segsites, 2, "Number of segregating sites should be 2");
 
         // Pi calculation:
         // For haplotype_group=1:
         // Variants considered: 1000, 3000 (2000 excluded due to missing)
         // Pairwise differences:
-        // (Sample1 vs Sample2):1 vs1 -> 0 differences
+        // (Sample1 vs Sample2):1 vs0 -> 1 difference
         // (Sample1 vs Sample3):1 vs0 -> 1 difference
-        // (Sample2 vs Sample3):1 vs0 -> 1 difference
+        // (Sample2 vs Sample3):0 vs0 -> 0 difference
         // Total differences: 2
         // Number of comparisons: 3
-        // Pi: 2 / 3 / 2001 ≈ 0.000333
-        let expected_pi = 4.0 / 3.0 / 2001.0; // 4 differences across 3 comparisons
-        let pi_calculated = result_group1.2;
+        // pi = 2 / 3 / 2001 ≈ 0.000333
+        let expected_pi = 2.0 / 3.0 / 2001.0;
+        let pi_calculated = result_group1.expect("Expected Some variant data").2;
         let pi_diff = (pi_calculated - expected_pi).abs();
         println!(
             "Pi difference for Group 1: expected ~{:.6}, got {:.6}",
@@ -1116,7 +1196,7 @@ mod tests {
             pi_calculated
         );
     }
-    
+
     #[test]
     fn test_group1_zero_segregating_sites() {
         let variants = vec![
@@ -1133,17 +1213,19 @@ mod tests {
         sample_filter.insert("SAMPLE1".to_string(), (0, 1));
         sample_filter.insert("SAMPLE2".to_string(), (0, 1));
         sample_filter.insert("SAMPLE3".to_string(), (0, 1));
-    
+
+        let adjusted_sequence_length = Some(2001); // seq_length = 2001
+
         let result_group1 = process_variants(
             &variants,
             &sample_names,
-            1,
+            1, // haplotype_group=1
             &sample_filter,
             1000,
             3000,
-        )
-        .unwrap();
-    
+            adjusted_sequence_length,
+        ).expect("Failed to process variants");
+
         // Calculate allele frequency based on TSV config:
         // haplotype_group=1:
         // SAMPLE1 hap1=0
@@ -1152,7 +1234,8 @@ mod tests {
         // Number of '1's: 0
         // Total haplotypes: 3
         let expected_freq_group1 = 0.0;
-        let allele_frequency_diff_group1 = (result_group1.2 - expected_freq_group1).abs();
+        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter);
+        let allele_frequency_diff_group1 = (allele_frequency_group1.unwrap_or(0.0) - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1 with zero '1's: {}",
             allele_frequency_diff_group1
@@ -1161,24 +1244,24 @@ mod tests {
             allele_frequency_diff_group1 < 1e-6,
             "Allele frequency for Group 1 with zero '1's is incorrect: expected {}, got {}",
             expected_freq_group1,
-            result_group1.2
+            allele_frequency_group1.unwrap_or(0.0)
         );
-    
+
         // No segregating sites
         let expected_segsites_group1 = 0;
         println!(
             "Number of segregating sites for Group 1 with zero segsites (expected {}): {}",
-            expected_segsites_group1, result_group1.0
+            expected_segsites_group1, result_group1.expect("Expected Some variant data").0
         );
         assert_eq!(
-            result_group1.0, expected_segsites_group1,
+            result_group1.expect("Expected Some variant data").0, expected_segsites_group1,
             "Number of segregating sites for Group 1 with zero segsites is incorrect: expected {}, got {}",
-            expected_segsites_group1, result_group1.0
+            expected_segsites_group1, result_group1.expect("Expected Some variant data").0
         );
-    
+
         // Watterson's theta should be 0
         let expected_w_theta = 0.0;
-        let w_theta_diff = (result_group1.1 - expected_w_theta).abs();
+        let w_theta_diff = (result_group1.expect("Expected Some variant data").1 - expected_w_theta).abs();
         println!(
             "Watterson's theta difference for Group 1 with zero segsites: {}",
             w_theta_diff
@@ -1187,12 +1270,12 @@ mod tests {
             w_theta_diff < 1e-6,
             "Watterson's theta for Group 1 with zero segsites is incorrect: expected {}, got {}",
             expected_w_theta,
-            result_group1.1
+            result_group1.expect("Expected Some variant data").1
         );
-    
+
         // Pi should be 0
         let expected_pi = 0.0;
-        let pi_diff = (result_group1.2 - expected_pi).abs();
+        let pi_diff = (result_group1.expect("Expected Some variant data").2 - expected_pi).abs();
         println!(
             "Nucleotide diversity (pi) difference for Group 1 with zero segsites: {}",
             pi_diff
@@ -1201,9 +1284,7 @@ mod tests {
             pi_diff < 1e-6,
             "Nucleotide diversity (pi) for Group 1 with zero segsites is incorrect: expected {}, got {}",
             expected_pi,
-            result_group1.2
+            result_group1.expect("Expected Some variant data").2
         );
     }
-
-
 }
