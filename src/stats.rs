@@ -682,7 +682,7 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
         let end: i64 = record.get(2).ok_or(VcfError::Parse("Missing end".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid end".to_string()))?;
 
         let mut samples_unfiltered = HashMap::new();
-        let mut samples_strict_filtered = HashMap::new();
+        let mut samples_filtered = HashMap::new();
 
         for (i, field) in record.iter().enumerate().skip(7) {
             total_genotypes += 1;
@@ -710,11 +710,11 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
                     invalid_genotypes += 1;
                 }
                 
-                // For samples_strict_filtered (exact matches)
+                // For samples_filtered (exact matches)
                 if field == "0|0" || field == "0|1" || field == "1|0" || field == "1|1" {
                     let left = field.chars().nth(0).unwrap().to_digit(10).unwrap() as u8;
                     let right = field.chars().nth(2).unwrap().to_digit(10).unwrap() as u8;
-                    samples_strict_filtered.insert(sample_name.clone(), (left, right));
+                    samples_filtered.insert(sample_name.clone(), (left, right));
                 }
             } else {
                 eprintln!("Warning: More genotype fields than sample names at line {}.", line_num + 2);
@@ -731,7 +731,7 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
             start,
             end,
             samples_unfiltered,
-            samples_strict_filtered,
+            samples_filtered,
         });
     }
 
