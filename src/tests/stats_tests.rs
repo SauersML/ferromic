@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-use itertools::Itertools;
+    use itertools::Itertools;
     use tempfile::NamedTempFile;
     use std::fs::File;
     use std::collections::HashMap;
-use std::io::Write;
+    use std::io::Write;
 
     // Helper function to create a Variant for testing
     fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
