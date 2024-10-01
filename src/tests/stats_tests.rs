@@ -397,15 +397,44 @@ use std::io::Write;
 
     #[test]
     fn test_parse_variant_one_gq_below_threshold() {
-        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let sample_names = vec![
+            "SAMPLE1".to_string(),
+            "SAMPLE2".to_string(),
+            "SAMPLE3".to_string(),
+        ];
+        let mut missing_data_info = MissingDataInfo::default();
+        let mut filtering_stats = FilteringStats::default();
         let min_gq = 30;
-        let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
-
+    
+        // Define the expected variant using the helper function
+        let expected_variant = create_variant(
+            1000,
+            vec![
+                Some(vec![0, 0]), // SAMPLE1: 0|0:35
+                Some(vec![0, 1]), // SAMPLE2: 0|1:25
+                Some(vec![1, 1]), // SAMPLE3: 1|1:45
+            ],
+        );
+    
+        // VCF line with one genotype below the GQ threshold
         let invalid_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:25\t1|1:45";
-        let result = parse_variant(invalid_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
+        let result = parse_variant(
+            invalid_gq_line,
+            "1",
+            1,
+            2000,
+            &mut missing_data_info,
+            &sample_names,
+            min_gq,
+            &mut filtering_stats,
+            _mask,
+        );
+    
+        // Ensure the function executed without errors
         assert!(result.is_ok());
+    
+        // Assert that the variant is returned but marked as invalid (filtered out)
         assert_eq!(result.unwrap(), Some((expected_variant, false)));
     }
 
@@ -431,15 +460,44 @@ use std::io::Write;
 
     #[test]
     fn test_parse_variant_low_gq_variant() {
-        let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let sample_names = vec![
+            "SAMPLE1".to_string(),
+            "SAMPLE2".to_string(),
+            "SAMPLE3".to_string(),
+        ];
+        let mut missing_data_info = MissingDataInfo::default();
+        let mut filtering_stats = FilteringStats::default();
         let min_gq = 30;
-        let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
-
+    
+        // Define the expected variant using the helper function
+        let expected_variant = create_variant(
+            1000,
+            vec![
+                Some(vec![0, 0]), // SAMPLE1: 0|0:35
+                Some(vec![0, 1]), // SAMPLE2: 0|1:20 (below threshold)
+                Some(vec![1, 1]), // SAMPLE3: 1|1:45
+            ],
+        );
+    
+        // VCF line with one genotype below the GQ threshold
         let low_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:20\t1|1:45";
-        let result = parse_variant(low_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
+        let result = parse_variant(
+            low_gq_line,
+            "1",
+            1,
+            2000,
+            &mut missing_data_info,
+            &sample_names,
+            min_gq,
+            &mut filtering_stats,
+            _mask,
+        );
+    
+        // Ensure the function executed without errors
         assert!(result.is_ok());
+    
+        // Assert that the variant is returned but marked as invalid (filtered out)
         assert_eq!(result.unwrap(), Some((expected_variant, false)));
     }
 
@@ -630,18 +688,26 @@ use std::io::Write;
 
     #[test]
     fn test_gq_filtering_low_gq_variant() {
-        let sample_names = vec!["Sample1".to_string(), "Sample2".to_string()];
+        let sample_names = vec![
+            "SAMPLE1".to_string(),
+            "SAMPLE2".to_string(),
+        ];
         let mut missing_data_info = MissingDataInfo::default();
         let mut filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let _mask: Option<&[(i64, i64)]> = None;
     
-        let variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|1:40";
-        let expected_variant = Variant {
-            position: 1000,
-            genotypes: vec![Some(vec![0, 0]), Some(vec![0, 1])],
-        };
+        // Define the expected variant using the helper function
+        let expected_variant = create_variant(
+            1000,
+            vec![
+                Some(vec![0, 0]), // SAMPLE1: 0|0:20 (below threshold)
+                Some(vec![0, 1]), // SAMPLE2: 0|1:40
+            ],
+        );
     
+        // VCF line with one genotype below the GQ threshold
+        let variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|1:40";
         let result = parse_variant(
             variant_line,
             "1",
@@ -652,9 +718,13 @@ use std::io::Write;
             min_gq,
             &mut filtering_stats,
             _mask,
-        ).expect("Failed to process variants");
+        );
     
-        assert_eq!(result, Some((expected_variant, false)));
+        // Ensure the function executed without errors
+        assert!(result.is_ok());
+    
+        // Assert that the variant is returned but marked as invalid (filtered out)
+        assert_eq!(result.unwrap(), Some((expected_variant, false)));
     }
 
     #[test]
