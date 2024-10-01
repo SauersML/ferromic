@@ -77,7 +77,7 @@ struct FilteringStats {
     multi_allelic_variants: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Debug, Clone)]
 struct Variant {
     position: i64,
     genotypes: Vec<Option<Vec<u8>>>,
