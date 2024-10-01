@@ -772,6 +772,7 @@ fn calculate_inversion_allele_frequency(
 
 
 
+
 fn parse_region(region: &str) -> Result<(i64, i64), VcfError> {
     let parts: Vec<&str> = region.split('-').collect();
     if parts.len() != 2 {
