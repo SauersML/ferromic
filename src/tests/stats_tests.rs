@@ -378,7 +378,8 @@ mod tests {
     #[test]
     fn test_parse_variant_valid_all_gq_above_threshold() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let mut missing_data_info = MissingDataInfo::default();  
+        let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
@@ -441,7 +442,8 @@ mod tests {
     #[test]
     fn test_parse_variant_valid_variant_details() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let mut missing_data_info = MissingDataInfo::default();  
+        let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
@@ -504,7 +506,8 @@ mod tests {
     #[test]
     fn test_parse_variant_out_of_range_region() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let mut missing_data_info = MissingDataInfo::default();  
+        let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
@@ -518,7 +521,8 @@ mod tests {
     #[test]
     fn test_parse_variant_different_chromosome() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let mut missing_data_info = MissingDataInfo::default();  
+        let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
@@ -532,7 +536,8 @@ mod tests {
     #[test]
     fn test_parse_variant_invalid_format() {
         let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string(), "SAMPLE3".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let mut missing_data_info = MissingDataInfo::default();  
+        let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
@@ -730,7 +735,8 @@ mod tests {
     #[test]
     fn test_gq_filtering_valid_variant() {
         let sample_names = vec!["Sample1".to_string(), "Sample2".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let mut missing_data_info = MissingDataInfo::default();  
+        let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
@@ -834,10 +840,15 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
+        ).unwrap();
+    
+        let (segsites, w_theta, pi, n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
     
         // Calculate allele frequency using the corrected function
-        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter);
+        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter, 1);
     
         // Allele frequency for group1 should be 1.0 (all hap2=1)
         let expected_freq_group1 = 1.0;
@@ -853,7 +864,7 @@ mod tests {
             allele_frequency_group1.unwrap_or(0.0)
         );
     
-        assert_eq!(result_group1.0, 2, "Number of segregating sites should be 2");
+        assert_eq!(segsites, 2, "Number of segregating sites should be 2");
     }
 
     #[test]
@@ -869,18 +880,23 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
+        ).unwrap();
+
+        let (_segsites, _w_theta, _pi, n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
 
         // Number of haplotypes for group1 should be 3
         let expected_num_hap_group1 = 3;
         println!(
             "Number of haplotypes for Group 1 (expected {}): {}",
-            expected_num_hap_group1, result_group1.3
+            expected_num_hap_group1, n_hap
         );
         assert_eq!(
-            result_group1.3, expected_num_hap_group1,
+            n_hap, expected_num_hap_group1,
             "Number of haplotypes for Group 1 is incorrect: expected {}, got {}",
-            expected_num_hap_group1, result_group1.3
+            expected_num_hap_group1, n_hap
         );
     }
 
@@ -899,19 +915,24 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
+        ).unwrap();
+
+        let (segsites, _w_theta, _pi, _n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
 
         // Number of segregating sites for group1 should be 2
         // Segregating sites at positions 1000 and 3000
         let expected_segsites_group1 = 2;
         println!(
             "Number of segregating sites for Group 1 (expected {}): {}",
-            expected_segsites_group1, result_group1.0
+            expected_segsites_group1, segsites
         );
         assert_eq!(
-            result_group1.0, expected_segsites_group1,
+            segsites, expected_segsites_group1,
             "Number of segregating sites for Group 1 is incorrect: expected {}, got {}",
-            expected_segsites_group1, result_group1.0
+            expected_segsites_group1, segsites
         );
     }
 
@@ -930,7 +951,12 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
+        ).unwrap();
+
+        let (_segsites, w_theta, _pi, _n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
 
         // Calculate expected Watterson's theta
         // seg_sites = 2, n = 3, seq_length = 3000 - 1000 +1 = 2001
@@ -938,7 +964,7 @@ mod tests {
         let harmonic_value = harmonic(2); // n-1 =2
         let expected_w_theta = 2.0 / harmonic_value / 2001.0;
 
-        let w_theta_diff = (result_group1.1 - expected_w_theta).abs();
+        let w_theta_diff = (w_theta - expected_w_theta).abs();
         println!(
             "Watterson's theta difference for Group 1: {}",
             w_theta_diff
@@ -947,7 +973,7 @@ mod tests {
             w_theta_diff < 1e-6,
             "Watterson's theta for Group 1 is incorrect: expected {:.6}, got {:.6}",
             expected_w_theta,
-            result_group1.1
+            w_theta
         );
     }
 
@@ -966,13 +992,18 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
+        ).unwrap();
+
+        let (_segsites, _w_theta, pi, _n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
     
         // Calculate expected nucleotide diversity (pi)
         // For haplotype_group=1:
         // All hap2 haplotypes=1, so no differences
         let expected_pi = 0.0;
-        let pi_diff = (result_group1.2 - expected_pi).abs();
+        let pi_diff = (pi - expected_pi).abs();
         println!(
             "Nucleotide diversity (pi) difference for Group 1: {}",
             pi_diff
@@ -981,7 +1012,7 @@ mod tests {
             pi_diff < 1e-6,
             "Nucleotide diversity (pi) for Group 1 is incorrect: expected {:.6}, got {:.6}",
             expected_pi,
-            result_group1.2
+            pi
         );
     }
 
@@ -1001,11 +1032,16 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
+        ).unwrap();
+
+        let (segsites, w_theta, pi, n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
 
         // Calculate allele frequency using the correct function
-        let allele_frequency_group1_filtered = calculate_inversion_allele_frequency(&sample_filter);
-
+        let allele_frequency_group1_filtered = calculate_inversion_allele_frequency(&sample_filter, 1);
+    
         // Allele frequency for group1 should still be approximately 0.6667 (2/3)
         let expected_freq_group1_filtered = 2.0 / 3.0;
         let allele_frequency_diff_group1_filtered = (allele_frequency_group1_filtered.unwrap_or(0.0) - expected_freq_group1_filtered).abs();
@@ -1019,8 +1055,8 @@ mod tests {
             expected_freq_group1_filtered,
             allele_frequency_group1_filtered.unwrap_or(0.0)
         );
-
-        assert_eq!(result_group1.0, 2, "Number of segregating sites should be 2");
+    
+        assert_eq!(segsites, 2, "Number of segregating sites should be 2");
     }
 
     #[test]
@@ -1028,7 +1064,6 @@ mod tests {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
-       let mut _filtering_stats = FilteringStats::default();
 
         let result_group1 = process_variants(
             &variants,
@@ -1038,18 +1073,23 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
-        ).unwrap().expect("Expected Some variant data");
+        ).unwrap();
 
+        let (_segsites, _w_theta, _pi, n_hap) = match result_group1 {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
+    
         // Number of haplotypes after filtering should be same as before if no filtering applied
         let expected_num_hap_group1_filtered = 3;
         println!(
             "Filtered number of haplotypes for Group 1 (expected {}): {}",
-            expected_num_hap_group1_filtered, result_group1.3
+            expected_num_hap_group1_filtered, n_hap
         );
         assert_eq!(
-            result_group1.3, expected_num_hap_group1_filtered,
+            n_hap, expected_num_hap_group1_filtered,
             "Filtered number of haplotypes for Group 1 is incorrect: expected {}, got {}",
-            expected_num_hap_group1_filtered, result_group1.3
+            expected_num_hap_group1_filtered, n_hap
         );
     }
 
