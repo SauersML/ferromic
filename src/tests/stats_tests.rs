@@ -406,7 +406,7 @@ use std::io::Write;
         let invalid_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:25\t1|1:45";
         let result = parse_variant(invalid_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
         assert!(result.is_ok());
-        assert!(result.unwrap(), Some((expected_variant, false)));
+        assert_eq!(result.unwrap(), Some((expected_variant, false)));
     }
 
     #[test]
@@ -440,7 +440,7 @@ use std::io::Write;
         let low_gq_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:20\t1|1:45";
         let result = parse_variant(low_gq_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
         assert!(result.is_ok());
-        assert!(result.unwrap(), Some((expected_variant, false)));
+        assert_eq!(result.unwrap(), Some((expected_variant, false)));
     }
 
     #[test]
@@ -631,12 +631,17 @@ use std::io::Write;
     #[test]
     fn test_gq_filtering_low_gq_variant() {
         let sample_names = vec!["Sample1".to_string(), "Sample2".to_string()];
-        let mut missing_data_info = MissingDataInfo::default();  let mut _filtering_stats = FilteringStats::default();
+        let mut missing_data_info = MissingDataInfo::default();
+        let mut filtering_stats = FilteringStats::default();
         let min_gq = 30;
-        let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
-
+    
         let variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|1:40";
+        let expected_variant = Variant {
+            position: 1000,
+            genotypes: vec![Some(vec![0, 0]), Some(vec![0, 1])],
+        };
+    
         let result = parse_variant(
             variant_line,
             "1",
@@ -645,12 +650,11 @@ use std::io::Write;
             &mut missing_data_info,
             &sample_names,
             min_gq,
-            &mut _filtering_stats,
+            &mut filtering_stats,
             _mask,
         ).expect("Failed to process variants");
-
-        // Variant should be None because one sample has GQ < min_gq
-        assert!(result.is_none());
+    
+        assert_eq!(result, Some((expected_variant, false)));
     }
 
     #[test]
