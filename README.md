@@ -9,8 +9,6 @@ Welcome to the **VCF Statistics Calculator**, a Rust-based tool designed to comp
 
 ## Table of Contents 📑
 
-## Table of Contents 📑
-
 - [Features](#features)
 - [Background](#background)
 - [Installation 🛠️](#installation-️)
