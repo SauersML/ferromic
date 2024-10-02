@@ -15,13 +15,13 @@ Welcome to the **VCF Statistics Calculator**, a Rust-based tool designed to comp
 - [Usage 🚀](#usage-🚀)
   - [Command-Line Arguments](#command-line-arguments)
   - [Input Files](#input-files)
-    - [VCF File 🧬](#vcf-file-️)
-    - [TSV Configuration File 📋](#tsv-configuration-file-️)
-    - [Mask File 🛡️](#mask-file-️)
-  - [Output File 📈](#output-file-️)
-- [Filtering Mechanisms 🔍](#filtering-mechanisms-️)
-- [Common Warnings and Errors ⚠️](#common-warnings-and-errors-️)
-- [Examples 🧪](#examples-️)
+    - [VCF File 🧬](#vcf-file)
+    - [TSV Configuration File 📋](#tsv-configuration-file)
+    - [Mask File 🛡️](#mask-file)
+  - [Output File 📈](#output-file)
+- [Filtering Mechanisms 🔍](#filtering-mechanisms)
+- [Common Warnings and Errors ⚠️](#common-warnings-and-errors)
+- [Examples 🧪](#examples)
 
 ---
 
