@@ -11,8 +11,8 @@ Welcome to the **VCF Statistics Calculator**, a Rust-based tool designed to comp
 
 - [Features](#features)
 - [Background](#background)
-- [Installation 🛠️](#installation-️)
-- [Usage 🚀](#usage-🚀)
+- [Installation 🛠️](#installation)
+- [Usage 🚀](#usage)
   - [Command-Line Arguments](#command-line-arguments)
   - [Input Files](#input-files)
     - [VCF File 🧬](#vcf-file)
