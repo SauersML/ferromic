@@ -743,22 +743,25 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
 fn calculate_inversion_allele_frequency(
     sample_filter: &HashMap<String, (u8, u8)>,
-    haplotype_group: u8,
 ) -> Option<f64> {
     let mut num_ones = 0;
     let mut total_haplotypes = 0;
 
     for (_sample, &(left, right)) in sample_filter.iter() {
-        if left == haplotype_group {
-            if left == 1 {
-                num_ones += 1;
-            }
+        if left == 1 {
+            num_ones += 1;
             total_haplotypes += 1;
         }
-        if right == haplotype_group {
-            if right == 1 {
-                num_ones += 1;
-            }
+        if right == 1 {
+            num_ones += 1;
+            total_haplotypes += 1;
+        }
+        if left == 0 {
+            num_ones += 1;
+            total_haplotypes += 1;
+        }
+        if right == 0 {
+            num_ones += 1;
             total_haplotypes += 1;
         }
     }
@@ -769,7 +772,6 @@ fn calculate_inversion_allele_frequency(
         None
     }
 }
-
 
 fn parse_region(region: &str) -> Result<(i64, i64), VcfError> {
     let parts: Vec<&str> = region.split('-').collect();
