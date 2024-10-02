@@ -7,24 +7,6 @@ Welcome to the **VCF Statistics Calculator**, a Rust-based tool designed to comp
 
 ---
 
-## Table of Contents 📑
-
-- [Features](#features)
-- [Background](#background)
-- [Installation 🛠️](#installation)
-- [Usage 🚀](#usage)
-  - [Command-Line Arguments](#command-line-arguments)
-  - [Input Files](#input-files)
-    - [VCF File 🧬](#vcf-file)
-    - [TSV Configuration File 📋](#tsv-configuration-file)
-    - [Mask File 🛡️](#mask-file)
-  - [Output File 📈](#output-file)
-- [Filtering Mechanisms 🔍](#filtering-mechanisms)
-- [Common Warnings and Errors ⚠️](#common-warnings-and-errors)
-- [Examples 🧪](#examples)
-
----
-
 ## Features ✨
 
 - **Calculate Genetic Diversity Metrics**: Compute Watterson's Theta (θ) and Pi (π) for specified regions.
