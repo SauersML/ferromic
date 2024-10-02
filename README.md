@@ -51,9 +51,14 @@ This tool processes VCF files to calculate **Watterson's Theta (θ)** and **Pi (
 
 ## Installation 🛠️
 
-Make sure you have [Rust](https://www.rust-lang.org/tools/install) installed.
+The easiest way to install the project is to run this command in your terminal:
+```
+curl -sSL https://github.com/ScottSauers/ferromic/raw/main/install.sh | bash
+```
 
-Clone the repository and build the project.
+Or, you can download the binary from the releases section.
+
+Or, make sure you have [Rust](https://www.rust-lang.org/tools/install) and Cargo installed, and you can clone the repository and build the project.
 
 ---
 
