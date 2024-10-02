@@ -827,39 +827,39 @@ mod tests {
     }
 
     #[test]
-    fn test_group1_allele_frequency() {
-        let (variants, sample_names, sample_filter) = setup_group1_test();
+    fn test_allele_frequency() {
+        let (variants, sample_names, sample_filter) = setup_global_test();
         let adjusted_sequence_length: Option<i64> = None;
     
-        // Process variants for haplotype_group=1
-        let result_group1 = process_variants(
+        let result = process_variants(
             &variants,
             &sample_names,
-            1, // haplotype_group=1
+            0, // haplotype_group is irrelevant now
             &sample_filter,
             1000,
             3000,
             adjusted_sequence_length,
         ).unwrap();
     
-        // function call: remove the extra argument
-        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter, 1));
+        // Calculate allele frequency globally
+        let allele_frequency = calculate_inversion_allele_frequency(&sample_filter);
     
         // Calculate expected allele frequency
-        let expected_freq_group1 = 1.0;
-        let allele_frequency_diff_group1 = (allele_frequency_group1.unwrap_or(0.0) - expected_freq_group1).abs();
+        let expected_freq = 0.666667; // Adjust based on your test setup
+        let allele_frequency_diff = (allele_frequency.unwrap_or(0.0) - expected_freq).abs();
         println!(
-            "Allele frequency difference for Group 1: {}",
-            allele_frequency_diff_group1
+            "Allele frequency difference: {}",
+            allele_frequency_diff
         );
         assert!(
-            allele_frequency_diff_group1 < 1e-6,
-            "Allele frequency for Group 1 is incorrect: expected {:.6}, got {:.6}",
-            expected_freq_group1,
-            allele_frequency_group1.unwrap_or(0.0)
+            allele_frequency_diff < 1e-6,
+            "Allele frequency is incorrect: expected {:.6}, got {:.6}",
+            expected_freq,
+            allele_frequency.unwrap_or(0.0)
         );
     
-        assert_eq!(result_group1.unwrap().0, 2, "Number of segregating sites should be 2");
+        // Verify segregating sites if applicable
+        assert_eq!(result.unwrap().0, 2, "Number of segregating sites should be 2");
     }
 
     #[test]
@@ -1010,39 +1010,42 @@ mod tests {
     }
 
     #[test]
-    fn test_group1_allele_frequency_filtered() {
-        let (variants, sample_names, sample_filter) = setup_group1_test();
+    fn test_global_allele_frequency_filtered() {
+        // Setup global test data
+        let (variants, sample_names, sample_filter) = setup_global_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
     
-        // Process variants for haplotype_group=1 with adjusted_sequence_length
-        let result_group1 = process_variants(
+        // Process variants without specifying haplotype_group (global)
+        let result = process_variants(
             &variants,
             &sample_names,
-            1, // haplotype_group=1
+            0, // haplotype_group is irrelevant for global calculation
             &sample_filter,
             1000,
             3000,
             adjusted_sequence_length,
         ).unwrap();
     
-        // function call: remove the extra argument
-        let allele_frequency_group1_filtered = calculate_inversion_allele_frequency(&sample_filter);
+        // Calculate global allele frequency
+        let allele_frequency = calculate_inversion_allele_frequency(&sample_filter);
     
-        // Calculate expected allele frequency
-        let expected_freq_group1_filtered = 2.0 / 3.0;
-        let allele_frequency_diff_group1_filtered = (allele_frequency_group1_filtered.unwrap_or(0.0) - expected_freq_group1_filtered).abs();
+        // Define expected allele frequency based on your test setup
+        let expected_freq = 2.0 / 3.0; // Adjust this value based on your actual test data
+        let allele_frequency_diff = (allele_frequency.unwrap_or(0.0) - expected_freq).abs();
         println!(
-            "Filtered allele frequency difference for Group 1: {}",
-            allele_frequency_diff_group1_filtered
+            "Filtered global allele frequency difference: {}",
+            allele_frequency_diff
         );
         assert!(
-            allele_frequency_diff_group1_filtered < 1e-6,
-            "Filtered allele frequency for Group 1 is incorrect: expected {:.6}, got {:.6}",
-            expected_freq_group1_filtered,
-            allele_frequency_group1_filtered.unwrap_or(0.0)
+            allele_frequency_diff < 1e-6,
+            "Filtered global allele frequency is incorrect: expected {:.6}, got {:.6}",
+            expected_freq,
+            allele_frequency.unwrap_or(0.0)
         );
     
-        assert_eq!(result_group1.unwrap().0, 2, "Number of segregating sites should be 2");
+        // Verify the number of segregating sites
+        let num_segsites = result.unwrap().0;
+        assert_eq!(num_segsites, 2, "Number of segregating sites should be 2");
     }
 
     #[test]
@@ -1205,7 +1208,7 @@ mod tests {
             ("Sample2".to_string(), (0, 1)),
             ("Sample3".to_string(), (0, 0)),
         ]);
-
+    
         // Define variants (for Watterson's theta and pi)
         let variants = vec![
             create_variant(
@@ -1233,17 +1236,18 @@ mod tests {
                 ],
             ),
         ];
-
+    
         let sample_names = vec![
             "Sample1".to_string(),
             "Sample2".to_string(),
             "Sample3".to_string(),
         ];
-
+    
         let adjusted_sequence_length: Option<i64> = None;
         let _mask: Option<&[(i64, i64)]> = None;
-       let mut _filtering_stats = FilteringStats::default();
-
+        let mut _filtering_stats = FilteringStats::default();
+    
+        // Process variants for haplotype_group=1 (Group 1)
         let result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1253,34 +1257,35 @@ mod tests {
             3000,
             adjusted_sequence_length,
         ).expect("Failed to process variants");
-
-        // Calculate allele frequency using the correct function
-        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter_unfiltered, 1);
-
-        // Calculate expected allele frequency based on the haplotype_group=1:
-        // SAMPLE1 hap1=1
-        // SAMPLE2 hap1=0
-        // SAMPLE3 hap1=0
-        // Number of '1's: 1
-        // Total haplotypes: 3
-        let expected_freq_group1 = 1.0 / 3.0;
-        let allele_frequency_diff_group1 = (allele_frequency_group1.unwrap_or(0.0) - expected_freq_group1).abs();
+    
+        // Calculate global allele frequency using the revised function (no haplotype_group parameter)
+        let allele_frequency_global = calculate_inversion_allele_frequency(&sample_filter_unfiltered);
+    
+        // Calculate expected global allele frequency based on all haplotypes:
+        // SAMPLE1: hap1=1
+        // SAMPLE2: hap1=0
+        // SAMPLE3: hap1=0
+        // Total '1's: 1
+        // Total haplotypes: 3 samples * 2 haplotypes each = 6
+        // Expected allele frequency = 1 / 6 ≈ 0.166667
+        let expected_freq_global = 1.0 / 6.0;
+        let allele_frequency_diff_global = (allele_frequency_global.unwrap_or(0.0) - expected_freq_global).abs();
         println!(
-            "Allele frequency difference for Group 1 with missing data: {}",
-            allele_frequency_diff_group1
+            "Global allele frequency difference: {}",
+            allele_frequency_diff_global
         );
         assert!(
-            allele_frequency_diff_group1 < 1e-6,
-            "Allele frequency for Group 1 with missing data is incorrect: expected {:.6}, got {:.6}",
-            expected_freq_group1,
-            allele_frequency_group1.unwrap_or(0.0)
+            allele_frequency_diff_global < 1e-6,
+            "Global allele frequency is incorrect: expected {:.6}, got {:.6}",
+            expected_freq_global,
+            allele_frequency_global.unwrap_or(0.0)
         );
-
-        // Verify Watterson's theta and pi
+    
+        // Verify Watterson's theta and pi for Group 1
         // Expected segregating sites: 2 (positions 1000 and 3000)
-        let num_segsites = result_group1.expect("Expected Some variant data").0;
+        let num_segsites = result_group1.unwrap().0;
         assert_eq!(num_segsites, 2, "Number of segregating sites should be 2");
-
+    
         // Pi calculation:
         // For haplotype_group=1:
         // Variants considered: 1000, 3000 (2000 excluded due to missing)
@@ -1292,7 +1297,7 @@ mod tests {
         // Number of comparisons: 3
         // pi = 2 / 3 / 2001 ≈ 0.000333
         let expected_pi = 2.0 / 3.0 / 2001.0;
-        let pi_calculated = result_group1.expect("Expected Some variant data").2;
+        let pi_calculated = result_group1.unwrap().2;
         let pi_diff = (pi_calculated - expected_pi).abs();
         println!(
             "Pi difference for Group 1: expected ~{:.6}, got {:.6}",
