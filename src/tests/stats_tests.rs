@@ -843,7 +843,7 @@ mod tests {
         ).unwrap();
     
         // function call: remove the extra argument
-        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter);
+        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter, 1));
     
         // Calculate expected allele frequency
         let expected_freq_group1 = 1.0;
@@ -1255,7 +1255,7 @@ mod tests {
         ).expect("Failed to process variants");
 
         // Calculate allele frequency using the correct function
-        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter_unfiltered);
+        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter_unfiltered, 1);
 
         // Calculate expected allele frequency based on the haplotype_group=1:
         // SAMPLE1 hap1=1
@@ -1344,7 +1344,7 @@ mod tests {
         // Calculate expected allele frequency based on TSV config:
         // haplotype_group=1 corresponds to hap2=1
         let expected_freq_group1 = 1.0;
-        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter);
+        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter, 1));
         let allele_frequency_diff_group1 = (allele_frequency_group1.unwrap_or(0.0) - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1 with zero '1's: {}",
