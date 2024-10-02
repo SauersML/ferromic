@@ -826,6 +826,67 @@ mod tests {
         (variants, sample_names, sample_filter)
     }
 
+    // Setup function for global tests
+    fn setup_global_test() -> (Vec<Variant>, Vec<String>, HashMap<String, (u8, u8)>) {
+        // Define the sample names as they appear in the VCF.
+        let sample_names = vec![
+            "Sample1".to_string(),
+            "Sample2".to_string(),
+            "Sample3".to_string(),
+        ];
+    
+        // Define the sample_filter for haplotype_group=1.
+        // Each entry maps a sample to its (left_haplotype, right_haplotype) group assignments.
+        // To achieve an allele frequency of 2/3 for Group 1, configure as follows:
+        // - Sample1: left=0 (direct), right=1 (inversion)
+        // - Sample2: left=1 (inversion), right=0 (direct)
+        // - Sample3: left=0 (direct), right=1 (inversion)
+        let sample_filter = HashMap::from([
+            ("Sample1".to_string(), (0, 1)), // haplotype_group=1: 1
+            ("Sample2".to_string(), (1, 0)), // haplotype_group=1: 0
+            ("Sample3".to_string(), (0, 1)), // haplotype_group=1: 1
+        ]);
+    
+        // Define the variants within the region 1000 to 3000.
+        // Each variant includes:
+        // - Position on the chromosome.
+        // - Genotypes for each sample, represented as Option<Vec<u8>>:
+        //     - `Some(vec![allele1, allele2])` for valid genotypes.
+        //     - `None` for missing genotypes.
+        let variants = vec![
+            // Variant at position 1000
+            create_variant(
+                1000,
+                vec![
+                    Some(vec![0, 0]), // Sample1: 0|0
+                    Some(vec![0, 1]), // Sample2: 0|1
+                    Some(vec![1, 1]), // Sample3: 1|1
+                ],
+            ),
+            // Variant at position 2000 (all genotypes are 0|0)
+            create_variant(
+                2000,
+                vec![
+                    Some(vec![0, 0]), // Sample1: 0|0
+                    Some(vec![0, 0]), // Sample2: 0|0
+                    Some(vec![0, 0]), // Sample3: 0|0
+                ],
+            ),
+            // Variant at position 3000
+            create_variant(
+                3000,
+                vec![
+                    Some(vec![0, 1]), // Sample1: 0|1
+                    Some(vec![1, 1]), // Sample2: 1|1
+                    Some(vec![0, 0]), // Sample3: 0|0
+                ],
+            ),
+        ];
+    
+        // Return the setup tuple containing variants, sample names, and sample_filter.
+        (variants, sample_names, sample_filter)
+    }
+
     #[test]
     fn test_allele_frequency() {
         let (variants, sample_names, sample_filter) = setup_global_test();
