@@ -1,3 +1,6 @@
+# Ferromic ⚙️
+Ferromic is a place for multiple bioinformatics tools for VCFs written in Rust. Right now, this includes file merging and region statistics calculation.
+
 # VCF Statistics Calculator 📊
 
 Welcome to the **VCF Statistics Calculator**, a Rust-based tool designed to compute **Watterson's Theta (θ)** and **Pi (π)** (and others, coming soon) for genomic regions defined in VCF (Variant Call Format) files.
@@ -38,7 +41,7 @@ Welcome to the **VCF Statistics Calculator**, a Rust-based tool designed to comp
 
 ## Background 🧬
 
-This tool processes VCF files to calculate **Watterson's Theta (θ)** and **Pi (π)**, metrics for understanding genetic diversity within genomic regions. By using a TSV configuration file, users can define multiple regions and categorize haplotypes based on SV (e.g. inversion) statuses. This allows for distinguishing between inverted and non-inverted haplotypes across different regions and samples.
+This tool processes VCF files to calculate **Watterson's Theta (θ)** and **Pi (π)**, metrics for understanding genetic diversity within genomic regions. By using a TSV configuration file, users can define multiple regions and categorize haplotypes based on SV (e.g. inversion) statuses. This allows for distinguishing between inverted and non-inverted haplotypes across different regions and samples. Note that if you are using VCFs, all sites which differ between samples must be included.
 
 **Metrics**:
 - **Watterson's Theta (θ)**: Based on the number of segregating (polymorphic) sites.
