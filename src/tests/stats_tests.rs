@@ -1348,7 +1348,7 @@ mod tests {
     
         // Calculate expected allele frequency based on TSV config:
         let expected_freq_group1 = 1.0;
-        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter, 1);
+        let allele_frequency_group1 = calculate_inversion_allele_frequency(&sample_filter);
         let allele_frequency_diff_group1 = (allele_frequency_group1.unwrap_or(0.0) - expected_freq_group1).abs();
         println!(
             "Allele frequency difference for Group 1 with zero '1's: {}",
