@@ -1,6 +1,5 @@
 name: Rust CI/CD
 
-# Grant necessary permissions to GITHUB_TOKEN
 permissions:
   contents: write
   packages: write
@@ -30,10 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Build
         run: cargo build --verbose
-
       - name: Run tests
         run: cargo test --verbose
 
@@ -56,8 +53,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-          release_name: Release ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+          release_name: Release ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
           draft: false
           prerelease: false
 
@@ -74,8 +71,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
           - os: macos-latest
             target: x86_64-apple-darwin
           - os: macos-latest
@@ -83,17 +78,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-      # Install OpenSSL on Windows
-      - name: Install OpenSSL on Windows
-        if: matrix.os == 'windows-latest'
-        run: |
-          choco install openssl -y
-          echo "OPENSSL_DIR=C:\\Program Files\\OpenSSL-Win64" >> $GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=C:\\Program Files\\OpenSSL-Win64\\include" >> $GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=C:\\Program Files\\OpenSSL-Win64\\lib" >> $GITHUB_ENV
-
-      - name: Install cross (Linux only)
+      - name: Install cross
         if: matrix.os == 'ubuntu-latest'
         run: cargo install cross
 
@@ -112,19 +103,11 @@ jobs:
         run: |
           binaries=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].targets[] | select(.kind[] | contains("bin")) | .name')
           for binary in $binaries; do
-            if [ "${{ matrix.os }}" = "windows-latest" ]; then
-              src="target/${{ matrix.target }}/release/${binary}.exe"
-              dst="${binary}-${{ matrix.target }}.exe"
-              cp "${src}" "${dst}"
-              asset_path="${dst}"
-              content_type="application/vnd.microsoft.portable-executable"
-            else
-              src="target/${{ matrix.target }}/release/${binary}"
-              dst="${binary}-${{ matrix.target }}.tar.gz"
-              tar czvf "${dst}" -C "$(dirname "${src}")" "$(basename "${src}")"
-              asset_path="${dst}"
-              content_type="application/gzip"
-            fi
+            src="target/${{ matrix.target }}/release/${binary}"
+            dst="${binary}-${{ matrix.target }}.tar.gz"
+            tar czvf "${dst}" -C "$(dirname "${src}")" "$(basename "${src}")"
+            asset_path="${dst}"
+            content_type="application/gzip"
             
             echo "Uploading ${dst}"
             
