@@ -569,7 +569,7 @@ fn process_config_entries(
                 None => continue, // Skip writing this record
             };
 
-            // Calculate allele frequency for haplotype_group=1 (no filter)
+            // Calculate allele frequency of inversions (no filter)
             let inversion_freq_no_filter = calculate_inversion_allele_frequency(&entry.samples_unfiltered);
 
             // Process haplotype_group=0 (filtered)
@@ -600,7 +600,7 @@ fn process_config_entries(
                 None => continue, // Skip writing this record
             };
 
-            // Calculate allele frequency for haplotype_group=1 (filtered)
+            // Calculate allele frequency of inversions
             let inversion_freq_filt = calculate_inversion_allele_frequency(&entry.samples_filtered);
 
             // Write the aggregated results to CSV
