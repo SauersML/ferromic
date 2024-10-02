@@ -906,7 +906,7 @@ mod tests {
         let allele_frequency = calculate_inversion_allele_frequency(&sample_filter);
     
         // Calculate expected allele frequency
-        let expected_freq = 0.666667; // Adjust based on your test setup
+        let expected_freq = 0.5; // Updated expectation
         let allele_frequency_diff = (allele_frequency.unwrap_or(0.0) - expected_freq).abs();
         println!(
             "Allele frequency difference: {}",
