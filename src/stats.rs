@@ -757,11 +757,9 @@ fn calculate_inversion_allele_frequency(
             total_haplotypes += 1;
         }
         if left == 0 {
-            num_ones += 1;
             total_haplotypes += 1;
         }
         if right == 0 {
-            num_ones += 1;
             total_haplotypes += 1;
         }
     }
