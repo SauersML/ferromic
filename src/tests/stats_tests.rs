@@ -1296,7 +1296,6 @@ mod tests {
         );
     
         // Pi should be 0
-        let pi = _pi;
         let expected_pi = 0.0;
         let pi_diff = (pi - expected_pi).abs();
         println!(
