@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
 use csv::{ReaderBuilder, WriterBuilder};
+use std::cmp::{max, min};
 use crossbeam_channel::{bounded};
 use std::time::{Duration};
 use std::sync::Arc;
@@ -144,9 +145,73 @@ fn main() -> Result<(), VcfError> {
     let num_logical_cpus = num_cpus::get();
     ThreadPoolBuilder::new().num_threads(num_logical_cpus).build_global().unwrap();
 
-    let mask = if let Some(mask_file) = args.mask_file.as_ref() {
+    // Parse the original mask file (exclude regions)
+    let original_mask = if let Some(mask_file) = args.mask_file.as_ref() {
         println!("Mask file provided: {}", mask_file);
         Some(Arc::new(parse_mask_file(Path::new(mask_file))?))
+    } else {
+        None
+    };
+
+    // Parse the allow file (include regions)
+    let allow_mask = if let Some(allow_file) = args.allow_file.as_ref() {
+        println!("Allow file provided: {}", allow_file);
+        Some(Arc::new(parse_mask_file(Path::new(allow_file))?))
+    } else {
+        None
+    };
+
+    // Combine original mask and inverse allow mask
+    let combined_mask = if original_mask.is_some() || allow_mask.is_some() {
+        // Initialize a new HashMap for combined mask
+        let mut combined: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
+
+        // Determine all chromosomes present in either mask
+        let chromosomes: HashSet<String> = original_mask
+            .as_ref()
+            .map(|m| m.keys().cloned().collect::<HashSet<_>>())
+            .unwrap_or_default()
+            .union(&allow_mask
+                .as_ref()
+                .map(|m| m.keys().cloned().collect::<HashSet<_>>())
+                .unwrap_or_default())
+            .cloned()
+            .collect();
+
+        for chr in chromosomes {
+            // Get original mask regions for this chromosome
+            let orig_regions = original_mask
+                .as_ref()
+                .and_then(|m| m.get(&chr))
+                .map(|v| v.as_slice())
+                .unwrap_or(&[][..]);
+
+            // Get allowed regions for this chromosome
+            let allowed_regions = allow_mask
+                .as_ref()
+                .and_then(|m| m.get(&chr))
+                .map(|v| v.as_slice())
+                .unwrap_or(&[][..]);
+
+            // If allow regions are provided, invert them to get regions to mask
+            let inverse_allow = if !allowed_regions.is_empty() {
+                // Overall analysis range for inversion: larger than any chr's coords, i.e. from 0 to i64::MAX
+                // Hopefully the chromosome has under a quintillion base pairs
+
+                let analysis_start = 0;
+                let analysis_end = i64::MAX;
+
+                invert_allow_regions(allowed_regions, analysis_start, analysis_end)
+            } else {
+                Vec::new()
+            };
+
+            // Merge original mask with inverse allow mask
+            let merged = merge_masks(orig_regions, &inverse_allow);
+            combined.insert(chr.clone(), merged);
+        }
+
+        Some(Arc::new(combined))
     } else {
         None
     };
@@ -163,9 +228,8 @@ fn main() -> Result<(), VcfError> {
             &args.vcf_folder,
             output_file,
             args.min_gq,
-            mask.as_ref().map(|v| &**v),
+            combined_mask.as_ref().map(|v| &**v),
         )?;
-
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
         let (start, end) = if let Some(region) = args.region.as_ref() {
@@ -179,16 +243,16 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        let mask_for_chr = mask.as_ref().and_then(|m| m.get(chr).cloned());
-        //let mask_for_chr = mask.clone().and_then(|m| m.get(&chr).cloned());
-        
+        // Extract the combined mask for the specific chromosome
+        let combined_mask_for_chr = combined_mask.as_ref().and_then(|m| m.get(chr).cloned());
+
         let (unfiltered_variants, filtered_variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(
             &vcf_file,
             chr,
             start,
             end,
             args.min_gq,
-            mask_for_chr.map(Arc::new),
+            combined_mask_for_chr.map(Arc::new),
         )?;
         
         println!("{}", "Calculating diversity statistics...".blue());
@@ -265,6 +329,78 @@ fn main() -> Result<(), VcfError> {
 
     println!("{}", "Analysis complete.".green());
     Ok(())
+}
+
+
+// Function to invert (exclude regions not specified) allowed regions within a given range
+// allow_regions should be sorted by start position.
+fn invert_allow_regions(
+    allow_regions: &[(i64, i64)],
+    region_start: i64,
+    region_end: i64,
+) -> Vec<(i64, i64)> {
+    let mut inverted = Vec::new();
+    let mut current = region_start;
+
+    for &(start, end) in allow_regions.iter() {
+        if start > current {
+            inverted.push((current, start - 1));
+        }
+        current = max(current, end + 1);
+    }
+
+    if current <= region_end {
+        inverted.push((current, region_end));
+    }
+
+    inverted
+}
+
+
+// Function to merge two sorted lists of intervals
+fn merge_masks(mask1: &[(i64, i64)], mask2: &[(i64, i64)]) -> Vec<(i64, i64)> {
+    let mut merged = Vec::new();
+    let mut i = 0;
+    let mut j = 0;
+
+    while i < mask1.len() && j < mask2.len() {
+        let (s1, e1) = mask1[i];
+        let (s2, e2) = mask2[j];
+
+        if s1 <= s2 {
+            add_interval(&mut merged, s1, e1);
+            i += 1;
+        } else {
+            add_interval(&mut merged, s2, e2);
+            j += 1;
+        }
+    }
+
+    while i < mask1.len() {
+        let (s, e) = mask1[i];
+        add_interval(&mut merged, s, e);
+        i += 1;
+    }
+
+    while j < mask2.len() {
+        let (s, e) = mask2[j];
+        add_interval(&mut merged, s, e);
+        j += 1;
+    }
+
+    merged
+}
+
+// Helper function to add and merge intervals
+fn add_interval(merged: &mut Vec<(i64, i64)>, start: i64, end: i64) {
+    if let Some(&(last_start, last_end)) = merged.last() {
+        if start <= last_end + 1 {
+            merged.pop();
+            merged.push((last_start, max(last_end, end)));
+            return;
+        }
+    }
+    merged.push((start, end));
 }
 
 
@@ -492,9 +628,9 @@ fn process_config_entries(
         );
 
         // Extract variants from the VCF
-        let mask_for_chr = mask.and_then(|m| m.get(&chr).cloned()).map(Arc::new);
+        let combined_mask_for_chr = mask.and_then(|m| m.get(&chr).cloned()).map(Arc::new);
 
-        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, mask_for_chr.clone()) {
+        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, combined_mask_for_chr.clone()) {
             Ok(data) => data,
             Err(e) => {
                 eprintln!("Error processing VCF file for {}: {}", chr, e);
@@ -533,8 +669,8 @@ fn process_config_entries(
             let sequence_length = entry.end - entry.start + 1;
 
             // Calculate total masked length overlapping with the region
-            let total_masked_length = if let Some(mask_for_chr) = mask_for_chr.as_ref() {
-                calculate_masked_length(entry.start, entry.end, &mask_for_chr)
+            let total_masked_length = if let Some(combined_mask_for_chr) = combined_mask_for_chr.as_ref() {
+                calculate_masked_length(entry.start, entry.end, &combined_mask_for_chr)
             } else {
                 0
             };
