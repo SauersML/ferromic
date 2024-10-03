@@ -417,16 +417,15 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
     let mut mask: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
     // The key is the chromosome name, and the value is a sorted list of (start, end) tuples for masked intervals
 
-
     for line in reader.lines() {
         let line = line?;
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() < 3 {
             continue; // Skip invalid lines
         }
-        let chr = fields[0].to_string();
-        let start: i64 = fields[1].parse().unwrap_or(0);
-        let end: i64 = fields[2].parse().unwrap_or(0);
+        let chr = fields[0].trim().to_string(); // Trim whitespace
+        let start: i64 = fields[1].trim().parse().unwrap_or(0); // Trim and parse
+        let end: i64 = fields[2].trim().parse().unwrap_or(0); // Trim and parse
         mask.entry(chr).or_default().push((start, end));
     }
 
