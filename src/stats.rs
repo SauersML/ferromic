@@ -160,10 +160,6 @@ fn main() -> Result<(), VcfError> {
     } else {
         None
     };
-
-    for chr in mask.keys() {
-        println!("Mask includes chromosome: {}", chr);
-    }
     
 
     // Combine original mask and inverse allow mask
@@ -435,6 +431,10 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
         let start: i64 = fields[1].trim().parse().unwrap_or(0); // Trim and parse
         let end: i64 = fields[2].trim().parse().unwrap_or(0); // Trim and parse
         mask.entry(chr).or_default().push((start, end));
+    }
+
+    for chr in mask.keys() {
+        println!("Mask includes chromosome: {}", chr);
     }
 
     // Sort the intervals for each chromosome
