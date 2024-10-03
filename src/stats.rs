@@ -43,6 +43,9 @@ struct Args {
 
     #[arg(long = "mask_file")]
     mask_file: Option<String>,
+
+    #[arg(long = "allow_file")]
+    allow_file: Option<String>,
 }
 
 
