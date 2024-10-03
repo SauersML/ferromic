@@ -161,6 +161,11 @@ fn main() -> Result<(), VcfError> {
         None
     };
 
+    for chr in mask.keys() {
+        println!("Mask includes chromosome: {}", chr);
+    }
+    
+
     // Combine original mask and inverse allow mask
     let combined_mask = if original_mask.is_some() || allow_mask.is_some() {
         // Initialize a new HashMap for combined mask
@@ -221,6 +226,9 @@ fn main() -> Result<(), VcfError> {
     if let Some(config_file) = args.config_file.as_ref() {
         println!("Config file provided: {}", config_file);
         let config_entries = parse_config_file(Path::new(config_file))?;
+        for entry in config_entries {
+            println!("Config entry chromosome: {}", entry.seqname);
+        }
         let output_file = args.output_file.as_ref().map(Path::new).unwrap_or_else(|| Path::new("output.csv"));
         println!("Output file: {}", output_file.display());
         process_config_entries(
@@ -636,6 +644,10 @@ fn process_config_entries(
         // Extract variants from the VCF
         let combined_mask_for_chr = mask.and_then(|m| m.get(&chr).cloned()).map(Arc::new);
 
+        if combined_mask_for_chr.is_none() {
+            eprintln!("Warning: No mask found for chromosome {}", chr);
+        }
+
         let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, combined_mask_for_chr.clone()) {
             Ok(data) => data,
             Err(e) => {
@@ -824,7 +836,10 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
             return Err(VcfError::Parse(format!("Mismatched number of fields in record on line {}", line_num + 2)));
         }
 
-        let seqname = record.get(0).ok_or(VcfError::Parse("Missing seqname".to_string()))?.to_string();
+        let seqname = record.get(0)
+            .ok_or(VcfError::Parse("Missing seqname".to_string()))?
+            .trim()
+            .to_string();
         let start: i64 = record.get(1).ok_or(VcfError::Parse("Missing start".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid start".to_string()))?;
         let end: i64 = record.get(2).ok_or(VcfError::Parse("Missing end".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid end".to_string()))?;
 
