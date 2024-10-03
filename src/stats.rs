@@ -1032,7 +1032,8 @@ fn process_vcf(
                         &sample_names,
                         min_gq,
                         &mut local_filtering_stats,
-                        mask.as_deref().map(|v| &v[..]),
+                        mask.as_deref().map(|v| &v[..]), // Convert Option<Arc<Vec<(i64, i64)>>> to Option<&[(i64, i64)]>
+
                     ) {
                         Ok(variant_option) => {
                             result_sender.send(Ok((variant_option, local_missing_data_info, local_filtering_stats))).map_err(|_| VcfError::ChannelSend)?;
