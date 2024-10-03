@@ -246,6 +246,8 @@ fn main() -> Result<(), VcfError> {
         // Extract the combined mask for the specific chromosome
         let combined_mask_for_chr = combined_mask.as_ref().and_then(|m| m.get(chr).cloned());
 
+        println!("Combined mask for {}: {:?}", chr, combined_mask_for_chr);
+
         let (unfiltered_variants, filtered_variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(
             &vcf_file,
             chr,
