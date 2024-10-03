@@ -269,6 +269,8 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut mask: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
+    # The key is the chromosome name, and the value is a sorted list of (start, end) tuples for masked intervals
+
 
     for line in reader.lines() {
         let line = line?;
