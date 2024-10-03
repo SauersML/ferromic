@@ -222,7 +222,7 @@ fn main() -> Result<(), VcfError> {
     if let Some(config_file) = args.config_file.as_ref() {
         println!("Config file provided: {}", config_file);
         let config_entries = parse_config_file(Path::new(config_file))?;
-        for entry in config_entries {
+        for entry in &config_entries {
             println!("Config entry chromosome: {}", entry.seqname);
         }
         let output_file = args.output_file.as_ref().map(Path::new).unwrap_or_else(|| Path::new("output.csv"));
