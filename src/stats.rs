@@ -341,6 +341,11 @@ fn invert_allow_regions(
     region_start: i64,
     region_end: i64,
 ) -> Vec<(i64, i64)> {
+    if allow_regions.is_empty() {
+        // If there are no allow regions, invert to the full region (mask everything)
+        return vec![(region_start, region_end)];
+    }
+
     let mut inverted = Vec::new();
     let mut current = region_start;
 
