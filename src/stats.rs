@@ -837,9 +837,11 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
             return Err(VcfError::Parse(format!("Mismatched number of fields in record on line {}", line_num + 2)));
         }
 
+        // Normalize chromosome name by removing "chr" prefix
         let seqname = record.get(0)
             .ok_or(VcfError::Parse("Missing seqname".to_string()))?
             .trim()
+            .trim_start_matches("chr")
             .to_string();
         let start: i64 = record.get(1).ok_or(VcfError::Parse("Missing start".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid start".to_string()))?;
         let end: i64 = record.get(2).ok_or(VcfError::Parse("Missing end".to_string()))?.parse().map_err(|_| VcfError::Parse("Invalid end".to_string()))?;
@@ -903,6 +905,7 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
     Ok(entries)
 }
+
 
 fn calculate_inversion_allele_frequency(
     sample_filter: &HashMap<String, (u8, u8)>,
