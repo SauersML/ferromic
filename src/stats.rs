@@ -699,7 +699,7 @@ fn process_config_entries(
                 .filter(|&&pos| pos >= entry.start && pos <= entry.end)
                 .count() as i64;
 
-            let adjusted_sequence_length = sequence_length - total_masked_length - number_of_filtered_positions_in_region;
+            let adjusted_sequence_length = sequence_length - total_masked_length - number_of_filtered_positions_in_region; // Does double subtraction occur here? Potential issue
 
             // Process haplotype_group=0 (unfiltered)
             let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) = match process_variants(
