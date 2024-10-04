@@ -347,22 +347,52 @@ fn invert_allow_regions(
 ) -> Vec<(i64, i64)> {
     if allow_regions.is_empty() {
         // If there are no allow regions, invert to the full region (mask everything)
+        println!(
+            "{}",
+            "No allow regions provided. Inverting to mask the entire region.".yellow()
+        );
         return vec![(region_start, region_end)];
     }
 
     let mut inverted = Vec::new();
     let mut current = region_start;
 
+    println!(
+        "{}",
+        format!(
+            "Inverting allow regions within range {}-{}.",
+            region_start, region_end
+        )
+        .yellow()
+    );
+
     for &(start, end) in allow_regions.iter() {
         if start > current {
             inverted.push((current, start - 1));
+            println!(
+                "{}",
+                format!("Adding masked region: {}-{}", current, start - 1).blue()
+            );
         }
         current = max(current, end + 1);
     }
 
     if current <= region_end {
         inverted.push((current, region_end));
+        println!(
+            "{}",
+            format!("Adding final masked region: {}-{}", current, region_end).blue()
+        );
     }
+
+    println!(
+        "{}",
+        format!(
+            "Inverted allow regions into {} masked regions.",
+            inverted.len()
+        )
+        .yellow()
+    );
 
     inverted
 }
@@ -374,15 +404,33 @@ fn merge_masks(mask1: &[(i64, i64)], mask2: &[(i64, i64)]) -> Vec<(i64, i64)> {
     let mut i = 0;
     let mut j = 0;
 
+    println!(
+        "{}",
+        format!(
+            "Merging {} original mask regions with {} inverse allow mask regions.",
+            mask1.len(),
+            mask2.len()
+        )
+        .green()
+    );
+
     while i < mask1.len() && j < mask2.len() {
         let (s1, e1) = mask1[i];
         let (s2, e2) = mask2[j];
 
         if s1 <= s2 {
             add_interval(&mut merged, s1, e1);
+            println!(
+                "{}",
+                format!("Adding interval from original mask: {}-{}", s1, e1).cyan()
+            );
             i += 1;
         } else {
             add_interval(&mut merged, s2, e2);
+            println!(
+                "{}",
+                format!("Adding interval from inverse allow mask: {}-{}", s2, e2).cyan()
+            );
             j += 1;
         }
     }
@@ -390,14 +438,27 @@ fn merge_masks(mask1: &[(i64, i64)], mask2: &[(i64, i64)]) -> Vec<(i64, i64)> {
     while i < mask1.len() {
         let (s, e) = mask1[i];
         add_interval(&mut merged, s, e);
+        println!(
+            "{}",
+            format!("Adding remaining interval from original mask: {}-{}", s, e).cyan()
+        );
         i += 1;
     }
 
     while j < mask2.len() {
         let (s, e) = mask2[j];
         add_interval(&mut merged, s, e);
+        println!(
+            "{}",
+            format!("Adding remaining interval from inverse allow mask: {}-{}", s, e).cyan()
+        );
         j += 1;
     }
+
+    println!(
+        "{}",
+        format!("Merged mask now has {} regions.", merged.len()).green()
+    );
 
     merged
 }
@@ -509,12 +570,25 @@ fn position_in_mask(pos: i64, mask: &[(i64, i64)]) -> bool {
         } else if pos > end {
             left = mid + 1;
         } else {
+            println!(
+                "{}",
+                format!(
+                    "Variant position {} is within masked region {}-{}.",
+                    pos, start, end
+                )
+                .magenta()
+            );
             return true; // Position is within a masked interval
         }
     }
 
+    println!(
+        "{}",
+        format!("Variant position {} is NOT within any masked regions.", pos).magenta()
+    );
     false
 }
+
 
 
 fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 {
