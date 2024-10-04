@@ -581,11 +581,6 @@ fn position_in_mask(pos: i64, mask: &[(i64, i64)]) -> bool {
             return true; // Position is within a masked interval
         }
     }
-
-    println!(
-        "{}",
-        format!("Variant position {} is NOT within any masked regions.", pos).magenta()
-    );
     false
 }
 
