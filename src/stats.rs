@@ -578,14 +578,7 @@ fn position_in_mask(pos: i64, mask: &[(i64, i64)]) -> bool {
         } else if pos > end {
             left = mid + 1;
         } else {
-            println!(
-                "{}",
-                format!(
-                    "Variant position {} is within masked region {}-{}.",
-                    pos, start, end
-                )
-                .magenta()
-            );
+                //
             return true; // Position is within a masked interval
         }
     }
