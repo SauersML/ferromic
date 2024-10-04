@@ -484,7 +484,7 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
 
     for (line_num, line_result) in reader.lines().enumerate() {
         let line = line_result?;
-        let fields: Vec<&str> = line.split('\t').collect();
+        let fields: Vec<&str> = line.split_whitespace().collect(); // Changed from split('\t') to split_whitespace()
         if fields.len() < 3 {
             eprintln!(
                 "{}",
@@ -525,6 +525,14 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
             }
         };
         mask.entry(chr.clone()).or_default().push((start, end));
+        println!(
+            "{}",
+            format!(
+                "Parsed line {}: chr={}, start={}, end={}",
+                line_num + 1, chr, start, end
+            )
+            .green()
+        );
     }
 
     println!(
