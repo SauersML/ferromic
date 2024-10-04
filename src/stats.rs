@@ -419,7 +419,7 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut mask: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
-    // The key is the chromosome name, and the value is a sorted list of (start, end) tuples for masked intervals
+    // The key is the chromosome name without "chr" prefix, and the value is a sorted list of (start, end) tuples for masked intervals
 
     for line in reader.lines() {
         let line = line?;
@@ -427,7 +427,8 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
         if fields.len() < 3 {
             continue; // Skip invalid lines
         }
-        let chr = fields[0].trim().to_string(); // Trim whitespace
+
+        let chr = fields[0].trim_start_matches("chr").to_string(); // Normalize chromosome name
         let start: i64 = fields[1].trim().parse().unwrap_or(0); // Trim and parse
         let end: i64 = fields[2].trim().parse().unwrap_or(0); // Trim and parse
         mask.entry(chr).or_default().push((start, end));
