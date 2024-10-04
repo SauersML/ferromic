@@ -421,21 +421,71 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
     let mut mask: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
     // The key is the chromosome name without "chr" prefix, and the value is a sorted list of (start, end) tuples for masked intervals
 
-    for line in reader.lines() {
-        let line = line?;
+    for (line_num, line_result) in reader.lines().enumerate() {
+        let line = line_result?;
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() < 3 {
+            eprintln!(
+                "{}",
+                format!("Skipping invalid line {}: '{}'", line_num + 1, line).red()
+            );
             continue; // Skip invalid lines
         }
 
         let chr = fields[0].trim_start_matches("chr").to_string(); // Normalize chromosome name
-        let start: i64 = fields[1].trim().parse().unwrap_or(0); // Trim and parse
-        let end: i64 = fields[2].trim().parse().unwrap_or(0); // Trim and parse
-        mask.entry(chr).or_default().push((start, end));
+        let start: i64 = match fields[1].trim().parse() {
+            Ok(val) => val,
+            Err(_) => {
+                eprintln!(
+                    "{}",
+                    format!(
+                        "Invalid start position on line {}: '{}'",
+                        line_num + 1,
+                        fields[1]
+                    )
+                    .red()
+                );
+                continue;
+            }
+        };
+        let end: i64 = match fields[2].trim().parse() {
+            Ok(val) => val,
+            Err(_) => {
+                eprintln!(
+                    "{}",
+                    format!(
+                        "Invalid end position on line {}: '{}'",
+                        line_num + 1,
+                        fields[2]
+                    )
+                    .red()
+                );
+                continue;
+            }
+        };
+        mask.entry(chr.clone()).or_default().push((start, end));
     }
 
-    for chr in mask.keys() {
-        println!("Mask includes chromosome: {}", chr);
+    println!(
+        "{}",
+        format!(
+            "Parsed mask file '{}': {} chromosomes with masked regions.",
+            path.display(),
+            mask.len()
+        )
+        .green()
+    );
+
+    for (chr, regions) in &mask {
+        println!(
+            "{}",
+            format!(
+                "Chromosome '{}': {} masked regions.",
+                chr,
+                regions.len()
+            )
+            .cyan()
+        );
     }
 
     // Sort the intervals for each chromosome
@@ -445,7 +495,6 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
 
     Ok(mask)
 }
-
 
 fn position_in_mask(pos: i64, mask: &[(i64, i64)]) -> bool {
     // Binary search over mask intervals
