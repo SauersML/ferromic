@@ -149,19 +149,27 @@ fn main() -> Result<(), VcfError> {
         .unwrap();
 
     // Parse the mask file (exclude regions)
-    let mask_regions = if let Some(mask_file) = args.mask_file.as_ref() {
+    let (mask_regions, mask_bed) = if let Some(mask_file) = args.mask_file.as_ref() {
         println!("Mask file provided: {}", mask_file);
-        Some(Arc::new(parse_regions_file(Path::new(mask_file))?))
+        let is_bed = Path::new(mask_file).extension().and_then(OsStr::to_str) == Some("bed");
+        (
+            Some(Arc::new(parse_regions_file(Path::new(mask_file), is_bed)?)),
+            is_bed,
+        )
     } else {
-        None
+        (None, false)
     };
 
     // Parse the allow file (include regions)
-    let allow_regions = if let Some(allow_file) = args.allow_file.as_ref() {
+    let (allow_regions, allow_bed) = if let Some(allow_file) = args.allow_file.as_ref() {
         println!("Allow file provided: {}", allow_file);
-        Some(Arc::new(parse_regions_file(Path::new(allow_file))?))
+        let is_bed = Path::new(allow_file).extension().and_then(OsStr::to_str) == Some("bed");
+        (
+            Some(Arc::new(parse_regions_file(Path::new(allow_file), is_bed)?)),
+            is_bed,
+        )
     } else {
-        None
+        (None, false)
     };
 
     println!("{}", "Starting VCF diversity analysis...".green());
@@ -185,6 +193,8 @@ fn main() -> Result<(), VcfError> {
             args.min_gq,
             mask_regions.as_deref(),
             allow_regions.as_deref(),
+            mask_bed,
+            allow_bed,
         )?;
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
@@ -333,7 +343,10 @@ fn main() -> Result<(), VcfError> {
     Ok(())
 }
 
-fn parse_regions_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfError> {
+fn parse_regions_file(
+    path: &Path,
+    is_bed_file: bool,
+) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfError> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut regions: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
@@ -380,6 +393,16 @@ fn parse_regions_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, V
                 continue;
             }
         };
+
+        // Adjust positions based on file type
+        let (start, end) = if is_bed_file {
+            // BED files are zero-based, half-open intervals [start, end)
+            (start, end)
+        } else {
+            // Other files are one-based, inclusive intervals [start-1, end]
+            (start - 1, end)
+        };
+
         regions.entry(chr.clone()).or_default().push((start, end));
         println!(
             "{}",
@@ -418,7 +441,6 @@ fn parse_regions_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, V
 
     Ok(regions)
 }
-
 fn position_in_regions(pos: i64, regions: &[(i64, i64)]) -> bool {
     // pos is zero-based
     // regions are sorted by start position
@@ -554,6 +576,8 @@ fn process_config_entries(
     min_gq: u16,
     mask: Option<&HashMap<String, Vec<(i64, i64)>>>,
     allow: Option<&HashMap<String, Vec<(i64, i64)>>>,
+    mask_bed: bool,
+    allow_bed: bool,
 ) -> Result<(), VcfError> {
     let mut writer = WriterBuilder::new()
         .has_headers(true)
@@ -630,6 +654,8 @@ fn process_config_entries(
             min_gq,
             mask,
             allow,
+            mask_bed,
+            allow_bed,
         ) {
             Ok(data) => data,
             Err(e) => {
@@ -1084,6 +1110,8 @@ fn process_vcf(
     min_gq: u16,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
+    mask_bed: bool,
+    allow_bed: bool,
 ) -> Result<(
     Vec<Variant>,        // Unfiltered variants
     Vec<Variant>,        // Filtered variants
@@ -1243,6 +1271,8 @@ fn process_vcf(
                         &mut local_filtering_stats,
                         allow_regions.as_ref(),
                         mask_regions.as_ref(),
+                        allow_bed,
+                        mask_bed,
                     ) {
                         Ok(variant_option) => {
                             result_sender
@@ -1356,6 +1386,7 @@ fn process_vcf(
                 stats.filtered_variants,
                 (stats.filtered_variants as f64 / stats.total_variants as f64) * 100.0
             );
+            println!("Filtered due to allow: {}", stats.filtered_due_to_allow);
             println!("Filtered due to mask: {}", stats.filtered_due_to_mask);
             println!("Multi-allelic variants: {}", stats.multi_allelic_variants);
             println!("Low GQ variants: {}", stats.low_gq_variants);
@@ -1430,6 +1461,8 @@ fn parse_variant(
     filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
+    allow_bed: bool,
+    mask_bed: bool,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
     filtering_stats.total_variants += 1;
 
@@ -1456,14 +1489,31 @@ fn parse_variant(
         return Ok(None);
     }
 
-    // Adjusted position for 0-based coordinates
-    let adjusted_pos = pos - 1;
+    // Adjusted positions based on file types
+    let adjusted_pos_allow = if allow_bed { pos - 1 } else { pos };
+    let adjusted_pos_mask = if mask_bed { pos - 1 } else { pos };
 
     if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
-        if !position_in_regions(adjusted_pos, allow_regions_chr) {
+        if !position_in_regions(adjusted_pos_allow, allow_regions_chr) {
             // Position not in allowed regions, filter it
             filtering_stats.filtered_variants += 1;
             filtering_stats.filtered_due_to_allow += 1;
+            filtering_stats.filtered_positions.insert(pos);
+            return Ok(None);
+        }
+    } else if allow_regions.is_some() {
+        // If allow_regions is provided, but there are no allowed regions for this chromosome, filter it
+        filtering_stats.filtered_variants += 1;
+        filtering_stats.filtered_due_to_allow += 1;
+        filtering_stats.filtered_positions.insert(pos);
+        return Ok(None);
+    }
+
+    if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
+        if position_in_regions(adjusted_pos_mask, mask_regions_chr) {
+            // Position in masked regions, filter it
+            filtering_stats.filtered_variants += 1;
+            filtering_stats.filtered_due_to_mask += 1;
             filtering_stats.filtered_positions.insert(pos);
             return Ok(None);
         }
