@@ -1180,7 +1180,7 @@ fn collect_vcf_chromosomes(vcf_folder: &str) -> Result<Vec<String>, VcfError> {
 
         // Open the VCF file (handle gzipped files)
         let file = File::open(&file_path)?;
-        let reader: Box<dyn BufRead> = if file_path.extension().and_then(|s| s.to_str()) == Some("gz") {
+        let mut reader: Box<dyn BufRead> = if file_path.extension().and_then(|s| s.to_str()) == Some("gz") {
             Box::new(BufReader::new(MultiGzDecoder::new(file)))
         } else {
             Box::new(BufReader::new(file))
