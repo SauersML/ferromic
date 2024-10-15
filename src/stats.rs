@@ -237,9 +237,10 @@ fn main() -> Result<(), VcfError> {
 
         // Extract the combined mask for the specific chromosome
         let combined_mask_for_chr = combined_mask.as_ref()
-            .and_then(|m| m.get(chr.as_str()).cloned()) // Updated line
-            .map(Arc::new)
-            .unwrap_or_else(|| {
+            .get(chr.as_str())               // Directly use `.get` on the HashMap
+            .cloned()                        // Clone the `Vec<(i64, i64)>` if present
+            .map(Arc::new)                   // Wrap the `Vec` in an `Arc`
+            .unwrap_or_else(|| {              // If no mask is found for the chromosome
                 println!(
                     "{}",
                     format!(
@@ -248,7 +249,7 @@ fn main() -> Result<(), VcfError> {
                     )
                     .yellow()
                 );
-                Arc::new(vec![(0, i64::MAX)])
+                Arc::new(vec![(1, i64::MAX)]) // Use (1, i64::MAX) to match typical 1-based coordinates
             });
         
         // Pass the mask as Some(Arc<Vec<_>>)
