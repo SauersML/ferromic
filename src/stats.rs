@@ -559,8 +559,6 @@ fn process_config_entries(
     min_gq: u16,
     mask: Option<&HashMap<String, Vec<(i64, i64)>>>,
     allow: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    mask_bed: bool,
-    allow_bed: bool,
 ) -> Result<(), VcfError> {
     let mut writer = WriterBuilder::new()
         .has_headers(true)
@@ -637,8 +635,6 @@ fn process_config_entries(
             min_gq,
             mask,
             allow,
-            mask_bed,
-            allow_bed,
         ) {
             Ok(data) => data,
             Err(e) => {
@@ -1424,7 +1420,7 @@ fn parse_variant(
     }
 
     if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
-        if position_in_regions(adjusted_pos_mask, mask_regions_chr) {
+        if position_in_regions(adjusted_pos, mask_regions_chr) {
             // Position in masked regions, filter it
             filtering_stats.filtered_variants += 1;
             filtering_stats.filtered_due_to_mask += 1;
@@ -1550,6 +1546,11 @@ fn parse_variant(
             filtering_stats.multi_allelic_variants += 1;
         }
     }
+
+    let variant = Variant {
+        position: pos,
+        genotypes: genotypes.clone(),
+    };
     
     // Return the parsed variant and whether it passes filters
     Ok(Some((variant, passes_filters)))
