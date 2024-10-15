@@ -247,14 +247,15 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
+        // Extract the combined mask for the specific chromosome
         let combined_mask_for_chr = combined_mask.as_ref()
-            .and_then(|m| m.get(&chr).cloned())
+            .and_then(|m| m.get(chr.as_str()).cloned()) // Updated line
             .map(Arc::new)
             .unwrap_or_else(|| {
                 println!(
                     "{}",
                     format!(
-                        "Chromosome '{}' not found in mask or allow files within config entries. Masking entire chromosome.",
+                        "Chromosome '{}' not found in mask or allow files. Masking entire chromosome.",
                         chr
                     )
                     .yellow()
