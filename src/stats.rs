@@ -1081,7 +1081,8 @@ fn process_vcf(
     start: i64,
     end: i64,
     min_gq: u16,
-    mask: Option<Arc<Vec<(i64, i64)>>>,
+    mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
+    allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
 ) -> Result<(
     Vec<Variant>,        // Unfiltered variants
     Vec<Variant>,        // Filtered variants
@@ -1221,28 +1222,13 @@ fn process_vcf(
             let result_sender = result_sender.clone();
             let chr = chr.to_string();
             let sample_names = Arc::clone(&sample_names);
-            let mask = mask.clone();
+            let mask_regions = mask_regions.cloned();
+            let allow_regions = allow_regions.cloned();
             thread::spawn(move || -> Result<(), VcfError> {
                 let mut processed_count = 0;
                 while let Ok(line) = line_receiver.recv() {
                     processed_count += 1;
-                    
-                    if processed_count == 1 {
-                        println!(
-                            "{}",
-                            format!("process_vcf: Consumer Thread {} started processing lines.", thread_id).cyan()
-                        );
-                    } else if processed_count % 100_000 == 0 {
-                        println!(
-                            "{}",
-                            format!(
-                                "process_vcf: Consumer Thread {} has processed {} lines so far.",
-                                thread_id, processed_count
-                            )
-                            .cyan()
-                        );
-                    }
-                    
+
                     let mut local_missing_data_info = MissingDataInfo::default();
                     let mut local_filtering_stats = FilteringStats::default();
                     match parse_variant(
@@ -1254,25 +1240,25 @@ fn process_vcf(
                         &sample_names,
                         min_gq,
                         &mut local_filtering_stats,
-                        mask.as_deref().map(|v| &v[..]), // Convert Option<Arc<Vec<(i64, i64)>>> to Option<&[(i64, i64)]>
-
+                        allow_regions.as_ref(),
+                        mask_regions.as_ref(),
                     ) {
                         Ok(variant_option) => {
-                            result_sender.send(Ok((variant_option, local_missing_data_info, local_filtering_stats))).map_err(|_| VcfError::ChannelSend)?;
-                        },
+                            result_sender
+                                .send(Ok((
+                                    variant_option,
+                                    local_missing_data_info,
+                                    local_filtering_stats,
+                                )))
+                                .map_err(|_| VcfError::ChannelSend)?;
+                        }
                         Err(e) => {
-                            result_sender.send(Err(e)).map_err(|_| VcfError::ChannelSend)?;
+                            result_sender
+                                .send(Err(e))
+                                .map_err(|_| VcfError::ChannelSend)?;
                         }
                     }
                 }
-                println!(
-                    "{}",
-                    format!(
-                        "process_vcf: Consumer Thread {} finished processing. Total lines processed: {}",
-                        thread_id, processed_count
-                    )
-                    .cyan()
-                );
                 Ok(())
             })
         })
@@ -1441,7 +1427,8 @@ fn parse_variant(
     sample_names: &[String],
     min_gq: u16,
     filtering_stats: &mut FilteringStats,
-    mask: Option<&[(i64, i64)]>,
+    allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
+    mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
     filtering_stats.total_variants += 1;
 
@@ -1461,14 +1448,35 @@ fn parse_variant(
         return Ok(None);
     }
 
-    let pos: i64 = fields[1].parse().map_err(|_| VcfError::Parse("Invalid position".to_string()))?;
+    let pos: i64 = fields[1]
+        .parse()
+        .map_err(|_| VcfError::Parse("Invalid position".to_string()))?;
     if pos < start || pos > end {
         return Ok(None);
     }
 
-    if let Some(mask) = mask {
-        if position_in_mask(pos, mask) {
-            // Variant is in masked region
+    // Adjusted position for 0-based coordinates
+    let adjusted_pos = pos - 1;
+
+    if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
+        if !position_in_regions(adjusted_pos, allow_regions_chr) {
+            // Position not in allowed regions, filter it
+            filtering_stats.filtered_variants += 1;
+            filtering_stats.filtered_due_to_allow += 1;
+            filtering_stats.filtered_positions.insert(pos);
+            return Ok(None);
+        }
+    } else if allow_regions.is_some() {
+        // If allow_regions is provided, but there are no allowed regions for this chromosome, filter it
+        filtering_stats.filtered_variants += 1;
+        filtering_stats.filtered_due_to_allow += 1;
+        filtering_stats.filtered_positions.insert(pos);
+        return Ok(None);
+    }
+
+    if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
+        if position_in_regions(adjusted_pos, mask_regions_chr) {
+            // Position in masked regions, filter it
             filtering_stats.filtered_variants += 1;
             filtering_stats.filtered_due_to_mask += 1;
             filtering_stats.filtered_positions.insert(pos);
