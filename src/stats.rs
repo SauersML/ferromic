@@ -791,7 +791,7 @@ fn process_config_entries(
                     )
                     .yellow()
                 );
-                Arc::new(vec![(1, i64::MAX)])
+                Arc::new(vec![(0, i64::MAX)])
             });
 
         // Pass the mask as Some(Arc<Vec<_>>)
