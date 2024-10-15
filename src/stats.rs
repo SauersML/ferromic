@@ -694,7 +694,7 @@ fn process_config_entries(
             let sequence_length = entry.end - entry.start + 1;
 
             // Calculate total masked length overlapping with the region
-            let total_masked_length = if let Some(mask_regions_chr) = mask.and_then(|m| m.get(&chr)) {
+            let total_masked_length = if let Some(mask_regions_chr) = mask.as_ref().and_then(|m| m.get(&chr)) {
                 calculate_masked_length(entry.start, entry.end, mask_regions_chr)
             } else {
                 0
