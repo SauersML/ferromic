@@ -258,8 +258,15 @@ fn main() -> Result<(), VcfError> {
             start,
             end,
             args.min_gq,
-            Some(combined_mask_for_chr.clone()), // Correctly wrap in Some
+            Some(combined_mask_for_chr.clone()),
         )?;
+
+        for (chr, regions) in combined_mask.iter() {
+            println!("Chromosome '{}': Combined mask has {} regions.", chr, regions.len());
+            for (start, end) in regions {
+                println!("Masked interval: {}-{}", start, end);
+            }
+        }
         
         println!("{}", "Calculating diversity statistics...".blue());
 
