@@ -248,20 +248,7 @@ fn main() -> Result<(), VcfError> {
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
         // Extract the combined mask for the specific chromosome
-        let combined_mask_for_chr = if let Some(ref m) = mask {
-            match m.get(&chr) {
-                Some(regions) => Some(Arc::new(regions.clone())),
-                None => {
-                    println!(
-                        "No mask for chromosome {}. Masking entire chromosome.",
-                        chr
-                    );
-                    Some(Arc::new(vec![(0, i64::MAX)]))
-                },
-            }
-        } else {
-            None
-        };
+        let combined_mask_for_chr = combined_mask.as_ref().and_then(|m| m.get(chr).cloned());
 
         println!("Combined mask for {}: {:?}", chr, combined_mask_for_chr);
 
@@ -774,20 +761,8 @@ fn process_config_entries(
             chr, min_start, max_end
         );
 
-        let combined_mask_for_chr = if let Some(ref m) = mask {
-            match m.get(&chr) {
-                Some(regions) => Some(Arc::new(regions.clone())),
-                None => {
-                    println!(
-                        "No mask for chromosome {}. Masking entire chromosome.",
-                        chr
-                    );
-                    Some(Arc::new(vec![(0, i64::MAX)]))
-                },
-            }
-        } else {
-            None
-        };
+        // Extract variants from the VCF
+        let combined_mask_for_chr = mask.and_then(|m| m.get(&chr).cloned()).map(Arc::new);
 
         if combined_mask_for_chr.is_none() {
             eprintln!("Warning: No mask found for chromosome {}", chr);
@@ -1167,7 +1142,7 @@ fn process_vcf(
     start: i64,
     end: i64,
     min_gq: u16,
-    mask: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    mask: Option<Arc<Vec<(i64, i64)>>>,
 ) -> Result<(
     Vec<Variant>,        // Unfiltered variants
     Vec<Variant>,        // Filtered variants
