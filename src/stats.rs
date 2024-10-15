@@ -163,58 +163,46 @@ fn main() -> Result<(), VcfError> {
     
 
     // Combine original mask and inverse allow mask
-    let combined_mask = if original_mask.is_some() || allow_mask.is_some() {
+    let combined_mask = {
         // Initialize a new HashMap for combined mask
         let mut combined: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
-
-        // Determine all chromosomes present in either mask
-        let chromosomes: HashSet<String> = original_mask
-            .as_ref()
-            .map(|m| m.keys().cloned().collect::<HashSet<_>>())
-            .unwrap_or_default()
-            .union(&allow_mask
-                .as_ref()
-                .map(|m| m.keys().cloned().collect::<HashSet<_>>())
-                .unwrap_or_default())
-            .cloned()
-            .collect();
-
-        for chr in chromosomes {
+    
+        // Collect all chromosomes from the VCF files
+        let vcf_chromosomes = collect_vcf_chromosomes(&args.vcf_folder)?;
+    
+        // Iterate over all chromosomes present in VCF
+        for chr in vcf_chromosomes {
             // Get original mask regions for this chromosome
             let orig_regions = original_mask
                 .as_ref()
                 .and_then(|m| m.get(&chr))
                 .map(|v| v.as_slice())
                 .unwrap_or(&[][..]);
-
+    
             // Get allowed regions for this chromosome
             let allowed_regions = allow_mask
                 .as_ref()
                 .and_then(|m| m.get(&chr))
                 .map(|v| v.as_slice())
                 .unwrap_or(&[][..]);
-
-            // If allow regions are provided, invert them to get regions to mask
+    
+            // Invert allow regions to get regions to mask
             let inverse_allow = if !allowed_regions.is_empty() {
-                // Overall analysis range for inversion: larger than any chr's coords, i.e. from 0 to i64::MAX
-                // Hopefully the chromosome has under a quintillion base pairs
-
-                let analysis_start = 0;
+                let analysis_start = 1;
                 let analysis_end = i64::MAX;
-
+    
                 invert_allow_regions(allowed_regions, analysis_start, analysis_end)
             } else {
-                Vec::new()
+                // If no allow regions for this chromosome, mask the entire chromosome
+                vec![(1, i64::MAX)]
             };
-
+    
             // Merge original mask with inverse allow mask
             let merged = merge_masks(orig_regions, &inverse_allow);
             combined.insert(chr.clone(), merged);
         }
-
-        Some(Arc::new(combined))
-    } else {
-        None
+    
+        Arc::new(combined)
     };
 
     println!("{}", "Starting VCF diversity analysis...".green());
