@@ -767,12 +767,12 @@ fn process_config_entries(
                 println!(
                     "{}",
                     format!(
-                        "Chromosome '{}' not found in mask or allow files within config entries. Masking entire chromosome.",
+                        "Chromosome '{}' not found in mask or allow files. Masking entire chromosome.",
                         chr
                     )
                     .yellow()
                 );
-                Arc::new(vec![(0, i64::MAX)])
+                Arc::new(vec![(1, i64::MAX)])
             });
 
         // Pass the mask as Some(Arc<Vec<_>>)
