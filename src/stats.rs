@@ -15,41 +15,49 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
 use csv::{ReaderBuilder, WriterBuilder};
-use std::cmp::{max, min};
 use crossbeam_channel::bounded;
 use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
-use std::ffi::OsStr;
 
+// Define command-line arguments using clap
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    // Folder containing VCF files
     #[arg(short, long = "vcf_folder")]
     vcf_folder: String,
 
+    // Chromosome to process
     #[arg(short, long = "chr")]
     chr: Option<String>,
 
+    // Region to process (start-end)
     #[arg(short, long = "region")]
     region: Option<String>,
 
+    // Configuration file
     #[arg(long = "config_file")]
     config_file: Option<String>,
 
+    // Output file
     #[arg(short, long = "output_file")]
     output_file: Option<String>,
 
+    // Minimum genotype quality
     #[arg(long = "min_gq", default_value = "30")]
     min_gq: u16,
 
+    // Mask file (regions to exclude)
     #[arg(long = "mask_file")]
     mask_file: Option<String>,
 
+    // Allow file (regions to include)
     #[arg(long = "allow_file")]
     allow_file: Option<String>,
 }
 
+// Data structures
 #[derive(Debug, Clone)]
 struct ConfigEntry {
     seqname: String,
@@ -95,6 +103,7 @@ struct MissingDataInfo {
     positions_with_missing: HashSet<i64>,
 }
 
+// Custom error types
 #[derive(Debug)]
 enum VcfError {
     Io(io::Error),
@@ -138,6 +147,7 @@ impl From<io::Error> for VcfError {
     }
 }
 
+// Main function
 fn main() -> Result<(), VcfError> {
     let args = Args::parse();
 
@@ -149,27 +159,19 @@ fn main() -> Result<(), VcfError> {
         .unwrap();
 
     // Parse the mask file (exclude regions)
-    let (mask_regions, mask_bed) = if let Some(mask_file) = args.mask_file.as_ref() {
+    let mask_regions = if let Some(mask_file) = args.mask_file.as_ref() {
         println!("Mask file provided: {}", mask_file);
-        let is_bed = Path::new(mask_file).extension().and_then(OsStr::to_str) == Some("bed");
-        (
-            Some(Arc::new(parse_regions_file(Path::new(mask_file), is_bed)?)),
-            is_bed,
-        )
+        Some(Arc::new(parse_regions_file(Path::new(mask_file))?))
     } else {
-        (None, false)
+        None
     };
 
     // Parse the allow file (include regions)
-    let (allow_regions, allow_bed) = if let Some(allow_file) = args.allow_file.as_ref() {
+    let allow_regions = if let Some(allow_file) = args.allow_file.as_ref() {
         println!("Allow file provided: {}", allow_file);
-        let is_bed = Path::new(allow_file).extension().and_then(OsStr::to_str) == Some("bed");
-        (
-            Some(Arc::new(parse_regions_file(Path::new(allow_file), is_bed)?)),
-            is_bed,
-        )
+        Some(Arc::new(parse_regions_file(Path::new(allow_file))?))
     } else {
-        (None, false)
+        None
     };
 
     println!("{}", "Starting VCF diversity analysis...".green());
@@ -193,8 +195,6 @@ fn main() -> Result<(), VcfError> {
             args.min_gq,
             mask_regions.as_deref(),
             allow_regions.as_deref(),
-            mask_bed,
-            allow_bed,
         )?;
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
@@ -212,8 +212,15 @@ fn main() -> Result<(), VcfError> {
             format!("Processing VCF file: {}", vcf_file.display()).cyan()
         );
 
-        // Pass the mask and allow regions
-        let (unfiltered_variants, filtered_variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(
+        // Process the VCF file
+        let (
+            unfiltered_variants,
+            filtered_variants,
+            sample_names,
+            chr_length,
+            missing_data_info,
+            filtering_stats,
+        ) = process_vcf(
             &vcf_file,
             &chr,
             start,
@@ -221,8 +228,6 @@ fn main() -> Result<(), VcfError> {
             args.min_gq,
             mask_regions.as_deref(),
             allow_regions.as_deref(),
-            mask_bed,
-            allow_bed,
         )?;
 
         println!("{}", "Calculating diversity statistics...".blue());
@@ -345,10 +350,12 @@ fn main() -> Result<(), VcfError> {
     Ok(())
 }
 
+// Function to parse regions file (mask or allow)
 fn parse_regions_file(
     path: &Path,
-    is_bed_file: bool,
 ) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfError> {
+    let is_bed_file = path.extension().and_then(|s| s.to_str()) == Some("bed");
+
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut regions: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
@@ -401,39 +408,11 @@ fn parse_regions_file(
             // BED files are zero-based, half-open intervals [start, end)
             (start, end)
         } else {
-            // Other files are one-based, inclusive intervals [start-1, end]
+            // Other files are one-based, inclusive intervals [start-1, end)
             (start - 1, end)
         };
 
         regions.entry(chr.clone()).or_default().push((start, end));
-        println!(
-            "{}",
-            format!(
-                "Parsed line {}: chr={}, start={}, end={}",
-                line_num + 1,
-                chr,
-                start,
-                end
-            )
-            .green()
-        );
-    }
-
-    println!(
-        "{}",
-        format!(
-            "Parsed regions file '{}': {} chromosomes with regions.",
-            path.display(),
-            regions.len()
-        )
-        .green()
-    );
-
-    for (chr, regions_list) in &regions {
-        println!(
-            "{}",
-            format!("Chromosome '{}': {} regions.", chr, regions_list.len()).cyan()
-        );
     }
 
     // Sort the intervals for each chromosome
@@ -443,6 +422,8 @@ fn parse_regions_file(
 
     Ok(regions)
 }
+
+// Function to check if a position is within any of the regions
 fn position_in_regions(pos: i64, regions: &[(i64, i64)]) -> bool {
     // pos is zero-based
     // regions are sorted by start position
@@ -1104,6 +1085,7 @@ fn collect_vcf_chromosomes(vcf_folder: &str) -> Result<Vec<String>, VcfError> {
 }
 
 
+// Function to process a VCF file
 fn process_vcf(
     file: &Path,
     chr: &str,
@@ -1112,8 +1094,6 @@ fn process_vcf(
     min_gq: u16,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    mask_bed: bool,
-    allow_bed: bool,
 ) -> Result<(
     Vec<Variant>,        // Unfiltered variants
     Vec<Variant>,        // Filtered variants
@@ -1145,38 +1125,7 @@ fn process_vcf(
             .template("{spinner:.bold.green} 🧬 {msg} 🧬 [{elapsed_precise}]")
             .expect("Failed to create spinner template")
             .tick_strings(&[
-                "░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░",
-                "▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░",
-                "▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒",
-                "██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓",
-                "█▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓█",
-                "▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██",
-                "▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓",
-                "░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓██▓▒",
-                "░▒▓██▓▒░░▒▓██▓▒░▆▅▄▃▂▁▂▃▄▅▆██▓▒░",
-                "▒▓██▓▒░░▒▓██▓▒░▅▄▃▂▁▂▃▄▅▆▇██▓▒░░",
-                "▓██▓▒░░▒▓██▓▒░▄▃▂▁▂▃▄▅▆▇███▓▒░░▒",
-                "██▓▒░░▒▓██▓▒░▃▂▁▂▃▄▅▆▇█▇██▓▒░░▒▓",
-                "█▓▒░░▒▓██▓▒░▂▁▂▃▄▅▆▇█▇▆██▓▒░░▒▓█",
-                "▓▒░░▒▓██▓▒░▁▂▃▄▅▆▇█▇▆▅██▓▒░░▒▓██",
-                "▒░░▒▓██▓▒░▂▃▄▅▆▇█▇▆▅▄██▓▒░░▒▓██▓",
-                "░░▒▓██▓▒░▃▄▅▆▇█▇▆▅▄▃██▓▒░░▒▓██▓▒",
-                "░▒▓██▓▒░▄▅▆▇█▇▆▅▄▃▂██▓▒░░▒▓██▓▒░",
-                "▒▓██▓▒░▅▆▇█▇▆▅▄▃▂▁██▓▒░░▒▓██▓▒░░",
-                "▓██▓▒░▆▇█▇▆▅▄▃▂▁▂██▓▒░░▒▓██▓▒░░▒",
-                "██▓▒░▇█▇▆▅▄▃▂▁▂▃██▓▒░░▒▓██▓▒░░▒▓",
-                "█▓▒░█▇▆▅▄▃▂▁▂▃▄██▓▒░░▒▓██▓▒░░▒▓█",
-                "▓▒░▇▆▅▄▃▂▁▂▃▄▅██▓▒░░▒▓██▓▒░░▒▓██",
-                "▒░░▆▅▄▃▂▁▂▃▄▅▆█▓▒░░▒▓██▓▒░░▒▓██▓",
-                "░░▒▅▄▃▂▁▂▃▄▅▆▇▓▒░░▒▓██▓▒░░▒▓██▓▒",
-                "░▒▓▄▃▂▁▂▃▄▅▆▇▓▒░░▒▓██▓▒░░▒▓██▓▒░",
-                "▒▓█▃▂▁▂▃▄▅▆▇▓▒░░▒▓██▓▒░░▒▓██▓▒░░",
-                "▓██▂▁▂▃▄▅▆▇▓▒░░▒▓██▓▒░░▒▓██▓▒░░▒",
-                "██▓▁▂▃▄▅▆▇█▒░░▒▓██▓▒░░▒▓██▓▒░░▒▓",
-                "█▓▒▂▃▄▅▆▇██░░▒▓██▓▒░░▒▓██▓▒░░▒▓█",
-                "▓▒░▃▄▅▆▇███░▒▓██▓▒░░▒▓██▓▒░░▒▓██",
-                "▒░░▄▅▆▇████▒▓██▓▒░░▒▓██▓▒░░▒▓██▓",
-                "░░▒▅▆▇██████▓█▓░░▒▓██▓▒░░▒▓██▓▒░"
+                "░▒▓██▓▒░", "▒▓██▓▒░", "▓██▓▒░", "██▓▒░", "█▓▒░", "▓▒░", "▒░", "░"
             ])
     } else {
         ProgressStyle::default_bar()
@@ -1203,7 +1152,7 @@ fn process_vcf(
     let mut buffer = String::new();
     while reader.read_line(&mut buffer)? > 0 {
         if buffer.starts_with("##") {
-            // ... Nothing
+            // Skip meta-information lines
         } else if buffer.starts_with("#CHROM") {
             validate_vcf_header(&buffer)?;
             sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
@@ -1223,23 +1172,7 @@ fn process_vcf(
             line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
             buffer.clear();
             line_count += 1;
-            
-            if line_count == 1 {
-                println!(
-                    "{}",
-                    "process_vcf: Producer Thread started reading lines.".yellow()
-                );
-            } else if line_count % 100_000 == 0 {
-                println!(
-                    "{}",
-                    format!("process_vcf: Producer Thread has read {} lines so far.", line_count).yellow()
-                );
-            }
         }
-        println!(
-            "{}",
-            format!("process_vcf: Producer Thread finished reading. Total lines read: {}", line_count).green()
-        );
         drop(line_sender);
         Ok(())
     });
@@ -1248,7 +1181,7 @@ fn process_vcf(
     let num_threads = num_cpus::get();
     let sample_names = Arc::new(sample_names);
     let consumer_threads: Vec<_> = (0..num_threads)
-        .map(|thread_id| {
+        .map(|_| {
             let line_receiver = line_receiver.clone();
             let result_sender = result_sender.clone();
             let chr = chr.to_string();
@@ -1256,10 +1189,7 @@ fn process_vcf(
             let mask_regions = mask_regions.cloned();
             let allow_regions = allow_regions.cloned();
             thread::spawn(move || -> Result<(), VcfError> {
-                let mut processed_count = 0;
                 while let Ok(line) = line_receiver.recv() {
-                    processed_count += 1;
-
                     let mut local_missing_data_info = MissingDataInfo::default();
                     let mut local_filtering_stats = FilteringStats::default();
                     match parse_variant(
@@ -1273,8 +1203,6 @@ fn process_vcf(
                         &mut local_filtering_stats,
                         allow_regions.as_ref(),
                         mask_regions.as_ref(),
-                        allow_bed,
-                        mask_bed,
                     ) {
                         Ok(variant_option) => {
                             result_sender
@@ -1298,31 +1226,13 @@ fn process_vcf(
         .collect();
 
     // Collector thread
-    let chr_clone = chr.to_string(); // Clone chr to owned String
     let collector_thread = thread::spawn({
         let unfiltered_variants = unfiltered_variants.clone();
         let filtered_variants = filtered_variants.clone();
         let missing_data_info = missing_data_info.clone();
         let filtering_stats = filtering_stats.clone();
-        let chr = chr_clone;
         move || -> Result<(), VcfError> {
-            let mut recv_count = 0;
-            let mut error_occurred = None;
-    
             while let Ok(result) = result_receiver.recv() {
-                recv_count += 1;
-    
-                if recv_count == 1 || recv_count % 100_000 == 0 {
-                    println!(
-                        "{}",
-                        format!(
-                            "process_vcf: Collector Thread has received {} results so far.",
-                            recv_count
-                        )
-                        .magenta()
-                    );
-                }
-    
                 match result {
                     Ok((Some((variant, passes_filters)), local_missing_data_info, local_filtering_stats)) => {
                         unfiltered_variants.lock().push(variant.clone());
@@ -1339,6 +1249,7 @@ fn process_vcf(
                         global_filtering_stats.filtered_variants += local_filtering_stats.filtered_variants;
                         global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
                         global_filtering_stats.filtered_due_to_mask += local_filtering_stats.filtered_due_to_mask;
+                        global_filtering_stats.filtered_due_to_allow += local_filtering_stats.filtered_due_to_allow;
                         global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
                         global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
                         global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
@@ -1354,33 +1265,21 @@ fn process_vcf(
                         global_filtering_stats.filtered_variants += local_filtering_stats.filtered_variants;
                         global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
                         global_filtering_stats.filtered_due_to_mask += local_filtering_stats.filtered_due_to_mask;
+                        global_filtering_stats.filtered_due_to_allow += local_filtering_stats.filtered_due_to_allow;
                         global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
                         global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
                         global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
                     },
                     Err(e) => {
                         // Record the error but continue consuming messages
-                        error_occurred = Some(e);
+                        eprintln!("Error processing variant: {}", e);
                     },
                 }
             }
-    
-            println!(
-                "{}",
-                format!(
-                    "process_vcf: Collector Thread finished receiving. Total results received: {}",
-                    recv_count
-                )
-                .magenta()
-            );
-    
-            // After consuming all messages, check if an error occurred
-            if let Some(e) = error_occurred {
-                return Err(e);
-            }
-    
+
+            // After consuming all messages, print filtering statistics
             let stats = filtering_stats.lock();
-    
+
             println!("\n{}", "Filtering Statistics:".green().bold());
             println!("Total variants processed: {}", stats.total_variants);
             println!(
@@ -1393,11 +1292,10 @@ fn process_vcf(
             println!("Multi-allelic variants: {}", stats.multi_allelic_variants);
             println!("Low GQ variants: {}", stats.low_gq_variants);
             println!("Missing data variants: {}", stats.missing_data_variants);
-    
+
             Ok(())
         }
     });
-
 
     // Wait for all threads to complete
     producer_thread.join().expect("Producer thread panicked")?;
@@ -1441,6 +1339,7 @@ fn process_vcf(
 }
 
 
+// Function to validate VCF header
 fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     let fields: Vec<&str> = header.split('\t').collect();
     let required_fields = vec!["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"];
@@ -1452,6 +1351,7 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
 }
 
 
+// Function to parse a variant line
 fn parse_variant(
     line: &str,
     chr: &str,
@@ -1463,8 +1363,6 @@ fn parse_variant(
     filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    allow_bed: bool,
-    mask_bed: bool,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
     filtering_stats.total_variants += 1;
 
@@ -1491,12 +1389,10 @@ fn parse_variant(
         return Ok(None);
     }
 
-    // Adjusted positions based on file types
-    let adjusted_pos_allow = if allow_bed { pos - 1 } else { pos };
-    let adjusted_pos_mask = if mask_bed { pos - 1 } else { pos };
+    let adjusted_pos = pos - 1; // Adjust VCF position (one-based) to zero-based
 
     if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
-        if !position_in_regions(adjusted_pos_allow, allow_regions_chr) {
+        if !position_in_regions(adjusted_pos, allow_regions_chr) {
             // Position not in allowed regions, filter it
             filtering_stats.filtered_variants += 1;
             filtering_stats.filtered_due_to_allow += 1;
@@ -1512,7 +1408,7 @@ fn parse_variant(
     }
 
     if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
-        if position_in_regions(adjusted_pos_mask, mask_regions_chr) {
+        if position_in_regions(adjusted_pos, mask_regions_chr) {
             // Position in masked regions, filter it
             filtering_stats.filtered_variants += 1;
             filtering_stats.filtered_due_to_mask += 1;
@@ -1655,14 +1551,8 @@ fn parse_variant(
         }
     }
     
-    // Always return the variant and whether it passes filters
-    Ok(Some((
-        Variant {
-            position: pos,
-            genotypes,
-        },
-        passes_filters,
-    )))
+    // Return the parsed variant and whether it passes filters
+    Ok(Some((variant, passes_filters)))
 }
 
 
