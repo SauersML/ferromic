@@ -247,31 +247,29 @@ fn main() -> Result<(), VcfError> {
 
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
-        // Extract the combined mask for the specific chromosome
         let combined_mask_for_chr = combined_mask.as_ref()
-            .and_then(|m| m.get(chr).cloned())
+            .and_then(|m| m.get(&chr).cloned())
             .map(Arc::new)
             .unwrap_or_else(|| {
                 println!(
                     "{}",
                     format!(
-                        "Chromosome '{}' not found in mask or allow files. Masking entire chromosome.",
+                        "Chromosome '{}' not found in mask or allow files within config entries. Masking entire chromosome.",
                         chr
                     )
                     .yellow()
                 );
                 Arc::new(vec![(0, i64::MAX)])
             });
-
-        println!("Combined mask for {}: {:?}", chr, combined_mask_for_chr);
-
+        
+        // Pass the mask as Some(Arc<Vec<_>>)
         let (unfiltered_variants, filtered_variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(
             &vcf_file,
-            chr,
+            &chr,
             start,
             end,
             args.min_gq,
-            combined_mask_for_chr.map(Arc::new),
+            Some(combined_mask_for_chr.clone()), // Correctly wrap in Some
         )?;
         
         println!("{}", "Calculating diversity statistics...".blue());
@@ -788,11 +786,8 @@ fn process_config_entries(
                 Arc::new(vec![(0, i64::MAX)])
             });
 
-        if combined_mask_for_chr.is_none() {
-            eprintln!("Warning: No mask found for chromosome {}", chr);
-        }
-
-        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, combined_mask_for_chr.clone()) {
+        // Pass the mask as Some(Arc<Vec<_>>)
+        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, Some(combined_mask_for_chr.clone())) {
             Ok(data) => data,
             Err(e) => {
                 eprintln!("Error processing VCF file for {}: {}", chr, e);
@@ -831,19 +826,16 @@ fn process_config_entries(
             let sequence_length = entry.end - entry.start + 1;
 
             // Calculate total masked length overlapping with the region
-            let total_masked_length = if let Some(combined_mask_for_chr) = combined_mask_for_chr.as_ref() {
-                calculate_masked_length(entry.start, entry.end, &combined_mask_for_chr)
-            } else {
-                0
-            };
-
+            let total_masked_length = calculate_masked_length(entry.start, entry.end, &combined_mask_for_chr[..]);
+            
             // Calculate the number of filtered positions within the region
             let number_of_filtered_positions_in_region = filtering_stats.filtered_positions.iter()
                 .filter(|&&pos| pos >= entry.start && pos <= entry.end)
                 .count() as i64;
-
-            let adjusted_sequence_length = sequence_length - total_masked_length - number_of_filtered_positions_in_region; // Does double subtraction occur here? Potential issue
-
+            
+            // Adjusted sequence length
+            let adjusted_sequence_length = sequence_length - total_masked_length - number_of_filtered_positions_in_region;
+            
             // Process haplotype_group=0 (unfiltered)
             let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) = match process_variants(
                 &unfiltered_variants,
