@@ -1414,12 +1414,11 @@ fn parse_variant(
             filtering_stats.filtered_positions.insert(pos);
             return Ok(None);
         }
-    } else if allow_regions.is_some() {
-        // If allow_regions is provided, but there are no allowed regions for this chromosome, filter it
-        filtering_stats.filtered_variants += 1;
-        filtering_stats.filtered_due_to_allow += 1;
-        filtering_stats.filtered_positions.insert(pos);
-        return Ok(None);
+    } else if mask_regions.is_some() {
+        // If mask_regions is provided but there are no mask regions for this chromosome,
+        // we do not filter the variant since it's not masked.
+        // This is seperate from the allow file behavior, which restricts anything not explicitly allowed.
+        // No action needed here; we proceed with processing.
     }
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
