@@ -20,6 +20,7 @@ use crossbeam_channel::bounded;
 use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
+use std::ffi::OsStr;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
