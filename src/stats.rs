@@ -3,7 +3,7 @@ use colored::*;
 use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
-use parking_lot::{Mutex};
+use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
 use csv::{ReaderBuilder, WriterBuilder};
 use std::cmp::{max, min};
-use crossbeam_channel::{bounded};
-use std::time::{Duration};
+use crossbeam_channel::bounded;
+use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
 
@@ -49,7 +49,6 @@ struct Args {
     allow_file: Option<String>,
 }
 
-
 #[derive(Debug, Clone)]
 struct ConfigEntry {
     seqname: String,
@@ -75,6 +74,7 @@ struct FilteringStats {
     total_variants: usize,
     filtered_variants: usize,
     filtered_due_to_mask: usize,
+    filtered_due_to_allow: usize,
     filtered_positions: HashSet<i64>,
     missing_data_variants: usize,
     low_gq_variants: usize,
@@ -137,72 +137,30 @@ impl From<io::Error> for VcfError {
     }
 }
 
-
 fn main() -> Result<(), VcfError> {
     let args = Args::parse();
 
     // Set Rayon to use all logical CPUs
     let num_logical_cpus = num_cpus::get();
-    ThreadPoolBuilder::new().num_threads(num_logical_cpus).build_global().unwrap();
+    ThreadPoolBuilder::new()
+        .num_threads(num_logical_cpus)
+        .build_global()
+        .unwrap();
 
-    // Parse the original mask file (exclude regions)
-    let original_mask = if let Some(mask_file) = args.mask_file.as_ref() {
+    // Parse the mask file (exclude regions)
+    let mask_regions = if let Some(mask_file) = args.mask_file.as_ref() {
         println!("Mask file provided: {}", mask_file);
-        Some(Arc::new(parse_mask_file(Path::new(mask_file))?))
+        Some(Arc::new(parse_regions_file(Path::new(mask_file))?))
     } else {
         None
     };
 
     // Parse the allow file (include regions)
-    let allow_mask = if let Some(allow_file) = args.allow_file.as_ref() {
+    let allow_regions = if let Some(allow_file) = args.allow_file.as_ref() {
         println!("Allow file provided: {}", allow_file);
-        Some(Arc::new(parse_mask_file(Path::new(allow_file))?))
+        Some(Arc::new(parse_regions_file(Path::new(allow_file))?))
     } else {
         None
-    };
-    
-
-    // Combine original mask and inverse allow mask
-    let combined_mask = {
-        // Initialize a new HashMap for combined mask
-        let mut combined: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
-    
-        // Collect all chromosomes from the VCF files
-        let vcf_chromosomes = collect_vcf_chromosomes(&args.vcf_folder)?;
-    
-        // Iterate over all chromosomes present in VCF
-        for chr in vcf_chromosomes {
-            // Get original mask regions for this chromosome
-            let orig_regions = original_mask
-                .as_ref()
-                .and_then(|m| m.get(&chr))
-                .map(|v| v.as_slice())
-                .unwrap_or(&[][..]);
-    
-            // Get allowed regions for this chromosome
-            let allowed_regions = allow_mask
-                .as_ref()
-                .and_then(|m| m.get(&chr))
-                .map(|v| v.as_slice())
-                .unwrap_or(&[][..]);
-    
-            // Invert allow regions to get regions to mask
-            let inverse_allow = if !allowed_regions.is_empty() {
-                let analysis_start = 1;
-                let analysis_end = i64::MAX;
-    
-                invert_allow_regions(allowed_regions, analysis_start, analysis_end)
-            } else {
-                // If no allow regions for this chromosome, mask the entire chromosome
-                vec![(1, i64::MAX)]
-            };
-    
-            // Merge original mask with inverse allow mask
-            let merged = merge_masks(orig_regions, &inverse_allow);
-            combined.insert(chr.clone(), merged);
-        }
-    
-        Arc::new(combined)
     };
 
     println!("{}", "Starting VCF diversity analysis...".green());
@@ -213,14 +171,19 @@ fn main() -> Result<(), VcfError> {
         for entry in &config_entries {
             println!("Config entry chromosome: {}", entry.seqname);
         }
-        let output_file = args.output_file.as_ref().map(Path::new).unwrap_or_else(|| Path::new("output.csv"));
+        let output_file = args
+            .output_file
+            .as_ref()
+            .map(Path::new)
+            .unwrap_or_else(|| Path::new("output.csv"));
         println!("Output file: {}", output_file.display());
         process_config_entries(
             &config_entries,
             &args.vcf_folder,
             output_file,
             args.min_gq,
-            Some(&*combined_mask),
+            mask_regions.as_deref(),
+            allow_regions.as_deref(),
         )?;
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
@@ -233,59 +196,43 @@ fn main() -> Result<(), VcfError> {
         };
         let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
 
-        println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
+        println!(
+            "{}",
+            format!("Processing VCF file: {}", vcf_file.display()).cyan()
+        );
 
-        // Extract the combined mask for the specific chromosome
-        let combined_mask_for_chr = combined_mask.as_ref()
-            .get(chr.as_str())               // Directly use `.get` on the HashMap
-            .cloned()                        // Clone the `Vec<(i64, i64)>` if present
-            .map(Arc::new)                   // Wrap the `Vec` in an `Arc`
-            .unwrap_or_else(|| {              // If no mask is found for the chromosome
-                println!(
-                    "{}",
-                    format!(
-                        "Chromosome '{}' not found in mask or allow files. Masking entire chromosome.",
-                        chr
-                    )
-                    .yellow()
-                );
-                Arc::new(vec![(1, i64::MAX)]) // Use (1, i64::MAX) to match typical 1-based coordinates
-            });
-        
-        // Pass the mask as Some(Arc<Vec<_>>)
+        // Pass the mask and allow regions
         let (unfiltered_variants, filtered_variants, sample_names, chr_length, missing_data_info, filtering_stats) = process_vcf(
             &vcf_file,
             &chr,
             start,
             end,
             args.min_gq,
-            Some(combined_mask_for_chr.clone()),
+            mask_regions.as_deref(),
+            allow_regions.as_deref(),
         )?;
 
-        for (chr, regions) in combined_mask.iter() {
-            println!(
-                "{}",
-                format!(
-                    "Chromosome '{}': {} masked regions.",
-                    chr,
-                    regions.len()
-                )
-                .cyan()
-            );
-            for (start, end) in regions {
-                println!("Masked interval: {}-{}", start, end);
-            }
-        }
-        
         println!("{}", "Calculating diversity statistics...".blue());
 
         let seq_length = if end == i64::MAX {
-            unfiltered_variants.last().map(|v| v.position).unwrap_or(0).max(chr_length) - start + 1
+            unfiltered_variants
+                .last()
+                .map(|v| v.position)
+                .unwrap_or(0)
+                .max(chr_length)
+                - start
+                + 1
         } else {
             end - start + 1
         };
 
-        if end == i64::MAX && unfiltered_variants.last().map(|v| v.position).unwrap_or(0) < chr_length {
+        if end == i64::MAX
+            && unfiltered_variants
+                .last()
+                .map(|v| v.position)
+                .unwrap_or(0)
+                < chr_length
+        {
             println!("{}", "Warning: The sequence length may be underestimated. Consider using the --region parameter for more accurate results.".yellow());
         }
 
@@ -294,21 +241,23 @@ fn main() -> Result<(), VcfError> {
 
         let n = sample_names.len();
         if n == 0 {
-            return Err(VcfError::Parse("No samples found after processing VCF.".to_string()));
+            return Err(VcfError::Parse(
+                "No samples found after processing VCF.".to_string(),
+            ));
         }
 
         let pairwise_diffs = calculate_pairwise_differences(&unfiltered_variants, n); // Also need filtered here?
         let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
-        
+
         let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
         let pi = calculate_pi(tot_pair_diff, n, seq_length);
-
 
         println!("\n{}", "Results:".green().bold());
         println!("Example pairwise nucleotide substitutions from this run:");
         let mut rng = thread_rng();
         for &((i, j), count, ref positions) in pairwise_diffs.choose_multiple(&mut rng, 5) {
-            let sample_positions: Vec<_> = positions.choose_multiple(&mut rng, 5.min(positions.len())).cloned().collect();
+            let sample_positions: Vec<_> =
+                positions.choose_multiple(&mut rng, 5.min(positions.len())).cloned().collect();
             println!(
                 "{}\t{}\t{}\t{:?}",
                 sample_names[i], sample_names[j], count, sample_positions
@@ -322,7 +271,10 @@ fn main() -> Result<(), VcfError> {
         println!("pi:{:.6}", pi);
 
         if unfiltered_variants.is_empty() {
-            println!("{}", "Warning: No variants found in the specified region.".yellow());
+            println!(
+                "{}",
+                "Warning: No variants found in the specified region.".yellow()
+            );
         }
 
         if num_segsites == 0 {
@@ -330,177 +282,64 @@ fn main() -> Result<(), VcfError> {
         }
 
         if num_segsites != raw_variant_count {
-            println!("{}", format!("Note: Number of segregating sites ({}) differs from raw variant count ({}).", num_segsites, raw_variant_count).yellow());
+            println!(
+                "{}",
+                format!(
+                    "Note: Number of segregating sites ({}) differs from raw variant count ({}).",
+                    num_segsites, raw_variant_count
+                )
+                .yellow()
+            );
         }
 
         println!("\n{}", "Filtering Statistics:".green().bold());
-        println!("Total variants processed: {}", filtering_stats.total_variants);
-        println!("Filtered variants: {} ({:.2}%)", filtering_stats.filtered_variants, (filtering_stats.filtered_variants as f64 / filtering_stats.total_variants as f64) * 100.0);
+        println!(
+            "Total variants processed: {}",
+            filtering_stats.total_variants
+        );
+        println!(
+            "Filtered variants: {} ({:.2}%)",
+            filtering_stats.filtered_variants,
+            (filtering_stats.filtered_variants as f64 / filtering_stats.total_variants as f64)
+                * 100.0
+        );
         println!("Multi-allelic variants: {}", filtering_stats.multi_allelic_variants);
         println!("Low GQ variants: {}", filtering_stats.low_gq_variants);
-        println!("Missing data variants: {}", filtering_stats.missing_data_variants);
-        
-        let missing_data_percentage = (missing_data_info.missing_data_points as f64 / missing_data_info.total_data_points as f64) * 100.0;
+        println!(
+            "Missing data variants: {}",
+            filtering_stats.missing_data_variants
+        );
+
+        let missing_data_percentage =
+            (missing_data_info.missing_data_points as f64 / missing_data_info.total_data_points as f64) * 100.0;
         println!("\n{}", "Missing Data Information:".yellow().bold());
-        println!("Number of missing data points: {}", missing_data_info.missing_data_points);
+        println!(
+            "Number of missing data points: {}",
+            missing_data_info.missing_data_points
+        );
         println!("Percentage of missing data: {:.2}%", missing_data_percentage);
-        println!("Number of positions with missing data: {}", missing_data_info.positions_with_missing.len());
+        println!(
+            "Number of positions with missing data: {}",
+            missing_data_info.positions_with_missing.len()
+        );
     } else {
-        return Err(VcfError::Parse("Either config file or chromosome must be specified".to_string()));
+        return Err(VcfError::Parse(
+            "Either config file or chromosome must be specified".to_string(),
+        ));
     }
 
     println!("{}", "Analysis complete.".green());
     Ok(())
 }
 
-
-// Function to invert (exclude regions not specified) allowed regions within a given range
-// allow_regions should be sorted by start position.
-fn invert_allow_regions(
-    allow_regions: &[(i64, i64)],
-    region_start: i64,
-    region_end: i64,
-) -> Vec<(i64, i64)> {
-    if allow_regions.is_empty() {
-        // If there are no allow regions, invert to the full region (mask everything)
-        println!(
-            "{}",
-            "No allow regions provided. Inverting to mask the entire region.".yellow()
-        );
-        return vec![(region_start, region_end)];
-    }
-
-    let mut inverted = Vec::new();
-    let mut current = region_start;
-
-    println!(
-        "{}",
-        format!(
-            "Inverting allow regions within range {}-{}.",
-            region_start, region_end
-        )
-        .yellow()
-    );
-
-    for &(start, end) in allow_regions.iter() {
-        if start > current {
-            inverted.push((current, start - 1));
-            println!(
-                "{}",
-                format!("Adding masked region: {}-{}", current, start - 1).blue()
-            );
-        }
-        current = max(current, end + 1);
-    }
-
-    if current <= region_end {
-        inverted.push((current, region_end));
-        println!(
-            "{}",
-            format!("Adding final masked region: {}-{}", current, region_end).blue()
-        );
-    }
-
-    println!(
-        "{}",
-        format!(
-            "Inverted allow regions into {} masked regions.",
-            inverted.len()
-        )
-        .yellow()
-    );
-
-    inverted
-}
-
-
-// Function to merge two sorted lists of intervals
-fn merge_masks(mask1: &[(i64, i64)], mask2: &[(i64, i64)]) -> Vec<(i64, i64)> {
-    let mut merged = Vec::new();
-    let mut i = 0;
-    let mut j = 0;
-
-    println!(
-        "{}",
-        format!(
-            "Merging {} original mask regions with {} inverse allow mask regions.",
-            mask1.len(),
-            mask2.len()
-        )
-        .green()
-    );
-
-    while i < mask1.len() && j < mask2.len() {
-        let (s1, e1) = mask1[i];
-        let (s2, e2) = mask2[j];
-
-        if s1 <= s2 {
-            add_interval(&mut merged, s1, e1);
-            println!(
-                "{}",
-                format!("Adding interval from original mask: {}-{}", s1, e1).cyan()
-            );
-            i += 1;
-        } else {
-            add_interval(&mut merged, s2, e2);
-            println!(
-                "{}",
-                format!("Adding interval from inverse allow mask: {}-{}", s2, e2).cyan()
-            );
-            j += 1;
-        }
-    }
-
-    while i < mask1.len() {
-        let (s, e) = mask1[i];
-        add_interval(&mut merged, s, e);
-        println!(
-            "{}",
-            format!("Adding remaining interval from original mask: {}-{}", s, e).cyan()
-        );
-        i += 1;
-    }
-
-    while j < mask2.len() {
-        let (s, e) = mask2[j];
-        add_interval(&mut merged, s, e);
-        println!(
-            "{}",
-            format!("Adding remaining interval from inverse allow mask: {}-{}", s, e).cyan()
-        );
-        j += 1;
-    }
-
-    println!(
-        "{}",
-        format!("Merged mask now has {} regions.", merged.len()).green()
-    );
-
-    merged
-}
-
-// Helper function to add and merge intervals
-fn add_interval(merged: &mut Vec<(i64, i64)>, start: i64, end: i64) {
-    if let Some(&(last_start, last_end)) = merged.last() {
-        if start <= last_end + 1 {
-            merged.pop();
-            merged.push((last_start, max(last_end, end)));
-            return;
-        }
-    }
-    merged.push((start, end));
-}
-
-
-fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfError> {
+fn parse_regions_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfError> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
-    let mut mask: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
-    // The key is the chromosome name without "chr" prefix, and the value is a sorted list of (start, end) tuples for masked intervals
+    let mut regions: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
 
     for (line_num, line_result) in reader.lines().enumerate() {
         let line = line_result?;
-        let fields: Vec<&str> = line.split_whitespace().collect(); // Changed from split('\t') to split_whitespace()
+        let fields: Vec<&str> = line.split_whitespace().collect();
         if fields.len() < 3 {
             eprintln!(
                 "{}",
@@ -540,12 +379,15 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
                 continue;
             }
         };
-        mask.entry(chr.clone()).or_default().push((start, end));
+        regions.entry(chr.clone()).or_default().push((start, end));
         println!(
             "{}",
             format!(
                 "Parsed line {}: chr={}, start={}, end={}",
-                line_num + 1, chr, start, end
+                line_num + 1,
+                chr,
+                start,
+                end
             )
             .green()
         );
@@ -554,58 +396,48 @@ fn parse_mask_file(path: &Path) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfE
     println!(
         "{}",
         format!(
-            "Parsed mask file '{}': {} chromosomes with masked regions.",
+            "Parsed regions file '{}': {} chromosomes with regions.",
             path.display(),
-            mask.len()
+            regions.len()
         )
         .green()
     );
 
-    for (chr, regions) in &mask {
+    for (chr, regions_list) in &regions {
         println!(
             "{}",
-            format!(
-                "Chromosome '{}': {} masked regions.",
-                chr,
-                regions.len()
-            )
-            .cyan()
+            format!("Chromosome '{}': {} regions.", chr, regions_list.len()).cyan()
         );
     }
 
     // Sort the intervals for each chromosome
-    for intervals in mask.values_mut() {
+    for intervals in regions.values_mut() {
         intervals.sort_by_key(|&(start, _)| start);
     }
 
-    Ok(mask)
+    Ok(regions)
 }
 
-fn position_in_mask(pos: i64, mask: &[(i64, i64)]) -> bool {
-    // Binary search over mask intervals
+fn position_in_regions(pos: i64, regions: &[(i64, i64)]) -> bool {
+    // pos is zero-based
+    // regions are sorted by start position
     let mut left = 0;
-    let mut right = mask.len();
+    let mut right = regions.len();
 
     while left < right {
         let mid = (left + right) / 2;
-        let (start, end) = mask[mid];
+        let (start, end) = regions[mid];
         if pos < start {
             right = mid;
-        } else if pos > end {
+        } else if pos >= end {
             left = mid + 1;
         } else {
-            // Position is within a masked interval
-            println!(
-                "Position {} is within masked interval {}-{}",
-                pos, start, end
-            );
+            // pos in [start, end)
             return true;
         }
     }
-    println!("Position {} is not masked", pos);
     false
 }
-
 
 fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 {
     let mut total = 0;
@@ -621,7 +453,6 @@ fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64
     total
 }
 
-
 fn process_variants(
     variants: &[Variant],
     sample_names: &[String],
@@ -635,7 +466,10 @@ fn process_variants(
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
         if vcf_sample_id_to_index.contains_key(sample_id) {
-            return Err(VcfError::Parse(format!("Duplicate sample ID '{}' in VCF.", sample_id)));
+            return Err(VcfError::Parse(format!(
+                "Duplicate sample ID '{}' in VCF.",
+                sample_id
+            )));
         }
         vcf_sample_id_to_index.insert(sample_id, i);
     }
@@ -656,7 +490,10 @@ fn process_variants(
     }
 
     if haplotype_indices.is_empty() {
-        println!("No haplotypes found for the specified group {}.", haplotype_group);
+        println!(
+            "No haplotypes found for the specified group {}.",
+            haplotype_group
+        );
         return Ok(None);
     }
 
@@ -669,10 +506,10 @@ fn process_variants(
         if variant.position < region_start || variant.position > region_end {
             continue;
         }
-    
+
         // Collect the alleles for the haplotypes
         let mut variant_alleles = Vec::new(); // Alleles of haplotypes at this variant
-    
+
         for &(i, allele_idx) in &haplotype_indices {
             let allele = variant.genotypes.get(i)
                 .and_then(|gt| gt.as_ref())
@@ -680,18 +517,18 @@ fn process_variants(
                 .copied();
             variant_alleles.push(allele); // allele is Option<u8>
         }
-    
+
         // Determine if the variant is a segregating site
         let alleles_present: Vec<u8> = variant_alleles.iter().filter_map(|&a| a).collect();
         let unique_alleles: HashSet<_> = alleles_present.iter().cloned().collect();
         if unique_alleles.len() > 1 {
             num_segsites += 1;
         }
-    
+
         // Compute pairwise differences
         for i in 0..n {
             if let Some(allele_i) = variant_alleles[i] {
-                for j in (i+1)..n {
+                for j in (i + 1)..n {
                     if let Some(allele_j) = variant_alleles[j] {
                         if allele_i != allele_j {
                             tot_pair_diff += 1;
@@ -715,6 +552,7 @@ fn process_config_entries(
     output_file: &Path,
     min_gq: u16,
     mask: Option<&HashMap<String, Vec<(i64, i64)>>>,
+    allow: Option<&HashMap<String, Vec<(i64, i64)>>>,
 ) -> Result<(), VcfError> {
     let mut writer = WriterBuilder::new()
         .has_headers(true)
@@ -722,34 +560,35 @@ fn process_config_entries(
         .map_err(|e| VcfError::Io(e.into()))?;
 
     // Write headers
-    writer.write_record(&[
-        "chr",
-        "region_start",
-        "region_end",
-        "0_sequence_length",
-        "1_sequence_length",
-        "0_sequence_length_adjusted",
-        "1_sequence_length_adjusted",
-        "0_segregating_sites",
-        "1_segregating_sites",
-        "0_w_theta",
-        "1_w_theta",
-        "0_pi",
-        "1_pi",
-        "0_segregating_sites_filtered",
-        "1_segregating_sites_filtered",
-        "0_w_theta_filtered",
-        "1_w_theta_filtered",
-        "0_pi_filtered",
-        "1_pi_filtered",
-        "0_num_hap_no_filter",
-        "1_num_hap_no_filter",
-        "0_num_hap_filter",
-        "1_num_hap_filter",
-        "inversion_freq_no_filter",
-        "inversion_freq_filter",
-    ])
-    .map_err(|e| VcfError::Io(e.into()))?;
+    writer
+        .write_record(&[
+            "chr",
+            "region_start",
+            "region_end",
+            "0_sequence_length",
+            "1_sequence_length",
+            "0_sequence_length_adjusted",
+            "1_sequence_length_adjusted",
+            "0_segregating_sites",
+            "1_segregating_sites",
+            "0_w_theta",
+            "1_w_theta",
+            "0_pi",
+            "1_pi",
+            "0_segregating_sites_filtered",
+            "1_segregating_sites_filtered",
+            "0_w_theta_filtered",
+            "1_w_theta_filtered",
+            "0_pi_filtered",
+            "1_pi_filtered",
+            "0_num_hap_no_filter",
+            "1_num_hap_no_filter",
+            "0_num_hap_filter",
+            "1_num_hap_filter",
+            "inversion_freq_no_filter",
+            "inversion_freq_filter",
+        ])
+        .map_err(|e| VcfError::Io(e.into()))?;
 
     // Organize regions by chromosome
     let mut regions_per_chr: HashMap<String, Vec<&ConfigEntry>> = HashMap::new();
@@ -781,22 +620,16 @@ fn process_config_entries(
             chr, min_start, max_end
         );
 
-        let combined_mask_for_chr = mask.and_then(|m| m.get(&chr).cloned())
-            .map(Arc::new)
-            .unwrap_or_else(|| {
-                println!(
-                    "{}",
-                    format!(
-                        "Chromosome '{}' not found in mask or allow files. Masking entire chromosome.",
-                        chr
-                    )
-                    .yellow()
-                );
-                Arc::new(vec![(0, i64::MAX)])
-            });
-
-        // Pass the mask as Some(Arc<Vec<_>>)
-        let variants_data = match process_vcf(&vcf_file, &chr, min_start, max_end, min_gq, Some(combined_mask_for_chr.clone())) {
+        // Pass the mask and allow regions
+        let variants_data = match process_vcf(
+            &vcf_file,
+            &chr,
+            min_start,
+            max_end,
+            min_gq,
+            mask,
+            allow,
+        ) {
             Ok(data) => data,
             Err(e) => {
                 eprintln!("Error processing VCF file for {}: {}", chr, e);
@@ -804,139 +637,164 @@ fn process_config_entries(
             }
         };
 
-        let (unfiltered_variants, filtered_variants, sample_names, _chr_length, _missing_data_info, filtering_stats) = variants_data;
+        let (
+            unfiltered_variants,
+            filtered_variants,
+            sample_names,
+            _chr_length,
+            _missing_data_info,
+            filtering_stats,
+        ) = variants_data;
 
         // Collect all config samples for this chromosome
-        let all_config_samples: HashSet<String> = entries.iter()
+        let all_config_samples: HashSet<String> = entries
+            .iter()
             .flat_map(|entry| {
-                entry.samples_unfiltered.keys().cloned()
+                entry
+                    .samples_unfiltered
+                    .keys()
+                    .cloned()
                     .chain(entry.samples_filtered.keys().cloned())
             })
             .collect();
-        
+
         // Collect VCF sample names
-        let vcf_sample_set: HashSet<String> = sample_names.iter()
+        let vcf_sample_set: HashSet<String> = sample_names
+            .iter()
             .map(|s| extract_sample_id(s).to_string())
             .collect();
 
-        
         // Find missing samples
-        let missing_samples: Vec<String> = all_config_samples.difference(&vcf_sample_set).cloned().collect();
-        
+        let missing_samples: Vec<String> = all_config_samples
+            .difference(&vcf_sample_set)
+            .cloned()
+            .collect();
+
         // Print warning if there are missing samples
         if !missing_samples.is_empty() {
-            eprintln!("Warning: The following samples from config file are missing in VCF for chromosome {}: {:?}", chr, missing_samples);
+            eprintln!(
+                "Warning: The following samples from config file are missing in VCF for chromosome {}: {:?}",
+                chr, missing_samples
+            );
         }
 
         for entry in entries {
-            println!("Processing entry: {}:{}-{}", entry.seqname, entry.start, entry.end);
+            println!(
+                "Processing entry: {}:{}-{}",
+                entry.seqname, entry.start, entry.end
+            );
 
             // Define regions
             let sequence_length = entry.end - entry.start + 1;
 
             // Calculate total masked length overlapping with the region
-            let total_masked_length = calculate_masked_length(entry.start, entry.end, &combined_mask_for_chr[..]);
-            
-            // Calculate the number of filtered positions within the region
-            let number_of_filtered_positions_in_region = filtering_stats.filtered_positions.iter()
-                .filter(|&&pos| pos >= entry.start && pos <= entry.end)
-                .count() as i64;
-            
-            // Adjusted sequence length
-            let adjusted_sequence_length = sequence_length - total_masked_length - number_of_filtered_positions_in_region;
-            
-            // Process haplotype_group=0 (unfiltered)
-            let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) = match process_variants(
-                &unfiltered_variants,
-                &sample_names,
-                0,
-                &entry.samples_unfiltered,
-                entry.start,
-                entry.end,
-                None,
-            )? {
-                Some(values) => values,
-                None => continue, // Skip writing this record
+            let total_masked_length = if let Some(mask_regions_chr) = mask.and_then(|m| m.get(&chr)) {
+                calculate_masked_length(entry.start, entry.end, mask_regions_chr)
+            } else {
+                0
             };
+
+            // Adjusted sequence length
+            let adjusted_sequence_length = sequence_length - total_masked_length;
+
+            // Process haplotype_group=0 (unfiltered)
+            let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) =
+                match process_variants(
+                    &unfiltered_variants,
+                    &sample_names,
+                    0,
+                    &entry.samples_unfiltered,
+                    entry.start,
+                    entry.end,
+                    None,
+                )? {
+                    Some(values) => values,
+                    None => continue, // Skip writing this record
+                };
 
             // Process haplotype_group=1 (unfiltered)
-            let (num_segsites_1, w_theta_1, pi_1, n_hap_1_no_filter) = match process_variants(
-                &unfiltered_variants,
-                &sample_names,
-                1,
-                &entry.samples_unfiltered,
-                entry.start,
-                entry.end,
-                None,
-            )? {
-                Some(values) => values,
-                None => continue, // Skip writing this record
-            };
+            let (num_segsites_1, w_theta_1, pi_1, n_hap_1_no_filter) =
+                match process_variants(
+                    &unfiltered_variants,
+                    &sample_names,
+                    1,
+                    &entry.samples_unfiltered,
+                    entry.start,
+                    entry.end,
+                    None,
+                )? {
+                    Some(values) => values,
+                    None => continue, // Skip writing this record
+                };
 
             // Calculate allele frequency of inversions (no filter)
-            let inversion_freq_no_filter = calculate_inversion_allele_frequency(&entry.samples_unfiltered);
+            let inversion_freq_no_filter =
+                calculate_inversion_allele_frequency(&entry.samples_unfiltered);
 
             // Process haplotype_group=0 (filtered)
-            let (num_segsites_0_filt, w_theta_0_filt, pi_0_filt, n_hap_0_filt) = match process_variants(
-                &filtered_variants,
-                &sample_names,
-                0,
-                &entry.samples_filtered,
-                entry.start,
-                entry.end,
-                Some(adjusted_sequence_length),
-            )? {
-                Some(values) => values,
-                None => continue, // Skip writing this record
-            };
+            let (num_segsites_0_filt, w_theta_0_filt, pi_0_filt, n_hap_0_filt) =
+                match process_variants(
+                    &filtered_variants,
+                    &sample_names,
+                    0,
+                    &entry.samples_filtered,
+                    entry.start,
+                    entry.end,
+                    Some(adjusted_sequence_length),
+                )? {
+                    Some(values) => values,
+                    None => continue, // Skip writing this record
+                };
 
             // Process haplotype_group=1 (filtered)
-            let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) = match process_variants(
-                &filtered_variants,
-                &sample_names,
-                1,
-                &entry.samples_filtered,
-                entry.start,
-                entry.end,
-                Some(adjusted_sequence_length),
-            )? {
-                Some(values) => values,
-                None => continue, // Skip writing this record
-            };
+            let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) =
+                match process_variants(
+                    &filtered_variants,
+                    &sample_names,
+                    1,
+                    &entry.samples_filtered,
+                    entry.start,
+                    entry.end,
+                    Some(adjusted_sequence_length),
+                )? {
+                    Some(values) => values,
+                    None => continue, // Skip writing this record
+                };
 
             // Calculate allele frequency of inversions
             let inversion_freq_filt = calculate_inversion_allele_frequency(&entry.samples_filtered);
 
             // Write the aggregated results to CSV
-            writer.write_record(&[
-                &entry.seqname,
-                &entry.start.to_string(),
-                &entry.end.to_string(),
-                &sequence_length.to_string(), // 0_sequence_length
-                &sequence_length.to_string(), // 1_sequence_length
-                &adjusted_sequence_length.to_string(), // 0_sequence_length_adjusted
-                &adjusted_sequence_length.to_string(), // 1_sequence_length_adjusted
-                &num_segsites_0.to_string(),  // 0_segregating_sites
-                &num_segsites_1.to_string(),  // 1_segregating_sites
-                &format!("{:.6}", w_theta_0), // 0_w_theta
-                &format!("{:.6}", w_theta_1), // 1_w_theta
-                &format!("{:.6}", pi_0),      // 0_pi
-                &format!("{:.6}", pi_1),      // 1_pi
-                &num_segsites_0_filt.to_string(), // 0_segregating_sites_filtered
-                &num_segsites_1_filt.to_string(), // 1_segregating_sites_filtered
-                &format!("{:.6}", w_theta_0_filt), // 0_w_theta_filtered
-                &format!("{:.6}", w_theta_1_filt), // 1_w_theta_filtered
-                &format!("{:.6}", pi_0_filt),      // 0_pi_filtered
-                &format!("{:.6}", pi_1_filt),      // 1_pi_filtered
-                &n_hap_0_no_filter.to_string(),    // 0_num_hap_no_filter
-                &n_hap_1_no_filter.to_string(),    // 1_num_hap_no_filter
-                &n_hap_0_filt.to_string(),         // 0_num_hap_filter
-                &n_hap_1_filt.to_string(),         // 1_num_hap_filter
-                // -1.0 should never occur
-                &format!("{:.6}", inversion_freq_no_filter.unwrap_or(-1.0)), // inversion_freq_no_filter
-                &format!("{:.6}", inversion_freq_filt.unwrap_or(-1.0)),       // inversion_freq_filter
-            ])
-            .map_err(|e| VcfError::Io(e.into()))?;
+            writer
+                .write_record(&[
+                    &entry.seqname,
+                    &entry.start.to_string(),
+                    &entry.end.to_string(),
+                    &sequence_length.to_string(),          // 0_sequence_length
+                    &sequence_length.to_string(),          // 1_sequence_length
+                    &adjusted_sequence_length.to_string(), // 0_sequence_length_adjusted
+                    &adjusted_sequence_length.to_string(), // 1_sequence_length_adjusted
+                    &num_segsites_0.to_string(),           // 0_segregating_sites
+                    &num_segsites_1.to_string(),           // 1_segregating_sites
+                    &format!("{:.6}", w_theta_0),          // 0_w_theta
+                    &format!("{:.6}", w_theta_1),          // 1_w_theta
+                    &format!("{:.6}", pi_0),               // 0_pi
+                    &format!("{:.6}", pi_1),               // 1_pi
+                    &num_segsites_0_filt.to_string(),      // 0_segregating_sites_filtered
+                    &num_segsites_1_filt.to_string(),      // 1_segregating_sites_filtered
+                    &format!("{:.6}", w_theta_0_filt),     // 0_w_theta_filtered
+                    &format!("{:.6}", w_theta_1_filt),     // 1_w_theta_filtered
+                    &format!("{:.6}", pi_0_filt),          // 0_pi_filtered
+                    &format!("{:.6}", pi_1_filt),          // 1_pi_filtered
+                    &n_hap_0_no_filter.to_string(),        // 0_num_hap_no_filter
+                    &n_hap_1_no_filter.to_string(),        // 1_num_hap_no_filter
+                    &n_hap_0_filt.to_string(),             // 0_num_hap_filter
+                    &n_hap_1_filt.to_string(),             // 1_num_hap_filter
+                    // -1.0 should never occur
+                    &format!("{:.6}", inversion_freq_no_filter.unwrap_or(-1.0)), // inversion_freq_no_filter
+                    &format!("{:.6}", inversion_freq_filt.unwrap_or(-1.0)),      // inversion_freq_filter
+                ])
+                .map_err(|e| VcfError::Io(e.into()))?;
 
             println!(
                 "Successfully wrote record for {}:{}-{}",
@@ -950,7 +808,6 @@ fn process_config_entries(
     println!("Processing complete. Check the output file: {:?}", output_file);
     Ok(())
 }
-
 
 
 fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
