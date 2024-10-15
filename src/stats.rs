@@ -220,7 +220,7 @@ fn main() -> Result<(), VcfError> {
             &args.vcf_folder,
             output_file,
             args.min_gq,
-            combined_mask.as_ref().map(|v| &**v),
+            Some(&*combined_mask),
         )?;
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
@@ -262,7 +262,15 @@ fn main() -> Result<(), VcfError> {
         )?;
 
         for (chr, regions) in combined_mask.iter() {
-            println!("Chromosome '{}': Combined mask has {} regions.", chr, regions.len());
+            println!(
+                "{}",
+                format!(
+                    "Chromosome '{}': {} masked regions.",
+                    chr,
+                    regions.len()
+                )
+                .cyan()
+            );
             for (start, end) in regions {
                 println!("Masked interval: {}-{}", start, end);
             }
@@ -1149,6 +1157,63 @@ fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send>, VcfError> {
     } else {
         Ok(Box::new(BufReader::new(file)))
     }
+}
+
+// Function to collect all unique chromosome names from VCF files in the folder
+fn collect_vcf_chromosomes(vcf_folder: &str) -> Result<Vec<String>, VcfError> {
+    let path = Path::new(vcf_folder);
+    let mut chromosomes = HashSet::new();
+
+    // Iterate over all files in the VCF folder
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let file_path = entry.path();
+
+        // Process only .vcf and .vcf.gz files
+        if let Some(ext) = file_path.extension().and_then(|s| s.to_str()) {
+            if ext != "vcf" && ext != "gz" {
+                continue;
+            }
+        } else {
+            continue;
+        }
+
+        // Open the VCF file (handle gzipped files)
+        let file = File::open(&file_path)?;
+        let reader: Box<dyn BufRead> = if file_path.extension().and_then(|s| s.to_str()) == Some("gz") {
+            Box::new(BufReader::new(MultiGzDecoder::new(file)))
+        } else {
+            Box::new(BufReader::new(file))
+        };
+
+        // Read lines until header is found
+        let mut buffer = String::new();
+        while reader.read_line(&mut buffer)? > 0 {
+            if buffer.starts_with("#CHROM") {
+                break;
+            }
+            buffer.clear();
+        }
+
+        // Read variant records to collect chromosome names
+        for line_result in reader.lines() {
+            let line = line_result?;
+            if line.starts_with("#") {
+                continue; // Skip header lines
+            }
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.len() < 1 {
+                continue; // Skip invalid lines
+            }
+            let vcf_chr = fields[0].trim_start_matches("chr").to_string();
+            if !vcf_chr.is_empty() {
+                chromosomes.insert(vcf_chr);
+            }
+        }
+    }
+
+    let chromosomes: Vec<String> = chromosomes.into_iter().collect();
+    Ok(chromosomes)
 }
 
 
