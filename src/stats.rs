@@ -248,7 +248,20 @@ fn main() -> Result<(), VcfError> {
         println!("{}", format!("Processing VCF file: {}", vcf_file.display()).cyan());
 
         // Extract the combined mask for the specific chromosome
-        let combined_mask_for_chr = combined_mask.as_ref().and_then(|m| m.get(chr).cloned());
+        let combined_mask_for_chr = combined_mask.as_ref()
+            .and_then(|m| m.get(chr).cloned())
+            .map(Arc::new)
+            .unwrap_or_else(|| {
+                println!(
+                    "{}",
+                    format!(
+                        "Chromosome '{}' not found in mask or allow files. Masking entire chromosome.",
+                        chr
+                    )
+                    .yellow()
+                );
+                Arc::new(vec![(0, i64::MAX)])
+            });
 
         println!("Combined mask for {}: {:?}", chr, combined_mask_for_chr);
 
@@ -761,8 +774,19 @@ fn process_config_entries(
             chr, min_start, max_end
         );
 
-        // Extract variants from the VCF
-        let combined_mask_for_chr = mask.and_then(|m| m.get(&chr).cloned()).map(Arc::new);
+        let combined_mask_for_chr = mask.and_then(|m| m.get(&chr).cloned())
+            .map(Arc::new)
+            .unwrap_or_else(|| {
+                println!(
+                    "{}",
+                    format!(
+                        "Chromosome '{}' not found in mask or allow files within config entries. Masking entire chromosome.",
+                        chr
+                    )
+                    .yellow()
+                );
+                Arc::new(vec![(0, i64::MAX)])
+            });
 
         if combined_mask_for_chr.is_none() {
             eprintln!("Warning: No mask found for chromosome {}", chr);
