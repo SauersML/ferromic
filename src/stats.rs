@@ -1373,7 +1373,7 @@ fn parse_variant(
         )));
     }
 
-    let vcf_chr = fields[0].trim_start_matches("chr");
+    let vcf_chr = fields[0].trim().trim_start_matches("chr");
 
     if vcf_chr != chr.trim_start_matches("chr") {
         return Ok(None);
