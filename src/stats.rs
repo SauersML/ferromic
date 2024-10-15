@@ -221,6 +221,8 @@ fn main() -> Result<(), VcfError> {
             args.min_gq,
             mask_regions.as_deref(),
             allow_regions.as_deref(),
+            mask_bed,
+            allow_bed,
         )?;
 
         println!("{}", "Calculating diversity statistics...".blue());
@@ -1526,7 +1528,7 @@ fn parse_variant(
     }
 
     if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
-        if position_in_regions(adjusted_pos, mask_regions_chr) {
+        if position_in_regions(adjusted_pos_mask, mask_regions_chr) {
             // Position in masked regions, filter it
             filtering_stats.filtered_variants += 1;
             filtering_stats.filtered_due_to_mask += 1;
