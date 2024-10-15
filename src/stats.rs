@@ -1088,8 +1088,8 @@ fn process_vcf(
     start: i64,
     end: i64,
     min_gq: u16,
-    mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
+    mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
 ) -> Result<(
     Vec<Variant>,        // Unfiltered variants
     Vec<Variant>,        // Filtered variants
@@ -1182,8 +1182,8 @@ fn process_vcf(
             let result_sender = result_sender.clone();
             let chr = chr.to_string();
             let sample_names = Arc::clone(&sample_names);
-            let mask_regions = mask_regions.cloned();
-            let allow_regions = allow_regions.cloned();
+            let mask_regions = mask_regions.clone();
+            let allow_regions = allow_regions.clone();
             thread::spawn(move || -> Result<(), VcfError> {
                 while let Ok(line) = line_receiver.recv() {
                     let mut local_missing_data_info = MissingDataInfo::default();
@@ -1197,8 +1197,8 @@ fn process_vcf(
                         &sample_names,
                         min_gq,
                         &mut local_filtering_stats,
-                        allow_regions.as_ref(),
-                        mask_regions.as_ref(),
+                        allow_regions.as_deref(),
+                        mask_regions.as_deref(),
                     ) {
                         Ok(variant_option) => {
                             result_sender
