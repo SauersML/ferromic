@@ -578,13 +578,17 @@ fn position_in_mask(pos: i64, mask: &[(i64, i64)]) -> bool {
         } else if pos > end {
             left = mid + 1;
         } else {
-                //
-            return true; // Position is within a masked interval
+            // Position is within a masked interval
+            println!(
+                "Position {} is within masked interval {}-{}",
+                pos, start, end
+            );
+            return true;
         }
     }
+    println!("Position {} is not masked", pos);
     false
 }
-
 
 
 fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 {
