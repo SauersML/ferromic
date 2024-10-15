@@ -1374,6 +1374,7 @@ fn parse_variant(
     }
 
     let vcf_chr = fields[0].trim_start_matches("chr");
+
     if vcf_chr != chr.trim_start_matches("chr") {
         return Ok(None);
     }
@@ -1387,6 +1388,7 @@ fn parse_variant(
 
     let adjusted_pos = pos - 1; // Adjust VCF position (one-based) to zero-based
 
+    // Check allow regions
     if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
         if !position_in_regions(adjusted_pos, allow_regions_chr) {
             // Position not in allowed regions, filter it
@@ -1403,6 +1405,7 @@ fn parse_variant(
         return Ok(None);
     }
 
+    // Check mask regions
     if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
         if position_in_regions(adjusted_pos, mask_regions_chr) {
             // Position in masked regions, filter it
@@ -1417,16 +1420,6 @@ fn parse_variant(
         filtering_stats.filtered_due_to_allow += 1;
         filtering_stats.filtered_positions.insert(pos);
         return Ok(None);
-    }
-
-    if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
-        if position_in_regions(adjusted_pos, mask_regions_chr) {
-            // Position in masked regions, filter it
-            filtering_stats.filtered_variants += 1;
-            filtering_stats.filtered_due_to_mask += 1;
-            filtering_stats.filtered_positions.insert(pos);
-            return Ok(None);
-        }
     }
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
