@@ -193,8 +193,8 @@ fn main() -> Result<(), VcfError> {
             &args.vcf_folder,
             output_file,
             args.min_gq,
-            mask_regions.as_deref(),
-            allow_regions.as_deref(),
+            mask_regions.clone(),
+            allow_regions.clone(),
         )?;
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
@@ -226,8 +226,8 @@ fn main() -> Result<(), VcfError> {
             start,
             end,
             args.min_gq,
-            mask_regions.as_deref(),
-            allow_regions.as_deref(),
+            mask_regions.clone(),
+            allow_regions.clone(),
         )?;
 
         println!("{}", "Calculating diversity statistics...".blue());
@@ -557,8 +557,8 @@ fn process_config_entries(
     vcf_folder: &str,
     output_file: &Path,
     min_gq: u16,
-    mask: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    allow: Option<&HashMap<String, Vec<(i64, i64)>>>,
+    mask: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    allow: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
 ) -> Result<(), VcfError> {
     let mut writer = WriterBuilder::new()
         .has_headers(true)
@@ -626,15 +626,15 @@ fn process_config_entries(
             chr, min_start, max_end
         );
 
-        // Pass the mask and allow regions
+        // Pass the mask and allow regions (clone the Arc)
         let variants_data = match process_vcf(
             &vcf_file,
             &chr,
             min_start,
             max_end,
             min_gq,
-            mask,
-            allow,
+            mask.clone(),
+            allow.clone(),
         ) {
             Ok(data) => data,
             Err(e) => {
@@ -1197,8 +1197,8 @@ fn process_vcf(
                         &sample_names,
                         min_gq,
                         &mut local_filtering_stats,
-                        allow_regions.as_deref(),
-                        mask_regions.as_deref(),
+                        allow_regions.as_ref().map(|arc| arc.as_ref()),
+                        mask_regions.as_ref().map(|arc| arc.as_ref()),
                     ) {
                         Ok(variant_option) => {
                             result_sender
