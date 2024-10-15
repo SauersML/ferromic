@@ -693,15 +693,13 @@ fn process_config_entries(
             // Define regions
             let sequence_length = entry.end - entry.start + 1;
 
-            // Calculate total masked length overlapping with the region
-            let total_masked_length = if let Some(mask_regions_chr) = mask.as_ref().and_then(|m| m.get(&chr)) {
-                calculate_masked_length(entry.start, entry.end, mask_regions_chr)
-            } else {
-                0
-            };
-
-            // Adjusted sequence length
-            let adjusted_sequence_length = sequence_length - total_masked_length;
+            // Calculate adjusted sequence length considering allow and mask regions
+            let adjusted_sequence_length = calculate_adjusted_sequence_length(
+                entry.start,
+                entry.end,
+                allow.as_ref().and_then(|a| a.get(&chr)),
+                mask.as_ref().and_then(|m| m.get(&chr)),
+            );
 
             // Process haplotype_group=0 (unfiltered)
             let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) =
@@ -768,7 +766,8 @@ fn process_config_entries(
                 };
 
             // Calculate allele frequency of inversions
-            let inversion_freq_filt = calculate_inversion_allele_frequency(&entry.samples_filtered);
+            let inversion_freq_filt =
+                calculate_inversion_allele_frequency(&entry.samples_filtered);
 
             // Write the aggregated results to CSV
             writer
