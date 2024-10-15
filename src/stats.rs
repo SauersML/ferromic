@@ -815,6 +815,86 @@ fn process_config_entries(
 }
 
 
+fn calculate_adjusted_sequence_length(
+    region_start: i64,
+    region_end: i64,
+    allow_regions_chr: Option<&Vec<(i64, i64)>>,
+    mask_regions_chr: Option<&Vec<(i64, i64)>>,
+) -> i64 {
+    let mut allowed_intervals = Vec::new();
+
+    if let Some(allow_regions) = allow_regions_chr {
+        // Intersect the entry region with the allow regions
+        for &(start, end) in allow_regions {
+            let overlap_start = std::cmp::max(region_start, start);
+            let overlap_end = std::cmp::min(region_end, end);
+            if overlap_start <= overlap_end {
+                allowed_intervals.push((overlap_start, overlap_end));
+            }
+        }
+    } else {
+        // If no allow regions, the entire entry region is allowed
+        allowed_intervals.push((region_start, region_end));
+    }
+
+    // Subtract the masked regions from the allowed intervals
+    let unmasked_intervals = subtract_regions(&allowed_intervals, mask_regions_chr);
+
+    // Calculate the total length of unmasked intervals
+    let adjusted_length: i64 = unmasked_intervals
+        .iter()
+        .map(|&(start, end)| end - start + 1)
+        .sum();
+
+    adjusted_length
+}
+
+fn subtract_regions(
+    intervals: &Vec<(i64, i64)>,
+    masks: Option<&Vec<(i64, i64)>>
+) -> Vec<(i64, i64)> {
+    if masks.is_none() {
+        return intervals.clone();
+    }
+
+    let masks = masks.unwrap();
+    let mut result = Vec::new();
+
+    for &(start, end) in intervals {
+        // Start with the interval (start, end)
+        let mut current_intervals = vec![(start, end)];
+
+        for &(mask_start, mask_end) in masks {
+            let mut new_intervals = Vec::new();
+
+            for &(curr_start, curr_end) in &current_intervals {
+                if mask_end < curr_start || mask_start > curr_end {
+                    // No overlap
+                    new_intervals.push((curr_start, curr_end));
+                } else {
+                    // There is overlap
+                    if mask_start > curr_start {
+                        new_intervals.push((curr_start, mask_start - 1));
+                    }
+                    if mask_end < curr_end {
+                        new_intervals.push((mask_end + 1, curr_end));
+                    }
+                }
+            }
+
+            current_intervals = new_intervals;
+            if current_intervals.is_empty() {
+                break;
+            }
+        }
+
+        result.extend(current_intervals);
+    }
+
+    result
+}
+
+
 fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(b'\t')
