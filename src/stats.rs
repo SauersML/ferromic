@@ -1358,7 +1358,7 @@ fn process_vcf(
             println!("Missing data variants: {}", stats.missing_data_variants);
 
             println!("\n{}", "Example Filtered Variants:".green().bold());
-            for example in &_filtering_stats.filtered_examples {
+            for example in &_filtering_stats.lock().filtered_examples {
                 println!("{}", example);
             }
 
