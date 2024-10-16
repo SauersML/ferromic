@@ -385,7 +385,10 @@ mod tests {
         let _mask: Option<&[(i64, i64)]> = None;
 
         let valid_line = "chr1\t1500\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
-        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
+        let allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
+        let mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
+        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, allow_regions, mask_regions);
+
         assert!(result.is_ok());
         let some_variant = result.unwrap();
         assert!(some_variant.is_some());
@@ -449,7 +452,10 @@ mod tests {
         let _mask: Option<&[(i64, i64)]> = None;
 
         let valid_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
-        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask);
+        let allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
+        let mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
+        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, allow_regions, mask_regions);
+
         assert!(result.is_ok());
         if let Some((variant, is_valid)) = result.unwrap() {
             assert!(is_valid);
