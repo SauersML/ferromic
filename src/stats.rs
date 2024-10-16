@@ -1323,9 +1323,10 @@ fn process_vcf(
                     }
                 }
                 Ok(())
-            })
+            }
         })
-        .collect();
+    })
+    .collect();
 
     // Collector thread
     let collector_thread = thread::spawn({
