@@ -272,13 +272,17 @@ fn main() -> Result<(), VcfError> {
         println!("\n{}", "Results:".green().bold());
         println!("Example pairwise nucleotide substitutions from this run:");
         let mut rng = thread_rng();
-        for &((i, j), count, ref positions) in pairwise_diffs.choose_multiple(&mut rng, 5) {
-            let sample_positions: Vec<_> =
-                positions.choose_multiple(&mut rng, 5.min(positions.len())).cloned().collect();
-            println!(
-                "{}\t{}\t{}\t{:?}",
-                sample_names[i], sample_names[j], count, sample_positions
-            );
+        let filtered_variants = _filtered_variants.lock();
+        let num_to_print = 5.min(filtered_variants.len());
+        let random_variants: Vec<_> = filtered_variants.choose_multiple(&mut rng, num_to_print).collect();
+        
+        if random_variants.is_empty() {
+            println!("No filtered variants available.");
+        } else {
+            println!("Random filtered variants:");
+            for variant in random_variants {
+                println!("{:?}", variant);
+            }
         }
 
         println!("\nSequence Length:{}", seq_length);
