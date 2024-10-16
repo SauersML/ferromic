@@ -1458,8 +1458,6 @@ fn parse_variant(
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
-    _filtering_stats.total_variants += 1;
-
     let fields: Vec<&str> = line.split('\t').collect();
 
     let required_fixed_fields = 9;
@@ -1483,6 +1481,12 @@ fn parse_variant(
     if pos < start || pos > end {
         return Ok(None);
     }
+
+    _filtering_stats.total_variants += 1; // DO NOT MOVE THIS LINE ABOVE THE CHECK FOR WITHIN RANGE
+    // Only variants within the range get passed the collector which increments statistics.
+    // For variants outside the range, the consumer thread does not send any result to the collector.
+    // If this line is moved above the early return return Ok(None) in the range check, then it would increment all variants, not just those in the regions
+    // This would mean that the maximum number of variants filtered could be below the maximum number of variants, in the case that there are variants outside of the ranges (which would not even get far enough to need to be filtered, but would be included in the total).
 
     let adjusted_pos = pos - 1; // Adjust VCF position (one-based) to zero-based
 
