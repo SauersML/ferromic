@@ -87,6 +87,7 @@ struct FilteringStats {
     missing_data_variants: usize,
     low_gq_variants: usize,
     multi_allelic_variants: usize,
+    filtered_examples: Vec<String>,
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -1356,6 +1357,11 @@ fn process_vcf(
             println!("Low GQ variants: {}", stats.low_gq_variants);
             println!("Missing data variants: {}", stats.missing_data_variants);
 
+            println!("\n{}", "Example Filtered Variants:".green().bold());
+            for example in &_filtering_stats.filtered_examples {
+                println!("{}", example);
+            }
+
             Ok(())
         }
     });
@@ -1458,10 +1464,12 @@ fn parse_variant(
     // Check allow regions
     if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
         if !position_in_regions(adjusted_pos, allow_regions_chr) {
-            // Position not in allowed regions, filter it
             _filtering_stats._filtered_variants += 1;
             _filtering_stats.filtered_due_to_allow += 1;
             _filtering_stats.filtered_positions.insert(pos);
+            if _filtering_stats.filtered_examples.len() < 5 {
+                _filtering_stats.filtered_examples.push(format!("{}: Filtered due to allow", line.trim()));
+            }
             return Ok(None);
         }
     } else if allow_regions.is_some() {
@@ -1475,10 +1483,12 @@ fn parse_variant(
     // Check mask regions
     if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
         if position_in_regions(adjusted_pos, mask_regions_chr) {
-            // Position in masked regions, filter it
             _filtering_stats._filtered_variants += 1;
             _filtering_stats.filtered_due_to_mask += 1;
             _filtering_stats.filtered_positions.insert(pos);
+            if _filtering_stats.filtered_examples.len() < 5 {
+                _filtering_stats.filtered_examples.push(format!("{}: Filtered due to mask", line.trim()));
+            }
             return Ok(None);
         }
     } else if mask_regions.is_some() {
@@ -1570,6 +1580,9 @@ fn parse_variant(
         _filtering_stats.low_gq_variants += 1;
         _filtering_stats._filtered_variants += 1;
         _filtering_stats.filtered_positions.insert(pos);
+        if _filtering_stats.filtered_examples.len() < 5 {
+            _filtering_stats.filtered_examples.push(format!("{}: Filtered due to low GQ", line.trim()));
+        }
 
         let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
         let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
