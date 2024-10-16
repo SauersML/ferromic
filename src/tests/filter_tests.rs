@@ -2,14 +2,14 @@
 
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
-use std::fs::{self, File};
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
-fn test_variant_filtering_print_statements() -> Result<(), Box<dyn std::error::Error>> {
+fn test_variant_filtering_output() -> Result<(), Box<dyn std::error::Error>> {
+    // Create a temporary directory for the test environment
     let dir = tempdir()?;
     let temp_path = dir.path();
 
@@ -50,7 +50,7 @@ chr1\t81650508\t81707447\t81678978\tchr1-81642914-INV-66617\tpass\tinv\t0|0\t0|0
 ";
     fs::write(&config_file_path, config_content)?;
 
-    // chr22.test.vcf
+    // ../vcfs_test/chr22.test.vcf
     let chr22_vcf_content = "\
 ##fileformat=VCFv4.2
 ##INFO=<ID=AC,Number=A,Type=Integer,Description=\"Allele count in genotypes\">
@@ -71,7 +71,7 @@ chr22\t10832039\t.\tA\tG\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:408:0,-4
 ";
     fs::write(vcf_folder_path.join("chr22.test.vcf"), chr22_vcf_content)?;
 
-    // chr3.test.vcf
+    // ../vcfs_test/chr3.test.vcf
     let chr3_vcf_content = "\
 ##fileformat=VCFv4.2
 ##INFO=<ID=AC,Number=A,Type=Integer,Description=\"Allele count in genotypes\">
@@ -92,7 +92,7 @@ chr3\t200700\t.\tA\tT\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|1:408:0,-40.7
 ";
     fs::write(vcf_folder_path.join("chr3.test.vcf"), chr3_vcf_content)?;
 
-    // chr17.test.vcf
+    // ../vcfs_test/chr17.test.vcf
     let chr17_vcf_content = "\
 ##fileformat=VCFv4.2
 ##INFO=<ID=AC,Number=A,Type=Integer,Description=\"Allele count in genotypes\">
@@ -113,9 +113,9 @@ chr17\t3900\t.\tG\tC\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:408:0,-40.75
 ";
     fs::write(vcf_folder_path.join("chr17.test.vcf"), chr17_vcf_content)?;
 
-
-    // Determine binary path relative to the test file
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+    // Determine the path to the `vcf_stats` binary
+    // This assumes that the test is being run from the project root and the binary is built in release mode
+    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let vcf_stats_binary = if cfg!(windows) {
         project_root.join("target").join("release").join("vcf_stats.exe")
     } else {
@@ -124,10 +124,11 @@ chr17\t3900\t.\tG\tC\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:408:0,-40.75
 
     assert!(
         vcf_stats_binary.exists(),
-        "vcf_stats binary not found at {:?}. Please build the project before running tests.",
+        "vcf_stats binary not found at {:?}. Please build the project before running tests using `cargo build --release`.",
         vcf_stats_binary
     );
 
+    // Execute the `vcf_stats` binary with the test files as arguments
     let mut cmd = Command::new(&vcf_stats_binary);
     cmd.arg("--vcf_folder")
         .arg(&vcf_folder_path)
@@ -140,7 +141,8 @@ chr17\t3900\t.\tG\tC\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:408:0,-40.75
         .arg("--allow_file")
         .arg(&allow_file_path);
 
-    let output = cmd.assert()
+    // Capture and assert the `stdout` contains the expected output statements
+    cmd.assert()
         .success()
         .stdout(predicate::str::contains("Filtering Statistics:"))
         .stdout(predicate::str::contains("Total variants processed: 5"))
@@ -152,11 +154,11 @@ chr17\t3900\t.\tG\tC\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:408:0,-40.75
         .stdout(predicate::str::contains("Low GQ variants: 1"))
         .stdout(predicate::str::contains("Filtered variants: 2 (40.00%)"))
         .stdout(predicate::str::contains("Filtered due to allow: 5"))
-        .stdout(predicate::str::contains("Filtered variants: 5 (100.00%)"))
-        .get_output();
+        .stdout(predicate::str::contains("Filtered variants: 5 (100.00%)"));
 
     let output_csv = fs::read_to_string(&output_file_path)?;
 
+    // Clean up the temporary directory
     dir.close()?;
 
     Ok(())
