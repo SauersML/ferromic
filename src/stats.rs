@@ -2,7 +2,6 @@ use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
-use itertools::Itertools;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -81,7 +80,7 @@ struct RegionStats {
 #[derive(Debug, Default)]
 struct FilteringStats {
     total_variants: usize,
-    filtered_variants: usize,
+    _filtered_variants: usize,
     filtered_due_to_mask: usize,
     filtered_due_to_allow: usize,
     filtered_positions: HashSet<i64>,
@@ -215,11 +214,11 @@ fn main() -> Result<(), VcfError> {
         // Process the VCF file
         let (
             unfiltered_variants,
-            filtered_variants,
+            _filtered_variants,
             sample_names,
             chr_length,
             missing_data_info,
-            filtering_stats,
+            _filtering_stats,
         ) = process_vcf(
             &vcf_file,
             &chr,
@@ -313,19 +312,19 @@ fn main() -> Result<(), VcfError> {
         println!("\n{}", "Filtering Statistics:".green().bold());
         println!(
             "Total variants processed: {}",
-            filtering_stats.total_variants
+            _filtering_stats.total_variants
         );
         println!(
             "Filtered variants: {} ({:.2}%)",
-            filtering_stats.filtered_variants,
-            (filtering_stats.filtered_variants as f64 / filtering_stats.total_variants as f64)
+            _filtering_stats._filtered_variants,
+            (_filtering_stats._filtered_variants as f64 / _filtering_stats.total_variants as f64)
                 * 100.0
         );
-        println!("Multi-allelic variants: {}", filtering_stats.multi_allelic_variants);
-        println!("Low GQ variants: {}", filtering_stats.low_gq_variants);
+        println!("Multi-allelic variants: {}", _filtering_stats.multi_allelic_variants);
+        println!("Low GQ variants: {}", _filtering_stats.low_gq_variants);
         println!(
             "Missing data variants: {}",
-            filtering_stats.missing_data_variants
+            _filtering_stats.missing_data_variants
         );
 
         let missing_data_percentage =
@@ -645,11 +644,11 @@ fn process_config_entries(
 
         let (
             unfiltered_variants,
-            filtered_variants,
+            _filtered_variants,
             sample_names,
             _chr_length,
             _missing_data_info,
-            filtering_stats,
+            _filtering_stats,
         ) = variants_data;
 
         // Collect all config samples for this chromosome
@@ -738,7 +737,7 @@ fn process_config_entries(
             // Process haplotype_group=0 (filtered)
             let (num_segsites_0_filt, w_theta_0_filt, pi_0_filt, n_hap_0_filt) =
                 match process_variants(
-                    &filtered_variants,
+                    &_filtered_variants,
                     &sample_names,
                     0,
                     &entry.samples_filtered,
@@ -753,7 +752,7 @@ fn process_config_entries(
             // Process haplotype_group=1 (filtered)
             let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) =
                 match process_variants(
-                    &filtered_variants,
+                    &_filtered_variants,
                     &sample_names,
                     1,
                     &entry.samples_filtered,
@@ -1182,10 +1181,10 @@ fn process_vcf(
     let chr_length = 0;
     
     let unfiltered_variants = Arc::new(Mutex::new(Vec::new()));
-    let filtered_variants = Arc::new(Mutex::new(Vec::new()));
+    let _filtered_variants = Arc::new(Mutex::new(Vec::new()));
 
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
-    let filtering_stats = Arc::new(Mutex::new(FilteringStats::default()));
+    let _filtering_stats = Arc::new(Mutex::new(FilteringStats::default()));
 
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
     let progress_bar = if is_gzipped {
@@ -1242,11 +1241,11 @@ fn process_vcf(
 
     // Spawn producer thread
     let producer_thread = thread::spawn(move || -> Result<(), VcfError> {
-        let mut line_count = 0;
+        let mut _line_count = 0;
         while reader.read_line(&mut buffer)? > 0 {
             line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
             buffer.clear();
-            line_count += 1;
+            _line_count += 1;
         }
         drop(line_sender);
         Ok(())
@@ -1303,25 +1302,25 @@ fn process_vcf(
     // Collector thread
     let collector_thread = thread::spawn({
         let unfiltered_variants = unfiltered_variants.clone();
-        let filtered_variants = filtered_variants.clone();
+        let _filtered_variants = _filtered_variants.clone();
         let missing_data_info = missing_data_info.clone();
-        let filtering_stats = filtering_stats.clone();
+        let _filtering_stats = _filtering_stats.clone();
         move || -> Result<(), VcfError> {
             while let Ok(result) = result_receiver.recv() {
                 match result {
                     Ok((Some((variant, passes_filters)), local_missing_data_info, local_filtering_stats)) => {
                         unfiltered_variants.lock().push(variant.clone());
                         if passes_filters {
-                            filtered_variants.lock().push(variant);
+                            _filtered_variants.lock().push(variant);
                         }
                         let mut global_missing_data_info = missing_data_info.lock();
                         global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
                         global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
                         global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
                         
-                        let mut global_filtering_stats = filtering_stats.lock();
+                        let mut global_filtering_stats = _filtering_stats.lock();
                         global_filtering_stats.total_variants += local_filtering_stats.total_variants;
-                        global_filtering_stats.filtered_variants += local_filtering_stats.filtered_variants;
+                        global_filtering_stats._filtered_variants += local_filtering_stats._filtered_variants;
                         global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
                         global_filtering_stats.filtered_due_to_mask += local_filtering_stats.filtered_due_to_mask;
                         global_filtering_stats.filtered_due_to_allow += local_filtering_stats.filtered_due_to_allow;
@@ -1335,9 +1334,9 @@ fn process_vcf(
                         global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
                         global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
                         
-                        let mut global_filtering_stats = filtering_stats.lock();
+                        let mut global_filtering_stats = _filtering_stats.lock();
                         global_filtering_stats.total_variants += local_filtering_stats.total_variants;
-                        global_filtering_stats.filtered_variants += local_filtering_stats.filtered_variants;
+                        global_filtering_stats._filtered_variants += local_filtering_stats._filtered_variants;
                         global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
                         global_filtering_stats.filtered_due_to_mask += local_filtering_stats.filtered_due_to_mask;
                         global_filtering_stats.filtered_due_to_allow += local_filtering_stats.filtered_due_to_allow;
@@ -1353,14 +1352,14 @@ fn process_vcf(
             }
 
             // After consuming all messages, print filtering statistics
-            let stats = filtering_stats.lock();
+            let stats = _filtering_stats.lock();
 
             println!("\n{}", "Filtering Statistics:".green().bold());
             println!("Total variants processed: {}", stats.total_variants);
             println!(
                 "Filtered variants: {} ({:.2}%)",
-                stats.filtered_variants,
-                (stats.filtered_variants as f64 / stats.total_variants as f64) * 100.0
+                stats._filtered_variants,
+                (stats._filtered_variants as f64 / stats.total_variants as f64) * 100.0
             );
             println!("Filtered due to allow: {}", stats.filtered_due_to_allow);
             println!("Filtered due to mask: {}", stats.filtered_due_to_mask);
@@ -1389,14 +1388,14 @@ fn process_vcf(
     let final_unfiltered_variants = Arc::try_unwrap(unfiltered_variants)
         .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
         .into_inner();
-    let final_filtered_variants = Arc::try_unwrap(filtered_variants)
+    let final_filtered_variants = Arc::try_unwrap(_filtered_variants)
         .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
         .into_inner();
             
     let final_missing_data_info = Arc::try_unwrap(missing_data_info)
         .map_err(|_| VcfError::Parse("Missing data info still have multiple owners".to_string()))?
         .into_inner();
-    let final_filtering_stats = Arc::try_unwrap(filtering_stats)
+    let final_filtering_stats = Arc::try_unwrap(_filtering_stats)
         .map_err(|_| VcfError::Parse("Filtering stats still have multiple owners".to_string()))?
         .into_inner();
 
@@ -1435,11 +1434,11 @@ fn parse_variant(
     missing_data_info: &mut MissingDataInfo,
     sample_names: &[String],
     min_gq: u16,
-    filtering_stats: &mut FilteringStats,
+    _filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
-    filtering_stats.total_variants += 1;
+    _filtering_stats.total_variants += 1;
 
     let fields: Vec<&str> = line.split('\t').collect();
 
@@ -1471,16 +1470,16 @@ fn parse_variant(
     if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
         if !position_in_regions(adjusted_pos, allow_regions_chr) {
             // Position not in allowed regions, filter it
-            filtering_stats.filtered_variants += 1;
-            filtering_stats.filtered_due_to_allow += 1;
-            filtering_stats.filtered_positions.insert(pos);
+            _filtering_stats._filtered_variants += 1;
+            _filtering_stats.filtered_due_to_allow += 1;
+            _filtering_stats.filtered_positions.insert(pos);
             return Ok(None);
         }
     } else if allow_regions.is_some() {
         // If allow_regions is provided, but there are no allowed regions for this chromosome, filter it
-        filtering_stats.filtered_variants += 1;
-        filtering_stats.filtered_due_to_allow += 1;
-        filtering_stats.filtered_positions.insert(pos);
+        _filtering_stats._filtered_variants += 1;
+        _filtering_stats.filtered_due_to_allow += 1;
+        _filtering_stats.filtered_positions.insert(pos);
         return Ok(None);
     }
 
@@ -1488,9 +1487,9 @@ fn parse_variant(
     if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
         if position_in_regions(adjusted_pos, mask_regions_chr) {
             // Position in masked regions, filter it
-            filtering_stats.filtered_variants += 1;
-            filtering_stats.filtered_due_to_mask += 1;
-            filtering_stats.filtered_positions.insert(pos);
+            _filtering_stats._filtered_variants += 1;
+            _filtering_stats.filtered_due_to_mask += 1;
+            _filtering_stats.filtered_positions.insert(pos);
             return Ok(None);
         }
     } else if mask_regions.is_some() {
@@ -1503,7 +1502,7 @@ fn parse_variant(
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
     let is_multiallelic = alt_alleles.len() > 1;
     if is_multiallelic {
-        filtering_stats.multi_allelic_variants += 1;
+        _filtering_stats.multi_allelic_variants += 1;
         eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not fully supported.", pos).yellow());
     }
 
@@ -1540,7 +1539,7 @@ fn parse_variant(
         .collect();
 
     let mut sample_has_low_gq = false;
-    let mut num_samples_below_gq = 0;
+    let mut _num_samples_below_gq = 0;
 
     for gt_field in fields[9..].iter() {
         let gt_subfields: Vec<&str> = gt_field.split(':').collect();
@@ -1571,17 +1570,17 @@ fn parse_variant(
         // Check if GQ value is below the minimum threshold
         if gq_value < min_gq {
             sample_has_low_gq = true;
-            num_samples_below_gq += 1;
+            _num_samples_below_gq += 1;
         }
     }
 
     if sample_has_low_gq {
         // Skip this variant
-        //let percent_low_gq = (num_samples_below_gq as f64 / (fields.len() - 9) as f64) * 100.0;
+        //let percent_low_gq = (_num_samples_below_gq as f64 / (fields.len() - 9) as f64) * 100.0;
         //eprintln!("Warning: Variant at position {} excluded due to low GQ. {:.2}% of samples had GQ below threshold.", pos, percent_low_gq);
-        filtering_stats.low_gq_variants += 1;
-        filtering_stats.filtered_variants += 1;
-        filtering_stats.filtered_positions.insert(pos);
+        _filtering_stats.low_gq_variants += 1;
+        _filtering_stats._filtered_variants += 1;
+        _filtering_stats.filtered_positions.insert(pos);
 
         let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
         let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
@@ -1596,7 +1595,7 @@ fn parse_variant(
     
     // Do not exclude the variant; update the missing data info
     if genotypes.iter().any(|gt| gt.is_none()) {
-        filtering_stats.missing_data_variants += 1;
+        _filtering_stats.missing_data_variants += 1;
         // Do not return; continue processing
     }
 
@@ -1605,16 +1604,16 @@ fn parse_variant(
     
     // Update filtering stats if variant is filtered out
     if !passes_filters {
-        filtering_stats.filtered_variants += 1;
-        filtering_stats.filtered_positions.insert(pos);
+        _filtering_stats._filtered_variants += 1;
+        _filtering_stats.filtered_positions.insert(pos);
         if sample_has_low_gq {
-            filtering_stats.low_gq_variants += 1;
+            _filtering_stats.low_gq_variants += 1;
         }
         if genotypes.iter().any(|gt| gt.is_none()) {
-            filtering_stats.missing_data_variants += 1;
+            _filtering_stats.missing_data_variants += 1;
         }
         if alt_alleles.len() > 1 {
-            filtering_stats.multi_allelic_variants += 1;
+            _filtering_stats.multi_allelic_variants += 1;
         }
     }
 
