@@ -272,7 +272,7 @@ fn main() -> Result<(), VcfError> {
         println!("\n{}", "Results:".green().bold());
         println!("Example pairwise nucleotide substitutions from this run:");
         let mut rng = thread_rng();
-        let filtered_variants = _filtered_variants.lock();
+        let filtered_variants = &_filtered_variants;
         let num_to_print = 5.min(filtered_variants.len());
         let random_variants: Vec<_> = filtered_variants.choose_multiple(&mut rng, num_to_print).collect();
         
