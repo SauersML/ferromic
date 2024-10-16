@@ -1288,12 +1288,13 @@ fn process_vcf(
             let chr = chr.to_string();
             let sample_names = Arc::clone(&sample_names);
             let mask_regions = mask_regions.clone();
-            let allow_regions = allow_regions.clone();
-            thread::spawn(move || -> Result<(), VcfError> {
-                while let Ok(line) = line_receiver.recv() {
-                    let mut local_missing_data_info = MissingDataInfo::default();
-                    let mut local_filtering_stats = FilteringStats::default();
-                    match parse_variant(
+            thread::spawn({
+                let allow_regions = allow_regions.clone();
+                move || -> Result<(), VcfError> {
+                    while let Ok(line) = line_receiver.recv() {
+                        let mut local_missing_data_info = MissingDataInfo::default();
+                        let mut local_filtering_stats = FilteringStats::default();
+                        match parse_variant(
                         &line,
                         &chr,
                         start,
