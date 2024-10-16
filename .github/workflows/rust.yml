@@ -30,9 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: cargo build --verbose
+        run: cargo build --verbose --release
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --verbose --release
 
   create_release:
     name: Create Release
