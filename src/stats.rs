@@ -1593,26 +1593,22 @@ fn parse_variant(
     }
 
     if sample_has_low_gq {
-        // Skip this variant
-        //let percent_low_gq = (_num_samples_below_gq as f64 / (fields.len() - 9) as f64) * 100.0;
-        //eprintln!("Warning: Variant at position {} excluded due to low GQ. {:.2}% of samples had GQ below threshold.", pos, percent_low_gq);
         _filtering_stats.low_gq_variants += 1;
         _filtering_stats._filtered_variants += 1;
         _filtering_stats.filtered_positions.insert(pos);
-        if _filtering_stats.filtered_examples.len() < 5 {
-            _filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
-        }
-
+        _filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
+        
         let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
         let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
-
+    
         let variant = Variant {
             position: pos,
             genotypes: genotypes.clone(),
         };
-
-        return Ok(Some((variant, passes_filters))) // This can exlcude the entire variant for all samples
+    
+        return Ok(Some((variant, passes_filters)));
     }
+
     
     // Do not exclude the variant; update the missing data info
     if genotypes.iter().any(|gt| gt.is_none()) {
@@ -1627,14 +1623,20 @@ fn parse_variant(
     if !passes_filters {
         _filtering_stats._filtered_variants += 1;
         _filtering_stats.filtered_positions.insert(pos);
+        
         if sample_has_low_gq {
             _filtering_stats.low_gq_variants += 1;
+            _filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
         }
+        
         if genotypes.iter().any(|gt| gt.is_none()) {
             _filtering_stats.missing_data_variants += 1;
+            _filtering_stats.add_example(format!("{}: Filtered due to missing data", line.trim()));
         }
-        if alt_alleles.len() > 1 {
+        
+        if is_multiallelic {
             _filtering_stats.multi_allelic_variants += 1;
+            _filtering_stats.add_example(format!("{}: Filtered due to multi-allelic variant", line.trim()));
         }
     }
 
