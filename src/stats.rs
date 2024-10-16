@@ -1326,6 +1326,10 @@ fn process_vcf(
                         global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
                         global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
                         global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
+
+                        for example in local_filtering_stats.filtered_examples.iter() {
+                            global_filtering_stats.add_example(example.clone());
+                        }
                     },
                     Ok((None, local_missing_data_info, local_filtering_stats)) => {
                         let mut global_missing_data_info = missing_data_info.lock();
@@ -1342,6 +1346,9 @@ fn process_vcf(
                         global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
                         global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
                         global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
+                        for example in local_filtering_stats.filtered_examples.iter() {
+                            global_filtering_stats.add_example(example.clone());
+                        }
                     },
                     Err(e) => {
                         // Record the error but continue consuming messages
