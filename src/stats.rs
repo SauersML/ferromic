@@ -94,6 +94,7 @@ impl FilteringStats {
     // Adds an example if there are fewer than 5
     fn add_example(&mut self, example: String) {
         if self.filtered_examples.len() < 5 {
+            println!("Adding example - {}", example); // Debug
             self.filtered_examples.push(example);
         }
     }
@@ -1486,9 +1487,7 @@ fn parse_variant(
             _filtering_stats._filtered_variants += 1;
             _filtering_stats.filtered_due_to_allow += 1;
             _filtering_stats.filtered_positions.insert(pos);
-            if _filtering_stats.filtered_examples.len() < 5 {
-                _filtering_stats.filtered_examples.push(format!("{}: Filtered due to allow", line.trim()));
-            }
+            _filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
             return Ok(None);
         }
     } else if allow_regions.is_some() {
@@ -1496,6 +1495,7 @@ fn parse_variant(
         _filtering_stats._filtered_variants += 1;
         _filtering_stats.filtered_due_to_allow += 1;
         _filtering_stats.filtered_positions.insert(pos);
+        _filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
         return Ok(None);
     }
 
@@ -1505,15 +1505,13 @@ fn parse_variant(
             _filtering_stats._filtered_variants += 1;
             _filtering_stats.filtered_due_to_mask += 1;
             _filtering_stats.filtered_positions.insert(pos);
-            if _filtering_stats.filtered_examples.len() < 5 {
-                _filtering_stats.filtered_examples.push(format!("{}: Filtered due to mask", line.trim()));
-            }
+            _filtering_stats.add_example(format!("{}: Filtered due to mask", line.trim()));
             return Ok(None);
         }
     } else if mask_regions.is_some() {
         // If mask_regions is provided but there are no mask regions for this chromosome,
         // we do not filter the variant since it's not masked.
-        // This is seperate from the allow file behavior, which restricts anything not explicitly allowed.
+        // This is separate from the allow file behavior, which restricts anything not explicitly allowed.
         // No action needed here; we proceed with processing.
     }
 
@@ -1522,6 +1520,7 @@ fn parse_variant(
     if is_multiallelic {
         _filtering_stats.multi_allelic_variants += 1;
         eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not fully supported.", pos).yellow());
+        _filtering_stats.add_example(format!("{}: Filtered due to multi-allelic variant", line.trim()));
     }
 
     // Parse the FORMAT field to get the indices of the subfields
@@ -1581,8 +1580,8 @@ fn parse_variant(
                 Err(_) => {
                     eprintln!("Missing GQ value '{}' at {}:{}. Treating as 0.", gq_str, chr, pos);
                     0
-                }
-            }
+                },
+            },
         };
     
         // Check if GQ value is below the minimum threshold
@@ -1593,27 +1592,28 @@ fn parse_variant(
     }
 
     if sample_has_low_gq {
+        // Skip this variant
         _filtering_stats.low_gq_variants += 1;
         _filtering_stats._filtered_variants += 1;
         _filtering_stats.filtered_positions.insert(pos);
         _filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
-        
+    
         let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
         let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
-    
+
         let variant = Variant {
             position: pos,
             genotypes: genotypes.clone(),
         };
-    
+
         return Ok(Some((variant, passes_filters)));
     }
-
     
     // Do not exclude the variant; update the missing data info
     if genotypes.iter().any(|gt| gt.is_none()) {
         _filtering_stats.missing_data_variants += 1;
-        // Do not return; continue processing
+        _filtering_stats.add_example(format!("{}: Filtered due to missing data", line.trim()));
+        // Continue processing
     }
 
     let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
@@ -1648,7 +1648,6 @@ fn parse_variant(
     // Return the parsed variant and whether it passes filters
     Ok(Some((variant, passes_filters)))
 }
-
 
 
 fn count_segregating_sites(variants: &[Variant]) -> usize {
