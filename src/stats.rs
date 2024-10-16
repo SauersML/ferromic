@@ -270,21 +270,6 @@ fn main() -> Result<(), VcfError> {
         let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
         println!("\n{}", "Results:".green().bold());
-        println!("Example pairwise nucleotide substitutions from this run:");
-        let mut rng = thread_rng();
-        let filtered_variants = &_filtered_variants;
-        let num_to_print = 5.min(filtered_variants.len());
-        let random_variants: Vec<_> = filtered_variants.choose_multiple(&mut rng, num_to_print).collect();
-        
-        if random_variants.is_empty() {
-            println!("No filtered variants available.");
-        } else {
-            println!("Random filtered variants:");
-            for variant in random_variants {
-                println!("{:?}", variant);
-            }
-        }
-
         println!("\nSequence Length:{}", seq_length);
         println!("Number of Segregating Sites:{}", num_segsites);
         println!("Raw Variant Count:{}", raw_variant_count);
