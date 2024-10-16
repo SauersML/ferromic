@@ -1600,7 +1600,7 @@ fn parse_variant(
         _filtering_stats._filtered_variants += 1;
         _filtering_stats.filtered_positions.insert(pos);
         if _filtering_stats.filtered_examples.len() < 5 {
-            _filtering_stats.filtered_examples.push(format!("{}: Filtered due to low GQ", line.trim()));
+            _filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
         }
 
         let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
