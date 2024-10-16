@@ -1261,6 +1261,7 @@ fn process_vcf(
         }
         buffer.clear();
     }
+    buffer.clear();
 
     // Set up channels for communication between threads
     let (line_sender, line_receiver) = bounded(1000);
