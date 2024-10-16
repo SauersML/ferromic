@@ -153,7 +153,7 @@ chr17	58001	.	G	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:479:0,-46.9443,-213.
 
     // Capture and assert the `stdout` contains the expected output statements
     cmd.assert()
-        .failure()
+        .success()
         .stderr(predicate::str::contains("Error finding VCF file for 1: NoVcfFiles"))
         .stdout(predicate::str::contains("Filtering Statistics:"))
         .stdout(predicate::str::contains("Total variants processed: 5"))
