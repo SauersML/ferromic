@@ -62,12 +62,12 @@ chr1\t81650508\t81707447\t81678978\tchr1-81642914-INV-66617\tpass\tinv\t0|0\t0|0
 ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Phred scaled genotype quality computed by whatshap genotyping algorithm.\">
 ##FORMAT=<ID=GL,Number=G,Type=Float,Description=\"log10-scaled likelihoods for genotypes: 0/0,0/1,1/1, computed by whatshap genotyping algorithm.\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">
-#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tEUR_GBR_HG00096\tEUR_FIN_HG00171\tEUR_FIN_HG00268
-chr22\t1234\t.\tG\tA\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|1:469:0,-42.9443,-213.646:.\t1|0:498:0,-49.7769,-315.657:.\t0|0:276:0,-27.5614,-170.553:.\t
-chr22\t1253\t.\tG\tT\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|1:469:0,-46.9343,-213.646:.\t1|0:498:0,-49.7769,-315.657:.\t1|1:276:0,-27.5614,-151.073:.\t
-chr22\t10731885\t.\tC\tT\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:469:0,-46.9443,-213.646:.\t0|0:498:0,-49.7769,-315.657:.\t0|0:276:0,-27.5614,-141.056:.\t
-chr22\t10732039\t.\tC\tT\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:438:0,-40.7527,-202.874:.\t1|0:480:0,-48.0367,-309.11:.\t0|0:323:0,-32.3138,-164.506:.\t
-chr22\t10832039\t.\tA\tG\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:408:0,-41.7547,-202.874:.\t0|1:480:0,-48.0367,-309.11:.\t0|0:323:0,-32.3138,-162.569:.\t
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	EUR_GBR_HG00096	EUR_FIN_HG00171	EUR_FIN_HG00268
+chr22	1234	.	G	A	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|1:469:0,-42.9443,-213.646:.	1|0:498:0,-49.7769,-315.657:.	0|0:276:0,-27.5614,-170.553:.
+chr22	1253	.	G	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|1:469:0,-46.9343,-213.646:.	1|0:498:0,-49.7769,-315.657:.	1|1:276:0,-27.5614,-151.073:.
+chr22	10731885	.	C	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:469:0,-46.9443,-213.646:.	0|0:498:0,-49.7769,-315.657:.	0|0:276:0,-27.5614,-141.056:.
+chr22	10732039	.	C	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:438:0,-40.7527,-202.874:.	1|0:480:0,-48.0367,-309.11:.	0|0:323:0,-32.3138,-164.506:.
+chr22	10832039	.	A	G	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:408:0,-41.7547,-202.874:.	0|1:480:0,-48.0367,-309.11:.	0|0:323:0,-32.3138,-162.569:.
 ";
     fs::write(vcf_folder_path.join("chr22.test.vcf"), chr22_vcf_content)?;
 
@@ -83,12 +83,12 @@ chr22\t10832039\t.\tA\tG\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:408:0,-4
 ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Phred scaled genotype quality computed by whatshap genotyping algorithm.\">
 ##FORMAT=<ID=GL,Number=G,Type=Float,Description=\"log10-scaled likelihoods for genotypes: 0/0,0/1,1/1, computed by whatshap genotyping algorithm.\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">
-#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tEUR_GBR_HG00096\tEUR_FIN_HG00171\tEUR_FIN_HG00268
-chr3\t10000\t.\tA\tG\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:469:0,-46.9443,-213.646:.\t1|0:498:0,-49.7769,-315.657:.\t0|0:276:0,-27.5614,-170.553:.\t
-chr3\t10100\t.\tG\tA\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:469:0,-46.9443,-213.646:.\t1|0:498:0,-49.7769,-315.657:.\t0|0:276:0,-27.5614,-151.073:.\t
-chr3\t200400\t.\tC\tT\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:469:0,-46.9443,-213.646:.\t0|0:498:0,-49.7769,-315.657:.\t0|1:276:0,-27.5614,-141.056:.\t
-chr3\t200500\t.\tG\tA\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:20:0,-40.7527,-150.874:.\t0|0:480:0,-48.0367,-309.11:.\t0|0:323:0,-32.3138,-164.506:.\t
-chr3\t200700\t.\tA\tT\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|1:408:0,-40.7527,-202.874:.\t0|0:480:0,-48.0367,-309.11:.\t010:323:0,-32.3138,-162.569:.\t
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	EUR_GBR_HG00096	EUR_FIN_HG00171	EUR_FIN_HG00268
+chr3	10000	.	A	G	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:469:0,-46.9443,-213.646:.	1|0:498:0,-49.7769,-315.657:.	0|0:276:0,-27.5614,-170.553:.
+chr3	10100	.	G	A	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:469:0,-46.9443,-213.646:.	1|0:498:0,-49.7769,-315.657:.	0|0:276:0,-27.5614,-151.073:.
+chr3	200400	.	C	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:469:0,-46.9443,-213.646:.	0|0:498:0,-49.7769,-315.657:.	0|1:276:0,-27.5614,-141.056:.
+chr3	200500	.	G	A	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:20:0,-40.7527,-150.874:.	0|0:480:0,-48.0367,-309.11:.	0|0:323:0,-32.3138,-164.506:.
+chr3	200700	.	A	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|1:408:0,-40.7527,-202.874:.	0|0:480:0,-48.0367,-309.11:.	0|1:323:0,-32.3138,-162.569:.
 ";
     fs::write(vcf_folder_path.join("chr3.test.vcf"), chr3_vcf_content)?;
 
@@ -104,12 +104,12 @@ chr3\t200700\t.\tA\tT\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|1:408:0,-40.7
 ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Phred scaled genotype quality computed by whatshap genotyping algorithm.\">
 ##FORMAT=<ID=GL,Number=G,Type=Float,Description=\"log10-scaled likelihoods for genotypes: 0/0,0/1,1/1, computed by whatshap genotyping algorithm.\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">
-#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tEUR_GBR_HG00096\tEUR_FIN_HG00171\tEUR_FIN_HG00268
-chr17\t2400\t.\tG\tT\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:452:0,-46.9443,-213.646:.\t1|0:498:0,-49.7769,-315.657:.\t0|0:276:0,-27.5614,-170.553:.\t
-chr17\t2800\t.\tG\tT\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:479:0,-46.9443,-213.646:.\t0|0:498:0,-49.7769,-315.657:.\t0|0:276:0,-27.5614,-151.073:.\t
-chr17\t3100\t.\tA\tG\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:469:0,-46.9443,-213.646:.\t0|0:498:0,-49.7769,-315.657:.\t0|0:276:0,-27.5614,-141.056:.\t
-chr17\t3600\t.\tT\tA\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:408:0,-40.7527,-202.874:.\t0|0:480:0,-48.0367,-309.11:.\t0|0:323:0,-32.3138,-164.506:.\t
-chr17\t3900\t.\tG\tC\t.\t.\tAA=C;VT=SNP;AN=6;AC=0\tGT:GQ:GL:PS\t0|0:408:0,-40.7527,-202.874:.\t0|0:480:0,-48.0367,-309.11:.\t010:323:0,-32.3138,-162.569:.\t
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	EUR_GBR_HG00096	EUR_FIN_HG00171	EUR_FIN_HG00268
+chr17	2400	.	G	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:452:0,-46.9443,-213.646:.	1|0:498:0,-49.7769,-315.657:.	0|0:276:0,-27.5614,-170.553:.
+chr17	2800	.	G	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:479:0,-46.9443,-213.646:.	0|0:498:0,-49.7769,-315.657:.	0|0:276:0,-27.5614,-151.073:.
+chr17	3100	.	A	G	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:469:0,-46.9443,-213.646:.	0|0:498:0,-49.7769,-315.657:.	0|0:276:0,-27.5614,-141.056:.
+chr17	3600	.	T	A	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:408:0,-40.7527,-202.874:.	0|0:480:0,-48.0367,-309.11:.	0|0:323:0,-32.3138,-164.506:.
+chr17	3900	.	G	C	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:408:0,-40.7527,-202.874:.	0|0:480:0,-48.0367,-309.11:.	0|1:323:0,-32.3138,-162.569:.
 ";
     fs::write(vcf_folder_path.join("chr17.test.vcf"), chr17_vcf_content)?;
 
