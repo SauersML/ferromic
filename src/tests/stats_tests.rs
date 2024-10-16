@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use itertools::Itertools;
     use tempfile::NamedTempFile;
     use std::fs::File;
     use std::collections::HashMap;
@@ -432,7 +431,7 @@ mod tests {
             &sample_names,
             min_gq,
             &mut filtering_stats,
-            _mask,
+            None, None,
         );
     
         // the function executed without errors
@@ -499,7 +498,7 @@ mod tests {
             &sample_names,
             min_gq,
             &mut filtering_stats,
-            _mask,
+            None, None,
         );
     
         // the function executed without errors
@@ -555,7 +554,7 @@ mod tests {
         let _mask: Option<&[(i64, i64)]> = None;
 
         let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35"; // Only 10 fields, expecting 12 for 3 samples
-        assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, _mask).is_err());
+        assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, None, None).is_err());
     }
 
     #[test]
@@ -603,7 +602,7 @@ mod tests {
         let config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSAMPLE1\tSAMPLE2\n\
                               chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1_lowconf\t1|1\n\
                               chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
-        let mut temp_file = NamedTempFile::new().expect("Failed to process variants");
+        let temp_file = NamedTempFile::new().expect("Failed to process variants");
         write!(temp_file.as_file(), "{}", config_content).expect("Failed to process variants");
 
         let config_entries = parse_config_file(temp_file.path()).expect("Failed to process variants");
@@ -624,7 +623,7 @@ mod tests {
 
     #[test]
     fn test_find_vcf_file_existing_vcfs() {
-        use std::fs::{self, File};
+        use std::fs::File;
 
         // Create a temporary directory for testing
         let temp_dir = tempfile::tempdir().expect("Failed to process variants");
@@ -734,7 +733,7 @@ mod tests {
             &sample_names,
             min_gq,
             &mut filtering_stats,
-            _mask,
+            None, None,
         );
     
         // the function executed without errors
@@ -763,7 +762,7 @@ mod tests {
             &sample_names,
             min_gq,
             &mut _filtering_stats,
-            _mask,
+            None, None,
         ).expect("Failed to process variants");
 
         // Variant should be Some because all samples have GQ >= min_gq
@@ -940,7 +939,7 @@ mod tests {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length: Option<i64> = None;
 
-        let result_group1 = process_variants(
+        let _result_group1 = process_variants(
             &variants,
             &sample_names,
             1, // haplotype_group=1
@@ -950,7 +949,7 @@ mod tests {
             adjusted_sequence_length,
         ).unwrap();
 
-        let (_segsites, _w_theta, _pi, n_hap) = match result_group1 {
+        let (_segsites, _w_theta, _pi, n_hap) = match _result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
@@ -975,7 +974,7 @@ mod tests {
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
     
-        let result_group1 = process_variants(
+        let _result_group1 = process_variants(
             &variants,
             &sample_names,
             1, // haplotype_group=1
@@ -986,7 +985,7 @@ mod tests {
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
-        let (segsites, _w_theta, _pi, _n_hap) = match result_group1 {
+        let (segsites, _w_theta, _pi, _n_hap) = match _result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
@@ -1010,7 +1009,7 @@ mod tests {
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
     
-        let result_group1 = process_variants(
+        let _result_group1 = process_variants(
             &variants,
             &sample_names,
             1, // haplotype_group=1
@@ -1021,7 +1020,7 @@ mod tests {
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
-        let (_segsites, w_theta, _pi, _n_hap) = match result_group1 {
+        let (_segsites, w_theta, _pi, _n_hap) = match _result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
@@ -1087,7 +1086,7 @@ mod tests {
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
 
-        let result_group1 = process_variants(
+        let _result_group1 = process_variants(
             &variants,
             &sample_names,
             1, // haplotype_group=1
@@ -1097,7 +1096,7 @@ mod tests {
             adjusted_sequence_length,
         ).unwrap();
 
-        let (_segsites, _w_theta, _pi, n_hap) = match result_group1 {
+        let (_segsites, _w_theta, _pi, n_hap) = match _result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
@@ -1123,7 +1122,7 @@ mod tests {
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
     
-        let result_group1 = process_variants(
+        let _result_group1 = process_variants(
             &variants,
             &sample_names,
             1, // haplotype_group=1
@@ -1134,7 +1133,7 @@ mod tests {
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
-        let (segsites, _w_theta, _pi, _n_hap) = match result_group1 {
+        let (segsites, _w_theta, _pi, _n_hap) = match _result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
@@ -1158,7 +1157,7 @@ mod tests {
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
     
-        let result_group1 = process_variants(
+        let _result_group1 = process_variants(
             &variants,
             &sample_names,
             1, // haplotype_group=1
@@ -1169,7 +1168,7 @@ mod tests {
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
-        let (_segsites, w_theta, _pi, _n_hap) = match result_group1 {
+        let (_segsites, w_theta, _pi, _n_hap) = match _result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
@@ -1249,7 +1248,7 @@ mod tests {
         let (variants, sample_names, sample_filter_unfiltered) = setup_group1_missing_data_test();
 
         // Process variants for haplotype_group=1 (Group 1)
-        let result_group1 = process_variants(
+        let _result_group1 = process_variants(
             &variants,
             &sample_names,
             1, // haplotype_group=1
