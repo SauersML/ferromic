@@ -90,6 +90,15 @@ struct FilteringStats {
     filtered_examples: Vec<String>,
 }
 
+impl FilteringStats {
+    // Adds an example if there are fewer than 5
+    fn add_example(&mut self, example: String) {
+        if self.filtered_examples.len() < 5 {
+            self.filtered_examples.push(example);
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 struct Variant {
     position: i64,
