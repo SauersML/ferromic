@@ -1712,5 +1712,5 @@ fn calculate_pi(tot_pair_diff: usize, n: usize, seq_length: i64) -> f64 {
 mod tests {
     use super::*;
     include!("tests/stats_tests.rs");
-    include!("src/tests/filter_tests.rs");
+    include!("tests/filter_tests.rs");
 }
