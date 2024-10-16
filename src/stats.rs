@@ -605,11 +605,11 @@ fn process_config_entries(
 
     for (chr, entries) in regions_per_chr {
         println!("Processing chromosome: {}", chr);
-
+    
         // Determine the range to process
         let min_start = entries.iter().map(|e| e.start).min().unwrap_or(0);
         let max_end = entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX);
-
+    
         // Locate the appropriate VCF file
         let vcf_file = match find_vcf_file(vcf_folder, &chr) {
             Ok(file) => file,
@@ -618,12 +618,12 @@ fn process_config_entries(
                 continue;
             }
         };
-
+    
         println!(
             "Processing VCF file for chromosome {} from {} to {}",
             chr, min_start, max_end
         );
-
+    
         // Pass the mask and allow regions (clone the Arc)
         let variants_data = match process_vcf(
             &vcf_file,
@@ -640,7 +640,7 @@ fn process_config_entries(
                 continue;
             }
         };
-
+    
         let (
             unfiltered_variants,
             _filtered_variants,
@@ -649,6 +649,31 @@ fn process_config_entries(
             _missing_data_info,
             _filtering_stats,
         ) = variants_data;
+
+        println!("\n{}", "Filtering Statistics:".green().bold());
+        println!("Total variants processed: {}", _filtering_stats.total_variants);
+        println!(
+            "Filtered variants: {} ({:.2}%)",
+            _filtering_stats._filtered_variants,
+            (_filtering_stats._filtered_variants as f64 / _filtering_stats.total_variants as f64)
+                * 100.0
+        );
+        println!("Filtered due to allow: {}", _filtering_stats.filtered_due_to_allow);
+        println!("Filtered due to mask: {}", _filtering_stats.filtered_due_to_mask);
+        println!("Multi-allelic variants: {}", _filtering_stats.multi_allelic_variants);
+        println!("Low GQ variants: {}", _filtering_stats.low_gq_variants);
+        println!("Missing data variants: {}", _filtering_stats.missing_data_variants);
+    
+        println!("\n{}", "Example Filtered Variants:".green().bold());
+        for (i, example) in _filtering_stats.filtered_examples.iter().enumerate().take(5) {
+            println!("Example {}: {}", i + 1, example);
+        }
+        if _filtering_stats.filtered_examples.len() > 5 {
+            println!(
+                "... and {} more.",
+                _filtering_stats.filtered_examples.len() - 5
+            );
+        }
 
         // Collect all config samples for this chromosome
         let all_config_samples: HashSet<String> = entries
@@ -1356,28 +1381,6 @@ fn process_vcf(
                     },
                 }
             }
-
-            // After consuming all messages, print filtering statistics
-            let stats = _filtering_stats.lock();
-
-            println!("\n{}", "Filtering Statistics:".green().bold());
-            println!("Total variants processed: {}", stats.total_variants);
-            println!(
-                "Filtered variants: {} ({:.2}%)",
-                stats._filtered_variants,
-                (stats._filtered_variants as f64 / stats.total_variants as f64) * 100.0
-            );
-            println!("Filtered due to allow: {}", stats.filtered_due_to_allow);
-            println!("Filtered due to mask: {}", stats.filtered_due_to_mask);
-            println!("Multi-allelic variants: {}", stats.multi_allelic_variants);
-            println!("Low GQ variants: {}", stats.low_gq_variants);
-            println!("Missing data variants: {}", stats.missing_data_variants);
-
-            println!("\n{}", "Example Filtered Variants:".green().bold());
-            for example in &_filtering_stats.lock().filtered_examples {
-                println!("{}", example);
-            }
-
             Ok(())
         }
     });
