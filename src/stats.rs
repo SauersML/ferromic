@@ -94,7 +94,7 @@ impl FilteringStats {
     // Adds an example if there are fewer than 5
     fn add_example(&mut self, example: String) {
         if self.filtered_examples.len() < 5 {
-            println!("Adding example - {}", example); // Debug
+            // println!("Adding example - {}", example); // Debug
             self.filtered_examples.push(example);
         }
     }
