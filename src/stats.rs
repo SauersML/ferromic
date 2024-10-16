@@ -920,7 +920,6 @@ fn subtract_regions(
     result
 }
 
-
 fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(b'\t')
