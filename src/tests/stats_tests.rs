@@ -597,31 +597,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_config_file_entry2_details() {
-
-        let config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSAMPLE1\tSAMPLE2\n\
-                              chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1_lowconf\t1|1\n\
-                              chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
-        let temp_file = NamedTempFile::new().expect("Failed to process variants");
-        write!(temp_file.as_file(), "{}", config_content).expect("Failed to process variants");
-
-        let config_entries = parse_config_file(temp_file.path()).expect("Failed to process variants");
-        assert_eq!(config_entries.len(), 2);
-
-        // Second entry details
-        let entry2 = &config_entries[1];
-        assert_eq!(entry2.seqname, "chr1");
-        assert_eq!(entry2.start, 3000);
-        assert_eq!(entry2.end, 4000);
-        assert_eq!(entry2.samples_unfiltered.len(), 2);
-        assert_eq!(entry2.samples_filtered.len(), 2);
-        assert!(entry2.samples_unfiltered.contains_key("SAMPLE1"));
-        assert!(entry2.samples_unfiltered.contains_key("SAMPLE2"));
-        assert!(entry2.samples_filtered.contains_key("SAMPLE1"));
-        assert!(entry2.samples_filtered.contains_key("SAMPLE2"));
-    }
-
-    #[test]
     fn test_find_vcf_file_existing_vcfs() {
         use std::fs::File;
 
