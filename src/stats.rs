@@ -107,6 +107,14 @@ struct Variant {
     genotypes: Vec<Option<Vec<u8>>>,
 }
 
+struct AlleleInfo {
+    sample_name: Option<String>, // Or could do sample_index if name isn't available
+    haplotype_group: u8,         // 0 or 1
+    nucleotide: char,            // A, C, T, G
+    chromosome: String,          // Chromosome
+    position: i64,               // Position in the chromosome
+}
+
 #[derive(Debug, Default, Clone)]
 struct MissingDataInfo {
     total_data_points: usize,
