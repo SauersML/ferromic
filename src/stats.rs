@@ -834,7 +834,6 @@ fn process_config_entries(
             );
             writer.flush().map_err(|e| VcfError::Io(e.into()))?;
         }
-    }
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
     println!("Processing complete. Check the output file: {:?}", output_file);
@@ -1444,6 +1443,221 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     Ok(())
 }
 
+// Function to make sequences for the specified haplotype group
+fn make_sequences(
+    variants: &[Variant],
+    sample_names: &[String],
+    haplotype_samples: &[(String, usize, usize)], // (hap_sample_name, sample_index, allele_index)
+    position_allele_map: &HashMap<i64, (char, char)>, // position to (ref_base, alt_base)
+    region_start: i64,
+    region_end: i64,
+    chr: &str,
+    haplotype_group: u8,
+) -> Result<(), VcfError> {
+    // Load the reference genome
+    let fasta_path = Path::new(&format!("{}.fa", chr));
+    let mut fasta_reader = IndexedReader::from_file(fasta_path)
+        .map_err(|e| VcfError::Io(e))?;
+
+    // Read the reference sequence for the region
+    let region_length = (region_end - region_start + 1) as usize;
+    let mut ref_seq = Vec::with_capacity(region_length);
+    fasta_reader
+        .fetch(chr, region_start as u64 - 1, region_end as u64)
+        .map_err(|e| VcfError::Parse(format!("Failed to fetch reference sequence: {:?}", e)))?;
+    fasta_reader.read(&mut ref_seq).map_err(|e| {
+        VcfError::Parse(format!(
+            "Failed to read reference sequence for {}:{}-{}: {:?}",
+            chr, region_start, region_end, e
+        ))
+    })?;
+    let ref_seq: Vec<char> = ref_seq.iter().map(|&b| b as char).collect();
+
+    // Initialize sequences for each haplotype sample
+    let mut hap_sequences: HashMap<String, Vec<char>> = HashMap::new();
+    for (hap_sample_name, _, _) in haplotype_samples {
+        hap_sequences.insert(hap_sample_name.clone(), ref_seq.clone());
+    }
+
+    // Map positions to indices in the sequence
+    let pos_to_index: HashMap<i64, usize> = (region_start..=region_end)
+        .enumerate()
+        .map(|(i, pos)| (pos, i))
+        .collect();
+
+    // Apply variants to haplotype sequences
+    for variant in variants {
+        if let Some(&(ref_base, alt_base)) = position_allele_map.get(&variant.position) {
+            if let Some(&idx) = pos_to_index.get(&variant.position) {
+                for (hap_sample_name, sample_idx, allele_idx) in haplotype_samples {
+                    if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
+                        if let Some(&allele) = alleles.get(*allele_idx) {
+                            let base = if allele == 0 {
+                                ref_base
+                            } else {
+                                alt_base
+                            };
+                            hap_sequences
+                                .get_mut(hap_sample_name)
+                                .unwrap()[idx] = base;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Parse GFF file to get CDS regions
+    let gff_path = Path::new(&format!("{}.gff", chr));
+    let cds_regions = parse_gff_file(gff_path, chr, region_start, region_end)?;
+
+    if cds_regions.is_empty() {
+        println!(
+            "No CDS regions found in {}:{}-{}",
+            chr, region_start, region_end
+        );
+        return Ok(());
+    }
+
+    // For each CDS region, generate PHYLIP files
+    for cds in cds_regions {
+        // Adjust CDS start and end to be within the region
+        let adjusted_start = std::cmp::max(cds.start, region_start);
+        let adjusted_end = std::cmp::min(cds.end, region_end);
+
+        // Ensure the length is a multiple of 3
+        let length = adjusted_end - adjusted_start + 1;
+        let adjusted_length = length - (length % 3);
+        if adjusted_length <= 0 {
+            continue; // Skip if adjusted length is zero or negative
+        }
+        let final_end = adjusted_start + adjusted_length - 1;
+
+        // Map positions to indices in the haplotype sequences
+        let cds_pos_to_index: HashMap<i64, usize> = (adjusted_start..=final_end)
+            .enumerate()
+            .map(|(i, pos)| (pos, pos_to_index[&pos]))
+            .collect();
+
+        // Extract sequences for the CDS region from each haplotype
+        let mut cds_hap_sequences: HashMap<String, Vec<char>> = HashMap::new();
+        for (hap_sample_name, _, _) in haplotype_samples {
+            let full_seq = &hap_sequences[hap_sample_name];
+            let cds_seq: Vec<char> = cds_pos_to_index
+                .values()
+                .map(|&idx| full_seq[idx])
+                .collect();
+            cds_hap_sequences.insert(hap_sample_name.clone(), cds_seq);
+        }
+
+        // Write sequences to PHYLIP file
+        let output_file = format!(
+            "group_{}_chr_{}_start_{}_end_{}.phy",
+            haplotype_group, chr, adjusted_start, final_end
+        );
+        write_phylip_file(&output_file, &cds_hap_sequences)?;
+
+        println!(
+            "PHYLIP file written: {} ({} samples, length {})",
+            output_file,
+            cds_hap_sequences.len(),
+            adjusted_length
+        );
+    }
+
+    Ok(())
+}
+
+// Helper function to parse GFF file and extract CDS regions
+fn parse_gff_file(
+    gff_path: &Path,
+    chr: &str,
+    region_start: i64,
+    region_end: i64,
+) -> Result<Vec<CdsRegion>, VcfError> {
+    let file = File::open(gff_path).map_err(|e| {
+        VcfError::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("GFF file not found: {:?}", e),
+        ))
+    })?;
+    let reader = BufReader::new(file);
+    let mut cds_regions = Vec::new();
+
+    for line_result in reader.lines() {
+        let line = line_result?;
+        if line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 9 {
+            continue;
+        }
+        let seqname = fields[0].trim().trim_start_matches("chr");
+        if seqname != chr.trim_start_matches("chr") {
+            continue;
+        }
+        let feature_type = fields[2];
+        if feature_type != "CDS" {
+            continue;
+        }
+        let start: i64 = fields[3]
+            .parse()
+            .map_err(|_| VcfError::Parse("Invalid CDS start position".to_string()))?;
+        let end: i64 = fields[4]
+            .parse()
+            .map_err(|_| VcfError::Parse("Invalid CDS end position".to_string()))?;
+        if end < region_start || start > region_end {
+            continue;
+        }
+        cds_regions.push(CdsRegion { start, end });
+    }
+
+    Ok(cds_regions)
+}
+
+// Struct to hold CDS region information
+struct CdsRegion {
+    start: i64,
+    end: i64,
+}
+
+// Write sequences to PHYLIP file
+fn write_phylip_file(
+    output_file: &str,
+    hap_sequences: &HashMap<String, Vec<char>>,
+) -> Result<(), VcfError> {
+    let num_samples = hap_sequences.len();
+    let seq_length = hap_sequences.values().next().unwrap().len();
+    let file = File::create(output_file).map_err(|e| {
+        VcfError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Failed to create PHYLIP file '{}': {:?}", output_file, e),
+        ))
+    })?;
+    let mut writer = BufWriter::new(file);
+
+    writeln!(writer, "{} {}", num_samples, seq_length).map_err(|e| {
+        VcfError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Failed to write to PHYLIP file '{}': {:?}", output_file, e),
+        ))
+    })?;
+
+    for (sample_name, seq_chars) in hap_sequences {
+        let padded_name = format!("{:<10}", sample_name);
+        let sequence: String = seq_chars.iter().collect();
+        writeln!(writer, "{}{}", padded_name, sequence).map_err(|e| {
+            VcfError::Io(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to write to PHYLIP file '{}': {:?}", output_file, e),
+            ))
+        })?;
+    }
+
+    Ok(())
+}
+
 
 // Function to parse a variant line
 fn parse_variant(
@@ -1457,6 +1671,7 @@ fn parse_variant(
     _filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
+    position_allele_map: &mut HashMap<i64, (char, char)>,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
@@ -1523,6 +1738,10 @@ fn parse_variant(
         // This is separate from the allow file behavior, which restricts anything not explicitly allowed.
         // No action needed here; we proceed with processing.
     }
+
+    let ref_allele = fields[3].chars().next().unwrap_or('N');
+    let alt_allele = fields[4].chars().next().unwrap_or('N');
+    position_allele_map.insert(pos, (ref_allele, alt_allele));
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
     let is_multiallelic = alt_alleles.len() > 1;
