@@ -107,6 +107,7 @@ struct Variant {
     genotypes: Vec<Option<Vec<u8>>>,
 }
 
+// IN PROGRESS
 struct AlleleInfo {
     sample_name: String, // Or could do sample_index if name isn't available
     haplotype_group: u8,        // 0 or 1 for haplotype group
@@ -1452,6 +1453,7 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     Ok(())
 }
 
+// IN PROGRESS
 // Helper function to parse GFF file and extract CDS regions
 fn parse_gff_file(
     gff_path: &Path,
@@ -1500,12 +1502,14 @@ fn parse_gff_file(
     Ok(cds_regions)
 }
 
+// IN PROGRESS
 // Struct to hold CDS region information
 struct CdsRegion {
     start: i64,
     end: i64,
 }
 
+// IN PROGRESS
 // Write sequences to PHYLIP file
 fn write_phylip_file(
     output_file: &str,
@@ -1541,7 +1545,6 @@ fn write_phylip_file(
 
     Ok(())
 }
-
 
 // Function to parse a variant line
 fn parse_variant(
