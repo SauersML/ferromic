@@ -834,6 +834,7 @@ fn process_config_entries(
             );
             writer.flush().map_err(|e| VcfError::Io(e.into()))?;
         }
+    }
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
     println!("Processing complete. Check the output file: {:?}", output_file);
