@@ -108,11 +108,11 @@ struct Variant {
 }
 
 struct AlleleInfo {
-    sample_name: Option<String>, // Or could do sample_index if name isn't available
-    haplotype_group: u8,         // 0 or 1
-    nucleotide: char,            // A, C, T, G
-    chromosome: String,          // Chromosome
-    position: i64,               // Position in the chromosome
+    sample_name: String, // Or could do sample_index if name isn't available
+    haplotype_group: u8,        // 0 or 1 for haplotype group
+    nucleotide: char,           // Nucleotide (A, C, T, G)
+    chromosome: String,         // Chromosome identifier
+    position: i64,              // Chromosome position
 }
 
 #[derive(Debug, Default, Clone)]
