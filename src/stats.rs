@@ -10,14 +10,16 @@ use rayon::ThreadPoolBuilder;
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use csv::{ReaderBuilder, WriterBuilder};
 use crossbeam_channel::bounded;
 use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
+use bio::io::fasta::{IndexedReader, FastaRead};
 
 // Define command-line arguments using clap
 #[derive(Parser, Debug)]
