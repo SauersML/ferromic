@@ -1,0 +1,5 @@
+48698abff654f02a5905223b7edf8eb2  data/data_summary.tsv
+eaa3c3cb82731651e6f2619675eae97f  data/assembly_data_report.jsonl
+689762f267eafe361b6ee4b21638eb51  data/GCF_000001405.40_GRCh38.p14_genomic.fna
+b72678dcbc2e5e3e06a705d7d6385f97  data/genomic.gff
+e39cd72e1561a17900db6102a76d60de  data/dataset_catalog.json
