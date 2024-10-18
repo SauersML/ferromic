@@ -7,7 +7,6 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
-use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::io::{BufWriter, Write};
