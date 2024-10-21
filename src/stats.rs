@@ -563,11 +563,8 @@ fn process_variants(
         };
 
         // Store the SeqInfo instance
-        {
-            let mut storage = seqinfo_storage.lock();
-            storage.push(seq_info);
-        }
-    }
+        let mut storage = seqinfo_storage.lock();
+        storage.push(seq_info);
 
         // Determine if the variant is a segregating site
         let alleles_present: Vec<u8> = variant_alleles.iter().filter_map(|&a| a).collect();
