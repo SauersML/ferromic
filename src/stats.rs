@@ -235,6 +235,9 @@ fn main() -> Result<(), VcfError> {
             format!("Processing VCF file: {}", vcf_file.display()).cyan()
         );
 
+        // Initialize shared SeqInfo storage
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+
         // Process the VCF file
         let (
             unfiltered_variants,
@@ -251,7 +254,18 @@ fn main() -> Result<(), VcfError> {
             args.min_gq,
             mask_regions.clone(),
             allow_regions.clone(),
+            Arc::clone(&seqinfo_storage), // Pass the storage
         )?;
+
+        let seqinfo = seqinfo_storage.lock();
+        if !seqinfo.is_empty() {
+            println!("\n{}", "Sample SeqInfo Entries:".green().bold());
+            for (i, info) in seqinfo.iter().take(5).enumerate() {
+                println!("SeqInfo {}: {:?}", i + 1, info);
+            }
+        } else {
+            println!("No SeqInfo entries were stored.");
+        }
 
         println!("{}", "Calculating diversity statistics...".blue());
 
@@ -479,6 +493,7 @@ fn process_variants(
     region_start: i64,
     region_end: i64,
     adjusted_sequence_length: Option<i64>,
+    seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
 ) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
@@ -537,6 +552,23 @@ fn process_variants(
             variant_alleles.push(allele); // allele is Option<u8>
         }
 
+        // Create and store SeqInfo
+        let seq_info = SeqInfo {
+            sample_index: i,
+            haplotype_group,
+            nucleotide: allele,
+            chromosome: String::from("PUT CHROMOSOME HERE"), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
+            position: variant.position,
+            filtered: false, // MUST USE ACTUAL FILTERING INFO. FALSE ALWAYS IS NOT CORRECT. Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time.
+        };
+
+        // Store the SeqInfo instance
+        {
+            let mut storage = seqinfo_storage.lock();
+            storage.push(seq_info);
+        }
+    }
+
         // Determine if the variant is a segregating site
         let alleles_present: Vec<u8> = variant_alleles.iter().filter_map(|&a| a).collect();
         let unique_alleles: HashSet<_> = alleles_present.iter().cloned().collect();
@@ -573,6 +605,9 @@ fn process_config_entries(
     mask: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
 ) -> Result<(), VcfError> {
+    // Initialize shared SeqInfo storage
+    let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+    
     let mut writer = WriterBuilder::new()
         .has_headers(true)
         .from_path(output_file)
@@ -749,10 +784,12 @@ fn process_config_entries(
                     entry.start,
                     entry.end,
                     None,
+                    Arc::clone(&seqinfo_storage), // Pass the storage
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
                 };
+
 
             // Process haplotype_group=1 (unfiltered)
             let (num_segsites_1, w_theta_1, pi_1, n_hap_1_no_filter) =
@@ -764,10 +801,19 @@ fn process_config_entries(
                     entry.start,
                     entry.end,
                     None,
+                    Arc::clone(&seqinfo_storage), // Pass the storage
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
                 };
+
+            let seqinfo = seqinfo_storage.lock();
+            if !seqinfo.is_empty() {
+                println!("\n{}", "Sample SeqInfo Entries:".green().bold());
+                for (i, info) in seqinfo.iter().take(5).enumerate() {
+                    println!("SeqInfo {}: {:?}", i + 1, info);
+                }
+            }
 
             // Calculate allele frequency of inversions (no filter)
             let inversion_freq_no_filter =
@@ -943,7 +989,7 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
     // Check if the number of sample names is consistent
     if sample_names.is_empty() {
-        eprintln!("{}", "Error: No sample names found in the configuration file header after skipping the first 7 columns. Please ensure the config file is properly formatted with tabs separating all columns, including sample names.".red());
+        eprintln!("{}", "Error: No sample names found in the configuration file header after skipping the first 7 columns. Tabs must separate all columns, including sample names.".red());
         return Err(VcfError::Parse("No sample names found in config file header.".to_string()));
     }
 
@@ -1206,6 +1252,7 @@ fn process_vcf(
     min_gq: u16,
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
 ) -> Result<(
     Vec<Variant>,        // Unfiltered variants
     Vec<Variant>,        // Filtered variants
@@ -1218,9 +1265,10 @@ fn process_vcf(
     let mut sample_names = Vec::new();
     let chr_length = 0;
     
+    // Existing unfiltered and filtered variants storage
     let unfiltered_variants = Arc::new(Mutex::new(Vec::new()));
-    let _filtered_variants = Arc::new(Mutex::new(Vec::new()));
 
+    // Existing missing data and filtering stats
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
     let _filtering_stats = Arc::new(Mutex::new(FilteringStats::default()));
 
@@ -1415,6 +1463,16 @@ fn process_vcf(
 
     // Wait for the progress thread to finish
     progress_thread.join().expect("Couldn't join progress thread");
+
+    let seqinfo = seqinfo_storage.lock();
+    if !seqinfo.is_empty() {
+        println!("\n{}", "Sample SeqInfo Entries:".green().bold());
+        for (i, info) in seqinfo.iter().take(5).enumerate() {
+            println!("SeqInfo {}: {:?}", i + 1, info);
+        }
+    } else {
+        println!("No SeqInfo entries were stored.");
+    }
 
     let final_unfiltered_variants = Arc::try_unwrap(unfiltered_variants)
         .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
