@@ -108,12 +108,13 @@ struct Variant {
 }
 
 // IN PROGRESS
-struct AlleleInfo {
-    sample_name: String, // Or could do sample_index if name isn't available
+struct SeqInfo {
+    sample_index: usize,         // The index of the sample this allele belongs to
     haplotype_group: u8,        // 0 or 1 for haplotype group
-    nucleotide: char,           // Nucleotide (A, C, T, G)
+    nucleotide: Option<u8>,     // The allele nucleotide (A, T, C, G) in u8 form (can be None)
     chromosome: String,         // Chromosome identifier
     position: i64,              // Chromosome position
+    filtered: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -518,6 +519,7 @@ fn process_variants(
     let mut tot_pair_diff = 0;
     let n = haplotype_indices.len();
 
+    // Need to add sequence info here
     for variant in variants {
         // Skip variants outside the region (redundant if already filtered)
         if variant.position < region_start || variant.position > region_end {
