@@ -108,13 +108,14 @@ struct Variant {
 }
 
 // IN PROGRESS
+#[derive(Debug, Clone)]
 struct SeqInfo {
     sample_index: usize,         // The index of the sample this allele belongs to
-    haplotype_group: u8,        // 0 or 1 for haplotype group
-    nucleotide: Option<u8>,     // The allele nucleotide (A, T, C, G) in u8 form (can be None)
-    chromosome: String,         // Chromosome identifier
-    position: i64,              // Chromosome position
-    filtered: bool,
+    haplotype_group: u8,         // 0 or 1 for haplotype group
+    nucleotide: Option<u8>,      // The allele nucleotide (A, T, C, G) in u8 form (can be None)
+    chromosome: String,          // Chromosome identifier
+    position: i64,               // Chromosome position
+    filtered: bool,              // Was this allele filtered or not
 }
 
 #[derive(Debug, Default, Clone)]
