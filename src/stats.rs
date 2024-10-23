@@ -3,8 +3,6 @@ use colored::*;
 use flate2::read::MultiGzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::fs::{self, File};
@@ -13,12 +11,11 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::{HashMap, HashSet};
-use csv::{ReaderBuilder, WriterBuilder};
+use csv::{WriterBuilder};
 use crossbeam_channel::bounded;
 use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
-use bio::io::fasta::{IndexedReader, FastaRead};
 
 // Define command-line arguments using clap
 #[derive(Parser, Debug)]
@@ -642,7 +639,7 @@ fn process_config_entries(
         ])
         .map_err(|e| VcfError::Io(e.into()))?;
 
-    let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
     // Organize regions by chromosome
     let mut regions_per_chr: HashMap<String, Vec<&ConfigEntry>> = HashMap::new();
@@ -1256,6 +1253,7 @@ fn process_vcf(
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
 ) -> Result<(
     Vec<Variant>,        // Unfiltered variants
     Vec<Variant>,        // Filtered variants
@@ -1696,7 +1694,8 @@ fn parse_variant(
 
     let ref_allele = fields[3].chars().next().unwrap_or('N');
     let alt_allele = fields[4].chars().next().unwrap_or('N');
-    position_allele_map.insert(pos, (ref_allele, alt_allele));
+    let mut map = position_allele_map.lock();
+    map.insert(pos, (ref_allele, alt_allele));
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
     let is_multiallelic = alt_alleles.len() > 1;
