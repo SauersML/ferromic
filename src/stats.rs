@@ -582,8 +582,7 @@ fn process_variants(
                     None
                 };
                 
-                //println!("DEBUG: Creating SeqInfo for chr:{}, pos:{}, hap:{}, nuc:{:?}", 
-                //    chromosome, variant.position, haplotype_group, nucleotide);
+
                 // Create and store SeqInfo
                 let seq_info = SeqInfo {
                     sample_index: sample_idx,
@@ -599,7 +598,7 @@ fn process_variants(
                 if let Some(_) = nucleotide {
                     let mut storage = seqinfo_storage.lock();
                     storage.push(seq_info);
-                    variant_alleles.push(nuc);
+                    variant_alleles.push(nucleotide);
                 }
         }
 
