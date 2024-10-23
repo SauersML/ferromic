@@ -1537,9 +1537,6 @@ fn process_vcf(
             println!("No SeqInfo entries were stored.");
         }
     }
-
-    drop(result_sender);
-    drop(collector_thread);
     
     let final_unfiltered_variants = Arc::try_unwrap(unfiltered_variants)
         .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
