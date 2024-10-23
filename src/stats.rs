@@ -811,12 +811,13 @@ fn process_config_entries(
             
             let variants_in_region: Vec<_> = unfiltered_variants.iter()
                 .filter(|v| v.position >= entry.start && v.position <= entry.end)
+                .cloned()
                 .collect();
             println!("Found {} variants in region", variants_in_region.len());
             
             let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) =
                 match process_variants(
-                    &unfiltered_variants,
+                    &variants_in_region,
                     &sample_names,
                     0,
                     &entry.samples_unfiltered,
