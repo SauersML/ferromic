@@ -550,6 +550,7 @@ fn process_variants(
                 .and_then(|gt| gt.as_ref())
                 .and_then(|alleles| alleles.get(allele_idx))
                 .copied();
+        }
 
         // Create and store SeqInfo
         let seq_info = SeqInfo {
