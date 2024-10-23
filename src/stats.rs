@@ -642,6 +642,8 @@ fn process_config_entries(
         ])
         .map_err(|e| VcfError::Io(e.into()))?;
 
+    let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+
     // Organize regions by chromosome
     let mut regions_per_chr: HashMap<String, Vec<&ConfigEntry>> = HashMap::new();
     for entry in config_entries {
@@ -1270,8 +1272,6 @@ fn process_vcf(
     let unfiltered_variants = Arc::new(Mutex::new(Vec::new()));
     let filtered_variants = Arc::new(Mutex::new(Vec::new()));
 
-    let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
-
     // Existing missing data and filtering stats
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
     let _filtering_stats = Arc::new(Mutex::new(FilteringStats::default()));
@@ -1626,7 +1626,7 @@ fn parse_variant(
     _filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    position_allele_map: &mut HashMap<i64, (char, char)>,
+    position_allele_map: &parking_lot::Mutex<HashMap<i64, (char, char)>>,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
