@@ -557,7 +557,7 @@ fn process_variants(
                     sample_index: sample_idx,
                     haplotype_group,
                     nucleotide: allele,
-                    chromosome: chr.to_string(), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
+                    chromosome: entry.seqname.clone(), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
                     position: variant.position,
                     filtered: false, // MUST USE ACTUAL FILTERING INFO. FALSE ALWAYS IS NOT CORRECT.
                     // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
@@ -790,6 +790,7 @@ fn process_config_entries(
                     entry.end,
                     None,
                     Arc::clone(&seqinfo_storage), // Pass the storage
+                    Arc::clone(&position_allele_map),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -807,6 +808,7 @@ fn process_config_entries(
                     entry.end,
                     None,
                     Arc::clone(&seqinfo_storage), // Pass the storage
+                    Arc::clone(&position_allele_map),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -835,6 +837,7 @@ fn process_config_entries(
                     entry.end,
                     Some(adjusted_sequence_length),
                     Arc::clone(&seqinfo_storage),
+                    Arc::clone(&position_allele_map),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -851,6 +854,7 @@ fn process_config_entries(
                     entry.end,
                     Some(adjusted_sequence_length),
                     Arc::clone(&seqinfo_storage),
+                    Arc::clone(&position_allele_map),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
