@@ -561,13 +561,14 @@ fn process_variants(
                 let nucleotide = if let Some(allele_val) = allele {
                     let map = position_allele_map.lock();
                     if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
-                        Some(match allele_val {
-                            0 => ref_allele as u8,
-                            1 => alt_allele as u8,
-                            _ => b'N',
-                        })
+                        match allele_val {
+                            0 => Some(ref_allele as u8),
+                            1 => Some(alt_allele as u8),
+                            _ => Some(b'N')
+                        }
                     } else {
-                        None
+                        eprintln!("Warning: No allele mapping found for position {}", variant.position);
+                        Some(b'N')
                     }
                 } else {
                     None
@@ -586,9 +587,11 @@ fn process_variants(
                     // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
                 };
         
-                // Store the SeqInfo instance
-                let mut storage = seqinfo_storage.lock();
-                storage.push(seq_info);
+                // Store SeqInfo if we have a valid nucleotide
+                if let Some(_) = nucleotide {
+                    let mut storage = seqinfo_storage.lock();
+                    storage.push(seq_info);
+                }
         }
 
         // Determine if the variant is a segregating site
@@ -1730,11 +1733,12 @@ fn parse_variant(
         // No action needed here; we proceed with processing.
     }
 
-    let ref_allele = fields[3].chars().next().unwrap_or('N');
-    let alt_allele = fields[4].chars().next().unwrap_or('N');
-
-    let mut map = position_allele_map.lock();
-    map.insert(pos, (ref_allele, alt_allele));
+    // Store reference and alternate alleles
+    if !fields[3].is_empty() && !fields[4].is_empty() {
+        let ref_allele = fields[3].chars().next().unwrap_or('N');
+        let alt_allele = fields[4].chars().next().unwrap_or('N');
+        position_allele_map.lock().insert(pos, (ref_allele, alt_allele));
+    }
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
     let is_multiallelic = alt_alleles.len() > 1;
