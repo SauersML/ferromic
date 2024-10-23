@@ -604,7 +604,7 @@ fn process_variants(
 
         // Determine if the variant is a segregating site
         let alleles_present: Vec<u8> = variant_alleles.iter().filter_map(|&a| a).collect();
-        let unique_alleles: HashSet<u8> = variant_alleles.iter().cloned().collect();
+        let unique_alleles: HashSet<u8> = variant_alleles.iter().cloned().collect(); // Is this correct?
         if unique_alleles.len() > 1 {
             num_segsites += 1;
         }
