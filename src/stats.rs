@@ -253,6 +253,7 @@ fn main() -> Result<(), VcfError> {
             mask_regions.clone(),
             allow_regions.clone(),
             Arc::clone(&seqinfo_storage), // Pass the storage
+            Arc::clone(&position_allele_map),
         )?;
 
         let seqinfo = seqinfo_storage.lock();
@@ -540,7 +541,7 @@ fn process_variants(
         }
 
         // Collect the alleles for the haplotypes
-        let mut variant_alleles = Vec::new(); // Alleles of haplotypes at this variant
+        let variant_alleles = Vec::new(); // Alleles of haplotypes at this variant
 
         for &(sample_idx, allele_idx) in &haplotype_indices {
             let allele = variant.genotypes.get(sample_idx)
@@ -681,6 +682,7 @@ fn process_config_entries(
             mask.clone(),
             allow.clone(),
             Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
         ) {
             Ok(data) => data,
             Err(e) => {
