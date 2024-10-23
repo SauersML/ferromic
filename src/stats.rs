@@ -1355,10 +1355,11 @@ fn process_vcf(
             thread::spawn({
                 let allow_regions = allow_regions.clone();
                 move || -> Result<(), VcfError> {
+                    let value = position_allele_map.clone();
                     while let Ok(line) = line_receiver.recv() {
                         let mut local_missing_data_info = MissingDataInfo::default();
                         let mut local_filtering_stats = FilteringStats::default();
-                        let position_allele_map_clone = Arc::clone(&position_allele_map);
+                        let position_allele_map_clone = Arc::clone(&value);
                         match parse_variant(
                         &line,
                         &chr,
@@ -1387,7 +1388,7 @@ fn process_vcf(
                                 .map_err(|_| VcfError::ChannelSend)?;
                         }
                     }
-                }
+                };
                 Ok(())
             }
         })
