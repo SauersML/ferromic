@@ -599,6 +599,7 @@ fn process_variants(
                 if let Some(_) = nucleotide {
                     let mut storage = seqinfo_storage.lock();
                     storage.push(seq_info);
+                    variant_alleles.push(nuc);
                 }
         }
 
