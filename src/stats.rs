@@ -537,6 +537,9 @@ fn process_variants(
     let mut tot_pair_diff = 0;
     let n = haplotype_indices.len();
 
+    // Clear previous entries
+    seqinfo_storage.lock().clear();
+
     // Need to add sequence info here
     for variant in variants {
         // Skip variants outside the region (redundant if already filtered)
@@ -569,7 +572,9 @@ fn process_variants(
                 } else {
                     None
                 };
-            
+                
+                println!("DEBUG: Creating SeqInfo for chr:{}, pos:{}, hap:{}, nuc:{:?}", 
+                    chromosome, variant.position, haplotype_group, nucleotide);
                 // Create and store SeqInfo
                 let seq_info = SeqInfo {
                     sample_index: sample_idx,
