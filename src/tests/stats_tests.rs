@@ -5,6 +5,8 @@ mod tests {
     use std::fs::File;
     use std::collections::HashMap;
     use std::io::Write;
+    use std::sync::Arc;
+    use parking_lot::Mutex;
 
     // Helper function to create a Variant for testing
     fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
@@ -380,13 +382,25 @@ mod tests {
         let mut missing_data_info = MissingDataInfo::default();  
         let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
-        let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
+        let position_allele_map = Mutex::new(HashMap::new());
 
         let valid_line = "chr1\t1500\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
         let allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
         let mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
-        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, allow_regions, mask_regions);
+        let result = parse_variant(
+            valid_line,
+            "1",
+            1,
+            2000,
+            &mut missing_data_info,
+            &sample_names,
+            min_gq,
+            &mut _filtering_stats,
+            allow_regions,
+            mask_regions,
+            &position_allele_map,
+        );
 
         assert!(result.is_ok());
         let some_variant = result.unwrap();
@@ -409,6 +423,7 @@ mod tests {
         let mut filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let _mask: Option<&[(i64, i64)]> = None;
+        let position_allele_map = Mutex::new(HashMap::new());
     
         // Define the expected variant using the helper function
         let expected_variant = create_variant(
@@ -431,7 +446,9 @@ mod tests {
             &sample_names,
             min_gq,
             &mut filtering_stats,
-            None, None,
+            None, 
+            None,
+            &position_allele_map,
         );
     
         // the function executed without errors
@@ -447,13 +464,25 @@ mod tests {
         let mut missing_data_info = MissingDataInfo::default();  
         let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
-        let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
+        let position_allele_map = Mutex::new(HashMap::new());
 
         let valid_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
         let allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
         let mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
-        let result = parse_variant(valid_line, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, allow_regions, mask_regions);
+        let result = parse_variant(
+            valid_line,
+            "1",
+            1,
+            2000,
+            &mut missing_data_info,
+            &sample_names,
+            min_gq,
+            &mut _filtering_stats,
+            allow_regions,
+            mask_regions,
+            &position_allele_map,
+        );
 
         assert!(result.is_ok());
         if let Some((variant, is_valid)) = result.unwrap() {
@@ -476,6 +505,7 @@ mod tests {
         let mut filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let _mask: Option<&[(i64, i64)]> = None;
+        let position_allele_map = Mutex::new(HashMap::new());
     
         // Define the expected variant using the helper function
         let expected_variant = create_variant(
@@ -498,7 +528,9 @@ mod tests {
             &sample_names,
             min_gq,
             &mut filtering_stats,
-            None, None,
+            None, 
+            None,
+            &position_allele_map,
         );
     
         // the function executed without errors
@@ -514,13 +546,25 @@ mod tests {
         let mut missing_data_info = MissingDataInfo::default();  
         let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
-        let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
+        let position_allele_map = Mutex::new(HashMap::new());
 
         let out_of_range = "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
         let allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
         let mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
-        let result = parse_variant(out_of_range, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, allow_regions, mask_regions);
+        let result = parse_variant(
+            out_of_range,
+            "1",
+            1,
+            2000,
+            &mut missing_data_info,
+            &sample_names,
+            min_gq,
+            &mut _filtering_stats,
+            allow_regions,
+            mask_regions,
+            &position_allele_map,
+        );
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -532,13 +576,25 @@ mod tests {
         let mut missing_data_info = MissingDataInfo::default();  
         let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
-        let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
+        let position_allele_map = Mutex::new(HashMap::new());
 
         let diff_chr = "chr2\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45";
         let allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
         let mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>> = None;
-        let result = parse_variant(diff_chr, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, allow_regions, mask_regions);
+        let result = parse_variant(
+            diff_chr,
+            "1",
+            1,
+            2000,
+            &mut missing_data_info,
+            &sample_names,
+            min_gq,
+            &mut _filtering_stats,
+            allow_regions,
+            mask_regions,
+            &position_allele_map,
+        );
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -550,11 +606,23 @@ mod tests {
         let mut missing_data_info = MissingDataInfo::default();  
         let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
-        let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
+        let position_allele_map = Mutex::new(HashMap::new());
 
         let invalid_format = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35"; // Only 10 fields, expecting 12 for 3 samples
-        assert!(parse_variant(invalid_format, "1", 1, 2000, &mut missing_data_info, &sample_names, min_gq, &mut _filtering_stats, None, None).is_err());
+        assert!(parse_variant(
+            invalid_format,
+            "1",
+            1,
+            2000,
+            &mut missing_data_info,
+            &sample_names,
+            min_gq,
+            &mut _filtering_stats,
+            None, 
+            None,
+            &position_allele_map,
+        ).is_err());
     }
 
     #[test]
@@ -570,7 +638,10 @@ mod tests {
         sample_filter.insert("SAMPLE2".to_string(), (0, 1));
         sample_filter.insert("SAMPLE3".to_string(), (0, 1));
         let adjusted_sequence_length: Option<i64> = None;
-    
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
+
         let invalid_group = process_variants(
             &variants,
             &sample_names,
@@ -579,13 +650,15 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         );
         assert!(invalid_group.unwrap_or(None).is_none(), "Expected None for invalid haplotype group");
     }
 
     #[test]
     fn test_parse_config_file_with_noreads() {
-
         let config_content = "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSAMPLE1\tSAMPLE2\n\
                               chr1\t1000\t2000\t1500\ttest_id\tpass\tinv\t0|1_lowconf\t1|1\n\
                               chr1\t3000\t4000\t.\t.\t.\t.\t0|0\t0|1\n";
@@ -687,6 +760,7 @@ mod tests {
         let mut filtering_stats = FilteringStats::default();
         let min_gq = 30;
         let _mask: Option<&[(i64, i64)]> = None;
+        let position_allele_map = Mutex::new(HashMap::new());
     
         // Define the expected variant using the helper function
         let expected_variant = create_variant(
@@ -708,7 +782,9 @@ mod tests {
             &sample_names,
             min_gq,
             &mut filtering_stats,
-            None, None,
+            None, 
+            None,
+            &position_allele_map,
         );
     
         // the function executed without errors
@@ -724,8 +800,8 @@ mod tests {
         let mut missing_data_info = MissingDataInfo::default();  
         let mut _filtering_stats = FilteringStats::default();
         let min_gq = 30;
-        let mut _filtering_stats = FilteringStats::default();
         let _mask: Option<&[(i64, i64)]> = None;
+        let position_allele_map = Mutex::new(HashMap::new());
 
         let valid_variant_line = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40";
         let result = parse_variant(
@@ -737,12 +813,14 @@ mod tests {
             &sample_names,
             min_gq,
             &mut _filtering_stats,
-            None, None,
+            None, 
+            None,
+            &position_allele_map,
         ).expect("Failed to process variants");
-
+    
         // Variant should be Some because all samples have GQ >= min_gq
         assert!(result.is_some());
-
+    
         if let Some((variant, is_valid)) = result {
             assert!(is_valid);
             assert_eq!(variant.genotypes, vec![Some(vec![0, 0]), Some(vec![0, 1])]);
@@ -877,6 +955,9 @@ mod tests {
     fn test_allele_frequency() {
         let (variants, sample_names, sample_filter) = setup_global_test();
         let adjusted_sequence_length: Option<i64> = None;
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
     
         let result = process_variants(
             &variants,
@@ -886,6 +967,9 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         ).unwrap();
     
         // Calculate allele frequency globally
@@ -913,7 +997,10 @@ mod tests {
     fn test_group1_number_of_haplotypes() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length: Option<i64> = None;
-
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
+    
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -922,13 +1009,16 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         ).unwrap();
-
+    
         let (_segsites, _w_theta, _pi, n_hap) = match _result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
-
+    
         // Number of haplotypes for group1 should be 3
         let expected_num_hap_group1 = 3;
         println!(
@@ -948,6 +1038,9 @@ mod tests {
         let adjusted_sequence_length: Option<i64> = None;
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
     
         let _result_group1 = process_variants(
             &variants,
@@ -957,6 +1050,9 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -983,6 +1079,9 @@ mod tests {
         let adjusted_sequence_length: Option<i64> = None;
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
     
         let _result_group1 = process_variants(
             &variants,
@@ -992,6 +1091,9 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1022,6 +1124,9 @@ mod tests {
         // Setup global test data
         let (variants, sample_names, sample_filter) = setup_global_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
     
         // Process variants without specifying haplotype_group (global)
         let result = process_variants(
@@ -1032,6 +1137,9 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         ).unwrap();
     
         // Calculate global allele frequency
@@ -1060,7 +1168,10 @@ mod tests {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
-
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
+    
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1069,8 +1180,11 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         ).unwrap();
-
+    
         let (_segsites, _w_theta, _pi, n_hap) = match _result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
@@ -1089,13 +1203,15 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_group1_filtered_segregating_sites() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
     
         let _result_group1 = process_variants(
             &variants,
@@ -1105,6 +1221,9 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1131,6 +1250,9 @@ mod tests {
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
     
         let _result_group1 = process_variants(
             &variants,
@@ -1140,6 +1262,9 @@ mod tests {
             1000,
             3000,
             adjusted_sequence_length,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1221,7 +1346,10 @@ mod tests {
     #[test]
     fn test_group1_missing_data_allele_frequency() {
         let (variants, sample_names, sample_filter_unfiltered) = setup_group1_missing_data_test();
-
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
+    
         // Process variants for haplotype_group=1 (Group 1)
         let _result_group1 = process_variants(
             &variants,
@@ -1231,11 +1359,14 @@ mod tests {
             1000,
             3000,
             None,
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome.clone(),
         ).expect("Failed to process variants");
-
+    
         // Calculate global allele frequency using the revised function (no haplotype_group parameter)
         let allele_frequency_global = calculate_inversion_allele_frequency(&sample_filter_unfiltered);
-
+    
         // Calculate expected global allele frequency based on all haplotypes:
         // SAMPLE1: hap1=1, hap2=0
         // SAMPLE2: hap1=0, hap2=1
