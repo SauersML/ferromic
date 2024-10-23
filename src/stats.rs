@@ -806,6 +806,14 @@ fn process_config_entries(
             );
 
             // Process haplotype_group=0 (unfiltered)
+            println!("Processing region {}-{} with {} variants", 
+                    entry.start, entry.end, unfiltered_variants.len());
+            
+            let variants_in_region: Vec<_> = unfiltered_variants.iter()
+                .filter(|v| v.position >= entry.start && v.position <= entry.end)
+                .collect();
+            println!("Found {} variants in region", variants_in_region.len());
+            
             let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) =
                 match process_variants(
                     &unfiltered_variants,
@@ -815,13 +823,10 @@ fn process_config_entries(
                     entry.start,
                     entry.end,
                     None,
-                    Arc::clone(&seqinfo_storage), // Pass the storage
+                    Arc::clone(&seqinfo_storage),
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
                 )? {
-                    Some(values) => values,
-                    None => continue, // Skip writing this record
-                };
 
 
             // Process haplotype_group=1 (unfiltered)
