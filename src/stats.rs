@@ -550,22 +550,22 @@ fn process_variants(
                 .and_then(|gt| gt.as_ref())
                 .and_then(|alleles| alleles.get(allele_idx))
                 .copied();
+
+                // Create and store SeqInfo
+                let seq_info = SeqInfo {
+                    sample_index: sample_idx,
+                    haplotype_group,
+                    nucleotide: allele,
+                    chromosome: String::from("PUT CHROMOSOME HERE"), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
+                    position: variant.position,
+                    filtered: false, // MUST USE ACTUAL FILTERING INFO. FALSE ALWAYS IS NOT CORRECT.
+                    // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
+                };
+        
+                // Store the SeqInfo instance
+                let mut storage = seqinfo_storage.lock();
+                storage.push(seq_info);
         }
-
-        // Create and store SeqInfo
-        let seq_info = SeqInfo {
-            sample_index: sample_idx,
-            haplotype_group,
-            nucleotide: allele,
-            chromosome: String::from("PUT CHROMOSOME HERE"), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
-            position: variant.position,
-            filtered: false, // MUST USE ACTUAL FILTERING INFO. FALSE ALWAYS IS NOT CORRECT.
-            // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
-        };
-
-        // Store the SeqInfo instance
-        let mut storage = seqinfo_storage.lock();
-        storage.push(seq_info);
 
         // Determine if the variant is a segregating site
         let alleles_present: Vec<u8> = variant_alleles.iter().filter_map(|&a| a).collect();
@@ -1397,7 +1397,7 @@ fn process_vcf(
     // Collector thread
     let collector_thread = thread::spawn({
         let unfiltered_variants = unfiltered_variants.clone();
-        let _filtered_variants = _filtered_variants.clone();
+        let filtered_variants = Arc::new(Mutex::new(Vec::new())); // Or let filtered_variants = filtered_variants.clone();?
         let missing_data_info = missing_data_info.clone();
         let _filtering_stats = _filtering_stats.clone();
         move || -> Result<(), VcfError> {
@@ -1483,7 +1483,7 @@ fn process_vcf(
     let final_unfiltered_variants = Arc::try_unwrap(unfiltered_variants)
         .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
         .into_inner();
-    let final_filtered_variants = Arc::try_unwrap(_filtered_variants)
+    let final_filtered_variants = Arc::try_unwrap(filtered_variants)
         .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
         .into_inner();
             
