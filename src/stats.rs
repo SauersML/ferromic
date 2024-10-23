@@ -575,12 +575,14 @@ fn process_variants(
         }
 
         // Compute pairwise differences
-        for i in 0..n {
-            if let Some(allele_i) = variant_alleles[i] {
-                for j in (i + 1)..n {
-                    if let Some(allele_j) = variant_alleles[j] {
-                        if allele_i != allele_j {
-                            tot_pair_diff += 1;
+        if !variant_alleles.is_empty() {
+            for i in 0..n {
+                if let Some(&allele_i) = variant_alleles.get(i) {
+                    for j in (i + 1)..n {
+                        if let Some(&allele_j) = variant_alleles.get(j) {
+                            if allele_i != allele_j {
+                                tot_pair_diff += 1;
+                            }
                         }
                     }
                 }
