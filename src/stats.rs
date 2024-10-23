@@ -556,7 +556,7 @@ fn process_variants(
                     sample_index: sample_idx,
                     haplotype_group,
                     nucleotide: allele,
-                    chromosome: String::from("PUT CHROMOSOME HERE"), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
+                    chromosome: chr.to_string(), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
                     position: variant.position,
                     filtered: false, // MUST USE ACTUAL FILTERING INFO. FALSE ALWAYS IS NOT CORRECT.
                     // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
