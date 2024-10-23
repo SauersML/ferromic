@@ -495,6 +495,7 @@ fn process_variants(
     region_end: i64,
     adjusted_sequence_length: Option<i64>,
     seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
 ) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
