@@ -236,6 +236,8 @@ fn main() -> Result<(), VcfError> {
         // Initialize shared SeqInfo storage
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
 
+        let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+
         // Process the VCF file
         let (
             unfiltered_variants,
@@ -541,7 +543,7 @@ fn process_variants(
         }
 
         // Collect the alleles for the haplotypes
-        let variant_alleles = Vec::new(); // Alleles of haplotypes at this variant
+        let mut variant_alleles = Vec::new(); // Alleles of haplotypes at this variant
 
         for &(sample_idx, allele_idx) in &haplotype_indices {
             let allele = variant.genotypes.get(sample_idx)
@@ -1372,7 +1374,7 @@ fn process_vcf(
                             &mut local_filtering_stats,
                             allow_regions.as_ref().map(|arc| arc.as_ref()),
                             mask_regions.as_ref().map(|arc| arc.as_ref()),
-                            &mut *position_allele_map.lock(),
+                            &position_allele_map,
                         ) {
                             Ok(variant_option) => {
                                 result_sender
@@ -1626,7 +1628,7 @@ fn parse_variant(
     _filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    position_allele_map: &parking_lot::Mutex<HashMap<i64, (char, char)>>,
+    position_allele_map: &Mutex<HashMap<i64, (char, char)>>,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
@@ -1696,6 +1698,7 @@ fn parse_variant(
 
     let ref_allele = fields[3].chars().next().unwrap_or('N');
     let alt_allele = fields[4].chars().next().unwrap_or('N');
+
     let mut map = position_allele_map.lock();
     map.insert(pos, (ref_allele, alt_allele));
 
