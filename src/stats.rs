@@ -1406,7 +1406,7 @@ fn process_vcf(
                     Ok((Some((variant, passes_filters)), local_missing_data_info, local_filtering_stats)) => {
                         unfiltered_variants.lock().push(variant.clone());
                         if passes_filters {
-                            _filtered_variants.lock().push(variant);
+                            filtered_variants.lock().push(variant);
                         }
                         let mut global_missing_data_info = missing_data_info.lock();
                         global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
