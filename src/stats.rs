@@ -552,11 +552,28 @@ fn process_variants(
                 .and_then(|alleles| alleles.get(allele_idx))
                 .copied();
 
+
+                // Convert VCF allele to actual nucleotide
+                let nucleotide = if let Some(allele_val) = allele {
+                    let map = position_allele_map.lock();
+                    if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                        Some(match allele_val {
+                            0 => ref_allele as u8,
+                            1 => alt_allele as u8,
+                            _ => b'N',
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+            
                 // Create and store SeqInfo
                 let seq_info = SeqInfo {
                     sample_index: sample_idx,
                     haplotype_group,
-                    nucleotide: allele,
+                    nucleotide,
                     chromosome: entry.seqname.clone(), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
                     position: variant.position,
                     filtered: false, // MUST USE ACTUAL FILTERING INFO. FALSE ALWAYS IS NOT CORRECT.
