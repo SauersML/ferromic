@@ -827,6 +827,9 @@ fn process_config_entries(
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
                 )? {
+                    Some(values) => values,
+                    None => continue, // Skip writing this record
+                };
 
 
             // Process haplotype_group=1 (unfiltered)
