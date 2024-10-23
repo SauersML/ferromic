@@ -257,17 +257,18 @@ fn main() -> Result<(), VcfError> {
             Arc::clone(&seqinfo_storage), // Pass the storage
             Arc::clone(&position_allele_map),
         )?;
-
-        let seqinfo = seqinfo_storage.lock();
-        if !seqinfo.is_empty() {
-            println!("\n{}", "Sample SeqInfo Entries:".green().bold());
-            for (i, info) in seqinfo.iter().take(5).enumerate() {
-                println!("SeqInfo {}: {:?}", i + 1, info);
+        
+        {
+            let seqinfo = seqinfo_storage.lock();
+            if !seqinfo.is_empty() {
+                println!("\n{}", "Sample SeqInfo Entries:".green().bold());
+                for (i, info) in seqinfo.iter().take(5).enumerate() {
+                    println!("SeqInfo {}: {:?}", i + 1, info);
+                }
+            } else {
+                println!("No SeqInfo entries were stored.");
             }
-        } else {
-            println!("No SeqInfo entries were stored.");
         }
-
         println!("{}", "Calculating diversity statistics...".blue());
 
         let seq_length = if end == i64::MAX {
@@ -851,11 +852,13 @@ fn process_config_entries(
                     None => continue, // Skip writing this record
                 };
 
-            let seqinfo = seqinfo_storage.lock();
-            if !seqinfo.is_empty() {
-                println!("\n{}", "Sample SeqInfo Entries:".green().bold());
-                for (i, info) in seqinfo.iter().take(5).enumerate() {
-                    println!("SeqInfo {}: {:?}", i + 1, info);
+            {
+                let seqinfo = seqinfo_storage.lock();
+                if !seqinfo.is_empty() {
+                    println!("\n{}", "Sample SeqInfo Entries:".green().bold());
+                    for (i, info) in seqinfo.iter().take(5).enumerate() {
+                        println!("SeqInfo {}: {:?}", i + 1, info);
+                    }
                 }
             }
 
@@ -1511,25 +1514,33 @@ fn process_vcf(
     for thread in consumer_threads {
         thread.join().expect("Consumer thread panicked")?;
     }
-    drop(result_sender); // Close the result channel
-    collector_thread.join().expect("Collector thread panicked")?;
-
-    // Signal that processing is complete
+    // Signal completion before joining collector
     processing_complete.store(true, Ordering::Relaxed);
+    
+    // All consumers must have finished and dropped their Arc references
+    drop(result_sender);
+    
+    // Now join collector thread
+    collector_thread.join().expect("Collector thread panicked")?;
 
     // Wait for the progress thread to finish
     progress_thread.join().expect("Couldn't join progress thread");
 
-    let seqinfo = seqinfo_storage.lock();
-    if !seqinfo.is_empty() {
-        println!("\n{}", "Sample SeqInfo Entries:".green().bold());
-        for (i, info) in seqinfo.iter().take(5).enumerate() {
-            println!("SeqInfo {}: {:?}", i + 1, info);
+    {
+        let seqinfo = seqinfo_storage.lock();
+        if !seqinfo.is_empty() {
+            println!("\n{}", "Sample SeqInfo Entries:".green().bold());
+            for (i, info) in seqinfo.iter().take(5).enumerate() {
+                println!("SeqInfo {}: {:?}", i + 1, info);
+            }
+        } else {
+            println!("No SeqInfo entries were stored.");
         }
-    } else {
-        println!("No SeqInfo entries were stored.");
     }
 
+    drop(result_sender);
+    drop(collector_thread);
+    
     let final_unfiltered_variants = Arc::try_unwrap(unfiltered_variants)
         .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
         .into_inner();
