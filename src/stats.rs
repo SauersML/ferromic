@@ -496,6 +496,7 @@ fn process_variants(
     adjusted_sequence_length: Option<i64>,
     seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    chromosome: String,
 ) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
@@ -574,7 +575,7 @@ fn process_variants(
                     sample_index: sample_idx,
                     haplotype_group,
                     nucleotide,
-                    chromosome: entry.seqname.clone(), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
+                    chromosome: chromosome.clone(),
                     position: variant.position,
                     filtered: false, // MUST USE ACTUAL FILTERING INFO. FALSE ALWAYS IS NOT CORRECT.
                     // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
@@ -808,6 +809,7 @@ fn process_config_entries(
                     None,
                     Arc::clone(&seqinfo_storage), // Pass the storage
                     Arc::clone(&position_allele_map),
+                    entry.seqname.clone(),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -826,6 +828,7 @@ fn process_config_entries(
                     None,
                     Arc::clone(&seqinfo_storage), // Pass the storage
                     Arc::clone(&position_allele_map),
+                    entry.seqname.clone(),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -855,6 +858,7 @@ fn process_config_entries(
                     Some(adjusted_sequence_length),
                     Arc::clone(&seqinfo_storage),
                     Arc::clone(&position_allele_map),
+                    entry.seqname.clone(),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -872,6 +876,7 @@ fn process_config_entries(
                     Some(adjusted_sequence_length),
                     Arc::clone(&seqinfo_storage),
                     Arc::clone(&position_allele_map),
+                    entry.seqname.clone(),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
