@@ -574,8 +574,8 @@ fn process_variants(
                     None
                 };
                 
-                println!("DEBUG: Creating SeqInfo for chr:{}, pos:{}, hap:{}, nuc:{:?}", 
-                    chromosome, variant.position, haplotype_group, nucleotide);
+                //println!("DEBUG: Creating SeqInfo for chr:{}, pos:{}, hap:{}, nuc:{:?}", 
+                //    chromosome, variant.position, haplotype_group, nucleotide);
                 // Create and store SeqInfo
                 let seq_info = SeqInfo {
                     sample_index: sample_idx,
