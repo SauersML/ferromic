@@ -645,7 +645,7 @@ mod tests {
         let invalid_group = process_variants(
             &variants,
             &sample_names,
-            2, // haplotype_group=2 (invalid, assuming only 0 and 1)
+            2, // haplotype_group=2 (invalid, since only 0 and 1)
             &sample_filter,
             1000,
             3000,
@@ -953,11 +953,53 @@ mod tests {
 
     #[test]
     fn test_allele_frequency() {
-        let (variants, sample_names, sample_filter) = setup_global_test();
-        let adjusted_sequence_length: Option<i64> = None;
+        let sample_names = vec![
+            "SAMPLE1".to_string(),
+            "SAMPLE2".to_string(),
+            "SAMPLE3".to_string(),
+        ];
+        let mut sample_filter = HashMap::new();
+        sample_filter.insert("SAMPLE1".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE2".to_string(), (0, 1));
+        sample_filter.insert("SAMPLE3".to_string(), (0, 1));
+        let adjusted_sequence_length: Option<i64> = Some(2001);
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+    
+        // Define VCF lines as strings
+        let vcf_lines = vec![
+            "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|1:40\t1|1:45",
+            "chr1\t2000\t.\tA\tA\t.\tPASS\t.\tGT:GQ\t0|0:35\t0|0:40\t0|0:45",
+            "chr1\t3000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|1:35\t1|1:40\t0|0:45",
+        ];
+    
+        // Parse each VCF line to populate `position_allele_map`
+        for line in &vcf_lines {
+            let mut missing_data_info = MissingDataInfo::default();
+            let mut filtering_stats = FilteringStats::default();
+            let result = parse_variant(
+                line,
+                "1",
+                1000,
+                3000,
+                &mut missing_data_info,
+                &sample_names,
+                30,
+                &mut filtering_stats,
+                None,
+                None,
+                &position_allele_map,
+            );
+            assert!(result.is_ok());
+        }
+    
+        // Now, process the variants
+        let variants = vec![
+            create_variant(1000, vec![Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1])]),
+            create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 0])]),
+            create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
+        ];
     
         let result = process_variants(
             &variants,
@@ -976,7 +1018,7 @@ mod tests {
         let allele_frequency = calculate_inversion_allele_frequency(&sample_filter);
     
         // Calculate expected allele frequency
-        let expected_freq = 0.5; // Updated expectation
+        let expected_freq = 0.5; // Based on test setup
         let allele_frequency_diff = (allele_frequency.unwrap_or(0.0) - expected_freq).abs();
         println!(
             "Allele frequency difference: {}",
@@ -989,7 +1031,7 @@ mod tests {
             allele_frequency.unwrap_or(0.0)
         );
     
-        // Verify segregating sites if applicable
+        // Verify segregating sites
         assert_eq!(result.unwrap().0, 2, "Number of segregating sites should be 2");
     }
 
@@ -1041,7 +1083,15 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-    
+
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('A', 'A'));
+            pam.insert(3000, ('A', 'T'));
+        }
+
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
@@ -1054,13 +1104,13 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
         ).unwrap();
-    
+
         // Correctly unwrap the Option to access the inner tuple
         let (segsites, _w_theta, _pi, _n_hap) = match _result_group1 {
             Some(data) => data,
             None => panic!("Expected Some variant data"),
         };
-    
+
         let expected_segsites_group1 = 2;
         println!(
             "Number of segregating sites for Group 1 (expected {}): {}",
@@ -1121,18 +1171,24 @@ mod tests {
 
     #[test]
     fn test_global_allele_frequency_filtered() {
-        // Setup global test data
         let (variants, sample_names, sample_filter) = setup_global_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-    
-        // Process variants without specifying haplotype_group (global)
+
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('A', 'A'));
+            pam.insert(3000, ('A', 'T'));
+        }
+
         let result = process_variants(
             &variants,
             &sample_names,
-            0, // haplotype_group is irrelevant for global calculation
+            0, // haplotype_group is irrelevant now
             &sample_filter,
             1000,
             3000,
@@ -1141,12 +1197,12 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
         ).unwrap();
-    
+
         // Calculate global allele frequency
         let allele_frequency = calculate_inversion_allele_frequency(&sample_filter);
-    
-        // Define expected allele frequency based on your test setup
-        let expected_freq = 0.5; // Updated expectation
+
+        // Define expected allele frequency based on test setup
+        let expected_freq = 0.5; // Adjust based on actual calculation
         let allele_frequency_diff = (allele_frequency.unwrap_or(0.0) - expected_freq).abs();
         println!(
             "Filtered global allele frequency difference: {}",
@@ -1158,8 +1214,8 @@ mod tests {
             expected_freq,
             allele_frequency.unwrap_or(0.0)
         );
-    
-        // Verify the number of segregating sites
+
+        // Number of segregating sites
         assert_eq!(result.unwrap().0, 2, "Number of segregating sites should be 2");
     }
 
