@@ -1352,47 +1352,49 @@ fn process_vcf(
             let chr = chr.to_string();
             let sample_names = Arc::clone(&sample_names);
             let mask_regions = mask_regions.clone();
+            let position_allele_map = Arc::clone(&position_allele_map);
+            
             thread::spawn({
                 let allow_regions = allow_regions.clone();
                 move || -> Result<(), VcfError> {
                     while let Ok(line) = line_receiver.recv() {
                         let mut local_missing_data_info = MissingDataInfo::default();
                         let mut local_filtering_stats = FilteringStats::default();
-                        let position_allele_map_clone = Arc::clone(&position_allele_map);
+                        
                         match parse_variant(
-                        &line,
-                        &chr,
-                        start,
-                        end,
-                        &mut local_missing_data_info,
-                        &sample_names,
-                        min_gq,
-                        &mut local_filtering_stats,
-                        allow_regions.as_ref().map(|arc| arc.as_ref()),
-                        mask_regions.as_ref().map(|arc| arc.as_ref()),
-                        &mut position_allele_map_clone.lock(),
-                    ) {
-                        Ok(variant_option) => {
-                            result_sender
-                                .send(Ok((
-                                    variant_option,
-                                    local_missing_data_info,
-                                    local_filtering_stats,
-                                )))
-                                .map_err(|_| VcfError::ChannelSend)?;
-                        }
-                        Err(e) => {
-                            result_sender
-                                .send(Err(e))
-                                .map_err(|_| VcfError::ChannelSend)?;
+                            &line,
+                            &chr,
+                            start,
+                            end,
+                            &mut local_missing_data_info,
+                            &sample_names,
+                            min_gq,
+                            &mut local_filtering_stats,
+                            allow_regions.as_ref().map(|arc| arc.as_ref()),
+                            mask_regions.as_ref().map(|arc| arc.as_ref()),
+                            &mut *position_allele_map.lock(),
+                        ) {
+                            Ok(variant_option) => {
+                                result_sender
+                                    .send(Ok((
+                                        variant_option,
+                                        local_missing_data_info,
+                                        local_filtering_stats,
+                                    )))
+                                    .map_err(|_| VcfError::ChannelSend)?;
+                            }
+                            Err(e) => {
+                                result_sender
+                                    .send(Err(e))
+                                    .map_err(|_| VcfError::ChannelSend)?;
+                            }
                         }
                     }
+                    Ok(())
                 }
-                Ok(())
-            }
+            })
         })
-    })
-    .collect();
+        .collect();
 
     // Collector thread
     let collector_thread = thread::spawn({
