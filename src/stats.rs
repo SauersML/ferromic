@@ -538,8 +538,15 @@ fn process_variants(
     let mut tot_pair_diff = 0;
     let n = haplotype_indices.len();
 
-    // Clear previous entries
-    seqinfo_storage.lock().clear();
+    // Clear previous entries and make sure lock is released
+    {
+        seqinfo_storage.lock().clear();
+    }
+    
+    // Early return if no variants
+    if variants.is_empty() { // But is early return really correct here? 
+        return Ok(Some((0, 0.0, 0.0, n))); // Return zero values but valid result
+    }
 
     // Need to add sequence info here
     for variant in variants {
