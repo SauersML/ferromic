@@ -545,17 +545,15 @@ fn process_variants(
         // Collect the alleles for the haplotypes
         let mut variant_alleles = Vec::new(); // Alleles of haplotypes at this variant
 
-        for &(i, allele_idx) in &haplotype_indices {
-            let allele = variant.genotypes.get(i)
+        for &(sample_idx, allele_idx) in &haplotype_indices {
+            let allele = variant.genotypes.get(sample_idx)
                 .and_then(|gt| gt.as_ref())
                 .and_then(|alleles| alleles.get(allele_idx))
                 .copied();
-            variant_alleles.push(allele); // allele is Option<u8>
-        }
 
         // Create and store SeqInfo
         let seq_info = SeqInfo {
-            sample_index: i,
+            sample_index: sample_idx,
             haplotype_group,
             nucleotide: allele,
             chromosome: String::from("PUT CHROMOSOME HERE"), // MUST USE LOGIC WHICH GETS THE REAL CHROMOSOME
@@ -682,6 +680,7 @@ fn process_config_entries(
             min_gq,
             mask.clone(),
             allow.clone(),
+            Arc::clone(&seqinfo_storage),
         ) {
             Ok(data) => data,
             Err(e) => {
@@ -828,6 +827,7 @@ fn process_config_entries(
                     entry.start,
                     entry.end,
                     Some(adjusted_sequence_length),
+                    Arc::clone(&seqinfo_storage),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -843,6 +843,7 @@ fn process_config_entries(
                     entry.start,
                     entry.end,
                     Some(adjusted_sequence_length),
+                    Arc::clone(&seqinfo_storage),
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -1266,6 +1267,9 @@ fn process_vcf(
     
     // Existing unfiltered and filtered variants storage
     let unfiltered_variants = Arc::new(Mutex::new(Vec::new()));
+    let filtered_variants = Arc::new(Mutex::new(Vec::new()));
+
+    let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
 
     // Existing missing data and filtering stats
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
@@ -1353,6 +1357,7 @@ fn process_vcf(
                     while let Ok(line) = line_receiver.recv() {
                         let mut local_missing_data_info = MissingDataInfo::default();
                         let mut local_filtering_stats = FilteringStats::default();
+                        let position_allele_map_clone = Arc::clone(&position_allele_map);
                         match parse_variant(
                         &line,
                         &chr,
@@ -1364,6 +1369,7 @@ fn process_vcf(
                         &mut local_filtering_stats,
                         allow_regions.as_ref().map(|arc| arc.as_ref()),
                         mask_regions.as_ref().map(|arc| arc.as_ref()),
+                        &mut position_allele_map_clone.lock(),
                     ) {
                         Ok(variant_option) => {
                             result_sender
