@@ -836,6 +836,7 @@ fn process_config_entries(
                     Arc::clone(&seqinfo_storage),
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
+                    false,  // unfiltered variants
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -852,9 +853,10 @@ fn process_config_entries(
                     entry.start,
                     entry.end,
                     None,
-                    Arc::clone(&seqinfo_storage), // Pass the storage
+                    Arc::clone(&seqinfo_storage),
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
+                    false,  // unfiltered variants
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -887,6 +889,7 @@ fn process_config_entries(
                     Arc::clone(&seqinfo_storage),
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
+                    true,  // filtered variants
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -905,6 +908,7 @@ fn process_config_entries(
                     Arc::clone(&seqinfo_storage),
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
+                    true,  // filtered variants
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
