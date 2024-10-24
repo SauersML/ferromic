@@ -590,7 +590,7 @@ fn process_variants(
                     nucleotide,
                     chromosome: chromosome.clone(),
                     position: variant.position,
-                    filtered: false, // MUST USE ACTUAL FILTERING INFO. FALSE ALWAYS IS NOT CORRECT.
+                    filtered: variants.as_ptr() == _filtered_variants.as_ptr(), // MUST USE ACTUAL FILTERING INFO.
                     // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
                 };
         
