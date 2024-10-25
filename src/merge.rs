@@ -20,16 +20,11 @@ use std::time::{Instant, Duration};
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
 use crossbeam_channel::{Sender, Receiver};
 
-const UPDATE_FREQUENCY_BYTES: usize = 1000 * 1024 * 1024; // MB
-const PRINT_INTERVAL: Duration = Duration::from_secs(5); // Print every 5 seconds
-
-
 impl Default for ChromosomeProgress {
     fn default() -> Self {
         ChromosomeProgress {
             total_bytes: 0,
             processed_bytes: 0,
-            last_print: Instant::now(),
         }
     }
 }
@@ -37,7 +32,6 @@ impl Default for ChromosomeProgress {
 struct ChromosomeProgress {
     total_bytes: u64,
     processed_bytes: u64,
-    last_print: Instant,
 }
 
 #[derive(Parser, Debug)]
