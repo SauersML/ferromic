@@ -539,11 +539,6 @@ fn process_variants(
     let mut tot_pair_diff = 0;
     let n = haplotype_indices.len();
 
-    // Clear previous entries and make sure lock is released
-    {
-        seqinfo_storage.lock().clear();
-    }
-    
     // Early return if no variants
     if variants.is_empty() { // But is early return really correct here? 
         return Ok(Some((0, 0.0, 0.0, n))); // Return zero values but valid result
@@ -629,6 +624,24 @@ fn process_variants(
     let seq_length = adjusted_sequence_length.unwrap_or(region_end - region_start + 1);
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
+
+    // Print the current contents before clearing
+    {
+        let seqinfo = seqinfo_storage.lock();
+        if !seqinfo.is_empty() {
+            println!("\n{}", "Sample SeqInfo Entries:".green().bold());
+            for (i, info) in seqinfo.iter().take(5).enumerate() {
+                println!("SeqInfo {}: {:?}", i + 1, info);
+            }
+        } else {
+            println!("No SeqInfo entries were stored.");
+        }
+    }
+
+    // Clear storage for next group
+    {
+        seqinfo_storage.lock().clear();
+    }
 
     Ok(Some((num_segsites, w_theta, pi, n)))
 }
@@ -861,16 +874,6 @@ fn process_config_entries(
                     Some(values) => values,
                     None => continue, // Skip writing this record
                 };
-
-            {
-                let seqinfo = seqinfo_storage.lock();
-                if !seqinfo.is_empty() {
-                    println!("\n{}", "Sample SeqInfo Entries:".green().bold());
-                    for (i, info) in seqinfo.iter().take(5).enumerate() {
-                        println!("SeqInfo {}: {:?}", i + 1, info);
-                    }
-                }
-            }
 
             // Calculate allele frequency of inversions (no filter)
             let inversion_freq_no_filter =
