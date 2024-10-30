@@ -451,7 +451,7 @@ mod tests {
             &position_allele_map,
         );
     
-        // the function executed without errors
+        // The function executed without errors
         assert!(result.is_ok());
     
         // Assert that the variant is returned but marked as invalid (filtered out)
@@ -1361,7 +1361,7 @@ mod tests {
         HashMap<String, (u8, u8)>,
     ) {
         // Define sample haplotype groupings as per TSV config
-        // For haplotype group 1, assume:
+        // For haplotype group 1:
         // SAMPLE1: hap1=1
         // SAMPLE2: hap1=0
         // SAMPLE3: hap1=0
