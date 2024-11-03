@@ -1135,6 +1135,12 @@ mod tests {
         let mut _filtering_stats = FilteringStats::default();
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('A', 'T'));
+            pam.insert(3000, ('A', 'T'));
+        }
         let chromosome = "1".to_string();
     
         let _result_group1 = process_variants(
@@ -1316,6 +1322,12 @@ mod tests {
         let mut _filtering_stats = FilteringStats::default();
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('A', 'T'));
+            pam.insert(3000, ('A', 'T'));
+        }
         let chromosome = "1".to_string();
     
         let _result_group1 = process_variants(
