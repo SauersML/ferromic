@@ -16,6 +16,7 @@ use crossbeam_channel::bounded;
 use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
+use prettytable::{Table, row, cell};
 
 // Define command-line arguments using clap
 #[derive(Parser, Debug)]
@@ -376,6 +377,38 @@ fn main() -> Result<(), VcfError> {
 
     println!("{}", "Analysis complete.".green());
     Ok(())
+}
+
+fn display_seqinfo_entries(seqinfo: &[SeqInfo], limit: usize) {
+    println!("\n{}", "Sample SeqInfo Entries:".green().bold());
+
+    let mut table = Table::new();
+    
+    // Set headers
+    table.add_row(row![
+        "Index", "Sample Index", "Haplotype Group", "Nucleotide", "Chromosome", "Position", "Filtered"
+    ]);
+
+    // Add rows
+    for (i, info) in seqinfo.iter().take(limit).enumerate() {
+        table.add_row(row![
+            i + 1,
+            info.sample_index,
+            info.haplotype_group,
+            info.nucleotide.map(|n| n as char).unwrap_or('N'),
+            info.chromosome,
+            info.position,
+            info.filtered
+        ]);
+    }
+
+    // Print the table to standard output
+    table.printstd();
+
+    // Show additional entry count if there are more entries
+    if seqinfo.len() > limit {
+        println!("... and {} more entries.", seqinfo.len() - limit);
+    }
 }
 
 // Function to parse regions file (mask or allow)
