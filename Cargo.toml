@@ -29,6 +29,7 @@ assert_cmd = "2.0"
 predicates = "2.1"
 bio = "2.0.3"
 regex = "1.7"
+prettytable = "0.10"
 
 [profile.release]
 lto = true
