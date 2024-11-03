@@ -262,7 +262,7 @@ fn main() -> Result<(), VcfError> {
             let seqinfo = seqinfo_storage.lock();
             if !seqinfo.is_empty() {
                 println!("\n{}", "Sample SeqInfo Entries:".green().bold());
-                for (i, info) in seqinfo.iter().take(5).enumerate() {
+                for (i, info) in seqinfo.iter().take(12).enumerate() {
                     println!("SeqInfo {}: {:?}", i + 1, info);
                 }
             } else {
@@ -630,7 +630,7 @@ fn process_variants(
         let seqinfo = seqinfo_storage.lock();
         if !seqinfo.is_empty() {
             println!("\n{}", "Sample SeqInfo Entries:".green().bold());
-            for (i, info) in seqinfo.iter().take(5).enumerate() {
+            for (i, info) in seqinfo.iter().take(12).enumerate() {
                 println!("SeqInfo {}: {:?}", i + 1, info);
             }
         } else {
@@ -1545,7 +1545,7 @@ fn process_vcf(
         let seqinfo = seqinfo_storage.lock();
         if !seqinfo.is_empty() {
             println!("\n{}", "Sample SeqInfo Entries:".green().bold());
-            for (i, info) in seqinfo.iter().take(5).enumerate() {
+            for (i, info) in seqinfo.iter().take(12).enumerate() {
                 println!("SeqInfo {}: {:?}", i + 1, info);
             }
         } else {
