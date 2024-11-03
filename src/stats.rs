@@ -377,15 +377,15 @@ fn main() -> Result<(), VcfError> {
 }
 
 fn display_seqinfo_entries(seqinfo: &[SeqInfo], limit: usize) {
-    println!("\n{}", "Sample SeqInfo Entries:".green().bold());
-
+    // Create a buffer for the table output
+    let mut output = Vec::new();
     let mut table = Table::new();
     
     // Set headers
     table.add_row(row![
         "Index", "Sample Index", "Haplotype Group", "Nucleotide", "Chromosome", "Position", "Filtered"
     ]);
-
+    
     // Add rows
     for (i, info) in seqinfo.iter().take(limit).enumerate() {
         table.add_row(row![
@@ -398,14 +398,25 @@ fn display_seqinfo_entries(seqinfo: &[SeqInfo], limit: usize) {
             info.filtered
         ]);
     }
-
-    // Print the table to standard output
-    table.printstd();
-
-    // Show additional entry count if there are more entries
+    
+    // Render the table to our buffer
+    table.print(&mut output).expect("Failed to print table to buffer");
+    
+    // Now print everything atomically as a single block
+    let table_string = String::from_utf8(output).expect("Failed to convert table to string");
+    
+    // Combine all output into a single print statement
+    print!("\n{}\n{}", 
+           "Sample SeqInfo Entries:".green().bold(),
+           table_string);
+    
+    // Add the count of remaining entries if any
     if seqinfo.len() > limit {
         println!("... and {} more entries.", seqinfo.len() - limit);
     }
+    
+    // Everything is flushed
+    std::io::stdout().flush().expect("Failed to flush stdout");
 }
 
 // Function to parse regions file (mask or allow)
