@@ -369,15 +369,6 @@ def perform_statistical_tests(haplotype_stats_files):
         print("Not enough data to perform statistical tests.")
 
 
-import os import sys import glob import subprocess import multiprocessing import signal import psutil from itertools import combinations import pandas as pd import numpy as np import shutil import re
-pasted
-S
-REWRITE THE FUCNTIONS NECESARY TO FIX IT.
-
-<planning> Only need to modify: 1. process_pair() to include cds_id in return 2. main() to handle sequential file reading but parallel pair processing 3. process_phy_file() is removed as its functionality moves into main() </planning> <reasoning> - Keep all original function names - Keep temp directories per file - Return values must match original format - Keep all original prints - Only change the parallelization structure </reasoning>
-python
-
-Copy
 def process_pair(args):
    pair, sequences, sample_groups, cds_id, codeml_path, temp_dir = args
    seq1_name, seq2_name = pair
