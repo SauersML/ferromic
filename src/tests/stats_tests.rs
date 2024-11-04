@@ -1159,7 +1159,7 @@ mod tests {
             &sample_filter,
             1000,
             2000,
-            Some(100),  // sequence_length=100
+            Some(100),  // sequence_length=100 for some reason
             Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome,
@@ -1172,7 +1172,7 @@ mod tests {
         };
     
         // 2 segregating sites, 4 haplotypes (H4 = 25/12), length 100
-        // theta = 2 / (25/12) / 100 = 0.0096
+        // theta = 2 / (25/12) / 100 = 0.00960000
         let expected_theta = 2.0 / (25.0/12.0) / 100.0;
         println!("Got {} segregating sites with {} haplotypes", segsites, n_hap);
         assert!((w_theta - expected_theta).abs() < 1e-10);
