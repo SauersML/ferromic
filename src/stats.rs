@@ -548,7 +548,9 @@ fn process_variants(
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: String,
     is_filtered_set: bool,
-) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
+    reference_sequence: &[u8],
+    cds_regions: &[CdsRegion],
+) -> Result<Option<(usize, f64, f64, usize)>, VcfError>
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
@@ -700,6 +702,7 @@ fn process_config_entries(
     min_gq: u16,
     mask: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    args: &Args,
 ) -> Result<(), VcfError> {
     // Initialize shared SeqInfo storage
     let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
