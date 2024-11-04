@@ -412,18 +412,49 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Get all input files
     phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
     total_files = len(phy_files)
-    print(f"Total CDS files to process: {total_files}")
+    print(f"Found {total_files} total .phy files")
 
+    # Check which files are already processed
+    completed_files = set()
+    for phy_file in phy_files:
+        phy_filename = os.path.basename(phy_file)
+        match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
+        if match:
+            cds_id = f'chr{match.group(2)}_start{match.group(3)}_end{match.group(4)}'
+        else:
+            cds_id = phy_filename.replace('.phy', '')
+            
+        output_csv = os.path.join(args.output_dir, f'{cds_id}.csv')
+        haplotype_csv = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
+        
+        if os.path.exists(output_csv) and os.path.exists(haplotype_csv):
+            completed_files.add(phy_file)
+            print(f"Found existing results for {cds_id}")
+
+    # Get files that need processing
+    files_to_process = [f for f in phy_files if f not in completed_files]
+    print(f"Found {len(completed_files)} completed files")
+    print(f"Need to process {len(files_to_process)} files")
+
+    if not files_to_process:
+        print("All files already processed. Moving to final statistics...")
+        haplotype_stats_files = [os.path.join(args.output_dir, f'{get_cds_id(f)}_haplotype_stats.csv') 
+                                for f in phy_files]
+        perform_statistical_tests(haplotype_stats_files)
+        return
+
+    # Prepare all work items
     all_work = []
     file_info = {}
     
-    # Process files sequentially to prepare work
-    for idx, phy_file in enumerate(phy_files, 1):
-        print(f"\n====== Processing file {idx}/{total_files}: {phy_file} ======")
+    # Process files sequentially to prepare work queue
+    for idx, phy_file in enumerate(files_to_process, 1):
+        print(f"\n====== Preparing file {idx}/{len(files_to_process)}: {phy_file} ======")
         
-        # Extract CDS info
         phy_filename = os.path.basename(phy_file)
         match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
         if match:
@@ -435,14 +466,6 @@ def main():
         else:
             cds_id = phy_filename.replace('.phy', '')
             group = None
-        print(f"Identified CDS: {cds_id}")
-
-        output_csv = os.path.join(args.output_dir, f'{cds_id}.csv')
-        haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
-
-        if os.path.exists(output_csv) and os.path.exists(haplotype_output_csv):
-            print(f"Skipping {phy_file} - output files already exist")
-            continue
 
         sequences = parse_phy_file(phy_file)
         if not sequences:
@@ -456,37 +479,33 @@ def main():
         for sample in sample_names:
             sample_group = extract_group_from_sample(sample)
             sample_groups[sample] = sample_group if sample_group is not None else group
-        print(f"Assigned {len(sample_groups)} samples to groups")
 
         pairs = list(combinations(sample_names, 2))
-        total_pairs = len(pairs)
-        print(f"Generated {total_pairs} pairwise combinations")
-
-        if total_pairs == 0:
+        if not pairs:
             print(f"ERROR: No pairs to process in {phy_file}")
             continue
 
         temp_dir = os.path.join(args.output_dir, f'temp_{cds_id}_{datetime.now().strftime("%Y%m%d%H%M%S%f")}')
         os.makedirs(temp_dir, exist_ok=True)
-        print(f"Created temporary directory: {temp_dir}")
 
-        # Store file info for later
+        # Store file info
         file_info[cds_id] = {
             'temp_dir': temp_dir,
-            'output_csv': output_csv,
-            'haplotype_output_csv': haplotype_output_csv,
+            'output_csv': os.path.join(args.output_dir, f'{cds_id}.csv'),
+            'haplotype_output_csv': os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv'),
             'sample_names': sample_names,
-            'sample_groups': sample_groups
+            'sample_groups': sample_groups,
+            'phy_file': phy_file
         }
 
-        # Create work items for this file
+        # Add work items
         for pair in pairs:
             work_item = (pair, sequences, sample_groups, cds_id, args.codeml_path, temp_dir)
             all_work.append(work_item)
 
     # Process all pairs in parallel
     total_pairs = len(all_work)
-    print(f"\nProcessing {total_pairs} total pairs across all files")
+    print(f"\nProcessing {total_pairs} total pairs across {len(files_to_process)} files")
     num_processes = get_safe_process_count()
     results_by_file = defaultdict(list)
 
@@ -498,38 +517,50 @@ def main():
             if i % 100 == 0:
                 print(f"Completed {i}/{total_pairs} pairs ({(i/total_pairs)*100:.1f}%)")
 
-    # Process results for each file
-    haplotype_stats_files = []
+    # Process results and clean up
+    newly_completed = []
     for cds_id, results in results_by_file.items():
         info = file_info[cds_id]
         
-        # Save results
         df = pd.DataFrame(results, columns=['Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega'])
         df['CDS'] = cds_id
         df.to_csv(info['output_csv'], index=False)
         
-        # Calculate haplotype stats
         haplotype_stats = []
         for sample in info['sample_names']:
             sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
             omega_values = sample_df['omega'].dropna()
-            mean_omega = omega_values.mean()
-            median_omega = omega_values.median()
             haplotype_stats.append({
                 'Haplotype': sample,
                 'Group': info['sample_groups'][sample],
                 'CDS': cds_id,
-                'Mean_dNdS': mean_omega,
-                'Median_dNdS': median_omega
+                'Mean_dNdS': omega_values.mean(),
+                'Median_dNdS': omega_values.median()
             })
-            print(f"Sample {sample}: mean dN/dS = {mean_omega:.4f}, median = {median_omega:.4f}")
 
-        haplotype_df = pd.DataFrame(haplotype_stats)
-        haplotype_df.to_csv(info['haplotype_output_csv'], index=False)
-        haplotype_stats_files.append(info['haplotype_output_csv'])
+        pd.DataFrame(haplotype_stats).to_csv(info['haplotype_output_csv'], index=False)
+        newly_completed.append(info['haplotype_output_csv'])
 
-    # Run final statistical analysis
-    perform_statistical_tests(haplotype_stats_files)
+        try:
+            shutil.rmtree(info['temp_dir'])
+        except Exception as e:
+            print(f"WARNING: Failed to clean up {info['temp_dir']}: {str(e)}")
+
+    # Get all haplotype files including previously completed ones
+    all_haplotype_files = []
+    for phy_file in phy_files:
+        phy_filename = os.path.basename(phy_file)
+        match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
+        if match:
+            cds_id = f'chr{match.group(2)}_start{match.group(3)}_end{match.group(4)}'
+        else:
+            cds_id = phy_filename.replace('.phy', '')
+        haplotype_file = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
+        if os.path.exists(haplotype_file):
+            all_haplotype_files.append(haplotype_file)
+
+    # Run final analysis on all results
+    perform_statistical_tests(all_haplotype_files)
 
 if __name__ == '__main__':
     main()
