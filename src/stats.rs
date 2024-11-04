@@ -763,6 +763,141 @@ fn process_variants(
     // Clear storage for next group
     seqinfo_storage.lock().clear();
     Ok(Some((num_segsites, w_theta, pi, n)))
+
+    if is_filtered_set {
+        make_sequences(
+            variants,
+            sample_names,
+            haplotype_group,
+            sample_filter,
+            region_start,
+            region_end,
+            reference_sequence,
+            cds_regions,
+            position_allele_map.clone(),
+            &chromosome,
+        )?;
+    }
+}
+
+fn make_sequences(
+    variants: &[Variant],
+    sample_names: &[String],
+    haplotype_group: u8,
+    sample_filter: &HashMap<String, (u8, u8)>,
+    region_start: i64,
+    region_end: i64,
+    reference_sequence: &[u8],
+    cds_regions: &[CdsRegion],
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    chromosome: &str,
+) -> Result<(), VcfError> {
+    // Map sample names to indices
+    let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
+    for (i, name) in sample_names.iter().enumerate() {
+        let sample_id = extract_sample_id(name);
+        vcf_sample_id_to_index.insert(sample_id, i);
+    }
+
+    // Collect haplotype indices for the specified group
+    let mut haplotype_indices = Vec::new();
+    for (sample_name, &(left_tsv, right_tsv)) in sample_filter.iter() {
+        if let Some(&i) = vcf_sample_id_to_index.get(sample_name.as_str()) {
+            if left_tsv == haplotype_group as u8 {
+                haplotype_indices.push((i, 0)); // Include left haplotype
+            }
+            if right_tsv == haplotype_group as u8 {
+                haplotype_indices.push((i, 1)); // Include right haplotype
+            }
+        } else {
+            // Sample not found in VCF
+        }
+    }
+
+    if haplotype_indices.is_empty() {
+        println!(
+            "No haplotypes found for the specified group {}.",
+            haplotype_group
+        );
+        return Ok(());
+    }
+
+    // Initialize sequences for each sample haplotype with the reference sequence
+    let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
+    for (sample_idx, hap_idx) in &haplotype_indices {
+        let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+        hap_sequences.insert(sample_name, reference_sequence.to_vec());
+    }
+
+    // Apply variants to sequences
+    for variant in variants {
+        if variant.position >= region_start && variant.position <= region_end {
+            let pos_in_seq = (variant.position - region_start) as usize;
+            for (sample_idx, hap_idx) in &haplotype_indices {
+                if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
+                    if let Some(allele) = alleles.get(*hap_idx) {
+                        let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+                        if let Some(seq) = hap_sequences.get_mut(&sample_name) {
+                            let map = position_allele_map.lock();
+                            if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                                seq[pos_in_seq] = if *allele == 0 {
+                                    ref_allele as u8
+                                } else {
+                                    alt_allele as u8
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // For each CDS, extract sequences and write to PHYLIP file
+    for cds in cds_regions {
+        // Check overlap with region
+        if cds.end < region_start || cds.start > region_end {
+            continue; // No overlap
+        }
+
+        // Adjust CDS start and end to overlap with region
+        let cds_start = std::cmp::max(cds.start, region_start);
+        let cds_end = std::cmp::min(cds.end, region_end);
+
+        // Make sure length is multiple of 3
+        let mut cds_length = cds_end - cds_start + 1;
+        let remainder = cds_length % 3;
+        if remainder != 0 {
+            cds_length -= remainder;
+        }
+
+        // Adjust cds_end
+        let cds_end = cds_start + cds_length - 1;
+
+        // For each haplotype sequence, extract CDS sequence
+        let mut cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
+        for (sample_name, seq) in &hap_sequences {
+            let start_offset = (cds_start - region_start) as usize;
+            let end_offset = (cds_end - region_start + 1) as usize;
+            let cds_seq = seq[start_offset..end_offset].to_vec();
+            cds_sequences.insert(sample_name.clone(), cds_seq);
+        }
+
+        // Write sequences to PHYLIP file
+        let filename = format!(
+            "group_{}_chr_{}_start_{}_end_{}.phy",
+            haplotype_group, chromosome, cds_start, cds_end
+        );
+
+        let char_sequences: HashMap<String, Vec<char>> = cds_sequences
+            .into_iter()
+            .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
+            .collect();
+
+        write_phylip_file(&filename, &char_sequences)?;
+    }
+
+    Ok(())
 }
 
 fn process_config_entries(
@@ -971,6 +1106,21 @@ fn process_config_entries(
                 .cloned()
                 .collect();
             println!("Found {} variants in region", variants_in_region.len());
+
+            // Add these lines before calling process_variants
+            let ref_sequence = read_reference_sequence(
+                &Path::new(&args.reference_path),
+                &chr,
+                entry.start,
+                entry.end
+            )?;
+            
+            let cds_regions = parse_gff_file(
+                &Path::new(&args.gff_path),
+                &chr,
+                entry.start,
+                entry.end
+            )?;
             
             let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) =
                 match process_variants(
