@@ -16,7 +16,7 @@ use crossbeam_channel::bounded;
 use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
-use prettytable::{Table, row, cell};
+use prettytable::{Table, row};
 
 // Define command-line arguments using clap
 #[derive(Parser, Debug)]
@@ -1716,7 +1716,7 @@ fn read_reference_sequence(
     start: i64,
     end: i64
 ) -> Result<Vec<u8>, VcfError> {
-    let reader = bio::io::fasta::Reader::from_file(fasta_path)?;
+    let reader = bio::io::fasta::Reader::from_file(fasta_path).map_err(|e| VcfError::Io(e.into()))?;
     for record in reader.records() {
         let record = record?;
         if record.id() == chr || record.id() == format!("chr{}", chr) {
