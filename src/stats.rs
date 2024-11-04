@@ -224,6 +224,7 @@ fn main() -> Result<(), VcfError> {
             args.min_gq,
             mask_regions.clone(),
             allow_regions.clone(),
+            &args,
         )?;
     } else if let Some(chr) = args.chr.as_ref() {
         println!("Chromosome provided: {}", chr);
@@ -677,6 +678,58 @@ fn process_variants(
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
+    for cds in cds_regions {
+        let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
+        
+        // Initialize sequences with reference 
+        for (sample_idx, hap_idx) in &haplotype_indices {
+            let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+            let start_offset = (cds.start - region_start) as usize;
+            let end_offset = (cds.end - region_start) as usize;
+            let sequence = reference_sequence[start_offset..end_offset].to_vec();
+            hap_sequences.insert(sample_name, sequence);
+        }
+
+        // Apply variants
+        for variant in variants {
+            if variant.position >= cds.start && variant.position <= cds.end {
+                let pos_in_seq = (variant.position - cds.start) as usize;
+                
+                for (sample_idx, hap_idx) in &haplotype_indices {
+                    if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
+                        if let Some(allele) = alleles.get(*hap_idx) {
+                            let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+                            if let Some(seq) = hap_sequences.get_mut(&sample_name) {
+                                let map = position_allele_map.lock();
+                                if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                                    seq[pos_in_seq] = if *allele == 0 {
+                                        ref_allele as u8
+                                    } else {
+                                        alt_allele as u8
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let filename = format!(
+            "group_{}_chr_{}_start_{}_end_{}.phy",
+            haplotype_group,
+            chromosome,
+            cds.start,
+            cds.end
+        );
+        
+        let char_sequences: HashMap<String, Vec<char>> = hap_sequences.into_iter()
+            .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
+            .collect();
+            
+        write_phylip_file(&filename, &char_sequences)?;
+    }
+
     // Print the current contents before clearing
     {
         let seqinfo = seqinfo_storage.lock();
@@ -920,6 +973,8 @@ fn process_config_entries(
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
                     false,  // unfiltered variants
+                    &ref_sequence,
+                    &cds_regions,
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -943,6 +998,8 @@ fn process_config_entries(
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
                     true,  // filtered variants
+                    &ref_sequence,
+                    &cds_regions,
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
@@ -962,6 +1019,8 @@ fn process_config_entries(
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
                     true,  // filtered variants
+                    &ref_sequence,
+                    &cds_regions,
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
