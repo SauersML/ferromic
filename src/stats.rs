@@ -958,6 +958,19 @@ fn process_config_entries(
                     None => continue, // Skip writing this record
                 };
 
+            let ref_sequence = read_reference_sequence(
+                &Path::new(&args.reference_path),
+                &chr,
+                entry.start,
+                entry.end
+            )?;
+            
+            let cds_regions = parse_gff_file(
+                &Path::new(&args.gff_path),
+                &chr,
+                entry.start,
+                entry.end
+            )?;
 
             // Process haplotype_group=1 (unfiltered)
             let (num_segsites_1, w_theta_1, pi_1, n_hap_1_no_filter) =
