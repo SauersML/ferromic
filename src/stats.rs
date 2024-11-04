@@ -741,10 +741,7 @@ fn process_variants(
     }
 
     // Clear storage for next group
-    {
-        seqinfo_storage.lock().clear();
-    }
-
+    seqinfo_storage.lock().clear();
     Ok(Some((num_segsites, w_theta, pi, n)))
 }
 
