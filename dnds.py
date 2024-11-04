@@ -179,7 +179,7 @@ def process_pair(args):
    pair, sequences, sample_groups, cds_id, codeml_path, temp_dir = args
    seq1_name, seq2_name = pair
    
-   print(f"\n=== Processing pair: {seq1_name} vs {seq2_name} ===")
+   print(f"\n=== Processing pair: {seq1_name} vs {seq2_name} for {cds_id} ===")
    
    working_dir = os.path.join(temp_dir, f'temp_{seq1_name}_{seq2_name}_{int(time.time())}')
    os.makedirs(working_dir, exist_ok=True)
@@ -207,7 +207,9 @@ def process_pair(args):
    except Exception as e:
        print(f"WARNING: Failed to clean up {working_dir}: {str(e)}")
 
-   return (seq1_name, seq2_name, sample_groups[seq1_name], sample_groups[seq2_name], dN, dS, omega)
+   # Return cds_id as last element
+   return (seq1_name, seq2_name, sample_groups[seq1_name], sample_groups[seq2_name], dN, dS, omega, cds_id)
+
 
 def process_phy_file(args):
    phy_file, output_dir, codeml_path, total_files, file_index = args
@@ -366,42 +368,176 @@ def perform_statistical_tests(haplotype_stats_files):
     else:
         print("Not enough data to perform statistical tests.")
 
+
+import os import sys import glob import subprocess import multiprocessing import signal import psutil from itertools import combinations import pandas as pd import numpy as np import shutil import re
+pasted
+S
+REWRITE THE FUCNTIONS NECESARY TO FIX IT.
+
+<planning> Only need to modify: 1. process_pair() to include cds_id in return 2. main() to handle sequential file reading but parallel pair processing 3. process_phy_file() is removed as its functionality moves into main() </planning> <reasoning> - Keep all original function names - Keep temp directories per file - Return values must match original format - Keep all original prints - Only change the parallelization structure </reasoning>
+python
+
+Copy
+def process_pair(args):
+   pair, sequences, sample_groups, cds_id, codeml_path, temp_dir = args
+   seq1_name, seq2_name = pair
+   
+   print(f"\n=== Processing pair: {seq1_name} vs {seq2_name} for {cds_id} ===")
+   
+   working_dir = os.path.join(temp_dir, f'temp_{seq1_name}_{seq2_name}_{int(time.time())}')
+   os.makedirs(working_dir, exist_ok=True)
+   print(f"Created working directory: {working_dir}")
+
+   temp_phy = os.path.join(working_dir, 'temp.phy')
+   with open(temp_phy, 'w') as phy_file:
+       phy_file.write(f" 2 {len(sequences[seq1_name])}\n")
+       phy_file.write(f"{seq1_name:<10}{sequences[seq1_name]}\n")
+       phy_file.write(f"{seq2_name:<10}{sequences[seq2_name]}\n")
+   print(f"Written sequences to: {temp_phy}")
+
+   ctl_path = create_paml_ctl('temp.phy', 'results.txt', working_dir)
+   success = run_codeml(ctl_path, working_dir, codeml_path)
+
+   results_file = os.path.join(working_dir, 'results.txt')
+   if success:
+       dN, dS, omega = parse_codeml_output(results_file)
+   else:
+       dN, dS, omega = None, None, None
+
+   try:
+       shutil.rmtree(working_dir)
+       print(f"Cleaned up directory: {working_dir}")
+   except Exception as e:
+       print(f"WARNING: Failed to clean up {working_dir}: {str(e)}")
+
+   # Return cds_id as last element
+   return (seq1_name, seq2_name, sample_groups[seq1_name], sample_groups[seq2_name], dN, dS, omega, cds_id)
+
 def main():
-    # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
     parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
-    parser.add_argument('--codeml_path', type=str, default='/home/hsiehph/sauer354/di/paml/bin/codeml', help='Path to the codeml executable.')
+    parser.add_argument('--codeml_path', type=str, default='/home/hsiehph/sauer354/di/paml/bin/codeml', help='Path to codeml executable.')
     args = parser.parse_args()
 
-    phy_dir = args.phy_dir
-    output_dir = args.output_dir
-    codeml_path = args.codeml_path
+    os.makedirs(args.output_dir, exist_ok=True)
+    phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
+    total_files = len(phy_files)
+    print(f"Total CDS files to process: {total_files}")
 
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Get list of all .phy files
-    phy_files = glob.glob(os.path.join(phy_dir, '*.phy'))
-
-    total_cds = len(phy_files)
-    print(f"Total CDS files to process: {total_cds}")
-
-    # Prepare arguments for multiprocessing
-    pool_args = []
+    all_work = []
+    file_info = {}
+    
+    # Process files sequentially to prepare work
     for idx, phy_file in enumerate(phy_files, 1):
-        pool_args.append((phy_file, output_dir, codeml_path, total_cds, idx))
+        print(f"\n====== Processing file {idx}/{total_files}: {phy_file} ======")
+        
+        # Extract CDS info
+        phy_filename = os.path.basename(phy_file)
+        match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
+        if match:
+            group = int(match.group(1))
+            chr_num = match.group(2)
+            start = match.group(3)
+            end = match.group(4)
+            cds_id = f'chr{chr_num}_start{start}_end{end}'
+        else:
+            cds_id = phy_filename.replace('.phy', '')
+            group = None
+        print(f"Identified CDS: {cds_id}")
 
-    # Use multiprocessing to process CDS files
-    num_processes = max(1, multiprocessing.cpu_count() - 1)
+        output_csv = os.path.join(args.output_dir, f'{cds_id}.csv')
+        haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
+
+        if os.path.exists(output_csv) and os.path.exists(haplotype_output_csv):
+            print(f"Skipping {phy_file} - output files already exist")
+            continue
+
+        sequences = parse_phy_file(phy_file)
+        if not sequences:
+            print(f"ERROR: No sequences found in {phy_file}")
+            continue
+
+        sample_names = list(sequences.keys())
+        print(f"Found {len(sample_names)} samples")
+
+        sample_groups = {}
+        for sample in sample_names:
+            sample_group = extract_group_from_sample(sample)
+            sample_groups[sample] = sample_group if sample_group is not None else group
+        print(f"Assigned {len(sample_groups)} samples to groups")
+
+        pairs = list(combinations(sample_names, 2))
+        total_pairs = len(pairs)
+        print(f"Generated {total_pairs} pairwise combinations")
+
+        if total_pairs == 0:
+            print(f"ERROR: No pairs to process in {phy_file}")
+            continue
+
+        temp_dir = os.path.join(args.output_dir, f'temp_{cds_id}_{datetime.now().strftime("%Y%m%d%H%M%S%f")}')
+        os.makedirs(temp_dir, exist_ok=True)
+        print(f"Created temporary directory: {temp_dir}")
+
+        # Store file info for later
+        file_info[cds_id] = {
+            'temp_dir': temp_dir,
+            'output_csv': output_csv,
+            'haplotype_output_csv': haplotype_output_csv,
+            'sample_names': sample_names,
+            'sample_groups': sample_groups
+        }
+
+        # Create work items for this file
+        for pair in pairs:
+            work_item = (pair, sequences, sample_groups, cds_id, args.codeml_path, temp_dir)
+            all_work.append(work_item)
+
+    # Process all pairs in parallel
+    total_pairs = len(all_work)
+    print(f"\nProcessing {total_pairs} total pairs across all files")
+    num_processes = get_safe_process_count()
+    results_by_file = defaultdict(list)
+
     with multiprocessing.Pool(processes=num_processes) as pool:
-        haplotype_stats_files = []
-        for i, result in enumerate(pool.imap_unordered(process_phy_file, pool_args), 1):
-            if result:
-                haplotype_stats_files.append(result)
-            percent = (i / total_cds) * 100
-            print(f"Completed {i}/{total_cds} CDS files ({percent:.2f}%)")
+        for i, result in enumerate(pool.imap_unordered(process_pair, all_work), 1):
+            seq1, seq2, group1, group2, dN, dS, omega, cds_id = result
+            results_by_file[cds_id].append((seq1, seq2, group1, group2, dN, dS, omega))
+            
+            if i % 100 == 0:
+                print(f"Completed {i}/{total_pairs} pairs ({(i/total_pairs)*100:.1f}%)")
 
-    # Perform statistical tests
+    # Process results for each file
+    haplotype_stats_files = []
+    for cds_id, results in results_by_file.items():
+        info = file_info[cds_id]
+        
+        # Save results
+        df = pd.DataFrame(results, columns=['Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega'])
+        df['CDS'] = cds_id
+        df.to_csv(info['output_csv'], index=False)
+        
+        # Calculate haplotype stats
+        haplotype_stats = []
+        for sample in info['sample_names']:
+            sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
+            omega_values = sample_df['omega'].dropna()
+            mean_omega = omega_values.mean()
+            median_omega = omega_values.median()
+            haplotype_stats.append({
+                'Haplotype': sample,
+                'Group': info['sample_groups'][sample],
+                'CDS': cds_id,
+                'Mean_dNdS': mean_omega,
+                'Median_dNdS': median_omega
+            })
+            print(f"Sample {sample}: mean dN/dS = {mean_omega:.4f}, median = {median_omega:.4f}")
+
+        haplotype_df = pd.DataFrame(haplotype_stats)
+        haplotype_df.to_csv(info['haplotype_output_csv'], index=False)
+        haplotype_stats_files.append(info['haplotype_output_csv'])
+
+    # Run final statistical analysis
     perform_statistical_tests(haplotype_stats_files)
 
 if __name__ == '__main__':
