@@ -1716,7 +1716,8 @@ fn read_reference_sequence(
     start: i64,
     end: i64
 ) -> Result<Vec<u8>, VcfError> {
-    let reader = bio::io::fasta::Reader::from_file(fasta_path).map_err(|e| VcfError::Io(e.into()))?;
+    let reader = bio::io::fasta::Reader::from_file(fasta_path)
+        .map_err(|e| VcfError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
     for record in reader.records() {
         let record = record?;
         if record.id() == chr || record.id() == format!("chr{}", chr) {
