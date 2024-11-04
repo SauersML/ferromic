@@ -404,7 +404,11 @@ def main():
     files_to_process = []
     for phy_file in phy_files:
         phy_filename = os.path.basename(phy_file)
-        cds_id = phy_filename.replace('.phy', '')
+        match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
+        if match:
+            cds_id = f'chr{match.group(2)}_start{match.group(3)}_end{match.group(4)}'
+        else:
+            cds_id = phy_filename.replace('.phy', '')
         output_csv = os.path.join(args.output_dir, f'{cds_id}.csv')
         haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
         if not os.path.exists(output_csv) or not os.path.exists(haplotype_output_csv):
@@ -422,13 +426,11 @@ def main():
     for idx, phy_file in enumerate(files_to_process, 1):
         work_args.append((phy_file, args.output_dir, args.codeml_path, total_files, idx))
 
-    # Use multiprocessing to process files in parallel
-    num_processes = get_safe_process_count()
-    with multiprocessing.Pool(processes=num_processes) as pool:
-        haplotype_stats_files = pool.map(process_phy_file, work_args)
-
-    # Filter out None results
-    haplotype_stats_files = [f for f in haplotype_stats_files if f]
+    haplotype_stats_files = []
+    for args_tuple in work_args:
+        result = process_phy_file(args_tuple)
+        if result:
+            haplotype_stats_files.append(result)
 
     # Perform final statistical tests
     if haplotype_stats_files:
