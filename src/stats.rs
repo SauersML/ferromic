@@ -950,6 +950,8 @@ fn process_config_entries(
                     Arc::clone(&position_allele_map),
                     entry.seqname.clone(),
                     false,  // unfiltered variants
+                    &ref_sequence,
+                    &cds_regions,
                 )? {
                     Some(values) => values,
                     None => continue, // Skip writing this record
