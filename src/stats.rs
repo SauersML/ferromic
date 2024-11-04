@@ -110,6 +110,7 @@ struct Variant {
 struct SeqInfo {
     sample_index: usize,         // The index of the sample this allele belongs to
     haplotype_group: u8,         // 0 or 1 for haplotype group
+    vcf_allele: Option<u8>,      // The VCF allele value (0 or 1) (can be None)
     nucleotide: Option<u8>,      // The allele nucleotide (A, T, C, G) in u8 form (can be None)
     chromosome: String,          // Chromosome identifier
     position: i64,               // Chromosome position
@@ -383,7 +384,7 @@ fn display_seqinfo_entries(seqinfo: &[SeqInfo], limit: usize) {
     
     // Set headers
     table.add_row(row![
-        "Index", "Sample Index", "Haplotype Group", "Nucleotide", "Chromosome", "Position", "Filtered"
+        "Index", "Sample Index", "Haplotype Group", "VCF Allele", "Nucleotide", "Chromosome", "Position", "Filtered"
     ]);
     
     // Add rows
@@ -392,6 +393,7 @@ fn display_seqinfo_entries(seqinfo: &[SeqInfo], limit: usize) {
             i + 1,
             info.sample_index,
             info.haplotype_group,
+            info.vcf_allele.map(|a| a.to_string()).unwrap_or("-".to_string()),
             info.nucleotide.map(|n| n as char).unwrap_or('N'),
             info.chromosome,
             info.position,
@@ -624,6 +626,7 @@ fn process_variants(
                 let seq_info = SeqInfo {
                     sample_index: sample_idx,
                     haplotype_group,
+                    vcf_allele: allele,
                     nucleotide,
                     chromosome: chromosome.clone(),
                     position: variant.position,
