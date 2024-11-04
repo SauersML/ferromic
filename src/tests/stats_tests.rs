@@ -1144,7 +1144,6 @@ mod tests {
             ("Sample1".to_string(), (1, 1)), // Add both haplotypes to group 1
             ("Sample2".to_string(), (1, 1)), // Add both haplotypes to group 1
         ]);
-        // Add reference alleles to avoid warnings
         let position_allele_map = Arc::new(Mutex::new(HashMap::from([
             (1000, ('A', 'T')),
             (2000, ('A', 'T')),
@@ -1159,7 +1158,7 @@ mod tests {
             &sample_filter,
             1000,
             2000,
-            Some(100),  // sequence_length=100 for some reason
+            Some(100),  // sequence_length=100
             Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome,
@@ -1175,6 +1174,8 @@ mod tests {
         // theta = 2 / (25/12) / 100 = 0.00960000
         let expected_theta = 2.0 / (25.0/12.0) / 100.0;
         println!("Got {} segregating sites with {} haplotypes", segsites, n_hap);
+        println!("Expected theta: {:.8}, Actual theta: {:.8}, Difference: {:.8}", 
+                 expected_theta, w_theta, (w_theta - expected_theta).abs());
         assert!((w_theta - expected_theta).abs() < 1e-10);
     }
     
