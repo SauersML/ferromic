@@ -1148,7 +1148,7 @@ mod tests {
             Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
-            true, // is_filtered_set
+            false, // is_filtered_set
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
