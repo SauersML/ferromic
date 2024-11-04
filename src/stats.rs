@@ -762,7 +762,6 @@ fn process_variants(
 
     // Clear storage for next group
     seqinfo_storage.lock().clear();
-    Ok(Some((num_segsites, w_theta, pi, n)))
 
     if is_filtered_set {
         make_sequences(
@@ -778,6 +777,7 @@ fn process_variants(
             &chromosome,
         )?;
     }
+    Ok(Some((num_segsites, w_theta, pi, n)))
 }
 
 fn make_sequences(
