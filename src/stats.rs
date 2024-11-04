@@ -635,10 +635,10 @@ fn process_variants(
                 };
         
                 // Store SeqInfo if we have a valid nucleotide
-                if let Some(nuc) = nucleotide {
+                if let Some(allele_val) = allele {
                     let mut storage = seqinfo_storage.lock();
                     storage.push(seq_info);
-                    variant_alleles.push(nuc);
+                    variant_alleles.push(allele_val);
                 }
         }
 
