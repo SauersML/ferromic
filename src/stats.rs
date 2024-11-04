@@ -241,6 +241,26 @@ fn main() -> Result<(), VcfError> {
             "{}",
             format!("Processing VCF file: {}", vcf_file.display()).cyan()
         );
+        
+        let ref_sequence = read_reference_sequence(
+            &Path::new(&args.reference_path),
+            chr,
+            start,
+            end
+        )?;
+        
+        let cds_regions = parse_gff_file(
+            &Path::new(&args.gff_path),
+            chr,
+            start,
+            end
+        )?;
+        
+
+        println!(
+            "{}",
+            format!("Processing VCF file: {}", vcf_file.display()).cyan()
+        );
 
         // Initialize shared SeqInfo storage
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
@@ -806,7 +826,22 @@ fn process_config_entries(
 
     for (chr, entries) in regions_per_chr {
         println!("Processing chromosome: {}", chr);
-    
+
+        // Read reference sequence and CDS regions once per chromosome
+        let ref_sequence = read_reference_sequence(
+            &Path::new(&args.reference_path),
+            &chr,
+            entries.iter().map(|e| e.start).min().unwrap_or(0),
+            entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX)
+        )?;
+        
+        let cds_regions = parse_gff_file(
+            &Path::new(&args.gff_path),
+            &chr,
+            entries.iter().map(|e| e.start).min().unwrap_or(0),
+            entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX)
+        )?;
+        
         // Determine the range to process
         let min_start = entries.iter().map(|e| e.start).min().unwrap_or(0);
         let max_end = entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX);
