@@ -72,11 +72,12 @@ def create_paml_ctl(seqfile, outfile, working_dir):
         ctl_file.write(ctl_content)
     return ctl_path
 
-# Function to run PAML codeml
+# Function to run PAML codeml, fix later
 def run_codeml(ctl_path, working_dir):
     try:
-        # Change directory to the working directory
-        subprocess.run(['codeml', ctl_path], cwd=working_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Use full path to codeml
+        codeml_path = "/home/hsiehph/sauer354/di/paml/bin/codeml"  # MODIFY THIS
+        subprocess.run([codeml_path, ctl_path], cwd=working_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
         print(f"Error running codeml: {e}")
 
