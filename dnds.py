@@ -18,6 +18,8 @@ from datetime import datetime
 from scipy.stats import mannwhitneyu
 import logging
 
+# Use absolute paths
+
 # Set up logging
 logging.basicConfig(
    level=logging.INFO,
