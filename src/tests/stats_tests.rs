@@ -1128,6 +1128,52 @@ mod tests {
     }
 
     #[test]
+    fn test_watterson_theta_exact_h4() {
+        let variants = vec![
+            create_variant(1000, vec![
+                Some(vec![0, 0]), // Sample1: 0|0
+                Some(vec![0, 1]), // Sample2: 0|1
+            ]),
+            create_variant(2000, vec![
+                Some(vec![1, 0]), // Sample1: 1|0
+                Some(vec![0, 0]), // Sample2: 0|0
+            ]),
+        ];
+        let sample_names = vec!["Sample1".to_string(), "Sample2".to_string()];
+        let sample_filter = HashMap::from([
+            ("Sample1".to_string(), (1, 1)), // Both haplotypes in group 1
+            ("Sample2".to_string(), (1, 1)), // Both haplotypes in group 1
+        ]);
+        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
+        let chromosome = "1".to_string();
+    
+        let result = process_variants(
+            &variants,
+            &sample_names,
+            1,  // haplotype_group=1
+            &sample_filter,
+            1000,
+            2000,
+            Some(100),  // sequence_length=100
+            Arc::clone(&seqinfo_storage),
+            Arc::clone(&position_allele_map),
+            chromosome,
+            false,
+        ).unwrap();
+    
+        let (_segsites, w_theta, _pi, _n_hap) = match result {
+            Some(data) => data,
+            None => panic!("Expected Some variant data"),
+        };
+    
+        // 2 segregating sites, 4 haplotypes (H4 = 25/12), length 100
+        // theta = 2 / (25/12) / 100 = 0.0096
+        let expected_theta = 2.0 / (25.0/12.0) / 100.0;
+        assert!((w_theta - expected_theta).abs() < 1e-10);
+    }
+
+    #[test]
     fn test_group1_watterson_theta() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length: Option<i64> = None;
