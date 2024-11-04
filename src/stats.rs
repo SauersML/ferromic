@@ -1630,6 +1630,22 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     Ok(())
 }
 
+fn read_reference_sequence(
+    fasta_path: &Path,
+    chr: &str, 
+    start: i64,
+    end: i64
+) -> Result<Vec<u8>, VcfError> {
+    let reader = bio::io::fasta::Reader::from_file(fasta_path)?;
+    for record in reader.records() {
+        let record = record?;
+        if record.id() == chr || record.id() == format!("chr{}", chr) {
+            return Ok(record.seq()[start as usize - 1..end as usize].to_vec());
+        }
+    }
+    Err(VcfError::Parse(format!("Chromosome {} not found in reference", chr)))
+}
+
 // IN PROGRESS
 // Helper function to parse GFF file and extract CDS regions
 fn parse_gff_file(
