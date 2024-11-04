@@ -53,6 +53,12 @@ struct Args {
     // Allow file (regions to include)
     #[arg(long = "allow_file")]
     allow_file: Option<String>,
+
+    #[arg(long = "reference")]
+    reference_path: String,
+
+    #[arg(long = "gff")]
+    gff_path: String,
 }
 
 // Data structures
