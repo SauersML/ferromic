@@ -376,6 +376,8 @@ mod tests {
         let invalid_order = "POS\t#CHROM\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT";
         assert!(matches!(validate_vcf_header(invalid_order), Err(VcfError::InvalidVcfFormat(_))));
     }
+    
+
 
     #[test]
     fn test_parse_variant_valid_all_gq_above_threshold() {
@@ -648,6 +650,14 @@ mod tests {
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", 1000, 3000)
             .expect("Failed to read reference sequence");
 
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('C', 'G'));
+            pam.insert(3000, ('G', 'A'));
+        }
+
         let invalid_group = process_variants(
             &variants,
             &sample_names,
@@ -677,6 +687,16 @@ mod tests {
         let config_entries = parse_config_file(path.path()).expect("Failed to process variants");
         assert_eq!(config_entries.len(), 2);
     }
+
+    // Variables `reference_path` and `gff_path` have to point to valid test files? But we can't assume this
+    let command = Command::new("vcf_stats")
+        .arg("--vcf_folder").arg(vcf_folder)
+        .arg("--config_file").arg(config_file)
+        .arg("--output_file").arg(output_file)
+        .arg("--min_gq").arg("30")
+        .arg("--allow_file").arg(allow_file)
+        .arg("--reference").arg(reference_path)
+        .arg("--gff").arg(gff_path); 
 
     #[test]
     fn test_find_vcf_file_existing_vcfs() {
@@ -842,37 +862,16 @@ mod tests {
     
     fn setup_test_data() -> (NamedTempFile, Vec<CdsRegion>) {
         let mut fasta_file = NamedTempFile::new().expect("Failed to create temporary fasta file");
-
+    
         // Write a simple sequence that's long enough to test anything
         writeln!(fasta_file, ">1").expect("Failed to write FASTA header");
         writeln!(fasta_file, "{}", "ACGT".repeat(10000)).expect("Failed to write sequence");
         fasta_file.flush().expect("Failed to flush file");
     
         let cds_regions = vec![
-            CdsRegion {
-                start: 1000,
-                end: 2000,
-            },
-            CdsRegion {
-                start: 2500,
-                end: 3000,
-            },
-            CdsRegion {
-                start: 3200,
-                end: 3300,
-            },
-            CdsRegion {
-                start: 3400,
-                end: 3450,
-            },
-            CdsRegion {
-                start: 20,
-                end: 30,
-            },
-            CdsRegion {
-                start: 3800,
-                end: 3810,
-            },
+            CdsRegion { start: 1200, end: 1901 },
+            CdsRegion { start: 1950, end: 2113 },
+            CdsRegion { start: 2600, end: 2679 },
         ];
     
         (fasta_file, cds_regions)
@@ -1053,6 +1052,14 @@ mod tests {
             create_variant(2000, vec![Some(vec![0, 0]), Some(vec![0, 0]), Some(vec![0, 0])]),
             create_variant(3000, vec![Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![0, 0])]),
         ];
+        
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('C', 'G'));
+            pam.insert(3000, ('G', 'A'));
+        }
     
         let result = process_variants(
             &variants,
@@ -1101,6 +1108,13 @@ mod tests {
         let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", 1000, 3000)
             .expect("Failed to read reference sequence");
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('C', 'G'));
+            pam.insert(3000, ('G', 'A'));
+        }
     
         let _result_group1 = process_variants(
             &variants,
@@ -1217,6 +1231,12 @@ mod tests {
        let (fasta_file, cds_regions) = setup_test_data();
        let reference_sequence = read_reference_sequence(fasta_file.path(), "1", 1000, 3000)
            .expect("Failed to read reference sequence");
+
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'G'));
+            pam.insert(2000, ('T', 'C'));
+        }
     
        let result = process_variants(
            &variants,
@@ -1260,6 +1280,13 @@ mod tests {
         let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", 1000, 3000)
             .expect("Failed to read reference sequence");
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('C', 'G'));
+            pam.insert(3000, ('G', 'A'));
+        }
     
         let _result_group1 = process_variants(
             &variants,
@@ -1367,6 +1394,14 @@ mod tests {
         let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", 1000, 3000)
             .expect("Failed to read reference sequence");
+
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('C', 'G'));
+            pam.insert(3000, ('G', 'A'));
+        }
     
         let _result_group1 = process_variants(
             &variants,
@@ -1414,6 +1449,14 @@ mod tests {
         let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", 1000, 3000)
             .expect("Failed to read reference sequence");
+        
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('C', 'G'));
+            pam.insert(3000, ('G', 'A'));
+        }
     
         let _result_group1 = process_variants(
             &variants,
@@ -1461,6 +1504,14 @@ mod tests {
         let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", 1000, 3000)
             .expect("Failed to read reference sequence");
+
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('C', 'G'));
+            pam.insert(3000, ('G', 'A'));
+        }
     
         let _result_group1 = process_variants(
             &variants,
@@ -1563,6 +1614,14 @@ mod tests {
         let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", 1000, 3000)
             .expect("Failed to read reference sequence");
+        
+        // Manually populate the position_allele_map
+        {
+            let mut pam = position_allele_map.lock();
+            pam.insert(1000, ('A', 'T'));
+            pam.insert(2000, ('C', 'G'));
+            pam.insert(3000, ('G', 'A'));
+        }
     
         // Process variants for haplotype_group=1 (Group 1)
         let _result_group1 = process_variants(
