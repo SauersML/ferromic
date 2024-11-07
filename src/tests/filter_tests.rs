@@ -142,10 +142,11 @@ chr17	58001	.	G	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:479:0,-46.9443,-213.
     let reference_file_path = temp_path.join("reference.fasta");
     let gff_file_path = temp_path.join("annotations.gff");
     
-    // Write content to the reference and GFF files
-    let long_sequence = "ACTACGTACGGATCG".repeat(81708457);
-    fs::write(&reference_file_path, format!(">chr1\n{}", long_sequence))?;
-    fs::write(&gff_file_path, "chr1\t.\tgene\t1\t1000\t.\t+\t.\tID=gene0;Name=gene0")?;
+    // Write content to the reference and GFF files with both chr1 and chr22 defined
+    let long_sequence_chr1 = "ACTACGTACGGATCG".repeat(81708457);
+    let long_sequence_chr22 = "ACTACGTACGGATCG".repeat(11731895);
+    fs::write(&reference_file_path, format!(">chr1\n{}\n>chr22\n{}", long_sequence_chr1, long_sequence_chr22))?;
+
 
     // Execute the `vcf_stats` binary with the test files as arguments
     let mut cmd = Command::new(&vcf_stats_binary);
