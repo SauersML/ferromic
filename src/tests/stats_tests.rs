@@ -839,18 +839,44 @@ mod tests {
         end: i64,
     }
     
-    fn setup_test_data() -> (Vec<u8>, Vec<CdsRegion>) {
-        // Create a reference sequence
-        let reference_sequence = b"ACGTACTCAGACTACGAGCGAATAGAGACGATCACGCATCAGCATGATATATACAGTACGTAGCAGAGTACTGCTAAGCGTGGTGTTGATACGATAAAACATTAGCATGCATCACTATTTATCATCATGTACGT".to_vec();
-        
-        // Create some CDS regions
+    fn setup_test_data() -> (PathBuf, Vec<CdsRegion>) {
+        // Create a temporary FASTA file for reference sequence
+        let mut fasta_file = NamedTempFile::new().expect("Failed to create temporary FASTA file");
+        writeln!(fasta_file, ">1").expect("Failed to write FASTA header");
+        writeln!(fasta_file, "ACGTACGTACGTACGTACGTACGTACGTACGT").expect("Failed to write FASTA sequence");
+
+        let fasta_path = fasta_file.into_temp_path();
+        let path_buf = PathBuf::from(fasta_path.to_str().unwrap());
+
+        // Create CDS regions
         let cds_regions = vec![
-            CdsRegion { start: 1000, end: 2000 },
-            CdsRegion { start: 2500, end: 3000 },
-            CdsRegion { start: 20, end: 30 },
+            CdsRegion {
+                start: 1000,
+                end: 2000,
+            },
+            CdsRegion {
+                start: 2500,
+                end: 3000,
+            },
+            CdsRegion {
+                start: 3200,
+                end: 3300,
+            },
+            CdsRegion {
+                start: 3400,
+                end: 3450,
+            },
+            CdsRegion {
+                start: 20,
+                end: 30,
+            },
+            CdsRegion {
+                start: 3800,
+                end: 3810,
+            },
         ];
-        
-        (reference_sequence, cds_regions)
+
+        (path_buf, cds_regions)
     }
 
     // Setup function for Group 1 tests
