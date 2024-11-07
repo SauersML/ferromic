@@ -826,8 +826,8 @@ fn make_sequences(
     for (sample_idx, hap_idx) in &haplotype_indices {
         let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
         hap_sequences.insert(sample_name, reference_sequence.to_vec());
-        let start_offset = (cds_start - region_start) as usize;
-        let end_offset = (cds_end - region_start + 1) as usize;
+        let start_offset = (cds.start - region_start) as usize;
+        let end_offset = (cds.end - region_start + 1) as usize;
 
         // Bounds checking
         if start_offset >= reference_sequence.len() || end_offset > reference_sequence.len() {
