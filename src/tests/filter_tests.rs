@@ -142,11 +142,21 @@ chr17	58001	.	G	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:479:0,-46.9443,-213.
     let reference_file_path = temp_path.join("reference.fasta");
     let gff_file_path = temp_path.join("annotations.gff");
     
-    // Write content to the reference and GFF files with both chr1 and chr22 defined
-    let long_sequence_chr1 = "ACTACGTACGGATCG".repeat(81708457);
-    let long_sequence_chr22 = "ACTACGTACGGATCG".repeat(11731895);
-    fs::write(&reference_file_path, format!(">chr1\n{}\n>chr22\n{}", long_sequence_chr1, long_sequence_chr22))?;
-
+    // Generate reference file content for all chromosomes
+    let sequence = "ACTACGTACGGATCG"; // Repeatable sequence pattern
+    let mut reference_content = String::new();
+    
+    for chr_num in 1..=22 {
+        let full_sequence = sequence.repeat(1_000_000 / sequence.len());
+        reference_content.push_str(&format!(">chr{}\n{}\n", chr_num, full_sequence));
+    }
+    
+    // Chromosomes X and Y
+    let full_sequence = sequence.repeat(1_000_000 / sequence.len());
+    reference_content.push_str(&format!(">chrX\n{}\n>chrY\n{}\n", full_sequence, full_sequence));
+    
+    // Write the full reference content to the file
+    fs::write(&reference_file_path, reference_content)?;
 
     // Execute the `vcf_stats` binary with the test files as arguments
     let mut cmd = Command::new(&vcf_stats_binary);
