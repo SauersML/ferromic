@@ -7,6 +7,7 @@ mod tests {
     use std::io::Write;
     use std::sync::Arc;
     use parking_lot::Mutex;
+    use std::path::PathBuf;
 
     // Helper function to create a Variant for testing
     fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
