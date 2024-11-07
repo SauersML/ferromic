@@ -837,12 +837,8 @@ mod tests {
             panic!("Expected Some variant, got None");
         }
     }
-
-    #[derive(Debug, Clone)]
-    struct CdsRegion {
-        start: i64,
-        end: i64,
-    }
+    
+    use super::CdsRegion;
     
     fn setup_test_data() -> (PathBuf, Vec<CdsRegion>) {
         // Create a temporary FASTA file for reference sequence
