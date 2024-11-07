@@ -644,6 +644,7 @@ mod tests {
         let chromosome = "1".to_string();
 
         // Read reference sequence
+        let (fasta_path, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
 
@@ -1020,6 +1021,9 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+        let (fasta_path, cds_regions) = setup_test_data();
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
     
         // Define VCF lines as strings
         let vcf_lines = vec![
@@ -1099,6 +1103,9 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+        let (fasta_path, cds_regions) = setup_test_data();
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
     
         let _result_group1 = process_variants(
             &variants,
@@ -1143,6 +1150,9 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+        let (fasta_path, cds_regions) = setup_test_data();
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
 
         // Manually populate the position_allele_map
         {
@@ -1209,6 +1219,9 @@ mod tests {
        ])));
        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
        let chromosome = "1".to_string();
+       let (fasta_path, cds_regions) = setup_test_data();
+       let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+           .expect("Failed to read reference sequence");
     
        let result = process_variants(
            &variants,
@@ -1249,6 +1262,9 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+        let (fasta_path, cds_regions) = setup_test_data();
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
     
         let _result_group1 = process_variants(
             &variants,
@@ -1296,6 +1312,9 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+        let (fasta_path, cds_regions) = setup_test_data();
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
 
         // Manually populate the position_allele_map
         {
@@ -1350,6 +1369,9 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+        let (fasta_path, cds_regions) = setup_test_data();
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
     
         let _result_group1 = process_variants(
             &variants,
@@ -1394,6 +1416,9 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+        let (fasta_path, cds_regions) = setup_test_data();
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
     
         let _result_group1 = process_variants(
             &variants,
@@ -1438,6 +1463,9 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+        let (fasta_path, cds_regions) = setup_test_data();
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
     
         let _result_group1 = process_variants(
             &variants,
@@ -1537,6 +1565,9 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+        let (fasta_path, cds_regions) = setup_test_data();
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
     
         // Process variants for haplotype_group=1 (Group 1)
         let _result_group1 = process_variants(
