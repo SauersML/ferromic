@@ -738,7 +738,7 @@ fn process_variants(
         // Write sequences to PHYLIP file
         let filename = format!(
             "group_{}_chr_{}_start_{}_end_{}.phy",
-            haplotype_group, chromosome, cds_start, cds_end
+            haplotype_group, chromosome, cds.start, cds.end
         );
 
         let char_sequences: HashMap<String, Vec<char>> = hap_sequences
@@ -951,7 +951,7 @@ fn make_sequences(
         // Write sequences to PHYLIP file
         let filename = format!(
             "group_{}_chr_{}_start_{}_end_{}.phy",
-            haplotype_group, chromosome, cds_start, cds_end
+            haplotype_group, chromosome, cds.start, cds.end
         );
 
         let char_sequences: HashMap<String, Vec<char>> = cds_sequences
