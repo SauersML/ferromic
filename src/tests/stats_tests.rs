@@ -843,7 +843,9 @@ mod tests {
     fn setup_test_data() -> (NamedTempFile, Vec<CdsRegion>) {
         let mut fasta_file = NamedTempFile::new().expect("Failed to create temporary FASTA file");
         writeln!(fasta_file, ">1").expect("Failed to write FASTA header");
-        writeln!(fasta_file, "{}", "ACGAGTACGTGACTT".repeat(1000)).expect("Failed to write FASTA sequence");
+        let padding = "N".repeat(200);
+        let main_seq = "ACGAGTACGTGACTT".repeat(1000);
+        writeln!(fasta_file, "{}{}", padding, main_seq).expect("Failed to write FASTA sequence");
         fasta_file.flush().expect("Failed to flush temporary file");
     
         let cds_regions = vec![
