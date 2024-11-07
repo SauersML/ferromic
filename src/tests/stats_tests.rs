@@ -1067,6 +1067,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             false, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         ).unwrap();
     
         // Calculate allele frequency globally
@@ -1110,6 +1112,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             false, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap) = match _result_group1 {
@@ -1160,6 +1164,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         ).unwrap();
 
         // Correctly unwrap the Option to access the inner tuple
@@ -1216,6 +1222,8 @@ mod tests {
            Arc::clone(&position_allele_map),
            chromosome,
            false,
+           &reference_sequence,
+           &cds_regions,
        ).unwrap();
     
        let (segsites, w_theta, _pi, n_hap) = match result {
@@ -1254,6 +1262,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             false, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1307,6 +1317,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         ).unwrap();
 
         // Calculate global allele frequency
@@ -1351,6 +1363,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap) = match _result_group1 {
@@ -1393,6 +1407,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1435,6 +1451,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1533,6 +1551,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         ).expect("Failed to process variants");
     
         // Calculate global allele frequency using the revised function (no haplotype_group parameter)
