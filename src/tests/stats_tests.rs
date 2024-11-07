@@ -841,12 +841,12 @@ mod tests {
     use super::CdsRegion;
     
     fn setup_test_data() -> (NamedTempFile, Vec<CdsRegion>) {
-        let mut fasta_file = NamedTempFile::new().expect("Failed to create temporary FASTA file");
+        let mut fasta_file = NamedTempFile::new().expect("Failed to create temporary fasta file");
+
+        // Write a simple sequence that's long enough to test anything
         writeln!(fasta_file, ">1").expect("Failed to write FASTA header");
-        let padding = "N".repeat(200);
-        let main_seq = "ACGAGTACGTGACTT".repeat(1000);
-        writeln!(fasta_file, "{}{}", padding, main_seq).expect("Failed to write FASTA sequence");
-        fasta_file.flush().expect("Failed to flush temporary file");
+        writeln!(fasta_file, "{}", "ACGT".repeat(10000)).expect("Failed to write sequence");
+        fasta_file.flush().expect("Failed to flush file");
     
         let cds_regions = vec![
             CdsRegion {
