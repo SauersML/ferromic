@@ -735,18 +735,17 @@ fn process_variants(
             }
         }
 
+        // Write sequences to PHYLIP file
         let filename = format!(
             "group_{}_chr_{}_start_{}_end_{}.phy",
-            haplotype_group,
-            chromosome,
-            cds.start,
-            cds.end
+            haplotype_group, chromosome, cds_start, cds_end
         );
-        
-        let char_sequences: HashMap<String, Vec<char>> = hap_sequences.into_iter()
+
+        let char_sequences: HashMap<String, Vec<char>> = hap_sequences
+            .into_iter()
             .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
             .collect();
-            
+
         write_phylip_file(&filename, &char_sequences)?;
     }
 
@@ -827,17 +826,41 @@ fn make_sequences(
     for (sample_idx, hap_idx) in &haplotype_indices {
         let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
         hap_sequences.insert(sample_name, reference_sequence.to_vec());
+        let start_offset = (cds_start - region_start) as usize;
+        let end_offset = (cds_end - region_start + 1) as usize;
+
+        // Bounds checking
+        if start_offset >= reference_sequence.len() || end_offset > reference_sequence.len() {
+            eprintln!(
+                "start_offset {} or end_offset {} out of bounds for reference sequence length {}",
+                start_offset,
+                end_offset,
+                reference_sequence.len()
+            );
+            continue;
+        }
+        let sequence = reference_sequence[start_offset..end_offset].to_vec();
+        hap_sequences.insert(sample_name, sequence);
     }
 
     // Apply variants to sequences
     for variant in variants {
-        if variant.position >= region_start && variant.position <= region_end {
-            let pos_in_seq = (variant.position - region_start) as usize;
+        if variant.position >= cds_start && variant.position <= cds_end {
+            let pos_in_seq = (variant.position - cds_start) as usize;
+
             for (sample_idx, hap_idx) in &haplotype_indices {
                 if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
                     if let Some(allele) = alleles.get(*hap_idx) {
                         let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
                         if let Some(seq) = hap_sequences.get_mut(&sample_name) {
+                            if pos_in_seq >= seq.len() {
+                                eprintln!(
+                                    "pos_in_seq {} out of bounds for sequence length {}",
+                                    pos_in_seq,
+                                    seq.len()
+                                );
+                                continue;
+                            }
                             let map = position_allele_map.lock();
                             if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
                                 seq[pos_in_seq] = if *allele == 0 {
@@ -855,21 +878,51 @@ fn make_sequences(
 
     // For each CDS, extract sequences and write to PHYLIP file
     for cds in cds_regions {
+        // CDS regions with no overlap with variants should still be included. We assume these are simply sequences where every sample is monomorphic at these positions.
         // Check overlap with region
-        if cds.end < region_start || cds.start > region_end {
-            continue; // No overlap
-        }
+        //if cds.end < region_start || cds.start > region_end {
+        //    continue; // No overlap
+        //}
 
         // Adjust CDS start and end to overlap with region
         let cds_start = std::cmp::max(cds.start, region_start);
         let cds_end = std::cmp::min(cds.end, region_end);
 
         // Make sure length is multiple of 3
+        // Calculate CDS length
         let mut cds_length = cds_end - cds_start + 1;
+        if cds_length < 3 {
+            eprintln!(
+                "CDS length less than 3 after adjustment at {}:{}-{}",
+                chromosome, cds_start, cds_end
+            );
+            continue;
+        }
+
+        // Make sure length is multiple of 3
         let remainder = cds_length % 3;
         if remainder != 0 {
             cds_length -= remainder;
+            let adjusted_cds_end = cds_start + cds_length - 1;
+            if adjusted_cds_end < cds_start {
+                eprintln!(
+                    "Adjusted CDS end {} is before CDS start {}",
+                    adjusted_cds_end, cds_start
+                );
+                continue;
+            }
+            cds_end = adjusted_cds_end;
         }
+
+        // Must have positive CDS length
+        if cds_length <= 0 {
+            eprintln!(
+                "CDS length non-positive after adjustment at {}:{}-{}",
+                chromosome, cds_start, cds_end
+            );
+            continue;
+        }
+
 
         // Adjust cds_end
         let cds_end = cds_start + cds_length - 1;
@@ -879,6 +932,18 @@ fn make_sequences(
         for (sample_name, seq) in &hap_sequences {
             let start_offset = (cds_start - region_start) as usize;
             let end_offset = (cds_end - region_start + 1) as usize;
+
+            // Bounds checking
+            if start_offset >= seq.len() || end_offset > seq.len() {
+                eprintln!(
+                    "start_offset {} or end_offset {} out of bounds for sequence length {}",
+                    start_offset,
+                    end_offset,
+                    seq.len()
+                );
+                continue;
+            }
+
             let cds_seq = seq[start_offset..end_offset].to_vec();
             cds_sequences.insert(sample_name.clone(), cds_seq);
         }
