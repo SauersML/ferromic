@@ -661,7 +661,7 @@ mod tests {
             chromosome.clone(),
             false, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         );
         assert!(invalid_group.unwrap_or(None).is_none(), "Expected None for invalid haplotype group");
     }
@@ -1072,7 +1072,7 @@ mod tests {
             chromosome.clone(),
             false, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         ).unwrap();
     
         // Calculate allele frequency globally
@@ -1120,7 +1120,7 @@ mod tests {
             chromosome.clone(),
             false, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap) = match _result_group1 {
@@ -1175,7 +1175,7 @@ mod tests {
             chromosome.clone(),
             true, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         ).unwrap();
 
         // Correctly unwrap the Option to access the inner tuple
@@ -1236,7 +1236,7 @@ mod tests {
            chromosome,
            false,
            &reference_sequence,
-           &cds_regions,
+           &cds_regions[..],
        ).unwrap();
     
        let (segsites, w_theta, _pi, n_hap) = match result {
@@ -1279,7 +1279,7 @@ mod tests {
             chromosome.clone(),
             false, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1337,7 +1337,7 @@ mod tests {
             chromosome.clone(),
             true, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         ).unwrap();
 
         // Calculate global allele frequency
@@ -1386,7 +1386,7 @@ mod tests {
             chromosome.clone(),
             true, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         ).unwrap();
     
         let (_segsites, _w_theta, _pi, n_hap) = match _result_group1 {
@@ -1433,7 +1433,7 @@ mod tests {
             chromosome.clone(),
             true, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1480,7 +1480,7 @@ mod tests {
             chromosome.clone(),
             true, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         ).unwrap();
     
         // Correctly unwrap the Option to access the inner tuple
@@ -1583,7 +1583,7 @@ mod tests {
             chromosome.clone(),
             true, // is_filtered_set
             &reference_sequence,
-            &cds_regions,
+            &cds_regions[..],
         ).expect("Failed to process variants");
     
         // Calculate global allele frequency using the revised function (no haplotype_group parameter)
