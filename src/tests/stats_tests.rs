@@ -688,16 +688,6 @@ mod tests {
         assert_eq!(config_entries.len(), 2);
     }
 
-    // Variables `reference_path` and `gff_path` have to point to valid test files? But we can't assume this
-    let command = Command::new("vcf_stats")
-        .arg("--vcf_folder").arg(vcf_folder)
-        .arg("--config_file").arg(config_file)
-        .arg("--output_file").arg(output_file)
-        .arg("--min_gq").arg("30")
-        .arg("--allow_file").arg(allow_file)
-        .arg("--reference").arg(reference_path)
-        .arg("--gff").arg(gff_path); 
-
     #[test]
     fn test_find_vcf_file_existing_vcfs() {
         use std::fs::File;
