@@ -147,12 +147,12 @@ chr17	58001	.	G	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:479:0,-46.9443,-213.
     let mut reference_content = String::new();
     
     for chr_num in 1..=22 {
-        let full_sequence = sequence.repeat(1_000_000 / sequence.len());
+        let full_sequence = sequence.repeat(100_000_000 / sequence.len());
         reference_content.push_str(&format!(">chr{}\n{}\n", chr_num, full_sequence));
     }
     
     // Chromosomes X and Y
-    let full_sequence = sequence.repeat(1_000_000 / sequence.len());
+    let full_sequence = sequence.repeat(100_000_000 / sequence.len());
     reference_content.push_str(&format!(">chrX\n{}\n>chrY\n{}\n", full_sequence, full_sequence));
     
     // Write the full reference content to the file
