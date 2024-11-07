@@ -654,6 +654,8 @@ mod tests {
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             false, // is_filtered_set
+            &reference_sequence,
+            &cds_regions,
         );
         assert!(invalid_group.unwrap_or(None).is_none(), "Expected None for invalid haplotype group");
     }
@@ -828,6 +830,26 @@ mod tests {
         } else {
             panic!("Expected Some variant, got None");
         }
+    }
+
+    #[derive(Debug, Clone)]
+    struct CdsRegion {
+        start: i64,
+        end: i64,
+    }
+    
+    fn setup_test_data() -> (Vec<u8>, Vec<CdsRegion>) {
+        // Create a reference sequence
+        let reference_sequence = b"ACGTACTCAGACTACGAGCGAATAGAGACGATCACGCATCAGCATGATATATACAGTACGTAGCAGAGTACTGCTAAGCGTGGTGTTGATACGATAAAACATTAGCATGCATCACTATTTATCATCATGTACGT".to_vec();
+        
+        // Create some CDS regions
+        let cds_regions = vec![
+            CdsRegion { start: 1000, end: 2000 },
+            CdsRegion { start: 2500, end: 3000 },
+            CdsRegion { start: 20, end: 30 },
+        ];
+        
+        (reference_sequence, cds_regions)
     }
 
     // Setup function for Group 1 tests
