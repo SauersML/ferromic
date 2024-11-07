@@ -612,7 +612,7 @@ fn process_variants(
     let n = haplotype_indices.len();
 
     // Early return if no variants
-    if variants.is_empty() {
+    if variants.is_empty() { // But is early return really correct here? 
         return Ok(Some((0, 0.0, 0.0, n))); // Return zero values but valid result
     }
 
@@ -632,44 +632,48 @@ fn process_variants(
                 .and_then(|alleles| alleles.get(allele_idx))
                 .copied();
 
-            // Convert VCF allele to actual nucleotide
-            let nucleotide = if let Some(allele_val) = allele {
-                let map = position_allele_map.lock();
-                if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
-                    match allele_val {
-                        0 => Some(ref_allele as u8),
-                        1 => Some(alt_allele as u8),
-                        _ => Some(b'N'),
+
+                // Convert VCF allele to actual nucleotide
+                let nucleotide = if let Some(allele_val) = allele {
+                    let map = position_allele_map.lock();
+                    if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                        match allele_val {
+                            0 => Some(ref_allele as u8),
+                            1 => Some(alt_allele as u8),
+                            _ => Some(b'N')
+                        }
+                    } else {
+                        eprintln!("Warning: No allele mapping found for position {}", variant.position);
+                        Some(b'N')
                     }
                 } else {
-                    eprintln!("Warning: No allele mapping found for position {}", variant.position);
-                    Some(b'N')
+                    None
+                };
+                
+
+                // Create and store SeqInfo
+                let seq_info = SeqInfo {
+                    sample_index: sample_idx,
+                    haplotype_group,
+                    vcf_allele: allele,
+                    nucleotide,
+                    chromosome: chromosome.clone(),
+                    position: variant.position,
+                    filtered: is_filtered_set, // MUST USE ACTUAL FILTERING INFO.
+                    // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
+                };
+        
+                // Store SeqInfo if we have a valid nucleotide
+                if let Some(allele_val) = allele {
+                    let mut storage = seqinfo_storage.lock();
+                    storage.push(seq_info);
+                    variant_alleles.push(allele_val);
                 }
-            } else {
-                None
-            };
-
-            // Create and store SeqInfo
-            let seq_info = SeqInfo {
-                sample_index: sample_idx,
-                haplotype_group,
-                vcf_allele: allele,
-                nucleotide,
-                chromosome: chromosome.clone(),
-                position: variant.position,
-                filtered: is_filtered_set,
-            };
-
-            // Store SeqInfo if we have a valid nucleotide
-            if allele.is_some() {
-                let mut storage = seqinfo_storage.lock();
-                storage.push(seq_info);
-                variant_alleles.push(allele.unwrap());
-            }
         }
 
         // Determine if the variant is a segregating site
-        let unique_alleles: HashSet<u8> = variant_alleles.iter().cloned().collect();
+        let alleles_present: Vec<u8> = variant_alleles.iter().map(|&a| a).collect();
+        let unique_alleles: HashSet<u8> = variant_alleles.iter().cloned().collect(); // Is this correct?
         if unique_alleles.len() > 1 {
             num_segsites += 1;
         }
@@ -694,15 +698,14 @@ fn process_variants(
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
-    // Process CDS regions
     for cds in cds_regions {
         let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
-
-        // Initialize sequences with reference
+        
+        // Initialize sequences with reference 
         for (sample_idx, hap_idx) in &haplotype_indices {
             let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
             let start_offset = (cds.start - region_start) as usize;
-            let end_offset = (cds.end - region_start + 1) as usize;
+            let end_offset = (cds.end - region_start) as usize;
             let sequence = reference_sequence[start_offset..end_offset].to_vec();
             hap_sequences.insert(sample_name, sequence);
         }
@@ -711,20 +714,12 @@ fn process_variants(
         for variant in variants {
             if variant.position >= cds.start && variant.position <= cds.end {
                 let pos_in_seq = (variant.position - cds.start) as usize;
-
+                
                 for (sample_idx, hap_idx) in &haplotype_indices {
                     if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
                         if let Some(allele) = alleles.get(*hap_idx) {
                             let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
                             if let Some(seq) = hap_sequences.get_mut(&sample_name) {
-                                if pos_in_seq >= seq.len() {
-                                    eprintln!(
-                                        "pos_in_seq {} out of bounds for sequence length {}",
-                                        pos_in_seq,
-                                        seq.len()
-                                    );
-                                    continue;
-                                }
                                 let map = position_allele_map.lock();
                                 if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
                                     seq[pos_in_seq] = if *allele == 0 {
@@ -740,24 +735,34 @@ fn process_variants(
             }
         }
 
-        // Write sequences to PHYLIP file
         let filename = format!(
             "group_{}_chr_{}_start_{}_end_{}.phy",
-            haplotype_group, chromosome, cds.start, cds.end
+            haplotype_group,
+            chromosome,
+            cds.start,
+            cds.end
         );
-
-        let char_sequences: HashMap<String, Vec<char>> = hap_sequences
-            .into_iter()
+        
+        let char_sequences: HashMap<String, Vec<char>> = hap_sequences.into_iter()
             .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
             .collect();
-
+            
         write_phylip_file(&filename, &char_sequences)?;
+    }
+
+    // Print the current contents before clearing
+    {
+        let seqinfo = seqinfo_storage.lock();
+        if !seqinfo.is_empty() {
+            display_seqinfo_entries(&seqinfo, 12);
+        } else {
+            println!("No SeqInfo entries were stored.");
+        }
     }
 
     // Clear storage for next group
     seqinfo_storage.lock().clear();
 
-    // Optionally call make_sequences if needed
     if is_filtered_set {
         make_sequences(
             variants,
@@ -772,7 +777,6 @@ fn process_variants(
             &chromosome,
         )?;
     }
-
     Ok(Some((num_segsites, w_theta, pi, n)))
 }
 
@@ -818,108 +822,74 @@ fn make_sequences(
         return Ok(());
     }
 
-    // For each CDS region, process the sequences
-    for cds in cds_regions {
-        // Adjust CDS start and end to overlap with region
-        let cds_start = std::cmp::max(cds.start, region_start);
-        let cds_end = std::cmp::min(cds.end, region_end);
+    // Initialize sequences for each sample haplotype with the reference sequence
+    let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
+    for (sample_idx, hap_idx) in &haplotype_indices {
+        let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+        hap_sequences.insert(sample_name, reference_sequence.to_vec());
+    }
 
-        // Calculate CDS length
-        let mut cds_length = cds_end - cds_start + 1;
-        if cds_length < 3 {
-            eprintln!(
-                "CDS length less than 3 after adjustment at {}:{}-{}",
-                chromosome, cds_start, cds_end
-            );
-            continue;
-        }
-
-        // Length is a multiple of 3
-        let remainder = cds_length % 3;
-        if remainder != 0 {
-            cds_length -= remainder;
-            let adjusted_cds_end = cds_start + cds_length - 1;
-            if adjusted_cds_end < cds_start {
-                eprintln!(
-                    "Adjusted CDS end {} is before CDS start {}",
-                    adjusted_cds_end, cds_start
-                );
-                continue;
-            }
-            // Adjust cds_end
-            let cds_end = adjusted_cds_end;
-        }
-
-        // Must have positive CDS length
-        if cds_length <= 0 {
-            eprintln!(
-                "CDS length non-positive after adjustment at {}:{}-{}",
-                chromosome, cds_start, cds_end
-            );
-            continue;
-        }
-
-        // Initialize sequences for each sample haplotype with the reference sequence
-        let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
-        for (sample_idx, hap_idx) in &haplotype_indices {
-            let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
-            let start_offset = (cds_start - region_start) as usize;
-            let end_offset = (cds_end - region_start + 1) as usize;
-
-            // Bounds checking
-            if start_offset >= reference_sequence.len() || end_offset > reference_sequence.len() {
-                eprintln!(
-                    "start_offset {} or end_offset {} out of bounds for reference sequence length {}",
-                    start_offset,
-                    end_offset,
-                    reference_sequence.len()
-                );
-                continue;
-            }
-            let sequence = reference_sequence[start_offset..end_offset].to_vec();
-            hap_sequences.insert(sample_name, sequence);
-        }
-
-        // Apply variants to sequences
-        for variant in variants {
-            if variant.position >= cds_start && variant.position <= cds_end {
-                let pos_in_seq = (variant.position - cds_start) as usize;
-
-                for (sample_idx, hap_idx) in &haplotype_indices {
-                    if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
-                        if let Some(allele) = alleles.get(*hap_idx) {
-                            let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
-                            if let Some(seq) = hap_sequences.get_mut(&sample_name) {
-                                if pos_in_seq >= seq.len() {
-                                    eprintln!(
-                                        "pos_in_seq {} out of bounds for sequence length {}",
-                                        pos_in_seq,
-                                        seq.len()
-                                    );
-                                    continue;
-                                }
-                                let map = position_allele_map.lock();
-                                if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
-                                    seq[pos_in_seq] = if *allele == 0 {
-                                        ref_allele as u8
-                                    } else {
-                                        alt_allele as u8
-                                    };
-                                }
+    // Apply variants to sequences
+    for variant in variants {
+        if variant.position >= region_start && variant.position <= region_end {
+            let pos_in_seq = (variant.position - region_start) as usize;
+            for (sample_idx, hap_idx) in &haplotype_indices {
+                if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
+                    if let Some(allele) = alleles.get(*hap_idx) {
+                        let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+                        if let Some(seq) = hap_sequences.get_mut(&sample_name) {
+                            let map = position_allele_map.lock();
+                            if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                                seq[pos_in_seq] = if *allele == 0 {
+                                    ref_allele as u8
+                                } else {
+                                    alt_allele as u8
+                                };
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    // For each CDS, extract sequences and write to PHYLIP file
+    for cds in cds_regions {
+        // Check overlap with region
+        if cds.end < region_start || cds.start > region_end {
+            continue; // No overlap
+        }
+
+        // Adjust CDS start and end to overlap with region
+        let cds_start = std::cmp::max(cds.start, region_start);
+        let cds_end = std::cmp::min(cds.end, region_end);
+
+        // Make sure length is multiple of 3
+        let mut cds_length = cds_end - cds_start + 1;
+        let remainder = cds_length % 3;
+        if remainder != 0 {
+            cds_length -= remainder;
+        }
+
+        // Adjust cds_end
+        let cds_end = cds_start + cds_length - 1;
+
+        // For each haplotype sequence, extract CDS sequence
+        let mut cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
+        for (sample_name, seq) in &hap_sequences {
+            let start_offset = (cds_start - region_start) as usize;
+            let end_offset = (cds_end - region_start + 1) as usize;
+            let cds_seq = seq[start_offset..end_offset].to_vec();
+            cds_sequences.insert(sample_name.clone(), cds_seq);
+        }
 
         // Write sequences to PHYLIP file
         let filename = format!(
             "group_{}_chr_{}_start_{}_end_{}.phy",
-            haplotype_group, chromosome, cds.start, cds.end
+            haplotype_group, chromosome, cds_start, cds_end
         );
 
-        let char_sequences: HashMap<String, Vec<char>> = hap_sequences
+        let char_sequences: HashMap<String, Vec<char>> = cds_sequences
             .into_iter()
             .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
             .collect();
