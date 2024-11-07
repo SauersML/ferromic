@@ -643,6 +643,10 @@ mod tests {
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
 
+        // Read reference sequence
+        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
+            .expect("Failed to read reference sequence");
+
         let invalid_group = process_variants(
             &variants,
             &sample_names,
