@@ -644,7 +644,7 @@ mod tests {
         let chromosome = "1".to_string();
 
         // Read reference sequence
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
 
@@ -840,16 +840,12 @@ mod tests {
     
     use super::CdsRegion;
     
-    fn setup_test_data() -> (PathBuf, Vec<CdsRegion>) {
-        // Create a temporary FASTA file for reference sequence
+    fn setup_test_data() -> (NamedTempFile, Vec<CdsRegion>) {
         let mut fasta_file = NamedTempFile::new().expect("Failed to create temporary FASTA file");
         writeln!(fasta_file, ">1").expect("Failed to write FASTA header");
         writeln!(fasta_file, "ACGTACGTACGTACGTACGTACGTACGTACGT").expect("Failed to write FASTA sequence");
-
-        let fasta_path = fasta_file.into_temp_path();
-        let path_buf = PathBuf::from(fasta_path.to_str().unwrap());
-
-        // Create CDS regions
+        fasta_file.flush().expect("Failed to flush temporary file");
+    
         let cds_regions = vec![
             CdsRegion {
                 start: 1000,
@@ -876,9 +872,10 @@ mod tests {
                 end: 3810,
             },
         ];
-
-        (path_buf, cds_regions)
+    
+        (fasta_file, cds_regions)
     }
+
 
     // Setup function for Group 1 tests
     fn setup_group1_test() -> (Vec<Variant>, Vec<String>, HashMap<String, (u8, u8)>) {
@@ -1017,7 +1014,7 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
     
@@ -1099,7 +1096,7 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
     
@@ -1146,7 +1143,7 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
 
@@ -1215,7 +1212,7 @@ mod tests {
        ])));
        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
        let chromosome = "1".to_string();
-       let (fasta_path, cds_regions) = setup_test_data();
+       let (fasta_file, cds_regions) = setup_test_data();
        let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
            .expect("Failed to read reference sequence");
     
@@ -1258,7 +1255,7 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
     
@@ -1308,7 +1305,7 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
 
@@ -1365,7 +1362,7 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
     
@@ -1412,7 +1409,7 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
     
@@ -1459,7 +1456,7 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
     
@@ -1561,7 +1558,7 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_path, cds_regions) = setup_test_data();
+        let (fasta_file, cds_regions) = setup_test_data();
         let reference_sequence = read_reference_sequence(&fasta_path, "1", 1000, 3000)
             .expect("Failed to read reference sequence");
     
