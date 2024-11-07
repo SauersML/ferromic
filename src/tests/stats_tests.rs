@@ -1159,18 +1159,22 @@ mod tests {
         let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
+    
+        // Adjusted CDS regions
         let (fasta_file, cds_regions) = setup_test_data();
+    
+        // Read reference sequence covering the CDS regions
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", 1000, 3000)
             .expect("Failed to read reference sequence");
-
+    
         // Manually populate the position_allele_map
         {
             let mut pam = position_allele_map.lock();
             pam.insert(1000, ('A', 'T'));
-            pam.insert(2000, ('A', 'A'));
-            pam.insert(3000, ('A', 'T'));
+            pam.insert(2000, ('C', 'G'));
+            pam.insert(3000, ('G', 'A'));
         }
-
+    
         let _result_group1 = process_variants(
             &variants,
             &sample_names,
