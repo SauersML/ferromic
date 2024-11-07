@@ -612,7 +612,7 @@ fn process_variants(
     let n = haplotype_indices.len();
 
     // Early return if no variants
-    if variants.is_empty() { // But is early return really correct here? 
+    if variants.is_empty() {
         return Ok(Some((0, 0.0, 0.0, n))); // Return zero values but valid result
     }
 
@@ -632,48 +632,44 @@ fn process_variants(
                 .and_then(|alleles| alleles.get(allele_idx))
                 .copied();
 
-
-                // Convert VCF allele to actual nucleotide
-                let nucleotide = if let Some(allele_val) = allele {
-                    let map = position_allele_map.lock();
-                    if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
-                        match allele_val {
-                            0 => Some(ref_allele as u8),
-                            1 => Some(alt_allele as u8),
-                            _ => Some(b'N')
-                        }
-                    } else {
-                        eprintln!("Warning: No allele mapping found for position {}", variant.position);
-                        Some(b'N')
+            // Convert VCF allele to actual nucleotide
+            let nucleotide = if let Some(allele_val) = allele {
+                let map = position_allele_map.lock();
+                if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                    match allele_val {
+                        0 => Some(ref_allele as u8),
+                        1 => Some(alt_allele as u8),
+                        _ => Some(b'N'),
                     }
                 } else {
-                    None
-                };
-                
-
-                // Create and store SeqInfo
-                let seq_info = SeqInfo {
-                    sample_index: sample_idx,
-                    haplotype_group,
-                    vcf_allele: allele,
-                    nucleotide,
-                    chromosome: chromosome.clone(),
-                    position: variant.position,
-                    filtered: is_filtered_set, // MUST USE ACTUAL FILTERING INFO.
-                    // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
-                };
-        
-                // Store SeqInfo if we have a valid nucleotide
-                if let Some(allele_val) = allele {
-                    let mut storage = seqinfo_storage.lock();
-                    storage.push(seq_info);
-                    variant_alleles.push(allele_val);
+                    eprintln!("Warning: No allele mapping found for position {}", variant.position);
+                    Some(b'N')
                 }
+            } else {
+                None
+            };
+
+            // Create and store SeqInfo
+            let seq_info = SeqInfo {
+                sample_index: sample_idx,
+                haplotype_group,
+                vcf_allele: allele,
+                nucleotide,
+                chromosome: chromosome.clone(),
+                position: variant.position,
+                filtered: is_filtered_set,
+            };
+
+            // Store SeqInfo if we have a valid nucleotide
+            if allele.is_some() {
+                let mut storage = seqinfo_storage.lock();
+                storage.push(seq_info);
+                variant_alleles.push(allele.unwrap());
+            }
         }
 
         // Determine if the variant is a segregating site
-        let alleles_present: Vec<u8> = variant_alleles.iter().map(|&a| a).collect();
-        let unique_alleles: HashSet<u8> = variant_alleles.iter().cloned().collect(); // Is this correct?
+        let unique_alleles: HashSet<u8> = variant_alleles.iter().cloned().collect();
         if unique_alleles.len() > 1 {
             num_segsites += 1;
         }
@@ -698,14 +694,15 @@ fn process_variants(
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
+    // Process CDS regions
     for cds in cds_regions {
         let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
-        
-        // Initialize sequences with reference 
+
+        // Initialize sequences with reference
         for (sample_idx, hap_idx) in &haplotype_indices {
             let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
             let start_offset = (cds.start - region_start) as usize;
-            let end_offset = (cds.end - region_start) as usize;
+            let end_offset = (cds.end - region_start + 1) as usize;
             let sequence = reference_sequence[start_offset..end_offset].to_vec();
             hap_sequences.insert(sample_name, sequence);
         }
@@ -714,12 +711,20 @@ fn process_variants(
         for variant in variants {
             if variant.position >= cds.start && variant.position <= cds.end {
                 let pos_in_seq = (variant.position - cds.start) as usize;
-                
+
                 for (sample_idx, hap_idx) in &haplotype_indices {
                     if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
                         if let Some(allele) = alleles.get(*hap_idx) {
                             let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
                             if let Some(seq) = hap_sequences.get_mut(&sample_name) {
+                                if pos_in_seq >= seq.len() {
+                                    eprintln!(
+                                        "pos_in_seq {} out of bounds for sequence length {}",
+                                        pos_in_seq,
+                                        seq.len()
+                                    );
+                                    continue;
+                                }
                                 let map = position_allele_map.lock();
                                 if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
                                     seq[pos_in_seq] = if *allele == 0 {
@@ -749,19 +754,10 @@ fn process_variants(
         write_phylip_file(&filename, &char_sequences)?;
     }
 
-    // Print the current contents before clearing
-    {
-        let seqinfo = seqinfo_storage.lock();
-        if !seqinfo.is_empty() {
-            display_seqinfo_entries(&seqinfo, 12);
-        } else {
-            println!("No SeqInfo entries were stored.");
-        }
-    }
-
     // Clear storage for next group
     seqinfo_storage.lock().clear();
 
+    // Optionally call make_sequences if needed
     if is_filtered_set {
         make_sequences(
             variants,
@@ -776,6 +772,7 @@ fn process_variants(
             &chromosome,
         )?;
     }
+
     Ok(Some((num_segsites, w_theta, pi, n)))
 }
 
