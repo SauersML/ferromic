@@ -145,18 +145,23 @@ chr17	58001	.	G	T	.	.	AA=C;VT=SNP;AN=6;AC=0	GT:GQ:GL:PS	0|0:479:0,-46.9443,-213.
     // Generate reference file content for all chromosomes
     let sequence = "ACTACGTACGGATCG"; // Repeatable sequence pattern
     let mut reference_content = String::new();
+    let mut gff_content = String::new();
     
     for chr_num in 1..=22 {
         let full_sequence = sequence.repeat(100_000_000 / sequence.len());
         reference_content.push_str(&format!(">chr{}\n{}\n", chr_num, full_sequence));
+        gff_content.push_str(&format!("chr{}\t.\tgene\t1\t1000\t.\t+\t.\tID=gene_chr{};Name=gene_chr{}\n", chr_num, chr_num, chr_num));
     }
     
     // Chromosomes X and Y
     let full_sequence = sequence.repeat(100_000_000 / sequence.len());
     reference_content.push_str(&format!(">chrX\n{}\n>chrY\n{}\n", full_sequence, full_sequence));
+    gff_content.push_str("chrX\t.\tgene\t1\t1000\t.\t+\t.\tID=gene_chrX;Name=gene_chrX\n");
+    gff_content.push_str("chrY\t.\tgene\t1\t1000\t.\t+\t.\tID=gene_chrY;Name=gene_chrY\n");
     
-    // Write the full reference content to the file
+    // Write the full reference and GFF content to the files
     fs::write(&reference_file_path, reference_content)?;
+    fs::write(&gff_file_path, gff_content)?;
 
     // Execute the `vcf_stats` binary with the test files as arguments
     let mut cmd = Command::new(&vcf_stats_binary);
