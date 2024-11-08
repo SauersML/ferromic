@@ -1984,6 +1984,7 @@ fn write_phylip_file(
     })?;
     let mut writer = BufWriter::new(file);
 
+    // Write header
     writeln!(writer, "{} {}", num_samples, seq_length).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
@@ -1994,6 +1995,34 @@ fn write_phylip_file(
     for (sample_name, seq_chars) in hap_sequences {
         let padded_name = format!("{:<10}", sample_name);
         let sequence: String = seq_chars.iter().collect();
+
+        // Warn if sequence does not start with a start codon (e.g., "ATG")
+        if !sequence.starts_with("ATG") {
+            eprintln!("WARNING: Sequence for sample '{}' does not start with a start codon (ATG).", sample_name);
+        }
+
+        // Error if sequence length is not divisible by three
+        if sequence.len() % 3 != 0 {
+            return Err(VcfError::Parse(format!(
+                "ERROR: Sequence for sample '{}' is not divisible by three, length is {}.",
+                sample_name,
+                sequence.len()
+            )));
+        }
+
+        // Warn if there is a stop codon in the middle of the sequence
+        let stop_codons = ["TAA", "TAG", "TGA"];
+        for i in (0..sequence.len() - 3).step_by(3) {
+            let codon = &sequence[i..i + 3];
+            if stop_codons.contains(&codon) {
+                eprintln!(
+                    "WARNING: Stop codon '{}' found in the middle of sequence for sample '{}' at position {}.",
+                    codon, sample_name, i
+                );
+                break;
+            }
+        }
+
         writeln!(writer, "{}{}", padded_name, sequence).map_err(|e| {
             VcfError::Io(io::Error::new(
                 io::ErrorKind::Other,
