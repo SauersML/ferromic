@@ -131,6 +131,7 @@ def run_codeml(ctl_path, working_dir, codeml_path):
    print(f"System status before CODEML: CPU {cpu_percent}%, Memory {mem.percent}%")
    
    try:
+       print(f"Executing command: cd {working_dir} && {codeml_path}")
        process = subprocess.Popen(
            [codeml_path],
            cwd=working_dir,
@@ -138,7 +139,6 @@ def run_codeml(ctl_path, working_dir, codeml_path):
            stderr=subprocess.PIPE,
            preexec_fn=os.setsid
        )
-       print(f"Executed command: cd {working_dir} && {codeml_path}")
 
        try:
            stdout, stderr = process.communicate(timeout=60)
