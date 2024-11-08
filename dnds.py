@@ -67,17 +67,20 @@ def parse_phy_file(filepath):
         sequence_lines = [line.strip() for line in lines[1:] if line.strip()]
         
         for line in sequence_lines:
-            # Split on whitespace
-            parts = line.strip().split()
-            
-            if len(parts) >= 2:
-                # Name and sequence on same line
-                name = parts[0][:10].ljust(10)  # 10 chars with padding
-                sequence = ''.join(parts[1:])
+            # Look for the pattern _0 or _1 followed by sequence
+            match = re.match(r'(.+?_[01])(.*)', line.strip())
+            if match:
+                name = match.group(1).ljust(10)  # Get everything up to and including _0/_1
+                sequence = match.group(2)  # Get everything after _0/_1
             else:
-                # Fixed-width format
-                name = line[:10].strip().ljust(10)
-                sequence = line[10:].replace(" ", "")
+                # Fallback to existing parsing if pattern not found
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    name = parts[0][:10].ljust(10)
+                    sequence = ''.join(parts[1:])
+                else:
+                    name = line[:10].strip().ljust(10)
+                    sequence = line[10:].replace(" ", "")
                 
             # Validate and clean sequence
             sequence = validate_sequence(sequence)
