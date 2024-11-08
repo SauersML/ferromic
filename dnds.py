@@ -155,26 +155,75 @@ def run_codeml(ctl_path, working_dir, codeml_path):
         return False
 
 def parse_codeml_output(outfile):
-    """Parse CODEML output"""
+    """Parse CODEML output, capturing all key information."""
+    results = {
+        'lnL': None,           # Log likelihood
+        't': None,             # Branch length
+        'kappa': None,         # Transition/transversion ratio
+        'omega': None,         # dN/dS ratio from ML
+        'S': None,             # Number of synonymous sites
+        'N': None,             # Number of nonsynonymous sites
+        'dN': None,            # Nonsynonymous substitutions per site
+        'dS': None,            # Synonymous substitutions per site
+        'raw_omega': None      # Raw dN/dS from ML parameters (first omega found)
+    }
+    
     try:
         with open(outfile, 'r') as f:
             content = f.read()
-            for line in content.split('\n'):
-                if "dN =" in line and "dS =" in line and "omega =" in line:
+            lines = content.split('\n')
+            
+            for i, line in enumerate(lines):
+                # Get log likelihood
+                if "lnL" in line:
+                    try:
+                        results['lnL'] = float(line.split('=')[1].strip().split()[0])
+                    except:
+                        pass
+                
+                # Get ML parameter estimates from the line after lnL
+                # Format: t k w
+                if results['lnL'] is not None and i < len(lines)-1:
+                    next_line = lines[i+1].strip()
+                    if next_line and not next_line.startswith('t='):  # Avoid the summary line
+                        try:
+                            parts = next_line.split()
+                            if len(parts) >= 3:
+                                results['t'] = float(parts[0])
+                                results['kappa'] = float(parts[1])
+                                results['raw_omega'] = float(parts[2])
+                        except:
+                            pass
+                
+                # Get the summary statistics line
+                # Format: t= 0.0000  S=    11.8  N=    18.2  dN/dS= 74.6344  dN = 0.0000  dS = 0.0000
+                if line.strip().startswith('t='):
                     parts = line.strip().split()
                     try:
-                        return (
-                            float(parts[1]),  # dN
-                            float(parts[4]),  # dS 
-                            float(parts[7])   # omega
-                        )
-                    except (IndexError, ValueError) as e:
-                        logging.error(f"Error parsing CODEML values: {str(e)}")
-                        break
+                        for j, part in enumerate(parts):
+                            if part == 't=':
+                                results['t'] = float(parts[j+1])
+                            elif part == 'S=':
+                                results['S'] = float(parts[j+1])
+                            elif part == 'N=':
+                                results['N'] = float(parts[j+1])
+                            elif part == 'dN/dS=':
+                                results['omega'] = float(parts[j+1])
+                            elif part == 'dN':
+                                results['dN'] = float(parts[j+3])
+                            elif part == 'dS':
+                                results['dS'] = float(parts[j+3])
+                    except:
+                        pass
+                        
     except FileNotFoundError:
         logging.error(f"Results file {outfile} not found")
+    except Exception as e:
+        logging.error(f"Error parsing CODEML output: {str(e)}")
     
-    return None, None, None
+    # Return just the values needed for the main analysis
+    # Can be modified to return the full results dictionary later
+    return (results['dN'], results['dS'], results['omega'])
 
 def get_safe_process_count():
    total_cpus = multiprocessing.cpu_count()
