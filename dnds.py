@@ -394,7 +394,7 @@ def main():
     parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
     parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
-    parser.add_argument('--codeml_path', type=str, default='../paml/bin/codeml', help='Path to codeml executable.')
+    parser.add_argument('--codeml_path', type=str, default='../../../../paml/bin/codeml', help='Path to codeml executable.')
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
