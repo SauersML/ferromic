@@ -1998,9 +1998,17 @@ fn write_phylip_file(
     output_file: &str,
     hap_sequences: &HashMap<String, Vec<char>>,
 ) -> Result<(), VcfError> {
-    let num_samples = hap_sequences.len();
+    // Initialize counters for batch statistics
+    let mut total_sequences = 0;
+    let mut stop_codon_or_too_short = 0;
+    let mut skipped_sequences = 0;
+    let mut not_divisible_by_three = 0;
+    let mut mid_sequence_stop = 0;
+    let mut length_modified = 0;
+
     let stop_codons = ["TAA", "TAG", "TGA"];
     
+    // Open file for writing
     let file = File::create(output_file).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
@@ -2009,7 +2017,9 @@ fn write_phylip_file(
     })?;
     let mut writer = BufWriter::new(file);
 
+    // Process each sample sequence
     for (sample_name, seq_chars) in hap_sequences {
+        total_sequences += 1;
         let padded_name = format!("{:<10}", sample_name);
         let mut sequence: String = seq_chars.iter().collect();
         let original_length = sequence.len();
@@ -2022,11 +2032,14 @@ fn write_phylip_file(
         // Check if sequence starts with ATG (start codon)
         if sequence.len() < 3 || !sequence.starts_with("ATG") {
             eprintln!("WARNING: Sequence for sample '{}' is too short or does not start with a start codon (ATG).", sample_name);
+            stop_codon_or_too_short += 1;
+            skipped_sequences += 1;
             continue;
         }
 
-        // Check divisibility by three
+        // Check if length is divisible by three
         if original_length % 3 != 0 {
+            not_divisible_by_three += 1;
             println!(
                 "Sequence for sample '{}' is not divisible by three. Attempting to find a clear reading frame and adjust...",
                 sample_name
@@ -2052,6 +2065,7 @@ fn write_phylip_file(
                             "WARNING: Multiple clear reading frames found for sample '{}'. Skipping this sequence.",
                             sample_name
                         );
+                        skipped_sequences += 1;
                         clear_frame = None;
                         break;
                     }
@@ -2074,8 +2088,10 @@ fn write_phylip_file(
                     if trim_end > 0 {
                         sequence = sequence[..sequence.len() - trim_end].to_string();
                     }
+                    length_modified += 1; // Increment counter for modified length
                 } else {
                     eprintln!("WARNING: Sequence for sample '{}' is too short after frame adjustment. Skipping this sequence.", sample_name);
+                    skipped_sequences += 1;
                     continue;
                 }
 
@@ -2090,11 +2106,12 @@ fn write_phylip_file(
                     "WARNING: No clear reading frame found for sample '{}'. Skipping this sequence.",
                     sample_name
                 );
+                skipped_sequences += 1;
                 continue; // Skip writing this sequence
             }
         }
 
-        // Final check: warn if there's a stop codon in the middle of the sequence
+        // Final check for stop codons in the middle of the sequence
         for i in (0..sequence.len().saturating_sub(3)).step_by(3) {
             let codon = &sequence[i..i + 3];
             if stop_codons.contains(&codon) {
@@ -2102,6 +2119,7 @@ fn write_phylip_file(
                     "WARNING: Stop codon '{}' found in the middle of sequence for sample '{}' at position {}.",
                     codon, sample_name, i
                 );
+                mid_sequence_stop += 1;
                 break;
             }
         }
@@ -2123,8 +2141,35 @@ fn write_phylip_file(
     })?;
 
     println!("PHYLIP file '{}' written successfully.", output_file);
+
+    // Calculate and print batch statistics
+    if total_sequences > 0 {
+        println!("\nBatch Statistics:");
+        println!(
+            "Percentage of sequences with stop codon or too short: {:.2}%",
+            (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
+        );
+        println!(
+            "Percentage of sequences skipped: {:.2}%",
+            (skipped_sequences as f64 / total_sequences as f64) * 100.0
+        );
+        println!(
+            "Percentage of sequences not divisible by three: {:.2}%",
+            (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
+        );
+        println!(
+            "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
+            (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
+        );
+        println!(
+            "Percentage of sequences with modified length: {:.2}%",
+            (length_modified as f64 / total_sequences as f64) * 100.0
+        );
+    }
+
     Ok(())
 }
+
 
 // Function to parse a variant line
 fn parse_variant(
