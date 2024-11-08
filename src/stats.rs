@@ -1920,6 +1920,7 @@ fn parse_gff_file(
     region_start: i64,
     region_end: i64,
 ) -> Result<Vec<CdsRegion>, VcfError> {
+    // Open the GFF file and handle any errors
     let file = File::open(gff_path).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::NotFound,
@@ -1929,32 +1930,54 @@ fn parse_gff_file(
     let reader = BufReader::new(file);
     let mut cds_regions = Vec::new();
 
+    // Process each line in the GFF file
     for line_result in reader.lines() {
         let line = line_result?;
         if line.starts_with('#') {
-            continue;
+            continue; // Skip comment lines
         }
+
+        // Split the line into fields and check for valid GFF format
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() < 9 {
-            continue;
+            continue; // Skip invalid lines
         }
+
+        // Check the sequence name matches the chromosome (ignoring "chr" prefix)
         let seqname = fields[0].trim().trim_start_matches("chr");
         if seqname != chr.trim_start_matches("chr") {
-            continue;
+            continue; // Skip if chromosome does not match
         }
+
+        // The feature must be a CDS
         let feature_type = fields[2];
         if feature_type != "CDS" {
-            continue;
+            continue; // Skip non-CDS features
         }
+
+        // Parse start and end positions of the CDS
         let start: i64 = fields[3]
             .parse()
             .map_err(|_| VcfError::Parse("Invalid CDS start position".to_string()))?;
         let end: i64 = fields[4]
             .parse()
             .map_err(|_| VcfError::Parse("Invalid CDS end position".to_string()))?;
+
+        // Only include CDS regions within the specified range
         if end < region_start || start > region_end {
             continue;
         }
+
+        // Calculate and log the length of the CDS
+        let cds_length = end - start + 1;
+        println!(
+            "CDS region added: start={}, end={}, length={}",
+            start,
+            end,
+            cds_length
+        );
+
+        // Add the CDS region to the list
         cds_regions.push(CdsRegion { start, end });
     }
 
