@@ -194,6 +194,7 @@ def process_pair(args):
     """Process a single pair of sequences."""
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir = args
     seq1_name, seq2_name = pair
+
     
     # Create unique working directory
     working_dir = os.path.join(temp_dir, f'temp_{seq1_name}_{seq2_name}_{int(time.time())}')
@@ -218,6 +219,32 @@ def process_pair(args):
     
     # Run CODEML
     success = run_codeml(ctl_path, working_dir, codeml_path)
+
+    # Parse results and return the 8-tuple
+    if success:
+        results_file = os.path.join(working_dir, 'results.txt')
+        dn, ds, omega = parse_codeml_output(results_file)
+        return (
+            seq1_name.strip(),
+            seq2_name.strip(), 
+            sample_groups.get(seq1_name),
+            sample_groups.get(seq2_name),
+            dn,
+            ds,
+            omega,
+            cds_id
+        )
+    else:
+        return (
+            seq1_name.strip(),
+            seq2_name.strip(),
+            sample_groups.get(seq1_name),
+            sample_groups.get(seq2_name),
+            None,  # dN
+            None,  # dS
+            None,  # omega
+            cds_id
+        )
 
 def process_phy_file(args):
    phy_file, output_dir, codeml_path, total_files, file_index = args
