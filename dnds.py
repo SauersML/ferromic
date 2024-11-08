@@ -140,7 +140,7 @@ def run_codeml(ctl_path, working_dir, codeml_path):
             stderr=subprocess.PIPE
         )
 
-        stdout, stderr = process.communicate(timeout=60)
+        stdout, stderr = process.communicate(timeout=3600)
         runtime = time.time() - start_time
         logging.info(f"CODEML runtime: {runtime:.2f}s")
         
