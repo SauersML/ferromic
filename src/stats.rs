@@ -1914,6 +1914,7 @@ fn read_reference_sequence(
 
 // IN PROGRESS
 // Helper function to parse GFF file and extract CDS regions
+// GTF and GFF use 1-based coordinate system
 fn parse_gff_file(
     gff_path: &Path,
     chr: &str,
