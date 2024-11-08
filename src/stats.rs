@@ -2020,8 +2020,9 @@ fn write_phylip_file(
         );
 
         // Check if sequence starts with ATG (start codon)
-        if !sequence.starts_with("ATG") {
-            eprintln!("WARNING: Sequence for sample '{}' does not start with a start codon (ATG).", sample_name);
+        if sequence.len() < 3 || !sequence.starts_with("ATG") {
+            eprintln!("WARNING: Sequence for sample '{}' is too short or does not start with a start codon (ATG).", sample_name);
+            continue;
         }
 
         // Check divisibility by three
@@ -2036,7 +2037,7 @@ fn write_phylip_file(
             // Check all three reading frames
             for frame in 0..3 {
                 let mut has_mid_sequence_stop = false;
-                for i in (frame..sequence.len() - 3).step_by(3) {
+                for i in (frame..sequence.len().saturating_sub(3)).step_by(3) {
                     let codon = &sequence[i..i + 3];
                     if stop_codons.contains(&codon) {
                         has_mid_sequence_stop = true;
@@ -2068,9 +2069,14 @@ fn write_phylip_file(
                 sequence = sequence[frame..].to_string();
 
                 // Trim from the end to make the length divisible by three
-                let trim_end = sequence.len() % 3;
-                if trim_end > 0 {
-                    sequence = sequence[..sequence.len() - trim_end].to_string();
+                if sequence.len() >= 3 {
+                    let trim_end = sequence.len() % 3;
+                    if trim_end > 0 {
+                        sequence = sequence[..sequence.len() - trim_end].to_string();
+                    }
+                } else {
+                    eprintln!("WARNING: Sequence for sample '{}' is too short after frame adjustment. Skipping this sequence.", sample_name);
+                    continue;
                 }
 
                 println!(
@@ -2089,7 +2095,7 @@ fn write_phylip_file(
         }
 
         // Final check: warn if there's a stop codon in the middle of the sequence
-        for i in (0..sequence.len() - 3).step_by(3) {
+        for i in (0..sequence.len().saturating_sub(3)).step_by(3) {
             let codon = &sequence[i..i + 3];
             if stop_codons.contains(&codon) {
                 eprintln!(
