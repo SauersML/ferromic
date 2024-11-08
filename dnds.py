@@ -138,6 +138,7 @@ def run_codeml(ctl_path, working_dir, codeml_path):
            stderr=subprocess.PIPE,
            preexec_fn=os.setsid
        )
+       print(f"Executed command: cd {working_dir} && {codeml_path}")
 
        try:
            stdout, stderr = process.communicate(timeout=60)
