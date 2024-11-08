@@ -154,76 +154,123 @@ def run_codeml(ctl_path, working_dir, codeml_path):
         logging.error(f"ERROR running CODEML: {str(e)}")
         return False
 
-def parse_codeml_output(outfile):
-    """Parse CODEML output, capturing all key information."""
+def parse_codeml_output(outfile_dir):
+    """
+    Parse CODEML output files, primarily from RST file with fallback to results.txt
+    Returns tuple of (dN, dS, omega)
+    """
+    logging.info(f"\n=== Parsing CODEML output in {outfile_dir} ===")
+    
+    # Initialize results
     results = {
-        'lnL': None,           # Log likelihood
-        't': None,             # Branch length
-        'kappa': None,         # Transition/transversion ratio
-        'omega': None,         # dN/dS ratio from ML
-        'S': None,             # Number of synonymous sites
-        'N': None,             # Number of nonsynonymous sites
-        'dN': None,            # Nonsynonymous substitutions per site
-        'dS': None,            # Synonymous substitutions per site
-        'raw_omega': None      # Raw dN/dS from ML parameters (first omega found)
+        'dN': None,
+        'dS': None,
+        'omega': None,
+        'N': None,
+        'S': None,
+        'lnL': None
     }
     
-    try:
-        with open(outfile, 'r') as f:
-            content = f.read()
-            lines = content.split('\n')
+    # Try parsing RST file first
+    rst_path = os.path.join(outfile_dir, 'rst')
+    if os.path.exists(rst_path):
+        logging.info("Found RST file, attempting to parse...")
+        try:
+            with open(rst_path, 'r') as f:
+                content = f.read()
+                
+            # Look for the pairwise comparison section
+            pairwise_match = re.search(r'seq seq\s+N\s+S\s+dN\s+dS\s+dN/dS.*?\n.*?(\d+)\s+(\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)', 
+                                     content, re.DOTALL)
             
-            for i, line in enumerate(lines):
-                # Get log likelihood
-                if "lnL" in line:
-                    try:
-                        results['lnL'] = float(line.split('=')[1].strip().split()[0])
-                    except:
-                        pass
+            if pairwise_match:
+                # Extract values from RST
+                results['N'] = float(pairwise_match.group(3))
+                results['S'] = float(pairwise_match.group(4))
+                results['dN'] = float(pairwise_match.group(5))
+                results['dS'] = float(pairwise_match.group(6))
+                results['omega'] = float(pairwise_match.group(7))
+                results['lnL'] = float(pairwise_match.group(8))
                 
-                # Get ML parameter estimates from the line after lnL
-                # Format: t k w
-                if results['lnL'] is not None and i < len(lines)-1:
-                    next_line = lines[i+1].strip()
-                    if next_line and not next_line.startswith('t='):  # Avoid the summary line
-                        try:
-                            parts = next_line.split()
-                            if len(parts) >= 3:
-                                results['t'] = float(parts[0])
-                                results['kappa'] = float(parts[1])
-                                results['raw_omega'] = float(parts[2])
-                        except:
-                            pass
+                logging.info(f"Successfully parsed RST file:")
+                logging.info(f"  N sites: {results['N']:.1f}")
+                logging.info(f"  S sites: {results['S']:.1f}")
+                logging.info(f"  dN: {results['dN']:.6f}")
+                logging.info(f"  dS: {results['dS']:.6f}")
+                logging.info(f"  dN/dS: {results['omega']:.6f}")
+                logging.info(f"  lnL: {results['lnL']:.6f}")
                 
-                # Get the summary statistics line
-                # Format: t= 0.0000  S=    11.8  N=    18.2  dN/dS= 74.6344  dN = 0.0000  dS = 0.0000
-                if line.strip().startswith('t='):
-                    parts = line.strip().split()
-                    try:
-                        for j, part in enumerate(parts):
-                            if part == 't=':
-                                results['t'] = float(parts[j+1])
-                            elif part == 'S=':
-                                results['S'] = float(parts[j+1])
-                            elif part == 'N=':
-                                results['N'] = float(parts[j+1])
-                            elif part == 'dN/dS=':
-                                results['omega'] = float(parts[j+1])
-                            elif part == 'dN':
-                                results['dN'] = float(parts[j+3])
-                            elif part == 'dS':
-                                results['dS'] = float(parts[j+3])
-                    except:
-                        pass
-                        
-    except FileNotFoundError:
-        logging.error(f"Results file {outfile} not found")
-    except Exception as e:
-        logging.error(f"Error parsing CODEML output: {str(e)}")
+                return (results['dN'], results['dS'], results['omega'])
+            else:
+                logging.warning("Could not find pairwise comparison section in RST file")
+        
+        except Exception as e:
+            logging.error(f"Error parsing RST file: {str(e)}")
+    else:
+        logging.warning("RST file not found")
     
-    # Return just the values needed for the main analysis
-    # Can be modified to return the full results dictionary later
-    return (results['dN'], results['dS'], results['omega'])
+    # Fallback to results.txt
+    logging.info("Attempting to parse results.txt as fallback...")
+    results_path = os.path.join(outfile_dir, 'results.txt')
+    
+    if not os.path.exists(results_path):
+        logging.error("results.txt not found!")
+        return (None, None, None)
+        
+    try:
+        with open(results_path, 'r') as f:
+            content = f.read()
+            
+        # Look for the ML output section near the end
+        ml_match = re.search(r't=\s*(\d+\.\d+)\s+S=\s*(\d+\.\d+)\s+N=\s*(\d+\.\d+)\s+dN/dS=\s*(\d+\.\d+)\s+dN\s*=\s*(\d+\.\d+)\s+dS\s*=\s*(\d+\.\d+)', 
+                           content)
+        
+        if ml_match:
+            results['S'] = float(ml_match.group(2))
+            results['N'] = float(ml_match.group(3))
+            results['omega'] = float(ml_match.group(4))
+            results['dN'] = float(ml_match.group(5))
+            results['dS'] = float(ml_match.group(6))
+            
+            logging.info(f"Successfully parsed results.txt:")
+            logging.info(f"  N sites: {results['N']:.1f}")
+            logging.info(f"  S sites: {results['S']:.1f}")
+            logging.info(f"  dN: {results['dN']:.6f}")
+            logging.info(f"  dS: {results['dS']:.6f}")
+            logging.info(f"  dN/dS: {results['omega']:.6f}")
+            
+            return (results['dN'], results['dS'], results['omega'])
+            
+        else:
+            logging.error("Could not find ML output section in results.txt")
+            
+    except Exception as e:
+        logging.error(f"Error parsing results.txt: {str(e)}")
+    
+    # Also check 2ML.* files as last resort
+    logging.info("Checking 2ML.* files as last resort...")
+    try:
+        with open(os.path.join(outfile_dir, '2ML.dN'), 'r') as f:
+            lines = f.readlines()
+            if len(lines) >= 3:
+                results['dN'] = float(lines[2].strip().split()[-1])
+                
+        with open(os.path.join(outfile_dir, '2ML.dS'), 'r') as f:
+            lines = f.readlines()
+            if len(lines) >= 3:
+                results['dS'] = float(lines[2].strip().split()[-1])
+                
+            logging.info(f"Successfully parsed 2ML.* files:")
+            logging.info(f"  dN: {results['dN']:.6f}")
+            logging.info(f"  dS: {results['dS']:.6f}")
+            
+            return (results['dN'], results['dS'], "N/A")
+            
+    except Exception as e:
+        logging.error(f"Error parsing 2ML.* files: {str(e)}")
+    
+    logging.error("Failed to parse CODEML output from any available file")
+    return (None, None, None)
 
 def get_safe_process_count():
    total_cpus = multiprocessing.cpu_count()
@@ -272,7 +319,7 @@ def process_pair(args):
     # Parse results and return the 8-tuple
     if success:
         results_file = os.path.join(working_dir, 'results.txt')
-        dn, ds, omega = parse_codeml_output(results_file)
+        dn, ds, omega = parse_codeml_output(working_dir)
         return (
             seq1_name.strip(),
             seq2_name.strip(), 
