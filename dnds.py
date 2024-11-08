@@ -128,19 +128,22 @@ def create_paml_ctl(seqfile, outfile, working_dir):
     return ctl_path
 
 def run_codeml(ctl_path, working_dir, codeml_path):
-    """Run CODEML"""
+    """Run CODEML and handle any prompts for 'Press Enter to continue'."""
     logging.info(f"\n=== Running CODEML in {working_dir} ===")
     start_time = time.time()
     
     try:
+        # Use subprocess with stdin to simulate 'Enter' input
         process = subprocess.Popen(
             [codeml_path],
             cwd=working_dir,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE  # stdin to send input
         )
 
-        stdout, stderr = process.communicate(timeout=3600)
+        # Send newline to stdin to bypass 'Press Enter' prompt
+        stdout, stderr = process.communicate(input=b'\n', timeout=3600)
         runtime = time.time() - start_time
         logging.info(f"CODEML runtime: {runtime:.2f}s")
         
