@@ -99,6 +99,7 @@ def extract_group_from_sample(sample_name):
 def create_paml_ctl(seqfile, outfile, working_dir):
     """Create CODEML control file with proper spacing."""
     ctl_content = f"""      seqfile = {seqfile}
+      treefile = tree.txt
       outfile = {outfile}
       noisy = 0
       verbose = 0
@@ -121,11 +122,6 @@ def create_paml_ctl(seqfile, outfile, working_dir):
     ctl_path = os.path.join(working_dir, 'codeml.ctl')
     with open(ctl_path, 'w') as f:
         f.write(ctl_content)
-        
-    # Create empty tree file that PAML requires
-    tree_path = os.path.join(working_dir, 'tree.txt') 
-    open(tree_path, 'w').close()
-        
     return ctl_path
 
 def run_codeml(ctl_path, working_dir, codeml_path):
@@ -200,34 +196,25 @@ def process_pair(args):
     working_dir = os.path.join(temp_dir, f'temp_{seq1_name}_{seq2_name}_{int(time.time())}')
     os.makedirs(working_dir, exist_ok=True)
 
-    # Write PHYLIP file
+    # Write PHYLIP file - ensure exactly 10 chars with two spaces after name
     phy_path = os.path.join(working_dir, 'temp.phy')
     with open(phy_path, 'w') as f:
         seq_len = len(sequences[seq1_name])
         f.write(f" 2 {seq_len}\n")
-        f.write(f"{seq1_name:<10}{sequences[seq1_name]}\n")
-        f.write(f"{seq2_name:<10}{sequences[seq2_name]}\n")
+        # Pad name to exactly 10 chars, then add two spaces
+        f.write(f"{seq1_name[:10].ljust(10)}  {sequences[seq1_name]}\n")
+        f.write(f"{seq2_name[:10].ljust(10)}  {sequences[seq2_name]}\n")
 
-    # Run CODEML
+    # Create control file
     ctl_path = create_paml_ctl('temp.phy', 'results.txt', working_dir)
+    
+    # Create empty tree file
+    tree_path = os.path.join(working_dir, 'tree.txt')
+    with open(tree_path, 'w') as f:
+        f.write('')
+    
+    # Run CODEML
     success = run_codeml(ctl_path, working_dir, codeml_path)
-    
-    # Parse results
-    results = (None, None, None)
-    if success:
-        results = parse_codeml_output(os.path.join(working_dir, 'results.txt'))
-    
-    # Cleanup
-    try:
-        shutil.rmtree(working_dir)
-    except Exception as e:
-        logging.warning(f"Failed to clean up {working_dir}: {str(e)}")
-
-    return (seq1_name, seq2_name, 
-            sample_groups.get(seq1_name), 
-            sample_groups.get(seq2_name),
-            *results, 
-            cds_id)
 
 def process_phy_file(args):
    phy_file, output_dir, codeml_path, total_files, file_index = args
