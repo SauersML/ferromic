@@ -18,70 +18,75 @@ from datetime import datetime
 from scipy.stats import mannwhitneyu
 import logging
 
-# Use absolute paths
-
 # Set up logging
 logging.basicConfig(
-   level=logging.INFO,
-   format='%(asctime)s [%(levelname)s] %(message)s',
-   handlers=[
-       logging.FileHandler('dnds_analysis.log'),
-       logging.StreamHandler(sys.stdout)
-   ]
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler('dnds_analysis.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 
+def validate_sequence(seq):
+    """Validate sequence is valid codons and trim to multiple of 3 if needed."""
+    if len(seq) % 3 != 0:
+        original_len = len(seq)
+        # Trim sequence to nearest multiple of 3
+        seq = seq[:-(len(seq) % 3)]
+        logging.warning(f"Sequence length {original_len} not multiple of 3. Trimmed to {len(seq)}")
+    
+    # Check for valid nucleotides
+    valid_bases = set('ATCGNatcgn-')
+    invalid_chars = set(seq) - valid_bases
+    if invalid_chars:
+        logging.warning(f"Found invalid nucleotides: {invalid_chars}")
+        return None
+        
+    return seq
+
 def parse_phy_file(filepath):
-   print(f"\n=== Starting to parse file: {filepath} ===")
-   sequences = {}
-   with open(filepath, 'r') as file:
-       lines = file.readlines()
-       if len(lines) < 1:
-           print(f"ERROR: Empty .phy file {filepath}")
-           return sequences
-       try:
-           num_sequences, seq_length = map(int, lines[0].strip().split())
-           print(f"File contains {num_sequences} sequences of length {seq_length}")
-       except ValueError:
-           print(f"ERROR: Failed parsing header of {filepath}")
-           return sequences
-       
-       sequence_lines = lines[1:]
-       # Remove empty lines
-       sequence_lines = [line.strip() for line in sequence_lines if line.strip()]
-       
-       i = 0
-       while i < len(sequence_lines):
-           line = sequence_lines[i]
-           if len(line) == 0:
-               i += 1
-               continue
-           # Check if line contains sequence name and sequence
-           parts = line.strip().split()
-           if len(parts) >= 2:
-               name = parts[0]
-               sequence = ''.join(parts[1:])
-               sequences[name] = sequence
-               print(f"Parsed sequence {len(sequences)}: {name} (length: {len(sequence)})")
-               i += 1
-           else:
-               # Name might be in the first 10 chars, and sequence in the rest
-               name = line[:10].strip()
-               sequence = line[10:].strip()
-               # In case the sequence spans multiple lines
-               while len(sequence) < seq_length:
-                   i += 1
-                   if i >= len(sequence_lines):
-                       break
-                   sequence += sequence_lines[i].strip()
-               sequences[name] = sequence
-               print(f"Parsed sequence {len(sequences)}: {name} (length: {len(sequence)})")
-               i += 1
-               
-   if len(sequences) != num_sequences:
-       print(f"WARNING: Number of parsed sequences ({len(sequences)}) does not match header ({num_sequences})")
-       
-   print(f"Successfully parsed {len(sequences)} sequences")
-   return sequences
+    """Parse PHYLIP file ensuring codon-aligned sequences."""
+    logging.info(f"\n=== Starting to parse file: {filepath} ===")
+    sequences = {}
+    
+    with open(filepath, 'r') as file:
+        lines = file.readlines()
+        if len(lines) < 1:
+            logging.error(f"Empty .phy file {filepath}")
+            return sequences
+            
+        try:
+            num_sequences, seq_length = map(int, lines[0].strip().split())
+            logging.info(f"File contains {num_sequences} sequences of length {seq_length}")
+        except ValueError:
+            logging.error(f"Failed parsing header of {filepath}")
+            return sequences
+
+        # Filter empty lines and process sequences
+        sequence_lines = [line.strip() for line in lines[1:] if line.strip()]
+        
+        for line in sequence_lines:
+            # Split on whitespace
+            parts = line.strip().split()
+            
+            if len(parts) >= 2:
+                # Name and sequence on same line
+                name = parts[0][:10].ljust(10)  # 10 chars with padding
+                sequence = ''.join(parts[1:])
+            else:
+                # Fixed-width format
+                name = line[:10].strip().ljust(10)
+                sequence = line[10:].replace(" ", "")
+                
+            # Validate and clean sequence
+            sequence = validate_sequence(sequence)
+            if sequence is not None:
+                sequences[name] = sequence
+                logging.info(f"Parsed sequence: {name} (length: {len(sequence)})")
+
+    logging.info(f"Successfully parsed {len(sequences)} sequences")
+    return sequences
 
 def extract_group_from_sample(sample_name):
    match = re.search(r'_(\d+)$', sample_name)
@@ -92,10 +97,8 @@ def extract_group_from_sample(sample_name):
        return None
 
 def create_paml_ctl(seqfile, outfile, working_dir):
-   print(f"Creating PAML control file in {working_dir}")
-   ctl_content = f"""
-      seqfile = {seqfile}
-      treefile = None
+    """Create CODEML control file with proper spacing."""
+    ctl_content = f"""      seqfile = {seqfile}
       outfile = {outfile}
       noisy = 0
       verbose = 0
@@ -114,83 +117,71 @@ def create_paml_ctl(seqfile, outfile, working_dir):
       getSE = 0
       RateAncestor = 0
       cleandata = 1
-   """
-   ctl_path = os.path.join(working_dir, 'codeml.ctl')
-   with open(ctl_path, 'w') as ctl_file:
-       ctl_file.write(ctl_content)
-   print(f"PAML control file created: {ctl_path}")
-   return ctl_path
+"""
+    ctl_path = os.path.join(working_dir, 'codeml.ctl')
+    with open(ctl_path, 'w') as f:
+        f.write(ctl_content)
+        
+    # Create empty tree file that PAML requires
+    tree_path = os.path.join(working_dir, 'tree.txt') 
+    open(tree_path, 'w').close()
+        
+    return ctl_path
 
 def run_codeml(ctl_path, working_dir, codeml_path):
-   print(f"Using codeml path: {os.path.abspath(codeml_path)}")
-   print(f"\n=== Running CODEML in {working_dir} ===")
-   start_time = time.time()
-   
-   cpu_percent = psutil.cpu_percent()
-   mem = psutil.virtual_memory()
-   print(f"System status before CODEML: CPU {cpu_percent}%, Memory {mem.percent}%")
-   
-   try:
-       print(f"Executing command: cd {working_dir} && {codeml_path}")
-       process = subprocess.Popen(
-           [codeml_path],
-           cwd=working_dir,
-           stdout=subprocess.PIPE,
-           stderr=subprocess.PIPE,
-           preexec_fn=os.setsid
-       )
+    """Run CODEML"""
+    logging.info(f"\n=== Running CODEML in {working_dir} ===")
+    start_time = time.time()
+    
+    try:
+        process = subprocess.Popen(
+            [codeml_path],
+            cwd=working_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
 
-       try:
-           stdout, stderr = process.communicate(timeout=60)
-           runtime = time.time() - start_time
-           print(f"CODEML runtime: {runtime:.2f}s")
-           
-           if process.returncode != 0:
-               print(f"CODEML error: {stderr.decode()}")
-               return False
-               
-           print("CODEML completed successfully")
-           return True
-           
-       except subprocess.TimeoutExpired:
-           print("CODEML process timed out - terminating")
-           os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-           return False
-           
-   except Exception as e:
-       print(f"ERROR running CODEML: {str(e)}")
-       return False
+        stdout, stderr = process.communicate(timeout=60)
+        runtime = time.time() - start_time
+        logging.info(f"CODEML runtime: {runtime:.2f}s")
+        
+        if process.returncode != 0:
+            logging.error(f"CODEML error: {stderr.decode()}")
+            return False
+            
+        return True
+        
+    except Exception as e:
+        logging.error(f"ERROR running CODEML: {str(e)}")
+        return False
 
 def parse_codeml_output(outfile):
-   print(f"Parsing CODEML output: {outfile}")
-   dN = None
-   dS = None 
-   omega = None
-   try:
-       with open(outfile, 'r') as f:
-           content = f.read()
-           print(f"CODEML output file size: {len(content)} bytes")
-           for line in content.split('\n'):
-               if "dN =" in line and "dS =" in line and "omega =" in line:
-                   parts = line.strip().split()
-                   try:
-                       dN = float(parts[1])
-                       dS = float(parts[4])
-                       omega = float(parts[7])
-                       print(f"Parsed values: dN={dN}, dS={dS}, omega={omega}")
-                   except (IndexError, ValueError) as e:
-                       print(f"ERROR parsing CODEML values: {str(e)}")
-                   break
-   except FileNotFoundError:
-       print(f"ERROR: Results file {outfile} not found")
-   
-   return dN, dS, omega
+    """Parse CODEML output"""
+    try:
+        with open(outfile, 'r') as f:
+            content = f.read()
+            for line in content.split('\n'):
+                if "dN =" in line and "dS =" in line and "omega =" in line:
+                    parts = line.strip().split()
+                    try:
+                        return (
+                            float(parts[1]),  # dN
+                            float(parts[4]),  # dS 
+                            float(parts[7])   # omega
+                        )
+                    except (IndexError, ValueError) as e:
+                        logging.error(f"Error parsing CODEML values: {str(e)}")
+                        break
+    except FileNotFoundError:
+        logging.error(f"Results file {outfile} not found")
+    
+    return None, None, None
 
 def get_safe_process_count():
    total_cpus = multiprocessing.cpu_count()
    mem = psutil.virtual_memory()
    
-   # Conservative allocation - use at most 25% of CPUs and ensure 4GB per process
+   # Conservative allocation - use at most 25% of CPUs and 4GB per process
    safe_cpu_count = max(1, min(total_cpus // 4, 8))
    mem_based_count = max(1, int(mem.available / (4 * 1024 * 1024 * 1024)))
    
@@ -201,39 +192,42 @@ def get_safe_process_count():
    return process_count
 
 def process_pair(args):
-   pair, sequences, sample_groups, cds_id, codeml_path, temp_dir = args
-   seq1_name, seq2_name = pair
-   
-   print(f"\n=== Processing pair: {seq1_name} vs {seq2_name} for {cds_id} ===")
-   
-   working_dir = os.path.join(temp_dir, f'temp_{seq1_name}_{seq2_name}_{int(time.time())}')
-   os.makedirs(working_dir, exist_ok=True)
-   print(f"Created working directory: {working_dir}")
+    """Process a single pair of sequences."""
+    pair, sequences, sample_groups, cds_id, codeml_path, temp_dir = args
+    seq1_name, seq2_name = pair
+    
+    # Create unique working directory
+    working_dir = os.path.join(temp_dir, f'temp_{seq1_name}_{seq2_name}_{int(time.time())}')
+    os.makedirs(working_dir, exist_ok=True)
 
-   temp_phy = os.path.join(working_dir, 'temp.phy')
-   with open(temp_phy, 'w') as phy_file:
-       phy_file.write(f" 2 {len(sequences[seq1_name])}\n")
-       phy_file.write(f"{seq1_name:<10}{sequences[seq1_name]}\n")
-       phy_file.write(f"{seq2_name:<10}{sequences[seq2_name]}\n")
-   print(f"Written sequences to: {temp_phy}")
+    # Write PHYLIP file
+    phy_path = os.path.join(working_dir, 'temp.phy')
+    with open(phy_path, 'w') as f:
+        seq_len = len(sequences[seq1_name])
+        f.write(f" 2 {seq_len}\n")
+        f.write(f"{seq1_name:<10}{sequences[seq1_name]}\n")
+        f.write(f"{seq2_name:<10}{sequences[seq2_name]}\n")
 
-   ctl_path = create_paml_ctl('temp.phy', 'results.txt', working_dir)
-   success = run_codeml(ctl_path, working_dir, codeml_path)
+    # Run CODEML
+    ctl_path = create_paml_ctl('temp.phy', 'results.txt', working_dir)
+    success = run_codeml(ctl_path, working_dir, codeml_path)
+    
+    # Parse results
+    results = (None, None, None)
+    if success:
+        results = parse_codeml_output(os.path.join(working_dir, 'results.txt'))
+    
+    # Cleanup
+    try:
+        shutil.rmtree(working_dir)
+    except Exception as e:
+        logging.warning(f"Failed to clean up {working_dir}: {str(e)}")
 
-   results_file = os.path.join(working_dir, 'results.txt')
-   if success:
-       dN, dS, omega = parse_codeml_output(results_file)
-   else:
-       dN, dS, omega = None, None, None
-
-   try:
-       shutil.rmtree(working_dir)
-       print(f"Cleaned up directory: {working_dir}")
-   except Exception as e:
-       print(f"WARNING: Failed to clean up {working_dir}: {str(e)}")
-
-   # Return cds_id as last element
-   return (seq1_name, seq2_name, sample_groups.get(seq1_name), sample_groups.get(seq2_name), dN, dS, omega, cds_id)
+    return (seq1_name, seq2_name, 
+            sample_groups.get(seq1_name), 
+            sample_groups.get(seq2_name),
+            *results, 
+            cds_id)
 
 def process_phy_file(args):
    phy_file, output_dir, codeml_path, total_files, file_index = args
