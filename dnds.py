@@ -122,6 +122,7 @@ def create_paml_ctl(seqfile, outfile, working_dir):
    return ctl_path
 
 def run_codeml(ctl_path, working_dir, codeml_path):
+   print(f"Using codeml path: {os.path.abspath(codeml_path)}")
    print(f"\n=== Running CODEML in {working_dir} ===")
    start_time = time.time()
    
