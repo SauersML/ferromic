@@ -853,8 +853,8 @@ fn make_sequences(
         }
     }
 
-    // Initialize batch statistics
-    let mut total_sequences = hap_sequences.len();
+    // Print batch statistics before CDS processing
+    let total_sequences = hap_sequences.len();
     let mut stop_codon_or_too_short = 0;
     let mut skipped_sequences = 0;
     let mut not_divisible_by_three = 0;
@@ -888,7 +888,6 @@ fn make_sequences(
         }
     }
 
-    // Print batch statistics once
     println!("\nBatch Statistics:");
     println!(
         "Percentage of sequences with stop codon or too short: {:.2}%",
@@ -2062,9 +2061,6 @@ fn write_phylip_file(
     output_file: &str,
     hap_sequences: &HashMap<String, Vec<char>>,
 ) -> Result<(), VcfError> {
-    let stop_codons = ["TAA", "TAG", "TGA"];
-    
-    // Open file for writing
     let file = File::create(output_file).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
@@ -2073,113 +2069,11 @@ fn write_phylip_file(
     })?;
     let mut writer = BufWriter::new(file);
 
-    // Process each sample sequence
+    // Process and write each sequence
     for (sample_name, seq_chars) in hap_sequences {
-        total_sequences += 1;
         let padded_name = format!("{:<10}", sample_name);
-        let mut sequence: String = seq_chars.iter().collect();
-        let original_length = sequence.len();
+        let sequence: String = seq_chars.iter().collect();
         
-        println!(
-            "Processing sequence for sample '{}', original length: {}",
-            sample_name, original_length
-        );
-
-        // Check if sequence starts with ATG (start codon)
-        if sequence.len() < 3 || !sequence.starts_with("ATG") {
-            eprintln!("WARNING: Sequence for sample '{}' is too short or does not start with a start codon (ATG).", sample_name);
-            stop_codon_or_too_short += 1;
-            skipped_sequences += 1;
-            continue;
-        }
-
-        // Check if length is divisible by three
-        if original_length % 3 != 0 {
-            not_divisible_by_three += 1;
-            println!(
-                "Sequence for sample '{}' is not divisible by three. Attempting to find a clear reading frame and adjust...",
-                sample_name
-            );
-
-            let mut clear_frame: Option<usize> = None;
-
-            // Check all three reading frames
-            for frame in 0..3 {
-                let mut has_mid_sequence_stop = false;
-                for i in (frame..sequence.len().saturating_sub(3)).step_by(3) {
-                    let codon = &sequence[i..i + 3];
-                    if stop_codons.contains(&codon) {
-                        has_mid_sequence_stop = true;
-                        break;
-                    }
-                }
-
-                if !has_mid_sequence_stop {
-                    if clear_frame.is_some() {
-                        // Multiple clear frames found, skipping this sequence
-                        eprintln!(
-                            "WARNING: Multiple clear reading frames found for sample '{}'. Skipping this sequence.",
-                            sample_name
-                        );
-                        skipped_sequences += 1;
-                        clear_frame = None;
-                        break;
-                    }
-                    clear_frame = Some(frame);
-                }
-            }
-
-            if let Some(frame) = clear_frame {
-                println!(
-                    "Clear reading frame found for sample '{}' at frame {}. Trimming sequence to align with this frame.",
-                    sample_name, frame
-                );
-
-                // Adjust sequence to start from the identified reading frame
-                sequence = sequence[frame..].to_string();
-
-                // Trim from the end to make the length divisible by three
-                if sequence.len() >= 3 {
-                    let trim_end = sequence.len() % 3;
-                    if trim_end > 0 {
-                        sequence = sequence[..sequence.len() - trim_end].to_string();
-                    }
-                    length_modified += 1; // Increment counter for modified length
-                } else {
-                    eprintln!("WARNING: Sequence for sample '{}' is too short after frame adjustment. Skipping this sequence.", sample_name);
-                    skipped_sequences += 1;
-                    continue;
-                }
-
-                println!(
-                    "Trimmed sequence for sample '{}', new length: {}",
-                    sample_name,
-                    sequence.len()
-                );
-
-            } else {
-                eprintln!(
-                    "WARNING: No clear reading frame found for sample '{}'. Skipping this sequence.",
-                    sample_name
-                );
-                skipped_sequences += 1;
-                continue; // Skip writing this sequence
-            }
-        }
-
-        // Final check for stop codons in the middle of the sequence
-        for i in (0..sequence.len().saturating_sub(3)).step_by(3) {
-            let codon = &sequence[i..i + 3];
-            if stop_codons.contains(&codon) {
-                eprintln!(
-                    "WARNING: Stop codon '{}' found in the middle of sequence for sample '{}' at position {}.",
-                    codon, sample_name, i
-                );
-                mid_sequence_stop += 1;
-                break;
-            }
-        }
-
         // Write sequence to PHYLIP file
         writeln!(writer, "{}{}", padded_name, sequence).map_err(|e| {
             VcfError::Io(io::Error::new(
@@ -2197,7 +2091,6 @@ fn write_phylip_file(
     })?;
 
     println!("PHYLIP file '{}' written successfully.", output_file);
-
     Ok(())
 }
 
