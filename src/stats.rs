@@ -2451,9 +2451,9 @@ fn calculate_pairwise_differences(
 ) -> Vec<((usize, usize), usize, Vec<i64>)> {
     let variants = Arc::new(variants);
 
-    (0..n-1).into_par_iter().flat_map(|i| { # n-1 or n? evaluate this.
+    (0..n-1).into_par_iter().flat_map(|i| { // n-1 or n? evaluate this.
         let variants = Arc::clone(&variants);
-        (i+1..n-1).into_par_iter().map(move |j| { # n-1 or n? evaluate this.
+        (i+1..n-1).into_par_iter().map(move |j| { // n-1 or n? evaluate this.
             let mut diff_count = 0;
             let mut diff_positions = Vec::new();
 
