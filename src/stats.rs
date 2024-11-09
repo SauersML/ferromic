@@ -1998,14 +1998,6 @@ fn write_phylip_file(
     output_file: &str,
     hap_sequences: &HashMap<String, Vec<char>>,
 ) -> Result<(), VcfError> {
-    // Initialize counters for batch statistics
-    let mut total_sequences = 0;
-    let mut stop_codon_or_too_short = 0;
-    let mut skipped_sequences = 0;
-    let mut not_divisible_by_three = 0;
-    let mut mid_sequence_stop = 0;
-    let mut length_modified = 0;
-
     let stop_codons = ["TAA", "TAG", "TGA"];
     
     // Open file for writing
