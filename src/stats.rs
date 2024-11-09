@@ -2199,31 +2199,6 @@ fn write_phylip_file(
 
     println!("PHYLIP file '{}' written successfully.", output_file);
 
-    // Calculate and print batch statistics
-    if total_sequences > 0 {
-        println!("\nBatch Statistics:");
-        println!(
-            "Percentage of sequences with stop codon or too short: {:.2}%",
-            (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
-        );
-        println!(
-            "Percentage of sequences skipped: {:.2}%",
-            (skipped_sequences as f64 / total_sequences as f64) * 100.0
-        );
-        println!(
-            "Percentage of sequences not divisible by three: {:.2}%",
-            (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
-        );
-        println!(
-            "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
-            (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
-        );
-        println!(
-            "Percentage of sequences with modified length: {:.2}%",
-            (length_modified as f64 / total_sequences as f64) * 100.0
-        );
-    }
-
     Ok(())
 }
 
