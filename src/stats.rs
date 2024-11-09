@@ -2073,13 +2073,6 @@ fn write_phylip_file(
     })?;
     let mut writer = BufWriter::new(file);
 
-    let mut total_sequences = 0;
-    let mut stop_codon_or_too_short = 0; 
-    let mut skipped_sequences = 0;
-    let mut not_divisible_by_three = 0;
-    let mut mid_sequence_stop = 0;
-    let mut length_modified = 0;
-
     // Process each sample sequence
     for (sample_name, seq_chars) in hap_sequences {
         total_sequences += 1;
