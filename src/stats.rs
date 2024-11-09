@@ -1964,7 +1964,13 @@ fn read_reference_sequence(
     for record in reader.records() {
         let record = record?;
         if record.id() == chr || record.id() == format!("chr{}", chr) {
-            return Ok(record.seq()[start as usize - 1..end as usize].to_vec());
+            let seq_len = record.seq().len();
+            let safe_start = (start as usize).saturating_sub(1);
+            let safe_end = std::cmp::min(end as usize, seq_len);
+            if safe_end <= safe_start {
+                return Err(VcfError::Parse(format!("Invalid sequence range: start={}, end={}", start, end)));
+            }
+            return Ok(record.seq()[safe_start..safe_end].to_vec());
         }
     }
     Err(VcfError::Parse(format!("Chromosome {} not found in reference", chr)))
