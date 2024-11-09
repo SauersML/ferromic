@@ -853,6 +853,64 @@ fn make_sequences(
         }
     }
 
+    // Initialize batch statistics
+    let mut total_sequences = hap_sequences.len();
+    let mut stop_codon_or_too_short = 0;
+    let mut skipped_sequences = 0;
+    let mut not_divisible_by_three = 0;
+    let mut mid_sequence_stop = 0;
+    let mut length_modified = 0;
+    
+    let stop_codons = ["TAA", "TAG", "TGA"];
+    
+    // Validate all sequences once before CDS processing
+    for (sample_name, sequence) in &hap_sequences {
+        let sequence_str = String::from_utf8_lossy(sequence);
+
+        if sequence.len() < 3 || !sequence_str.starts_with("ATG") {
+            stop_codon_or_too_short += 1;
+            skipped_sequences += 1;
+            continue;
+        }
+
+        if sequence.len() % 3 != 0 {
+            not_divisible_by_three += 1;
+            length_modified += 1;
+        }
+
+        // Check for mid-sequence stop codons
+        for i in (0..sequence.len()-2).step_by(3) {
+            let codon = &sequence_str[i..i+3];
+            if stop_codons.contains(&codon) {
+                mid_sequence_stop += 1;
+                break;
+            }
+        }
+    }
+
+    // Print batch statistics once
+    println!("\nBatch Statistics:");
+    println!(
+        "Percentage of sequences with stop codon or too short: {:.2}%",
+        (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
+    );
+    println!(
+        "Percentage of sequences skipped: {:.2}%",
+        (skipped_sequences as f64 / total_sequences as f64) * 100.0
+    );
+    println!(
+        "Percentage of sequences not divisible by three: {:.2}%",
+        (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
+    );
+    println!(
+        "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
+        (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
+    );
+    println!(
+        "Percentage of sequences with modified length: {:.2}%",
+        (length_modified as f64 / total_sequences as f64) * 100.0
+    );
+
     // For each CDS, extract sequences and write to PHYLIP file
     for cds in cds_regions {
         // Check overlap with region
