@@ -1981,6 +1981,7 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     Ok(())
 }
 
+
 fn read_reference_sequence(
     fasta_path: &Path,
     chr: &str, 
@@ -2002,57 +2003,57 @@ fn read_reference_sequence(
         )));
     }
 
-    // Open both the FASTA file and its index
-    let fasta = fasta_path.to_str().ok_or_else(|| VcfError::Parse("Invalid FASTA path".to_string()))?;
-    let fai = format!("{}.fai", fasta);
-    
-    let mut reader = bio::io::fasta::IndexedReader::from_file(&fasta)
+    // Create reader for the FASTA file
+    let mut reader = bio::io::fasta::IndexedReader::from_file(fasta_path)
         .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other, 
             format!("Failed to open FASTA file: {}", e)
         )))?;
 
-    // Get sequence length from index
-    let seq_length = reader.index.sequences().get(chr)
-        .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?
-        .len as i64;
+    // Fetch the sequence information
+    let sequences = reader.index.sequences();
+    
+    // Look up the chromosome
+    let seq_info = sequences.values()
+        .find(|seq| seq.name == chr)
+        .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?;
 
-    // Validate coordinates against sequence length
-    if start >= seq_length {
+    // Get sequence length
+    let seq_length = seq_info.len;
+    
+    // Validate start position
+    if start as u64 >= seq_length {
         return Err(VcfError::Parse(format!(
             "Start position {} exceeds sequence length {} for chromosome {}",
             start, seq_length, chr
         )));
     }
 
-    // Clamp end position to sequence length if necessary
-    let adjusted_end = std::cmp::min(end, seq_length - 1);
-    if adjusted_end != end {
+    // Clamp end position to sequence length
+    let adjusted_end = std::cmp::min(end as u64, seq_length - 1);
+    if adjusted_end as i64 != end {
         println!("Warning: End position {} exceeds sequence length {}. Clamping to {}", 
                  end, seq_length, adjusted_end);
     }
 
-    // Create a buffer with exact required capacity
-    let region_length = (adjusted_end - start + 1) as usize;
+    // Calculate region length and allocate buffer
+    let region_length = (adjusted_end - start as u64 + 1) as usize;
     let mut sequence = Vec::with_capacity(region_length);
 
-    // Fetch sequence with validated coordinates
-    // Convert to u64 safely now that we know values are non-negative and in bounds
-    reader.fetch(chr, start as u64, (adjusted_end + 1) as u64).map_err(|e| {
-        VcfError::Io(io::Error::new(
+    // Fetch the sequence
+    reader.fetch(chr, start as u64, adjusted_end + 1)
+        .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
             format!("Failed to fetch region {}:{}-{}: {}", chr, start, adjusted_end, e)
-        ))
-    })?;
+        )))?;
 
-    // Read sequence into pre-allocated buffer
-    reader.read(&mut sequence).map_err(|e| {
-        VcfError::Io(io::Error::new(
+    // Read the sequence into our buffer
+    reader.read(&mut sequence)
+        .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
             format!("Failed to read sequence for region {}:{}-{}: {}", 
                     chr, start, adjusted_end, e)
-        ))
-    })?;
+        )))?;
 
     // Verify sequence length
     if sequence.len() != region_length {
@@ -2072,6 +2073,7 @@ fn read_reference_sequence(
 
     Ok(sequence)
 }
+
 
 // IN PROGRESS
 // Helper function to parse GFF file and extract CDS regions
