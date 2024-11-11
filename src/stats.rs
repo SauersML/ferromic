@@ -2017,8 +2017,9 @@ fn read_reference_sequence(
         chr.to_string()
     };
 
-    // First try with chr prefix, then without
-    let seq_info = reader.index.sequences()
+    // Get sequences and find our chromosome
+    let sequences = reader.index.sequences();
+    let seq_info = sequences
         .iter()
         .find(|seq| seq.name == chr_with_prefix || seq.name == chr)
         .ok_or_else(|| VcfError::Parse(format!(
@@ -2026,7 +2027,7 @@ fn read_reference_sequence(
         )))?;
 
     let seq_length = seq_info.len;
-    let actual_chr_name = &seq_info.name; // Use the actual name we found
+    let actual_chr_name = seq_info.name.as_str(); // Get a reference to the name
 
     // Validate start position
     if start as u64 >= seq_length {
@@ -2079,6 +2080,7 @@ fn read_reference_sequence(
 
     Ok(sequence)
 }
+
 
 
 // IN PROGRESS
