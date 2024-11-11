@@ -290,18 +290,27 @@ def get_safe_process_count():
    return process_count
 
 def process_pair(args):
-    """Process a single pair of sequences, skipping PAML if sequences are identical."""
+    """Process a single pair of sequences, skipping PAML if sequences are identical. 
+    Only processes pairs from the same group."""
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir = args
     seq1_name, seq2_name = pair
     
+    # CRITICAL: Validate that sequences are from the same group
+    group1 = sample_groups.get(seq1_name)
+    group2 = sample_groups.get(seq2_name)
+    
+    if group1 != group2:
+        logging.error(f"CRITICAL ERROR: Attempted cross-group comparison: {seq1_name} (Group {group1}) vs {seq2_name} (Group {group2})")
+        return None
+        
     # Check if sequences are identical
     if sequences[seq1_name] == sequences[seq2_name]:
-        logging.info(f"Sequences {seq1_name} and {seq2_name} are identical - skipping PAML")
+        logging.info(f"Sequences {seq1_name} and {seq2_name} from group {group1} are identical - skipping PAML")
         return (
             seq1_name.strip(),
             seq2_name.strip(),
-            sample_groups.get(seq1_name),
-            sample_groups.get(seq2_name),
+            group1,
+            group1,  # Explicitly use same group
             0.0,  # dN = 0 for identical sequences
             0.0,  # dS = 0 for identical sequences
             -1.0,  # omega = -1 to indicate identical sequences
@@ -309,7 +318,7 @@ def process_pair(args):
         )
     
     # Create unique working directory for non-identical sequences
-    working_dir = os.path.join(temp_dir, f'temp_{seq1_name}_{seq2_name}_{int(time.time())}')
+    working_dir = os.path.join(temp_dir, f'temp_group{group1}_{seq1_name}_{seq2_name}_{int(time.time())}')
     os.makedirs(working_dir, exist_ok=True)
 
     # Write PHYLIP file - exactly 10 chars with two spaces after name
@@ -317,7 +326,6 @@ def process_pair(args):
     with open(phy_path, 'w') as f:
         seq_len = len(sequences[seq1_name])
         f.write(f" 2 {seq_len}\n")
-        # Pad name to exactly 10 chars, then add two spaces
         f.write(f"{seq1_name[:10].ljust(10)}  {sequences[seq1_name]}\n")
         f.write(f"{seq2_name[:10].ljust(10)}  {sequences[seq2_name]}\n")
 
@@ -339,8 +347,8 @@ def process_pair(args):
         return (
             seq1_name.strip(),
             seq2_name.strip(), 
-            sample_groups.get(seq1_name),
-            sample_groups.get(seq2_name),
+            group1,
+            group1,  # Explicitly use same group
             dn,
             ds,
             omega,
@@ -350,15 +358,13 @@ def process_pair(args):
         return (
             seq1_name.strip(),
             seq2_name.strip(),
-            sample_groups.get(seq1_name),
-            sample_groups.get(seq2_name),
+            group1,
+            group1,  # Explicitly use same group
             None,  # dN
             None,  # dS
             None,  # omega
             cds_id
         )
-
-
 
 def process_phy_file(args):
     phy_file, output_dir, codeml_path, total_files, file_index = args
@@ -404,19 +410,30 @@ def process_phy_file(args):
         sample_groups[sample] = sample_group if sample_group is not None else group
     print(f"Assigned {len(sample_groups)} samples to groups")
 
-    # Generate pairwise combinations
-    pairs = list(combinations(sample_names, 2))
+    # CRITICAL CHANGE: Separate sequences by group and only generate within-group pairs
+    group0_names = [name for name, group in sample_groups.items() if group == 0]
+    group1_names = [name for name, group in sample_groups.items() if group == 1]
+    
+    print(f"Found {len(group0_names)} sequences in group 0")
+    print(f"Found {len(group1_names)} sequences in group 1")
+
+    # Generate pairs ONLY within same group
+    group0_pairs = list(combinations(group0_names, 2))
+    group1_pairs = list(combinations(group1_names, 2))
+    pairs = group0_pairs + group1_pairs
+    
     total_pairs = len(pairs)
-    print(f"Generated {total_pairs} pairwise combinations")
+    print(f"Generated {len(group0_pairs)} pairs within group 0")
+    print(f"Generated {len(group1_pairs)} pairs within group 1")
+    print(f"Total pairs to process: {total_pairs}")
 
     if total_pairs == 0:
-        print(f"ERROR: No pairs to process in {phy_file}")
+        print(f"ERROR: No valid pairs to process in {phy_file}")
         return None
 
     # Create temporary directory
     temp_dir = os.path.join(output_dir, f'temp_{cds_id}_{datetime.now().strftime("%Y%m%d%H%M%S%f")}')
     os.makedirs(temp_dir, exist_ok=True)
-    print(f"Created temporary directory: {temp_dir}")
 
     # Prepare multiprocessing arguments
     pool_args = [(pair, sequences, sample_groups, cds_id, codeml_path, temp_dir) for pair in pairs]
@@ -428,7 +445,12 @@ def process_phy_file(args):
     with multiprocessing.Pool(processes=num_processes) as pool:
         completed = 0
         for result in pool.imap_unordered(process_pair, pool_args):
-            results.append(result)
+            if result is not None:  # Only append valid results
+                # Verify groups match before adding result
+                if result[2] == result[3]:  # Check Group1 == Group2
+                    results.append(result)
+                else:
+                    print(f"WARNING: Discarding result with mismatched groups: {result[0]} (Group {result[2]}) vs {result[1]} (Group {result[3]})")
             completed += 1
             if completed % max(1, total_pairs // 20) == 0:
                 print(f"Progress: {completed}/{total_pairs} pairs ({(completed/total_pairs)*100:.1f}%)")
@@ -445,12 +467,21 @@ def process_phy_file(args):
 
     # Create and save pairwise results DataFrame
     df = pd.DataFrame(results, columns=['Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega', 'CDS'])
+    
+    # CRITICAL: Verify no cross-group comparisons exist in final results
+    cross_group = df[df['Group1'] != df['Group2']]
+    if not cross_group.empty:
+        print("ERROR: Found cross-group comparisons in results!")
+        print(cross_group)
+        return None
+    
     df.to_csv(output_csv, index=False)
     print(f"Saved pairwise results to: {output_csv}")
 
-    # Calculate per-haplotype statistics
+    # Calculate per-haplotype statistics (now guaranteed to be within-group only)
     haplotype_stats = []
     for sample in sample_names:
+        # Get only comparisons where this sample is involved
         sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
         # Convert omega to numeric, handling "N/A" and other non-numeric values
         omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
@@ -464,24 +495,25 @@ def process_phy_file(args):
             'Group': sample_groups[sample],
             'CDS': cds_id,
             'Mean_dNdS': mean_omega,
-            'Median_dNdS': median_omega
+            'Median_dNdS': median_omega,
+            'Num_Comparisons': len(omega_values)  # Add count of comparisons
         })
         
         # Print sample statistics, handling NaN values
         mean_str = f"{mean_omega:.4f}" if pd.notna(mean_omega) else "N/A"
         median_str = f"{median_omega:.4f}" if pd.notna(median_omega) else "N/A"
-        print(f"Sample {sample}: mean dN/dS = {mean_str}, median = {median_str}")
+        print(f"Sample {sample} (Group {sample_groups[sample]}): mean dN/dS = {mean_str}, median = {median_str}, comparisons = {len(omega_values)}")
 
     # Save haplotype statistics
     haplotype_df = pd.DataFrame(haplotype_stats)
     haplotype_df.to_csv(haplotype_output_csv, index=False)
     print(f"Saved haplotype statistics to: {haplotype_output_csv}")
 
-    # Calculate and print group statistics
+    # Calculate and print group statistics (now guaranteed to be within-group only)
     group0 = pd.to_numeric(haplotype_df[haplotype_df['Group'] == 0]['Mean_dNdS'], errors='coerce').dropna()
     group1 = pd.to_numeric(haplotype_df[haplotype_df['Group'] == 1]['Mean_dNdS'], errors='coerce').dropna()
 
-    print(f"\nStatistics for CDS {cds_id}:")
+    print(f"\nWithin-Group Statistics for CDS {cds_id}:")
     if not group0.empty:
         print(f"Group 0: n={len(group0)}, Mean={group0.mean():.4f}, Median={group0.median():.4f}, SD={group0.std():.4f}")
     if not group1.empty:
