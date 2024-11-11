@@ -833,6 +833,13 @@ fn make_sequences(
     for variant in variants {
         if variant.position >= region_start && variant.position <= region_end {
             let pos_in_seq = (variant.position - region_start) as usize;
+            if pos_in_seq >= seq.len() {
+                eprintln!(
+                    "Warning: Position {} is out of bounds for sequence of length {}. Skipping variant.",
+                    pos_in_seq, seq.len()
+                );
+                continue;
+            }
             for (sample_idx, hap_idx) in &haplotype_indices {
                 if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
                     if let Some(allele) = alleles.get(*hap_idx) {
