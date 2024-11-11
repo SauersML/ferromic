@@ -434,41 +434,41 @@ def process_phy_file(args):
        print(f"Cleaned up temporary directory: {temp_dir}")
    except Exception as e:
        print(f"WARNING: Failed to clean up {temp_dir}: {str(e)}")
-
-df = pd.DataFrame(results, columns=['Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega', 'CDS'])
-df.to_csv(output_csv, index=False)
-print(f"Saved pairwise results to: {output_csv}")
-
-haplotype_stats = []
-for sample in sample_names:
-    sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
-    # Convert omega to numeric, "N/A" becomes NaN
-    omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
-    mean_omega = omega_values.mean()
-    median_omega = omega_values.median()
     
-    haplotype_stats.append({
-        'Haplotype': sample,
-        'Group': sample_groups[sample],
-        'CDS': cds_id,
-        'Mean_dNdS': mean_omega,
-        'Median_dNdS': median_omega
-    })
-    print(f"Sample {sample}: mean dN/dS = {mean_omega:.4f}, median = {median_omega:.4f}")
-
-haplotype_df = pd.DataFrame(haplotype_stats)
-haplotype_df.to_csv(haplotype_output_csv, index=False)
-print(f"Saved haplotype statistics to: {haplotype_output_csv}")
-
-# Convert to numeric for group comparisons
-group0 = pd.to_numeric(haplotype_df[haplotype_df['Group'] == 0]['Mean_dNdS'], errors='coerce').dropna()
-group1 = pd.to_numeric(haplotype_df[haplotype_df['Group'] == 1]['Mean_dNdS'], errors='coerce').dropna()
-
-print(f"\nStatistics for CDS {cds_id}:")
-if not group0.empty:
-    print(f"Group 0: n={len(group0)}, Mean={group0.mean():.4f}, Median={group0.median():.4f}, SD={group0.std():.4f}")
-if not group1.empty:
-    print(f"Group 1: n={len(group1)}, Mean={group1.mean():.4f}, Median={group1.median():.4f}, SD={group1.std():.4f}")
+    df = pd.DataFrame(results, columns=['Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega', 'CDS'])
+    df.to_csv(output_csv, index=False)
+    print(f"Saved pairwise results to: {output_csv}")
+    
+    haplotype_stats = []
+    for sample in sample_names:
+        sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
+        # Convert omega to numeric, "N/A" becomes NaN
+        omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
+        mean_omega = omega_values.mean()
+        median_omega = omega_values.median()
+        
+        haplotype_stats.append({
+            'Haplotype': sample,
+            'Group': sample_groups[sample],
+            'CDS': cds_id,
+            'Mean_dNdS': mean_omega,
+            'Median_dNdS': median_omega
+        })
+        print(f"Sample {sample}: mean dN/dS = {mean_omega:.4f}, median = {median_omega:.4f}")
+    
+    haplotype_df = pd.DataFrame(haplotype_stats)
+    haplotype_df.to_csv(haplotype_output_csv, index=False)
+    print(f"Saved haplotype statistics to: {haplotype_output_csv}")
+    
+    # Convert to numeric for group comparisons
+    group0 = pd.to_numeric(haplotype_df[haplotype_df['Group'] == 0]['Mean_dNdS'], errors='coerce').dropna()
+    group1 = pd.to_numeric(haplotype_df[haplotype_df['Group'] == 1]['Mean_dNdS'], errors='coerce').dropna()
+    
+    print(f"\nStatistics for CDS {cds_id}:")
+    if not group0.empty:
+        print(f"Group 0: n={len(group0)}, Mean={group0.mean():.4f}, Median={group0.median():.4f}, SD={group0.std():.4f}")
+    if not group1.empty:
+        print(f"Group 1: n={len(group1)}, Mean={group1.mean():.4f}, Median={group1.median():.4f}, SD={group1.std():.4f}")
 
    total_time = time.time() - start_time
    print(f"Completed processing {phy_file} in {total_time:.1f} seconds")
