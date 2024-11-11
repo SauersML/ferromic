@@ -539,7 +539,8 @@ def perform_statistical_tests(haplotype_stats_files):
 def check_existing_results(output_dir):
     """
     Perform preliminary analysis using existing results files before running PAML.
-    Returns a DataFrame with combined statistics and performs statistical tests.
+    Groups are determined by sample name suffixes (_0 or _1).
+    Performs analyses with different filtering criteria for dN/dS values.
     """
     logging.info("\n=== Performing Preliminary Analysis of Existing Results ===")
     
@@ -570,46 +571,87 @@ def check_existing_results(output_dir):
     combined_df = pd.concat(haplotype_dfs, ignore_index=True)
     logging.info(f"Combined data contains {len(combined_df)} entries")
     
-    # Calculate statistics per group
-    stats = {}
-    for group in [0, 1]:
-        group_data = combined_df[combined_df['Group'] == group]['Mean_dNdS'].dropna()
-        if not group_data.empty:
-            stats[group] = {
-                'n': len(group_data),
-                'mean': group_data.mean(),
-                'median': group_data.median(),
-                'std': group_data.std()
-            }
-    
-    # Print preliminary results
-    logging.info("\n=== Preliminary Results from Existing Data ===")
-    for group, values in stats.items():
-        logging.info(f"\nGroup {group}:")
-        logging.info(f"  Sample size: {values['n']}")
-        logging.info(f"  Mean dN/dS: {values['mean']:.4f}")
-        logging.info(f"  Median dN/dS: {values['median']:.4f}")
-        logging.info(f"  Standard deviation: {values['std']:.4f}")
-    
-    # Perform statistical test if both groups present
-    if 0 in stats and 1 in stats:
-        group0_data = combined_df[combined_df['Group'] == 0]['Mean_dNdS'].dropna()
-        group1_data = combined_df[combined_df['Group'] == 1]['Mean_dNdS'].dropna()
+    # Analyze sample naming patterns
+    sample_pattern = combined_df['Haplotype'].str.extract(r'(.+?)_([01])$')
+    if not sample_pattern.empty:
+        logging.info("\nSample naming patterns:")
+        for prefix in sample_pattern[0].unique():
+            if pd.notna(prefix):
+                group0_count = len(combined_df[combined_df['Haplotype'].str.match(f'{prefix}_0$')])
+                group1_count = len(combined_df[combined_df['Haplotype'].str.match(f'{prefix}_1$')])
+                logging.info(f"Prefix '{prefix}': {group0_count} in group 0, {group1_count} in group 1")
+
+    # Create filtered datasets
+    df_no_neg1 = combined_df[combined_df['Mean_dNdS'] != -1].copy()
+    df_no_99 = combined_df[combined_df['Mean_dNdS'] != 99].copy()
+    df_no_both = combined_df[(combined_df['Mean_dNdS'] != -1) & (combined_df['Mean_dNdS'] != 99)].copy()
+
+    datasets = {
+        "All data": combined_df,
+        "Excluding dN/dS = -1": df_no_neg1,
+        "Excluding dN/dS = 99": df_no_99,
+        "Excluding both -1 and 99": df_no_both
+    }
+
+    # Analyze each dataset
+    for dataset_name, df in datasets.items():
+        logging.info(f"\n=== Analysis for {dataset_name} ===")
         
-        stat, p_value = mannwhitneyu(group0_data, group1_data, alternative='two-sided')
-        logging.info("\nPreliminary Statistical Test:")
-        logging.info(f"Mann-Whitney U test: Statistic={stat}, p-value={p_value:.6f}")
-        
-        if p_value < 0.05:
-            logging.info("Preliminary result: Significant difference between groups")
-        else:
-            logging.info("Preliminary result: No significant difference between groups")
+        # Calculate statistics per group
+        stats = {}
+        for group in [0, 1]:
+            group_data = df[df['Group'] == group]['Mean_dNdS'].dropna()
+            if not group_data.empty:
+                stats[group] = {
+                    'n': len(group_data),
+                    'mean': group_data.mean(),
+                    'median': group_data.median(),
+                    'std': group_data.std()
+                }
+                logging.info(f"\nGroup {group}:")
+                logging.info(f"  Sample size: {stats[group]['n']}")
+                logging.info(f"  Mean dN/dS: {stats[group]['mean']:.4f}")
+                logging.info(f"  Median dN/dS: {stats[group]['median']:.4f}")
+                logging.info(f"  Standard deviation: {stats[group]['std']:.4f}")
+
+        # Perform statistical tests if both groups present
+        if 0 in stats and 1 in stats:
+            group0_data = df[df['Group'] == 0]['Mean_dNdS'].dropna()
+            group1_data = df[df['Group'] == 1]['Mean_dNdS'].dropna()
             
-        # Calculate and report effect size
-        effect_size = abs(stats[0]['mean'] - stats[1]['mean']) / np.sqrt((stats[0]['std']**2 + stats[1]['std']**2) / 2)
-        logging.info(f"Effect size (Cohen's d): {effect_size:.4f}")
-        
+            try:
+                stat, p_value = mannwhitneyu(group0_data, group1_data, alternative='two-sided')
+                logging.info("\nMann-Whitney U test:")
+                logging.info(f"  Statistic = {stat}")
+                logging.info(f"  p-value = {p_value:.6f}")
+                
+                # Calculate effect size
+                effect_size = abs(stats[0]['mean'] - stats[1]['mean']) / np.sqrt((stats[0]['std']**2 + stats[1]['std']**2) / 2)
+                logging.info(f"  Effect size (Cohen's d) = {effect_size:.4f}")
+                
+                # Interpret results
+                if p_value < 0.05:
+                    logging.info("  Result: Significant difference between groups")
+                else:
+                    logging.info("  Result: No significant difference between groups")
+                
+                # Add additional descriptive statistics
+                logging.info("\nAdditional Statistics:")
+                logging.info(f"  Group 0 range: {group0_data.min():.4f} to {group0_data.max():.4f}")
+                logging.info(f"  Group 1 range: {group1_data.min():.4f} to {group1_data.max():.4f}")
+                
+                # Calculate and log quartiles
+                g0_quartiles = group0_data.quantile([0.25, 0.75])
+                g1_quartiles = group1_data.quantile([0.25, 0.75])
+                logging.info(f"  Group 0 quartiles (Q1, Q3): {g0_quartiles[0.25]:.4f}, {g0_quartiles[0.75]:.4f}")
+                logging.info(f"  Group 1 quartiles (Q1, Q3): {g1_quartiles[0.25]:.4f}, {g1_quartiles[0.75]:.4f}")
+                
+            except Exception as e:
+                logging.error(f"Error performing statistical tests: {str(e)}")
+
+    # Return the complete dataset
     return combined_df
+
 
 
 
