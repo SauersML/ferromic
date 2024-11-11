@@ -1987,31 +1987,84 @@ fn read_reference_sequence(
     start: i64,
     end: i64
 ) -> Result<Vec<u8>, VcfError> {
-    let reader = bio::io::fasta::IndexedReader::from_file(fasta_path)
-        .map_err(|e| VcfError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+    // Input validation
+    if start < 0 || end < 0 {
+        return Err(VcfError::Parse(format!(
+            "Invalid coordinates: start ({}) and end ({}) must be non-negative",
+            start, end
+        )));
+    }
+    
+    if start > end {
+        return Err(VcfError::Parse(format!(
+            "Invalid coordinates: start ({}) must be less than or equal to end ({})",
+            start, end
+        )));
+    }
 
-    // Create a buffer to hold the sequence
-    let mut sequence = Vec::new();
+    // Create mutable reader with proper reference to path
+    let mut reader = bio::io::fasta::IndexedReader::from_file(fasta_path)
+        .map_err(|e| VcfError::Io(io::Error::new(
+            io::ErrorKind::Other, 
+            format!("Failed to open FASTA file: {}", e)
+        )))?;
 
-    // Attempt to fetch the sequence from the FASTA index
-    let region = format!("{}:{}-{}", chr, start, end);
-    reader.fetch(&region).map_err(|e| {
+    // Get sequence info to check bounds
+    let seq_info = reader.index.sequences.get(chr).ok_or_else(|| {
+        VcfError::Parse(format!("Chromosome {} not found in reference", chr))
+    })?;
+
+    // Validate coordinates against sequence length
+    let seq_length = seq_info.len as i64;
+    if start >= seq_length {
+        return Err(VcfError::Parse(format!(
+            "Start position {} exceeds sequence length {} for chromosome {}",
+            start, seq_length, chr
+        )));
+    }
+
+    // Clamp end position to sequence length if necessary
+    let adjusted_end = std::cmp::min(end, seq_length - 1);
+    if adjusted_end != end {
+        println!("Warning: End position {} exceeds sequence length {}. Clamping to {}", 
+                 end, seq_length, adjusted_end);
+    }
+
+    // Create a buffer with exact required capacity
+    let region_length = (adjusted_end - start + 1) as usize;
+    let mut sequence = Vec::with_capacity(region_length);
+
+    // Fetch sequence with validated coordinates
+    // Convert to u64 safely now that we know values are non-negative and in bounds
+    reader.fetch(chr, start as u64, (adjusted_end + 1) as u64).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
-            format!("Failed to fetch region {}: {:?}", region, e),
+            format!("Failed to fetch region {}:{}-{}: {}", chr, start, adjusted_end, e)
         ))
     })?;
+
+    // Read sequence into pre-allocated buffer
     reader.read(&mut sequence).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
-            format!("Failed to read sequence for region {}: {:?}", region, e),
+            format!("Failed to read sequence for region {}:{}-{}: {}", 
+                    chr, start, adjusted_end, e)
         ))
     })?;
 
-    if sequence.is_empty() {
+    // Verify sequence length
+    if sequence.len() != region_length {
         return Err(VcfError::Parse(format!(
-            "No sequence found for region {} in reference",
-            region
+            "Expected sequence length {} but got {} for region {}:{}-{}",
+            region_length, sequence.len(), chr, start, adjusted_end
+        )));
+    }
+
+    // Verify sequence content
+    if sequence.iter().any(|&b| !matches!(b, b'A' | b'C' | b'G' | b'T' | b'N')) {
+        return Err(VcfError::Parse(format!(
+            "Invalid nucleotides found in sequence for region {}:{}-{}",
+            chr, start, adjusted_end
         )));
     }
 
