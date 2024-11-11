@@ -2003,24 +2003,20 @@ fn read_reference_sequence(
         )));
     }
 
-    // Create reader for the FASTA file
-    let mut reader = bio::io::fasta::IndexedReader::from_file(fasta_path)
+    // Create reader for the FASTA file and its index
+    let mut reader = bio::io::fasta::IndexedReader::from_file(&fasta_path)
         .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other, 
             format!("Failed to open FASTA file: {}", e)
         )))?;
 
-    // Fetch the sequence information
-    let sequences = reader.index.sequences();
-    
-    // Look up the chromosome
-    let seq_info = sequences.values()
+    // Get access to sequences through index, with proper error handling
+    let seq_length = reader.index.sequences()
+        .iter()
         .find(|seq| seq.name == chr)
-        .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?;
+        .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?
+        .len;
 
-    // Get sequence length
-    let seq_length = seq_info.len;
-    
     // Validate start position
     if start as u64 >= seq_length {
         return Err(VcfError::Parse(format!(
@@ -2040,14 +2036,13 @@ fn read_reference_sequence(
     let region_length = (adjusted_end - start as u64 + 1) as usize;
     let mut sequence = Vec::with_capacity(region_length);
 
-    // Fetch the sequence
+    // Fetch and read the sequence with proper error handling
     reader.fetch(chr, start as u64, adjusted_end + 1)
         .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
             format!("Failed to fetch region {}:{}-{}: {}", chr, start, adjusted_end, e)
         )))?;
 
-    // Read the sequence into our buffer
     reader.read(&mut sequence)
         .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
@@ -2073,7 +2068,6 @@ fn read_reference_sequence(
 
     Ok(sequence)
 }
-
 
 // IN PROGRESS
 // Helper function to parse GFF file and extract CDS regions
