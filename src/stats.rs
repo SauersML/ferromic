@@ -2010,18 +2010,29 @@ fn read_reference_sequence(
             format!("Failed to open FASTA file: {}", e)
         )))?;
 
-    // Get access to sequences through index, with proper error handling
-    let seq_length = reader.index.sequences()
+    // Try both with and without "chr" prefix
+    let chr_with_prefix = if !chr.starts_with("chr") {
+        format!("chr{}", chr)
+    } else {
+        chr.to_string()
+    };
+
+    // First try with chr prefix, then without
+    let seq_info = reader.index.sequences()
         .iter()
-        .find(|seq| seq.name == chr)
-        .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?
-        .len;
+        .find(|seq| seq.name == chr_with_prefix || seq.name == chr)
+        .ok_or_else(|| VcfError::Parse(format!(
+            "Chromosome {} (or {}) not found in reference", chr, chr_with_prefix
+        )))?;
+
+    let seq_length = seq_info.len;
+    let actual_chr_name = &seq_info.name; // Use the actual name we found
 
     // Validate start position
     if start as u64 >= seq_length {
         return Err(VcfError::Parse(format!(
             "Start position {} exceeds sequence length {} for chromosome {}",
-            start, seq_length, chr
+            start, seq_length, actual_chr_name
         )));
     }
 
@@ -2037,24 +2048,24 @@ fn read_reference_sequence(
     let mut sequence = Vec::with_capacity(region_length);
 
     // Fetch and read the sequence with proper error handling
-    reader.fetch(chr, start as u64, adjusted_end + 1)
+    reader.fetch(actual_chr_name, start as u64, adjusted_end + 1)
         .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
-            format!("Failed to fetch region {}:{}-{}: {}", chr, start, adjusted_end, e)
+            format!("Failed to fetch region {}:{}-{}: {}", actual_chr_name, start, adjusted_end, e)
         )))?;
 
     reader.read(&mut sequence)
         .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
             format!("Failed to read sequence for region {}:{}-{}: {}", 
-                    chr, start, adjusted_end, e)
+                    actual_chr_name, start, adjusted_end, e)
         )))?;
 
     // Verify sequence length
     if sequence.len() != region_length {
         return Err(VcfError::Parse(format!(
             "Expected sequence length {} but got {} for region {}:{}-{}",
-            region_length, sequence.len(), chr, start, adjusted_end
+            region_length, sequence.len(), actual_chr_name, start, adjusted_end
         )));
     }
 
@@ -2062,12 +2073,13 @@ fn read_reference_sequence(
     if sequence.iter().any(|&b| !matches!(b, b'A' | b'C' | b'G' | b'T' | b'N')) {
         return Err(VcfError::Parse(format!(
             "Invalid nucleotides found in sequence for region {}:{}-{}",
-            chr, start, adjusted_end
+            actual_chr_name, start, adjusted_end
         )));
     }
 
     Ok(sequence)
 }
+
 
 // IN PROGRESS
 // Helper function to parse GFF file and extract CDS regions
