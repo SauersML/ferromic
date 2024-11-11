@@ -358,92 +358,104 @@ def process_pair(args):
             cds_id
         )
 
+
+
 def process_phy_file(args):
-   phy_file, output_dir, codeml_path, total_files, file_index = args
+    phy_file, output_dir, codeml_path, total_files, file_index = args
 
-   print(f"\n====== Processing file {file_index}/{total_files}: {phy_file} ======")
-   start_time = time.time()
+    print(f"\n====== Processing file {file_index}/{total_files}: {phy_file} ======")
+    start_time = time.time()
 
-   phy_filename = os.path.basename(phy_file)
-   match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
-   if match:
-       group = int(match.group(1))
-       chr_num = match.group(2)
-       start = match.group(3)
-       end = match.group(4)
-       cds_id = f'chr{chr_num}_start{start}_end{end}'
-   else:
-       cds_id = phy_filename.replace('.phy', '')
-       group = None
-   print(f"Identified CDS: {cds_id}")
+    # Parse filename and extract CDS info
+    phy_filename = os.path.basename(phy_file)
+    match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
+    if match:
+        group = int(match.group(1))
+        chr_num = match.group(2)
+        start = match.group(3)
+        end = match.group(4)
+        cds_id = f'chr{chr_num}_start{start}_end{end}'
+    else:
+        cds_id = phy_filename.replace('.phy', '')
+        group = None
+    print(f"Identified CDS: {cds_id}")
 
-   output_csv = os.path.join(output_dir, f'{cds_id}.csv')
-   haplotype_output_csv = os.path.join(output_dir, f'{cds_id}_haplotype_stats.csv')
+    # Check if output files already exist
+    output_csv = os.path.join(output_dir, f'{cds_id}.csv')
+    haplotype_output_csv = os.path.join(output_dir, f'{cds_id}_haplotype_stats.csv')
 
-   if os.path.exists(output_csv) and os.path.exists(haplotype_output_csv):
-       print(f"Skipping {phy_file} - output files already exist")
-       return haplotype_output_csv
+    if os.path.exists(output_csv) and os.path.exists(haplotype_output_csv):
+        print(f"Skipping {phy_file} - output files already exist")
+        return haplotype_output_csv
 
-   sequences = parse_phy_file(phy_file)
-   if not sequences:
-       print(f"ERROR: No sequences found in {phy_file}")
-       return None
+    # Parse sequences and validate
+    sequences = parse_phy_file(phy_file)
+    if not sequences:
+        print(f"ERROR: No sequences found in {phy_file}")
+        return None
        
-   sample_names = list(sequences.keys())
-   print(f"Found {len(sample_names)} samples")
+    # Get sample names and assign groups
+    sample_names = list(sequences.keys())
+    print(f"Found {len(sample_names)} samples")
 
-   sample_groups = {}
-   for sample in sample_names:
-       sample_group = extract_group_from_sample(sample)
-       sample_groups[sample] = sample_group if sample_group is not None else group
-   print(f"Assigned {len(sample_groups)} samples to groups")
+    sample_groups = {}
+    for sample in sample_names:
+        sample_group = extract_group_from_sample(sample)
+        sample_groups[sample] = sample_group if sample_group is not None else group
+    print(f"Assigned {len(sample_groups)} samples to groups")
 
-   pairs = list(combinations(sample_names, 2))
-   total_pairs = len(pairs)
-   print(f"Generated {total_pairs} pairwise combinations")
+    # Generate pairwise combinations
+    pairs = list(combinations(sample_names, 2))
+    total_pairs = len(pairs)
+    print(f"Generated {total_pairs} pairwise combinations")
 
-   if total_pairs == 0:
-       print(f"ERROR: No pairs to process in {phy_file}")
-       return None
+    if total_pairs == 0:
+        print(f"ERROR: No pairs to process in {phy_file}")
+        return None
 
-   temp_dir = os.path.join(output_dir, f'temp_{cds_id}_{datetime.now().strftime("%Y%m%d%H%M%S%f")}')
-   os.makedirs(temp_dir, exist_ok=True)
-   print(f"Created temporary directory: {temp_dir}")
+    # Create temporary directory
+    temp_dir = os.path.join(output_dir, f'temp_{cds_id}_{datetime.now().strftime("%Y%m%d%H%M%S%f")}')
+    os.makedirs(temp_dir, exist_ok=True)
+    print(f"Created temporary directory: {temp_dir}")
 
-   pool_args = []
-   for pair in pairs:
-       pool_args.append((pair, sequences, sample_groups, cds_id, codeml_path, temp_dir))
-
-   num_processes = get_safe_process_count()
-   print(f"Processing {total_pairs} pairs using {num_processes} processes")
-   
-   with multiprocessing.Pool(processes=num_processes) as pool:
-       results = []
-       completed = 0
-       for result in pool.imap_unordered(process_pair, pool_args):
-           results.append(result)
-           completed += 1
-           if completed % max(1, total_pairs // 20) == 0:
-               print(f"Progress: {completed}/{total_pairs} pairs ({(completed/total_pairs)*100:.1f}%)")
-               print(f"Current runtime: {time.time() - start_time:.1f}s")
-
-   print(f"All pairs processed for {phy_file}")
-   
-   try:
-       shutil.rmtree(temp_dir)
-       print(f"Cleaned up temporary directory: {temp_dir}")
-   except Exception as e:
-       print(f"WARNING: Failed to clean up {temp_dir}: {str(e)}")
+    # Prepare multiprocessing arguments
+    pool_args = [(pair, sequences, sample_groups, cds_id, codeml_path, temp_dir) for pair in pairs]
+    num_processes = get_safe_process_count()
+    print(f"Processing {total_pairs} pairs using {num_processes} processes")
     
+    # Process pairs using multiprocessing
+    results = []
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        completed = 0
+        for result in pool.imap_unordered(process_pair, pool_args):
+            results.append(result)
+            completed += 1
+            if completed % max(1, total_pairs // 20) == 0:
+                print(f"Progress: {completed}/{total_pairs} pairs ({(completed/total_pairs)*100:.1f}%)")
+                print(f"Current runtime: {time.time() - start_time:.1f}s")
+
+    print(f"All pairs processed for {phy_file}")
+    
+    # Clean up temporary directory
+    try:
+        shutil.rmtree(temp_dir)
+        print(f"Cleaned up temporary directory: {temp_dir}")
+    except Exception as e:
+        print(f"WARNING: Failed to clean up {temp_dir}: {str(e)}")
+
+    # Create and save pairwise results DataFrame
     df = pd.DataFrame(results, columns=['Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega', 'CDS'])
     df.to_csv(output_csv, index=False)
     print(f"Saved pairwise results to: {output_csv}")
-    
+
+    # Calculate per-haplotype statistics
     haplotype_stats = []
     for sample in sample_names:
         sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
-        # Convert omega to numeric, "N/A" becomes NaN
+        # Convert omega to numeric, handling "N/A" and other non-numeric values
         omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
+        
+        # Calculate statistics
         mean_omega = omega_values.mean()
         median_omega = omega_values.median()
         
@@ -454,26 +466,33 @@ def process_phy_file(args):
             'Mean_dNdS': mean_omega,
             'Median_dNdS': median_omega
         })
-        print(f"Sample {sample}: mean dN/dS = {mean_omega:.4f}, median = {median_omega:.4f}")
-    
+        
+        # Print sample statistics, handling NaN values
+        mean_str = f"{mean_omega:.4f}" if pd.notna(mean_omega) else "N/A"
+        median_str = f"{median_omega:.4f}" if pd.notna(median_omega) else "N/A"
+        print(f"Sample {sample}: mean dN/dS = {mean_str}, median = {median_str}")
+
+    # Save haplotype statistics
     haplotype_df = pd.DataFrame(haplotype_stats)
     haplotype_df.to_csv(haplotype_output_csv, index=False)
     print(f"Saved haplotype statistics to: {haplotype_output_csv}")
-    
-    # Convert to numeric for group comparisons
+
+    # Calculate and print group statistics
     group0 = pd.to_numeric(haplotype_df[haplotype_df['Group'] == 0]['Mean_dNdS'], errors='coerce').dropna()
     group1 = pd.to_numeric(haplotype_df[haplotype_df['Group'] == 1]['Mean_dNdS'], errors='coerce').dropna()
-    
+
     print(f"\nStatistics for CDS {cds_id}:")
     if not group0.empty:
         print(f"Group 0: n={len(group0)}, Mean={group0.mean():.4f}, Median={group0.median():.4f}, SD={group0.std():.4f}")
     if not group1.empty:
         print(f"Group 1: n={len(group1)}, Mean={group1.mean():.4f}, Median={group1.median():.4f}, SD={group1.std():.4f}")
 
-   total_time = time.time() - start_time
-   print(f"Completed processing {phy_file} in {total_time:.1f} seconds")
-   
-   return haplotype_output_csv
+    total_time = time.time() - start_time
+    print(f"Completed processing {phy_file} in {total_time:.1f} seconds")
+    
+    return haplotype_output_csv
+
+
 
 def perform_statistical_tests(haplotype_stats_files):
     # Combine all haplotype stats into a single DataFrame
