@@ -535,6 +535,84 @@ def perform_statistical_tests(haplotype_stats_files):
     else:
         print("Not enough data to perform statistical tests.")
 
+
+def check_existing_results(output_dir):
+    """
+    Perform preliminary analysis using existing results files before running PAML.
+    Returns a DataFrame with combined statistics and performs statistical tests.
+    """
+    logging.info("\n=== Performing Preliminary Analysis of Existing Results ===")
+    
+    # Find all existing haplotype statistics files
+    haplotype_files = glob.glob(os.path.join(output_dir, '*_haplotype_stats.csv'))
+    if not haplotype_files:
+        logging.info("No existing results found for preliminary analysis.")
+        return None
+        
+    logging.info(f"Found {len(haplotype_files)} existing result files")
+    
+    # Combine all haplotype stats
+    haplotype_dfs = []
+    for f in haplotype_files:
+        try:
+            df = pd.read_csv(f)
+            haplotype_dfs.append(df)
+            logging.info(f"Loaded {f}: {len(df)} entries")
+        except Exception as e:
+            logging.error(f"Error reading {f}: {e}")
+            continue
+    
+    if not haplotype_dfs:
+        logging.warning("No valid data found in existing files")
+        return None
+        
+    # Combine all data
+    combined_df = pd.concat(haplotype_dfs, ignore_index=True)
+    logging.info(f"Combined data contains {len(combined_df)} entries")
+    
+    # Calculate statistics per group
+    stats = {}
+    for group in [0, 1]:
+        group_data = combined_df[combined_df['Group'] == group]['Mean_dNdS'].dropna()
+        if not group_data.empty:
+            stats[group] = {
+                'n': len(group_data),
+                'mean': group_data.mean(),
+                'median': group_data.median(),
+                'std': group_data.std()
+            }
+    
+    # Print preliminary results
+    logging.info("\n=== Preliminary Results from Existing Data ===")
+    for group, values in stats.items():
+        logging.info(f"\nGroup {group}:")
+        logging.info(f"  Sample size: {values['n']}")
+        logging.info(f"  Mean dN/dS: {values['mean']:.4f}")
+        logging.info(f"  Median dN/dS: {values['median']:.4f}")
+        logging.info(f"  Standard deviation: {values['std']:.4f}")
+    
+    # Perform statistical test if both groups present
+    if 0 in stats and 1 in stats:
+        group0_data = combined_df[combined_df['Group'] == 0]['Mean_dNdS'].dropna()
+        group1_data = combined_df[combined_df['Group'] == 1]['Mean_dNdS'].dropna()
+        
+        stat, p_value = mannwhitneyu(group0_data, group1_data, alternative='two-sided')
+        logging.info("\nPreliminary Statistical Test:")
+        logging.info(f"Mann-Whitney U test: Statistic={stat}, p-value={p_value:.6f}")
+        
+        if p_value < 0.05:
+            logging.info("Preliminary result: Significant difference between groups")
+        else:
+            logging.info("Preliminary result: No significant difference between groups")
+            
+        # Calculate and report effect size
+        effect_size = abs(stats[0]['mean'] - stats[1]['mean']) / np.sqrt((stats[0]['std']**2 + stats[1]['std']**2) / 2)
+        logging.info(f"Effect size (Cohen's d): {effect_size:.4f}")
+        
+    return combined_df
+
+
+
 def main():
     parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
@@ -543,6 +621,14 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
+
+    # Perform preliminary analysis first
+    logging.info("\nPerforming preliminary analysis of existing results...")
+    prelim_results = check_existing_results(args.output_dir)
+    if prelim_results is not None:
+        logging.info("\nPreliminary analysis complete. Proceeding with remaining files...")
+    else:
+        logging.info("\nNo existing results found. Proceeding with full analysis...")
     
     # Get all input files
     phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
