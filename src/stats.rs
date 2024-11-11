@@ -822,6 +822,7 @@ fn make_sequences(
         return Ok(());
     }
 
+
     // Initialize sequences for each sample haplotype with the reference sequence
     let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
     for (sample_idx, hap_idx) in &haplotype_indices {
@@ -833,18 +834,18 @@ fn make_sequences(
     for variant in variants {
         if variant.position >= region_start && variant.position <= region_end {
             let pos_in_seq = (variant.position - region_start) as usize;
-            if pos_in_seq >= seq.len() {
-                eprintln!(
-                    "Warning: Position {} is out of bounds for sequence of length {}. Skipping variant.",
-                    pos_in_seq, seq.len()
-                );
-                continue;
-            }
             for (sample_idx, hap_idx) in &haplotype_indices {
                 if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
                     if let Some(allele) = alleles.get(*hap_idx) {
                         let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
                         if let Some(seq) = hap_sequences.get_mut(&sample_name) {
+                            if pos_in_seq >= seq.len() {
+                                eprintln!(
+                                    "Warning: Position {} is out of bounds for sequence of length {}. Skipping variant.",
+                                    pos_in_seq, seq.len()
+                                );
+                                continue;
+                            }
                             let map = position_allele_map.lock();
                             if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
                                 seq[pos_in_seq] = if *allele == 0 {
@@ -861,61 +862,65 @@ fn make_sequences(
     }
 
     // Print batch statistics before CDS processing
-    let total_sequences = hap_sequences.len();
-    let mut stop_codon_or_too_short = 0;
-    let mut skipped_sequences = 0;
-    let mut not_divisible_by_three = 0;
-    let mut mid_sequence_stop = 0;
-    let mut length_modified = 0;
-    
-    let stop_codons = ["TAA", "TAG", "TGA"];
-    
-    // Validate all sequences once before CDS processing
-    for (sample_name, sequence) in &hap_sequences {
-        let sequence_str = String::from_utf8_lossy(sequence);
+    if hap_sequences.is_empty() {
+        eprintln!("No haplotype sequences generated. Cannot compute batch statistics.");
+    } else {
+        let total_sequences = hap_sequences.len();
+        let mut stop_codon_or_too_short = 0;
+        let mut skipped_sequences = 0;
+        let mut not_divisible_by_three = 0;
+        let mut mid_sequence_stop = 0;
+        let mut length_modified = 0;
 
-        if sequence.len() < 3 || !sequence_str.starts_with("ATG") {
-            stop_codon_or_too_short += 1;
-            skipped_sequences += 1;
-            continue;
-        }
+        let stop_codons = ["TAA", "TAG", "TGA"];
 
-        if sequence.len() % 3 != 0 {
-            not_divisible_by_three += 1;
-            length_modified += 1;
-        }
+        // Validate all sequences once before CDS processing
+        for (_sample_name, sequence) in &hap_sequences {
+            let sequence_str = String::from_utf8_lossy(sequence);
 
-        // Check for mid-sequence stop codons
-        for i in (0..sequence.len()-2).step_by(3) {
-            let codon = &sequence_str[i..i+3];
-            if stop_codons.contains(&codon) {
-                mid_sequence_stop += 1;
-                break;
+            if sequence.len() < 3 || !sequence_str.starts_with("ATG") {
+                stop_codon_or_too_short += 1;
+                skipped_sequences += 1;
+                continue;
+            }
+
+            if sequence.len() % 3 != 0 {
+                not_divisible_by_three += 1;
+                length_modified += 1;
+            }
+
+            // Check for mid-sequence stop codons
+            for i in (0..sequence.len() - 2).step_by(3) {
+                let codon = &sequence_str[i..i + 3];
+                if stop_codons.contains(&codon) {
+                    mid_sequence_stop += 1;
+                    break;
+                }
             }
         }
-    }
 
-    println!("\nBatch Statistics:");
-    println!(
-        "Percentage of sequences with stop codon or too short: {:.2}%",
-        (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
-    );
-    println!(
-        "Percentage of sequences skipped: {:.2}%",
-        (skipped_sequences as f64 / total_sequences as f64) * 100.0
-    );
-    println!(
-        "Percentage of sequences not divisible by three: {:.2}%",
-        (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
-    );
-    println!(
-        "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
-        (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
-    );
-    println!(
-        "Percentage of sequences with modified length: {:.2}%",
-        (length_modified as f64 / total_sequences as f64) * 100.0
-    );
+        println!("\nBatch Statistics:");
+        println!(
+            "Percentage of sequences with stop codon or too short: {:.2}%",
+            (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
+        );
+        println!(
+            "Percentage of sequences skipped: {:.2}%",
+            (skipped_sequences as f64 / total_sequences as f64) * 100.0
+        );
+        println!(
+            "Percentage of sequences not divisible by three: {:.2}%",
+            (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
+        );
+        println!(
+            "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
+            (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
+        );
+        println!(
+            "Percentage of sequences with modified length: {:.2}%",
+            (length_modified as f64 / total_sequences as f64) * 100.0
+        );
+    }
 
     // For each CDS, extract sequences and write to PHYLIP file
     for cds in cds_regions {
@@ -943,8 +948,25 @@ fn make_sequences(
         for (sample_name, seq) in &hap_sequences {
             let start_offset = (cds_start - region_start) as usize;
             let end_offset = (cds_end - region_start + 1) as usize;
+
+            if end_offset > seq.len() {
+                eprintln!(
+                    "Warning: CDS end offset {} exceeds sequence length {} for sample {}. Skipping CDS.",
+                    end_offset, seq.len(), sample_name
+                );
+                continue;
+            }
+
             let cds_seq = seq[start_offset..end_offset].to_vec();
             cds_sequences.insert(sample_name.clone(), cds_seq);
+        }
+
+        if cds_sequences.is_empty() {
+            eprintln!(
+                "No CDS sequences generated for CDS region {}-{}. Skipping PHYLIP file writing.",
+                cds_start, cds_end
+            );
+            continue;
         }
 
         // Write sequences to PHYLIP file
