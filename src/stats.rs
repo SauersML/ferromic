@@ -2002,20 +2002,22 @@ fn read_reference_sequence(
         )));
     }
 
-    // Create mutable reader with proper reference to path
-    let mut reader = bio::io::fasta::IndexedReader::from_file(fasta_path)
+    // Open both the FASTA file and its index
+    let fasta = fasta_path.to_str().ok_or_else(|| VcfError::Parse("Invalid FASTA path".to_string()))?;
+    let fai = format!("{}.fai", fasta);
+    
+    let mut reader = bio::io::fasta::IndexedReader::from_file(&fasta)
         .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other, 
             format!("Failed to open FASTA file: {}", e)
         )))?;
 
-    // Get sequence info to check bounds
-    let seq_info = reader.index.sequences.get(chr).ok_or_else(|| {
-        VcfError::Parse(format!("Chromosome {} not found in reference", chr))
-    })?;
+    // Get sequence length from index
+    let seq_length = reader.index.sequences().get(chr)
+        .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?
+        .len as i64;
 
     // Validate coordinates against sequence length
-    let seq_length = seq_info.len as i64;
     if start >= seq_length {
         return Err(VcfError::Parse(format!(
             "Start position {} exceeds sequence length {} for chromosome {}",
