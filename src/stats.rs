@@ -2071,7 +2071,20 @@ fn read_reference_sequence(
     }
 
     // Verify sequence content
-    if sequence.iter().any(|&b| !matches!(b, b'A' | b'C' | b'G' | b'T' | b'N')) {
+    let invalid_chars: Vec<(usize, u8)> = sequence.iter()
+        .enumerate()
+        .filter(|(_, &b)| !matches!(b, b'A' | b'C' | b'G' | b'T' | b'N'))
+        .take(10)  // Show first 10 invalid chars
+        .collect();
+    
+    if !invalid_chars.is_empty() {
+        println!("Found invalid characters:");
+        for (pos, ch) in invalid_chars {
+            println!("Position {}: '{}' (ASCII: {})", 
+                    pos, 
+                    String::from_utf8_lossy(&[ch]), 
+                    ch);
+        }
         return Err(VcfError::Parse(format!(
             "Invalid nucleotides found in sequence for region {}:{}-{}",
             actual_chr_name, start, adjusted_end
