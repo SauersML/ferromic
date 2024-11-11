@@ -572,20 +572,15 @@ fn process_variants(
     reference_sequence: &[u8],
     cds_regions: &[CdsRegion],
 ) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
+    // Map sample names to indices
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
-        if vcf_sample_id_to_index.contains_key(sample_id) {
-            return Err(VcfError::Parse(format!(
-                "Duplicate sample ID '{}' in VCF.",
-                sample_id
-            )));
-        }
         vcf_sample_id_to_index.insert(sample_id, i);
     }
 
+    // Collect haplotype indices for the specified group
     let mut haplotype_indices = Vec::new();
-
     for (sample_name, &(left_tsv, right_tsv)) in sample_filter.iter() {
         if let Some(&i) = vcf_sample_id_to_index.get(sample_name.as_str()) {
             if left_tsv == haplotype_group as u8 {
@@ -594,8 +589,6 @@ fn process_variants(
             if right_tsv == haplotype_group as u8 {
                 haplotype_indices.push((i, 1)); // Include right haplotype
             }
-        } else {
-            // Sample not found in VCF
         }
     }
 
@@ -612,19 +605,17 @@ fn process_variants(
     let n = haplotype_indices.len();
 
     // Early return if no variants
-    if variants.is_empty() { // But is early return really correct here? 
+    if variants.is_empty() {
         return Ok(Some((0, 0.0, 0.0, n))); // Return zero values but valid result
     }
 
-    // Need to add sequence info here
+    // Collect alleles and compute statistics
     for variant in variants {
-        // Skip variants outside the region (redundant if already filtered)
         if variant.position < region_start || variant.position > region_end {
             continue;
         }
 
-        // Collect the alleles for the haplotypes
-        let mut variant_alleles = Vec::new(); // Alleles of haplotypes at this variant
+        let mut variant_alleles = Vec::new();
 
         for &(sample_idx, allele_idx) in &haplotype_indices {
             let allele = variant.genotypes.get(sample_idx)
