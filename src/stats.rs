@@ -1958,21 +1958,35 @@ fn read_reference_sequence(
     start: i64,
     end: i64
 ) -> Result<Vec<u8>, VcfError> {
-    let reader = bio::io::fasta::Reader::from_file(fasta_path)
+    let reader = bio::io::fasta::IndexedReader::from_file(fasta_path)
         .map_err(|e| VcfError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
-    for record in reader.records() {
-        let record = record?;
-        if record.id() == chr || record.id() == format!("chr{}", chr) {
-            let seq_len = record.seq().len();
-            let safe_start = (start as usize).saturating_sub(1);
-            let safe_end = std::cmp::min(end as usize, seq_len);
-            if safe_end <= safe_start {
-                return Err(VcfError::Parse(format!("Invalid sequence range: start={}, end={}", start, end)));
-            }
-            return Ok(record.seq()[safe_start..safe_end].to_vec());
-        }
+
+    // Create a buffer to hold the sequence
+    let mut sequence = Vec::new();
+
+    // Attempt to fetch the sequence from the FASTA index
+    let region = format!("{}:{}-{}", chr, start, end);
+    reader.fetch(&region).map_err(|e| {
+        VcfError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Failed to fetch region {}: {:?}", region, e),
+        ))
+    })?;
+    reader.read(&mut sequence).map_err(|e| {
+        VcfError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Failed to read sequence for region {}: {:?}", region, e),
+        ))
+    })?;
+
+    if sequence.is_empty() {
+        return Err(VcfError::Parse(format!(
+            "No sequence found for region {} in reference",
+            region
+        )));
     }
-    Err(VcfError::Parse(format!("Chromosome {} not found in reference", chr)))
+
+    Ok(sequence)
 }
 
 // IN PROGRESS
