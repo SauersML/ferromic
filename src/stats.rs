@@ -2337,12 +2337,16 @@ fn calculate_pairwise_differences(
 ) -> Vec<((usize, usize), usize, Vec<i64>)> {
     let variants = Arc::new(variants);
 
-    (0..n-1).into_par_iter().flat_map(|i| { // n-1 or n? evaluate this.
+    // Iterate over all sample indices from 0 to n - 1
+    (0..n).into_par_iter().flat_map(|i| {
         let variants = Arc::clone(&variants);
-        (i+1..n-1).into_par_iter().map(move |j| { // n-1 or n? evaluate this.
+
+        // For each i, iterate over j from i + 1 to n - 1
+        (i+1..n).into_par_iter().map(move |j| {
             let mut diff_count = 0;
             let mut diff_positions = Vec::new();
 
+            // For each variant, compare genotypes of samples i and j
             for v in variants.iter() {
                 if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
                     if gi != gj {
@@ -2350,16 +2354,18 @@ fn calculate_pairwise_differences(
                         diff_positions.push(v.position);
                     }
                 } else {
-                    // Skip positions where one or both genotypes are missing
+                    // Skip if either genotype is missing
                     continue;
                 }
             }
 
-            // Return statement should be inside the closure
+            // Return the pair of sample indices, difference count, and positions
             ((i, j), diff_count, diff_positions)
         }).collect::<Vec<_>>()
     }).collect()
 }
+
+
 
 fn extract_sample_id(name: &str) -> &str {
     name.rsplit('_').next().unwrap_or(name)
