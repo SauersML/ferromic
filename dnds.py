@@ -290,16 +290,29 @@ def get_safe_process_count():
    return process_count
 
 def process_pair(args):
-    """Process a single pair of sequences."""
+    """Process a single pair of sequences, skipping PAML if sequences are identical."""
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir = args
     seq1_name, seq2_name = pair
-
     
-    # Create unique working directory
+    # Check if sequences are identical
+    if sequences[seq1_name] == sequences[seq2_name]:
+        logging.info(f"Sequences {seq1_name} and {seq2_name} are identical - skipping PAML")
+        return (
+            seq1_name.strip(),
+            seq2_name.strip(),
+            sample_groups.get(seq1_name),
+            sample_groups.get(seq2_name),
+            0.0,  # dN = 0 for identical sequences
+            0.0,  # dS = 0 for identical sequences
+            -1.0,  # omega = -1 to indicate identical sequences
+            cds_id
+        )
+    
+    # Create unique working directory for non-identical sequences
     working_dir = os.path.join(temp_dir, f'temp_{seq1_name}_{seq2_name}_{int(time.time())}')
     os.makedirs(working_dir, exist_ok=True)
 
-    # Write PHYLIP file - ensure exactly 10 chars with two spaces after name
+    # Write PHYLIP file - exactly 10 chars with two spaces after name
     phy_path = os.path.join(working_dir, 'temp.phy')
     with open(phy_path, 'w') as f:
         seq_len = len(sequences[seq1_name])
