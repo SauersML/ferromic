@@ -2075,6 +2075,7 @@ fn read_reference_sequence(
         .enumerate()
         .filter(|(_, &b)| !matches!(b, b'A' | b'C' | b'G' | b'T' | b'N'))
         .take(10)  // Show first 10 invalid chars
+        .map(|(i, &b)| (i, b))  // Dereference here
         .collect();
     
     if !invalid_chars.is_empty() {
