@@ -702,6 +702,8 @@ def check_existing_results(output_dir):
     logging.info(f"Combined data contains {len(combined_df)} entries")
     
     # Analyze sample naming patterns
+    # Strip sample names to remove any trailing spaces
+    combined_df['Haplotype'] = combined_df['Haplotype'].str.strip()
     sample_pattern = combined_df['Haplotype'].str.extract(r'(.+?)_([01])$')
     if not sample_pattern.empty:
         logging.info("\nSample naming patterns:")
