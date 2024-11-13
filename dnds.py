@@ -29,22 +29,19 @@ logging.basicConfig(
 )
 
 def validate_sequence(seq):
-    """Validate sequence is valid codons and trim to multiple of 3 if needed."""
+    """Validate that sequence is codon-aligned and skip if not."""
     if len(seq) % 3 != 0:
-        original_len = len(seq)
-        # Trim sequence to nearest multiple of 3
-        seq = seq[:-(len(seq) % 3)]
-        logging.warning(f"Sequence length {original_len} not multiple of 3. Trimmed to {len(seq)}")
-    
+        logging.warning(f"Skipping sequence of length {len(seq)}: not divisible by 3")
+        return None
+
     # Check for valid nucleotides
     valid_bases = set('ATCGNatcgn-')
     invalid_chars = set(seq) - valid_bases
     if invalid_chars:
-        logging.warning(f"Found invalid nucleotides: {invalid_chars}")
+        logging.warning(f"Skipping sequence with invalid nucleotides: {invalid_chars}")
         return None
         
     return seq
-
 def parse_phy_file(filepath):
     """Parse PHYLIP file with codon-aligned sequences."""
     logging.info(f"\n=== Starting to parse file: {filepath} ===")
