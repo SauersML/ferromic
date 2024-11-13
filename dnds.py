@@ -121,7 +121,8 @@ def parse_phy_file(filepath):
 
 def extract_group_from_sample(sample_name):
     """Extract the group from a sample name, expecting it to end with _0 or _1."""
-    match = re.search(r'_(\d+)$', sample_name)
+    sample_name = sample_name.strip()  # Remove trailing spaces
+    match = re.search(r'_(0|1)$', sample_name)
     if match:
         return int(match.group(1))
     else:
@@ -217,7 +218,7 @@ def parse_codeml_output(outfile_dir):
                 
             # Look for the pairwise comparison section
             pairwise_match = re.search(
-                r'seq seq\s+N\s+S\s+dN\s+dS\s+dN/dS.*?\n.*?(\d+)\s+(\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)', 
+                r'seq\s+seq\s+N\s+S\s+dN\s+dS\s+dN/dS.*?\n.*?(\d+)\s+(\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)', 
                 content, re.DOTALL)
             
             if pairwise_match:
@@ -564,6 +565,8 @@ def process_phy_file(args):
     
     return haplotype_output_csv
 
+
+
 def perform_statistical_tests(haplotype_stats_files, output_dir):
     """
     Perform statistical tests:
@@ -704,8 +707,8 @@ def check_existing_results(output_dir):
         logging.info("\nSample naming patterns:")
         for prefix in sample_pattern[0].unique():
             if pd.notna(prefix):
-                group0_count = len(combined_df[combined_df['Haplotype'].str.match(f'{prefix}_0$')])
-                group1_count = len(combined_df[combined_df['Haplotype'].str.match(f'{prefix}_1$')])
+                group0_count = len(combined_df[combined_df['Haplotype'].str.match(f'^{re.escape(prefix)}_0$')])
+                group1_count = len(combined_df[combined_df['Haplotype'].str.match(f'^{re.escape(prefix)}_1$')])
                 logging.info(f"Prefix '{prefix}': {group0_count} in group 0, {group1_count} in group 1")
 
     # Create filtered datasets
@@ -778,6 +781,8 @@ def check_existing_results(output_dir):
 
     # Return the complete dataset
     return combined_df
+
+
 
 def main():
     parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
