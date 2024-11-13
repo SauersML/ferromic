@@ -16,7 +16,7 @@ import hashlib
 from scipy.stats import mannwhitneyu, wilcoxon
 
 # ----------------------------
-# 1. Setup Logging
+# Setup Logging
 # ----------------------------
 
 logging.basicConfig(
@@ -29,11 +29,11 @@ logging.basicConfig(
 )
 
 # ----------------------------
-# 2. Utility Functions
+# Utility Functions
 # ----------------------------
 
 def validate_sequence(seq):
-    """Validate that sequence is codon-aligned and contains only valid nucleotides."""
+    """Check if the sequence is codon-aligned and contains only valid nucleotides."""
     if len(seq) % 3 != 0:
         logging.warning(f"Skipping sequence of length {len(seq)}: not divisible by 3")
         return None
@@ -47,43 +47,42 @@ def validate_sequence(seq):
     return seq
 
 def generate_checksum(full_name):
-    """Generate a 3-character checksum from the full sample name."""
+    """Create a 3-character checksum from the sample name."""
     hash_object = hashlib.md5(full_name.encode())
     checksum = hash_object.hexdigest()[:3].upper()
     return checksum
 
 def extract_group_from_sample(sample_name):
-    """Extract the group from a sample name, expecting it to end with _0 or _1."""
+    """Retrieve the group number from the sample name ending with _0 or _1."""
     sample_name = sample_name.strip()
     match = re.search(r'_(0|1)$', sample_name)
     if match:
         return int(match.group(1))
-    else:
-        logging.warning(f"Could not extract group from sample name: {sample_name}")
-        return None
+    logging.warning(f"Group suffix not found in sample name: {sample_name}")
+    return None
 
 def create_paml_ctl(seqfile, outfile, working_dir):
-    """Create CODEML control file with proper formatting."""
+    """Generate the CODEML control file with necessary parameters."""
     ctl_content = f"""      seqfile = {seqfile}
-          treefile = tree.txt
-          outfile = {outfile}
-          noisy = 0
-          verbose = 0
-          runmode = -2
-          seqtype = 1
-          CodonFreq = 2
-          model = 0
-          NSsites = 0
-          icode = 0
-          fix_kappa = 0
-          kappa = 2.0
-          fix_omega = 0
-          omega = 1.0
-          fix_alpha = 1
-          alpha = 0.0
-          getSE = 0
-          RateAncestor = 0
-          cleandata = 1
+              treefile = tree.txt
+              outfile = {outfile}
+              noisy = 0
+              verbose = 0
+              runmode = -2
+              seqtype = 1
+              CodonFreq = 2
+              model = 0
+              NSsites = 0
+              icode = 0
+              fix_kappa = 0
+              kappa = 2.0
+              fix_omega = 0
+              omega = 1.0
+              fix_alpha = 1
+              alpha = 0.0
+              getSE = 0
+              RateAncestor = 0
+              cleandata = 1
     """
     ctl_path = os.path.join(working_dir, 'codeml.ctl')
     with open(ctl_path, 'w') as f:
@@ -91,12 +90,11 @@ def create_paml_ctl(seqfile, outfile, working_dir):
     return ctl_path
 
 def run_codeml(ctl_path, working_dir, codeml_path):
-    """Run CODEML and handle any prompts."""
-    logging.info(f"\n=== Running CODEML in {working_dir} ===")
+    """Execute CODEML and handle its output."""
+    logging.info(f"Running CODEML in directory: {working_dir}")
     start_time = time.time()
     
     try:
-        # Use subprocess to run CODEML, send newline to bypass 'Press Enter'
         process = subprocess.Popen(
             [codeml_path],
             cwd=working_dir,
@@ -107,10 +105,10 @@ def run_codeml(ctl_path, working_dir, codeml_path):
 
         stdout, stderr = process.communicate(input=b'\n', timeout=3600)
         runtime = time.time() - start_time
-        logging.info(f"CODEML runtime: {runtime:.2f}s")
+        logging.info(f"CODEML completed in {runtime:.2f} seconds")
         
         if process.returncode != 0:
-            logging.error(f"CODEML error: {stderr.decode()}")
+            logging.error(f"CODEML encountered an error: {stderr.decode().strip()}")
             return False
             
         return True
@@ -120,17 +118,13 @@ def run_codeml(ctl_path, working_dir, codeml_path):
         process.kill()
         return False
     except Exception as e:
-        logging.error(f"ERROR running CODEML: {str(e)}")
+        logging.error(f"Error running CODEML: {e}")
         return False
 
 def parse_codeml_output(outfile_dir):
-    """
-    Parse CODEML output files to extract dN, dS, and omega.
-    Returns tuple: (dN, dS, omega)
-    """
-    logging.info(f"\n=== Parsing CODEML output in {outfile_dir} ===")
+    """Extract dN, dS, and omega from CODEML output files."""
+    logging.info(f"Parsing CODEML output in {outfile_dir}")
     
-    # Initialize results
     results = {
         'dN': None,
         'dS': None,
@@ -140,23 +134,19 @@ def parse_codeml_output(outfile_dir):
         'lnL': None
     }
     
-    # Attempt to parse RST file first
     rst_path = os.path.join(outfile_dir, 'rst')
     if os.path.exists(rst_path):
-        logging.info("Found RST file, attempting to parse...")
+        logging.info("Parsing RST file")
         try:
             with open(rst_path, 'r') as f:
                 content = f.read()
                 
-            # Example regex to extract dN, dS, omega from RST
-            # This needs to be adjusted based on the actual RST file format
             pairwise_match = re.search(
                 r'(\d+)\s+(\d+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)',
                 content
             )
             
             if pairwise_match:
-                # Extract values assuming correct group indices
                 results['N'] = float(pairwise_match.group(3))
                 results['S'] = float(pairwise_match.group(4))
                 results['dN'] = float(pairwise_match.group(5))
@@ -164,215 +154,191 @@ def parse_codeml_output(outfile_dir):
                 results['omega'] = float(pairwise_match.group(7))
                 results['lnL'] = float(pairwise_match.group(8))
                 
-                logging.info(f"Successfully parsed RST file:")
-                logging.info(f"  N sites: {results['N']:.1f}")
-                logging.info(f"  S sites: {results['S']:.1f}")
-                logging.info(f"  dN: {results['dN']:.6f}")
-                logging.info(f"  dS: {results['dS']:.6f}")
-                logging.info(f"  dN/dS: {results['omega']:.6f}")
-                logging.info(f"  lnL: {results['lnL']:.6f}")
+                logging.info("RST file parsed successfully")
+                logging.info(f"N sites: {results['N']}")
+                logging.info(f"S sites: {results['S']}")
+                logging.info(f"dN: {results['dN']}")
+                logging.info(f"dS: {results['dS']}")
+                logging.info(f"omega: {results['omega']}")
+                logging.info(f"lnL: {results['lnL']}")
                 
                 return (results['dN'], results['dS'], results['omega'])
-            else:
-                logging.warning("Could not find pairwise comparison section in RST file")
+            logging.warning("Pairwise comparison section not found in RST file")
         
         except Exception as e:
-            logging.error(f"Error parsing RST file: {str(e)}")
-    else:
-        logging.warning("RST file not found")
+            logging.error(f"Error parsing RST file: {e}")
     
-    # Fallback to parsing results.txt
-    logging.info("Attempting to parse results.txt as fallback...")
+    logging.info("RST file not found or parsing failed. Attempting to parse results.txt")
     results_path = os.path.join(outfile_dir, 'results.txt')
     
-    if not os.path.exists(results_path):
-        logging.error("results.txt not found!")
-        return (None, None, None)
-        
-    try:
-        with open(results_path, 'r') as f:
-            content = f.read()
+    if os.path.exists(results_path):
+        try:
+            with open(results_path, 'r') as f:
+                content = f.read()
+                
+            ml_match = re.search(
+                r't=\s*[\d\.]+\s+S=\s*([\d\.]+)\s+N=\s*([\d\.]+)\s+dN/dS=\s*([\d\.]+)\s+dN\s*=\s*([\d\.]+)\s+dS\s*=\s*([\d\.]+)',
+                content
+            )
             
-        # Example regex to extract dN, dS, omega from results.txt
-        # This needs to be adjusted based on the actual results.txt file format
-        ml_match = re.search(
-            r't=\s*[\d\.]+\s+S=\s*([\d\.]+)\s+N=\s*([\d\.]+)\s+dN/dS=\s*([\d\.]+)\s+dN\s*=\s*([\d\.]+)\s+dS\s*=\s*([\d\.]+)',
-            content
-        )
-        
-        if ml_match:
-            results['S'] = float(ml_match.group(1))
-            results['N'] = float(ml_match.group(2))
-            results['omega'] = float(ml_match.group(3))
-            results['dN'] = float(ml_match.group(4))
-            results['dS'] = float(ml_match.group(5))
-            
-            logging.info(f"Successfully parsed results.txt:")
-            logging.info(f"  N sites: {results['N']:.1f}")
-            logging.info(f"  S sites: {results['S']:.1f}")
-            logging.info(f"  dN: {results['dN']:.6f}")
-            logging.info(f"  dS: {results['dS']:.6f}")
-            logging.info(f"  dN/dS: {results['omega']:.6f}")
-            
-            return (results['dN'], results['dS'], results['omega'])
-            
-        else:
-            logging.error("Could not find ML output section in results.txt")
-            
-    except Exception as e:
-        logging.error(f"Error parsing results.txt: {str(e)}")
+            if ml_match:
+                results['S'] = float(ml_match.group(1))
+                results['N'] = float(ml_match.group(2))
+                results['omega'] = float(ml_match.group(3))
+                results['dN'] = float(ml_match.group(4))
+                results['dS'] = float(ml_match.group(5))
+                
+                logging.info("results.txt parsed successfully")
+                logging.info(f"N sites: {results['N']}")
+                logging.info(f"S sites: {results['S']}")
+                logging.info(f"dN: {results['dN']}")
+                logging.info(f"dS: {results['dS']}")
+                logging.info(f"omega: {results['omega']}")
+                
+                return (results['dN'], results['dS'], results['omega'])
+            logging.error("ML output section not found in results.txt")
+                
+        except Exception as e:
+            logging.error(f"Error parsing results.txt: {e}")
+    else:
+        logging.error("results.txt not found")
     
-    # Last resort: Parsing 2ML.* files
-    logging.info("Checking 2ML.* files as last resort...")
+    logging.info("Attempting to parse 2ML.dN and 2ML.dS files")
     try:
-        with open(os.path.join(outfile_dir, '2ML.dN'), 'r') as f:
+        dN_path = os.path.join(outfile_dir, '2ML.dN')
+        dS_path = os.path.join(outfile_dir, '2ML.dS')
+        
+        with open(dN_path, 'r') as f:
             lines = f.readlines()
             if len(lines) >= 3:
                 results['dN'] = float(lines[2].strip().split()[-1])
             else:
-                logging.warning("2ML.dN file does not have enough lines.")
+                logging.warning("2ML.dN does not have enough lines")
         
-        with open(os.path.join(outfile_dir, '2ML.dS'), 'r') as f:
+        with open(dS_path, 'r') as f:
             lines = f.readlines()
             if len(lines) >= 3:
                 results['dS'] = float(lines[2].strip().split()[-1])
             else:
-                logging.warning("2ML.dS file does not have enough lines.")
+                logging.warning("2ML.dS does not have enough lines")
         
-        # Compute omega if dS is not zero
         if results['dS'] and results['dS'] != 0:
             results['omega'] = results['dN'] / results['dS']
         else:
-            results['omega'] = np.nan  # Assign NaN if dS is zero or missing
+            results['omega'] = np.nan
         
-        logging.info(f"Successfully parsed 2ML.* files:")
-        logging.info(f"  dN: {results['dN']:.6f}")
-        logging.info(f"  dS: {results['dS']:.6f}")
-        logging.info(f"  dN/dS: {results['omega'] if not pd.isna(results['omega']) else 'NaN'}")
+        logging.info("2ML.dN and 2ML.dS parsed successfully")
+        logging.info(f"dN: {results['dN']}")
+        logging.info(f"dS: {results['dS']}")
+        logging.info(f"omega: {results['omega']}")
         
         return (results['dN'], results['dS'], results['omega'])
         
     except Exception as e:
-        logging.error(f"Error parsing 2ML.* files: {str(e)}")
+        logging.error(f"Error parsing 2ML.* files: {e}")
     
-    logging.error("Failed to parse CODEML output from any available file")
+    logging.error("Failed to parse CODEML output from all sources")
     return (None, None, None)
 
 def get_safe_process_count():
-    """Determine a safe number of parallel processes based on CPU and memory."""
+    """Calculate an appropriate number of parallel processes based on system resources."""
     total_cpus = multiprocessing.cpu_count()
     mem = psutil.virtual_memory()
     
-    # Conservative allocation - use at most 25% of CPUs and 4GB per process
     safe_cpu_count = max(1, min(total_cpus // 4, 8))
-    mem_based_count = max(1, int(mem.available / (4 * 1024 * 1024 * 1024)))
+    mem_based_count = max(1, int(mem.available / (4 * 1024 ** 3)))
     
     process_count = min(safe_cpu_count, mem_based_count)
-    logging.info(f"System resources: {total_cpus} CPUs, {mem.available/1024/1024/1024:.1f}GB free RAM")
+    logging.info(f"System has {total_cpus} CPUs and {mem.available / (1024 ** 3):.1f}GB free RAM")
     logging.info(f"Using {process_count} parallel processes")
     
     return process_count
 
 # ----------------------------
-# 3. Core Processing Functions
+# Core Processing Functions
 # ----------------------------
 
 def process_pair(args):
-    """
-    Process a single pair of sequences.
-    Filters out omega values of -1 and 99 before returning.
-    """
+    """Handle the processing of a single pair of sequences."""
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir = args
     seq1_name, seq2_name = pair
     
-    # Validate that sequences are from the same group
+    if seq1_name not in sequences or seq2_name not in sequences:
+        missing = [name for name in [seq1_name, seq2_name] if name not in sequences]
+        logging.error(f"Missing sequences for pair: {missing}")
+        return None
+
     group1 = sample_groups.get(seq1_name)
     group2 = sample_groups.get(seq2_name)
     
     if group1 != group2:
-        logging.error(f"CRITICAL ERROR: Attempted cross-group comparison: {seq1_name} (Group {group1}) vs {seq2_name} (Group {group2})")
+        logging.error(f"Cross-group comparison detected: {seq1_name} (Group {group1}) vs {seq2_name} (Group {group2})")
         return None
         
-    # Check if sequences are identical
     if sequences[seq1_name] == sequences[seq2_name]:
-        logging.info(f"Sequences {seq1_name} and {seq2_name} from group {group1} are identical - skipping PAML")
+        logging.info(f"Identical sequences found: {seq1_name} and {seq2_name} - assigning omega = -1")
         return (
-            seq1_name.strip(),
-            seq2_name.strip(),
+            seq1_name,
+            seq2_name,
             group1,
-            group1,  # Explicitly use same group
-            0.0,     # dN = 0 for identical sequences
-            0.0,     # dS = 0 for identical sequences
-            -1.0,    # omega = -1 to indicate identical sequences
+            group1,
+            0.0,
+            0.0,
+            -1.0,
             cds_id
         )
     
-    # Create unique working directory for non-identical sequences
     timestamp = int(time.time())
-    working_dir = os.path.join(temp_dir, f'temp_group{group1}_{seq1_name}_{seq2_name}_{timestamp}')
+    working_dir = os.path.join(temp_dir, f'temp_{seq1_name}_{seq2_name}_{timestamp}')
     os.makedirs(working_dir, exist_ok=True)
 
-    # Write PHYLIP file - exactly 10 chars with two spaces after name
     phy_path = os.path.join(working_dir, 'temp.phy')
     with open(phy_path, 'w') as f:
         seq_len = len(sequences[seq1_name])
-        f.write(f" 2 {seq_len}\n")
+        f.write(f"2 {seq_len}\n")
         f.write(f"{seq1_name[:10].ljust(10)}  {sequences[seq1_name]}\n")
         f.write(f"{seq2_name[:10].ljust(10)}  {sequences[seq2_name]}\n")
 
-    # Create control file
     ctl_path = create_paml_ctl('temp.phy', 'results.txt', working_dir)
     
-    # Create empty tree file
     tree_path = os.path.join(working_dir, 'tree.txt')
     with open(tree_path, 'w') as f:
-        f.write('')
-    
-    # Run CODEML
+        f.write('(Seq1,Seq2);')
+
     success = run_codeml(ctl_path, working_dir, codeml_path)
 
-    # Parse results and return the 8-tuple
     if success:
         dn, ds, omega = parse_codeml_output(working_dir)
-        # Ensure omega is a float or np.nan
         if omega is None or not isinstance(omega, (int, float)):
             omega = np.nan
         return (
-            seq1_name.strip(),
-            seq2_name.strip(), 
+            seq1_name,
+            seq2_name, 
             group1,
-            group1,  # Explicitly use same group
-            dn,
-            ds,
+            group1,
+            dn if dn is not None else np.nan,
+            ds if ds is not None else np.nan,
             omega,
             cds_id
         )
-    else:
-        return (
-            seq1_name.strip(),
-            seq2_name.strip(),
-            group1,
-            group1,  # Explicitly use same group
-            np.nan,  # dN
-            np.nan,  # dS
-            np.nan,  # omega
-            cds_id
-        )
+    return (
+        seq1_name,
+        seq2_name,
+        group1,
+        group1,
+        np.nan,
+        np.nan,
+        np.nan,
+        cds_id
+    )
 
 def process_phy_file(args):
-    """
-    Process a single PHYLIP file:
-    - Parse sequences
-    - Generate within-group pairs
-    - Run CODEML on each pair
-    - Aggregate haplotype statistics
-    """
+    """Manage the processing of a single PHYLIP file."""
     phy_file, output_dir, codeml_path, total_files, file_index = args
 
-    logging.info(f"\n====== Processing file {file_index}/{total_files}: {phy_file} ======")
+    logging.info(f"Processing file {file_index}/{total_files}: {phy_file}")
     start_time = time.time()
 
-    # Parse filename and extract CDS info
     phy_filename = os.path.basename(phy_file)
     match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
     if match:
@@ -386,7 +352,6 @@ def process_phy_file(args):
         group = None
     logging.info(f"Identified CDS: {cds_id}")
 
-    # Check if output files already exist
     output_csv = os.path.join(output_dir, f'{cds_id}.csv')
     haplotype_output_csv = os.path.join(output_dir, f'{cds_id}_haplotype_stats.csv')
 
@@ -394,18 +359,14 @@ def process_phy_file(args):
         logging.info(f"Skipping {phy_file} - output files already exist")
         return haplotype_output_csv
 
-    # Parse sequences and validate
     sequences = parse_phy_file(phy_file)
     if not sequences:
         logging.error(f"No valid sequences found in {phy_file}")
         return None
-       
-    # Get sample names and assign groups
-    sample_names = list(sequences.keys())
-    logging.info(f"Found {len(sample_names)} samples")
 
-    # Strip trailing spaces from sample names
+    sample_names = list(sequences.keys())
     sample_names = [s.strip() for s in sample_names]
+    logging.info(f"Found {len(sample_names)} samples")
 
     sample_groups = {}
     for sample in sample_names:
@@ -413,14 +374,12 @@ def process_phy_file(args):
         sample_groups[sample] = sample_group if sample_group is not None else group
     logging.info(f"Assigned {len(sample_groups)} samples to groups")
 
-    # Separate sequences by group and only generate within-group pairs
     group0_names = [name for name, grp in sample_groups.items() if grp == 0]
     group1_names = [name for name, grp in sample_groups.items() if grp == 1]
     
     logging.info(f"Found {len(group0_names)} sequences in group 0")
     logging.info(f"Found {len(group1_names)} sequences in group 1")
 
-    # Generate pairs ONLY within same group
     group0_pairs = list(combinations(group0_names, 2))
     group1_pairs = list(combinations(group1_names, 2))
     pairs = group0_pairs + group1_pairs
@@ -434,67 +393,48 @@ def process_phy_file(args):
         logging.error(f"No valid pairs to process in {phy_file}")
         return None
 
-    # Create temporary directory
     timestamp = int(time.time())
     temp_dir = os.path.join(output_dir, f'temp_{cds_id}_{timestamp}')
     os.makedirs(temp_dir, exist_ok=True)
 
-    # Prepare multiprocessing arguments
     pool_args = [(pair, sequences, sample_groups, cds_id, codeml_path, temp_dir) for pair in pairs]
     num_processes = get_safe_process_count()
     logging.info(f"Processing {total_pairs} pairs using {num_processes} processes")
     
-    # Process pairs using multiprocessing
     results = []
     with multiprocessing.Pool(processes=num_processes) as pool:
-        completed = 0
-        total_steps = max(1, total_pairs // 20)
         for result in pool.imap_unordered(process_pair, pool_args):
-            if result is not None:  # Only append valid results
-                # Verify groups match before adding result
-                if result[2] == result[3]:  # Check Group1 == Group2
+            if result is not None:
+                if result[2] == result[3]:
                     results.append(result)
                 else:
-                    logging.warning(f"Discarding result with mismatched groups: {result[0]} (Group {result[2]}) vs {result[1]} (Group {result[3]})")
-            completed += 1
-            if completed % total_steps == 0 or completed == total_pairs:
-                logging.info(f"Progress: {completed}/{total_pairs} pairs ({(completed/total_pairs)*100:.1f}%)")
-                logging.info(f"Current runtime: {time.time() - start_time:.1f}s")
-
+                    logging.warning(f"Mismatched groups for pair: {result[0]} vs {result[1]}")
+    
     logging.info(f"All pairs processed for {phy_file}")
     
-    # Clean up temporary directory
     try:
         shutil.rmtree(temp_dir)
-        logging.info(f"Cleaned up temporary directory: {temp_dir}")
+        logging.info(f"Temporary directory removed: {temp_dir}")
     except Exception as e:
-        logging.warning(f"Failed to clean up {temp_dir}: {str(e)}")
+        logging.warning(f"Could not remove temporary directory {temp_dir}: {e}")
 
-    # Create and save pairwise results DataFrame
     df = pd.DataFrame(results, columns=['Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega', 'CDS'])
     
-    # Verify no cross-group comparisons exist in final results
     cross_group = df[df['Group1'] != df['Group2']]
     if not cross_group.empty:
-        logging.error("Found cross-group comparisons in results!")
+        logging.error("Cross-group comparisons detected in results")
         logging.error(cross_group)
         return None
     
     df.to_csv(output_csv, index=False)
-    logging.info(f"Saved pairwise results to: {output_csv}")
+    logging.info(f"Pairwise results saved to {output_csv}")
 
-    # Calculate per-haplotype statistics (now guaranteed to be within-group only)
     haplotype_stats = []
     for sample in sample_names:
-        # Get only comparisons where this sample is involved
         sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
-        # Convert omega to numeric, handling non-numeric values
         omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
-        
-        # Exclude invalid omega values (-1 and 99)
         omega_values = omega_values[~omega_values.isin([-1, 99])]
         
-        # Calculate statistics if there are valid omega values
         if not omega_values.empty:
             mean_omega = omega_values.mean()
             median_omega = omega_values.median()
@@ -508,24 +448,21 @@ def process_phy_file(args):
             'CDS': cds_id,
             'Mean_dNdS': mean_omega,
             'Median_dNdS': median_omega,
-            'Num_Comparisons': len(omega_values)  # Add count of comparisons
+            'Num_Comparisons': len(omega_values)
         })
         
-        # Log sample statistics, handling NaN values
         mean_str = f"{mean_omega:.4f}" if pd.notna(mean_omega) else "N/A"
         median_str = f"{median_omega:.4f}" if pd.notna(median_omega) else "N/A"
         logging.info(f"Sample {sample} (Group {sample_groups[sample]}): mean dN/dS = {mean_str}, median = {median_str}, comparisons = {len(omega_values)}")
 
-    # Save haplotype statistics
     haplotype_df = pd.DataFrame(haplotype_stats)
     haplotype_df.to_csv(haplotype_output_csv, index=False)
-    logging.info(f"Saved haplotype statistics to: {haplotype_output_csv}")
+    logging.info(f"Haplotype statistics saved to {haplotype_output_csv}")
 
-    # Calculate and log group statistics
     group0 = haplotype_df[haplotype_df['Group'] == 0]['Mean_dNdS'].dropna()
     group1 = haplotype_df[haplotype_df['Group'] == 1]['Mean_dNdS'].dropna()
 
-    logging.info(f"\nWithin-Group Statistics for CDS {cds_id}:")
+    logging.info(f"Within-Group Statistics for CDS {cds_id}:")
     if not group0.empty:
         logging.info(f"Group 0: n={len(group0)}, Mean={group0.mean():.4f}, Median={group0.median():.4f}, SD={group0.std():.4f}")
     else:
@@ -541,237 +478,42 @@ def process_phy_file(args):
     return haplotype_output_csv
 
 def perform_statistical_tests(haplotype_stats_files, output_dir):
-    """
-    Perform statistical tests:
-    1. Mann-Whitney U test on all mean dN/dS between groups.
-    2. Test 1: Unpaired Mann-Whitney U test on sample-wise mean dN/dS between groups.
-    3. Test 2: Paired Wilcoxon Signed-Rank test on CDS-wise mean dN/dS between groups.
-    
-    Excludes dN/dS values of -1 and 99 from all tests.
-    """
-    # Combine all haplotype stats into a single DataFrame
+    """Conduct statistical analyses on the aggregated haplotype statistics."""
     haplotype_dfs = []
     for f in haplotype_stats_files:
         try:
             df = pd.read_csv(f)
             haplotype_dfs.append(df)
-            logging.info(f"Loaded haplotype stats file: {f}")
+            logging.info(f"Loaded haplotype stats from {f}")
         except Exception as e:
-            logging.error(f"Error reading {f}: {e}")
+            logging.error(f"Failed to read {f}: {e}")
 
     if not haplotype_dfs:
-        logging.warning("No haplotype statistics files to process.")
+        logging.warning("No haplotype statistics files available for analysis.")
         return
 
-    haplotype_df = pd.concat(haplotype_dfs, ignore_index=True)
-    logging.info(f"Combined haplotype data contains {len(haplotype_df)} entries")
-
-    # Exclude dN/dS values of -1 and 99
-    haplotype_df_filtered = haplotype_df[~haplotype_df['Mean_dNdS'].isin([-1, 99])].copy()
-    logging.info(f"Total haplotype entries after exclusion: {len(haplotype_df_filtered)}")
-
-    # Save filtered DataFrame
-    filtered_haplotype_csv = os.path.join(output_dir, 'filtered_haplotype_stats.csv')
-    haplotype_df_filtered.to_csv(filtered_haplotype_csv, index=False)
-    logging.info(f"Saved filtered haplotype statistics to: {filtered_haplotype_csv}")
-
-    # -------------------
-    # 3.1 Existing Mann-Whitney U Test on All Mean dN/dS Between Groups
-    # -------------------
-    group0_overall = haplotype_df_filtered[haplotype_df_filtered['Group'] == 0]['Mean_dNdS'].dropna()
-    group1_overall = haplotype_df_filtered[haplotype_df_filtered['Group'] == 1]['Mean_dNdS'].dropna()
-
-    logging.info("\n=== Existing Mann-Whitney U Test on All Mean dN/dS ===")
-    if not group0_overall.empty and not group1_overall.empty:
-        stat, p_value = mannwhitneyu(group0_overall, group1_overall, alternative='two-sided')
-        logging.info(f"Overall Mann-Whitney U test: Statistic={stat}, p-value={p_value:.6f}")
-        if p_value < 0.05:
-            logging.info("Result: Significant difference between Group 0 and Group 1.")
-        else:
-            logging.info("Result: No significant difference between Group 0 and Group 1.")
-    else:
-        logging.warning("Not enough data for the overall Mann-Whitney U test.")
-
-    # -------------------
-    # 3.2 Test 1: Unpaired Mann-Whitney U Test on Sample-wise Mean dN/dS
-    # -------------------
-    logging.info("\n=== Test 1: Unpaired Mann-Whitney U Test on Sample-wise Mean dN/dS ===")
-    if not group0_overall.empty and not group1_overall.empty:
-        stat1, p_value1 = mannwhitneyu(group0_overall, group1_overall, alternative='two-sided')
-        logging.info(f"Test 1 Mann-Whitney U test: Statistic={stat1}, p-value={p_value1:.6f}")
-        if p_value1 < 0.05:
-            logging.info("Result: Significant difference between Group 0 and Group 1 (Test 1).")
-        else:
-            logging.info("Result: No significant difference between Group 0 and Group 1 (Test 1).")
-    else:
-        logging.warning("Not enough data for Test 1.")
-
-    # -------------------
-    # 3.3 Test 2: Paired Wilcoxon Signed-Rank Test on CDS-wise Mean dN/dS
-    # -------------------
-    logging.info("\n=== Test 2: Paired Wilcoxon Signed-Rank Test on CDS-wise Mean dN/dS ===")
-
-    # Extract per-CDS mean dN/dS for each group
-    cds_group_means = haplotype_df_filtered.groupby(['CDS', 'Group'])['Mean_dNdS'].mean().unstack()
-
-    # Drop CDSs that do not have both groups
-    cds_paired = cds_group_means.dropna(subset=[0,1])
-
-    if len(cds_paired) < 1:
-        logging.warning("No paired CDS data available for Test 2.")
-        return
-
-    # Extract paired group0 and group1 mean dN/dS
-    group0_cds = cds_paired[0]
-    group1_cds = cds_paired[1]
-
-    # Perform Wilcoxon Signed-Rank Test
-    try:
-        stat2, p_value2 = wilcoxon(group0_cds, group1_cds)
-        logging.info(f"Test 2 Wilcoxon Signed-Rank test: Statistic={stat2}, p-value={p_value2:.6f}")
-        if p_value2 < 0.05:
-            logging.info("Result: Significant difference between Group 0 and Group 1 (Test 2).")
-        else:
-            logging.info("Result: No significant difference between Group 0 and Group 1 (Test 2).")
-    except ValueError as ve:
-        logging.error(f"Test 2 Wilcoxon Signed-Rank test could not be performed: {ve}")
-
-# ----------------------------
-# 4. Parsing PHYLIP Files
-# ----------------------------
-
-def parse_phy_file(filepath):
-    """Parse PHYLIP file with codon-aligned sequences and enforce sample naming convention."""
-    logging.info(f"\n=== Starting to parse file: {filepath} ===")
-    sequences = {}
-    
-    with open(filepath, 'r') as file:
-        lines = file.readlines()
-        if len(lines) < 1:
-            logging.error(f"Empty .phy file {filepath}")
-            return sequences
-
-        # Attempt to parse the header; if it fails, assume no header
-        try:
-            num_sequences, seq_length = map(int, lines[0].strip().split())
-            logging.info(f"File contains {num_sequences} sequences of length {seq_length}")
-            sequence_lines = [line.strip() for line in lines[1:] if line.strip()]
-        except ValueError:
-            logging.warning(f"Failed parsing header of {filepath}. Assuming no header.")
-            sequence_lines = [line.strip() for line in lines if line.strip()]
-    
-        for line in sequence_lines:
-            # Look for the pattern _0 or _1 followed by sequence
-            match = re.match(r'^(.+?_[01])\s*(.*)$', line.strip())
-            if match:
-                full_name = match.group(1)  # e.g., AFR_MSL_HG03486_1
-                sequence = match.group(2)    # Sequence part after the name
-            else:
-                # Fallback to existing parsing if pattern not found
-                parts = line.strip().split()
-                if len(parts) >= 2:
-                    full_name = parts[0]
-                    sequence = ''.join(parts[1:])
-                else:
-                    full_name = line[:10].strip()
-                    sequence = line[10:].replace(" ", "")
-            
-            # Generate checksum
-            checksum = generate_checksum(full_name)
-            
-            # Extract first three characters
-            first_three = full_name[:3]
-            
-            # Extract group suffix (_0 or _1)
-            group_suffix_match = re.search(r'_(0|1)$', full_name)
-            if group_suffix_match:
-                group_suffix = group_suffix_match.group(1)
-            else:
-                logging.warning(f"Sample name does not end with _0 or _1: {full_name}")
-                group_suffix = '0'  # Default to group 0 if not found
-            
-            # Construct the new sample name: XXX_YYY_S
-            new_sample_name = f"{first_three}_{checksum}_{group_suffix}"
-            
-            # Pad to 10 characters if necessary
-            if len(new_sample_name) < 10:
-                new_sample_name = new_sample_name.ljust(10)
-            else:
-                new_sample_name = new_sample_name[:10]
-            
-            # Validate and clean sequence
-            sequence = validate_sequence(sequence)
-            if sequence is not None:
-                sequences[new_sample_name] = sequence
-                logging.info(f"Parsed sequence: {full_name} as {new_sample_name} (length: {len(sequence)})")
-
-    logging.info(f"Successfully parsed {len(sequences)} sequences")
-    return sequences
-
-# ----------------------------
-# 5. Statistical Analysis
-# ----------------------------
-
-def check_existing_results(output_dir):
-    """
-    Perform preliminary analysis using existing results files before running PAML.
-    Groups are determined by the 'Group' column directly from haplotype_stats.csv.
-    Performs analyses with different filtering criteria for dN/dS values.
-    """
-    logging.info("\n=== Performing Preliminary Analysis of Existing Results ===")
-    
-    # Find all existing haplotype statistics files
-    haplotype_files = glob.glob(os.path.join(output_dir, '*_haplotype_stats.csv'))
-    if not haplotype_files:
-        logging.info("No existing results found for preliminary analysis.")
-        return None
-        
-    logging.info(f"Found {len(haplotype_files)} existing result files")
-    
-    # Combine all haplotype stats
-    haplotype_dfs = []
-    for f in haplotype_files:
-        try:
-            df = pd.read_csv(f)
-            haplotype_dfs.append(df)
-            logging.info(f"Loaded {f}: {len(df)} entries")
-        except Exception as e:
-            logging.error(f"Error reading {f}: {e}")
-            continue
-    
-    if not haplotype_dfs:
-        logging.warning("No valid data found in existing files")
-        return None
-        
-    # Combine all data
     combined_df = pd.concat(haplotype_dfs, ignore_index=True)
-    logging.info(f"Combined data contains {len(combined_df)} entries")
-    
-    # Log 'Mean_dNdS' statistics
-    if 'Mean_dNdS' in combined_df.columns:
-        logging.info(f"'Mean_dNdS' Summary:")
-        logging.info(combined_df['Mean_dNdS'].describe())
-    else:
-        logging.error("Combined DataFrame does not contain 'Mean_dNdS' column.")
-        return None
-    
-    # Verify 'Group' column exists and has valid values
+    logging.info(f"Combined haplotype data has {len(combined_df)} entries")
+
+    if 'Mean_dNdS' not in combined_df.columns:
+        logging.error("Combined DataFrame lacks 'Mean_dNdS' column.")
+        return
+
+    logging.info("Mean_dNdS Summary:")
+    logging.info(combined_df['Mean_dNdS'].describe())
+
     if 'Group' not in combined_df.columns:
-        logging.error("Combined DataFrame does not contain 'Group' column.")
-        return None
-    
-    # Ensure 'Group' column is of integer type
+        logging.error("Combined DataFrame lacks 'Group' column.")
+        return
+
     combined_df['Group'] = pd.to_numeric(combined_df['Group'], errors='coerce')
-    
-    # Check unique groups present
     unique_groups = combined_df['Group'].dropna().unique()
-    logging.info(f"Unique groups in combined data: {unique_groups}")
-    
+    logging.info(f"Unique groups found: {unique_groups}")
+
     if not set(unique_groups).intersection({0,1}):
-        logging.error("No valid groups (0 or 1) found in the 'Group' column.")
-        return None
-    
-    # Create filtered datasets
+        logging.error("No valid groups (0 or 1) present in the 'Group' column.")
+        return
+
     df_no_neg1 = combined_df[combined_df['Mean_dNdS'] != -1].copy()
     df_no_99 = combined_df[combined_df['Mean_dNdS'] != 99].copy()
     df_no_both = combined_df[(combined_df['Mean_dNdS'] != -1) & (combined_df['Mean_dNdS'] != 99)].copy()
@@ -783,12 +525,10 @@ def check_existing_results(output_dir):
         "Excluding both -1 and 99": df_no_both
     }
 
-    # Analyze each dataset
     for dataset_name, df in datasets.items():
-        logging.info(f"\n=== Analysis for {dataset_name} ===")
+        logging.info(f"Analysis for {dataset_name}")
         logging.info(f"Dataset contains {len(df)} entries")
 
-        # Calculate statistics per group
         stats = {}
         for group in [0, 1]:
             group_data = df[df['Group'] == group]['Mean_dNdS'].dropna()
@@ -799,58 +539,195 @@ def check_existing_results(output_dir):
                     'median': group_data.median(),
                     'std': group_data.std()
                 }
-                logging.info(f"\nGroup {group}:")
-                logging.info(f"  Sample size: {stats[group]['n']}")
-                logging.info(f"  Mean dN/dS: {stats[group]['mean']:.4f}")
-                logging.info(f"  Median dN/dS: {stats[group]['median']:.4f}")
-                logging.info(f"  Standard deviation: {stats[group]['std']:.4f}")
+                logging.info(f"Group {group}: n={stats[group]['n']}, Mean={stats[group]['mean']:.4f}, Median={stats[group]['median']:.4f}, SD={stats[group]['std']:.4f}")
             else:
-                logging.info(f"\nGroup {group}: No valid Mean_dNdS values.")
+                logging.info(f"Group {group}: No valid Mean_dNdS values.")
 
-        # Perform statistical tests if both groups present
         if 0 in stats and 1 in stats:
             group0_data = df[df['Group'] == 0]['Mean_dNdS'].dropna()
             group1_data = df[df['Group'] == 1]['Mean_dNdS'].dropna()
             
             try:
                 stat, p_value = mannwhitneyu(group0_data, group1_data, alternative='two-sided')
-                logging.info("\nMann-Whitney U test:")
-                logging.info(f"  Statistic = {stat}")
-                logging.info(f"  p-value = {p_value:.6f}")
+                logging.info(f"Mann-Whitney U test: Statistic={stat}, p-value={p_value:.6f}")
                 
-                # Calculate effect size
                 effect_size = abs(stats[0]['mean'] - stats[1]['mean']) / np.sqrt((stats[0]['std']**2 + stats[1]['std']**2) / 2)
-                logging.info(f"  Effect size (Cohen's d) = {effect_size:.4f}")
+                logging.info(f"Effect size (Cohen's d): {effect_size:.4f}")
                 
-                # Interpret results
                 if p_value < 0.05:
-                    logging.info("  Result: Significant difference between groups")
+                    logging.info("Significant difference between Group 0 and Group 1.")
                 else:
-                    logging.info("  Result: No significant difference between groups")
+                    logging.info("No significant difference between Group 0 and Group 1.")
                 
-                # Add additional descriptive statistics
-                logging.info("\nAdditional Statistics:")
-                logging.info(f"  Group 0 range: {group0_data.min():.4f} to {group0_data.max():.4f}")
-                logging.info(f"  Group 1 range: {group1_data.min():.4f} to {group1_data.max():.4f}")
+                logging.info(f"Group 0 range: {group0_data.min():.4f} to {group0_data.max():.4f}")
+                logging.info(f"Group 1 range: {group1_data.min():.4f} to {group1_data.max():.4f}")
                 
-                # Calculate and log quartiles
                 g0_quartiles = group0_data.quantile([0.25, 0.75])
                 g1_quartiles = group1_data.quantile([0.25, 0.75])
-                logging.info(f"  Group 0 quartiles (Q1, Q3): {g0_quartiles[0.25]:.4f}, {g0_quartiles[0.75]:.4f}")
-                logging.info(f"  Group 1 quartiles (Q1, Q3): {g1_quartiles[0.25]:.4f}, {g1_quartiles[0.75]:.4f}")
+                logging.info(f"Group 0 quartiles (Q1, Q3): {g0_quartiles[0.25]:.4f}, {g0_quartiles[0.75]:.4f}")
+                logging.info(f"Group 1 quartiles (Q1, Q3): {g1_quartiles[0.25]:.4f}, {g1_quartiles[0.75]:.4f}")
                 
             except Exception as e:
-                logging.error(f"Error performing statistical tests: {str(e)}")
+                logging.error(f"Error performing Mann-Whitney U test: {e}")
 
-    # Ensure that haplotype_df_filtered is always defined before returning
-    haplotype_df_filtered = haplotype_df_filtered if 'haplotype_df_filtered' in locals() else None
-    return haplotype_df_filtered
+def parse_phy_file(filepath):
+    """Extract and validate sequences from a PHYLIP file, formatting sample names appropriately."""
+    logging.info(f"Parsing PHYLIP file: {filepath}")
+    sequences = {}
+    
+    with open(filepath, 'r') as file:
+        lines = file.readlines()
+        if not lines:
+            logging.error(f"PHYLIP file is empty: {filepath}")
+            return sequences
+
+        try:
+            num_sequences, seq_length = map(int, lines[0].strip().split())
+            sequence_lines = [line.strip() for line in lines[1:] if line.strip()]
+            logging.info(f"File has {num_sequences} sequences each of length {seq_length}")
+        except ValueError:
+            logging.warning(f"No valid header found in {filepath}. Processing without header.")
+            sequence_lines = [line.strip() for line in lines if line.strip()]
+    
+        for line in sequence_lines:
+            match = re.match(r'^(.+?_[01])\s*(.*)$', line)
+            if match:
+                full_name = match.group(1)
+                sequence = match.group(2)
+            else:
+                parts = line.split()
+                if len(parts) >= 2:
+                    full_name = parts[0]
+                    sequence = ''.join(parts[1:])
+                else:
+                    full_name = line[:10].strip()
+                    sequence = line[10:].replace(" ", "")
+            
+            checksum = generate_checksum(full_name)
+            first_three = full_name[:3]
+            group_suffix_match = re.search(r'_(0|1)$', full_name)
+            group_suffix = group_suffix_match.group(1) if group_suffix_match else '0'
+            
+            new_sample_name = f"{first_three}_{checksum}_{group_suffix}"
+            new_sample_name = new_sample_name[:10].ljust(10)
+            new_sample_name = new_sample_name.strip()
+            
+            validated_seq = validate_sequence(sequence)
+            if validated_seq:
+                sequences[new_sample_name] = validated_seq
+                logging.info(f"Added sequence: {new_sample_name} (Length: {len(validated_seq)})")
+
+    logging.info(f"Total valid sequences parsed: {len(sequences)}")
+    return sequences
 
 # ----------------------------
-# 6. Main Function
+# Statistical Analysis
 # ----------------------------
+
+def check_existing_results(output_dir):
+    """Analyze existing haplotype statistics files to determine if analysis can proceed."""
+    logging.info("Analyzing existing haplotype statistics files")
+    
+    haplotype_files = glob.glob(os.path.join(output_dir, '*_haplotype_stats.csv'))
+    if not haplotype_files:
+        logging.info("No existing haplotype statistics files found")
+        return None
+        
+    logging.info(f"Found {len(haplotype_files)} haplotype statistics files")
+    
+    haplotype_dfs = []
+    for f in haplotype_files:
+        try:
+            df = pd.read_csv(f)
+            haplotype_dfs.append(df)
+            logging.info(f"Loaded {f} with {len(df)} entries")
+        except Exception as e:
+            logging.error(f"Failed to load {f}: {e}")
+    
+    if not haplotype_dfs:
+        logging.warning("No valid data in haplotype statistics files")
+        return None
+        
+    combined_df = pd.concat(haplotype_dfs, ignore_index=True)
+    logging.info(f"Combined haplotype data has {len(combined_df)} entries")
+    
+    logging.info("Mean_dNdS Summary:")
+    logging.info(combined_df['Mean_dNdS'].describe())
+    
+    if 'Group' not in combined_df.columns:
+        logging.error("Combined DataFrame lacks 'Group' column")
+        return None
+    
+    combined_df['Group'] = pd.to_numeric(combined_df['Group'], errors='coerce')
+    unique_groups = combined_df['Group'].dropna().unique()
+    logging.info(f"Groups present in data: {unique_groups}")
+    
+    if not set(unique_groups).intersection({0,1}):
+        logging.error("No valid groups (0 or 1) found in 'Group' column")
+        return None
+    
+    df_no_neg1 = combined_df[combined_df['Mean_dNdS'] != -1].copy()
+    df_no_99 = combined_df[combined_df['Mean_dNdS'] != 99].copy()
+    df_no_both = combined_df[(combined_df['Mean_dNdS'] != -1) & (combined_df['Mean_dNdS'] != 99)].copy()
+
+    datasets = {
+        "All data": combined_df,
+        "Excluding dN/dS = -1": df_no_neg1,
+        "Excluding dN/dS = 99": df_no_99,
+        "Excluding both -1 and 99": df_no_both
+    }
+
+    for dataset_name, df in datasets.items():
+        logging.info(f"Analyzing dataset: {dataset_name}")
+        logging.info(f"Entries: {len(df)}")
+        
+        stats = {}
+        for group in [0, 1]:
+            group_data = df[df['Group'] == group]['Mean_dNdS'].dropna()
+            if not group_data.empty:
+                stats[group] = {
+                    'n': len(group_data),
+                    'mean': group_data.mean(),
+                    'median': group_data.median(),
+                    'std': group_data.std()
+                }
+                logging.info(f"Group {group}: n={stats[group]['n']}, Mean={stats[group]['mean']:.4f}, Median={stats[group]['median']:.4f}, SD={stats[group]['std']:.4f}")
+            else:
+                logging.info(f"Group {group}: No valid Mean_dNdS values")
+        
+        if 0 in stats and 1 in stats:
+            group0_data = df[df['Group'] == 0]['Mean_dNdS'].dropna()
+            group1_data = df[df['Group'] == 1]['Mean_dNdS'].dropna()
+            
+            try:
+                stat, p_value = mannwhitneyu(group0_data, group1_data, alternative='two-sided')
+                logging.info(f"Mann-Whitney U test: Statistic={stat}, p-value={p_value:.6f}")
+                
+                effect_size = abs(stats[0]['mean'] - stats[1]['mean']) / np.sqrt((stats[0]['std']**2 + stats[1]['std']**2) / 2)
+                logging.info(f"Effect size (Cohen's d): {effect_size:.4f}")
+                
+                if p_value < 0.05:
+                    logging.info("Significant difference between Group 0 and Group 1")
+                else:
+                    logging.info("No significant difference between Group 0 and Group 1")
+                
+                min_g0 = group0_data.min()
+                max_g0 = group0_data.max()
+                min_g1 = group1_data.min()
+                max_g1 = group1_data.max()
+                logging.info(f"Group 0 range: {min_g0:.4f} to {max_g0:.4f}")
+                logging.info(f"Group 1 range: {min_g1:.4f} to {max_g1:.4f}")
+                
+                g0_quartiles = group0_data.quantile([0.25, 0.75])
+                g1_quartiles = group1_data.quantile([0.25, 0.75])
+                logging.info(f"Group 0 quartiles: Q1={g0_quartiles[0.25]:.4f}, Q3={g0_quartiles[0.75]:.4f}")
+                logging.info(f"Group 1 quartiles: Q1={g1_quartiles[0.25]:.4f}, Q3={g1_quartiles[0.75]:.4f}")
+                
+            except Exception as e:
+                logging.error(f"Error during Mann-Whitney U test: {e}")
 
 def main():
+    """Main function to orchestrate the dN/dS analysis."""
     parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
     parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
@@ -859,20 +736,17 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Perform preliminary analysis first
-    logging.info("\nPerforming preliminary analysis of existing results...")
+    logging.info("Starting preliminary analysis of existing results")
     prelim_results = check_existing_results(args.output_dir)
     if prelim_results is not None:
-        logging.info("\nPreliminary analysis complete. Proceeding with remaining files...")
+        logging.info("Preliminary analysis completed. Continuing with remaining files")
     else:
-        logging.info("\nNo existing results found. Proceeding with full analysis...")
-    
-    # Get all input files
+        logging.info("No existing results found. Proceeding with full analysis")
+
     phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
     total_files = len(phy_files)
-    logging.info(f"Found {total_files} total .phy files")
+    logging.info(f"Found {total_files} PHYLIP files to process")
 
-    # Get the list of files to process
     files_to_process = []
     for phy_file in phy_files:
         phy_filename = os.path.basename(phy_file)
@@ -889,11 +763,9 @@ def main():
             logging.info(f"Skipping {phy_file} - output files already exist")
 
     if not files_to_process:
-        logging.info("All files already processed. Exiting.")
+        logging.info("All PHYLIP files have been processed. Exiting.")
         return
 
-    # Prepare arguments for processing each file
-    total_files = len(files_to_process)
     work_args = []
     for idx, phy_file in enumerate(files_to_process, 1):
         work_args.append((phy_file, args.output_dir, args.codeml_path, total_files, idx))
@@ -904,11 +776,10 @@ def main():
         if result:
             haplotype_stats_files.append(result)
 
-    # Perform final statistical tests
     if haplotype_stats_files:
         perform_statistical_tests(haplotype_stats_files, args.output_dir)
     else:
-        logging.warning("No haplotype statistics files generated.")
+        logging.warning("No haplotype statistics files were generated")
 
 if __name__ == '__main__':
     main()
