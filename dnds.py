@@ -234,11 +234,18 @@ def parse_codeml_output(outfile_dir):
             if len(lines) >= 3:
                 results['dS'] = float(lines[2].strip().split()[-1])
         
+        # Compute omega if dS is not zero
+        if results['dS'] and results['dS'] != 0:
+            results['omega'] = results['dN'] / results['dS']
+        else:
+            results['omega'] = np.nan  # Assign NaN if dS is zero or missing
+        
         logging.info(f"Successfully parsed 2ML.* files:")
         logging.info(f"  dN: {results['dN']:.6f}")
         logging.info(f"  dS: {results['dS']:.6f}")
+        logging.info(f"  dN/dS: {results['omega'] if not pd.isna(results['omega']) else 'NaN'}")
         
-        return (results['dN'], results['dS'], "N/A")
+        return (results['dN'], results['dS'], results['omega'])
         
     except Exception as e:
         logging.error(f"Error parsing 2ML.* files: {str(e)}")
@@ -322,6 +329,9 @@ def process_pair(args):
     # Parse results and return the 8-tuple
     if success:
         dn, ds, omega = parse_codeml_output(working_dir)
+        # Ensure omega is a float or np.nan
+        if omega is None or not isinstance(omega, (int, float)):
+            omega = np.nan
         return (
             seq1_name.strip(),
             seq2_name.strip(), 
@@ -338,9 +348,9 @@ def process_pair(args):
             seq2_name.strip(),
             group1,
             group1,  # Explicitly use same group
-            None,   # dN
-            None,   # dS
-            None,   # omega
+            np.nan,  # dN
+            np.nan,  # dS
+            np.nan,  # omega
             cds_id
         )
 
@@ -549,7 +559,7 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
     logging.info(f"Combined haplotype data contains {len(haplotype_df)} entries")
 
     # Exclude dN/dS values of -1 and 99
-    haplotype_df_filtered = haplotype_df[~haplotype_df['Mean_dNdS'].isin([-1, 99])]
+    haplotype_df_filtered = haplotype_df[~haplotype_df['Mean_dNdS'].isin([-1, 99])].copy()
     logging.info(f"Total haplotype entries after exclusion: {len(haplotype_df_filtered)}")
 
     # Save filtered DataFrame
