@@ -2152,10 +2152,11 @@ fn parse_gff_file(
     })?;
     let reader = BufReader::new(file);
     
-    let mut gene_cdss: HashMap<String, Vec<(i64, i64, i64)>> = HashMap::new();
+    // Change to use transcript ID as key since CDS belongs to transcripts
+    let mut transcript_cdss: HashMap<String, Vec<(i64, i64, i64)>> = HashMap::new();
     let mut skipped_lines = 0;
     let mut processed_lines = 0;
-    let mut genes_found = HashSet::new();
+    let mut transcripts_found = HashSet::new();
     let mut malformed_attributes = 0;
 
     println!("Reading GFF entries...");
@@ -2213,14 +2214,13 @@ fn parse_gff_file(
             0
         });
 
-
-        // Parse attributes (key-value pairs are separated by semicolons)
+        // Parse attributes to get transcript_id and gene_name
         let attributes = fields[8];
+        let mut transcript_id = None;
         let mut gene_name = None;
         
         for attr in attributes.split(';') {
             let attr = attr.trim();
-            // Try both space and equals as separators
             let parts: Vec<&str> = if attr.contains('=') {
                 attr.splitn(2, '=').collect()
             } else {
@@ -2235,31 +2235,33 @@ fn parse_gff_file(
             let value = parts[1].trim().trim_matches('"').trim_matches('\'');
 
             match key {
-                "gene_name" => {
-                    gene_name = Some(value.to_string());
-                    break;
-                }
-                "gene_id" if gene_name.is_none() => {
-                    gene_name = Some(value.to_string());
-                }
+                "transcript_id" => transcript_id = Some(value.to_string()),
+                "gene_name" => gene_name = Some(value.to_string()),
                 _ => continue,
             }
         }
 
-        let gene_name = match gene_name {
-            Some(name) => name,
+        let transcript_id = match transcript_id {
+            Some(id) => id,
             None => {
                 malformed_attributes += 1;
                 if malformed_attributes <= 5 {
-                    eprintln!("Warning: Could not find gene name/id in attributes at line {}: {}", 
+                    eprintln!("Warning: Could not find transcript_id in attributes at line {}: {}", 
                              line_num + 1, attributes);
                 }
                 continue;
             }
         };
 
-        genes_found.insert(gene_name.clone());
-        gene_cdss.entry(gene_name)
+        // Store for later reporting
+        if let Some(gene) = gene_name {
+            transcripts_found.insert(format!("{}:{}", gene, transcript_id));
+        } else {
+            transcripts_found.insert(transcript_id.clone());
+        }
+
+        // Store CDS segment with frame exactly as given in GFF
+        transcript_cdss.entry(transcript_id)
             .or_default()
             .push((start, end, frame));
     }
@@ -2267,107 +2269,67 @@ fn parse_gff_file(
     println!("\n{}", "GFF Parsing Statistics:".blue().bold());
     println!("Total CDS entries processed: {}", processed_lines);
     println!("Skipped lines: {}", skipped_lines);
-    println!("Unique genes found: {}", genes_found.len());
+    println!("Unique transcripts found: {}", transcripts_found.len());
     if malformed_attributes > 0 {
-        println!("{}", format!("Entries with missing gene identifiers: {}", malformed_attributes).yellow());
+        println!("{}", format!("Entries with missing transcript IDs: {}", malformed_attributes).yellow());
     }
 
-    println!("\n{}", "Processing CDS regions by gene...".green().bold());
+    println!("\n{}", "Processing CDS regions by transcript...".green().bold());
     let mut cds_regions = Vec::new();
-    let mut genes_processed = 0;
-    let mut warning_count = 0;
+    let mut transcripts_processed = 0;
 
-
-    for (gene_name, mut segments) in gene_cdss {
-        // Sort segments by position
+    for (transcript_id, mut segments) in transcript_cdss {
+        // Sort segments by position (CDS order matters for transcripts)
         segments.sort_by_key(|&(start, _, _)| start);
         
-        println!("\nProcessing gene: {}", gene_name);
+        println!("\nProcessing transcript: {}", transcript_id);
         println!("Found {} CDS segments", segments.len());
-        
-        let mut valid_segments: Vec<(i64, i64)> = Vec::new();
-        let mut prev_end: Option<i64> = None;
-        let mut running_frame: i64 = 0;
-        
-        for (idx, &(start, end, frame)) in segments.iter().enumerate() {
-            println!("  Segment {}: {}-{} (frame {})", idx + 1, start, end, frame);
-            
-            if let Some(previous_end) = prev_end {
-                if start > previous_end + 1 {
-                    let gap_size = start - previous_end - 1;
-                    println!("    Gap found: {} bp", gap_size);
-                    
-                    if let Some(&(prev_start, _)) = valid_segments.last() {
-                        let prev_len = previous_end - prev_start + 1;
-                        running_frame = (running_frame + prev_len) % 3;
-                        
-                        let start_adj = start + ((3 - running_frame) % 3);
-                        if start_adj <= end {
-                            valid_segments.push((start_adj, end));
-                            println!("    Adjusted start to {} to maintain frame", start_adj);
-                        } else {
-                            println!("    {} Warning: Segment too short after frame adjustment", "!".yellow());
-                            warning_count += 1;
-                        }
-                    }
-                } else {
-                    valid_segments.push((start, end));
-                }
-            } else {
-                let start_adj = start + frame;
-                if start_adj <= end {
-                    valid_segments.push((start_adj, end));
-                    if frame != 0 {
-                        println!("    First segment adjusted by frame {}", frame);
-                    }
-                } else {
-                    println!("    {} Warning: First segment too short after frame adjustment", "!".yellow());
-                    warning_count += 1;
-                }
-            }
-            prev_end = Some(end);
-        }
 
-        if valid_segments.is_empty() {
-            println!("  {} No valid segments for gene {}", "!".red(), gene_name);
+        // Simply collect segments - frames are biologically determined
+        let segments: Vec<_> = segments.into_iter()
+            .map(|(start, end, _frame)| (start, end))
+            .collect();
+
+        if segments.is_empty() {
+            println!("  {} No valid segments for transcript {}", "!".red(), transcript_id);
             continue;
         }
 
-        // Get min/max across all valid segments
-        let min_start = valid_segments.iter()
+        // Get full CDS region extent
+        let min_start = segments.iter()
             .map(|&(s, _)| s)
             .min()
             .unwrap();
-        let max_end = valid_segments.iter()
+        let max_end = segments.iter()
             .map(|&(_, e)| e)
             .max()
             .unwrap();
 
-        // Adjust length to be multiple of 3
-        let mut length = max_end - min_start + 1;
-        let remainder = length % 3;
-        
-        if remainder != 0 {
-            println!("  {} Length {} not divisible by 3, trimming {} bases",
-                    "!".yellow(), length, remainder);
-            length -= remainder;
+        // Total coding length is sum of individual CDS lengths
+        let total_length: i64 = segments.iter()
+            .map(|&(s, e)| e - s + 1)
+            .sum();
+
+        if total_length % 3 != 0 {
+            println!("  Warning: Total CDS length {} not divisible by 3 for transcript {}", 
+                    total_length, transcript_id);
         }
         
         let cds_region = CdsRegion {
             start: min_start,
-            end: min_start + length - 1,
+            end: max_end,
         };
         
-        println!("  Final CDS region: {}-{} (length: {})", 
-                cds_region.start, cds_region.end, length);
+        println!("  CDS region: {}-{} (total coding length: {})", 
+                cds_region.start, cds_region.end, total_length);
         
         cds_regions.push(cds_region);
+        transcripts_processed += 1;
     }
 
     println!("\n{}", "CDS Processing Summary:".blue().bold());
-    println!("Total genes processed: {}", genes_processed);
+    println!("Total transcripts processed: {}", transcripts_processed);
     println!("Valid CDS regions created: {}", cds_regions.len());
-    println!("Warnings encountered: {}", warning_count);
     
     if cds_regions.is_empty() {
         println!("{}", "No valid CDS regions found!".red());
