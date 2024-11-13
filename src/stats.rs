@@ -2278,41 +2278,80 @@ fn parse_gff_file(
     let mut cds_regions = Vec::new();
     let mut transcripts_processed = 0;
 
+    #[derive(Default)]
+    struct TranscriptStats {
+        total_transcripts: usize,
+        non_divisible_by_three: usize,
+        total_cds_segments: usize,
+        single_exon_transcripts: usize,
+        multi_exon_transcripts: usize,
+        total_coding_length: i64,
+        shortest_transcript_length: i64,
+        longest_transcript_length: i64,
+        transcripts_with_gaps: usize,
+    }
+
+    let mut stats = TranscriptStats {
+        shortest_transcript_length: i64::MAX,
+        ..Default::default()
+    };
+
     for (transcript_id, mut segments) in transcript_cdss {
-        // Sort segments by position (CDS order matters for transcripts)
         segments.sort_by_key(|&(start, _, _)| start);
         
         println!("\nProcessing transcript: {}", transcript_id);
         println!("Found {} CDS segments", segments.len());
 
-        // Simply collect segments - frames are biologically determined
-        let segments: Vec<_> = segments.into_iter()
-            .map(|(start, end, _frame)| (start, end))
-            .collect();
+        stats.total_transcripts += 1;
+        stats.total_cds_segments += segments.len();
+
+        if segments.len() == 1 {
+            stats.single_exon_transcripts += 1;
+        } else {
+            stats.multi_exon_transcripts += 1;
+        }
+
+        // Check for gaps between segments
+        let has_gaps = segments.windows(2)
+            .any(|w| w[1].0 - w[0].1 > 1);
+        if has_gaps {
+            stats.transcripts_with_gaps += 1;
+        }
+
+        // Calculate total coding length and check individual segments
+        let mut coding_segments = Vec::new();
+        for (i, &(start, end, frame)) in segments.iter().enumerate() {
+            let segment_length = end - start + 1;
+            println!("  Segment {}: {}-{} (length: {}, frame: {})", 
+                    i + 1, start, end, segment_length, frame);
+            coding_segments.push((start, end));
+        }
 
         if segments.is_empty() {
             println!("  {} No valid segments for transcript {}", "!".red(), transcript_id);
             continue;
         }
 
-        // Get full CDS region extent
-        let min_start = segments.iter()
-            .map(|&(s, _)| s)
-            .min()
-            .unwrap();
-        let max_end = segments.iter()
-            .map(|&(_, e)| e)
-            .max()
-            .unwrap();
-
-        // Total coding length is sum of individual CDS lengths
-        let total_length: i64 = segments.iter()
-            .map(|&(s, e)| e - s + 1)
+        let min_start = segments.iter().map(|&(s, _, _)| s).min().unwrap();
+        let max_end = segments.iter().map(|&(_, e, _)| e).max().unwrap();
+        let transcript_span = max_end - min_start + 1;
+        
+        // Calculate actual coding length (sum of CDS lengths)
+        let total_coding_length: i64 = segments.iter()
+            .map(|&(s, e, _)| e - s + 1)
             .sum();
 
-        if total_length % 3 != 0 {
-            println!("  Warning: Total CDS length {} not divisible by 3 for transcript {}", 
-                    total_length, transcript_id);
+        stats.total_coding_length += total_coding_length;
+        stats.shortest_transcript_length = stats.shortest_transcript_length.min(total_coding_length);
+        stats.longest_transcript_length = stats.longest_transcript_length.max(total_coding_length);
+
+        if total_coding_length % 3 != 0 {
+            stats.non_divisible_by_three += 1;
+            println!("  {} Warning: Total CDS length {} not divisible by 3", 
+                    "!".yellow(), total_coding_length);
+            println!("    Remainder when divided by 3: {}", total_coding_length % 3);
+            println!("    Individual segment lengths: {:?}", 
+                    segments.iter().map(|&(s, e, _)| e - s + 1).collect::<Vec<_>>());
         }
         
         let cds_region = CdsRegion {
@@ -2320,17 +2359,36 @@ fn parse_gff_file(
             end: max_end,
         };
         
-        println!("  CDS region: {}-{} (total coding length: {})", 
-                cds_region.start, cds_region.end, total_length);
+        println!("  CDS region: {}-{}", cds_region.start, cds_region.end);
+        println!("    Genomic span: {}", transcript_span);
+        println!("    Total coding length: {}", total_coding_length);
         
         cds_regions.push(cds_region);
-        transcripts_processed += 1;
     }
 
     println!("\n{}", "CDS Processing Summary:".blue().bold());
-    println!("Total transcripts processed: {}", transcripts_processed);
-    println!("Valid CDS regions created: {}", cds_regions.len());
-    
+    println!("Total transcripts processed: {}", stats.total_transcripts);
+    println!("Total CDS segments: {}", stats.total_cds_segments);
+    println!("Average segments per transcript: {:.2}", 
+             stats.total_cds_segments as f64 / stats.total_transcripts as f64);
+    println!("Single-exon transcripts: {} ({:.1}%)", 
+             stats.single_exon_transcripts,
+             100.0 * stats.single_exon_transcripts as f64 / stats.total_transcripts as f64);
+    println!("Multi-exon transcripts: {} ({:.1}%)", 
+             stats.multi_exon_transcripts,
+             100.0 * stats.multi_exon_transcripts as f64 / stats.total_transcripts as f64);
+    println!("Transcripts with gaps: {} ({:.1}%)",
+             stats.transcripts_with_gaps,
+             100.0 * stats.transcripts_with_gaps as f64 / stats.total_transcripts as f64);
+    println!("Non-divisible by three: {} ({:.1}%)", 
+             stats.non_divisible_by_three,
+             100.0 * stats.non_divisible_by_three as f64 / stats.total_transcripts as f64);
+    println!("Total coding bases: {}", stats.total_coding_length);
+    println!("Shortest transcript: {} bp", stats.shortest_transcript_length);
+    println!("Longest transcript: {} bp", stats.longest_transcript_length);
+    println!("Average transcript length: {:.1} bp",
+             stats.total_coding_length as f64 / stats.total_transcripts as f64);
+
     if cds_regions.is_empty() {
         println!("{}", "No valid CDS regions found!".red());
     }
