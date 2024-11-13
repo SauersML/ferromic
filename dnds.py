@@ -148,8 +148,8 @@ def parse_codeml_output(outfile_dir):
             with open(rst_path, 'r') as f:
                 content = f.read()
                 
-            # Regex to extract dN, dS, omega from RST
-            # Adjust the regex based on actual RST file format
+            # Example regex to extract dN, dS, omega from RST
+            # This needs to be adjusted based on the actual RST file format
             pairwise_match = re.search(
                 r'(\d+)\s+(\d+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)',
                 content
@@ -193,7 +193,8 @@ def parse_codeml_output(outfile_dir):
         with open(results_path, 'r') as f:
             content = f.read()
             
-        # Regex to extract dN, dS, omega from results.txt
+        # Example regex to extract dN, dS, omega from results.txt
+        # This needs to be adjusted based on the actual results.txt file format
         ml_match = re.search(
             r't=\s*[\d\.]+\s+S=\s*([\d\.]+)\s+N=\s*([\d\.]+)\s+dN/dS=\s*([\d\.]+)\s+dN\s*=\s*([\d\.]+)\s+dS\s*=\s*([\d\.]+)',
             content
@@ -228,11 +229,15 @@ def parse_codeml_output(outfile_dir):
             lines = f.readlines()
             if len(lines) >= 3:
                 results['dN'] = float(lines[2].strip().split()[-1])
+            else:
+                logging.warning("2ML.dN file does not have enough lines.")
         
         with open(os.path.join(outfile_dir, '2ML.dS'), 'r') as f:
             lines = f.readlines()
             if len(lines) >= 3:
                 results['dS'] = float(lines[2].strip().split()[-1])
+            else:
+                logging.warning("2ML.dS file does not have enough lines.")
         
         # Compute omega if dS is not zero
         if results['dS'] and results['dS'] != 0:
@@ -628,6 +633,140 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
     except ValueError as ve:
         logging.error(f"Test 2 Wilcoxon Signed-Rank test could not be performed: {ve}")
 
+def check_existing_results(output_dir):
+    """
+    Perform preliminary analysis using existing results files before running PAML.
+    Groups are determined by the 'Group' column directly from haplotype_stats.csv.
+    Performs analyses with different filtering criteria for dN/dS values.
+    """
+    logging.info("\n=== Performing Preliminary Analysis of Existing Results ===")
+    
+    # Find all existing haplotype statistics files
+    haplotype_files = glob.glob(os.path.join(output_dir, '*_haplotype_stats.csv'))
+    if not haplotype_files:
+        logging.info("No existing results found for preliminary analysis.")
+        return None
+        
+    logging.info(f"Found {len(haplotype_files)} existing result files")
+    
+    # Combine all haplotype stats
+    haplotype_dfs = []
+    for f in haplotype_files:
+        try:
+            df = pd.read_csv(f)
+            haplotype_dfs.append(df)
+            logging.info(f"Loaded {f}: {len(df)} entries")
+        except Exception as e:
+            logging.error(f"Error reading {f}: {e}")
+            continue
+    
+    if not haplotype_dfs:
+        logging.warning("No valid data found in existing files")
+        return None
+        
+    # Combine all data
+    combined_df = pd.concat(haplotype_dfs, ignore_index=True)
+    logging.info(f"Combined data contains {len(combined_df)} entries")
+    
+    # Log 'Mean_dNdS' statistics
+    if 'Mean_dNdS' in combined_df.columns:
+        logging.info(f"'Mean_dNdS' Summary:")
+        logging.info(combined_df['Mean_dNdS'].describe())
+    else:
+        logging.error("Combined DataFrame does not contain 'Mean_dNdS' column.")
+        return None
+    
+    # Verify 'Group' column exists and has valid values
+    if 'Group' not in combined_df.columns:
+        logging.error("Combined DataFrame does not contain 'Group' column.")
+        return None
+    
+    # Ensure 'Group' column is of integer type
+    combined_df['Group'] = pd.to_numeric(combined_df['Group'], errors='coerce')
+    
+    # Check unique groups present
+    unique_groups = combined_df['Group'].dropna().unique()
+    logging.info(f"Unique groups in combined data: {unique_groups}")
+    
+    if not set(unique_groups).intersection({0,1}):
+        logging.error("No valid groups (0 or 1) found in the 'Group' column.")
+        return None
+    
+    # Create filtered datasets
+    df_no_neg1 = combined_df[combined_df['Mean_dNdS'] != -1].copy()
+    df_no_99 = combined_df[combined_df['Mean_dNdS'] != 99].copy()
+    df_no_both = combined_df[(combined_df['Mean_dNdS'] != -1) & (combined_df['Mean_dNdS'] != 99)].copy()
+
+    datasets = {
+        "All data": combined_df,
+        "Excluding dN/dS = -1": df_no_neg1,
+        "Excluding dN/dS = 99": df_no_99,
+        "Excluding both -1 and 99": df_no_both
+    }
+
+    # Analyze each dataset
+    for dataset_name, df in datasets.items():
+        logging.info(f"\n=== Analysis for {dataset_name} ===")
+        logging.info(f"Dataset contains {len(df)} entries")
+
+        # Calculate statistics per group
+        stats = {}
+        for group in [0, 1]:
+            group_data = df[df['Group'] == group]['Mean_dNdS'].dropna()
+            if not group_data.empty:
+                stats[group] = {
+                    'n': len(group_data),
+                    'mean': group_data.mean(),
+                    'median': group_data.median(),
+                    'std': group_data.std()
+                }
+                logging.info(f"\nGroup {group}:")
+                logging.info(f"  Sample size: {stats[group]['n']}")
+                logging.info(f"  Mean dN/dS: {stats[group]['mean']:.4f}")
+                logging.info(f"  Median dN/dS: {stats[group]['median']:.4f}")
+                logging.info(f"  Standard deviation: {stats[group]['std']:.4f}")
+            else:
+                logging.info(f"\nGroup {group}: No valid Mean_dNdS values.")
+
+        # Perform statistical tests if both groups present
+        if 0 in stats and 1 in stats:
+            group0_data = df[df['Group'] == 0]['Mean_dNdS'].dropna()
+            group1_data = df[df['Group'] == 1]['Mean_dNdS'].dropna()
+            
+            try:
+                stat, p_value = mannwhitneyu(group0_data, group1_data, alternative='two-sided')
+                logging.info("\nMann-Whitney U test:")
+                logging.info(f"  Statistic = {stat}")
+                logging.info(f"  p-value = {p_value:.6f}")
+                
+                # Calculate effect size
+                effect_size = abs(stats[0]['mean'] - stats[1]['mean']) / np.sqrt((stats[0]['std']**2 + stats[1]['std']**2) / 2)
+                logging.info(f"  Effect size (Cohen's d) = {effect_size:.4f}")
+                
+                # Interpret results
+                if p_value < 0.05:
+                    logging.info("  Result: Significant difference between groups")
+                else:
+                    logging.info("  Result: No significant difference between groups")
+                
+                # Add additional descriptive statistics
+                logging.info("\nAdditional Statistics:")
+                logging.info(f"  Group 0 range: {group0_data.min():.4f} to {group0_data.max():.4f}")
+                logging.info(f"  Group 1 range: {group1_data.min():.4f} to {group1_data.max():.4f}")
+                
+                # Calculate and log quartiles
+                g0_quartiles = group0_data.quantile([0.25, 0.75])
+                g1_quartiles = group1_data.quantile([0.25, 0.75])
+                logging.info(f"  Group 0 quartiles (Q1, Q3): {g0_quartiles[0.25]:.4f}, {g0_quartiles[0.75]:.4f}")
+                logging.info(f"  Group 1 quartiles (Q1, Q3): {g1_quartiles[0.25]:.4f}, {g1_quartiles[0.75]:.4f}")
+                
+            except Exception as e:
+                logging.error(f"Error performing statistical tests: {str(e)}")
+
+    # Ensure that haplotype_df_filtered is always defined before returning
+    haplotype_df_filtered = haplotype_df_filtered if 'haplotype_df_filtered' in locals() else None
+    return haplotype_df_filtered
+
 # ----------------------------
 # 4. Parsing PHYLIP Files
 # ----------------------------
@@ -834,7 +973,8 @@ def check_existing_results(output_dir):
             except Exception as e:
                 logging.error(f"Error performing statistical tests: {str(e)}")
 
-    # Return the combined DataFrame for potential further use
+    # Ensure that haplotype_df_filtered is always defined before returning
+    haplotype_df_filtered = haplotype_df_filtered if 'haplotype_df_filtered' in locals() else None
     return haplotype_df_filtered
 
 # ----------------------------
