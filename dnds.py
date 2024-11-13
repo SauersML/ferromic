@@ -42,6 +42,8 @@ def validate_sequence(seq):
         return None
         
     return seq
+
+
 def parse_phy_file(filepath):
     """Parse PHYLIP file with codon-aligned sequences."""
     logging.info(f"\n=== Starting to parse file: {filepath} ===")
@@ -66,19 +68,19 @@ def parse_phy_file(filepath):
             # Look for the pattern _0 or _1 followed by sequence
             match = re.match(r'^(.+?_[01])\s*(.*)$', line.strip())
             if match:
-                full_name = match.group(1)  # Full name with group suffix (e.g., EAS_CHB_NA_0)
-                truncated_name = full_name[:10].ljust(10)  # Truncate to first 10 characters for PHYLIP format
+                full_name = match.group(1)  # Full name with group suffix (e.g., AFR_MSL_HG03486_1)
+                truncated_name = full_name[:8].ljust(8) + full_name[-2:]  # Preserve suffix
                 sequence = match.group(2)  # Sequence part after the name
             else:
                 # Fallback to existing parsing if pattern not found
                 parts = line.strip().split()
                 if len(parts) >= 2:
                     full_name = parts[0]
-                    truncated_name = full_name[:10].ljust(10)
+                    truncated_name = full_name[:8].ljust(8) + full_name[-2:]  # Preserve suffix
                     sequence = ''.join(parts[1:])
                 else:
                     full_name = line[:10].strip()
-                    truncated_name = full_name.ljust(10)
+                    truncated_name = full_name[:8].ljust(8) + full_name[-2:]  # Preserve suffix
                     sequence = line[10:].replace(" ", "")
                 
             # Validate and clean sequence
@@ -89,6 +91,7 @@ def parse_phy_file(filepath):
 
     logging.info(f"Successfully parsed {len(sequences)} sequences")
     return sequences
+
 
 def extract_group_from_sample(sample_name):
     """Extract the group from a sample name, expecting it to end with _0 or _1."""
