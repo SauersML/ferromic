@@ -15,10 +15,9 @@ import threading
 import time
 from collections import defaultdict
 from datetime import datetime
-from scipy.stats import mannwhitneyu
+from scipy.stats import mannwhitneyu, wilcoxon
 import logging
 import hashlib
-
 
 # Set up logging
 logging.basicConfig(
@@ -183,6 +182,10 @@ def run_codeml(ctl_path, working_dir, codeml_path):
             
         return True
         
+    except subprocess.TimeoutExpired:
+        logging.error("CODEML execution timed out.")
+        process.kill()
+        return False
     except Exception as e:
         logging.error(f"ERROR running CODEML: {str(e)}")
         return False
@@ -213,8 +216,9 @@ def parse_codeml_output(outfile_dir):
                 content = f.read()
                 
             # Look for the pairwise comparison section
-            pairwise_match = re.search(r'seq seq\s+N\s+S\s+dN\s+dS\s+dN/dS.*?\n.*?(\d+)\s+(\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)', 
-                                     content, re.DOTALL)
+            pairwise_match = re.search(
+                r'seq seq\s+N\s+S\s+dN\s+dS\s+dN/dS.*?\n.*?(\d+)\s+(\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)', 
+                content, re.DOTALL)
             
             if pairwise_match:
                 # Extract values from RST
@@ -255,8 +259,9 @@ def parse_codeml_output(outfile_dir):
             content = f.read()
             
         # Look for the ML output section near the end
-        ml_match = re.search(r't=\s*(\d+\.\d+)\s+S=\s*(\d+\.\d+)\s+N=\s*(\d+\.\d+)\s+dN/dS=\s*(\d+\.\d+)\s+dN\s*=\s*(\d+\.\d+)\s+dS\s*=\s*(\d+\.\d+)', 
-                           content)
+        ml_match = re.search(
+            r't=\s*(\d+\.\d+)\s+S=\s*(\d+\.\d+)\s+N=\s*(\d+\.\d+)\s+dN/dS=\s*(\d+\.\d+)\s+dN\s*=\s*(\d+\.\d+)\s+dS\s*=\s*(\d+\.\d+)', 
+            content)
         
         if ml_match:
             results['S'] = float(ml_match.group(2))
@@ -306,18 +311,18 @@ def parse_codeml_output(outfile_dir):
     return (None, None, None)
 
 def get_safe_process_count():
-   total_cpus = multiprocessing.cpu_count()
-   mem = psutil.virtual_memory()
-   
-   # Conservative allocation - use at most 25% of CPUs and 4GB per process
-   safe_cpu_count = max(1, min(total_cpus // 4, 8))
-   mem_based_count = max(1, int(mem.available / (4 * 1024 * 1024 * 1024)))
-   
-   process_count = min(safe_cpu_count, mem_based_count)
-   print(f"\nSystem resources: {total_cpus} CPUs, {mem.available/1024/1024/1024:.1f}GB free RAM")
-   print(f"Using {process_count} parallel processes")
-   
-   return process_count
+    total_cpus = multiprocessing.cpu_count()
+    mem = psutil.virtual_memory()
+    
+    # Conservative allocation - use at most 25% of CPUs and 4GB per process
+    safe_cpu_count = max(1, min(total_cpus // 4, 8))
+    mem_based_count = max(1, int(mem.available / (4 * 1024 * 1024 * 1024)))
+    
+    process_count = min(safe_cpu_count, mem_based_count)
+    print(f"\nSystem resources: {total_cpus} CPUs, {mem.available/1024/1024/1024:.1f}GB free RAM")
+    print(f"Using {process_count} parallel processes")
+    
+    return process_count
 
 def process_pair(args):
     """Process a single pair of sequences, skipping PAML if sequences are identical. 
@@ -348,7 +353,8 @@ def process_pair(args):
         )
     
     # Create unique working directory for non-identical sequences
-    working_dir = os.path.join(temp_dir, f'temp_group{group1}_{seq1_name}_{seq2_name}_{int(time.time())}')
+    timestamp = int(time.time())
+    working_dir = os.path.join(temp_dir, f'temp_group{group1}_{seq1_name}_{seq2_name}_{timestamp}')
     os.makedirs(working_dir, exist_ok=True)
 
     # Write PHYLIP file - exactly 10 chars with two spaces after name
@@ -372,7 +378,6 @@ def process_pair(args):
 
     # Parse results and return the 8-tuple
     if success:
-        results_file = os.path.join(working_dir, 'results.txt')
         dn, ds, omega = parse_codeml_output(working_dir)
         return (
             seq1_name.strip(),
@@ -427,7 +432,7 @@ def process_phy_file(args):
     # Parse sequences and validate
     sequences = parse_phy_file(phy_file)
     if not sequences:
-        print(f"ERROR: No sequences found in {phy_file}")
+        print(f"ERROR: No valid sequences found in {phy_file}")
         return None
        
     # Get sample names and assign groups
@@ -440,9 +445,9 @@ def process_phy_file(args):
         sample_groups[sample] = sample_group if sample_group is not None else group
     print(f"Assigned {len(sample_groups)} samples to groups")
 
-    # CRITICAL CHANGE: Separate sequences by group and only generate within-group pairs
-    group0_names = [name for name, group in sample_groups.items() if group == 0]
-    group1_names = [name for name, group in sample_groups.items() if group == 1]
+    # Separate sequences by group and only generate within-group pairs
+    group0_names = [name for name, grp in sample_groups.items() if grp == 0]
+    group1_names = [name for name, grp in sample_groups.items() if grp == 1]
     
     print(f"Found {len(group0_names)} sequences in group 0")
     print(f"Found {len(group1_names)} sequences in group 1")
@@ -462,7 +467,8 @@ def process_phy_file(args):
         return None
 
     # Create temporary directory
-    temp_dir = os.path.join(output_dir, f'temp_{cds_id}_{datetime.now().strftime("%Y%m%d%H%M%S%f")}')
+    timestamp = int(time.time())
+    temp_dir = os.path.join(output_dir, f'temp_{cds_id}_{timestamp}')
     os.makedirs(temp_dir, exist_ok=True)
 
     # Prepare multiprocessing arguments
@@ -474,6 +480,7 @@ def process_phy_file(args):
     results = []
     with multiprocessing.Pool(processes=num_processes) as pool:
         completed = 0
+        total_steps = max(1, total_pairs // 20)
         for result in pool.imap_unordered(process_pair, pool_args):
             if result is not None:  # Only append valid results
                 # Verify groups match before adding result
@@ -482,7 +489,7 @@ def process_phy_file(args):
                 else:
                     print(f"WARNING: Discarding result with mismatched groups: {result[0]} (Group {result[2]}) vs {result[1]} (Group {result[3]})")
             completed += 1
-            if completed % max(1, total_pairs // 20) == 0:
+            if completed % total_steps == 0 or completed == total_pairs:
                 print(f"Progress: {completed}/{total_pairs} pairs ({(completed/total_pairs)*100:.1f}%)")
                 print(f"Current runtime: {time.time() - start_time:.1f}s")
 
@@ -515,6 +522,9 @@ def process_phy_file(args):
         sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
         # Convert omega to numeric, handling "N/A" and other non-numeric values
         omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
+        
+        # Exclude invalid omega values (-1 and 99)
+        omega_values = omega_values[~omega_values.isin([-1, 99])]
         
         # Calculate statistics
         mean_omega = omega_values.mean()
@@ -554,9 +564,19 @@ def process_phy_file(args):
     
     return haplotype_output_csv
 
-
-
-def perform_statistical_tests(haplotype_stats_files):
+def perform_statistical_tests(haplotype_stats_files, output_dir):
+    """
+    Perform statistical tests:
+    1. Existing Mann-Whitney U test on all mean dN/dS between groups.
+    2. Test 1: Unpaired Mann-Whitney U test on sample-wise mean dN/dS between groups.
+    3. Test 2: Paired Wilcoxon Signed-Rank test on CDS-wise mean dN/dS between groups.
+    
+    Excludes dN/dS values of -1 and 99 from all tests.
+    
+    Parameters:
+    - haplotype_stats_files: List of file paths to haplotype_stats.csv files.
+    - output_dir: Directory where output files are stored.
+    """
     # Combine all haplotype stats into a single DataFrame
     haplotype_dfs = []
     for f in haplotype_stats_files:
@@ -572,31 +592,76 @@ def perform_statistical_tests(haplotype_stats_files):
 
     haplotype_df = pd.concat(haplotype_dfs, ignore_index=True)
 
-    # Save final CSV
-    haplotype_df.to_csv('final_haplotype_stats.csv', index=False)
+    # Exclude dN/dS values of -1 and 99
+    haplotype_df = haplotype_df[~haplotype_df['Mean_dNdS'].isin([-1, 99])]
+    print(f"\nTotal haplotype entries after exclusion: {len(haplotype_df)}")
 
-    # Compare group 0 and group 1 across all CDS
-    group0 = haplotype_df[haplotype_df['Group'] == 0]['Mean_dNdS'].dropna()
-    group1 = haplotype_df[haplotype_df['Group'] == 1]['Mean_dNdS'].dropna()
+    # Save filtered DataFrame
+    filtered_haplotype_csv = os.path.join(output_dir, 'filtered_haplotype_stats.csv')
+    haplotype_df.to_csv(filtered_haplotype_csv, index=False)
+    print(f"Saved filtered haplotype statistics to: {filtered_haplotype_csv}")
 
-    print("\nOverall Statistical Analysis:")
-    if not group0.empty:
-        print(f"Group 0 - Mean dN/dS: {group0.mean():.4f}, Median: {group0.median():.4f}, SD: {group0.std():.4f}")
-    if not group1.empty:
-        print(f"Group 1 - Mean dN/dS: {group1.mean():.4f}, Median: {group1.median():.4f}, SD: {group1.std():.4f}")
+    # -------------------
+    # Existing Test:
+    # Mann-Whitney U test on all mean dN/dS between groups
+    # -------------------
+    group0_overall = haplotype_df[haplotype_df['Group'] == 0]['Mean_dNdS'].dropna()
+    group1_overall = haplotype_df[haplotype_df['Group'] == 1]['Mean_dNdS'].dropna()
 
-    # Perform statistical test (e.g., Mann-Whitney U test)
-    if not group0.empty and not group1.empty:
-        stat, p_value = mannwhitneyu(group0, group1, alternative='two-sided')
-        print(f"Mann-Whitney U test: Statistic={stat}, p-value={p_value}")
-
+    print("\n=== Existing Mann-Whitney U Test on All Mean dN/dS ===")
+    if not group0_overall.empty and not group1_overall.empty:
+        stat, p_value = mannwhitneyu(group0_overall, group1_overall, alternative='two-sided')
+        print(f"Overall Mann-Whitney U test: Statistic={stat}, p-value={p_value:.6f}")
         if p_value < 0.05:
-            print("There is a significant difference between Group 0 and Group 1.")
+            print("Result: Significant difference between Group 0 and Group 1.")
         else:
-            print("There is no significant difference between Group 0 and Group 1.")
+            print("Result: No significant difference between Group 0 and Group 1.")
     else:
-        print("Not enough data to perform statistical tests.")
+        print("Not enough data for the overall Mann-Whitney U test.")
 
+    # -------------------
+    # Test 1: Unpaired Mann-Whitney U Test on Sample-wise Mean dN/dS
+    # -------------------
+    print("\n=== Test 1: Unpaired Mann-Whitney U Test on Sample-wise Mean dN/dS ===")
+    if not group0_overall.empty and not group1_overall.empty:
+        stat1, p_value1 = mannwhitneyu(group0_overall, group1_overall, alternative='two-sided')
+        print(f"Test 1 Mann-Whitney U test: Statistic={stat1}, p-value={p_value1:.6f}")
+        if p_value1 < 0.05:
+            print("Result: Significant difference between Group 0 and Group 1 (Test 1).")
+        else:
+            print("Result: No significant difference between Group 0 and Group 1 (Test 1).")
+    else:
+        print("Not enough data for Test 1.")
+
+    # -------------------
+    # Test 2: Paired Wilcoxon Signed-Rank Test on CDS-wise Mean dN/dS
+    # -------------------
+    print("\n=== Test 2: Paired Wilcoxon Signed-Rank Test on CDS-wise Mean dN/dS ===")
+
+    # Extract per-CDS mean dN/dS for each group
+    cds_group_means = haplotype_df.groupby(['CDS', 'Group'])['Mean_dNdS'].mean().unstack()
+
+    # Drop CDSs that do not have both groups
+    cds_paired = cds_group_means.dropna(subset=[0,1])
+
+    if len(cds_paired) < 1:
+        print("No paired CDS data available for Test 2.")
+        return
+
+    # Extract paired group0 and group1 mean dN/dS
+    group0_cds = cds_paired[0]
+    group1_cds = cds_paired[1]
+
+    # Perform Wilcoxon Signed-Rank Test
+    try:
+        stat2, p_value2 = wilcoxon(group0_cds, group1_cds)
+        print(f"Test 2 Wilcoxon Signed-Rank test: Statistic={stat2}, p-value={p_value2:.6f}")
+        if p_value2 < 0.05:
+            print("Result: Significant difference between Group 0 and Group 1 (Test 2).")
+        else:
+            print("Result: No significant difference between Group 0 and Group 1 (Test 2).")
+    except ValueError as ve:
+        print(f"Test 2 Wilcoxon Signed-Rank test could not be performed: {ve}")
 
 def check_existing_results(output_dir):
     """
@@ -714,9 +779,6 @@ def check_existing_results(output_dir):
     # Return the complete dataset
     return combined_df
 
-
-
-
 def main():
     parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
@@ -773,7 +835,7 @@ def main():
 
     # Perform final statistical tests
     if haplotype_stats_files:
-        perform_statistical_tests(haplotype_stats_files)
+        perform_statistical_tests(haplotype_stats_files, args.output_dir)
     else:
         print("No haplotype statistics files generated.")
 
