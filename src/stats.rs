@@ -2152,7 +2152,7 @@ fn parse_gff_file(
     })?;
     let reader = BufReader::new(file);
     
-    let mut gene_cdss: HashMap<String, Vec<(i64, i64, i32)>> = HashMap::new();
+    let mut gene_cdss: HashMap<String, Vec<(i64, i64, i64)>> = HashMap::new();
     let mut skipped_lines = 0;
     let mut processed_lines = 0;
     let mut genes_found = HashSet::new();
@@ -2208,10 +2208,11 @@ fn parse_gff_file(
             continue;
         }
 
-        let frame: i32 = fields[7].parse().unwrap_or_else(|_| {
+        let frame: i64 = fields[7].parse().unwrap_or_else(|_| {
             eprintln!("Warning: Invalid frame at line {}, using 0", line_num + 1);
             0
         });
+
 
         // Parse attributes (key-value pairs are separated by semicolons)
         let attributes = fields[8];
@@ -2276,24 +2277,19 @@ fn parse_gff_file(
     let mut genes_processed = 0;
     let mut warning_count = 0;
 
-    for (gene_name, mut segments) in gene_cdss {
-        genes_processed += 1;
-        if genes_processed % 100 == 0 {
-            println!("Processed {} genes...", genes_processed);
-        }
 
+    for (gene_name, mut segments) in gene_cdss {
         // Sort segments by position
         segments.sort_by_key(|&(start, _, _)| start);
         
         println!("\nProcessing gene: {}", gene_name);
         println!("Found {} CDS segments", segments.len());
         
-        // Validate and adjust segments based on frame
-        let mut valid_segments = Vec::new();
-        let mut prev_end = None;
-        let mut running_frame = 0;
+        let mut valid_segments: Vec<(i64, i64)> = Vec::new();
+        let mut prev_end: Option<i64> = None;
+        let mut running_frame: i64 = 0;
         
-        for (idx, (start, end, frame)) in segments.iter().enumerate() {
+        for (idx, &(start, end, frame)) in segments.iter().enumerate() {
             println!("  Segment {}: {}-{} (frame {})", idx + 1, start, end, frame);
             
             if let Some(previous_end) = prev_end {
@@ -2301,25 +2297,27 @@ fn parse_gff_file(
                     let gap_size = start - previous_end - 1;
                     println!("    Gap found: {} bp", gap_size);
                     
-                    let prev_len = previous_end - valid_segments.last().unwrap().0 + 1;
-                    running_frame = (running_frame + prev_len as i32) % 3;
-                    
-                    let start_adj = start + ((3 - running_frame) % 3);
-                    if start_adj <= *end {
-                        valid_segments.push((start_adj, *end));
-                        println!("    Adjusted start to {} to maintain frame", start_adj);
-                    } else {
-                        println!("    {} Warning: Segment too short after frame adjustment", "!".yellow());
-                        warning_count += 1;
+                    if let Some(&(prev_start, _)) = valid_segments.last() {
+                        let prev_len = previous_end - prev_start + 1;
+                        running_frame = (running_frame + prev_len) % 3;
+                        
+                        let start_adj = start + ((3 - running_frame) % 3);
+                        if start_adj <= end {
+                            valid_segments.push((start_adj, end));
+                            println!("    Adjusted start to {} to maintain frame", start_adj);
+                        } else {
+                            println!("    {} Warning: Segment too short after frame adjustment", "!".yellow());
+                            warning_count += 1;
+                        }
                     }
                 } else {
-                    valid_segments.push((*start, *end));
+                    valid_segments.push((start, end));
                 }
             } else {
                 let start_adj = start + frame;
-                if start_adj <= *end {
-                    valid_segments.push((start_adj, *end));
-                    if *frame != 0 {
+                if start_adj <= end {
+                    valid_segments.push((start_adj, end));
+                    if frame != 0 {
                         println!("    First segment adjusted by frame {}", frame);
                     }
                 } else {
@@ -2327,7 +2325,7 @@ fn parse_gff_file(
                     warning_count += 1;
                 }
             }
-            prev_end = Some(*end);
+            prev_end = Some(end);
         }
 
         if valid_segments.is_empty() {
@@ -2335,8 +2333,17 @@ fn parse_gff_file(
             continue;
         }
 
-        let min_start = valid_segments.iter().map(|&(s, _)| s).min().unwrap();
-        let max_end = valid_segments.iter().map(|&(_, e)| e).max().unwrap();
+        // Get min/max across all valid segments
+        let min_start = valid_segments.iter()
+            .map(|&(s, _)| s)
+            .min()
+            .unwrap();
+        let max_end = valid_segments.iter()
+            .map(|&(_, e)| e)
+            .max()
+            .unwrap();
+
+        // Adjust length to be multiple of 3
         let mut length = max_end - min_start + 1;
         let remainder = length % 3;
         
