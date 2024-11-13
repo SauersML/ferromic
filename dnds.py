@@ -17,6 +17,8 @@ from collections import defaultdict
 from datetime import datetime
 from scipy.stats import mannwhitneyu
 import logging
+import hashlib
+
 
 # Set up logging
 logging.basicConfig(
@@ -43,6 +45,12 @@ def validate_sequence(seq):
         
     return seq
 
+def generate_checksum(full_name):
+    """Generate a 3-character checksum from the full sample name."""
+    # Use MD5 hash and take the first 3 hexadecimal characters
+    hash_object = hashlib.md5(full_name.encode())
+    checksum = hash_object.hexdigest()[:3].upper()
+    return checksum
 
 def parse_phy_file(filepath):
     """Parse PHYLIP file with codon-aligned sequences and enforce sample naming convention."""
