@@ -55,7 +55,7 @@ def parse_phy_file(filepath):
         if len(lines) < 1:
             logging.error(f"Empty .phy file {filepath}")
             return sequences
-                
+
         # Attempt to parse the header; if it fails, assume no header
         try:
             num_sequences, seq_length = map(int, lines[0].strip().split())
@@ -69,34 +69,38 @@ def parse_phy_file(filepath):
             # Look for the pattern _0 or _1 followed by sequence
             match = re.match(r'^(.+?_[01])\s*(.*)$', line.strip())
             if match:
-                name = match.group(1)[:10].ljust(10)  # Get everything up to and including _0/_1
-                sequence = match.group(2)  # Get everything after _0/_1
+                full_name = match.group(1)  # Full name with group suffix (e.g., EAS_CHB_NA_0)
+                truncated_name = full_name[:10].ljust(10)  # Truncate to first 10 characters for PHYLIP format
+                sequence = match.group(2)  # Sequence part after the name
             else:
                 # Fallback to existing parsing if pattern not found
                 parts = line.strip().split()
                 if len(parts) >= 2:
-                    name = parts[0][:10].ljust(10)
+                    full_name = parts[0]
+                    truncated_name = full_name[:10].ljust(10)
                     sequence = ''.join(parts[1:])
                 else:
-                    name = line[:10].strip().ljust(10)
+                    full_name = line[:10].strip()
+                    truncated_name = full_name.ljust(10)
                     sequence = line[10:].replace(" ", "")
                 
             # Validate and clean sequence
             sequence = validate_sequence(sequence)
             if sequence is not None:
-                sequences[name] = sequence
-                logging.info(f"Parsed sequence: {name} (length: {len(sequence)})")
+                sequences[truncated_name] = sequence
+                logging.info(f"Parsed sequence: {full_name} (length: {len(sequence)})")
 
     logging.info(f"Successfully parsed {len(sequences)} sequences")
     return sequences
 
 def extract_group_from_sample(sample_name):
-   match = re.search(r'_(\d+)$', sample_name)
-   if match:
-       return int(match.group(1))
-   else:
-       print(f"WARNING: Could not extract group from sample name: {sample_name}")
-       return None
+    """Extract the group from a sample name, expecting it to end with _0 or _1."""
+    match = re.search(r'_(\d+)$', sample_name)
+    if match:
+        return int(match.group(1))
+    else:
+        logging.warning(f"Could not extract group from sample name: {sample_name}")
+        return None
 
 def create_paml_ctl(seqfile, outfile, working_dir):
     """Create CODEML control file with proper spacing."""
