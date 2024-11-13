@@ -46,7 +46,7 @@ def validate_sequence(seq):
     return seq
 
 def parse_phy_file(filepath):
-    """Parse PHYLIP file ensuring codon-aligned sequences."""
+    """Parse PHYLIP file with codon-aligned sequences."""
     logging.info(f"\n=== Starting to parse file: {filepath} ===")
     sequences = {}
     
@@ -55,22 +55,21 @@ def parse_phy_file(filepath):
         if len(lines) < 1:
             logging.error(f"Empty .phy file {filepath}")
             return sequences
-            
+                
+        # Attempt to parse the header; if it fails, assume no header
         try:
             num_sequences, seq_length = map(int, lines[0].strip().split())
             logging.info(f"File contains {num_sequences} sequences of length {seq_length}")
+            sequence_lines = [line.strip() for line in lines[1:] if line.strip()]
         except ValueError:
-            logging.error(f"Failed parsing header of {filepath}")
-            return sequences
-
-        # Filter empty lines and process sequences
-        sequence_lines = [line.strip() for line in lines[1:] if line.strip()]
-        
+            logging.warning(f"Failed parsing header of {filepath}. Assuming no header.")
+            sequence_lines = [line.strip() for line in lines if line.strip()]
+    
         for line in sequence_lines:
             # Look for the pattern _0 or _1 followed by sequence
-            match = re.match(r'(.+?_[01])(.*)', line.strip())
+            match = re.match(r'^(.+?_[01])\s*(.*)$', line.strip())
             if match:
-                name = match.group(1).ljust(10)  # Get everything up to and including _0/_1
+                name = match.group(1)[:10].ljust(10)  # Get everything up to and including _0/_1
                 sequence = match.group(2)  # Get everything after _0/_1
             else:
                 # Fallback to existing parsing if pattern not found
