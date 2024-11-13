@@ -669,7 +669,7 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
 def check_existing_results(output_dir):
     """
     Perform preliminary analysis using existing results files before running PAML.
-    Groups are determined by sample name suffixes (_0 or _1).
+    Groups are determined by the 'Group' column directly from haplotype_stats.csv.
     Performs analyses with different filtering criteria for dN/dS values.
     """
     logging.info("\n=== Performing Preliminary Analysis of Existing Results ===")
@@ -701,18 +701,22 @@ def check_existing_results(output_dir):
     combined_df = pd.concat(haplotype_dfs, ignore_index=True)
     logging.info(f"Combined data contains {len(combined_df)} entries")
     
-    # Analyze sample naming patterns
-    # Strip sample names to remove any trailing spaces
-    combined_df['Haplotype'] = combined_df['Haplotype'].str.strip()
-    sample_pattern = combined_df['Haplotype'].str.extract(r'(.+?)_([01])$')
-    if not sample_pattern.empty:
-        logging.info("\nSample naming patterns:")
-        for prefix in sample_pattern[0].unique():
-            if pd.notna(prefix):
-                group0_count = len(combined_df[combined_df['Haplotype'].str.match(f'^{re.escape(prefix)}_0$')])
-                group1_count = len(combined_df[combined_df['Haplotype'].str.match(f'^{re.escape(prefix)}_1$')])
-                logging.info(f"Prefix '{prefix}': {group0_count} in group 0, {group1_count} in group 1")
-
+    # Verify 'Group' column exists and has valid values
+    if 'Group' not in combined_df.columns:
+        logging.error("Combined DataFrame does not contain 'Group' column.")
+        return None
+    
+    # Ensure 'Group' column is of integer type
+    combined_df['Group'] = pd.to_numeric(combined_df['Group'], errors='coerce')
+    
+    # Check unique groups present
+    unique_groups = combined_df['Group'].dropna().unique()
+    logging.info(f"Unique groups in combined data: {unique_groups}")
+    
+    if not set(unique_groups).intersection({0,1}):
+        logging.error("No valid groups (0 or 1) found in the 'Group' column.")
+        return None
+    
     # Create filtered datasets
     df_no_neg1 = combined_df[combined_df['Mean_dNdS'] != -1].copy()
     df_no_99 = combined_df[combined_df['Mean_dNdS'] != 99].copy()
