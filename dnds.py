@@ -64,25 +64,25 @@ def extract_group_from_sample(sample_name):
 def create_paml_ctl(seqfile, outfile, working_dir):
     """Generate the CODEML control file with necessary parameters."""
     ctl_content = f"""      seqfile = {seqfile}
-              treefile = tree.txt
-              outfile = {outfile}
-              noisy = 0
-              verbose = 0
-              runmode = -2
-              seqtype = 1
-              CodonFreq = 2
-              model = 0
-              NSsites = 0
-              icode = 0
-              fix_kappa = 0
-              kappa = 2.0
-              fix_omega = 0
-              omega = 1.0
-              fix_alpha = 1
-              alpha = 0.0
-              getSE = 0
-              RateAncestor = 0
-              cleandata = 1
+                  treefile = tree.txt
+                  outfile = {outfile}
+                  noisy = 0
+                  verbose = 0
+                  runmode = -2
+                  seqtype = 1
+                  CodonFreq = 2
+                  model = 0
+                  NSsites = 0
+                  icode = 0
+                  fix_kappa = 0
+                  kappa = 2.0
+                  fix_omega = 0
+                  omega = 1.0
+                  fix_alpha = 1
+                  alpha = 0.0
+                  getSE = 0
+                  RateAncestor = 0
+                  cleandata = 1
     """
     ctl_path = os.path.join(working_dir, 'codeml.ctl')
     with open(ctl_path, 'w') as f:
@@ -365,7 +365,6 @@ def process_phy_file(args):
         return None
 
     sample_names = list(sequences.keys())
-    sample_names = [s.strip() for s in sample_names]
     logging.info(f"Found {len(sample_names)} samples")
 
     sample_groups = {}
@@ -409,7 +408,7 @@ def process_phy_file(args):
                     results.append(result)
                 else:
                     logging.warning(f"Mismatched groups for pair: {result[0]} vs {result[1]}")
-    
+
     logging.info(f"All pairs processed for {phy_file}")
     
     try:
@@ -508,10 +507,10 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
 
     combined_df['Group'] = pd.to_numeric(combined_df['Group'], errors='coerce')
     unique_groups = combined_df['Group'].dropna().unique()
-    logging.info(f"Unique groups found: {unique_groups}")
+    logging.info(f"Groups present in data: {unique_groups}")
 
     if not set(unique_groups).intersection({0,1}):
-        logging.error("No valid groups (0 or 1) present in the 'Group' column.")
+        logging.error("No valid groups (0 or 1) found in 'Group' column.")
         return
 
     df_no_neg1 = combined_df[combined_df['Mean_dNdS'] != -1].copy()
@@ -526,9 +525,9 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
     }
 
     for dataset_name, df in datasets.items():
-        logging.info(f"Analysis for {dataset_name}")
-        logging.info(f"Dataset contains {len(df)} entries")
-
+        logging.info(f"Analyzing dataset: {dataset_name}")
+        logging.info(f"Entries: {len(df)}")
+        
         stats = {}
         for group in [0, 1]:
             group_data = df[df['Group'] == group]['Mean_dNdS'].dropna()
@@ -541,7 +540,7 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
                 }
                 logging.info(f"Group {group}: n={stats[group]['n']}, Mean={stats[group]['mean']:.4f}, Median={stats[group]['median']:.4f}, SD={stats[group]['std']:.4f}")
             else:
-                logging.info(f"Group {group}: No valid Mean_dNdS values.")
+                logging.info(f"Group {group}: No valid Mean_dNdS values")
 
         if 0 in stats and 1 in stats:
             group0_data = df[df['Group'] == 0]['Mean_dNdS'].dropna()
@@ -555,23 +554,27 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
                 logging.info(f"Effect size (Cohen's d): {effect_size:.4f}")
                 
                 if p_value < 0.05:
-                    logging.info("Significant difference between Group 0 and Group 1.")
+                    logging.info("Significant difference between Group 0 and Group 1")
                 else:
-                    logging.info("No significant difference between Group 0 and Group 1.")
+                    logging.info("No significant difference between Group 0 and Group 1")
                 
-                logging.info(f"Group 0 range: {group0_data.min():.4f} to {group0_data.max():.4f}")
-                logging.info(f"Group 1 range: {group1_data.min():.4f} to {group1_data.max():.4f}")
+                min_g0 = group0_data.min()
+                max_g0 = group0_data.max()
+                min_g1 = group1_data.min()
+                max_g1 = group1_data.max()
+                logging.info(f"Group 0 range: {min_g0:.4f} to {max_g0:.4f}")
+                logging.info(f"Group 1 range: {min_g1:.4f} to {max_g1:.4f}")
                 
                 g0_quartiles = group0_data.quantile([0.25, 0.75])
                 g1_quartiles = group1_data.quantile([0.25, 0.75])
-                logging.info(f"Group 0 quartiles (Q1, Q3): {g0_quartiles[0.25]:.4f}, {g0_quartiles[0.75]:.4f}")
-                logging.info(f"Group 1 quartiles (Q1, Q3): {g1_quartiles[0.25]:.4f}, {g1_quartiles[0.75]:.4f}")
+                logging.info(f"Group 0 quartiles: Q1={g0_quartiles[0.25]:.4f}, Q3={g0_quartiles[0.75]:.4f}")
+                logging.info(f"Group 1 quartiles: Q1={g1_quartiles[0.25]:.4f}, Q3={g1_quartiles[0.75]:.4f}")
                 
             except Exception as e:
-                logging.error(f"Error performing Mann-Whitney U test: {e}")
+                logging.error(f"Error during Mann-Whitney U test: {e}")
 
 def parse_phy_file(filepath):
-    """Extract and validate sequences from a PHYLIP file, formatting sample names appropriately."""
+    """Extract and validate sequences from a PHYLIP file, keeping sample names unchanged."""
     logging.info(f"Parsing PHYLIP file: {filepath}")
     sequences = {}
     
@@ -603,19 +606,10 @@ def parse_phy_file(filepath):
                     full_name = line[:10].strip()
                     sequence = line[10:].replace(" ", "")
             
-            checksum = generate_checksum(full_name)
-            first_three = full_name[:3]
-            group_suffix_match = re.search(r'_(0|1)$', full_name)
-            group_suffix = group_suffix_match.group(1) if group_suffix_match else '0'
-            
-            new_sample_name = f"{first_three}_{checksum}_{group_suffix}"
-            new_sample_name = new_sample_name[:10].ljust(10)
-            new_sample_name = new_sample_name.strip()
-            
             validated_seq = validate_sequence(sequence)
             if validated_seq:
-                sequences[new_sample_name] = validated_seq
-                logging.info(f"Added sequence: {new_sample_name} (Length: {len(validated_seq)})")
+                sequences[full_name] = validated_seq
+                logging.info(f"Added sequence: {full_name} (Length: {len(validated_seq)})")
 
     logging.info(f"Total valid sequences parsed: {len(sequences)}")
     return sequences
@@ -694,7 +688,7 @@ def check_existing_results(output_dir):
                 logging.info(f"Group {group}: n={stats[group]['n']}, Mean={stats[group]['mean']:.4f}, Median={stats[group]['median']:.4f}, SD={stats[group]['std']:.4f}")
             else:
                 logging.info(f"Group {group}: No valid Mean_dNdS values")
-        
+
         if 0 in stats and 1 in stats:
             group0_data = df[df['Group'] == 0]['Mean_dNdS'].dropna()
             group1_data = df[df['Group'] == 1]['Mean_dNdS'].dropna()
