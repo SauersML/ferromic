@@ -45,7 +45,7 @@ def validate_sequence(seq):
 
 
 def parse_phy_file(filepath):
-    """Parse PHYLIP file with codon-aligned sequences."""
+    """Parse PHYLIP file with codon-aligned sequences and enforce sample naming convention."""
     logging.info(f"\n=== Starting to parse file: {filepath} ===")
     sequences = {}
     
@@ -68,30 +68,49 @@ def parse_phy_file(filepath):
             # Look for the pattern _0 or _1 followed by sequence
             match = re.match(r'^(.+?_[01])\s*(.*)$', line.strip())
             if match:
-                full_name = match.group(1)  # Full name with group suffix (e.g., AFR_MSL_HG03486_1)
-                truncated_name = full_name[:8].ljust(8) + full_name[-2:]  # Preserve suffix
-                sequence = match.group(2)  # Sequence part after the name
+                full_name = match.group(1)  # e.g., AFR_MSL_HG03486_1
+                sequence = match.group(2)    # Sequence part after the name
             else:
                 # Fallback to existing parsing if pattern not found
                 parts = line.strip().split()
                 if len(parts) >= 2:
                     full_name = parts[0]
-                    truncated_name = full_name[:8].ljust(8) + full_name[-2:]  # Preserve suffix
                     sequence = ''.join(parts[1:])
                 else:
                     full_name = line[:10].strip()
-                    truncated_name = full_name[:8].ljust(8) + full_name[-2:]  # Preserve suffix
                     sequence = line[10:].replace(" ", "")
-                
+            
+            # Generate checksum
+            checksum = generate_checksum(full_name)
+            
+            # Extract first three characters
+            first_three = full_name[:3]
+            
+            # Extract group suffix (_0 or _1)
+            group_suffix_match = re.search(r'_(0|1)$', full_name)
+            if group_suffix_match:
+                group_suffix = group_suffix_match.group(1)
+            else:
+                logging.warning(f"Sample name does not end with _0 or _1: {full_name}")
+                group_suffix = '0'  # Default to group 0 if not found
+            
+            # Construct the new sample name: XXX_YYY_S
+            new_sample_name = f"{first_three}_{checksum}_{group_suffix}"
+            
+            # Pad to 10 characters if necessary
+            if len(new_sample_name) < 10:
+                new_sample_name = new_sample_name.ljust(10)
+            else:
+                new_sample_name = new_sample_name[:10]
+            
             # Validate and clean sequence
             sequence = validate_sequence(sequence)
             if sequence is not None:
-                sequences[truncated_name] = sequence
-                logging.info(f"Parsed sequence: {full_name} (length: {len(sequence)})")
+                sequences[new_sample_name] = sequence
+                logging.info(f"Parsed sequence: {full_name} as {new_sample_name} (length: {len(sequence)})")
 
     logging.info(f"Successfully parsed {len(sequences)} sequences")
     return sequences
-
 
 def extract_group_from_sample(sample_name):
     """Extract the group from a sample name, expecting it to end with _0 or _1."""
