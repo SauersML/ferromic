@@ -401,6 +401,7 @@ def process_phy_file(args):
     logging.info(f"Processing {total_pairs} pairs using {num_processes} processes")
     
     results = []
+    completed_pairs = 0
     with multiprocessing.Pool(processes=num_processes) as pool:
         for result in pool.imap_unordered(process_pair, pool_args):
             if result is not None:
@@ -408,6 +409,9 @@ def process_phy_file(args):
                     results.append(result)
                 else:
                     logging.warning(f"Mismatched groups for pair: {result[0]} vs {result[1]}")
+            completed_pairs += 1
+            progress = (completed_pairs / total_pairs) * 100
+            logging.info(f"Progress: {completed_pairs}/{total_pairs} pairs processed ({progress:.2f}%)")
 
     logging.info(f"All pairs processed for {phy_file}")
     
@@ -424,12 +428,12 @@ def process_phy_file(args):
         logging.error("Cross-group comparisons detected in results")
         logging.error(cross_group)
         return None
-    
+
     df.to_csv(output_csv, index=False)
     logging.info(f"Pairwise results saved to {output_csv}")
 
     haplotype_stats = []
-    for sample in sample_names:
+    for idx, sample in enumerate(sample_names, 1):
        sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
        omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
        # Filter out special values before averaging
@@ -454,7 +458,7 @@ def process_phy_file(args):
         
         mean_str = f"{mean_omega:.4f}" if pd.notna(mean_omega) else "N/A"
         median_str = f"{median_omega:.4f}" if pd.notna(median_omega) else "N/A"
-        logging.info(f"Sample {sample} (Group {sample_groups[sample]}): mean dN/dS = {mean_str}, median = {median_str}, comparisons = {len(omega_values)}")
+        logging.info(f"Sample {idx}/{len(sample_names)}: {sample} (Group {sample_groups[sample]}): mean dN/dS = {mean_str}, median = {median_str}, comparisons = {len(omega_values)}")
 
     haplotype_df = pd.DataFrame(haplotype_stats)
     haplotype_df.to_csv(haplotype_output_csv, index=False)
@@ -481,11 +485,13 @@ def process_phy_file(args):
 def perform_statistical_tests(haplotype_stats_files, output_dir):
     """Conduct statistical analyses on the aggregated haplotype statistics."""
     haplotype_dfs = []
-    for f in haplotype_stats_files:
+    total_files = len(haplotype_stats_files)
+    logging.info(f"Starting statistical tests on {total_files} haplotype stats files")
+    for idx, f in enumerate(haplotype_stats_files, 1):
         try:
             df = pd.read_csv(f)
             haplotype_dfs.append(df)
-            logging.info(f"Loaded haplotype stats from {f}")
+            logging.info(f"Loaded haplotype stats from {f} ({idx}/{total_files})")
         except Exception as e:
             logging.error(f"Failed to read {f}: {e}")
 
@@ -850,10 +856,14 @@ def main():
        work_args.append((phy_file, args.output_dir, args.codeml_path, total_files, idx))
 
    new_haplotype_files = []
-   for args_tuple in work_args:
+   total_new_files = len(work_args)
+   for idx, args_tuple in enumerate(work_args, 1):
+       logging.info(f"Processing file {idx}/{total_new_files}: {args_tuple[0]}")
        result = process_phy_file(args_tuple)
        if result:
            new_haplotype_files.append(result)
+       progress = (idx / total_new_files) * 100
+       logging.info(f"Overall Progress: {idx}/{total_new_files} files processed ({progress:.2f}%)")
 
    if new_haplotype_files:
        # Run both analyses on updated full dataset
