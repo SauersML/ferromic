@@ -511,24 +511,22 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
         logging.error("No valid groups (0 or 1) found in 'Group' column.")
         return
 
-    df_no_neg1 = combined_df[combined_df['Mean_dNdS'] != -1].copy()
-    df_no_99 = combined_df[combined_df['Mean_dNdS'] != 99].copy()
-    df_no_both = combined_df[(combined_df['Mean_dNdS'] != -1) & (combined_df['Mean_dNdS'] != 99)].copy()
-
+    # Create filtered datasets
     datasets = {
         "All data": combined_df,
-        "Excluding dN/dS = -1": df_no_neg1,
-        "Excluding dN/dS = 99": df_no_99,
-        "Excluding both -1 and 99": df_no_both
+        "Excluding dN/dS = -1": combined_df[combined_df['Mean_dNdS'] != -1].copy(),
+        "Excluding dN/dS = 99": combined_df[combined_df['Mean_dNdS'] != 99].copy(),
+        "Excluding both -1 and 99": combined_df[(combined_df['Mean_dNdS'] != -1) & 
+                                              (combined_df['Mean_dNdS'] != 99)].copy()
     }
 
-    for dataset_name, df in datasets.items():
+    for dataset_name, dataset_df in datasets.items():
         logging.info(f"Analyzing dataset: {dataset_name}")
-        logging.info(f"Entries: {len(df)}")
+        logging.info(f"Entries: {len(dataset_df)}")
         
         stats = {}
         for group in [0, 1]:
-            group_data = df[df['Group'] == group]['Mean_dNdS'].dropna()
+            group_data = dataset_df[dataset_df['Group'] == group]['Mean_dNdS'].dropna()
             if not group_data.empty:
                 stats[group] = {
                     'n': len(group_data),
@@ -536,19 +534,24 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
                     'median': group_data.median(),
                     'std': group_data.std()
                 }
-                logging.info(f"Group {group}: n={stats[group]['n']}, Mean={stats[group]['mean']:.4f}, Median={stats[group]['median']:.4f}, SD={stats[group]['std']:.4f}")
+                logging.info(f"Group {group}: n={stats[group]['n']}, Mean={stats[group]['mean']:.4f}, "
+                           f"Median={stats[group]['median']:.4f}, SD={stats[group]['std']:.4f}")
             else:
                 logging.info(f"Group {group}: No valid Mean_dNdS values")
 
         if 0 in stats and 1 in stats:
-            group0_data = df[df['Group'] == 0]['Mean_dNdS'].dropna()
-            group1_data = df[df['Group'] == 1]['Mean_dNdS'].dropna()
+            # Get the data for both groups outside the try block
+            group0_data = dataset_df[dataset_df['Group'] == 0]['Mean_dNdS'].dropna()
+            group1_data = dataset_df[dataset_df['Group'] == 1]['Mean_dNdS'].dropna()
             
             try:
+                # Mann-Whitney U test
                 stat, p_value = mannwhitneyu(group0_data, group1_data, alternative='two-sided')
                 logging.info(f"Mann-Whitney U test: Statistic={stat}, p-value={p_value:.6f}")
                 
-                effect_size = abs(stats[0]['mean'] - stats[1]['mean']) / np.sqrt((stats[0]['std']**2 + stats[1]['std']**2) / 2)
+                # Effect size calculation
+                effect_size = abs(stats[0]['mean'] - stats[1]['mean']) / \
+                            np.sqrt((stats[0]['std']**2 + stats[1]['std']**2) / 2)
                 logging.info(f"Effect size (Cohen's d): {effect_size:.4f}")
                 
                 if p_value < 0.05:
@@ -556,6 +559,7 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
                 else:
                     logging.info("No significant difference between Group 0 and Group 1")
                 
+                # Range information
                 min_g0 = group0_data.min()
                 max_g0 = group0_data.max()
                 min_g1 = group1_data.min()
@@ -563,13 +567,24 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
                 logging.info(f"Group 0 range: {min_g0:.4f} to {max_g0:.4f}")
                 logging.info(f"Group 1 range: {min_g1:.4f} to {max_g1:.4f}")
                 
+                # Quartile information
                 g0_quartiles = group0_data.quantile([0.25, 0.75])
                 g1_quartiles = group1_data.quantile([0.25, 0.75])
                 logging.info(f"Group 0 quartiles: Q1={g0_quartiles[0.25]:.4f}, Q3={g0_quartiles[0.75]:.4f}")
                 logging.info(f"Group 1 quartiles: Q1={g1_quartiles[0.25]:.4f}, Q3={g1_quartiles[0.75]:.4f}")
                 
+                # Perform Levene's test for variance homogeneity
+                if len(group0_data) >= 2 and len(group1_data) >= 2:  # Levene's test requires at least 2 values per group
+                    levene_stat, levene_p = levene(group0_data, group1_data)
+                    logging.info(f"Levene's test for variance homogeneity: "
+                               f"Statistic={levene_stat:.4f}, p-value={levene_p:.6f}")
+                else:
+                    logging.warning("Insufficient data for Levene's test")
+                
             except Exception as e:
-                logging.error(f"Error during Mann-Whitney U test: {e}")
+                logging.error(f"Error during statistical tests: {e}")
+
+    return combined_df
 
 def parse_phy_file(filepath):
     """Extract and validate sequences from a PHYLIP file, keeping sample names unchanged."""
