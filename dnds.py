@@ -20,12 +20,12 @@ from scipy.stats import mannwhitneyu, wilcoxon
 # ----------------------------
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler('dnds_analysis.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
+   level=logging.INFO,
+   format='%(asctime)s [%(levelname)s] %(message)s',
+   handlers=[
+       logging.FileHandler('dnds_analysis.log'),
+       logging.StreamHandler(sys.stdout)
+   ]
 )
 
 # ----------------------------
@@ -614,166 +614,230 @@ def parse_phy_file(filepath):
     logging.info(f"Total valid sequences parsed: {len(sequences)}")
     return sequences
 
+
+
 # ----------------------------
-# Statistical Analysis
+# Statistical Analysis Functions
 # ----------------------------
+
+def analyze_cds_dataset(df, cds_id, dataset_name):
+   """Analyze a single CDS dataset with proper statistical treatment."""
+   results = {
+       'cds_id': cds_id,
+       'dataset': dataset_name,
+       'group0_stats': None,
+       'group1_stats': None,
+       'comparison_stats': None
+   }
+
+   # Analyze each group separately
+   for group in [0, 1]:
+       group_data = df[df['Group'] == group]['Mean_dNdS'].dropna()
+       if len(group_data) >= 3:  # Minimum sample size requirement
+           stats = {
+               'n': len(group_data),
+               'mean': group_data.mean(),
+               'median': group_data.median(),
+               'std': group_data.std(),
+               'q1': group_data.quantile(0.25),
+               'q3': group_data.quantile(0.75),
+               'min': group_data.min(),
+               'max': group_data.max()
+           }
+           if group == 0:
+               results['group0_stats'] = stats
+           else:
+               results['group1_stats'] = stats
+
+   # Only perform comparison if both groups have sufficient data
+   if results['group0_stats'] and results['group1_stats']:
+       group0_data = df[df['Group'] == 0]['Mean_dNdS'].dropna()
+       group1_data = df[df['Group'] == 1]['Mean_dNdS'].dropna()
+       
+       try:
+           stat, p_value = mannwhitneyu(group0_data, group1_data, alternative='two-sided')
+           effect_size = abs(results['group0_stats']['mean'] - results['group1_stats']['mean']) / \
+                        np.sqrt((results['group0_stats']['std']**2 + results['group1_stats']['std']**2) / 2)
+           
+           results['comparison_stats'] = {
+               'mw_statistic': stat,
+               'p_value': p_value,
+               'effect_size': effect_size
+           }
+       except Exception as e:
+           logging.error(f"Statistical comparison failed for CDS {cds_id}: {e}")
+   
+   return results
+
+def perform_statistical_analysis(haplotype_stats_files, output_dir):
+   """Perform statistical analysis properly organized by CDS."""
+   # First, organize data by CDS
+   cds_data = {}
+   for filepath in haplotype_stats_files:
+       try:
+           df = pd.read_csv(filepath)
+           cds_id = df['CDS'].iloc[0]  # Each file should contain data for one CDS
+           cds_data[cds_id] = df
+       except Exception as e:
+           logging.error(f"Error reading {filepath}: {e}")
+           continue
+   
+   logging.info(f"Found {len(cds_data)} unique CDS regions to analyze")
+   
+   # Analysis results for each CDS
+   all_results = []
+   
+   for cds_id, df in cds_data.items():
+       logging.info(f"\nAnalyzing CDS: {cds_id}")
+       
+       # Create different datasets for exclusion criteria
+       datasets = {
+           "All data": df,
+           "Excluding dN/dS = -1": df[df['Mean_dNdS'] != -1].copy(),
+           "Excluding dN/dS = 99": df[df['Mean_dNdS'] != 99].copy(),
+           "Excluding both -1 and 99": df[(df['Mean_dNdS'] != -1) & 
+                                        (df['Mean_dNdS'] != 99)].copy()
+       }
+       
+       # Analyze each dataset
+       for dataset_name, dataset_df in datasets.items():
+           results = analyze_cds_dataset(dataset_df, cds_id, dataset_name)
+           if results['comparison_stats']:  # Only add if comparison was possible
+               all_results.append(results)
+               
+               # Log detailed results for this CDS and dataset
+               logging.info(f"\nResults for {cds_id} - {dataset_name}:")
+               if results['group0_stats']:
+                   g0 = results['group0_stats']
+                   logging.info(f"Group 0: n={g0['n']}, Mean={g0['mean']:.4f}, "
+                              f"Median={g0['median']:.4f}, SD={g0['std']:.4f}")
+                   logging.info(f"Group 0 range: {g0['min']:.4f} to {g0['max']:.4f}")
+                   logging.info(f"Group 0 quartiles: Q1={g0['q1']:.4f}, Q3={g0['q3']:.4f}")
+               
+               if results['group1_stats']:
+                   g1 = results['group1_stats']
+                   logging.info(f"Group 1: n={g1['n']}, Mean={g1['mean']:.4f}, "
+                              f"Median={g1['median']:.4f}, SD={g1['std']:.4f}")
+                   logging.info(f"Group 1 range: {g1['min']:.4f} to {g1['max']:.4f}")
+                   logging.info(f"Group 1 quartiles: Q1={g1['q1']:.4f}, Q3={g1['q3']:.4f}")
+               
+               if results['comparison_stats']:
+                   comp = results['comparison_stats']
+                   logging.info(f"Mann-Whitney U test: Statistic={comp['mw_statistic']}, "
+                              f"p-value={comp['p_value']:.6f}")
+                   logging.info(f"Effect size (Cohen's d): {comp['effect_size']:.4f}")
+   
+       
+       # Save comprehensive results
+       results_df = pd.DataFrame([
+           {
+               'CDS': r['cds_id'],
+               'Dataset': r['dataset'],
+               'Group0_n': r['group0_stats']['n'],
+               'Group0_mean': r['group0_stats']['mean'],
+               'Group0_median': r['group0_stats']['median'],
+               'Group0_sd': r['group0_stats']['std'],
+               'Group1_n': r['group1_stats']['n'],
+               'Group1_mean': r['group1_stats']['mean'],
+               'Group1_median': r['group1_stats']['median'],
+               'Group1_sd': r['group1_stats']['std'],
+               'MWU_statistic': r['comparison_stats']['mw_statistic'],
+               'p_value': r['comparison_stats']['p_value'],
+               'significant': r['comparison_stats']['p_value'] < 0.05,
+               'effect_size': r['comparison_stats']['effect_size']
+           }
+           for r in all_results
+       ])
+       
+       # Save results
+       output_path = os.path.join(output_dir, 'comprehensive_cds_analysis.csv')
+       results_df.to_csv(output_path, index=False)
+       logging.info(f"\nSaved comprehensive analysis to {output_path}")
+       
+       # Summary statistics
+       logging.info(f"\nAnalysis Summary:")
+       logging.info(f"Total CDS analyzed: {len(cds_data)}")
+       
+       return results_df
+   return None
 
 def check_existing_results(output_dir):
-    """Analyze existing haplotype statistics files to determine if analysis can proceed."""
-    logging.info("Analyzing existing haplotype statistics files")
-    
-    haplotype_files = glob.glob(os.path.join(output_dir, '*_haplotype_stats.csv'))
-    if not haplotype_files:
-        logging.info("No existing haplotype statistics files found")
-        return None
-        
-    logging.info(f"Found {len(haplotype_files)} haplotype statistics files")
-    
-    haplotype_dfs = []
-    for f in haplotype_files:
-        try:
-            df = pd.read_csv(f)
-            haplotype_dfs.append(df)
-            logging.info(f"Loaded {f} with {len(df)} entries")
-        except Exception as e:
-            logging.error(f"Failed to load {f}: {e}")
-    
-    if not haplotype_dfs:
-        logging.warning("No valid data in haplotype statistics files")
-        return None
-        
-    combined_df = pd.concat(haplotype_dfs, ignore_index=True)
-    logging.info(f"Combined haplotype data has {len(combined_df)} entries")
-    
-    logging.info("Mean_dNdS Summary:")
-    logging.info(combined_df['Mean_dNdS'].describe())
-    
-    if 'Group' not in combined_df.columns:
-        logging.error("Combined DataFrame lacks 'Group' column")
-        return None
-    
-    combined_df['Group'] = pd.to_numeric(combined_df['Group'], errors='coerce')
-    unique_groups = combined_df['Group'].dropna().unique()
-    logging.info(f"Groups present in data: {unique_groups}")
-    
-    if not set(unique_groups).intersection({0,1}):
-        logging.error("No valid groups (0 or 1) found in 'Group' column")
-        return None
-    
-    df_no_neg1 = combined_df[combined_df['Mean_dNdS'] != -1].copy()
-    df_no_99 = combined_df[combined_df['Mean_dNdS'] != 99].copy()
-    df_no_both = combined_df[(combined_df['Mean_dNdS'] != -1) & (combined_df['Mean_dNdS'] != 99)].copy()
+   """Check existing results and determine if analysis should proceed."""
+   comprehensive_results = os.path.join(output_dir, 'comprehensive_cds_analysis.csv')
+   
+   if os.path.exists(comprehensive_results):
+       try:
+           results_df = pd.read_csv(comprehensive_results)
+           logging.info(f"Found existing comprehensive analysis with {len(results_df)} entries")
+           return results_df
+       except Exception as e:
+           logging.error(f"Error reading existing results: {e}")
+   
+   return None
 
-    datasets = {
-        "All data": combined_df,
-        "Excluding dN/dS = -1": df_no_neg1,
-        "Excluding dN/dS = 99": df_no_99,
-        "Excluding both -1 and 99": df_no_both
-    }
-
-    for dataset_name, df in datasets.items():
-        logging.info(f"Analyzing dataset: {dataset_name}")
-        logging.info(f"Entries: {len(df)}")
-        
-        stats = {}
-        for group in [0, 1]:
-            group_data = df[df['Group'] == group]['Mean_dNdS'].dropna()
-            if not group_data.empty:
-                stats[group] = {
-                    'n': len(group_data),
-                    'mean': group_data.mean(),
-                    'median': group_data.median(),
-                    'std': group_data.std()
-                }
-                logging.info(f"Group {group}: n={stats[group]['n']}, Mean={stats[group]['mean']:.4f}, Median={stats[group]['median']:.4f}, SD={stats[group]['std']:.4f}")
-            else:
-                logging.info(f"Group {group}: No valid Mean_dNdS values")
-
-        if 0 in stats and 1 in stats:
-            group0_data = df[df['Group'] == 0]['Mean_dNdS'].dropna()
-            group1_data = df[df['Group'] == 1]['Mean_dNdS'].dropna()
-            
-            try:
-                stat, p_value = mannwhitneyu(group0_data, group1_data, alternative='two-sided')
-                logging.info(f"Mann-Whitney U test: Statistic={stat}, p-value={p_value:.6f}")
-                
-                effect_size = abs(stats[0]['mean'] - stats[1]['mean']) / np.sqrt((stats[0]['std']**2 + stats[1]['std']**2) / 2)
-                logging.info(f"Effect size (Cohen's d): {effect_size:.4f}")
-                
-                if p_value < 0.05:
-                    logging.info("Significant difference between Group 0 and Group 1")
-                else:
-                    logging.info("No significant difference between Group 0 and Group 1")
-                
-                min_g0 = group0_data.min()
-                max_g0 = group0_data.max()
-                min_g1 = group1_data.min()
-                max_g1 = group1_data.max()
-                logging.info(f"Group 0 range: {min_g0:.4f} to {max_g0:.4f}")
-                logging.info(f"Group 1 range: {min_g1:.4f} to {max_g1:.4f}")
-                
-                g0_quartiles = group0_data.quantile([0.25, 0.75])
-                g1_quartiles = group1_data.quantile([0.25, 0.75])
-                logging.info(f"Group 0 quartiles: Q1={g0_quartiles[0.25]:.4f}, Q3={g0_quartiles[0.75]:.4f}")
-                logging.info(f"Group 1 quartiles: Q1={g1_quartiles[0.25]:.4f}, Q3={g1_quartiles[0.75]:.4f}")
-                
-            except Exception as e:
-                logging.error(f"Error during Mann-Whitney U test: {e}")
+# ----------------------------
+# Main Function
+# ----------------------------
 
 def main():
-    """Main function to orchestrate the dN/dS analysis."""
-    parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
-    parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
-    parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
-    parser.add_argument('--codeml_path', type=str, default='../../../../paml/bin/codeml', help='Path to codeml executable.')
-    args = parser.parse_args()
+   """Main function to orchestrate the dN/dS analysis."""
+   parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
+   parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
+   parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
+   parser.add_argument('--codeml_path', type=str, default='../../../../paml/bin/codeml', help='Path to codeml executable.')
+   args = parser.parse_args()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+   os.makedirs(args.output_dir, exist_ok=True)
 
-    logging.info("Starting preliminary analysis of existing results")
-    prelim_results = check_existing_results(args.output_dir)
-    if prelim_results is not None:
-        logging.info("Preliminary analysis completed. Continuing with remaining files")
-    else:
-        logging.info("No existing results found. Proceeding with full analysis")
+   logging.info("Starting preliminary analysis of existing results")
+   existing_results = check_existing_results(args.output_dir)
+   if existing_results is not None:
+       logging.info("Comprehensive analysis already exists. Checking for new files.")
+   else:
+       logging.info("No existing comprehensive analysis found. Will perform full analysis.")
 
-    phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
-    total_files = len(phy_files)
-    logging.info(f"Found {total_files} PHYLIP files to process")
+   phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
+   total_files = len(phy_files)
+   logging.info(f"Found {total_files} PHYLIP files to process")
 
-    files_to_process = []
-    for phy_file in phy_files:
-        phy_filename = os.path.basename(phy_file)
-        match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
-        if match:
-            cds_id = f'chr{match.group(2)}_start{match.group(3)}_end{match.group(4)}'
-        else:
-            cds_id = phy_filename.replace('.phy', '')
-        output_csv = os.path.join(args.output_dir, f'{cds_id}.csv')
-        haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
-        if not os.path.exists(output_csv) or not os.path.exists(haplotype_output_csv):
-            files_to_process.append(phy_file)
-        else:
-            logging.info(f"Skipping {phy_file} - output files already exist")
+   # Process new files
+   files_to_process = []
+   for phy_file in phy_files:
+       phy_filename = os.path.basename(phy_file)
+       match = re.match(r'group_(\d+)_chr_(.+)_start_(\d+)_end_(\d+)\.phy', phy_filename)
+       if match:
+           cds_id = f'chr{match.group(2)}_start{match.group(3)}_end{match.group(4)}'
+       else:
+           cds_id = phy_filename.replace('.phy', '')
+           
+       output_csv = os.path.join(args.output_dir, f'{cds_id}.csv')
+       haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
+       
+       if not os.path.exists(output_csv) or not os.path.exists(haplotype_output_csv):
+           files_to_process.append(phy_file)
+       else:
+           logging.info(f"Skipping {phy_file} - output files already exist")
 
-    if not files_to_process:
-        logging.info("All PHYLIP files have been processed. Exiting.")
-        return
+   if not files_to_process:
+       logging.info("All PHYLIP files have been processed. Performing final analysis.")
+   else:
+       logging.info(f"Processing {len(files_to_process)} new files")
+       work_args = []
+       for idx, phy_file in enumerate(files_to_process, 1):
+           work_args.append((phy_file, args.output_dir, args.codeml_path, total_files, idx))
 
-    work_args = []
-    for idx, phy_file in enumerate(files_to_process, 1):
-        work_args.append((phy_file, args.output_dir, args.codeml_path, total_files, idx))
+       haplotype_stats_files = []
+       for args_tuple in work_args:
+           result = process_phy_file(args_tuple)
+           if result:
+               haplotype_stats_files.append(result)
 
-    haplotype_stats_files = []
-    for args_tuple in work_args:
-        result = process_phy_file(args_tuple)
-        if result:
-            haplotype_stats_files.append(result)
-
-    if haplotype_stats_files:
-        perform_statistical_tests(haplotype_stats_files, args.output_dir)
-    else:
-        logging.warning("No haplotype statistics files were generated")
+   # Get all haplotype stats files for final analysis
+   all_haplotype_files = glob.glob(os.path.join(args.output_dir, '*_haplotype_stats.csv'))
+   if all_haplotype_files:
+       perform_statistical_analysis(all_haplotype_files, args.output_dir)
+   else:
+       logging.warning("No haplotype statistics files were found for analysis")
 
 if __name__ == '__main__':
-    main()
+   main()
