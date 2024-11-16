@@ -431,9 +431,7 @@ def process_phy_file(args):
     haplotype_stats = []
     for sample in sample_names:
         sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
-        omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
-        omega_values = omega_values[~omega_values.isin([-1, 99])]
-        
+        omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')        
         if not omega_values.empty:
             mean_omega = omega_values.mean()
             median_omega = omega_values.median()
@@ -726,6 +724,11 @@ def perform_statistical_analysis(haplotype_stats_files, output_dir):
                    logging.info(f"Mann-Whitney U test: Statistic={comp['mw_statistic']}, "
                               f"p-value={comp['p_value']:.6f}")
                    logging.info(f"Effect size (Cohen's d): {comp['effect_size']:.4f}")
+               
+               if dataset_name == "Excluding both -1 and 99":
+                  from scipy.stats import levene  # for variance test
+                  stat, p_value = levene(group0_data, group1_data)
+                  logging.info(f"Levene's test for variance: Statistic={stat}, p-value={p_value:.6f}")
    
        
        # Save comprehensive results
