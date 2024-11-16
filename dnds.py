@@ -790,17 +790,20 @@ def main():
    os.makedirs(args.output_dir, exist_ok=True)
 
    logging.info("Starting preliminary analysis of existing results")
-   existing_results = check_existing_results(args.output_dir)
-   if existing_results is not None:
-       logging.info("Comprehensive analysis already exists. Checking for new files.")
+   existing_haplotype_files = glob.glob(os.path.join(args.output_dir, '*_haplotype_stats.csv'))
+   if existing_haplotype_files:
+       logging.info(f"Found {len(existing_haplotype_files)} existing haplotype files")
+       perform_statistical_tests(existing_haplotype_files, args.output_dir)
+       perform_statistical_analysis(existing_haplotype_files, args.output_dir)
+       logging.info("Preliminary analysis completed. Continuing with remaining files")
    else:
-       logging.info("No existing comprehensive analysis found. Will perform full analysis.")
+       logging.info("No existing results found. Proceeding with full analysis")
 
    phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
    total_files = len(phy_files)
    logging.info(f"Found {total_files} PHYLIP files to process")
 
-   # Process new files
+   # Check which files need processing
    files_to_process = []
    for phy_file in phy_files:
        phy_filename = os.path.basename(phy_file)
@@ -809,35 +812,37 @@ def main():
            cds_id = f'chr{match.group(2)}_start{match.group(3)}_end{match.group(4)}'
        else:
            cds_id = phy_filename.replace('.phy', '')
-           
        output_csv = os.path.join(args.output_dir, f'{cds_id}.csv')
        haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
-       
        if not os.path.exists(output_csv) or not os.path.exists(haplotype_output_csv):
            files_to_process.append(phy_file)
        else:
            logging.info(f"Skipping {phy_file} - output files already exist")
 
    if not files_to_process:
-       logging.info("All PHYLIP files have been processed. Performing final analysis.")
-   else:
-       logging.info(f"Processing {len(files_to_process)} new files")
-       work_args = []
-       for idx, phy_file in enumerate(files_to_process, 1):
-           work_args.append((phy_file, args.output_dir, args.codeml_path, total_files, idx))
+       logging.info("All PHYLIP files have been processed. Analysis complete.")
+       return
 
-       haplotype_stats_files = []
-       for args_tuple in work_args:
-           result = process_phy_file(args_tuple)
-           if result:
-               haplotype_stats_files.append(result)
+   # Process new files
+   logging.info(f"Processing {len(files_to_process)} new files")
+   work_args = []
+   for idx, phy_file in enumerate(files_to_process, 1):
+       work_args.append((phy_file, args.output_dir, args.codeml_path, total_files, idx))
 
-   # Get all haplotype stats files for final analysis
-   all_haplotype_files = glob.glob(os.path.join(args.output_dir, '*_haplotype_stats.csv'))
-   if all_haplotype_files:
+   new_haplotype_files = []
+   for args_tuple in work_args:
+       result = process_phy_file(args_tuple)
+       if result:
+           new_haplotype_files.append(result)
+
+   if new_haplotype_files:
+       # Run both analyses on updated full dataset
+       all_haplotype_files = glob.glob(os.path.join(args.output_dir, '*_haplotype_stats.csv'))
+       perform_statistical_tests(all_haplotype_files, args.output_dir)
        perform_statistical_analysis(all_haplotype_files, args.output_dir)
+       logging.info("Final analysis completed")
    else:
-       logging.warning("No haplotype statistics files were found for analysis")
+       logging.warning("No new haplotype statistics files were generated")
 
 if __name__ == '__main__':
    main()
