@@ -4,6 +4,7 @@ import glob
 import subprocess
 import multiprocessing
 import psutil
+from itertools import combinations
 import pandas as pd
 import numpy as np
 import shutil
@@ -12,10 +13,8 @@ import argparse
 import time
 import logging
 import hashlib
-from scipy.stats import mannwhitneyu, wilcoxon, levene
+from scipy.stats import mannwhitneyu, levene
 import matplotlib.pyplot as plt
-from itertools import combinations
-from tqdm import tqdm
 import pickle
 
 # ----------------------------
@@ -23,12 +22,12 @@ import pickle
 # ----------------------------
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler('dnds_analysis.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
+   level=logging.INFO,
+   format='%(asctime)s [%(levelname)s] %(message)s',
+   handlers=[
+       logging.FileHandler('dnds_analysis.log'),
+       logging.StreamHandler(sys.stdout)
+   ]
 )
 
 # ----------------------------
@@ -79,7 +78,7 @@ def extract_group_from_sample(sample_name):
         logging.warning(f"Group suffix not found in sample name: {sample_name}")
         return None
 
-def create_codeml_ctl(seqfile, outfile, working_dir):
+def create_paml_ctl(seqfile, outfile, working_dir):
     """
     Create the CODEML control file with necessary parameters.
 
@@ -165,39 +164,28 @@ def parse_codeml_output(outfile_dir):
         logging.error(f"CODEML output file not found: {rst_file}")
         return None, None, None
 
-    with open(rst_file, 'r') as f:
-        content = f.read()
+    try:
+        with open(rst_file, 'r') as f:
+            content = f.read()
 
-    pattern = re.compile(r'dN & dS for each branch')
-    if pattern.search(content):
-        try:
-            omega_pattern = re.compile(r'\(dN/dS\) =\s+([\d\.]+)')
-            omega_match = omega_pattern.search(content)
-            if omega_match:
-                omega = float(omega_match.group(1))
-            else:
-                omega = np.nan
-
-            dn_pattern = re.compile(r'dN =\s+([\d\.]+)')
-            dn_match = dn_pattern.search(content)
-            if dn_match:
-                dn = float(dn_match.group(1))
-            else:
-                dn = np.nan
-
-            ds_pattern = re.compile(r'dS =\s+([\d\.]+)')
-            ds_match = ds_pattern.search(content)
-            if ds_match:
-                ds = float(ds_match.group(1))
-            else:
-                ds = np.nan
-
-            return dn, ds, omega
-        except Exception as e:
-            logging.error(f"Error parsing CODEML output: {e}")
+        # Pattern to extract dN, dS, and omega
+        pattern = re.compile(
+            r"t=\s*[\d\.]+\s+S=\s*([\d\.]+)\s+N=\s*([\d\.]+)\s+"
+            r"dN/dS=\s*([\d\.]+)\s+dN=\s*([\d\.]+)\s+dS=\s*([\d\.]+)"
+        )
+        match = pattern.search(content)
+        if match:
+            S = float(match.group(1))
+            N = float(match.group(2))
+            omega = float(match.group(3))
+            dN = float(match.group(4))
+            dS = float(match.group(5))
+            return dN, dS, omega
+        else:
+            logging.error("Could not parse CODEML output.")
             return None, None, None
-    else:
-        logging.error("Pattern not found in CODEML output.")
+    except Exception as e:
+        logging.error(f"Error parsing CODEML output: {e}")
         return None, None, None
 
 def get_safe_process_count():
@@ -343,7 +331,7 @@ def process_pair(args):
         f.write(f"({seq1_name},{seq2_name});\n")
 
     # Create control file
-    ctl_path = create_codeml_ctl(seqfile, 'mlc', working_dir)
+    ctl_path = create_paml_ctl(seqfile, 'mlc', working_dir)
 
     # Run CODEML
     success = run_codeml(ctl_path, working_dir, codeml_path)
@@ -426,11 +414,22 @@ def process_phy_file(args):
 
     # Process pairs with multiprocessing
     num_processes = get_safe_process_count()
+    manager = multiprocessing.Manager()
+    progress_counter = manager.Value('i', 0)
+    total_pairs = len(pool_args)
     results = []
+
+    def update_progress(result):
+        if result:
+            results.append(result)
+        with progress_counter.get_lock():
+            progress_counter.value += 1
+            progress = (progress_counter.value / total_pairs) * 100
+            logging.info(f"Progress: {progress_counter.value}/{total_pairs} pairs processed ({progress:.2f}%)")
+
     with multiprocessing.Pool(processes=num_processes) as pool:
-        for res in tqdm(pool.imap_unordered(process_pair, pool_args), total=len(pool_args)):
-            if res:
-                results.append(res)
+        for _ in pool.imap_unordered(process_pair, pool_args):
+            update_progress(_)
 
     # Save pairwise results
     df = pd.DataFrame(results, columns=['Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega', 'CDS'])
@@ -497,8 +496,8 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
     # Prepare datasets
     datasets = {
         "All data": combined_df,
-        "Excluding omega = -1": combined_df[combined_df['Mean_omega'] != -1],
-        "Excluding omega = 99": combined_df[combined_df['Mean_omega'] != 99],
+        "Excluding dN/dS = -1": combined_df[combined_df['Mean_omega'] != -1],
+        "Excluding dN/dS = 99": combined_df[combined_df['Mean_omega'] != 99],
         "Excluding both -1 and 99": combined_df[(combined_df['Mean_omega'] != -1) & (combined_df['Mean_omega'] != 99)]
     }
 
@@ -526,6 +525,9 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
         plt.hist(group1, bins=20, alpha=0.5, label='Group 1')
         plt.legend()
         plt.title(f"Histogram of Mean Omega - {dataset_name}")
+        plt.xlabel('Mean Omega')
+        plt.ylabel('Frequency')
+        plt.tight_layout()
         histogram_file = os.path.join(output_dir, f"histogram_{dataset_name.replace(' ', '_')}.png")
         plt.savefig(histogram_file)
         plt.close()
