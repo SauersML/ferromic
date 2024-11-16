@@ -21,7 +21,7 @@ Requirements:
 Usage:
     python3 dnds_analysis.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
 
-Author: OpenAI's ChatGPT... and me... lol
+Author: Anthropic's Claude and OpenAI's ChatGPT... and me... lol
 Date: 2024-11-15
 """
 
