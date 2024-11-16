@@ -1,3 +1,30 @@
+#!/usr/bin/env python3
+"""
+dN/dS Analysis Script using PAML's CODEML
+
+This script calculates pairwise dN/dS values using PAML's CODEML program.
+It processes PHYLIP files containing nucleotide sequences, computes pairwise
+comparisons within groups, and performs statistical analyses to compare
+groups based on mean dN/dS values.
+
+Features:
+- Caching of results to resume interrupted analyses seamlessly.
+- Progress tracking with percentage completion.
+- Statistical analyses with multiple filtering criteria.
+- Generation of histograms for visual inspection.
+- Optimized for faster execution with multiprocessing.
+
+Requirements:
+- PAML (specifically CODEML) installed and accessible.
+- Python packages: pandas, numpy, scipy, matplotlib, psutil, tqdm.
+
+Usage:
+    python3 dnds_analysis.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
+
+Author: OpenAI's ChatGPT
+Date: 2024-11-15
+"""
+
 import os
 import sys
 import glob
@@ -15,6 +42,7 @@ import logging
 import hashlib
 from scipy.stats import mannwhitneyu, levene
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 import pickle
 
 # ----------------------------
@@ -452,8 +480,8 @@ def process_phy_file(args):
             'Haplotype': sample,
             'Group': sample_groups[sample],
             'CDS': cds_id,
-            'Mean_omega': mean_omega,
-            'Median_omega': median_omega,
+            'Mean_dNdS': mean_omega,
+            'Median_dNdS': median_omega,
             'Num_Comparisons': len(omega_values)
         })
 
@@ -496,15 +524,15 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
     # Prepare datasets
     datasets = {
         "All data": combined_df,
-        "Excluding dN/dS = -1": combined_df[combined_df['Mean_omega'] != -1],
-        "Excluding dN/dS = 99": combined_df[combined_df['Mean_omega'] != 99],
-        "Excluding both -1 and 99": combined_df[(combined_df['Mean_omega'] != -1) & (combined_df['Mean_omega'] != 99)]
+        "Excluding dN/dS = -1": combined_df[combined_df['Mean_dNdS'] != -1],
+        "Excluding dN/dS = 99": combined_df[combined_df['Mean_dNdS'] != 99],
+        "Excluding both -1 and 99": combined_df[(combined_df['Mean_dNdS'] != -1) & (combined_df['Mean_dNdS'] != 99)]
     }
 
     for dataset_name, df in datasets.items():
         logging.info(f"Analyzing dataset: {dataset_name}")
-        group0 = df[df['Group'] == 0]['Mean_omega'].dropna()
-        group1 = df[df['Group'] == 1]['Mean_omega'].dropna()
+        group0 = df[df['Group'] == 0]['Mean_dNdS'].dropna()
+        group1 = df[df['Group'] == 1]['Mean_dNdS'].dropna()
 
         if group0.empty or group1.empty:
             logging.warning(f"Insufficient data for {dataset_name}. Skipping.")
@@ -524,8 +552,8 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
         plt.hist(group0, bins=20, alpha=0.5, label='Group 0')
         plt.hist(group1, bins=20, alpha=0.5, label='Group 1')
         plt.legend()
-        plt.title(f"Histogram of Mean Omega - {dataset_name}")
-        plt.xlabel('Mean Omega')
+        plt.title(f"Histogram of Mean dN/dS - {dataset_name}")
+        plt.xlabel('Mean dN/dS')
         plt.ylabel('Frequency')
         plt.tight_layout()
         histogram_file = os.path.join(output_dir, f"histogram_{dataset_name.replace(' ', '_')}.png")
@@ -550,10 +578,10 @@ def analyze_cds_per_individual(haplotype_stats_files, output_dir):
             df = pd.read_csv(f)
             cds_id = df['CDS'].iloc[0]
             # Exclude -1 and 99
-            df = df[(df['Mean_omega'] != -1) & (df['Mean_omega'] != 99)]
+            df = df[(df['Mean_dNdS'] != -1) & (df['Mean_dNdS'] != 99)]
 
-            group0 = df[df['Group'] == 0]['Mean_omega'].dropna()
-            group1 = df[df['Group'] == 1]['Mean_omega'].dropna()
+            group0 = df[df['Group'] == 0]['Mean_dNdS'].dropna()
+            group1 = df[df['Group'] == 1]['Mean_dNdS'].dropna()
 
             if len(group0) >= 3 and len(group1) >= 3:
                 # Perform Mann-Whitney U test
@@ -620,15 +648,26 @@ def main():
     # Process files
     work_args = []
     for idx, phy_file in enumerate(phy_files, 1):
+        phy_filename = os.path.basename(phy_file)
+        cds_id = phy_filename.replace('.phy', '')
+        output_csv = os.path.join(args.output_dir, f'{cds_id}.csv')
+        haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
+        if os.path.exists(output_csv) and os.path.exists(haplotype_output_csv):
+            logging.info(f"Skipping {phy_file} - output files already exist")
+            continue
         work_args.append((phy_file, args.output_dir, args.codeml_path, total_files, idx, cache))
 
     new_haplotype_files = []
-    for args_tuple in work_args:
+    total_new_files = len(work_args)
+    for idx, args_tuple in enumerate(work_args, 1):
+        logging.info(f"Processing file {idx}/{total_new_files}: {args_tuple[0]}")
         haplotype_file = process_phy_file(args_tuple)
         if haplotype_file:
             new_haplotype_files.append(haplotype_file)
         # Save cache after each file
         save_cache(cache_file, cache)
+        progress = (idx / total_new_files) * 100
+        logging.info(f"Overall Progress: {idx}/{total_new_files} files processed ({progress:.2f}%)")
 
     # Final analysis
     all_haplotype_files = glob.glob(os.path.join(args.output_dir, '*_haplotype_stats.csv'))
