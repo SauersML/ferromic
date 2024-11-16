@@ -556,7 +556,7 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
         plt.xlabel('Mean dN/dS')
         plt.ylabel('Frequency')
         plt.tight_layout()
-        histogram_file = os.path.join(output_dir, f"histogram_{dataset_name.replace(' ', '_')}.png")
+        histogram_file = os.path.join(output_dir, f"histogram_{re.sub(r'[^A-Za-z0-9_]', '_', dataset_name.replace(' ', '_'))}.png")
         plt.savefig(histogram_file)
         plt.close()
         logging.info(f"Histogram saved: {histogram_file}")
