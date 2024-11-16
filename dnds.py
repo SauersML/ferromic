@@ -492,6 +492,8 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
     combined_df = pd.concat(haplotype_dfs, ignore_index=True)
     logging.info(f"Combined haplotype data has {len(combined_df)} entries")
 
+    logging.info(f"Number of -1 values: {sum(combined_df['Mean_dNdS'] == -1)}, Number of 99 values: {sum(combined_df['Mean_dNdS'] == 99)}")
+
     if 'Mean_dNdS' not in combined_df.columns:
         logging.error("Combined DataFrame lacks 'Mean_dNdS' column.")
         return
