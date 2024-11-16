@@ -476,6 +476,8 @@ def process_phy_file(args):
 
 def perform_statistical_tests(haplotype_stats_files, output_dir):
     """Conduct statistical analyses on the aggregated haplotype statistics."""
+    from scipy.stats import mannwhitneyu, levene  # Move import to top
+
     haplotype_dfs = []
     for f in haplotype_stats_files:
         try:
@@ -511,13 +513,12 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
         logging.error("No valid groups (0 or 1) found in 'Group' column.")
         return
 
-    # Create filtered datasets
+    # Create filtered datasets - FIXED by using boolean indexing properly
     datasets = {
         "All data": combined_df,
-        "Excluding dN/dS = -1": combined_df[combined_df['Mean_dNdS'] != -1].copy(),
-        "Excluding dN/dS = 99": combined_df[combined_df['Mean_dNdS'] != 99].copy(),
-        "Excluding both -1 and 99": combined_df[(combined_df['Mean_dNdS'] != -1) & 
-                                              (combined_df['Mean_dNdS'] != 99)].copy()
+        "Excluding dN/dS = -1": combined_df[~(combined_df['Mean_dNdS'] == -1)].copy(),
+        "Excluding dN/dS = 99": combined_df[~(combined_df['Mean_dNdS'] == 99)].copy(),
+        "Excluding both -1 and 99": combined_df[~(combined_df['Mean_dNdS'].isin([-1, 99]))].copy()
     }
 
     for dataset_name, dataset_df in datasets.items():
@@ -573,18 +574,20 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
                 logging.info(f"Group 0 quartiles: Q1={g0_quartiles[0.25]:.4f}, Q3={g0_quartiles[0.75]:.4f}")
                 logging.info(f"Group 1 quartiles: Q1={g1_quartiles[0.25]:.4f}, Q3={g1_quartiles[0.75]:.4f}")
                 
-                # Perform Levene's test for variance homogeneity
-                if len(group0_data) >= 2 and len(group1_data) >= 2:  # Levene's test requires at least 2 values per group
-                    levene_stat, levene_p = levene(group0_data, group1_data)
-                    logging.info(f"Levene's test for variance homogeneity: "
-                               f"Statistic={levene_stat:.4f}, p-value={levene_p:.6f}")
-                else:
-                    logging.warning("Insufficient data for Levene's test")
+                # Only do Levene's test for the specific dataset
+                if dataset_name == "Excluding both -1 and 99":
+                    if len(group0_data) >= 2 and len(group1_data) >= 2:
+                        levene_stat, levene_p = levene(group0_data, group1_data)
+                        logging.info(f"Levene's test for variance homogeneity: "
+                                   f"Statistic={levene_stat:.4f}, p-value={levene_p:.6f}")
+                    else:
+                        logging.warning("Insufficient data for Levene's test")
                 
             except Exception as e:
                 logging.error(f"Error during statistical tests: {e}")
 
     return combined_df
+
 
 def parse_phy_file(filepath):
     """Extract and validate sequences from a PHYLIP file, keeping sample names unchanged."""
