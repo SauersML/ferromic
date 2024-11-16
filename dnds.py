@@ -434,18 +434,17 @@ def process_phy_file(args):
 
     haplotype_stats = []
     for idx, sample in enumerate(sample_names, 1):
-       sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
-       omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
-       # Filter out special values before averaging
-       regular_omegas = omega_values[~omega_values.isin([-1, 99])]
+        sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
+        omega_values = pd.to_numeric(sample_df['omega'], errors='coerce')
+        # Filter out special values before averaging
+        regular_omegas = omega_values[~omega_values.isin([-1, 99])]
 
-      
-       if not regular_omegas.empty:
-          mean_omega = regular_omegas.mean()
-          median_omega = regular_omegas.median()
-       else:
-          mean_omega = np.nan
-          median_omega = np.nan
+        if not regular_omegas.empty:
+            mean_omega = regular_omegas.mean()
+            median_omega = regular_omegas.median()
+        else:
+            mean_omega = np.nan
+            median_omega = np.nan
         
         haplotype_stats.append({
             'Haplotype': sample,
@@ -641,7 +640,6 @@ def parse_phy_file(filepath):
     return sequences
 
 
-
 # ----------------------------
 # Statistical Analysis Functions
 # ----------------------------
@@ -754,9 +752,8 @@ def perform_statistical_analysis(haplotype_stats_files, output_dir):
                    logging.info(f"Effect size (Cohen's d): {comp['effect_size']:.4f}")
                
                if dataset_name == "Excluding both -1 and 99":
-                  from scipy.stats import levene  # for variance test
-                  stat, p_value = levene(group0_data, group1_data)
-                  logging.info(f"Levene's test for variance: Statistic={stat}, p-value={p_value:.6f}")
+                   stat, p_value = levene(group0_data, group1_data)
+                   logging.info(f"Levene's test for variance: Statistic={stat:.4f}, p-value={p_value:.6f}")
    
        
        # Save comprehensive results
