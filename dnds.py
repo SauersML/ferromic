@@ -13,7 +13,7 @@ import argparse
 import time
 import logging
 import hashlib
-from scipy.stats import mannwhitneyu, wilcoxon
+from scipy.stats import mannwhitneyu, wilcoxon, levene
 
 # ----------------------------
 # Setup Logging
@@ -476,8 +476,6 @@ def process_phy_file(args):
 
 def perform_statistical_tests(haplotype_stats_files, output_dir):
     """Conduct statistical analyses on the aggregated haplotype statistics."""
-    from scipy.stats import mannwhitneyu, levene  # Move import to top
-
     haplotype_dfs = []
     for f in haplotype_stats_files:
         try:
