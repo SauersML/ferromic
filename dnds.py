@@ -749,11 +749,6 @@ def perform_statistical_analysis(haplotype_stats_files, output_dir):
            for r in all_results
        ])
        
-       # Save results
-       output_path = os.path.join(output_dir, 'comprehensive_cds_analysis.csv')
-       results_df.to_csv(output_path, index=False)
-       logging.info(f"\nSaved comprehensive analysis to {output_path}")
-       
        # Summary statistics
        logging.info(f"\nAnalysis Summary:")
        logging.info(f"Total CDS analyzed: {len(cds_data)}")
