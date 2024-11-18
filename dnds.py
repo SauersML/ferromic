@@ -547,6 +547,7 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
             stat, p_value = levene(group0, group1)
             logging.info(f"Levene's test for {dataset_name}: p-value = {p_value:.4f}")
 
+        
         # Generate histograms
         def remove_outliers(data):
             Q1 = np.percentile(data, 25)
@@ -559,12 +560,17 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
         # Create figure with two subplots
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
         
-        # Top subplot - Full range with log transformation
-        ax1.hist(np.log1p(group0), bins=20, alpha=0.5, label='Group 0')
-        ax1.hist(np.log1p(group1), bins=20, alpha=0.5, label='Group 1')
+        # Top subplot - Full range with shifted log transformation
+        # Add a constant to make all values positive before log transform
+        min_val = min(np.min(group0), np.min(group1))
+        shift = abs(min_val) + 1 if min_val <= 0 else 0
+        
+        # Apply log transform to shifted positive values
+        ax1.hist(np.log1p(group0 + shift), bins=20, alpha=0.5, label='Group 0')
+        ax1.hist(np.log1p(group1 + shift), bins=20, alpha=0.5, label='Group 1')
         ax1.legend()
         ax1.set_title(f"Log-transformed Histogram of Mean dN/dS - {dataset_name}")
-        ax1.set_xlabel('Log(Mean dN/dS + 1)')
+        ax1.set_xlabel('Log(Mean dN/dS + shift)')
         ax1.set_ylabel('Frequency')
         
         # Bottom subplot - Zoomed view without outliers
