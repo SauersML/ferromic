@@ -645,18 +645,62 @@ def analyze_cds_per_individual(haplotype_stats_files, output_dir):
     # Calculate proportion of significant CDSs
     if cds_results:
         results_df = pd.DataFrame(cds_results)
+        
+        # Basic stats
         total_cds = len(results_df)
         significant_cds = results_df[results_df['Significant']].shape[0]
         proportion_significant = significant_cds / total_cds
-
+        
+        # Calculate success rates and total comparisons
+        total_comparisons = df['Num_Comparisons'].sum()
+        successful_comparisons = df[df['Mean_dNdS'].notna()]['Num_Comparisons'].sum()
+        comparison_success_rate = (successful_comparisons / total_comparisons) * 100 if total_comparisons > 0 else 0
+        
+        # Group statistics
+        group_stats = df.groupby('Group').agg({
+            'Mean_dNdS': ['count', 'mean', 'std', 'min', 'max', 'median'],
+            'Num_Comparisons': 'sum'
+        }).round(4)
+        
+        # Log comprehensive statistics
+        logging.info("\n=== Analysis Summary ===")
         logging.info(f"Total CDSs analyzed: {total_cds}")
         logging.info(f"Number of significant CDSs: {significant_cds}")
         logging.info(f"Proportion of significant CDSs: {proportion_significant:.2%}")
-
-        # Save results
-        results_file = os.path.join(output_dir, 'cds_statistical_results.csv')
-        results_df.to_csv(results_file, index=False)
-        logging.info(f"CDS statistical results saved to {results_file}")
+        logging.info(f"Total pairwise comparisons: {total_comparisons}")
+        logging.info(f"Successful comparisons: {successful_comparisons}")
+        logging.info(f"Comparison success rate: {comparison_success_rate:.2%}")
+        
+        # Create master summary 
+        master_stats = pd.DataFrame([{
+            'Total_CDS': total_cds,
+            'Significant_CDS': significant_cds,
+            'Proportion_Significant': proportion_significant,
+            'Total_Comparisons': total_comparisons,
+            'Successful_Comparisons': successful_comparisons,
+            'Comparison_Success_Rate': comparison_success_rate
+        }])
+        
+        # Combine all individual CSVs
+        all_results = pd.DataFrame()
+        for f in haplotype_stats_files:
+            single_cds = pd.read_csv(f)
+            all_results = pd.concat([all_results, single_cds], ignore_index=True)
+        
+        # Add statistical results
+        all_results = pd.merge(all_results, results_df, on='CDS', how='left')
+        
+        # Save everything to separate CSVs
+        all_results.to_csv(os.path.join(output_dir, 'all_dnds_results.csv'), index=False)
+        master_stats.to_csv(os.path.join(output_dir, 'summary_statistics.csv'), index=False)
+        group_stats.to_csv(os.path.join(output_dir, 'group_statistics.csv'))
+        results_df.to_csv(os.path.join(output_dir, 'cds_statistics.csv'), index=False)
+        
+        logging.info(f"\nResults saved to:")
+        logging.info(f"All results: all_dnds_results.csv")
+        logging.info(f"Summary stats: summary_statistics.csv")
+        logging.info(f"Group stats: group_statistics.csv")
+        logging.info(f"CDS stats: cds_statistics.csv")
 
 # ----------------------------
 # Main Function
@@ -725,7 +769,10 @@ def main():
     else:
         logging.warning("No haplotype statistics files found for analysis.")
 
+    # Combine all results one final time
+    final_haplotype_files = glob.glob(os.path.join(args.output_dir, '*_haplotype_stats.csv'))
+    if final_haplotype_files:
+        analyze_cds_per_individual(final_haplotype_files, args.output_dir)
     logging.info("dN/dS analysis completed.")
-
 if __name__ == '__main__':
     main()
