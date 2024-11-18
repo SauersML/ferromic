@@ -548,18 +548,59 @@ def perform_statistical_tests(haplotype_stats_files, output_dir):
             logging.info(f"Levene's test for {dataset_name}: p-value = {p_value:.4f}")
 
         # Generate histograms
-        plt.figure()
-        plt.hist(group0, bins=20, alpha=0.5, label='Group 0')
-        plt.hist(group1, bins=20, alpha=0.5, label='Group 1')
-        plt.legend()
-        plt.title(f"Histogram of Mean dN/dS - {dataset_name}")
-        plt.xlabel('Mean dN/dS')
-        plt.ylabel('Frequency')
+        def remove_outliers(data):
+            Q1 = np.percentile(data, 25)
+            Q3 = np.percentile(data, 75)
+            IQR = Q3 - Q1
+            lower = Q1 - 1.5*IQR
+            upper = Q3 + 1.5*IQR
+            return data[(data >= lower) & (data <= upper)]
+        
+        # Create figure with two subplots
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+        
+        # Top subplot - Full range with log transformation
+        ax1.hist(np.log1p(group0), bins=20, alpha=0.5, label='Group 0')
+        ax1.hist(np.log1p(group1), bins=20, alpha=0.5, label='Group 1')
+        ax1.legend()
+        ax1.set_title(f"Log-transformed Histogram of Mean dN/dS - {dataset_name}")
+        ax1.set_xlabel('Log(Mean dN/dS + 1)')
+        ax1.set_ylabel('Frequency')
+        
+        # Bottom subplot - Zoomed view without outliers
+        group0_clean = remove_outliers(group0)
+        group1_clean = remove_outliers(group1)
+        ax2.hist(group0_clean, bins=20, alpha=0.5, label='Group 0')
+        ax2.hist(group1_clean, bins=20, alpha=0.5, label='Group 1')
+        ax2.legend()
+        ax2.set_title(f"Histogram of Mean dN/dS (Excluding Outliers) - {dataset_name}")
+        ax2.set_xlabel('Mean dN/dS')
+        ax2.set_ylabel('Frequency')
+        
+        # Add text showing range of excluded values
+        max_excluded = max(np.max(group0), np.max(group1))
+        min_excluded = min(np.min(group0), np.min(group1))
+        ax2.text(0.02, 0.98, f'Full data range: {min_excluded:.2f} to {max_excluded:.2f}',
+                 transform=ax2.transAxes, verticalalignment='top')
+        
         plt.tight_layout()
-        histogram_file = os.path.join(output_dir, f"histogram_{re.sub(r'[^A-Za-z0-9_]', '_', dataset_name.replace(' ', '_'))}.png")
-        plt.savefig(histogram_file)
+        
+        # Save the figure
+        histogram_file = os.path.join(output_dir, 
+                                     f"histogram_{re.sub(r'[^A-Za-z0-9_]', '_', dataset_name.replace(' ', '_'))}.png")
+        plt.savefig(histogram_file, dpi=300, bbox_inches='tight')
         plt.close()
         logging.info(f"Histogram saved: {histogram_file}")
+        
+        # Also log some statistics about the outliers
+        total_points = len(group0) + len(group1)
+        clean_points = len(group0_clean) + len(group1_clean)
+        outlier_percent = ((total_points - clean_points) / total_points) * 100
+        logging.info(f"Outlier analysis: {outlier_percent:.1f}% of points were outliers")
+        logging.info(f"Original ranges - Group 0: [{np.min(group0):.2f}, {np.max(group0):.2f}], " 
+                    f"Group 1: [{np.min(group1):.2f}, {np.max(group1):.2f}]")
+        logging.info(f"Clean ranges - Group 0: [{np.min(group0_clean):.2f}, {np.max(group0_clean):.2f}], "
+                    f"Group 1: [{np.min(group1_clean):.2f}, {np.max(group1_clean):.2f}]")
 
 def analyze_cds_per_individual(haplotype_stats_files, output_dir):
     """
