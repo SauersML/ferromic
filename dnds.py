@@ -20,9 +20,6 @@ Requirements:
 
 Usage:
     python3 dnds_analysis.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
-
-Author: Anthropic's Claude and OpenAI's ChatGPT... and me... lol
-Date: 2024-11-15
 """
 
 import os
@@ -705,7 +702,7 @@ def analyze_cds_per_individual(haplotype_stats_files, output_dir):
 
 def combine_all_results(output_dir):
     """
-    Combine all pairwise results and individual haplotype statistics into single CSV files.
+    Combine all raw parsed PAML results from every single CODEML run into a single CSV file.
 
     Parameters:
     output_dir (str): Directory where the output CSV files are stored.
@@ -717,12 +714,22 @@ def combine_all_results(output_dir):
     import pandas as pd
     import os
 
-    # Combine all pairwise results
+    # Collect all per-CDS pairwise result files (excluding haplotype stats and combined files)
     pairwise_files = glob.glob(os.path.join(output_dir, '*.csv'))
-    # Exclude haplotype stats files and any combined files
-    pairwise_files = [f for f in pairwise_files if not f.endswith('_haplotype_stats.csv') 
-                      and not os.path.basename(f).startswith('all_') 
-                      and not os.path.basename(f).startswith('combined_')]
+    combined_files = {
+        'all_pairwise_results.csv',
+        'all_haplotype_stats.csv',
+        'all_per_run_results.csv',
+        'summary_statistics.csv',
+        'group_statistics.csv',
+        'cds_statistics.csv',
+        'all_dnds_results.csv',
+    }
+    pairwise_files = [
+        f for f in pairwise_files
+        if not f.endswith('_haplotype_stats.csv')
+        and os.path.basename(f) not in combined_files
+    ]
 
     if not pairwise_files:
         logging.warning("No pairwise result files found to combine.")
@@ -740,37 +747,13 @@ def combine_all_results(output_dir):
 
         if pairwise_dfs:
             all_pairwise_df = pd.concat(pairwise_dfs, ignore_index=True)
-            all_pairwise_csv = os.path.join(output_dir, 'all_pairwise_results.csv')
-            all_pairwise_df.to_csv(all_pairwise_csv, index=False)
-            logging.info(f"All pairwise results combined into {all_pairwise_csv}")
+
+            # Save combined per-run results
+            all_per_run_csv = os.path.join(output_dir, 'all_per_run_results.csv')
+            all_pairwise_df.to_csv(all_per_run_csv, index=False)
+            logging.info(f"All per-run PAML results combined into {all_per_run_csv}")
         else:
             logging.warning("No valid pairwise dataframes to combine.")
-
-    # Combine all haplotype statistics
-    haplotype_files = glob.glob(os.path.join(output_dir, '*_haplotype_stats.csv'))
-    haplotype_files = [f for f in haplotype_files if not os.path.basename(f).startswith('all_')]
-
-    if not haplotype_files:
-        logging.warning("No haplotype statistics files found to combine.")
-    else:
-        haplotype_dfs = []
-        for f in haplotype_files:
-            try:
-                df = pd.read_csv(f)
-                if not df.empty:
-                    haplotype_dfs.append(df)
-                else:
-                    logging.warning(f"Empty haplotype stats file skipped: {f}")
-            except Exception as e:
-                logging.error(f"Failed to read {f}: {e}")
-
-        if haplotype_dfs:
-            all_haplotype_df = pd.concat(haplotype_dfs, ignore_index=True)
-            all_haplotype_csv = os.path.join(output_dir, 'all_haplotype_stats.csv')
-            all_haplotype_df.to_csv(all_haplotype_csv, index=False)
-            logging.info(f"All haplotype statistics combined into {all_haplotype_csv}")
-        else:
-            logging.warning("No valid haplotype dataframes to combine.")
 
 # ----------------------------
 # Main Function
