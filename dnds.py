@@ -702,6 +702,61 @@ def analyze_cds_per_individual(haplotype_stats_files, output_dir):
         logging.info(f"Group stats: group_statistics.csv")
         logging.info(f"CDS stats: cds_statistics.csv")
 
+
+def combine_all_results(output_dir):
+    """
+    Combine all pairwise results and individual haplotype statistics into single CSV files.
+
+    Parameters:
+    output_dir (str): Directory where the output CSV files are stored.
+
+    Returns:
+    None
+    """
+    import glob
+    import pandas as pd
+    import os
+
+    # Combine all pairwise results
+    pairwise_files = glob.glob(os.path.join(output_dir, '*.csv'))
+    # Exclude haplotype stats files and combined files
+    pairwise_files = [f for f in pairwise_files if not f.endswith('_haplotype_stats.csv') 
+                      and not os.path.basename(f) == 'all_pairwise_results.csv']
+
+    pairwise_dfs = []
+    for f in pairwise_files:
+        try:
+            df = pd.read_csv(f)
+            pairwise_dfs.append(df)
+        except Exception as e:
+            logging.error(f"Failed to read {f}: {e}")
+
+    if pairwise_dfs:
+        all_pairwise_df = pd.concat(pairwise_dfs, ignore_index=True)
+        all_pairwise_csv = os.path.join(output_dir, 'all_pairwise_results.csv')
+        all_pairwise_df.to_csv(all_pairwise_csv, index=False)
+        logging.info(f"All pairwise results combined into {all_pairwise_csv}")
+    else:
+        logging.warning("No pairwise result files found to combine.")
+
+    # Combine all haplotype statistics
+    haplotype_files = glob.glob(os.path.join(output_dir, '*_haplotype_stats.csv'))
+    haplotype_dfs = []
+    for f in haplotype_files:
+        try:
+            df = pd.read_csv(f)
+            haplotype_dfs.append(df)
+        except Exception as e:
+            logging.error(f"Failed to read {f}: {e}")
+
+    if haplotype_dfs:
+        all_haplotype_df = pd.concat(haplotype_dfs, ignore_index=True)
+        all_haplotype_csv = os.path.join(output_dir, 'all_haplotype_stats.csv')
+        all_haplotype_df.to_csv(all_haplotype_csv, index=False)
+        logging.info(f"All haplotype statistics combined into {all_haplotype_csv}")
+    else:
+        logging.warning("No haplotype statistics files found to combine.")
+
 # ----------------------------
 # Main Function
 # ----------------------------
@@ -717,6 +772,9 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
+
+    # Call the new function to combine existing data into a single CSV file
+    combine_all_results(args.output_dir)
 
     # Load cache
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
@@ -774,5 +832,6 @@ def main():
     if final_haplotype_files:
         analyze_cds_per_individual(final_haplotype_files, args.output_dir)
     logging.info("dN/dS analysis completed.")
+
 if __name__ == '__main__':
     main()
