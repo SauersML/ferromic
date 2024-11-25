@@ -719,43 +719,58 @@ def combine_all_results(output_dir):
 
     # Combine all pairwise results
     pairwise_files = glob.glob(os.path.join(output_dir, '*.csv'))
-    # Exclude haplotype stats files and combined files
+    # Exclude haplotype stats files and any combined files
     pairwise_files = [f for f in pairwise_files if not f.endswith('_haplotype_stats.csv') 
-                      and not os.path.basename(f) == 'all_pairwise_results.csv']
+                      and not os.path.basename(f).startswith('all_') 
+                      and not os.path.basename(f).startswith('combined_')]
 
-    pairwise_dfs = []
-    for f in pairwise_files:
-        try:
-            df = pd.read_csv(f)
-            pairwise_dfs.append(df)
-        except Exception as e:
-            logging.error(f"Failed to read {f}: {e}")
-
-    if pairwise_dfs:
-        all_pairwise_df = pd.concat(pairwise_dfs, ignore_index=True)
-        all_pairwise_csv = os.path.join(output_dir, 'all_pairwise_results.csv')
-        all_pairwise_df.to_csv(all_pairwise_csv, index=False)
-        logging.info(f"All pairwise results combined into {all_pairwise_csv}")
-    else:
+    if not pairwise_files:
         logging.warning("No pairwise result files found to combine.")
+    else:
+        pairwise_dfs = []
+        for f in pairwise_files:
+            try:
+                df = pd.read_csv(f)
+                if not df.empty:
+                    pairwise_dfs.append(df)
+                else:
+                    logging.warning(f"Empty pairwise result file skipped: {f}")
+            except Exception as e:
+                logging.error(f"Failed to read {f}: {e}")
+
+        if pairwise_dfs:
+            all_pairwise_df = pd.concat(pairwise_dfs, ignore_index=True)
+            all_pairwise_csv = os.path.join(output_dir, 'all_pairwise_results.csv')
+            all_pairwise_df.to_csv(all_pairwise_csv, index=False)
+            logging.info(f"All pairwise results combined into {all_pairwise_csv}")
+        else:
+            logging.warning("No valid pairwise dataframes to combine.")
 
     # Combine all haplotype statistics
     haplotype_files = glob.glob(os.path.join(output_dir, '*_haplotype_stats.csv'))
-    haplotype_dfs = []
-    for f in haplotype_files:
-        try:
-            df = pd.read_csv(f)
-            haplotype_dfs.append(df)
-        except Exception as e:
-            logging.error(f"Failed to read {f}: {e}")
+    haplotype_files = [f for f in haplotype_files if not os.path.basename(f).startswith('all_')]
 
-    if haplotype_dfs:
-        all_haplotype_df = pd.concat(haplotype_dfs, ignore_index=True)
-        all_haplotype_csv = os.path.join(output_dir, 'all_haplotype_stats.csv')
-        all_haplotype_df.to_csv(all_haplotype_csv, index=False)
-        logging.info(f"All haplotype statistics combined into {all_haplotype_csv}")
-    else:
+    if not haplotype_files:
         logging.warning("No haplotype statistics files found to combine.")
+    else:
+        haplotype_dfs = []
+        for f in haplotype_files:
+            try:
+                df = pd.read_csv(f)
+                if not df.empty:
+                    haplotype_dfs.append(df)
+                else:
+                    logging.warning(f"Empty haplotype stats file skipped: {f}")
+            except Exception as e:
+                logging.error(f"Failed to read {f}: {e}")
+
+        if haplotype_dfs:
+            all_haplotype_df = pd.concat(haplotype_dfs, ignore_index=True)
+            all_haplotype_csv = os.path.join(output_dir, 'all_haplotype_stats.csv')
+            all_haplotype_df.to_csv(all_haplotype_csv, index=False)
+            logging.info(f"All haplotype statistics combined into {all_haplotype_csv}")
+        else:
+            logging.warning("No valid haplotype dataframes to combine.")
 
 # ----------------------------
 # Main Function
