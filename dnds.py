@@ -662,7 +662,7 @@ def analyze_cds_per_individual(haplotype_stats_files, output_dir):
             'Num_Comparisons': 'sum'
         }).round(4)
         
-        # Log comprehensive statistics
+        # Log statistics
         logging.info("\n=== Analysis Summary ===")
         logging.info(f"Total CDSs analyzed: {total_cds}")
         logging.info(f"Number of significant CDSs: {significant_cds}")
