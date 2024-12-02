@@ -238,7 +238,8 @@ def create_enhanced_visualization(matrix_0, matrix_1, cds, result):
     if matrix_0 is None or matrix_1 is None:
         return
         
-    plt.style.use('seaborn-darkgrid')
+    plt.style.use('seaborn')
+    sns.set_style("darkgrid")
     fig = plt.figure(figsize=(20, 10))
     
     # Main title with styling
