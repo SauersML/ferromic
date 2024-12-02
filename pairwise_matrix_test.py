@@ -351,7 +351,7 @@ def parse_cds_coordinates(cds_name):
     """Extract chromosome and coordinates from CDS name."""
     try:
         # Debug print to see actual CDS name format
-        print(f"Parsing CDS name: {cds_name}")
+        #print(f"Parsing CDS name: {cds_name}")
         
         # Try different possible formats
         if '/' in cds_name:  # If it's a path, take last part
