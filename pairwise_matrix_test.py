@@ -347,6 +347,167 @@ def analyze_cds_parallel(args):
     save_cached_result(cds, result)
     return cds, result
 
+
+
+
+def parse_cds_coordinates(cds_name):
+    """Extract chromosome and coordinates from CDS name."""
+    # Expected format: chr_start_end or chr:start-end
+    try:
+        if '_' in cds_name:
+            chrom, start, end = cds_name.split('_')
+        else:
+            chrom, coords = cds_name.split(':')
+            start, end = coords.split('-')
+        return chrom, int(start), int(end)
+    except:
+        return None, None, None
+
+def build_overlap_clusters(results_df):
+    """Build clusters of overlapping CDS regions."""
+    # Initialize clusters
+    clusters = {}
+    cluster_id = 0
+    cds_to_cluster = {}
+    
+    # Sort CDSs by chromosome and start position
+    cds_coords = []
+    for cds in results_df['CDS']:
+        chrom, start, end = parse_cds_coordinates(cds)
+        if None not in (chrom, start, end):
+            cds_coords.append((chrom, start, end, cds))
+    
+    cds_coords.sort()  # Sort by chromosome, then start
+    
+    # Build clusters
+    active_regions = []  # (chrom, end, cluster_id)
+    
+    for chrom, start, end, cds in cds_coords:
+        # Remove finished active regions
+        active_regions = [(c, e, cid) for c, e, cid in active_regions 
+                         if c == chrom and e >= start]
+        
+        # Find overlapping clusters
+        overlapping_clusters = set(cid for c, e, cid in active_regions)
+        
+        if not overlapping_clusters:
+            # Create new cluster
+            clusters[cluster_id] = {cds}
+            cds_to_cluster[cds] = cluster_id
+            active_regions.append((chrom, end, cluster_id))
+            cluster_id += 1
+        else:
+            # Add to first overlapping cluster
+            target_cluster = min(overlapping_clusters)
+            clusters[target_cluster].add(cds)
+            cds_to_cluster[cds] = target_cluster
+            
+            # Merge other overlapping clusters if any
+            for cid in overlapping_clusters:
+                if cid != target_cluster:
+                    clusters[target_cluster].update(clusters[cid])
+                    del clusters[cid]
+            
+            # Update active regions
+            active_regions = [(c, e, target_cluster) if cid in overlapping_clusters
+                            else (c, e, cid) 
+                            for c, e, cid in active_regions]
+            active_regions.append((chrom, end, target_cluster))
+    
+    return clusters
+
+def combine_cluster_evidence(cluster_cdss, results_df):
+    """Combine statistics for a cluster of overlapping CDSs."""
+    cluster_data = results_df[results_df['CDS'].isin(cluster_cdss)]
+    
+    # Get weights based on CDS length
+    weights = {}
+    total_length = 0
+    for cds in cluster_cdss:
+        _, start, end = parse_cds_coordinates(cds)
+        if None not in (start, end):
+            length = end - start
+            weights[cds] = length
+            total_length += length
+    
+    # Normalize weights
+    for cds in weights:
+        weights[cds] /= total_length
+    
+    # Compute weighted statistics
+    weighted_mean_diff = 0
+    weighted_effect_size = 0
+    total_comparisons = 0
+    valid_cdss = 0
+    
+    for cds in cluster_cdss:
+        row = cluster_data[cluster_data['CDS'] == cds].iloc[0]
+        if not np.isnan(row['observed_mean']) and not np.isnan(row['effect_size_mean']):
+            weight = weights.get(cds, 1/len(cluster_cdss))
+            weighted_mean_diff += row['observed_mean'] * weight
+            weighted_effect_size += row['effect_size_mean'] * weight
+            total_comparisons += row['n0'] * (row['n0'] - 1) // 2  # comparisons in group 0
+            total_comparisons += row['n1'] * (row['n1'] - 1) // 2  # comparisons in group 1
+            valid_cdss += 1
+    
+    # Combine p-values if we have valid data
+    if valid_cdss > 0:
+        # Use Fisher's method within cluster
+        valid_pvals = cluster_data['mean_pvalue'].dropna()
+        if len(valid_pvals) > 0:
+            fisher_stat = -2 * np.sum(np.log(valid_pvals))
+            combined_p = stats.chi2.sf(fisher_stat, df=2*len(valid_pvals))
+        else:
+            combined_p = np.nan
+    else:
+        combined_p = np.nan
+        weighted_mean_diff = np.nan
+        weighted_effect_size = np.nan
+        total_comparisons = 0
+    
+    return {
+        'combined_pvalue': combined_p,
+        'weighted_mean_diff': weighted_mean_diff,
+        'weighted_effect_size': weighted_effect_size,
+        'n_comparisons': total_comparisons,
+        'n_valid_cds': valid_cdss
+    }
+
+def compute_overall_significance(cluster_results):
+    """Compute overall significance from independent clusters."""
+    valid_clusters = [c for c in cluster_results.values() 
+                     if not np.isnan(c['combined_pvalue'])]
+    
+    if not valid_clusters:
+        return {
+            'overall_pvalue': np.nan,
+            'overall_effect': np.nan,
+            'n_valid_clusters': 0,
+            'total_comparisons': 0
+        }
+    
+    # Combine p-values using Fisher's method
+    cluster_pvals = [c['combined_pvalue'] for c in valid_clusters]
+    fisher_stat = -2 * np.sum(np.log(cluster_pvals))
+    overall_pvalue = stats.chi2.sf(fisher_stat, df=2*len(cluster_pvals))
+    
+    # Compute weighted effect size
+    total_comparisons = sum(c['n_comparisons'] for c in valid_clusters)
+    weighted_effect = np.average(
+        [c['weighted_effect_size'] for c in valid_clusters],
+        weights=[c['n_comparisons'] for c in valid_clusters]
+    )
+    
+    return {
+        'overall_pvalue': overall_pvalue,
+        'overall_effect': weighted_effect,
+        'n_valid_clusters': len(valid_clusters),
+        'total_comparisons': total_comparisons
+    }
+
+
+
+
 def main():
     start_time = datetime.now()
     print(f"Analysis started at {start_time}")
@@ -380,7 +541,26 @@ def main():
     # Save final results
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
     
-    # Create visualizations for top 5 most significant results
+    # Add overall analysis
+    print("\nComputing overall significance...")
+    clusters = build_overlap_clusters(results_df)
+    cluster_stats = {}
+    for cluster_id, cluster_cdss in clusters.items():
+        cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df)
+    
+    overall_results = compute_overall_significance(cluster_stats)
+    
+    # Save overall results
+    with open(RESULTS_DIR / 'overall_results.json', 'w') as f:
+        json.dump(overall_results, f, indent=2)
+    
+    # Print overall results
+    print("\nOverall Analysis Results:")
+    print(f"Number of independent clusters: {overall_results['n_valid_clusters']}")
+    print(f"Total pairwise comparisons: {overall_results['total_comparisons']:,}")
+    print(f"Overall p-value: {overall_results['overall_pvalue']:.4e}")
+    print(f"Overall effect size: {overall_results['overall_effect']:.4f}")
+    
     significant_results = results_df.sort_values('mean_pvalue')
     for _, row in significant_results.head().iterrows():
         cds = row['CDS']
@@ -391,10 +571,10 @@ def main():
             cds, 
             result
         )
-    
+  
     # Print summary statistics
     valid_results = results_df[~results_df['mean_pvalue'].isna()]
-    print("\nAnalysis Complete!")
+    print("\nPer-CDS Analysis Summary:")
     print(f"Total CDSs analyzed: {len(results_df):,}")
     print(f"Valid analyses: {len(valid_results):,}")
     print(f"Significant CDSs (p < 0.05):")
