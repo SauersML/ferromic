@@ -150,8 +150,8 @@ def calculate_test_statistics(matrix_0, matrix_1):
     if len(values_0) == 0 or len(values_1) == 0:
         return np.nan, np.nan
         
-    mean_diff = np.mean(values_1) - np.mean(values_0)
-    median_diff = np.median(values_1) - np.median(values_0)
+    mean_diff = np.mean(np.abs(np.mean(values_1) - values_0))
+    median_diff = np.mean(np.abs(np.median(values_1) - values_0))
     print("\nCalculate_test_statistics:")
     #print(f"  Group 0 values: {values_0}")
     #print(f"  Group 1 values: {values_1}") 
@@ -245,9 +245,9 @@ def permutation_test_worker(args):
     print(f"  First 5 permuted medians: {permuted_medians[:5]}")
     print(f"  Number of extreme means: {np.sum(np.abs(permuted_means) >= np.abs(orig_mean))}")
     print(f"  Number of extreme medians: {np.sum(np.abs(permuted_medians) >= np.abs(orig_median))}")
-    
-    mean_pval = (np.sum(np.abs(permuted_means) >= np.abs(orig_mean)) + 1) / (len(permuted_means) + 1) if permuted_means else np.nan
-    median_pval = (np.sum(np.abs(permuted_medians) >= np.abs(orig_median)) + 1) / (len(permuted_medians) + 1) if permuted_medians else np.nan
+  
+    mean_pval = (np.sum(permuted_means >= orig_mean) + 1) / (len(permuted_means) + 1) if permuted_means else np.nan
+    median_pval = (np.sum(permuted_medians >= orig_median) + 1) / (len(permuted_medians) + 1) if permuted_medians else np.nan
     
     return {
         'observed_mean': orig_mean,
