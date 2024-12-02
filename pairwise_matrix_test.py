@@ -145,6 +145,7 @@ def calculate_test_statistics(matrix_0, matrix_1):
         
     mean_diff = np.mean(values_1) - np.mean(values_0)
     median_diff = np.median(values_1) - np.median(values_0)
+    print(f"Median calc: values_0: {len(values_0)}, values_1: {len(values_1)}, median_diff: {median_diff}")
     
     return mean_diff, median_diff
 
@@ -217,6 +218,7 @@ def permutation_test_worker(args):
         permuted_medians.extend(chunk_medians)
     
     # Calculate p-values
+    print(f"orig_mean: {orig_mean}, permuted_means: {len(permuted_means)}, n_extreme: {np.sum(np.abs(permuted_means) >= np.abs(orig_mean))}")
     mean_pval = (np.sum(np.abs(permuted_means) >= np.abs(orig_mean)) + 1) / (len(permuted_means) + 1) if permuted_means else np.nan
     median_pval = (np.sum(np.abs(permuted_medians) >= np.abs(orig_median)) + 1) / (len(permuted_medians) + 1) if permuted_medians else np.nan
     
