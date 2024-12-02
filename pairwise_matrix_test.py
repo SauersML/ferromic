@@ -62,23 +62,91 @@ from collections import defaultdict
 import seaborn as sns
 import matplotlib.pyplot as plt
 from multiprocessing import Pool, cpu_count
-from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from tqdm.auto import tqdm
 import warnings
+import os
+import json
+from datetime import datetime
+from pathlib import Path
+from functools import partial
+import pickle
+from scipy import stats
 warnings.filterwarnings('ignore')
 
+# Constants
+CACHE_DIR = Path("cache")
+RESULTS_DIR = Path("results")
+PLOTS_DIR = Path("plots")
+CACHE_INTERVAL = 50  # Save results every N CDSs
+N_PERMUTATIONS = 1000
+
+# Create necessary directories
+for directory in [CACHE_DIR, RESULTS_DIR, PLOTS_DIR]:
+    directory.mkdir(exist_ok=True)
+
+def get_cache_path(cds):
+    """Generate cache file path for a CDS."""
+    return CACHE_DIR / f"{cds.replace('/', '_')}.pkl"
+
+def load_cached_result(cds):
+    """Load cached result for a CDS if it exists."""
+    cache_path = get_cache_path(cds)
+    if cache_path.exists():
+        try:
+            with open(cache_path, 'rb') as f:
+                return pickle.load(f)
+        except:
+            return None
+    return None
+
+def save_cached_result(cds, result):
+    """Save result for a CDS to cache."""
+    cache_path = get_cache_path(cds)
+    with open(cache_path, 'wb') as f:
+        pickle.dump(result, f)
+
 def read_and_preprocess_data(file_path):
-    """Read and preprocess the CSV file."""
+    """Read and preprocess the CSV file with parallel processing."""
     print("Reading data...")
     df = pd.read_csv(file_path)
     
-    # Remove invalid omega values
-    df = df[df['omega'] != -1]
-    df = df[df['omega'] != 99]
-    df = df.dropna(subset=['omega'])  # Remove NaN omega values
+    # Parallel filtering using dask if the dataset is large
+    if len(df) > 1_000_000:
+        import dask.dataframe as dd
+        ddf = dd.from_pandas(df, npartitions=cpu_count())
+        df = ddf[
+            (ddf['omega'] != -1) & 
+            (ddf['omega'] != 99) & 
+            ddf['omega'].notnull()
+        ].compute()
+    else:
+        df = df[
+            (df['omega'] != -1) & 
+            (df['omega'] != 99)
+        ].dropna(subset=['omega'])
     
-    print(f"Total valid comparisons: {len(df)}")
-    print(f"Unique CDSs found: {df['CDS'].nunique()}")
+    print(f"Total valid comparisons: {len(df):,}")
+    print(f"Unique CDSs found: {df['CDS'].nunique():,}")
     return df
+
+def calculate_test_statistics(matrix_0, matrix_1):
+    """Calculate both mean and median differences."""
+    if matrix_0 is None or matrix_1 is None:
+        return np.nan, np.nan
+        
+    upper_0 = np.triu(matrix_0, k=1)
+    upper_1 = np.triu(matrix_1, k=1)
+    values_0 = upper_0[~np.isnan(upper_0)]
+    values_1 = upper_1[~np.isnan(upper_1)]
+    
+    if len(values_0) == 0 or len(values_1) == 0:
+        return np.nan, np.nan
+        
+    mean_diff = np.mean(values_1) - np.mean(values_0)
+    median_diff = np.median(values_1) - np.median(values_0)
+    
+    return mean_diff, median_diff
 
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
@@ -111,164 +179,233 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
     
     return matrix_0, matrix_1
 
-def calculate_test_statistic(matrix_0, matrix_1):
-    """Calculate difference in means between upper triangles."""
+def permutation_test_worker(args):
+    """Worker function for parallel permutation testing."""
+    all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
+    
+    # Create matrices for original groups (used for effect size)
+    orig_matrix_0, orig_matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
+    orig_mean, orig_median = calculate_test_statistics(orig_matrix_0, orig_matrix_1)
+    
+    # Run permutations in chunks for better memory management
+    chunk_size = 100
+    n_chunks = N_PERMUTATIONS // chunk_size
+    
+    permuted_means = []
+    permuted_medians = []
+    
+    for _ in range(n_chunks):
+        chunk_means = []
+        chunk_medians = []
+        
+        for _ in range(chunk_size):
+            # Randomly assign sequences to groups
+            np.random.shuffle(all_sequences)
+            perm_seq_0 = all_sequences[:n0]
+            perm_seq_1 = all_sequences[n0:]
+            
+            # Create matrices and calculate statistics
+            matrix_0, matrix_1 = create_matrices(perm_seq_0, perm_seq_1, pairwise_dict)
+            mean_diff, median_diff = calculate_test_statistics(matrix_0, matrix_1)
+            
+            if not np.isnan(mean_diff):
+                chunk_means.append(mean_diff)
+            if not np.isnan(median_diff):
+                chunk_medians.append(median_diff)
+        
+        permuted_means.extend(chunk_means)
+        permuted_medians.extend(chunk_medians)
+    
+    # Calculate p-values
+    mean_pval = np.mean(np.abs(permuted_means) >= np.abs(orig_mean)) if permuted_means else np.nan
+    median_pval = np.mean(np.abs(permuted_medians) >= np.abs(orig_median)) if permuted_medians else np.nan
+    
+    return {
+        'observed_mean': orig_mean,
+        'observed_median': orig_median,
+        'mean_pvalue': mean_pval,
+        'median_pvalue': median_pval,
+        'matrix_0': orig_matrix_0,
+        'matrix_1': orig_matrix_1,
+        'n0': len(sequences_0),
+        'n1': len(sequences_1),
+        'effect_size_mean': orig_mean / np.std(permuted_means) if permuted_means else np.nan,
+        'effect_size_median': orig_median / np.std(permuted_medians) if permuted_medians else np.nan
+    }
+
+def create_enhanced_visualization(matrix_0, matrix_1, cds, result):
+    """Create beautiful visualization of the comparison matrices."""
     if matrix_0 is None or matrix_1 is None:
-        return np.nan
+        return
         
-    upper_0 = np.triu(matrix_0, k=1)
-    upper_1 = np.triu(matrix_1, k=1)
-    values_0 = upper_0[~np.isnan(upper_0)]
-    values_1 = upper_1[~np.isnan(upper_1)]
+    plt.style.use('seaborn-darkgrid')
+    fig = plt.figure(figsize=(20, 10))
     
-    # Check if we have enough values
-    if len(values_0) == 0 or len(values_1) == 0:
-        return np.nan
-        
-    return np.mean(values_1) - np.mean(values_0)
+    # Main title with styling
+    plt.suptitle(f'Pairwise Comparison Analysis: {cds}', 
+                fontsize=16, fontweight='bold', y=1.02)
+    
+    # Create GridSpec for flexible layout
+    gs = plt.GridSpec(2, 3, figure=fig)
+    
+    # Heatmaps
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1])
+    
+    # Custom diverging colormap
+    cmap = sns.diverging_palette(220, 20, as_cmap=True)
+    
+    # Plot heatmaps with enhanced styling
+    sns.heatmap(matrix_0, cmap=cmap, center=1, ax=ax1, 
+                square=True, cbar_kws={'label': 'Omega Value'})
+    sns.heatmap(matrix_1, cmap=cmap, center=1, ax=ax2, 
+                square=True, cbar_kws={'label': 'Omega Value'})
+    
+    ax1.set_title(f'Group 0 Matrix (n={result["n0"]})', fontsize=12, pad=10)
+    ax2.set_title(f'Group 1 Matrix (n={result["n1"]})', fontsize=12, pad=10)
+    
+    # Distribution comparison
+    ax3 = fig.add_subplot(gs[0, 2])
+    values_0 = matrix_0[np.triu_indices_from(matrix_0, k=1)]
+    values_1 = matrix_1[np.triu_indices_from(matrix_1, k=1)]
+    
+    sns.kdeplot(data=values_0[~np.isnan(values_0)], ax=ax3, label='Group 0', 
+                fill=True, alpha=0.5)
+    sns.kdeplot(data=values_1[~np.isnan(values_1)], ax=ax3, label='Group 1', 
+                fill=True, alpha=0.5)
+    ax3.set_title('Distribution of Omega Values', fontsize=12)
+    ax3.legend()
+    
+    # Results table
+    ax4 = fig.add_subplot(gs[1, :])
+    ax4.axis('off')
+    
+    table_data = [
+        ['Metric', 'Mean', 'Median'],
+        ['Observed Difference', f"{result['observed_mean']:.4f}", f"{result['observed_median']:.4f}"],
+        ['P-value', f"{result['mean_pvalue']:.4f}", f"{result['median_pvalue']:.4f}"],
+        ['Effect Size', f"{result['effect_size_mean']:.4f}", f"{result['effect_size_median']:.4f}"]
+    ]
+    
+    table = ax4.table(cellText=table_data, loc='center', cellLoc='center',
+                     colWidths=[0.2, 0.2, 0.2])
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.5, 2)
+    
+    # Style the table
+    for (row, col), cell in table.get_celld().items():
+        if row == 0:
+            cell.set_text_props(weight='bold')
+            cell.set_facecolor('#E6E6E6')
+        if col == 0:
+            cell.set_text_props(weight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png', 
+                dpi=300, bbox_inches='tight')
+    plt.close()
 
-def permutation_test_single(args):
-    """Single permutation iteration."""
-    all_sequences, n0, pairwise_dict = args
+def analyze_cds_parallel(args):
+    """Analyze a single CDS with parallel permutations."""
+    df_cds, cds = args
     
-    # Randomly assign sequences to groups, maintaining original group sizes
-    np.random.shuffle(all_sequences)
-    sequences_0 = all_sequences[:n0]
-    sequences_1 = all_sequences[n0:]
+    # Check cache first
+    cached_result = load_cached_result(cds)
+    if cached_result is not None:
+        return cds, cached_result
     
-    # Create new matrices based on this assignment
-    matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
-    
-    return calculate_test_statistic(matrix_0, matrix_1)
-
-def analyze_cds(df_cds, n_permutations=1000):
-    """Analyze a single CDS."""
-    # Create dictionary of pairwise values
+    # Create pairwise dictionary
     pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega'] 
                      for _, row in df_cds.iterrows()}
     
-    # Get original group assignments
+    # Get sequences for each group
     sequences_0 = np.array([seq for seq in df_cds['Seq1'].unique() 
                            if not seq.endswith('1')])
     sequences_1 = np.array([seq for seq in df_cds['Seq1'].unique() 
                            if seq.endswith('1')])
     
-    print(f"Group 0 size: {len(sequences_0)}, Group 1 size: {len(sequences_1)}")
-    
-    # Check if we have enough sequences in both groups
     if len(sequences_0) < 2 or len(sequences_1) < 2:
-        return {
-            'observed_stat': np.nan,
-            'p_value': np.nan,
+        result = {
+            'observed_mean': np.nan,
+            'observed_median': np.nan,
+            'mean_pvalue': np.nan,
+            'median_pvalue': np.nan,
             'matrix_0': None,
             'matrix_1': None,
             'n0': len(sequences_0),
-            'n1': len(sequences_1)
+            'n1': len(sequences_1),
+            'effect_size_mean': np.nan,
+            'effect_size_median': np.nan
         }
-    
-    n0 = len(sequences_0)
-    
-    # Calculate observed statistic
-    matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
-    observed_stat = calculate_test_statistic(matrix_0, matrix_1)
-    
-    if np.isnan(observed_stat):
-        return {
-            'observed_stat': np.nan,
-            'p_value': np.nan,
-            'matrix_0': matrix_0,
-            'matrix_1': matrix_1,
-            'n0': n0,
-            'n1': len(sequences_1)
-        }
-    
-    # Run permutations
-    all_sequences = np.concatenate([sequences_0, sequences_1])
-    args = [(all_sequences.copy(), n0, pairwise_dict) for _ in range(n_permutations)]
-    
-    with Pool(cpu_count()) as pool:
-        permuted_stats = list(tqdm(
-            pool.imap(permutation_test_single, args),
-            total=n_permutations,
-            desc="Running permutations"
+    else:
+        all_sequences = np.concatenate([sequences_0, sequences_1])
+        result = permutation_test_worker((
+            all_sequences, len(sequences_0), pairwise_dict, 
+            sequences_0, sequences_1
         ))
     
-    # Remove any NaN values from permuted stats
-    permuted_stats = np.array([x for x in permuted_stats if not np.isnan(x)])
-    
-    # Calculate p-value if we have enough permutations
-    if len(permuted_stats) > 0:
-        p_value = np.mean(np.abs(permuted_stats) >= np.abs(observed_stat))
-    else:
-        p_value = np.nan
-    
-    return {
-        'observed_stat': observed_stat,
-        'p_value': p_value,
-        'matrix_0': matrix_0,
-        'matrix_1': matrix_1,
-        'n0': n0,
-        'n1': len(sequences_1)
-    }
-
-def visualize_matrices(matrix_0, matrix_1, cds, result):
-    """Create and save visualization of the comparison matrices."""
-    if matrix_0 is None or matrix_1 is None:
-        return
-        
-    plt.figure(figsize=(15, 6))
-    
-    plt.subplot(121)
-    sns.heatmap(matrix_0, cmap='viridis', center=1)
-    plt.title(f'Group 0 Matrix (n={result["n0"]})')
-    
-    plt.subplot(122)
-    sns.heatmap(matrix_1, cmap='viridis', center=1)
-    plt.title(f'Group 1 Matrix (n={result["n1"]})')
-    
-    plt.suptitle(f'CDS: {cds}\nObs diff: {result["observed_stat"]:.4f}, p-value: {result["p_value"]:.4f}')
-    plt.tight_layout()
-    plt.savefig(f'matrices_{cds.replace("/", "_")}.png')
-    plt.close()
+    # Cache the result
+    save_cached_result(cds, result)
+    return cds, result
 
 def main():
+    start_time = datetime.now()
+    print(f"Analysis started at {start_time}")
+    
     # Read data
     df = read_and_preprocess_data('all_pairwise_results.csv')
-    results = []
     
-    # Process each CDS
-    for cds in tqdm(df['CDS'].unique(), desc="Processing CDSs"):
-        print(f"\nAnalyzing CDS: {cds}")
-        df_cds = df[df['CDS'] == cds]
-        
-        result = analyze_cds(df_cds)
-        result['CDS'] = cds
-        results.append(result)
-        
-        if not np.isnan(result['observed_stat']):
-            print(f"Observed difference: {result['observed_stat']:.4f}")
-            print(f"P-value: {result['p_value']:.4f}")
-        else:
-            print("Not enough data for analysis")
-        
-        # Visualize first few valid results
-        if len([r for r in results if not np.isnan(r['observed_stat'])]) <= 5:
-            visualize_matrices(result['matrix_0'], result['matrix_1'], cds, result)
+    # Prepare arguments for parallel processing
+    cds_args = [(df[df['CDS'] == cds], cds) for cds in df['CDS'].unique()]
     
-    # Save results
+    # Process CDSs in parallel
+    results = {}
+    with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
+        for cds, result in tqdm(
+            executor.map(analyze_cds_parallel, cds_args),
+            total=len(cds_args),
+            desc="Processing CDSs"
+        ):
+            results[cds] = result
+    
+    # Convert results to DataFrame
     results_df = pd.DataFrame([
-        {k: v for k, v in r.items() if k not in ['matrix_0', 'matrix_1']}
-        for r in results
+        {
+            'CDS': cds,
+            **{k: v for k, v in result.items() 
+               if k not in ['matrix_0', 'matrix_1']}
+        }
+        for cds, result in results.items()
     ])
-    results_df.to_csv('permutation_test_results.csv', index=False)
     
-    # Calculate summary statistics for valid results
-    valid_results = results_df[~results_df['p_value'].isna()]
+    # Save final results
+    results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
     
+    # Create visualizations for top 5 most significant results
+    significant_results = results_df.sort_values('mean_pvalue')
+    for _, row in significant_results.head().iterrows():
+        cds = row['CDS']
+        result = results[cds]
+        create_enhanced_visualization(
+            result['matrix_0'], 
+            result['matrix_1'], 
+            cds, 
+            result
+        )
+    
+    # Print summary statistics
+    valid_results = results_df[~results_df['mean_pvalue'].isna()]
     print("\nAnalysis Complete!")
-    print(f"Total CDSs analyzed: {len(results_df)}")
-    print(f"Valid analyses: {len(valid_results)}")
-    print(f"Significant CDSs (p < 0.05): {(valid_results['p_value'] < 0.05).sum()}")
+    print(f"Total CDSs analyzed: {len(results_df):,}")
+    print(f"Valid analyses: {len(valid_results):,}")
+    print(f"Significant CDSs (p < 0.05):")
+    print(f"  By mean: {(valid_results['mean_pvalue'] < 0.05).sum():,}")
+    print(f"  By median: {(valid_results['median_pvalue'] < 0.05).sum():,}")
+    
+    end_time = datetime.now()
+    print(f"\nAnalysis completed at {end_time}")
+    print(f"Total runtime: {end_time - start_time}")
 
 if __name__ == "__main__":
     main()
