@@ -146,8 +146,8 @@ def calculate_test_statistics(matrix_0, matrix_1):
     mean_diff = np.mean(values_1) - np.mean(values_0)
     median_diff = np.median(values_1) - np.median(values_0)
     print("\nCalculate_test_statistics:")
-    print(f"  Group 0 values: {values_0}")
-    print(f"  Group 1 values: {values_1}") 
+    #print(f"  Group 0 values: {values_0}")
+    #print(f"  Group 1 values: {values_1}") 
     print(f"  Group 0 median: {np.median(values_0):.4f}")
     print(f"  Group 1 median: {np.median(values_1):.4f}")
     print(f"  Median diff: {median_diff:.4f}")
@@ -160,7 +160,11 @@ def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
     key1 = (seq1, seq2)
     key2 = (seq2, seq1)
-    return pairwise_dict.get(key1) or pairwise_dict.get(key2)
+    val1 = pairwise_dict.get(key1)
+    val2 = pairwise_dict.get(key2)
+    if val1 is not None:
+        return val1
+    return val2
 
 def create_matrices(sequences_0, sequences_1, pairwise_dict):
     """Create matrices for two groups based on sequence assignments."""
