@@ -135,10 +135,17 @@ def calculate_test_statistics(matrix_0, matrix_1):
     if matrix_0 is None or matrix_1 is None:
         return np.nan, np.nan
         
-    upper_0 = np.triu(matrix_0, k=1)
-    upper_1 = np.triu(matrix_1, k=1)
-    values_0 = upper_0[~np.isnan(upper_0)]
-    values_1 = upper_1[~np.isnan(upper_1)]
+    # Get upper triangle entries excluding diagonal
+    n0 = matrix_0.shape[0]
+    n1 = matrix_1.shape[0]
+    rows0, cols0 = np.triu_indices(n0, k=1)
+    rows1, cols1 = np.triu_indices(n1, k=1)
+    
+    # Extract values, filtering out NaN and zeros used for missing data
+    values_0 = matrix_0[rows0, cols0]
+    values_1 = matrix_1[rows1, cols1]
+    values_0 = values_0[(~np.isnan(values_0))]
+    values_1 = values_1[(~np.isnan(values_1))]
     
     if len(values_0) == 0 or len(values_1) == 0:
         return np.nan, np.nan
