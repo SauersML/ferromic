@@ -16,7 +16,7 @@ METHOD:
 
 2. Test Statistic
   - Calculate mean omega value in each group's matrix (using upper triangle only)
-  - Take difference: mean(Group 1) - mean(Group 0)
+  - Take difference: mean(Group 1) - mean(Group 0) (or absolute mean, or median, etc.)
   - This captures if one group tends to have higher/lower omega values
 
 3. Permutation Test
