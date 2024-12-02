@@ -347,24 +347,48 @@ def analyze_cds_parallel(args):
     save_cached_result(cds, result)
     return cds, result
 
-
-
-
 def parse_cds_coordinates(cds_name):
     """Extract chromosome and coordinates from CDS name."""
-    # Expected format: chr_start_end or chr:start-end
     try:
-        if '_' in cds_name:
-            chrom, start, end = cds_name.split('_')
-        else:
+        # Debug print to see actual CDS name format
+        print(f"Parsing CDS name: {cds_name}")
+        
+        # Try different possible formats
+        if '/' in cds_name:  # If it's a path, take last part
+            cds_name = cds_name.split('/')[-1]
+            
+        if '_' in cds_name: # This is what we expect
+          try:
+              # Format is chr{X}_start{Y}_end{Z}
+              parts = cds_name.split('_')
+              if len(parts) == 3 and parts[1].startswith('start') and parts[2].startswith('end'):
+                  chrom = parts[0]
+                  start = int(parts[1].replace('start', ''))
+                  end = int(parts[2].replace('end', ''))
+                  return chrom, start, end
+          except Exception as e:
+              print(f"Error parsing {cds_name}: {str(e)}")
+              return None, None, None
+        elif ':' in cds_name:
             chrom, coords = cds_name.split(':')
-            start, end = coords.split('-')
-        return chrom, int(start), int(end)
-    except:
+            if '-' in coords:
+                start, end = coords.split('-')
+            else:
+                start, end = coords.split('..')
+            return chrom, int(start), int(end)
+            
+        # Print debug info if parsing fails
+        print(f"Failed to parse: {cds_name}")
+        return None, None, None
+    except Exception as e:
+        print(f"Error parsing {cds_name}: {str(e)}")
         return None, None, None
 
 def build_overlap_clusters(results_df):
     """Build clusters of overlapping CDS regions."""
+    # Debug info
+    print(f"\nAnalyzing {len(results_df)} CDS entries")
+    
     # Initialize clusters
     clusters = {}
     cluster_id = 0
@@ -376,6 +400,14 @@ def build_overlap_clusters(results_df):
         chrom, start, end = parse_cds_coordinates(cds)
         if None not in (chrom, start, end):
             cds_coords.append((chrom, start, end, cds))
+
+    print(f"\nSuccessfully parsed {len(cds_coords)} CDS coordinates")
+    if len(cds_coords) == 0:
+        print("No CDS coordinates could be parsed! Check CDS name format.")
+        # Print a few example CDS names
+        print("\nExample CDS names:")
+        for cds in results_df['CDS'].head():
+            print(cds)
     
     cds_coords.sort()  # Sort by chromosome, then start
     
@@ -473,6 +505,38 @@ def combine_cluster_evidence(cluster_cdss, results_df):
         'n_valid_cds': valid_cdss
     }
 
+
+
+
+
+
+
+"""
+OVERALL TEST METHODOLOGY
+
+The overall test combines evidence across CDS regions.
+
+1. DEPENDENCY STRUCTURE
+- CDSs that share genomic coordinates are not independent
+- They may be using the same underlying sequence data
+- We handle this by first grouping overlapping CDSs into clusters
+- Each cluster is assumed to represent one independent piece of evidence
+
+2. WITHIN-CLUSTER COMBINATION
+For each cluster of overlapping CDSs:
+- Weight each CDS by its genomic length
+- Combine their test statistics using weighted averages
+- Use Fisher's method to combine p-values within cluster
+- Track number of actual pairwise comparisons made
+
+3. BETWEEN-CLUSTER COMBINATION 
+Once we have cluster-level statistics:
+- We assume clusters are truly independent (no sequence overlap)
+- Use Fisher's method to combine cluster p-values
+- Weight effect sizes by number of comparisons
+"""
+
+
 def compute_overall_significance(cluster_results):
     """Compute overall significance from independent clusters."""
     valid_clusters = [c for c in cluster_results.values() 
@@ -541,7 +605,7 @@ def main():
     # Save final results
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
     
-    # Add overall analysis
+    # Overall analysis
     print("\nComputing overall significance...")
     clusters = build_overlap_clusters(results_df)
     cluster_stats = {}
@@ -550,9 +614,17 @@ def main():
     
     overall_results = compute_overall_significance(cluster_stats)
     
+    # Convert numpy values to native Python types for JSON serialization
+    json_safe_results = {
+        'overall_pvalue': float(overall_results['overall_pvalue']) if not np.isnan(overall_results['overall_pvalue']) else None,
+        'overall_effect': float(overall_results['overall_effect']) if not np.isnan(overall_results['overall_effect']) else None,
+        'n_valid_clusters': int(overall_results['n_valid_clusters']),
+        'total_comparisons': int(overall_results['total_comparisons'])
+    }
+    
     # Save overall results
     with open(RESULTS_DIR / 'overall_results.json', 'w') as f:
-        json.dump(overall_results, f, indent=2)
+        json.dump(json_safe_results, f, indent=2)
     
     # Print overall results
     print("\nOverall Analysis Results:")
