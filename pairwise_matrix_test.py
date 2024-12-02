@@ -145,9 +145,16 @@ def calculate_test_statistics(matrix_0, matrix_1):
         
     mean_diff = np.mean(values_1) - np.mean(values_0)
     median_diff = np.median(values_1) - np.median(values_0)
-    print(f"Median calc: values_0: {len(values_0)}, values_1: {len(values_1)}, median_diff: {median_diff}")
+    print("\nCalculate_test_statistics:")
+    print(f"  Group 0 values: {values_0}")
+    print(f"  Group 1 values: {values_1}") 
+    print(f"  Group 0 median: {np.median(values_0):.4f}")
+    print(f"  Group 1 median: {np.median(values_1):.4f}")
+    print(f"  Median diff: {median_diff:.4f}")
+    print(f"  Mean diff: {mean_diff:.4f}")
     
     return mean_diff, median_diff
+
 
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
@@ -218,7 +225,16 @@ def permutation_test_worker(args):
         permuted_medians.extend(chunk_medians)
     
     # Calculate p-values
-    print(f"orig_mean: {orig_mean}, permuted_means: {len(permuted_means)}, n_extreme: {np.sum(np.abs(permuted_means) >= np.abs(orig_mean))}")
+    print("\nPermutation test p-value calculation:")
+    print(f"  Original mean: {orig_mean:.4f}")
+    print(f"  Original median: {orig_median:.4f}")
+    print(f"  Number of permuted means: {len(permuted_means)}")
+    print(f"  Number of permuted medians: {len(permuted_medians)}")
+    print(f"  First 5 permuted means: {permuted_means[:5]}")
+    print(f"  First 5 permuted medians: {permuted_medians[:5]}")
+    print(f"  Number of extreme means: {np.sum(np.abs(permuted_means) >= np.abs(orig_mean))}")
+    print(f"  Number of extreme medians: {np.sum(np.abs(permuted_medians) >= np.abs(orig_median))}")
+    
     mean_pval = (np.sum(np.abs(permuted_means) >= np.abs(orig_mean)) + 1) / (len(permuted_means) + 1) if permuted_means else np.nan
     median_pval = (np.sum(np.abs(permuted_medians) >= np.abs(orig_median)) + 1) / (len(permuted_medians) + 1) if permuted_medians else np.nan
     
