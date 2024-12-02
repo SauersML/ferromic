@@ -233,30 +233,27 @@ def permutation_test_worker(args):
         'effect_size_median': orig_median / np.std(permuted_medians) if permuted_medians else np.nan
     }
 
-def create_enhanced_visualization(matrix_0, matrix_1, cds, result):
-    """Create beautiful visualization of the comparison matrices."""
+def create_visualization(matrix_0, matrix_1, cds, result):
     if matrix_0 is None or matrix_1 is None:
         return
         
-    plt.style.use('seaborn')
-    sns.set_style("darkgrid")
+    # Create figure without any specific style
     fig = plt.figure(figsize=(20, 10))
     
-    # Main title with styling
+    # Main title
     plt.suptitle(f'Pairwise Comparison Analysis: {cds}', 
                 fontsize=16, fontweight='bold', y=1.02)
     
-    # Create GridSpec for flexible layout
     gs = plt.GridSpec(2, 3, figure=fig)
-    
+  
     # Heatmaps
     ax1 = fig.add_subplot(gs[0, 0])
     ax2 = fig.add_subplot(gs[0, 1])
-    
+  
     # Custom diverging colormap
     cmap = sns.diverging_palette(220, 20, as_cmap=True)
     
-    # Plot heatmaps with enhanced styling
+    # Plot heatmaps
     sns.heatmap(matrix_0, cmap=cmap, center=1, ax=ax1, 
                 square=True, cbar_kws={'label': 'Omega Value'})
     sns.heatmap(matrix_1, cmap=cmap, center=1, ax=ax2, 
@@ -388,7 +385,7 @@ def main():
     for _, row in significant_results.head().iterrows():
         cds = row['CDS']
         result = results[cds]
-        create_enhanced_visualization(
+        create_visualization(
             result['matrix_0'], 
             result['matrix_1'], 
             cds, 
