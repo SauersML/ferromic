@@ -150,8 +150,8 @@ def calculate_test_statistics(matrix_0, matrix_1):
     if len(values_0) == 0 or len(values_1) == 0:
         return np.nan, np.nan
         
-    mean_diff = np.mean(np.abs(np.mean(values_1) - values_0))
-    median_diff = np.mean(np.abs(np.median(values_1) - values_0))
+    mean_diff = abs(np.mean(values_1) - np.mean(values_0))
+    median_diff = abs(np.median(values_1) - np.median(values_0))
     print("\nCalculate_test_statistics:")
     #print(f"  Group 0 values: {values_0}")
     #print(f"  Group 1 values: {values_1}") 
