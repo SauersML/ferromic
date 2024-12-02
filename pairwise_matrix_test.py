@@ -152,13 +152,13 @@ def calculate_test_statistics(matrix_0, matrix_1):
         
     mean_diff = abs(np.mean(values_1) - np.mean(values_0))
     median_diff = abs(np.median(values_1) - np.median(values_0))
-    print("\nCalculate_test_statistics:")
+    #print("\nCalculate_test_statistics:")
     #print(f"  Group 0 values: {values_0}")
     #print(f"  Group 1 values: {values_1}") 
-    print(f"  Group 0 median: {np.median(values_0):.4f}")
-    print(f"  Group 1 median: {np.median(values_1):.4f}")
-    print(f"  Median diff: {median_diff:.4f}")
-    print(f"  Mean diff: {mean_diff:.4f}")
+    #print(f"  Group 0 median: {np.median(values_0):.4f}")
+    #print(f"  Group 1 median: {np.median(values_1):.4f}")
+    #print(f"  Median diff: {median_diff:.4f}")
+    #print(f"  Mean diff: {mean_diff:.4f}")
     
     return mean_diff, median_diff
 
