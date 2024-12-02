@@ -1,3 +1,61 @@
+"""
+This script implements a permutation test to analyze differences between two groups 
+of pairwise comparisons while accounting for their non-independence. The key challenge
+is that pairwise comparisons within a group are usually not independent.
+
+DATA STRUCTURE:
+- Input data contains pairwise omega values between sequences (but this method can be applied generally to other types of data)
+- Sequences belong to two groups (marked by *_0 or *_1 suffix)
+
+METHOD:
+1. Data Organization
+  - For each group, create a matrix of all pairwise omega values
+  - Matrix[i,j] = omega value between sequence i and j in that group
+  - Matrices are symmetric (Matrix[i,j] = Matrix[j,i])
+  - Diagonal is NaN (no self-comparisons)
+
+2. Test Statistic
+  - Calculate mean omega value in each group's matrix (using upper triangle only)
+  - Take difference: mean(Group 1) - mean(Group 0)
+  - This captures if one group tends to have higher/lower omega values
+
+3. Permutation Test
+  - Null hypothesis: Group labels are random with respect to omega values
+  - Take all sequences from both groups
+  - Randomly shuffle sequences into two new groups (maintaining original group sizes)
+  - Reconstruct matrices using original omega values but new group assignments
+  - Calculate test statistic for this permutation
+  - Repeat many times (default 1000)
+
+VALIDITY:
+The test is valid because:
+1. Maintains dependency structure
+  - Never creates new omega values
+  - Only redistributes existing pairwise comparisons
+  - Dependencies between comparisons sharing sequences are preserved
+
+2. Handles missing data appropriately
+  - Permuted matrices have more NaNs than original (when mixing groups)
+  - This is correct because we only had within-group comparisons
+  - NaNs are properly excluded from mean calculations
+
+3. Tests proper null hypothesis
+  - If groups have no real difference, omega values should be exchangeable
+  - Permutation distribution represents null of "no group effect"
+  - P-value = proportion of permuted differences more extreme than observed
+
+INTERPRETATION:
+- Low p-value means the observed difference between groups is unlikely by chance
+- Suggests systematic differences in omega values between groups
+- Original group structure (0 vs 1) captures meaningful variation
+
+OUTPUT:
+- P-value for each CDS
+- Observed difference in means
+- Summary statistics across all CDS regions
+"""
+
+
 import pandas as pd
 import numpy as np
 from collections import defaultdict
