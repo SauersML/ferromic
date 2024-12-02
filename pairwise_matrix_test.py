@@ -217,8 +217,8 @@ def permutation_test_worker(args):
         permuted_medians.extend(chunk_medians)
     
     # Calculate p-values
-    mean_pval = np.mean(np.abs(permuted_means) >= np.abs(orig_mean)) if permuted_means else np.nan
-    median_pval = np.mean(np.abs(permuted_medians) >= np.abs(orig_median)) if permuted_medians else np.nan
+    mean_pval = (np.sum(np.abs(permuted_means) >= np.abs(orig_mean)) + 1) / (len(permuted_means) + 1) if permuted_means else np.nan
+    median_pval = (np.sum(np.abs(permuted_medians) >= np.abs(orig_median)) + 1) / (len(permuted_medians) + 1) if permuted_medians else np.nan
     
     return {
         'observed_mean': orig_mean,
