@@ -734,7 +734,7 @@ def main():
     # Print overall results
     print("\nOverall Analysis Results:")
     print(f"Number of independent clusters: {overall_results['n_valid_clusters']}")
-    print(f"Total pairwise comparisons: {overall_results['total_comparisons']:,}")
+    print(f"Total unique CDS pairs: {overall_results['total_comparisons']:,}")
     print(f"Overall p-value: {overall_results['overall_pvalue']:.4e}")
     print(f"Overall effect size: {overall_results['overall_effect']:.4f}")
     
