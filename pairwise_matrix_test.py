@@ -542,9 +542,21 @@ def compute_overall_significance(cluster_results):
             print(f"Clusters with zero p-values: {zero_p_clusters}")
         cluster_pvals[cluster_pvals < min_pvalue] = min_pvalue
 
-        # Fisher's method
+        # Fisher's method using log survival function to prevent underflow
         fisher_stat = -2 * np.sum(np.log(cluster_pvals))
-        overall_pvalue_fisher = stats.chi2.sf(fisher_stat, df=2 * len(cluster_pvals))
+        df_fisher = 2 * len(cluster_pvals)
+
+        # Compute the logarithm of the p-value directly
+        overall_log_pvalue_fisher = stats.chi2.logsf(fisher_stat, df=df_fisher)
+
+        # Check for underflow and set to minimum p-value if necessary
+        if np.isneginf(overall_log_pvalue_fisher) or np.isnan(overall_log_pvalue_fisher):
+            overall_log_pvalue_fisher = np.log(min_pvalue)
+            print(f"Warning: Overall log p-value underflow in Fisher's method. Set to log(min_pvalue).")
+
+        # Convert log p-value back to p-value
+        overall_pvalue_fisher = np.exp(overall_log_pvalue_fisher)
+
         if overall_pvalue_fisher == 0:
             overall_pvalue_fisher = min_pvalue
             print(f"Warning: Overall p-value underflow to zero in Fisher's method. Set to {overall_pvalue_fisher}.")
