@@ -532,7 +532,7 @@ def build_overlap_clusters(results_df):
 def combine_cluster_evidence(cluster_cdss, results_df):
     """Combine statistics for a cluster of overlapping CDSs, considering only CDSs that meet specified criteria."""
     cluster_data = results_df[results_df['CDS'].isin(cluster_cdss)]
-    
+
     # Get weights based on CDS length
     weights = {}
     total_length = 0
@@ -542,41 +542,44 @@ def combine_cluster_evidence(cluster_cdss, results_df):
             length = end - start
             weights[cds] = length
             total_length += length
-    
+
     # Normalize weights
     for cds in weights:
         weights[cds] /= total_length
-    
+
     # Initialize statistics
     weighted_mean_diff = 0
     weighted_effect_size = 0
     total_comparisons = 0
     valid_cdss = 0
     valid_indices = []
-    
+
     for idx, row in cluster_data.iterrows():
         cds = row['CDS']
         effect_size = row['effect_size_mean']
         n0 = row['n0']
         n1 = row['n1']
-        
+
         weight = weights.get(cds, 1 / len(cluster_cdss))
         weighted_mean_diff += row['observed_mean'] * weight
         weighted_effect_size += effect_size * weight
-        total_comparisons += row['num_comp_group_0']  # actual number of comparisons in group 0
-        total_comparisons += row['num_comp_group_1']  # actual number of comparisons in group 1
+        # Handle NaN values for 'num_comp_group_0' and 'num_comp_group_1'
+        num_comp_group_0 = 0 if np.isnan(row['num_comp_group_0']) else row['num_comp_group_0']
+        num_comp_group_1 = 0 if np.isnan(row['num_comp_group_1']) else row['num_comp_group_1']
+        total_comparisons += num_comp_group_0  # actual number of comparisons in group 0
+        total_comparisons += num_comp_group_1  # actual number of comparisons in group 1
         valid_cdss += 1
         valid_indices.append(idx)
-  
+
     # Combine p-values if we have valid data
     if valid_cdss > 0:
         # Use Fisher's method within cluster
         valid_pvals = cluster_data.loc[valid_indices]['mean_pvalue']
-    
+
         # p-values are finite and not NaN
         valid_pvals = valid_pvals[~np.isnan(valid_pvals)]
         valid_pvals = valid_pvals[~np.isinf(valid_pvals)]
-    
+
         if len(valid_pvals) > 0:
             fisher_stat = -2 * np.sum(np.log(valid_pvals))
             combined_p = stats.chi2.sf(fisher_stat, df=2 * len(valid_pvals))
@@ -587,7 +590,7 @@ def combine_cluster_evidence(cluster_cdss, results_df):
         weighted_mean_diff = np.nan
         weighted_effect_size = np.nan
         total_comparisons = 0
-    
+
     return {
         'combined_pvalue': combined_p,
         'weighted_mean_diff': weighted_mean_diff,
@@ -698,16 +701,17 @@ def main():
     for cluster_id, cluster_cdss in clusters.items():
         cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df)
     
+    # Compute overall significance
     overall_results = compute_overall_significance(cluster_stats)
-      
+
     # Convert numpy values to native Python types for JSON serialization
     json_safe_results = {
         'overall_pvalue': float(overall_results['overall_pvalue']) if not np.isnan(overall_results['overall_pvalue']) else None,
         'overall_effect': float(overall_results['overall_effect']) if not np.isnan(overall_results['overall_effect']) else None,
-        'n_valid_clusters': int(overall_results['n_valid_clusters']),
-        'total_comparisons': int(overall_results['total_comparisons'])
+        'n_valid_clusters': int(overall_results['n_valid_clusters']) if not np.isnan(overall_results['n_valid_clusters']) else None,
+        'total_comparisons': int(overall_results['total_comparisons']) if not np.isnan(overall_results['total_comparisons']) else None
     }
-    
+
     # Save overall results
     with open(RESULTS_DIR / 'overall_results.json', 'w') as f:
         json.dump(json_safe_results, f, indent=2)
