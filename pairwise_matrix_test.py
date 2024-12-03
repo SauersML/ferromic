@@ -309,7 +309,11 @@ def analyze_cds_parallel(args):
     n0 = len(sequences_0)
     n1 = len(sequences_1)
 
-    if n0 < 1 or n1 < 1:
+    # Set minimum required sequences per group
+    min_sequences_per_group = 5
+
+    if n0 < min_sequences_per_group or n1 < min_sequences_per_group:
+        # Not enough sequences in one of the groups; return NaNs
         result = {
             'observed_effect_size': np.nan,
             'p_value': np.nan,
