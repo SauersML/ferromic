@@ -392,8 +392,6 @@ def analyze_cds_parallel(args):
     pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega']
                      for _, row in df_cds.iterrows()}
 
-    result['pairwise_comparisons'] = set(pairwise_dict.keys())
-
     # Collect all unique sequences from both 'Seq1' and 'Seq2' columns
     all_seqs = pd.concat([df_cds['Seq1'], df_cds['Seq2']]).unique()
     sequences_0 = np.array([seq for seq in all_seqs if not seq.endswith('1')])
@@ -425,6 +423,8 @@ def analyze_cds_parallel(args):
         # Include matrices in the result dictionary
         result['matrix_0'] = matrix_0
         result['matrix_1'] = matrix_1
+
+    result['pairwise_comparisons'] = set(pairwise_dict.keys())
 
     # Cache the result
     save_cached_result(cds, result)
