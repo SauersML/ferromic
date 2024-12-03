@@ -90,12 +90,16 @@ def get_cache_path(cds):
     return CACHE_DIR / f"{cds.replace('/', '_')}.pkl"
 
 def load_cached_result(cds):
-    """Load cached result for a CDS if it exists."""
+    """Load cached result for a CDS if it exists and includes 'pairwise_comparisons'."""
     cache_path = get_cache_path(cds)
     if cache_path.exists():
         try:
             with open(cache_path, 'rb') as f:
-                return pickle.load(f)
+                cached_result = pickle.load(f)
+            # 'pairwise_comparisons' must be in the cached result
+            if 'pairwise_comparisons' not in cached_result:
+                return None  # Force recomputation
+            return cached_result
         except:
             return None
     return None
