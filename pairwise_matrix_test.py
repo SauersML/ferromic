@@ -392,6 +392,8 @@ def analyze_cds_parallel(args):
     pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega']
                      for _, row in df_cds.iterrows()}
 
+    result['pairwise_comparisons'] = set(pairwise_dict.keys())
+
     # Collect all unique sequences from both 'Seq1' and 'Seq2' columns
     all_seqs = pd.concat([df_cds['Seq1'], df_cds['Seq2']]).unique()
     sequences_0 = np.array([seq for seq in all_seqs if not seq.endswith('1')])
@@ -563,11 +565,16 @@ def combine_cluster_evidence(cluster_cdss, results_df):
         weight = weights.get(cds, 1 / len(cluster_cdss))
         weighted_mean_diff += row['observed_mean'] * weight
         weighted_effect_size += effect_size * weight
-        # Handle NaN values for 'num_comp_group_0' and 'num_comp_group_1'
-        num_comp_group_0 = 0 if np.isnan(row['num_comp_group_0']) else row['num_comp_group_0']
-        num_comp_group_1 = 0 if np.isnan(row['num_comp_group_1']) else row['num_comp_group_1']
-        total_comparisons += num_comp_group_0  # actual number of comparisons in group 0
-        total_comparisons += num_comp_group_1  # actual number of comparisons in group 1
+        # Also handle NaN values for 'num_comp_group_0' and 'num_comp_group_1'
+        # Initialize a set to collect unique pairwise comparisons for the cluster
+        cluster_pairs = set()
+        
+        # Inside the loop over cluster_data
+        cds_pairs = row['pairwise_comparisons']
+        cluster_pairs.update(cds_pairs)
+        
+        # After the loop, set total_comparisons to the number of unique pairs
+        total_comparisons = len(cluster_pairs)
         valid_cdss += 1
         valid_indices.append(idx)
 
@@ -596,7 +603,8 @@ def combine_cluster_evidence(cluster_cdss, results_df):
         'weighted_mean_diff': weighted_mean_diff,
         'weighted_effect_size': weighted_effect_size,
         'n_comparisons': total_comparisons,
-        'n_valid_cds': valid_cdss
+        'n_valid_cds': valid_cdss,
+        'cluster_pairs': cluster_pairs
     }
 
 
@@ -645,7 +653,12 @@ def compute_overall_significance(cluster_results):
     overall_pvalue = stats.chi2.sf(fisher_stat, df=2*len(cluster_pvals))
 
     # Compute weighted effect size
-    total_comparisons = sum(c['n_comparisons'] for c in valid_clusters)
+    # Collect all unique pairwise comparisons across valid clusters
+    all_unique_pairs = set()
+    for c in valid_clusters:
+        all_unique_pairs.update(c['cluster_pairs'])
+    total_comparisons = len(all_unique_pairs)
+  
     weighted_effect = np.average(
         [c['weighted_effect_size'] for c in valid_clusters],
         weights=[c['n_comparisons'] for c in valid_clusters]
