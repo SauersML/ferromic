@@ -650,9 +650,12 @@ Once we have cluster-level statistics:
 
 def compute_overall_significance(cluster_results):
     """Compute overall significance from independent clusters."""
-    valid_clusters = [c for c in cluster_results.values() 
-                     if not np.isnan(c['combined_pvalue'])]
-  
+    # Filter out clusters with NaN combined_pvalue or weighted_effect_size
+    valid_clusters = [
+        c for c in cluster_results.values()
+        if not np.isnan(c['combined_pvalue']) and not np.isnan(c['weighted_effect_size'])
+    ]
+
     if not valid_clusters:
         return {
             'overall_pvalue': np.nan,
@@ -660,31 +663,29 @@ def compute_overall_significance(cluster_results):
             'n_valid_clusters': 0,
             'total_comparisons': 0
         }
-  
+
     # Combine p-values using Fisher's method
     cluster_pvals = [c['combined_pvalue'] for c in valid_clusters]
     fisher_stat = -2 * np.sum(np.log(cluster_pvals))
-    overall_pvalue = stats.chi2.sf(fisher_stat, df=2*len(cluster_pvals))
+    overall_pvalue = stats.chi2.sf(fisher_stat, df=2 * len(cluster_pvals))
 
     # Compute weighted effect size
+    effect_sizes = [c['weighted_effect_size'] for c in valid_clusters]
+    weights = [c['n_comparisons'] for c in valid_clusters]
+    weighted_effect = np.average(effect_sizes, weights=weights)
+
     # Collect all unique pairwise comparisons across valid clusters
     all_unique_pairs = set()
     for c in valid_clusters:
         all_unique_pairs.update(c['cluster_pairs'])
     total_comparisons = len(all_unique_pairs)
-  
-    weighted_effect = np.average(
-        [c['weighted_effect_size'] for c in valid_clusters],
-        weights=[c['n_comparisons'] for c in valid_clusters]
-    )
-    
+
     return {
         'overall_pvalue': overall_pvalue,
         'overall_effect': weighted_effect,
         'n_valid_clusters': len(valid_clusters),
         'total_comparisons': total_comparisons
     }
-
 
 
 
