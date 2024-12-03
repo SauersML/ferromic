@@ -530,9 +530,9 @@ def compute_overall_significance(cluster_results):
     overall_effect = np.nan
     n_valid_clusters = 0
     total_comparisons = 0
-    cluster_pvals = None  # Initialize cluster_pvals to avoid UnboundLocalError
+    cluster_pvals = None
 
-    # Filter out clusters with NaN combined_pvalue or weighted_effect_size
+    # Filter out clusters with valid combined_pvalue and weighted_effect_size
     valid_clusters = [
         c for c in cluster_results.values()
         if not np.isnan(c['combined_pvalue']) and not np.isnan(c['weighted_effect_size'])
@@ -610,10 +610,15 @@ def compute_overall_significance(cluster_results):
         print(f"Fisher's method p-value: {overall_pvalue_fisher:.4e}")
         print(f"Stouffer's Z method p-value: {overall_pvalue_stouffer:.4e}")
 
+        # Decide which overall p-value to return; let's choose Fisher's method
+        overall_pvalue = overall_pvalue_fisher
+
     else:
         print("No valid clusters available for significance computation.")
+        overall_pvalue = np.nan  # overall_pvalue is defined even if no valid clusters
 
     return {
+        'overall_pvalue': overall_pvalue,
         'overall_pvalue_fisher': overall_pvalue_fisher,
         'overall_pvalue_stouffer': overall_pvalue_stouffer,
         'overall_effect': overall_effect,
