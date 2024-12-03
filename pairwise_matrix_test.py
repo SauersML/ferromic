@@ -519,7 +519,6 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
         'cluster_pairs': cluster_pairs
     }
 
-
 def compute_overall_significance(cluster_results):
     """Compute overall significance from independent clusters using Fisher's and Stouffer's methods."""
     import numpy as np
@@ -528,7 +527,6 @@ def compute_overall_significance(cluster_results):
     # Initialize default return values
     overall_pvalue_fisher = np.nan
     overall_pvalue_stouffer = np.nan
-    overall_pvalue = np.nan  # This will be the p-value we choose to return
     overall_effect = np.nan
     n_valid_clusters = 0
     total_comparisons = 0
@@ -607,14 +605,15 @@ def compute_overall_significance(cluster_results):
         total_comparisons = len(all_unique_pairs)
         n_valid_clusters = len(valid_clusters)
 
-        # Decide which overall p-value to return (e.g., Fisher's method)
-        overall_pvalue = overall_pvalue_fisher  # Choose the method you prefer
+        # Print both p-values to the terminal
+        print("\nOverall p-values from combining methods:")
+        print(f"Fisher's method p-value: {overall_pvalue_fisher:.4e}")
+        print(f"Stouffer's Z method p-value: {overall_pvalue_stouffer:.4e}")
 
     else:
         print("No valid clusters available for significance computation.")
 
     return {
-        'overall_pvalue': overall_pvalue,
         'overall_pvalue_fisher': overall_pvalue_fisher,
         'overall_pvalue_stouffer': overall_pvalue_stouffer,
         'overall_effect': overall_effect,
@@ -664,12 +663,14 @@ def main():
     for cluster_id, cluster_cdss in clusters.items():
         cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df, results)
 
+
     # Compute overall significance
     overall_results = compute_overall_significance(cluster_stats)
 
     # Convert numpy values to native Python types for JSON serialization
     json_safe_results = {
-        'overall_pvalue': float(overall_results['overall_pvalue']) if not np.isnan(overall_results['overall_pvalue']) else None,
+        'overall_pvalue_fisher': float(overall_results['overall_pvalue_fisher']) if not np.isnan(overall_results['overall_pvalue_fisher']) else None,
+        'overall_pvalue_stouffer': float(overall_results['overall_pvalue_stouffer']) if not np.isnan(overall_results['overall_pvalue_stouffer']) else None,
         'overall_effect': float(overall_results['overall_effect']) if not np.isnan(overall_results['overall_effect']) else None,
         'n_valid_clusters': int(overall_results['n_valid_clusters']) if not np.isnan(overall_results['n_valid_clusters']) else None,
         'total_comparisons': int(overall_results['total_comparisons']) if not np.isnan(overall_results['total_comparisons']) else None
