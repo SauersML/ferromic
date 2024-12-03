@@ -288,7 +288,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     plt.close()
 
 def analyze_cds_parallel(args):
-    """Analyze a single CDS using GEE."""
+    """Analyze a single CDS"""
     df_cds, cds = args
 
     # Check cache first
@@ -327,7 +327,7 @@ def analyze_cds_parallel(args):
         # Generate matrices for visualization
         matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
 
-        # Call the GEE analysis worker
+        # Call the analysis worker
         result = analysis_worker((
             all_sequences, n0, pairwise_dict,
             sequences_0, sequences_1
