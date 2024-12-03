@@ -205,25 +205,26 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
 # TODO: pairwise CDSs
 
 def permutation_test_worker(args):
-    """Optimized permutation test worker using NumPy arrays and matrices."""
+    """Permutation test worker that handles NaN values and empty arrays."""
     all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
 
     num_seqs = len(all_sequences)
     seq_to_idx = {seq: idx for idx, seq in enumerate(all_sequences)}
 
-    # Build omega_matrix
+    # Build the omega matrix
     omega_matrix = np.full((num_seqs, num_seqs), np.nan)
     for (seq1, seq2), omega in pairwise_dict.items():
-        i, j = seq_to_idx[seq1], seq_to_idx[seq2]
+        i = seq_to_idx[seq1]
+        j = seq_to_idx[seq2]
         omega_matrix[i, j] = omega
-        omega_matrix[j, i] = omega  # symmetry
+        omega_matrix[j, i] = omega  # Symmetry
 
     # Original group assignments
     groups = np.zeros(num_seqs, dtype=int)
     for seq in sequences_1:
         groups[seq_to_idx[seq]] = 1
 
-    # Original within-group omega values
+    # Extract original within-group omega values
     mask_0 = np.outer(groups == 0, groups == 0)
     mask_1 = np.outer(groups == 1, groups == 1)
     orig_values_0 = omega_matrix[mask_0]
@@ -231,7 +232,7 @@ def permutation_test_worker(args):
     orig_values_0 = orig_values_0[~np.isnan(orig_values_0)]
     orig_values_1 = orig_values_1[~np.isnan(orig_values_1)]
 
-    # Initialize variables to NaN in case they are not computed
+    # Initialize variables to NaN
     orig_mean_diff = np.nan
     orig_median_diff = np.nan
     mean_pval = np.nan
@@ -239,26 +240,26 @@ def permutation_test_worker(args):
     effect_size_mean = np.nan
     effect_size_median = np.nan
 
-    # Check if we have enough data to proceed
+    # Check for sufficient data
     if len(orig_values_0) == 0 or len(orig_values_1) == 0:
         return {
-            'observed_mean': orig_mean_diff,
-            'observed_median': orig_median_diff,
-            'mean_pvalue': mean_pval,
-            'median_pvalue': median_pval,
+            'observed_mean': np.nan,
+            'observed_median': np.nan,
+            'mean_pvalue': np.nan,
+            'median_pvalue': np.nan,
             'n0': len(sequences_0),
             'n1': len(sequences_1),
             'num_comp_group_0': len(orig_values_0),
             'num_comp_group_1': len(orig_values_1),
-            'effect_size_mean': effect_size_mean,
-            'effect_size_median': effect_size_median
+            'effect_size_mean': np.nan,
+            'effect_size_median': np.nan
         }
 
-    # Compute the observed mean and median differences
+    # Compute observed differences
     orig_mean_diff = abs(np.mean(orig_values_1) - np.mean(orig_values_0))
     orig_median_diff = abs(np.median(orig_values_1) - np.median(orig_values_0))
 
-    # Run permutations
+    # Run permutation tests
     permuted_mean_diffs = []
     permuted_median_diffs = []
 
@@ -267,7 +268,7 @@ def permutation_test_worker(args):
         permuted_groups = np.zeros(num_seqs, dtype=int)
         permuted_groups[permuted_indices[n0:]] = 1
 
-        # Permuted within-group omega values
+        # Extract permuted within-group omega values
         perm_mask_0 = np.outer(permuted_groups == 0, permuted_groups == 0)
         perm_mask_1 = np.outer(permuted_groups == 1, permuted_groups == 1)
         perm_values_0 = omega_matrix[perm_mask_0]
@@ -284,20 +285,31 @@ def permutation_test_worker(args):
         permuted_mean_diffs.append(mean_diff)
         permuted_median_diffs.append(median_diff)
 
-    # Calculate p-values
+    # Convert permutation differences to arrays and filter out NaN values
     permuted_mean_diffs = np.array(permuted_mean_diffs)
+    permuted_mean_diffs = permuted_mean_diffs[~np.isnan(permuted_mean_diffs)]
     permuted_median_diffs = np.array(permuted_median_diffs)
+    permuted_median_diffs = permuted_median_diffs[~np.isnan(permuted_median_diffs)]
 
-    mean_pval = (np.sum(permuted_mean_diffs >= orig_mean_diff) + 1) / (len(permuted_mean_diffs) + 1)
-    median_pval = (np.sum(permuted_median_diffs >= orig_median_diff) + 1) / (len(permuted_median_diffs) + 1)
-
-    # Adjusted effect size calculations to prevent division by zero
     epsilon = 1e-10  # Small constant to prevent division by zero
-    std_mean = permuted_mean_diffs.std(ddof=1)
-    std_median = permuted_median_diffs.std(ddof=1)
 
-    effect_size_mean = orig_mean_diff / (std_mean + epsilon)
-    effect_size_median = orig_median_diff / (std_median + epsilon)
+    # Calculate mean p-value and effect size if valid
+    if len(permuted_mean_diffs) > 0 and not np.isnan(orig_mean_diff):
+        mean_pval = (np.sum(permuted_mean_diffs >= orig_mean_diff) + 1) / (len(permuted_mean_diffs) + 1)
+        std_mean = np.std(permuted_mean_diffs, ddof=1)
+        effect_size_mean = orig_mean_diff / (std_mean + epsilon)
+    else:
+        mean_pval = np.nan
+        effect_size_mean = np.nan
+
+    # Calculate median p-value and effect size if valid
+    if len(permuted_median_diffs) > 0 and not np.isnan(orig_median_diff):
+        median_pval = (np.sum(permuted_median_diffs >= orig_median_diff) + 1) / (len(permuted_median_diffs) + 1)
+        std_median = np.std(permuted_median_diffs, ddof=1)
+        effect_size_median = orig_median_diff / (std_median + epsilon)
+    else:
+        median_pval = np.nan
+        effect_size_median = np.nan
 
     return {
         'observed_mean': orig_mean_diff,
