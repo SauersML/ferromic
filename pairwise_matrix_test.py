@@ -198,67 +198,67 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
     
     return matrix_0, matrix_1
 
+# TODO: pairwise CDSs
+
 def permutation_test_worker(args):
-    """Worker function for permutation testing optimized for speed."""
-    all_sequences, n0, pairwise_df, sequences_0, sequences_1 = args
+    """Optimized permutation test worker using NumPy arrays and matrices."""
+    all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
 
-    # Create DataFrames for original groups
-    group_assignments = pd.Series(index=all_sequences, data=0)
-    group_assignments.loc[sequences_1] = 1
+    num_seqs = len(all_sequences)
+    seq_to_idx = {seq: idx for idx, seq in enumerate(all_sequences)}
 
-    # Merge omega values with group assignments
-    pairwise_df['Group1'] = pairwise_df['Seq1'].map(group_assignments)
-    pairwise_df['Group2'] = pairwise_df['Seq2'].map(group_assignments)
+    # Build omega_matrix
+    omega_matrix = np.full((num_seqs, num_seqs), np.nan)
+    for (seq1, seq2), omega in pairwise_dict.items():
+        i, j = seq_to_idx[seq1], seq_to_idx[seq2]
+        omega_matrix[i, j] = omega
+        omega_matrix[j, i] = omega  # symmetry
 
-    # Original test statistic
-    orig_values_0 = pairwise_df[
-        (pairwise_df['Group1'] == 0) & (pairwise_df['Group2'] == 0)
-    ]['omega'].values
+    # Original group assignments
+    groups = np.zeros(num_seqs, dtype=int)
+    for seq in sequences_1:
+        groups[seq_to_idx[seq]] = 1
 
-    orig_values_1 = pairwise_df[
-        (pairwise_df['Group1'] == 1) & (pairwise_df['Group2'] == 1)
-    ]['omega'].values
+    # Original within-group omega values
+    mask_0 = np.outer(groups == 0, groups == 0)
+    mask_1 = np.outer(groups == 1, groups == 1)
+    orig_values_0 = omega_matrix[mask_0]
+    orig_values_1 = omega_matrix[mask_1]
+    orig_values_0 = orig_values_0[~np.isnan(orig_values_0)]
+    orig_values_1 = orig_values_1[~np.isnan(orig_values_1)]
 
     if len(orig_values_0) == 0 or len(orig_values_1) == 0:
-        return {
-            'observed_mean': np.nan,
-            'observed_median': np.nan,
-            'mean_pvalue': np.nan,
-            'median_pvalue': np.nan,
-            'n0': len(sequences_0),
-            'n1': len(sequences_1),
-            'effect_size_mean': np.nan,
-            'effect_size_median': np.nan
-        }
-
+      return {
+        'observed_mean': orig_mean_diff,
+        'observed_median': orig_median_diff,
+        'mean_pvalue': mean_pval,
+        'median_pvalue': median_pval,
+        'n0': len(sequences_0),
+        'n1': len(sequences_1),
+        'num_comp_group_0': len(orig_values_0),
+        'num_comp_group_1': len(orig_values_1),
+        'effect_size_mean': effect_size_mean,
+        'effect_size_median': effect_size_median
+      }
     orig_mean_diff = abs(np.mean(orig_values_1) - np.mean(orig_values_0))
     orig_median_diff = abs(np.median(orig_values_1) - np.median(orig_values_0))
-
-    # Store original omega values for permutations
-    omega_values = pairwise_df[['Seq1', 'Seq2', 'omega']].values
 
     # Run permutations
     permuted_mean_diffs = []
     permuted_median_diffs = []
+
     for _ in range(N_PERMUTATIONS):
-        # Shuffle group assignments
-        np.random.shuffle(all_sequences)
-        perm_groups = pd.Series(index=all_sequences, data=0)
-        perm_groups.iloc[n0:] = 1
+        permuted_indices = np.random.permutation(num_seqs)
+        permuted_groups = np.zeros(num_seqs, dtype=int)
+        permuted_groups[permuted_indices[n0:]] = 1
 
-        # Map new group assignments
-        group_map = perm_groups.to_dict()
-        pairwise_df['PermGroup1'] = pairwise_df['Seq1'].map(group_map)
-        pairwise_df['PermGroup2'] = pairwise_df['Seq2'].map(group_map)
-
-        # Select within-group omega values based on permuted groups
-        perm_values_0 = pairwise_df[
-            (pairwise_df['PermGroup1'] == 0) & (pairwise_df['PermGroup2'] == 0)
-        ]['omega'].values
-
-        perm_values_1 = pairwise_df[
-            (pairwise_df['PermGroup1'] == 1) & (pairwise_df['PermGroup2'] == 1)
-        ]['omega'].values
+        # Permuted within-group omega values
+        perm_mask_0 = np.outer(permuted_groups == 0, permuted_groups == 0)
+        perm_mask_1 = np.outer(permuted_groups == 1, permuted_groups == 1)
+        perm_values_0 = omega_matrix[perm_mask_0]
+        perm_values_1 = omega_matrix[perm_mask_1]
+        perm_values_0 = perm_values_0[~np.isnan(perm_values_0)]
+        perm_values_1 = perm_values_1[~np.isnan(perm_values_1)]
 
         if len(perm_values_0) == 0 or len(perm_values_1) == 0:
             continue
@@ -276,6 +276,14 @@ def permutation_test_worker(args):
     mean_pval = (np.sum(permuted_mean_diffs >= orig_mean_diff) + 1) / (len(permuted_mean_diffs) + 1)
     median_pval = (np.sum(permuted_median_diffs >= orig_median_diff) + 1) / (len(permuted_median_diffs) + 1)
 
+    # Adjusted effect size calculations to prevent division by zero
+    epsilon = 1e-10  # Small constant to prevent division by zero
+    std_mean = permuted_mean_diffs.std(ddof=1)
+    std_median = permuted_median_diffs.std(ddof=1)
+
+    effect_size_mean = orig_mean_diff / (std_mean + epsilon)
+    effect_size_median = orig_median_diff / (std_median + epsilon)
+
     return {
         'observed_mean': orig_mean_diff,
         'observed_median': orig_median_diff,
@@ -283,8 +291,8 @@ def permutation_test_worker(args):
         'median_pvalue': median_pval,
         'n0': len(sequences_0),
         'n1': len(sequences_1),
-        'effect_size_mean': orig_mean_diff / permuted_mean_diffs.std(ddof=1),
-        'effect_size_median': orig_median_diff / permuted_median_diffs.std(ddof=1)
+        'effect_size_mean': effect_size_mean,
+        'effect_size_median': effect_size_median
     }
 
 def create_visualization(matrix_0, matrix_1, cds, result):
@@ -361,23 +369,23 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 def analyze_cds_parallel(args):
     """Analyze a single CDS with parallel permutations."""
     df_cds, cds = args
-    
+
     # Check cache first
     cached_result = load_cached_result(cds)
     if cached_result is not None:
         return cds, cached_result
-    
+
     # Create pairwise dictionary
-    pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega'] 
+    pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega']
                      for _, row in df_cds.iterrows()}
-    
-    # Get sequences for each group
-    sequences_0 = np.array([seq for seq in df_cds['Seq1'].unique() 
-                           if not seq.endswith('1')])
-    sequences_1 = np.array([seq for seq in df_cds['Seq1'].unique() 
-                           if seq.endswith('1')])
-    
-    if len(sequences_0) < 2 or len(sequences_1) < 2:
+
+    # Collect all unique sequences from both 'Seq1' and 'Seq2' columns
+    all_seqs = pd.concat([df_cds['Seq1'], df_cds['Seq2']]).unique()
+    sequences_0 = np.array([seq for seq in all_seqs if not seq.endswith('1')])
+    sequences_1 = np.array([seq for seq in all_seqs if seq.endswith('1')])
+    all_sequences = np.concatenate([sequences_0, sequences_1])
+
+    if len(sequences_0) < 1 or len(sequences_1) < 1:
         result = {
             'observed_mean': np.nan,
             'observed_median': np.nan,
@@ -391,12 +399,18 @@ def analyze_cds_parallel(args):
             'effect_size_median': np.nan
         }
     else:
-        all_sequences = np.concatenate([sequences_0, sequences_1])
+        # Generate matrices for visualization
+        matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
+        
         result = permutation_test_worker((
-            all_sequences, len(sequences_0), pairwise_dict, 
+            all_sequences, len(sequences_0), pairwise_dict,
             sequences_0, sequences_1
         ))
-    
+        
+        # Include matrices in the result dictionary
+        result['matrix_0'] = matrix_0
+        result['matrix_1'] = matrix_1
+
     # Cache the result
     save_cached_result(cds, result)
     return cds, result
@@ -536,8 +550,8 @@ def combine_cluster_evidence(cluster_cdss, results_df):
         weight = weights.get(cds, 1 / len(cluster_cdss))
         weighted_mean_diff += row['observed_mean'] * weight
         weighted_effect_size += effect_size * weight
-        total_comparisons += n0 * (n0 - 1) // 2  # comparisons in group 0
-        total_comparisons += n1 * (n1 - 1) // 2  # comparisons in group 1
+        total_comparisons += row['num_comp_group_0']  # actual number of comparisons in group 0
+        total_comparisons += row['num_comp_group_1']  # actual number of comparisons in group 1
         valid_cdss += 1
         valid_indices.append(idx)
   
