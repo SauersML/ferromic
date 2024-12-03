@@ -3,28 +3,25 @@ import numpy as np
 from collections import defaultdict
 import seaborn as sns
 import matplotlib.pyplot as plt
-from multiprocessing import Pool, cpu_count
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from multiprocessing import cpu_count
+from concurrent.futures import ProcessPoolExecutor
 from tqdm.auto import tqdm
 import warnings
 import os
 import json
 from datetime import datetime
 from pathlib import Path
-from functools import partial
 import pickle
 from scipy import stats
 
-#TODO: put comments back, add paired
-
+# Suppress warnings
 warnings.filterwarnings('ignore')
 
 # Constants
 CACHE_DIR = Path("cache")
 RESULTS_DIR = Path("results")
 PLOTS_DIR = Path("plots")
-CACHE_INTERVAL = 50  # Save results every N CDSs
-N_PERMUTATIONS = 1000
+N_PERMUTATIONS = 1000  # Number of permutations for the permutation test
 
 # Create necessary directories
 for directory in [CACHE_DIR, RESULTS_DIR, PLOTS_DIR]:
@@ -53,58 +50,52 @@ def save_cached_result(cds, result):
         pickle.dump(result, f)
 
 def read_and_preprocess_data(file_path):
-    """Read and preprocess the CSV file with parallel processing."""
+    """Read and preprocess the CSV file."""
     print("Reading data...")
     df = pd.read_csv(file_path)
-    
+
     # Filtering valid omega values
     df = df[
-        (df['omega'] != -1) & 
+        (df['omega'] != -1) &
         (df['omega'] != 99)
     ].dropna(subset=['omega'])
-    
+
     print(f"Total valid comparisons: {len(df):,}")
     print(f"Unique CDSs found: {df['CDS'].nunique():,}")
     return df
 
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
-    key1 = (seq1, seq2)
-    key2 = (seq2, seq1)
-    val1 = pairwise_dict.get(key1)
-    val2 = pairwise_dict.get(key2)
-    if val1 is not None:
-        return val1
-    return val2
+    key = (seq1, seq2) if (seq1, seq2) in pairwise_dict else (seq2, seq1)
+    return pairwise_dict.get(key)
 
 def create_matrices(sequences_0, sequences_1, pairwise_dict):
     """Create matrices for two groups based on sequence assignments."""
     if len(sequences_0) == 0 or len(sequences_1) == 0:
         return None, None
-        
+
     n0, n1 = len(sequences_0), len(sequences_1)
     matrix_0 = np.full((n0, n0), np.nan)
     matrix_1 = np.full((n1, n1), np.nan)
-    
+
     # Fill matrix 0
     for i in range(n0):
-        for j in range(i+1, n0):
+        for j in range(i + 1, n0):
             val = get_pairwise_value(sequences_0[i], sequences_0[j], pairwise_dict)
             if val is not None:
-                matrix_0[i,j] = matrix_0[j,i] = val
-                
+                matrix_0[i, j] = matrix_0[j, i] = val
+
     # Fill matrix 1
     for i in range(n1):
-        for j in range(i+1, n1):
+        for j in range(i + 1, n1):
             val = get_pairwise_value(sequences_1[i], sequences_1[j], pairwise_dict)
             if val is not None:
-                matrix_1[i,j] = matrix_1[j,i] = val
-    
+                matrix_1[i, j] = matrix_1[j, i] = val
+
     return matrix_0, matrix_1
 
 def permutation_test_worker(args):
-    """Optimized permutation test worker using Cliff's Delta as the effect size."""
-    from scipy.stats import rankdata
+    """Permutation test worker using Cliff's Delta as the effect size."""
     all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
 
     num_seqs = len(all_sequences)
@@ -123,14 +114,18 @@ def permutation_test_worker(args):
     for seq in sequences_1:
         groups[seq_to_idx[seq]] = 1
 
+    # Function to extract within-group omega values
+    def extract_within_group_values(groups):
+        mask_0 = np.outer(groups == 0, groups == 0)
+        mask_1 = np.outer(groups == 1, groups == 1)
+        values_0 = omega_matrix[mask_0]
+        values_1 = omega_matrix[mask_1]
+        values_0 = values_0[~np.isnan(values_0)]
+        values_1 = values_1[~np.isnan(values_1)]
+        return values_0, values_1
+
     # Extract original within-group omega values
-    # For Cliff's Delta, we need all unique omega values from both groups
-    mask_0 = np.outer(groups == 0, groups == 0)
-    mask_1 = np.outer(groups == 1, groups == 1)
-    values_0 = omega_matrix[mask_0]
-    values_1 = omega_matrix[mask_1]
-    values_0 = values_0[~np.isnan(values_0)]
-    values_1 = values_1[~np.isnan(values_1)]
+    values_0, values_1 = extract_within_group_values(groups)
 
     # Check for sufficient data
     if len(values_0) == 0 or len(values_1) == 0:
@@ -139,116 +134,128 @@ def permutation_test_worker(args):
             'p_value': np.nan,
             'n0': len(sequences_0),
             'n1': len(sequences_1),
-            'num_comp_group_0': len(values_0),
-            'num_comp_group_1': len(values_1),
+            'num_comp_group_0': 0,
+            'num_comp_group_1': 0,
         }
 
-    n0 = len(values_0)
-    n1 = len(values_1)
-    n_total = n0 + n1
+    n0_values = len(values_0)
+    n1_values = len(values_1)
 
-    # Combine the values and compute ranks
-    combined_values = np.concatenate([values_0, values_1])
-    ranks = rankdata(combined_values, method='average')
-
-    # Assign ranks to groups
-    ranks_0 = ranks[:n0]
-    ranks_1 = ranks[n0:]
-
-    # Compute Cliff's Delta using ranks
-    sum_ranks_0 = np.sum(ranks_0)
-    sum_ranks_1 = np.sum(ranks_1)
-
-    cliffs_delta = (2 * (sum_ranks_1 - n1 * (n1 + 1) / 2)) / (n0 * n1) - 1
+    # Compute observed Cliff's Delta
+    cliffs_delta = compute_cliffs_delta(values_0, values_1)
 
     # Permutation test
     permuted_deltas = np.zeros(N_PERMUTATIONS)
+    all_indices = np.arange(num_seqs)
+
     for i in range(N_PERMUTATIONS):
-        permuted_indices = np.random.permutation(n_total)
-        perm_values_0 = combined_values[permuted_indices[:n0]]
-        perm_values_1 = combined_values[permuted_indices[n0:]]
+        # Permute group assignments
+        permuted_groups = np.copy(groups)
+        np.random.shuffle(permuted_groups)
 
-        # Compute ranks
-        perm_combined_values = np.concatenate([perm_values_0, perm_values_1])
-        perm_ranks = rankdata(perm_combined_values, method='average')
+        # Extract within-group omega values for permuted groups
+        perm_values_0, perm_values_1 = extract_within_group_values(permuted_groups)
 
-        perm_ranks_0 = perm_ranks[:n0]
-        perm_ranks_1 = perm_ranks[n0:]
+        # Skip this permutation if not enough data
+        if len(perm_values_0) == 0 or len(perm_values_1) == 0:
+            permuted_deltas[i] = np.nan
+            continue
 
         # Compute Cliff's Delta for permutation
-        perm_sum_ranks_1 = np.sum(perm_ranks_1)
-        perm_delta = (2 * (perm_sum_ranks_1 - n1 * (n1 + 1) / 2)) / (n0 * n1) - 1
+        perm_delta = compute_cliffs_delta(perm_values_0, perm_values_1)
         permuted_deltas[i] = perm_delta
 
+    # Remove NaN values from permutations
+    permuted_deltas = permuted_deltas[~np.isnan(permuted_deltas)]
+
     # Calculate p-value (two-tailed test)
-    p_value = (np.sum(np.abs(permuted_deltas) >= np.abs(cliffs_delta)) + 1) / (N_PERMUTATIONS + 1)
+    p_value = (np.sum(np.abs(permuted_deltas) >= np.abs(cliffs_delta)) + 1) / (len(permuted_deltas) + 1)
 
     return {
         'observed_effect_size': cliffs_delta,
         'p_value': p_value,
-        'n0': n0,
-        'n1': n1,
-        'num_comp_group_0': len(values_0),
-        'num_comp_group_1': len(values_1),
+        'n0': len(sequences_0),
+        'n1': len(sequences_1),
+        'num_comp_group_0': n0_values,
+        'num_comp_group_1': n1_values,
     }
 
+def compute_cliffs_delta(x, y):
+    """Compute Cliff's Delta effect size."""
+    n_x = len(x)
+    n_y = len(y)
+    n_pairs = n_x * n_y
+
+    # Efficient computation using broadcasting
+    x = np.array(x)
+    y = np.array(y)
+
+    difference_matrix = x[:, np.newaxis] - y
+    num_greater = np.sum(difference_matrix > 0)
+    num_less = np.sum(difference_matrix < 0)
+
+    cliffs_delta = (num_greater - num_less) / n_pairs
+
+    return cliffs_delta
+
 def create_visualization(matrix_0, matrix_1, cds, result):
+    """Create visualizations for a CDS."""
     if matrix_0 is None or matrix_1 is None:
         return
-        
+
     # Create figure without any specific style
     fig = plt.figure(figsize=(20, 10))
-    
+
     # Main title
-    plt.suptitle(f'Pairwise Comparison Analysis: {cds}', 
+    plt.suptitle(f'Pairwise Comparison Analysis: {cds}',
                 fontsize=16, fontweight='bold', y=1.02)
-    
+
     gs = plt.GridSpec(2, 3, figure=fig)
-  
+
     # Heatmaps
     ax1 = fig.add_subplot(gs[0, 0])
     ax2 = fig.add_subplot(gs[0, 1])
-  
+
     # Custom diverging colormap
     cmap = sns.diverging_palette(220, 20, as_cmap=True)
-    
+
     # Plot heatmaps
-    sns.heatmap(matrix_0, cmap=cmap, center=1, ax=ax1, 
+    sns.heatmap(matrix_0, cmap=cmap, center=1, ax=ax1,
                 square=True, cbar_kws={'label': 'Omega Value'})
-    sns.heatmap(matrix_1, cmap=cmap, center=1, ax=ax2, 
+    sns.heatmap(matrix_1, cmap=cmap, center=1, ax=ax2,
                 square=True, cbar_kws={'label': 'Omega Value'})
-    
+
     ax1.set_title(f'Group 0 Matrix (n={result["n0"]})', fontsize=12, pad=10)
     ax2.set_title(f'Group 1 Matrix (n={result["n1"]})', fontsize=12, pad=10)
-    
+
     # Distribution comparison
     ax3 = fig.add_subplot(gs[0, 2])
     values_0 = matrix_0[np.triu_indices_from(matrix_0, k=1)]
     values_1 = matrix_1[np.triu_indices_from(matrix_1, k=1)]
-    
-    sns.kdeplot(data=values_0[~np.isnan(values_0)], ax=ax3, label='Group 0', 
+
+    sns.kdeplot(data=values_0[~np.isnan(values_0)], ax=ax3, label='Group 0',
                 fill=True, alpha=0.5)
-    sns.kdeplot(data=values_1[~np.isnan(values_1)], ax=ax3, label='Group 1', 
+    sns.kdeplot(data=values_1[~np.isnan(values_1)], ax=ax3, label='Group 1',
                 fill=True, alpha=0.5)
     ax3.set_title('Distribution of Omega Values', fontsize=12)
     ax3.legend()
-    
+
     # Results table
     ax4 = fig.add_subplot(gs[1, :])
     ax4.axis('off')
-    
+
     table_data = [
         ['Metric', 'Value'],
         ['Observed Effect Size (Cliff\'s Delta)', f"{result['observed_effect_size']:.4f}"],
         ['P-value', f"{result['p_value']:.4f}"]
     ]
-    
+
     table = ax4.table(cellText=table_data, loc='center', cellLoc='center',
                      colWidths=[0.3, 0.2])
     table.auto_set_font_size(False)
     table.set_fontsize(12)
     table.scale(1.5, 2)
-    
+
     # Style the table
     for (row, col), cell in table.get_celld().items():
         if row == 0:
@@ -256,9 +263,9 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             cell.set_facecolor('#E6E6E6')
         if col == 0:
             cell.set_text_props(weight='bold')
-    
+
     plt.tight_layout()
-    plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png', 
+    plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png',
                 dpi=300, bbox_inches='tight')
     plt.close()
 
@@ -295,12 +302,12 @@ def analyze_cds_parallel(args):
     else:
         # Generate matrices for visualization
         matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
-        
+
         result = permutation_test_worker((
             all_sequences, len(sequences_0), pairwise_dict,
             sequences_0, sequences_1
         ))
-        
+
         # Include matrices in the result dictionary
         result['matrix_0'] = matrix_0
         result['matrix_1'] = matrix_1
@@ -316,30 +323,22 @@ def parse_cds_coordinates(cds_name):
     """Extract chromosome and coordinates from CDS name."""
     try:
         # Try different possible formats
-        if '/' in cds_name:  # If it's a path, take last part
+        if '/' in cds_name:  # If it's a path, take the last part
             cds_name = cds_name.split('/')[-1]
-            
-        if '_' in cds_name: # This is what we expect
-            try:
-                # Format is chr{X}_start{Y}_end{Z}
-                parts = cds_name.split('_')
-                if len(parts) == 3 and parts[1].startswith('start') and parts[2].startswith('end'):
-                    chrom = parts[0]
-                    start = int(parts[1].replace('start', ''))
-                    end = int(parts[2].replace('end', ''))
-                    return chrom, start, end
-            except Exception as e:
-                print(f"Error parsing {cds_name}: {str(e)}")
-                return None, None, None
+
+        if '_' in cds_name:  # Expected format
+            parts = cds_name.split('_')
+            if len(parts) == 3 and parts[1].startswith('start') and parts[2].startswith('end'):
+                chrom = parts[0]
+                start = int(parts[1].replace('start', ''))
+                end = int(parts[2].replace('end', ''))
+                return chrom, start, end
         elif ':' in cds_name:
             chrom, coords = cds_name.split(':')
-            if '-' in coords:
-                start, end = coords.split('-')
-            else:
-                start, end = coords.split('..')
-            return chrom, int(start), int(end)
-            
-        # Print debug info if parsing fails
+            start, end = map(int, coords.replace('-', '..').split('..'))
+            return chrom, start, end
+
+        # If parsing fails
         print(f"Failed to parse: {cds_name}")
         return None, None, None
     except Exception as e:
@@ -349,12 +348,12 @@ def parse_cds_coordinates(cds_name):
 def build_overlap_clusters(results_df):
     """Build clusters of overlapping CDS regions."""
     print(f"\nAnalyzing {len(results_df)} CDS entries")
-    
+
     # Initialize clusters
     clusters = {}
     cluster_id = 0
     cds_to_cluster = {}
-    
+
     # Sort CDSs by chromosome and start position
     cds_coords = []
     for cds in results_df['CDS']:
@@ -369,20 +368,22 @@ def build_overlap_clusters(results_df):
         print("\nExample CDS names:")
         for cds in results_df['CDS'].head():
             print(cds)
-    
-    cds_coords.sort()  # Sort by chromosome, then start
-    
+
+    # Sort by chromosome and start position
+    cds_coords.sort()
+
     # Build clusters
     active_regions = []  # (chrom, end, cluster_id)
-    
+
     for chrom, start, end, cds in cds_coords:
         # Remove finished active regions
-        active_regions = [(c, e, cid) for c, e, cid in active_regions 
-                         if c == chrom and e >= start]
-        
+        active_regions = [(c, e, cid) for c, e, cid in active_regions
+                          if c != chrom or e >= start]
+
         # Find overlapping clusters
-        overlapping_clusters = set(cid for c, e, cid in active_regions)
-        
+        overlapping_clusters = set(cid for c, e, cid in active_regions
+                                   if c == chrom and e >= start)
+
         if not overlapping_clusters:
             # Create new cluster
             clusters[cluster_id] = {cds}
@@ -390,23 +391,23 @@ def build_overlap_clusters(results_df):
             active_regions.append((chrom, end, cluster_id))
             cluster_id += 1
         else:
-            # Add to first overlapping cluster
+            # Merge overlapping clusters
             target_cluster = min(overlapping_clusters)
             clusters[target_cluster].add(cds)
             cds_to_cluster[cds] = target_cluster
-            
-            # Merge other overlapping clusters if any
+
+            # Merge other overlapping clusters
             for cid in overlapping_clusters:
                 if cid != target_cluster:
                     clusters[target_cluster].update(clusters[cid])
                     del clusters[cid]
-            
+
             # Update active regions
             active_regions = [(c, e, target_cluster) if cid in overlapping_clusters
-                            else (c, e, cid) 
-                            for c, e, cid in active_regions]
+                              else (c, e, cid)
+                              for c, e, cid in active_regions]
             active_regions.append((chrom, end, target_cluster))
-    
+
     return clusters
 
 def combine_cluster_evidence(cluster_cdss, results_df, results):
@@ -460,7 +461,7 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
         # Use Fisher's method within cluster
         valid_pvals = cluster_data.loc[valid_indices]['p_value']
 
-        # p-values are finite and not NaN
+        # Filter out invalid p-values
         valid_pvals = valid_pvals[~np.isnan(valid_pvals)]
         valid_pvals = valid_pvals[~np.isinf(valid_pvals)]
 
@@ -534,13 +535,14 @@ def compute_overall_significance(cluster_results):
 def main():
     start_time = datetime.now()
     print(f"Analysis started at {start_time}")
-    
+
     # Read data
     df = read_and_preprocess_data('all_pairwise_results.csv')
-    
+
     # Prepare arguments for parallel processing
-    cds_args = [(df[df['CDS'] == cds], cds) for cds in df['CDS'].unique()]
-    
+    cds_list = df['CDS'].unique()
+    cds_args = [(df[df['CDS'] == cds], cds) for cds in cds_list]
+
     # Process CDSs in parallel
     results = {}
     with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
@@ -550,27 +552,27 @@ def main():
             desc="Processing CDSs"
         ):
             results[cds] = result
-    
+
     # Convert results to DataFrame
     results_df = pd.DataFrame([
         {
             'CDS': cds,
-            **{k: v for k, v in result.items() 
+            **{k: v for k, v in result.items()
                if k not in ['matrix_0', 'matrix_1', 'pairwise_comparisons']}
         }
         for cds, result in results.items()
     ])
-    
+
     # Save final results
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
-      
+
     # Overall analysis
     print("\nComputing overall significance...")
     clusters = build_overlap_clusters(results_df)
     cluster_stats = {}
     for cluster_id, cluster_cdss in clusters.items():
         cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df, results)
-    
+
     # Compute overall significance
     overall_results = compute_overall_significance(cluster_stats)
 
@@ -585,35 +587,35 @@ def main():
     # Save overall results
     with open(RESULTS_DIR / 'overall_results.json', 'w') as f:
         json.dump(json_safe_results, f, indent=2)
-    
+
     # Print overall results
     print("\nOverall Analysis Results:")
     print(f"Number of independent clusters: {overall_results['n_valid_clusters']}")
     print(f"Total unique CDS pairs: {overall_results['total_comparisons']:,}")
     print(f"Overall p-value: {overall_results['overall_pvalue']:.4e}")
     print(f"Overall effect size (Cliff's Delta): {overall_results['overall_effect']:.4f}")
-    
+
     # Sort results by p-value
     significant_results = results_df.sort_values('p_value')
-    
+
     # Create visualizations for top significant results
     for _, row in significant_results.head().iterrows():
         cds = row['CDS']
         result = results[cds]
         create_visualization(
-            result['matrix_0'], 
-            result['matrix_1'], 
-            cds, 
+            result['matrix_0'],
+            result['matrix_1'],
+            cds,
             result
         )
-  
+
     # Print summary statistics
     valid_results = results_df[~results_df['p_value'].isna()]
     print("\nPer-CDS Analysis Summary:")
     print(f"Total CDSs analyzed: {len(results_df):,}")
     print(f"Valid analyses: {len(valid_results):,}")
     print(f"Significant CDSs (p < 0.05): {(valid_results['p_value'] < 0.05).sum():,}")
-    
+
     end_time = datetime.now()
     print(f"\nAnalysis completed at {end_time}")
     print(f"Total runtime: {end_time - start_time}")
