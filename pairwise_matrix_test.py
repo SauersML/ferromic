@@ -1,61 +1,3 @@
-"""
-This script implements a permutation test to analyze differences between two groups 
-of pairwise comparisons while accounting for their non-independence. The key challenge
-is that pairwise comparisons within a group are usually not independent.
-
-DATA STRUCTURE:
-- Input data contains pairwise omega values between sequences (but this method can be applied generally to other types of data)
-- Sequences belong to two groups (marked by *_0 or *_1 suffix)
-
-METHOD:
-1. Data Organization
-  - For each group, create a matrix of all pairwise omega values
-  - Matrix[i,j] = omega value between sequence i and j in that group
-  - Matrices are symmetric (Matrix[i,j] = Matrix[j,i])
-  - Diagonal is NaN (no self-comparisons)
-
-2. Test Statistic
-  - Calculate mean omega value in each group's matrix (using upper triangle only)
-  - Take difference: mean(Group 1) - mean(Group 0) (or absolute mean, or median, etc.)
-  - This captures if one group tends to have higher/lower omega values
-
-3. Permutation Test
-  - Null hypothesis: Group labels are random with respect to omega values
-  - Take all sequences from both groups
-  - Randomly shuffle sequences into two new groups (maintaining original group sizes)
-  - Reconstruct matrices using original omega values but new group assignments
-  - Calculate test statistic for this permutation
-  - Repeat many times (default 1000)
-
-VALIDITY:
-The test is valid because:
-1. Maintains dependency structure
-  - Never creates new omega values
-  - Only redistributes existing pairwise comparisons
-  - Dependencies between comparisons sharing sequences are preserved
-
-2. Handles missing data appropriately
-  - Permuted matrices have more NaNs than original (when mixing groups)
-  - This is correct because we only had within-group comparisons
-  - NaNs are properly excluded from mean calculations
-
-3. Tests proper null hypothesis
-  - If groups have no real difference, omega values should be exchangeable
-  - Permutation distribution represents null of "no group effect"
-  - P-value = proportion of permuted differences more extreme than observed
-
-INTERPRETATION:
-- Low p-value means the observed difference between groups is unlikely by chance
-- Suggests systematic differences in omega values between groups
-- Original group structure (0 vs 1) captures meaningful variation
-
-OUTPUT:
-- P-value for each CDS
-- Observed difference in means
-- Summary statistics across all CDS regions
-"""
-
-
 import pandas as pd
 import numpy as np
 from collections import defaultdict
@@ -72,6 +14,9 @@ from pathlib import Path
 from functools import partial
 import pickle
 from scipy import stats
+
+#TODO: put comments back, add paired
+
 warnings.filterwarnings('ignore')
 
 # Constants
@@ -90,15 +35,12 @@ def get_cache_path(cds):
     return CACHE_DIR / f"{cds.replace('/', '_')}.pkl"
 
 def load_cached_result(cds):
-    """Load cached result for a CDS if it exists and includes 'pairwise_comparisons'."""
+    """Load cached result for a CDS if it exists."""
     cache_path = get_cache_path(cds)
     if cache_path.exists():
         try:
             with open(cache_path, 'rb') as f:
                 cached_result = pickle.load(f)
-            # 'pairwise_comparisons' must be in the cached result
-            if 'pairwise_comparisons' not in cached_result:
-                return None  # Force recomputation
             return cached_result
         except:
             return None
@@ -115,57 +57,15 @@ def read_and_preprocess_data(file_path):
     print("Reading data...")
     df = pd.read_csv(file_path)
     
-    # Parallel filtering using dask if the dataset is large
-    if len(df) > 1_000_000:
-        import dask.dataframe as dd
-        ddf = dd.from_pandas(df, npartitions=cpu_count())
-        df = ddf[
-            (ddf['omega'] != -1) & 
-            (ddf['omega'] != 99) & 
-            ddf['omega'].notnull()
-        ].compute()
-    else:
-        df = df[
-            (df['omega'] != -1) & 
-            (df['omega'] != 99)
-        ].dropna(subset=['omega'])
+    # Filtering valid omega values
+    df = df[
+        (df['omega'] != -1) & 
+        (df['omega'] != 99)
+    ].dropna(subset=['omega'])
     
     print(f"Total valid comparisons: {len(df):,}")
     print(f"Unique CDSs found: {df['CDS'].nunique():,}")
     return df
-
-def calculate_test_statistics(matrix_0, matrix_1):
-    """Calculate both mean and median differences."""
-    if matrix_0 is None or matrix_1 is None:
-        return np.nan, np.nan
-        
-    # Get upper triangle entries excluding diagonal
-    n0 = matrix_0.shape[0]
-    n1 = matrix_1.shape[0]
-    rows0, cols0 = np.triu_indices(n0, k=1)
-    rows1, cols1 = np.triu_indices(n1, k=1)
-    
-    # Extract values, filtering out NaN and zeros used for missing data
-    values_0 = matrix_0[rows0, cols0]
-    values_1 = matrix_1[rows1, cols1]
-    values_0 = values_0[(~np.isnan(values_0))]
-    values_1 = values_1[(~np.isnan(values_1))]
-    
-    if len(values_0) == 0 or len(values_1) == 0:
-        return np.nan, np.nan
-        
-    mean_diff = abs(np.mean(values_1) - np.mean(values_0))
-    median_diff = abs(np.median(values_1) - np.median(values_0))
-    #print("\nCalculate_test_statistics:")
-    #print(f"  Group 0 values: {values_0}")
-    #print(f"  Group 1 values: {values_1}") 
-    #print(f"  Group 0 median: {np.median(values_0):.4f}")
-    #print(f"  Group 1 median: {np.median(values_1):.4f}")
-    #print(f"  Median diff: {median_diff:.4f}")
-    #print(f"  Mean diff: {mean_diff:.4f}")
-    
-    return mean_diff, median_diff
-
 
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
@@ -202,10 +102,8 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
     
     return matrix_0, matrix_1
 
-# TODO: pairwise CDSs
-
 def permutation_test_worker(args):
-    """Permutation test worker that handles NaN values and empty arrays."""
+    """Permutation test worker using Cliff's Delta as the effect size."""
     all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
 
     num_seqs = len(all_sequences)
@@ -225,103 +123,76 @@ def permutation_test_worker(args):
         groups[seq_to_idx[seq]] = 1
 
     # Extract original within-group omega values
+    # For Cliff's Delta, we need all unique omega values from both groups
     mask_0 = np.outer(groups == 0, groups == 0)
     mask_1 = np.outer(groups == 1, groups == 1)
-    orig_values_0 = omega_matrix[mask_0]
-    orig_values_1 = omega_matrix[mask_1]
-    orig_values_0 = orig_values_0[~np.isnan(orig_values_0)]
-    orig_values_1 = orig_values_1[~np.isnan(orig_values_1)]
-
-    # Initialize variables to NaN
-    orig_mean_diff = np.nan
-    orig_median_diff = np.nan
-    mean_pval = np.nan
-    median_pval = np.nan
-    effect_size_mean = np.nan
-    effect_size_median = np.nan
+    values_0 = omega_matrix[mask_0]
+    values_1 = omega_matrix[mask_1]
+    values_0 = values_0[~np.isnan(values_0)]
+    values_1 = values_1[~np.isnan(values_1)]
 
     # Check for sufficient data
-    if len(orig_values_0) == 0 or len(orig_values_1) == 0:
+    if len(values_0) == 0 or len(values_1) == 0:
         return {
-            'observed_mean': np.nan,
-            'observed_median': np.nan,
-            'mean_pvalue': np.nan,
-            'median_pvalue': np.nan,
+            'observed_effect_size': np.nan,
+            'p_value': np.nan,
             'n0': len(sequences_0),
             'n1': len(sequences_1),
-            'num_comp_group_0': len(orig_values_0),
-            'num_comp_group_1': len(orig_values_1),
-            'effect_size_mean': np.nan,
-            'effect_size_median': np.nan
+            'num_comp_group_0': len(values_0),
+            'num_comp_group_1': len(values_1),
         }
 
-    # Compute observed differences
-    orig_mean_diff = abs(np.mean(orig_values_1) - np.mean(orig_values_0))
-    orig_median_diff = abs(np.median(orig_values_1) - np.median(orig_values_0))
+    # Compute Cliff's Delta
+    n0 = len(values_0)
+    n1 = len(values_1)
+    n_pairs = n0 * n1
 
-    # Run permutation tests
-    permuted_mean_diffs = []
-    permuted_median_diffs = []
+    # Use numpy broadcasting for efficient pairwise comparisons
+    # Reshape arrays for broadcasting
+    values_0_matrix = values_0[np.newaxis, :]  # Shape (1, n0)
+    values_1_matrix = values_1[:, np.newaxis]  # Shape (n1, 1)
+
+    # Compute pairwise differences
+    comparisons = values_1_matrix - values_0_matrix  # Shape (n1, n0)
+
+    # Count greater and lesser comparisons
+    greater = np.sum(comparisons > 0)
+    lesser = np.sum(comparisons < 0)
+    # Equal values are not counted in greater or lesser
+
+    cliffs_delta = (greater - lesser) / n_pairs
+
+    # Permutation test for p-value
+    combined_values = np.concatenate([values_0, values_1])
+    permuted_deltas = []
 
     for _ in range(N_PERMUTATIONS):
-        permuted_indices = np.random.permutation(num_seqs)
-        permuted_groups = np.zeros(num_seqs, dtype=int)
-        permuted_groups[permuted_indices[n0:]] = 1
+        np.random.shuffle(combined_values)
+        perm_values_0 = combined_values[:n0]
+        perm_values_1 = combined_values[n0:]
 
-        # Extract permuted within-group omega values
-        perm_mask_0 = np.outer(permuted_groups == 0, permuted_groups == 0)
-        perm_mask_1 = np.outer(permuted_groups == 1, permuted_groups == 1)
-        perm_values_0 = omega_matrix[perm_mask_0]
-        perm_values_1 = omega_matrix[perm_mask_1]
-        perm_values_0 = perm_values_0[~np.isnan(perm_values_0)]
-        perm_values_1 = perm_values_1[~np.isnan(perm_values_1)]
+        # Reshape for broadcasting
+        perm_values_0_matrix = perm_values_0[np.newaxis, :]
+        perm_values_1_matrix = perm_values_1[:, np.newaxis]
 
-        if len(perm_values_0) == 0 or len(perm_values_1) == 0:
-            continue
+        perm_comparisons = perm_values_1_matrix - perm_values_0_matrix
+        perm_greater = np.sum(perm_comparisons > 0)
+        perm_lesser = np.sum(perm_comparisons < 0)
+        perm_delta = (perm_greater - perm_lesser) / n_pairs
+        permuted_deltas.append(perm_delta)
 
-        mean_diff = abs(np.mean(perm_values_1) - np.mean(perm_values_0))
-        median_diff = abs(np.median(perm_values_1) - np.median(perm_values_0))
+    permuted_deltas = np.array(permuted_deltas)
 
-        permuted_mean_diffs.append(mean_diff)
-        permuted_median_diffs.append(median_diff)
-
-    # Convert permutation differences to arrays and filter out NaN values
-    permuted_mean_diffs = np.array(permuted_mean_diffs)
-    permuted_mean_diffs = permuted_mean_diffs[~np.isnan(permuted_mean_diffs)]
-    permuted_median_diffs = np.array(permuted_median_diffs)
-    permuted_median_diffs = permuted_median_diffs[~np.isnan(permuted_median_diffs)]
-
-    epsilon = 1e-10  # Small constant to prevent division by zero
-
-    # Calculate mean p-value and effect size if valid
-    if len(permuted_mean_diffs) > 0 and not np.isnan(orig_mean_diff):
-        mean_pval = (np.sum(permuted_mean_diffs >= orig_mean_diff) + 1) / (len(permuted_mean_diffs) + 1)
-        std_mean = np.std(permuted_mean_diffs, ddof=1)
-        effect_size_mean = orig_mean_diff / (std_mean + epsilon)
-    else:
-        mean_pval = np.nan
-        effect_size_mean = np.nan
-
-    # Calculate median p-value and effect size if valid
-    if len(permuted_median_diffs) > 0 and not np.isnan(orig_median_diff):
-        median_pval = (np.sum(permuted_median_diffs >= orig_median_diff) + 1) / (len(permuted_median_diffs) + 1)
-        std_median = np.std(permuted_median_diffs, ddof=1)
-        effect_size_median = orig_median_diff / (std_median + epsilon)
-    else:
-        median_pval = np.nan
-        effect_size_median = np.nan
+    # Calculate p-value (two-tailed test)
+    p_value = (np.sum(np.abs(permuted_deltas) >= np.abs(cliffs_delta)) + 1) / (len(permuted_deltas) + 1)
 
     return {
-        'observed_mean': orig_mean_diff,
-        'observed_median': orig_median_diff,
-        'mean_pvalue': mean_pval,
-        'median_pvalue': median_pval,
+        'observed_effect_size': cliffs_delta,
+        'p_value': p_value,
         'n0': len(sequences_0),
         'n1': len(sequences_1),
-        'num_comp_group_0': len(orig_values_0),
-        'num_comp_group_1': len(orig_values_1),
-        'effect_size_mean': effect_size_mean,
-        'effect_size_median': effect_size_median
+        'num_comp_group_0': len(values_0),
+        'num_comp_group_1': len(values_1),
     }
 
 def create_visualization(matrix_0, matrix_1, cds, result):
@@ -370,16 +241,15 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ax4.axis('off')
     
     table_data = [
-        ['Metric', 'Mean', 'Median'],
-        ['Observed Difference', f"{result['observed_mean']:.4f}", f"{result['observed_median']:.4f}"],
-        ['P-value', f"{result['mean_pvalue']:.4f}", f"{result['median_pvalue']:.4f}"],
-        ['Effect Size', f"{result['effect_size_mean']:.4f}", f"{result['effect_size_median']:.4f}"]
+        ['Metric', 'Value'],
+        ['Observed Effect Size (Cliff\'s Delta)', f"{result['observed_effect_size']:.4f}"],
+        ['P-value', f"{result['p_value']:.4f}"]
     ]
     
     table = ax4.table(cellText=table_data, loc='center', cellLoc='center',
-                     colWidths=[0.2, 0.2, 0.2])
+                     colWidths=[0.3, 0.2])
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
+    table.set_fontsize(12)
     table.scale(1.5, 2)
     
     # Style the table
@@ -416,16 +286,14 @@ def analyze_cds_parallel(args):
 
     if len(sequences_0) < 1 or len(sequences_1) < 1:
         result = {
-            'observed_mean': np.nan,
-            'observed_median': np.nan,
-            'mean_pvalue': np.nan,
-            'median_pvalue': np.nan,
+            'observed_effect_size': np.nan,
+            'p_value': np.nan,
             'matrix_0': None,
             'matrix_1': None,
             'n0': len(sequences_0),
             'n1': len(sequences_1),
-            'effect_size_mean': np.nan,
-            'effect_size_median': np.nan
+            'num_comp_group_0': 0,
+            'num_comp_group_1': 0,
         }
     else:
         # Generate matrices for visualization
@@ -440,6 +308,7 @@ def analyze_cds_parallel(args):
         result['matrix_0'] = matrix_0
         result['matrix_1'] = matrix_1
 
+    # Pairwise comparisons for cluster analysis
     result['pairwise_comparisons'] = set(pairwise_dict.keys())
 
     # Cache the result
@@ -449,25 +318,22 @@ def analyze_cds_parallel(args):
 def parse_cds_coordinates(cds_name):
     """Extract chromosome and coordinates from CDS name."""
     try:
-        # Debug print to see actual CDS name format
-        #print(f"Parsing CDS name: {cds_name}")
-        
         # Try different possible formats
         if '/' in cds_name:  # If it's a path, take last part
             cds_name = cds_name.split('/')[-1]
             
         if '_' in cds_name: # This is what we expect
-          try:
-              # Format is chr{X}_start{Y}_end{Z}
-              parts = cds_name.split('_')
-              if len(parts) == 3 and parts[1].startswith('start') and parts[2].startswith('end'):
-                  chrom = parts[0]
-                  start = int(parts[1].replace('start', ''))
-                  end = int(parts[2].replace('end', ''))
-                  return chrom, start, end
-          except Exception as e:
-              print(f"Error parsing {cds_name}: {str(e)}")
-              return None, None, None
+            try:
+                # Format is chr{X}_start{Y}_end{Z}
+                parts = cds_name.split('_')
+                if len(parts) == 3 and parts[1].startswith('start') and parts[2].startswith('end'):
+                    chrom = parts[0]
+                    start = int(parts[1].replace('start', ''))
+                    end = int(parts[2].replace('end', ''))
+                    return chrom, start, end
+            except Exception as e:
+                print(f"Error parsing {cds_name}: {str(e)}")
+                return None, None, None
         elif ':' in cds_name:
             chrom, coords = cds_name.split(':')
             if '-' in coords:
@@ -485,7 +351,6 @@ def parse_cds_coordinates(cds_name):
 
 def build_overlap_clusters(results_df):
     """Build clusters of overlapping CDS regions."""
-    # Debug info
     print(f"\nAnalyzing {len(results_df)} CDS entries")
     
     # Initialize clusters
@@ -548,7 +413,7 @@ def build_overlap_clusters(results_df):
     return clusters
 
 def combine_cluster_evidence(cluster_cdss, results_df):
-    """Combine statistics for a cluster of overlapping CDSs, considering only CDSs that meet specified criteria."""
+    """Combine statistics for a cluster of overlapping CDSs."""
     cluster_data = results_df[results_df['CDS'].isin(cluster_cdss)]
 
     # Get weights based on CDS length
@@ -566,7 +431,6 @@ def combine_cluster_evidence(cluster_cdss, results_df):
         weights[cds] /= total_length
 
     # Initialize statistics
-    weighted_mean_diff = 0
     weighted_effect_size = 0
     valid_cdss = 0
     valid_indices = []
@@ -576,10 +440,12 @@ def combine_cluster_evidence(cluster_cdss, results_df):
 
     for idx, row in cluster_data.iterrows():
         cds = row['CDS']
-        effect_size = row['effect_size_mean']
+        effect_size = row['observed_effect_size']
+
+        if np.isnan(effect_size):
+            continue  # Skip invalid entries
 
         weight = weights.get(cds, 1 / len(cluster_cdss))
-        weighted_mean_diff += row['observed_mean'] * weight
         weighted_effect_size += effect_size * weight
 
         # Accumulate unique pairwise comparisons
@@ -595,7 +461,7 @@ def combine_cluster_evidence(cluster_cdss, results_df):
     # Combine p-values if we have valid data
     if valid_cdss > 0:
         # Use Fisher's method within cluster
-        valid_pvals = cluster_data.loc[valid_indices]['mean_pvalue']
+        valid_pvals = cluster_data.loc[valid_indices]['p_value']
 
         # p-values are finite and not NaN
         valid_pvals = valid_pvals[~np.isnan(valid_pvals)]
@@ -608,45 +474,16 @@ def combine_cluster_evidence(cluster_cdss, results_df):
             combined_p = np.nan
     else:
         combined_p = np.nan
-        weighted_mean_diff = np.nan
         weighted_effect_size = np.nan
         total_comparisons = 0
 
     return {
         'combined_pvalue': combined_p,
-        'weighted_mean_diff': weighted_mean_diff,
         'weighted_effect_size': weighted_effect_size,
         'n_comparisons': total_comparisons,
         'n_valid_cds': valid_cdss,
         'cluster_pairs': cluster_pairs
     }
-
-
-"""
-OVERALL TEST METHODOLOGY
-
-The overall test combines evidence across CDS regions.
-
-1. DEPENDENCY STRUCTURE
-- CDSs that share genomic coordinates are not independent
-- They may be using the same underlying sequence data
-- We handle this by first grouping overlapping CDSs into clusters
-- Each cluster is assumed to represent one independent piece of evidence
-
-2. WITHIN-CLUSTER COMBINATION
-For each cluster of overlapping CDSs:
-- Weight each CDS by its genomic length
-- Combine their test statistics using weighted averages
-- Use Fisher's method to combine p-values within cluster
-- Track number of actual pairwise comparisons made
-
-3. BETWEEN-CLUSTER COMBINATION 
-Once we have cluster-level statistics:
-- We assume clusters are truly independent (no sequence overlap)
-- Use Fisher's method to combine cluster p-values
-- Weight effect sizes by number of comparisons
-"""
-
 
 def compute_overall_significance(cluster_results):
     """Compute overall significance from independent clusters."""
@@ -669,10 +506,20 @@ def compute_overall_significance(cluster_results):
     fisher_stat = -2 * np.sum(np.log(cluster_pvals))
     overall_pvalue = stats.chi2.sf(fisher_stat, df=2 * len(cluster_pvals))
 
-    # Compute weighted effect size
+    # Compute weighted effect size with normalized weights
     effect_sizes = [c['weighted_effect_size'] for c in valid_clusters]
     weights = [c['n_comparisons'] for c in valid_clusters]
-    weighted_effect = np.average(effect_sizes, weights=weights)
+
+    # Normalize weights to sum to 1
+    weights = np.array(weights, dtype=float)
+    weights_sum = weights.sum()
+    if weights_sum == 0:
+        # Avoid division by zero
+        normalized_weights = np.ones_like(weights) / len(weights)
+    else:
+        normalized_weights = weights / weights_sum
+
+    weighted_effect = np.average(effect_sizes, weights=normalized_weights)
 
     # Collect all unique pairwise comparisons across valid clusters
     all_unique_pairs = set()
@@ -686,8 +533,6 @@ def compute_overall_significance(cluster_results):
         'n_valid_clusters': len(valid_clusters),
         'total_comparisons': total_comparisons
     }
-
-
 
 def main():
     start_time = datetime.now()
@@ -714,7 +559,7 @@ def main():
         {
             'CDS': cds,
             **{k: v for k, v in result.items() 
-               if k not in ['matrix_0', 'matrix_1']}
+               if k not in ['matrix_0', 'matrix_1', 'pairwise_comparisons']}
         }
         for cds, result in results.items()
     ])
@@ -749,9 +594,12 @@ def main():
     print(f"Number of independent clusters: {overall_results['n_valid_clusters']}")
     print(f"Total unique CDS pairs: {overall_results['total_comparisons']:,}")
     print(f"Overall p-value: {overall_results['overall_pvalue']:.4e}")
-    print(f"Overall effect size: {overall_results['overall_effect']:.4f}")
+    print(f"Overall effect size (Cliff's Delta): {overall_results['overall_effect']:.4f}")
     
-    significant_results = results_df.sort_values('mean_pvalue')
+    # Sort results by p-value
+    significant_results = results_df.sort_values('p_value')
+    
+    # Create visualizations for top significant results
     for _, row in significant_results.head().iterrows():
         cds = row['CDS']
         result = results[cds]
@@ -763,13 +611,11 @@ def main():
         )
   
     # Print summary statistics
-    valid_results = results_df[~results_df['mean_pvalue'].isna()]
+    valid_results = results_df[~results_df['p_value'].isna()]
     print("\nPer-CDS Analysis Summary:")
     print(f"Total CDSs analyzed: {len(results_df):,}")
     print(f"Valid analyses: {len(valid_results):,}")
-    print(f"Significant CDSs (p < 0.05):")
-    print(f"  By mean: {(valid_results['mean_pvalue'] < 0.05).sum():,}")
-    print(f"  By median: {(valid_results['median_pvalue'] < 0.05).sum():,}")
+    print(f"Significant CDSs (p < 0.05): {(valid_results['p_value'] < 0.05).sum():,}")
     
     end_time = datetime.now()
     print(f"\nAnalysis completed at {end_time}")
