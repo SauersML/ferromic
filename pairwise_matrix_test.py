@@ -515,7 +515,7 @@ def compute_overall_significance(cluster_results):
     import mpmath
 
     # Set the desired precision for mpmath (increase if needed)
-    mpmath.mp.dps = 100  # 100 decimal places of precision
+    mpmath.mp.dps = 100000
 
     # Initialize default return values
     overall_pvalue_fisher = np.nan
