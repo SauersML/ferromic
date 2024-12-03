@@ -103,7 +103,8 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
     return matrix_0, matrix_1
 
 def permutation_test_worker(args):
-    """Permutation test worker using Cliff's Delta as the effect size."""
+    """Optimized permutation test worker using Cliff's Delta as the effect size."""
+    from scipy.stats import rankdata
     all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
 
     num_seqs = len(all_sequences)
@@ -142,55 +143,51 @@ def permutation_test_worker(args):
             'num_comp_group_1': len(values_1),
         }
 
-    # Compute Cliff's Delta
     n0 = len(values_0)
     n1 = len(values_1)
-    n_pairs = n0 * n1
+    n_total = n0 + n1
 
-    # Use numpy broadcasting for efficient pairwise comparisons
-    # Reshape arrays for broadcasting
-    values_0_matrix = values_0[np.newaxis, :]  # Shape (1, n0)
-    values_1_matrix = values_1[:, np.newaxis]  # Shape (n1, 1)
-
-    # Compute pairwise differences
-    comparisons = values_1_matrix - values_0_matrix  # Shape (n1, n0)
-
-    # Count greater and lesser comparisons
-    greater = np.sum(comparisons > 0)
-    lesser = np.sum(comparisons < 0)
-    # Equal values are not counted in greater or lesser
-
-    cliffs_delta = (greater - lesser) / n_pairs
-
-    # Permutation test for p-value
+    # Combine the values and compute ranks
     combined_values = np.concatenate([values_0, values_1])
-    permuted_deltas = []
+    ranks = rankdata(combined_values, method='average')
 
-    for _ in range(N_PERMUTATIONS):
-        np.random.shuffle(combined_values)
-        perm_values_0 = combined_values[:n0]
-        perm_values_1 = combined_values[n0:]
+    # Assign ranks to groups
+    ranks_0 = ranks[:n0]
+    ranks_1 = ranks[n0:]
 
-        # Reshape for broadcasting
-        perm_values_0_matrix = perm_values_0[np.newaxis, :]
-        perm_values_1_matrix = perm_values_1[:, np.newaxis]
+    # Compute Cliff's Delta using ranks
+    sum_ranks_0 = np.sum(ranks_0)
+    sum_ranks_1 = np.sum(ranks_1)
 
-        perm_comparisons = perm_values_1_matrix - perm_values_0_matrix
-        perm_greater = np.sum(perm_comparisons > 0)
-        perm_lesser = np.sum(perm_comparisons < 0)
-        perm_delta = (perm_greater - perm_lesser) / n_pairs
-        permuted_deltas.append(perm_delta)
+    cliffs_delta = (2 * (sum_ranks_1 - n1 * (n1 + 1) / 2)) / (n0 * n1) - 1
 
-    permuted_deltas = np.array(permuted_deltas)
+    # Permutation test
+    permuted_deltas = np.zeros(N_PERMUTATIONS)
+    for i in range(N_PERMUTATIONS):
+        permuted_indices = np.random.permutation(n_total)
+        perm_values_0 = combined_values[permuted_indices[:n0]]
+        perm_values_1 = combined_values[permuted_indices[n0:]]
+
+        # Compute ranks
+        perm_combined_values = np.concatenate([perm_values_0, perm_values_1])
+        perm_ranks = rankdata(perm_combined_values, method='average')
+
+        perm_ranks_0 = perm_ranks[:n0]
+        perm_ranks_1 = perm_ranks[n0:]
+
+        # Compute Cliff's Delta for permutation
+        perm_sum_ranks_1 = np.sum(perm_ranks_1)
+        perm_delta = (2 * (perm_sum_ranks_1 - n1 * (n1 + 1) / 2)) / (n0 * n1) - 1
+        permuted_deltas[i] = perm_delta
 
     # Calculate p-value (two-tailed test)
-    p_value = (np.sum(np.abs(permuted_deltas) >= np.abs(cliffs_delta)) + 1) / (len(permuted_deltas) + 1)
+    p_value = (np.sum(np.abs(permuted_deltas) >= np.abs(cliffs_delta)) + 1) / (N_PERMUTATIONS + 1)
 
     return {
         'observed_effect_size': cliffs_delta,
         'p_value': p_value,
-        'n0': len(sequences_0),
-        'n1': len(sequences_1),
+        'n0': n0,
+        'n1': n1,
         'num_comp_group_0': len(values_0),
         'num_comp_group_1': len(values_1),
     }
