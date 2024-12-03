@@ -556,31 +556,29 @@ def combine_cluster_evidence(cluster_cdss, results_df):
     # Initialize statistics
     weighted_mean_diff = 0
     weighted_effect_size = 0
-    total_comparisons = 0
     valid_cdss = 0
     valid_indices = []
+
+    # Initialize a set to collect unique pairwise comparisons for the cluster
+    cluster_pairs = set()
 
     for idx, row in cluster_data.iterrows():
         cds = row['CDS']
         effect_size = row['effect_size_mean']
-        n0 = row['n0']
-        n1 = row['n1']
 
         weight = weights.get(cds, 1 / len(cluster_cdss))
         weighted_mean_diff += row['observed_mean'] * weight
         weighted_effect_size += effect_size * weight
-        # Also handle NaN values for 'num_comp_group_0' and 'num_comp_group_1'
-        # Initialize a set to collect unique pairwise comparisons for the cluster
-        cluster_pairs = set()
-        
-        # Inside the loop over cluster_data
+
+        # Accumulate unique pairwise comparisons
         cds_pairs = row['pairwise_comparisons']
         cluster_pairs.update(cds_pairs)
-        
-        # After the loop, set total_comparisons to the number of unique pairs
-        total_comparisons = len(cluster_pairs)
+
         valid_cdss += 1
         valid_indices.append(idx)
+
+    # After the loop, set total_comparisons to the number of unique pairs
+    total_comparisons = len(cluster_pairs)
 
     # Combine p-values if we have valid data
     if valid_cdss > 0:
