@@ -199,67 +199,92 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
     return matrix_0, matrix_1
 
 def permutation_test_worker(args):
-    """Worker function for parallel permutation testing."""
-    all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
-    
-    # Create matrices for original groups (used for effect size)
-    orig_matrix_0, orig_matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
-    orig_mean, orig_median = calculate_test_statistics(orig_matrix_0, orig_matrix_1)
-    
-    # Run permutations in chunks for better memory management
-    chunk_size = 100
-    n_chunks = N_PERMUTATIONS // chunk_size
-    
-    permuted_means = []
-    permuted_medians = []
-    
-    for _ in range(n_chunks):
-        chunk_means = []
-        chunk_medians = []
-        
-        for _ in range(chunk_size):
-            # Randomly assign sequences to groups
-            np.random.shuffle(all_sequences)
-            perm_seq_0 = all_sequences[:n0]
-            perm_seq_1 = all_sequences[n0:]
-            
-            # Create matrices and calculate statistics
-            matrix_0, matrix_1 = create_matrices(perm_seq_0, perm_seq_1, pairwise_dict)
-            mean_diff, median_diff = calculate_test_statistics(matrix_0, matrix_1)
-            
-            if not np.isnan(mean_diff):
-                chunk_means.append(mean_diff)
-            if not np.isnan(median_diff):
-                chunk_medians.append(median_diff)
-        
-        permuted_means.extend(chunk_means)
-        permuted_medians.extend(chunk_medians)
-    
+    """Worker function for permutation testing optimized for speed."""
+    all_sequences, n0, pairwise_df, sequences_0, sequences_1 = args
+
+    # Create DataFrames for original groups
+    group_assignments = pd.Series(index=all_sequences, data=0)
+    group_assignments.loc[sequences_1] = 1
+
+    # Merge omega values with group assignments
+    pairwise_df['Group1'] = pairwise_df['Seq1'].map(group_assignments)
+    pairwise_df['Group2'] = pairwise_df['Seq2'].map(group_assignments)
+
+    # Original test statistic
+    orig_values_0 = pairwise_df[
+        (pairwise_df['Group1'] == 0) & (pairwise_df['Group2'] == 0)
+    ]['omega'].values
+
+    orig_values_1 = pairwise_df[
+        (pairwise_df['Group1'] == 1) & (pairwise_df['Group2'] == 1)
+    ]['omega'].values
+
+    if len(orig_values_0) == 0 or len(orig_values_1) == 0:
+        return {
+            'observed_mean': np.nan,
+            'observed_median': np.nan,
+            'mean_pvalue': np.nan,
+            'median_pvalue': np.nan,
+            'n0': len(sequences_0),
+            'n1': len(sequences_1),
+            'effect_size_mean': np.nan,
+            'effect_size_median': np.nan
+        }
+
+    orig_mean_diff = abs(np.mean(orig_values_1) - np.mean(orig_values_0))
+    orig_median_diff = abs(np.median(orig_values_1) - np.median(orig_values_0))
+
+    # Store original omega values for permutations
+    omega_values = pairwise_df[['Seq1', 'Seq2', 'omega']].values
+
+    # Run permutations
+    permuted_mean_diffs = []
+    permuted_median_diffs = []
+    for _ in range(N_PERMUTATIONS):
+        # Shuffle group assignments
+        np.random.shuffle(all_sequences)
+        perm_groups = pd.Series(index=all_sequences, data=0)
+        perm_groups.iloc[n0:] = 1
+
+        # Map new group assignments
+        group_map = perm_groups.to_dict()
+        pairwise_df['PermGroup1'] = pairwise_df['Seq1'].map(group_map)
+        pairwise_df['PermGroup2'] = pairwise_df['Seq2'].map(group_map)
+
+        # Select within-group omega values based on permuted groups
+        perm_values_0 = pairwise_df[
+            (pairwise_df['PermGroup1'] == 0) & (pairwise_df['PermGroup2'] == 0)
+        ]['omega'].values
+
+        perm_values_1 = pairwise_df[
+            (pairwise_df['PermGroup1'] == 1) & (pairwise_df['PermGroup2'] == 1)
+        ]['omega'].values
+
+        if len(perm_values_0) == 0 or len(perm_values_1) == 0:
+            continue
+
+        mean_diff = abs(np.mean(perm_values_1) - np.mean(perm_values_0))
+        median_diff = abs(np.median(perm_values_1) - np.median(perm_values_0))
+
+        permuted_mean_diffs.append(mean_diff)
+        permuted_median_diffs.append(median_diff)
+
     # Calculate p-values
-    print("\nPermutation test p-value calculation:")
-    print(f"  Original mean: {orig_mean:.4f}")
-    print(f"  Original median: {orig_median:.4f}")
-    print(f"  Number of permuted means: {len(permuted_means)}")
-    print(f"  Number of permuted medians: {len(permuted_medians)}")
-    print(f"  First 5 permuted means: {permuted_means[:5]}")
-    print(f"  First 5 permuted medians: {permuted_medians[:5]}")
-    print(f"  Number of extreme means: {np.sum(np.abs(permuted_means) >= np.abs(orig_mean))}")
-    print(f"  Number of extreme medians: {np.sum(np.abs(permuted_medians) >= np.abs(orig_median))}")
-    
-    mean_pval = (np.sum(np.array(permuted_means) >= orig_mean) + 1) / (len(permuted_means) + 1) if permuted_means else np.nan
-    median_pval = (np.sum(np.array(permuted_medians) >= orig_median) + 1) / (len(permuted_medians) + 1) if permuted_medians else np.nan
-    
+    permuted_mean_diffs = np.array(permuted_mean_diffs)
+    permuted_median_diffs = np.array(permuted_median_diffs)
+
+    mean_pval = (np.sum(permuted_mean_diffs >= orig_mean_diff) + 1) / (len(permuted_mean_diffs) + 1)
+    median_pval = (np.sum(permuted_median_diffs >= orig_median_diff) + 1) / (len(permuted_median_diffs) + 1)
+
     return {
-        'observed_mean': orig_mean,
-        'observed_median': orig_median,
+        'observed_mean': orig_mean_diff,
+        'observed_median': orig_median_diff,
         'mean_pvalue': mean_pval,
         'median_pvalue': median_pval,
-        'matrix_0': orig_matrix_0,
-        'matrix_1': orig_matrix_1,
         'n0': len(sequences_0),
         'n1': len(sequences_1),
-        'effect_size_mean': orig_mean / np.std(permuted_means) if permuted_means else np.nan,
-        'effect_size_median': orig_median / np.std(permuted_medians) if permuted_medians else np.nan
+        'effect_size_mean': orig_mean_diff / permuted_mean_diffs.std(ddof=1),
+        'effect_size_median': orig_median_diff / permuted_median_diffs.std(ddof=1)
     }
 
 def create_visualization(matrix_0, matrix_1, cds, result):
