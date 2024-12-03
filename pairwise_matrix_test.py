@@ -409,7 +409,7 @@ def build_overlap_clusters(results_df):
     
     return clusters
 
-def combine_cluster_evidence(cluster_cdss, results_df):
+def combine_cluster_evidence(cluster_cdss, results_df, results):
     """Combine statistics for a cluster of overlapping CDSs."""
     cluster_data = results_df[results_df['CDS'].isin(cluster_cdss)]
 
@@ -445,8 +445,8 @@ def combine_cluster_evidence(cluster_cdss, results_df):
         weight = weights.get(cds, 1 / len(cluster_cdss))
         weighted_effect_size += effect_size * weight
 
-        # Accumulate unique pairwise comparisons
-        cds_pairs = row['pairwise_comparisons']
+        # Accumulate unique pairwise comparisons from the results dictionary
+        cds_pairs = results[cds]['pairwise_comparisons']
         cluster_pairs.update(cds_pairs)
 
         valid_cdss += 1
@@ -569,7 +569,7 @@ def main():
     clusters = build_overlap_clusters(results_df)
     cluster_stats = {}
     for cluster_id, cluster_cdss in clusters.items():
-        cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df)
+        cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df, results)
     
     # Compute overall significance
     overall_results = compute_overall_significance(cluster_stats)
