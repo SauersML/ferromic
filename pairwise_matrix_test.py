@@ -436,7 +436,7 @@ def build_overlap_clusters(results_df):
     return clusters
 
 def combine_cluster_evidence(cluster_cdss, results_df, results):
-    """Combine statistics for a cluster of overlapping CDSs."""
+    """Combine statistics for a cluster of overlapping CDSs using the smallest p-value."""
     cluster_data = results_df[results_df['CDS'].isin(cluster_cdss)]
 
     # Get weights based on CDS length
@@ -454,7 +454,7 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
         weights[cds] /= total_length
 
     # Initialize statistics
-    weighted_effect_size = 0
+    weighted_effect_size = 0.0
     valid_cdss = 0
     valid_indices = []
 
@@ -481,29 +481,18 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
     # After the loop, set total_comparisons to the number of unique pairs
     total_comparisons = len(cluster_pairs)
 
-    # Combine p-values if we have valid data
+    # Combine p-values by selecting the smallest p-value if we have valid data... perhaps: switch to median p-value
     if valid_cdss > 0:
-        # Use Fisher's method within cluster
+        # Collect valid p-values
         valid_pvals = cluster_data.loc[valid_indices]['p_value']
 
         # Filter out invalid p-values
         valid_pvals = valid_pvals[~np.isnan(valid_pvals)]
         valid_pvals = valid_pvals[~np.isinf(valid_pvals)]
 
-        # Check for zero p-values and print warning
-        if (valid_pvals == 0).any():
-            print(f"Warning: Zero p-value detected in cluster for CDSs {cluster_cdss}.")
-            # Optionally, you might want to investigate why the p-value is zero
-            # For example, inspect the corresponding CDSs or data
-
         if len(valid_pvals) > 0:
-            # Proceed with Fisher's method
-            fisher_stat = -2 * np.sum(np.log(valid_pvals))
-            combined_p = stats.chi2.sf(fisher_stat, df=2 * len(valid_pvals))
-            # Handle numerical underflow if combined_p is zero
-            if combined_p == 0:
-                combined_p = np.nextafter(0, 1)  # Smallest positive float
-                print(f"Warning: Combined p-value underflow to zero for cluster with CDSs {cluster_cdss}. Set to {combined_p}.")
+            # Use the smallest p-value as the combined p-value
+            combined_p = valid_pvals.min()
         else:
             combined_p = np.nan
     else:
