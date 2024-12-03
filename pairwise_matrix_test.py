@@ -227,19 +227,30 @@ def permutation_test_worker(args):
     orig_values_0 = orig_values_0[~np.isnan(orig_values_0)]
     orig_values_1 = orig_values_1[~np.isnan(orig_values_1)]
 
+    # Initialize variables to NaN in case they are not computed
+    orig_mean_diff = np.nan
+    orig_median_diff = np.nan
+    mean_pval = np.nan
+    median_pval = np.nan
+    effect_size_mean = np.nan
+    effect_size_median = np.nan
+
+    # Check if we have enough data to proceed
     if len(orig_values_0) == 0 or len(orig_values_1) == 0:
-      return {
-        'observed_mean': orig_mean_diff,
-        'observed_median': orig_median_diff,
-        'mean_pvalue': mean_pval,
-        'median_pvalue': median_pval,
-        'n0': len(sequences_0),
-        'n1': len(sequences_1),
-        'num_comp_group_0': len(orig_values_0),
-        'num_comp_group_1': len(orig_values_1),
-        'effect_size_mean': effect_size_mean,
-        'effect_size_median': effect_size_median
-      }
+        return {
+            'observed_mean': orig_mean_diff,
+            'observed_median': orig_median_diff,
+            'mean_pvalue': mean_pval,
+            'median_pvalue': median_pval,
+            'n0': len(sequences_0),
+            'n1': len(sequences_1),
+            'num_comp_group_0': len(orig_values_0),
+            'num_comp_group_1': len(orig_values_1),
+            'effect_size_mean': effect_size_mean,
+            'effect_size_median': effect_size_median
+        }
+
+    # Compute the observed mean and median differences
     orig_mean_diff = abs(np.mean(orig_values_1) - np.mean(orig_values_0))
     orig_median_diff = abs(np.median(orig_values_1) - np.median(orig_values_0))
 
@@ -291,6 +302,8 @@ def permutation_test_worker(args):
         'median_pvalue': median_pval,
         'n0': len(sequences_0),
         'n1': len(sequences_1),
+        'num_comp_group_0': len(orig_values_0),
+        'num_comp_group_1': len(orig_values_1),
         'effect_size_mean': effect_size_mean,
         'effect_size_median': effect_size_median
     }
