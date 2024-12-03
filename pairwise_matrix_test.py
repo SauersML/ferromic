@@ -490,9 +490,20 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
         valid_pvals = valid_pvals[~np.isnan(valid_pvals)]
         valid_pvals = valid_pvals[~np.isinf(valid_pvals)]
 
+        # Check for zero p-values and print warning
+        if (valid_pvals == 0).any():
+            print(f"Warning: Zero p-value detected in cluster for CDSs {cluster_cdss}.")
+            # Optionally, you might want to investigate why the p-value is zero
+            # For example, inspect the corresponding CDSs or data
+
         if len(valid_pvals) > 0:
+            # Proceed with Fisher's method
             fisher_stat = -2 * np.sum(np.log(valid_pvals))
             combined_p = stats.chi2.sf(fisher_stat, df=2 * len(valid_pvals))
+            # Handle numerical underflow if combined_p is zero
+            if combined_p == 0:
+                combined_p = np.nextafter(0, 1)  # Smallest positive float
+                print(f"Warning: Combined p-value underflow to zero for cluster with CDSs {cluster_cdss}. Set to {combined_p}.")
         else:
             combined_p = np.nan
     else:
