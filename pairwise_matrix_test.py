@@ -547,9 +547,9 @@ def compute_overall_significance(cluster_results):
         df_fisher = 2 * len(cluster_pvals)
 
         # Compute the p-value using mpmath's regularized upper incomplete gamma function
-        # p-value = Q(df/2, fisher_stat/2) = gammainc(df/2, fisher_stat/2, regularized=True, complement=True)
-        p_value = mpmath.gammainc(df_fisher / 2, fisher_stat / 2, 
-                                  regularized=True, complement=True)
+        # The survival function for chi-squared is equivalent to the regularized upper incomplete gamma function
+        # p-value = Q(k/2, x/2) = gammainc(k/2, x/2, ∞, regularized=True)
+        p_value = mpmath.gammainc(df_fisher / 2, fisher_stat / 2, mpmath.inf, regularized=True)
 
         # Ensure the p-value is not zero
         if p_value == 0 or p_value < min_pvalue:
