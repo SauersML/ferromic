@@ -525,95 +525,96 @@ def compute_overall_significance(cluster_results):
     import numpy as np
     from scipy import stats
 
+    # Initialize default return values
+    overall_pvalue_fisher = np.nan
+    overall_pvalue_stouffer = np.nan
+    overall_pvalue = np.nan  # This will be the p-value we choose to return
+    overall_effect = np.nan
+    n_valid_clusters = 0
+    total_comparisons = 0
+    cluster_pvals = None  # Initialize cluster_pvals to avoid UnboundLocalError
+
     # Filter out clusters with NaN combined_pvalue or weighted_effect_size
     valid_clusters = [
         c for c in cluster_results.values()
         if not np.isnan(c['combined_pvalue']) and not np.isnan(c['weighted_effect_size'])
     ]
 
-    # Initialize default return values
-    overall_pvalue_fisher = np.nan
-    overall_pvalue_stouffer = np.nan
-    overall_effect = np.nan
-    n_valid_clusters = 0
-    total_comparisons = 0
+    if valid_clusters:
+        # Collect cluster p-values
+        cluster_pvals = [c['combined_pvalue'] for c in valid_clusters]
 
-    if not valid_clusters:
-        return {
-            'overall_pvalue_fisher': overall_pvalue_fisher,
-            'overall_pvalue_stouffer': overall_pvalue_stouffer,
-            'overall_effect': overall_effect,
-            'n_valid_clusters': n_valid_clusters,
-            'total_comparisons': total_comparisons
-        }
+        # Convert cluster_pvals to a numpy array for manipulation
+        cluster_pvals = np.array(cluster_pvals)
 
-    # Combine p-values using Fisher's method
-    cluster_pvals = [c['combined_pvalue'] for c in valid_clusters]
+        # Replace zeros or extremely small p-values with a minimum positive value
+        min_pvalue = np.nextafter(0, 1)  # Smallest positive float
+        if (cluster_pvals == 0).any():
+            print("Warning: Zero p-value detected among cluster combined p-values.")
+            zero_p_clusters = [i for i, p in enumerate(cluster_pvals) if p == 0]
+            print(f"Clusters with zero p-values: {zero_p_clusters}")
+        cluster_pvals[cluster_pvals < min_pvalue] = min_pvalue
 
-    # Convert cluster_pvals to a numpy array for manipulation
-    cluster_pvals = np.array(cluster_pvals)
+        # Fisher's method
+        fisher_stat = -2 * np.sum(np.log(cluster_pvals))
+        overall_pvalue_fisher = stats.chi2.sf(fisher_stat, df=2 * len(cluster_pvals))
+        if overall_pvalue_fisher == 0:
+            overall_pvalue_fisher = min_pvalue
+            print(f"Warning: Overall p-value underflow to zero in Fisher's method. Set to {overall_pvalue_fisher}.")
 
-    # Replace zeros or extremely small p-values with a minimum positive value
-    min_pvalue = np.nextafter(0, 1)  # Smallest positive float
-    if (cluster_pvals == 0).any():
-        print("Warning: Zero p-value detected among cluster combined p-values.")
-        zero_p_clusters = [i for i, p in enumerate(cluster_pvals) if p == 0]
-        print(f"Clusters with zero p-values: {zero_p_clusters}")
-    cluster_pvals[cluster_pvals < min_pvalue] = min_pvalue
+        # Stouffer's Z method
+        from scipy.stats import norm
+        cluster_zscores = norm.isf(cluster_pvals)  # Convert p-values to Z-scores
 
-    # Fisher's method
-    fisher_stat = -2 * np.sum(np.log(cluster_pvals))
-    overall_pvalue_fisher = stats.chi2.sf(fisher_stat, df=2 * len(cluster_pvals))
-    if overall_pvalue_fisher == 0:
-        overall_pvalue_fisher = min_pvalue
-        print(f"Warning: Overall p-value underflow to zero in Fisher's method. Set to {overall_pvalue_fisher}.")
+        # Use the number of comparisons as weights
+        weights = np.array([c['n_comparisons'] for c in valid_clusters], dtype=float)
 
-    # Stouffer's Z method
-    from scipy.stats import norm
-    cluster_zscores = norm.isf(cluster_pvals)  # Convert p-values to Z-scores
-
-    # Use the number of comparisons as weights
-    weights = np.array([c['n_comparisons'] for c in valid_clusters], dtype=float)
-
-    # Check for zero weights to avoid division by zero
-    if np.all(weights == 0):
-        weights = None
-        print("Warning: All weights are zero. Proceeding with equal weights in Stouffer's method.")
-    else:
-        # Normalize weights
-        weights_sum = weights.sum()
-        if weights_sum == 0:
-            normalized_weights = np.ones_like(weights) / len(weights)
+        # Check for zero weights to avoid division by zero
+        if np.all(weights == 0):
+            weights = None
+            print("Warning: All weights are zero. Proceeding with equal weights in Stouffer's method.")
         else:
-            normalized_weights = weights / weights_sum
+            # Normalize weights
+            weights_sum = weights.sum()
+            if weights_sum == 0:
+                normalized_weights = np.ones_like(weights) / len(weights)
+            else:
+                normalized_weights = weights / weights_sum
 
-    # Compute combined Z-score
-    if weights is not None:
-        combined_z = np.sum(cluster_zscores * normalized_weights)
+        # Compute combined Z-score
+        if weights is not None:
+            combined_z = np.sum(cluster_zscores * normalized_weights)
+        else:
+            combined_z = np.mean(cluster_zscores)
+
+        # Compute overall p-value using Stouffer's method
+        overall_pvalue_stouffer = norm.sf(combined_z)
+        if overall_pvalue_stouffer == 0:
+            overall_pvalue_stouffer = min_pvalue
+            print(f"Warning: Overall p-value underflow to zero in Stouffer's method. Set to {overall_pvalue_stouffer}.")
+
+        # Compute weighted effect size with normalized weights
+        effect_sizes = np.array([c['weighted_effect_size'] for c in valid_clusters])
+        if weights is not None:
+            overall_effect = np.average(effect_sizes, weights=normalized_weights)
+        else:
+            overall_effect = np.mean(effect_sizes)
+
+        # Collect all unique pairwise comparisons across valid clusters
+        all_unique_pairs = set()
+        for c in valid_clusters:
+            all_unique_pairs.update(c['cluster_pairs'])
+        total_comparisons = len(all_unique_pairs)
+        n_valid_clusters = len(valid_clusters)
+
+        # Decide which overall p-value to return (e.g., Fisher's method)
+        overall_pvalue = overall_pvalue_fisher  # Choose the method you prefer
+
     else:
-        combined_z = np.mean(cluster_zscores)
-
-    # Compute overall p-value using Stouffer's method
-    overall_pvalue_stouffer = norm.sf(combined_z)
-    if overall_pvalue_stouffer == 0:
-        overall_pvalue_stouffer = min_pvalue
-        print(f"Warning: Overall p-value underflow to zero in Stouffer's method. Set to {overall_pvalue_stouffer}.")
-
-    # Compute weighted effect size with normalized weights
-    effect_sizes = np.array([c['weighted_effect_size'] for c in valid_clusters])
-    if weights is not None:
-        overall_effect = np.average(effect_sizes, weights=normalized_weights)
-    else:
-        overall_effect = np.mean(effect_sizes)
-
-    # Collect all unique pairwise comparisons across valid clusters
-    all_unique_pairs = set()
-    for c in valid_clusters:
-        all_unique_pairs.update(c['cluster_pairs'])
-    total_comparisons = len(all_unique_pairs)
-    n_valid_clusters = len(valid_clusters)
+        print("No valid clusters available for significance computation.")
 
     return {
+        'overall_pvalue': overall_pvalue,
         'overall_pvalue_fisher': overall_pvalue_fisher,
         'overall_pvalue_stouffer': overall_pvalue_stouffer,
         'overall_effect': overall_effect,
