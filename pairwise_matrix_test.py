@@ -720,6 +720,7 @@ def main():
     ])
     
     # Save final results
+    results_df = results_df.drop(columns=['pairwise_comparisons'])
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
       
     # Overall analysis
