@@ -94,101 +94,71 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
 
     return matrix_0, matrix_1
 
-def permutation_test_worker(args):
-    """Efficient permutation test worker using vectorized operations and precomputed indices."""
+def analysis_worker(args):
+    """GEE analysis worker function for a single CDS."""
+    import statsmodels.api as sm
+
     all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
 
-    num_seqs = len(all_sequences)
-    seq_to_idx = {seq: idx for idx, seq in enumerate(all_sequences)}
-
-    # Build the omega matrix once
-    omega_matrix = np.full((num_seqs, num_seqs), np.nan)
+    # Prepare data for GEE
+    data = []
     for (seq1, seq2), omega in pairwise_dict.items():
-        i = seq_to_idx[seq1]
-        j = seq_to_idx[seq2]
-        omega_matrix[i, j] = omega
-        omega_matrix[j, i] = omega  # Symmetry
+        # Determine group of the pair
+        if seq1 in sequences_0 and seq2 in sequences_0:
+            group = 0
+        elif seq1 in sequences_1 and seq2 in sequences_1:
+            group = 1
+        else:
+            continue  # Skip pairs not within the same group
 
-    # Original group assignments
-    groups = np.zeros(num_seqs, dtype=int)
-    for seq in sequences_1:
-        groups[seq_to_idx[seq]] = 1
+        data.append({
+            'omega_value': omega,
+            'group': group,
+            'seq1': seq1,
+            'seq2': seq2
+        })
 
-    # Precompute all possible within-group indices
-    upper_tri_indices = np.triu_indices(num_seqs, k=1)
-    valid_pair_mask = ~np.isnan(omega_matrix[upper_tri_indices])
+    df = pd.DataFrame(data)
 
-    # Extract original within-group omega values
-    group_pairs = groups[upper_tri_indices[0]] + groups[upper_tri_indices[1]]
-    within_group_mask = (group_pairs == 0) | (group_pairs == 2)
-    orig_within_mask = valid_pair_mask & within_group_mask
-
-    orig_values = omega_matrix[upper_tri_indices][orig_within_mask]
-    orig_groups = groups[upper_tri_indices[0]][orig_within_mask]
-
-    # Check for sufficient data
-    if len(orig_values) == 0:
+    if df.empty:
         return {
             'observed_effect_size': np.nan,
             'p_value': np.nan,
-            'n0': len(sequences_0),
-            'n1': len(sequences_1),
+            'n0': n0,
+            'n1': len(all_sequences) - n0,
             'num_comp_group_0': 0,
             'num_comp_group_1': 0,
+            'std_err': np.nan
         }
 
-    # Compute observed Cliff's Delta
-    values_0 = orig_values[orig_groups == 0]
-    values_1 = orig_values[orig_groups == 1]
-    cliffs_delta_observed = compute_cliffs_delta(values_0, values_1)
+    # Add constant term for intercept
+    df['intercept'] = 1
 
-    # Prepare for permutations
-    permuted_deltas = np.zeros(N_PERMUTATIONS)
-    num_pairs = len(orig_values)
-    group_indices = np.arange(num_pairs)
+    # Define dependent and independent variables
+    endog = df['omega_value']
+    exog = df[['intercept', 'group']]
 
-    # Combine permuted group assignments in advance
-    group_size = len(groups)
-    perm_group_assignments = np.array([np.random.permutation(groups) for _ in range(N_PERMUTATIONS)])
+    # Since dependencies are assumed minimal, use Independence correlation structure
+    family = sm.families.Gaussian()
+    ind = sm.cov_struct.Independence()
 
-    # For each permutation, compute Cliff's Delta
-    for i in range(N_PERMUTATIONS):
-        permuted_groups = perm_group_assignments[i]
+    # Fit GEE model
+    model = sm.GEE(endog, exog, groups=np.arange(len(df)), family=family, cov_struct=ind)
+    result = model.fit()
 
-        # Permuted within-group mask
-        perm_group_pairs = permuted_groups[upper_tri_indices[0]] + permuted_groups[upper_tri_indices[1]]
-        perm_within_group_mask = valid_pair_mask & ((perm_group_pairs == 0) | (perm_group_pairs == 2))
-
-        perm_values = omega_matrix[upper_tri_indices][perm_within_group_mask]
-        perm_groups = permuted_groups[upper_tri_indices[0]][perm_within_group_mask]
-
-        if len(perm_values) == 0:
-            permuted_deltas[i] = np.nan
-            continue
-
-        perm_values_0 = perm_values[perm_groups == 0]
-        perm_values_1 = perm_values[perm_groups == 1]
-
-        if len(perm_values_0) == 0 or len(perm_values_1) == 0:
-            permuted_deltas[i] = np.nan
-            continue
-
-        # Compute Cliff's Delta for permutation
-        permuted_deltas[i] = compute_cliffs_delta(perm_values_0, perm_values_1)
-
-    # Remove NaN values from permutations
-    permuted_deltas = permuted_deltas[~np.isnan(permuted_deltas)]
-
-    # Calculate p-value (two-tailed test)
-    p_value = (np.sum(np.abs(permuted_deltas) >= np.abs(cliffs_delta_observed)) + 1) / (len(permuted_deltas) + 1)
+    # Extract effect size and p-value
+    effect_size = result.params['group']
+    p_value = result.pvalues['group']
+    std_err = result.bse['group']
 
     return {
-        'observed_effect_size': cliffs_delta_observed,
+        'observed_effect_size': effect_size,
         'p_value': p_value,
-        'n0': len(sequences_0),
-        'n1': len(sequences_1),
-        'num_comp_group_0': (orig_groups == 0).sum(),
-        'num_comp_group_1': (orig_groups == 1).sum(),
+        'n0': n0,
+        'n1': len(all_sequences) - n0,
+        'std_err': std_err,
+        'num_comp_group_0': (df['group'] == 0).sum(),
+        'num_comp_group_1': (df['group'] == 1).sum(),
     }
 
 def compute_cliffs_delta(x, y):
@@ -281,7 +251,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     plt.close()
 
 def analyze_cds_parallel(args):
-    """Analyze a single CDS with parallel permutations."""
+    """Analyze a single CDS using GEE."""
     df_cds, cds = args
 
     # Check cache first
@@ -299,23 +269,26 @@ def analyze_cds_parallel(args):
     sequences_1 = np.array([seq for seq in all_seqs if seq.endswith('1')])
     all_sequences = np.concatenate([sequences_0, sequences_1])
 
-    if len(sequences_0) < 1 or len(sequences_1) < 1:
+    n0 = len(sequences_0)
+    n1 = len(sequences_1)
+
+    if n0 < 1 or n1 < 1:
         result = {
             'observed_effect_size': np.nan,
             'p_value': np.nan,
-            'matrix_0': None,
-            'matrix_1': None,
-            'n0': len(sequences_0),
-            'n1': len(sequences_1),
+            'n0': n0,
+            'n1': n1,
             'num_comp_group_0': 0,
             'num_comp_group_1': 0,
+            'std_err': np.nan
         }
     else:
         # Generate matrices for visualization
         matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
 
-        result = permutation_test_worker((
-            all_sequences, len(sequences_0), pairwise_dict,
+        # Call the GEE analysis worker
+        result = analysis_worker((
+            all_sequences, n0, pairwise_dict,
             sequences_0, sequences_1
         ))
 
