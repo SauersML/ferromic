@@ -95,13 +95,13 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
     return matrix_0, matrix_1
 
 def permutation_test_worker(args):
-    """Permutation test worker using Cliff's Delta as the effect size."""
+    """Efficient permutation test worker using vectorized operations and precomputed indices."""
     all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
 
     num_seqs = len(all_sequences)
     seq_to_idx = {seq: idx for idx, seq in enumerate(all_sequences)}
 
-    # Build the omega matrix
+    # Build the omega matrix once
     omega_matrix = np.full((num_seqs, num_seqs), np.nan)
     for (seq1, seq2), omega in pairwise_dict.items():
         i = seq_to_idx[seq1]
@@ -114,21 +114,20 @@ def permutation_test_worker(args):
     for seq in sequences_1:
         groups[seq_to_idx[seq]] = 1
 
-    # Function to extract within-group omega values
-    def extract_within_group_values(groups):
-        mask_0 = np.outer(groups == 0, groups == 0)
-        mask_1 = np.outer(groups == 1, groups == 1)
-        values_0 = omega_matrix[mask_0]
-        values_1 = omega_matrix[mask_1]
-        values_0 = values_0[~np.isnan(values_0)]
-        values_1 = values_1[~np.isnan(values_1)]
-        return values_0, values_1
+    # Precompute all possible within-group indices
+    upper_tri_indices = np.triu_indices(num_seqs, k=1)
+    valid_pair_mask = ~np.isnan(omega_matrix[upper_tri_indices])
 
     # Extract original within-group omega values
-    values_0, values_1 = extract_within_group_values(groups)
+    group_pairs = groups[upper_tri_indices[0]] + groups[upper_tri_indices[1]]
+    within_group_mask = (group_pairs == 0) | (group_pairs == 2)
+    orig_within_mask = valid_pair_mask & within_group_mask
+
+    orig_values = omega_matrix[upper_tri_indices][orig_within_mask]
+    orig_groups = groups[upper_tri_indices[0]][orig_within_mask]
 
     # Check for sufficient data
-    if len(values_0) == 0 or len(values_1) == 0:
+    if len(orig_values) == 0:
         return {
             'observed_effect_size': np.nan,
             'p_value': np.nan,
@@ -138,46 +137,58 @@ def permutation_test_worker(args):
             'num_comp_group_1': 0,
         }
 
-    n0_values = len(values_0)
-    n1_values = len(values_1)
-
     # Compute observed Cliff's Delta
-    cliffs_delta = compute_cliffs_delta(values_0, values_1)
+    values_0 = orig_values[orig_groups == 0]
+    values_1 = orig_values[orig_groups == 1]
+    cliffs_delta_observed = compute_cliffs_delta(values_0, values_1)
 
-    # Permutation test
+    # Prepare for permutations
     permuted_deltas = np.zeros(N_PERMUTATIONS)
-    all_indices = np.arange(num_seqs)
+    num_pairs = len(orig_values)
+    group_indices = np.arange(num_pairs)
 
+    # Combine permuted group assignments in advance
+    group_size = len(groups)
+    perm_group_assignments = np.array([np.random.permutation(groups) for _ in range(N_PERMUTATIONS)])
+
+    # For each permutation, compute Cliff's Delta
     for i in range(N_PERMUTATIONS):
-        # Permute group assignments
-        permuted_groups = np.copy(groups)
-        np.random.shuffle(permuted_groups)
+        permuted_groups = perm_group_assignments[i]
 
-        # Extract within-group omega values for permuted groups
-        perm_values_0, perm_values_1 = extract_within_group_values(permuted_groups)
+        # Permuted within-group mask
+        perm_group_pairs = permuted_groups[upper_tri_indices[0]] + permuted_groups[upper_tri_indices[1]]
+        perm_within_group_mask = valid_pair_mask & ((perm_group_pairs == 0) | (perm_group_pairs == 2))
 
-        # Skip this permutation if not enough data
+        perm_values = omega_matrix[upper_tri_indices][perm_within_group_mask]
+        perm_groups = permuted_groups[upper_tri_indices[0]][perm_within_group_mask]
+
+        if len(perm_values) == 0:
+            permuted_deltas[i] = np.nan
+            continue
+
+        perm_values_0 = perm_values[perm_groups == 0]
+        perm_values_1 = perm_values[perm_groups == 1]
+
         if len(perm_values_0) == 0 or len(perm_values_1) == 0:
             permuted_deltas[i] = np.nan
             continue
 
         # Compute Cliff's Delta for permutation
-        perm_delta = compute_cliffs_delta(perm_values_0, perm_values_1)
-        permuted_deltas[i] = perm_delta
+        permuted_deltas[i] = compute_cliffs_delta(perm_values_0, perm_values_1)
 
     # Remove NaN values from permutations
     permuted_deltas = permuted_deltas[~np.isnan(permuted_deltas)]
 
     # Calculate p-value (two-tailed test)
-    p_value = (np.sum(np.abs(permuted_deltas) >= np.abs(cliffs_delta)) + 1) / (len(permuted_deltas) + 1)
+    p_value = (np.sum(np.abs(permuted_deltas) >= np.abs(cliffs_delta_observed)) + 1) / (len(permuted_deltas) + 1)
 
     return {
-        'observed_effect_size': cliffs_delta,
+        'observed_effect_size': cliffs_delta_observed,
         'p_value': p_value,
         'n0': len(sequences_0),
         'n1': len(sequences_1),
-        'num_comp_group_0': n0_values,
-        'num_comp_group_1': n1_values,
+        'num_comp_group_0': (orig_groups == 0).sum(),
+        'num_comp_group_1': (orig_groups == 1).sum(),
     }
 
 def compute_cliffs_delta(x, y):
