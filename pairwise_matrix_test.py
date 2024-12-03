@@ -131,6 +131,30 @@ def analysis_worker(args):
             'std_err': np.nan
         }
 
+    # Check if 'group' has at least two levels
+    if df['group'].nunique() < 2:
+        return {
+            'observed_effect_size': np.nan,
+            'p_value': np.nan,
+            'n0': n0,
+            'n1': len(all_sequences) - n0,
+            'num_comp_group_0': (df['group'] == 0).sum(),
+            'num_comp_group_1': (df['group'] == 1).sum(),
+            'std_err': np.nan
+        }
+
+    # Check if 'omega_value' has variation
+    if df['omega_value'].nunique() < 2:
+        return {
+            'observed_effect_size': np.nan,
+            'p_value': np.nan,
+            'n0': n0,
+            'n1': len(all_sequences) - n0,
+            'num_comp_group_0': (df['group'] == 0).sum(),
+            'num_comp_group_1': (df['group'] == 1).sum(),
+            'std_err': np.nan
+        }
+
     # Add constant term for intercept
     df['intercept'] = 1
 
@@ -142,14 +166,26 @@ def analysis_worker(args):
     family = sm.families.Gaussian()
     ind = sm.cov_struct.Independence()
 
-    # Fit GEE model
-    model = sm.GEE(endog, exog, groups=np.arange(len(df)), family=family, cov_struct=ind)
-    result = model.fit()
+    # Fit GEE model with exception handling
+    try:
+        model = sm.GEE(endog, exog, groups=np.arange(len(df)), family=family, cov_struct=ind)
+        result = model.fit()
+    except (ValueError, np.linalg.LinAlgError):
+        # Return NaNs if the model fails to fit
+        return {
+            'observed_effect_size': np.nan,
+            'p_value': np.nan,
+            'n0': n0,
+            'n1': len(all_sequences) - n0,
+            'std_err': np.nan,
+            'num_comp_group_0': (df['group'] == 0).sum(),
+            'num_comp_group_1': (df['group'] == 1).sum()
+        }
 
     # Extract effect size and p-value
-    effect_size = result.params['group']
-    p_value = result.pvalues['group']
-    std_err = result.bse['group']
+    effect_size = result.params.get('group', np.nan)
+    p_value = result.pvalues.get('group', np.nan)
+    std_err = result.bse.get('group', np.nan)
 
     return {
         'observed_effect_size': effect_size,
@@ -160,6 +196,7 @@ def analysis_worker(args):
         'num_comp_group_0': (df['group'] == 0).sum(),
         'num_comp_group_1': (df['group'] == 1).sum(),
     }
+
 
 def compute_cliffs_delta(x, y):
     """Compute Cliff's Delta effect size."""
