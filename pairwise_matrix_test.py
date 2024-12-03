@@ -536,9 +536,25 @@ def compute_overall_significance(cluster_results):
         }
 
     # Combine p-values using Fisher's method
-    cluster_pvals = [c['combined_pvalue'] for c in valid_clusters]
+
+    # Convert cluster_pvals to numpy array for checking zeros
+    cluster_pvals = np.array(cluster_pvals)
+
+    # Check for zero p-values and print warning
+    if (cluster_pvals == 0).any():
+        print("Warning: Zero p-value detected among cluster combined p-values.")
+        # Optionally, you might want to list which clusters have zero p-values
+        zero_p_clusters = [i for i, p in enumerate(cluster_pvals) if p == 0]
+        print(f"Clusters with zero p-values: {zero_p_clusters}")
+
+    # Proceed with Fisher's method
     fisher_stat = -2 * np.sum(np.log(cluster_pvals))
     overall_pvalue = stats.chi2.sf(fisher_stat, df=2 * len(cluster_pvals))
+
+    # Handle numerical underflow if overall_pvalue is zero
+    if overall_pvalue == 0:
+        overall_pvalue = np.nextafter(0, 1)
+        print(f"Warning: Overall p-value underflow to zero. Set to {overall_pvalue}.")
 
     # Compute weighted effect size with normalized weights
     effect_sizes = [c['weighted_effect_size'] for c in valid_clusters]
