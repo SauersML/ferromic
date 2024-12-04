@@ -230,34 +230,61 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     fig.suptitle(f'Pairwise Comparison Analysis: {cds}',
                  fontsize=18, fontweight='bold', y=0.95)
 
-    # Custom diverging colormap
-    cmap = sns.diverging_palette(220, 20, as_cmap=True)
+    # Custom colormap excluding white
+    cmap = sns.color_palette("viridis", as_cmap=True)
+
+    # Function to display only one triangle of the matrix
+    def get_triangle_mask(matrix, triangle='lower'):
+        mask = np.ones_like(matrix, dtype=bool)
+        if triangle == 'lower':
+            mask[np.tril_indices_from(mask)] = False
+        else:
+            mask[np.triu_indices_from(mask)] = False
+        return mask
+
+    # Prepare matrices for plotting
+    def prepare_matrix(matrix):
+        # Ensure matrix is square
+        n = matrix.shape[0]
+        if n != matrix.shape[1]:
+            raise ValueError("Matrix must be square.")
+        # Mask values to display only the lower triangle
+        mask = get_triangle_mask(matrix, triangle='lower')
+        return matrix, mask
+
+    matrix_0_plot, mask_0 = prepare_matrix(matrix_0)
+    matrix_1_plot, mask_1 = prepare_matrix(matrix_1)
+
+    # Adjust axes labels to start from 1
+    tick_labels_0 = [str(i+1) for i in range(result['n0'])]
+    tick_labels_1 = [str(i+1) for i in range(result['n1'])]
 
     # Heatmap for Group 0
     ax1 = fig.add_subplot(gs[0, 0])
-    sns.heatmap(matrix_0, cmap=cmap, center=1, ax=ax1,
+    sns.heatmap(matrix_0_plot, cmap=cmap, ax=ax1,
                 square=True, cbar_kws={'label': 'Omega Value'},
-                mask=np.isnan(matrix_0), linewidths=0.5, linecolor='gray')
+                mask=mask_0, linewidths=0.5, linecolor='gray',
+                xticklabels=tick_labels_0, yticklabels=tick_labels_0)
     ax1.set_title(f'Group 0 Matrix (n={result["n0"]})', fontsize=14, pad=12)
+    ax1.set_xlabel('Sequence Index', fontsize=12)
+    ax1.set_ylabel('Sequence Index', fontsize=12)
+    ax1.tick_params(axis='both', which='both', length=0)
 
     # Heatmap for Group 1
     ax2 = fig.add_subplot(gs[0, 1])
-    sns.heatmap(matrix_1, cmap=cmap, center=1, ax=ax2,
+    sns.heatmap(matrix_1_plot, cmap=cmap, ax=ax2,
                 square=True, cbar_kws={'label': 'Omega Value'},
-                mask=np.isnan(matrix_1), linewidths=0.5, linecolor='gray')
+                mask=mask_1, linewidths=0.5, linecolor='gray',
+                xticklabels=tick_labels_1, yticklabels=tick_labels_1)
     ax2.set_title(f'Group 1 Matrix (n={result["n1"]})', fontsize=14, pad=12)
-
-    # Highlight missing data in heatmaps
-    for ax, matrix in zip([ax1, ax2], [matrix_0, matrix_1]):
-        mask = np.isnan(matrix)
-        if np.any(mask):
-            ax.imshow(mask, cmap='gray', alpha=0.2, zorder=2)
-            ax.set_facecolor('lightgray')
+    ax2.set_xlabel('Sequence Index', fontsize=12)
+    ax2.set_ylabel('Sequence Index', fontsize=12)
+    ax2.tick_params(axis='both', which='both', length=0)
 
     # Distribution comparison between groups
     ax3 = fig.add_subplot(gs[0, 2])
-    values_0 = matrix_0[np.triu_indices_from(matrix_0, k=1)]
-    values_1 = matrix_1[np.triu_indices_from(matrix_1, k=1)]
+    values_0 = matrix_0[np.tril_indices_from(matrix_0, k=-1)]
+    values_1 = matrix_1[np.tril_indices_from(matrix_1, k=-1)]
     sns.kdeplot(values_0[~np.isnan(values_0)], ax=ax3, label='Group 0',
                 fill=True, common_norm=False, color='#1f77b4', alpha=0.6)
     sns.kdeplot(values_1[~np.isnan(values_1)], ax=ax3, label='Group 1',
@@ -307,6 +334,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png',
                 dpi=300, bbox_inches='tight')
     plt.close(fig)
+
 
 def analyze_cds_parallel(args):
     """Analyze a single CDS"""
