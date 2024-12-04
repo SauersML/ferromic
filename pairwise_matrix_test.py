@@ -300,7 +300,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Create a figure with specified size and layout
     fig = plt.figure(figsize=(16, 10))
-    gs = plt.GridSpec(2, 3, height_ratios=[4, 1], hspace=0.4, wspace=0.4)
+    gs = plt.GridSpec(2, 3, height_ratios=[4, 1], hspace=0.6, wspace=0.6)
 
     # Main title
     fig.suptitle(f'Pairwise Comparison Analysis: {cds}', fontsize=18, fontweight='bold', y=0.95)
@@ -413,7 +413,12 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     sm.set_array([])
 
     # Add the colorbar
-    cbar_ax = fig.add_axes([0.92, 0.4, 0.02, 0.2])
+    # Move the colorbar next to the matrices
+    # Get the position of ax2 (the second matrix plot)
+    pos = ax2.get_position()
+    
+    # Adjust the position of the colorbar to be next to ax2
+    cbar_ax = fig.add_axes([pos.x1 + 0.02, pos.y0, 0.02, pos.height])
     cbar = plt.colorbar(sm, cax=cbar_ax)
     cbar.set_label('Omega Value', fontsize=12)
 
