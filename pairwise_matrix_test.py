@@ -252,7 +252,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cmap_viridis = sns.color_palette("viridis", as_cmap=True)
 
     # Define colors for special omega values
-    color_minus_one = (75/255, 0, 0)       # Very dark red/black
+    color_minus_one = (230/255, 230/255, 250/255)  # Lavender
     color_ninety_nine = (1, 192/255, 192/255)  # Very light red
 
     # Create a custom colormap by extending the viridis colormap with special colors
