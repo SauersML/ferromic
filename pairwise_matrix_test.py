@@ -215,76 +215,98 @@ def compute_cliffs_delta(x, y):
 
     return cliffs_delta
 
+
 def create_visualization(matrix_0, matrix_1, cds, result):
-    """Create visualizations for a CDS."""
+    """Create enhanced visualizations for a CDS analysis."""
     if matrix_0 is None or matrix_1 is None:
+        print(f"No data available for CDS: {cds}")
         return
 
-    # Create figure without any specific style
-    fig = plt.figure(figsize=(20, 10))
+    # Create a figure with a specified size
+    fig = plt.figure(figsize=(20, 12))
+    gs = plt.GridSpec(2, 3, height_ratios=[3, 1], hspace=0.4, wspace=0.3)
 
     # Main title
-    plt.suptitle(f'Pairwise Comparison Analysis: {cds}',
-                fontsize=16, fontweight='bold', y=1.02)
-
-    gs = plt.GridSpec(2, 3, figure=fig)
-
-    # Heatmaps
-    ax1 = fig.add_subplot(gs[0, 0])
-    ax2 = fig.add_subplot(gs[0, 1])
+    fig.suptitle(f'Pairwise Comparison Analysis: {cds}',
+                 fontsize=18, fontweight='bold', y=0.95)
 
     # Custom diverging colormap
     cmap = sns.diverging_palette(220, 20, as_cmap=True)
 
-    # Plot heatmaps
+    # Heatmap for Group 0
+    ax1 = fig.add_subplot(gs[0, 0])
     sns.heatmap(matrix_0, cmap=cmap, center=1, ax=ax1,
-                square=True, cbar_kws={'label': 'Omega Value'})
+                square=True, cbar_kws={'label': 'Omega Value'},
+                mask=np.isnan(matrix_0), linewidths=0.5, linecolor='gray')
+    ax1.set_title(f'Group 0 Matrix (n={result["n0"]})', fontsize=14, pad=12)
+
+    # Heatmap for Group 1
+    ax2 = fig.add_subplot(gs[0, 1])
     sns.heatmap(matrix_1, cmap=cmap, center=1, ax=ax2,
-                square=True, cbar_kws={'label': 'Omega Value'})
+                square=True, cbar_kws={'label': 'Omega Value'},
+                mask=np.isnan(matrix_1), linewidths=0.5, linecolor='gray')
+    ax2.set_title(f'Group 1 Matrix (n={result["n1"]})', fontsize=14, pad=12)
 
-    ax1.set_title(f'Group 0 Matrix (n={result["n0"]})', fontsize=12, pad=10)
-    ax2.set_title(f'Group 1 Matrix (n={result["n1"]})', fontsize=12, pad=10)
+    # Highlight missing data in heatmaps
+    for ax, matrix in zip([ax1, ax2], [matrix_0, matrix_1]):
+        mask = np.isnan(matrix)
+        if np.any(mask):
+            ax.imshow(mask, cmap='gray', alpha=0.2, zorder=2)
+            ax.set_facecolor('lightgray')
 
-    # Distribution comparison
+    # Distribution comparison between groups
     ax3 = fig.add_subplot(gs[0, 2])
     values_0 = matrix_0[np.triu_indices_from(matrix_0, k=1)]
     values_1 = matrix_1[np.triu_indices_from(matrix_1, k=1)]
-
-    sns.kdeplot(data=values_0[~np.isnan(values_0)], ax=ax3, label='Group 0',
-                fill=True, alpha=0.5)
-    sns.kdeplot(data=values_1[~np.isnan(values_1)], ax=ax3, label='Group 1',
-                fill=True, alpha=0.5)
-    ax3.set_title('Distribution of Omega Values', fontsize=12)
-    ax3.legend()
+    sns.kdeplot(values_0[~np.isnan(values_0)], ax=ax3, label='Group 0',
+                fill=True, common_norm=False, color='#1f77b4', alpha=0.6)
+    sns.kdeplot(values_1[~np.isnan(values_1)], ax=ax3, label='Group 1',
+                fill=True, common_norm=False, color='#ff7f0e', alpha=0.6)
+    ax3.set_title('Distribution of Omega Values', fontsize=14, pad=12)
+    ax3.set_xlabel('Omega Value', fontsize=12)
+    ax3.set_ylabel('Density', fontsize=12)
+    ax3.legend(title='Groups', title_fontsize=12, fontsize=11)
 
     # Results table
     ax4 = fig.add_subplot(gs[1, :])
+    ax4.axis('tight')
     ax4.axis('off')
+
+    # Prepare table data with clear indication of missing results
+    effect_size = f"{result['observed_effect_size']:.4f}" if not np.isnan(result['observed_effect_size']) else 'N/A'
+    p_value = f"{result['p_value']:.4e}" if not np.isnan(result['p_value']) else 'N/A'
+    std_err = f"{result['std_err']:.4f}" if not np.isnan(result['std_err']) else 'N/A'
 
     table_data = [
         ['Metric', 'Value'],
-        ['Observed Effect Size (Cliff\'s Delta)', f"{result['observed_effect_size']:.4f}"],
-        ['P-value', f"{result['p_value']:.4f}"]
+        ['Observed Effect Size (from Mixed Model)', effect_size],
+        ['Standard Error', std_err],
+        ['P-value', p_value],
+        ['Number of Sequences in Group 0', f"{result['n0']}"],
+        ['Number of Sequences in Group 1', f"{result['n1']}"],
+        ['Comparisons in Group 0', f"{result['num_comp_group_0']}"],
+        ['Comparisons in Group 1', f"{result['num_comp_group_1']}"]
     ]
 
-    table = ax4.table(cellText=table_data, loc='center', cellLoc='center',
-                     colWidths=[0.3, 0.2])
+    # Create table
+    table = ax4.table(cellText=table_data, loc='center', cellLoc='left',
+                      colWidths=[0.5, 0.5], colLabels=None)
     table.auto_set_font_size(False)
     table.set_fontsize(12)
-    table.scale(1.5, 2)
+    table.scale(1, 1.5)
 
     # Style the table
     for (row, col), cell in table.get_celld().items():
+        cell.set_edgecolor('gray')
         if row == 0:
-            cell.set_text_props(weight='bold')
+            cell.set_text_props(weight='bold', ha='center')
             cell.set_facecolor('#E6E6E6')
-        if col == 0:
+        elif col == 0:
             cell.set_text_props(weight='bold')
 
-    plt.tight_layout()
     plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png',
                 dpi=300, bbox_inches='tight')
-    plt.close()
+    plt.close(fig)
 
 def analyze_cds_parallel(args):
     """Analyze a single CDS"""
