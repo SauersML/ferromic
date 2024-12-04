@@ -509,7 +509,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Create a custom colormap by extending the viridis colormap with special colors
     # Now the indices are: -1 for special minus_one, 0-255 for viridis, 256 for special ninety_nine
-    colors = [color_minus_one] + cmap_viridis(np.linspace(0, 1, 253)).tolist() + [color_ninety_nine]
+    colors = [color_minus_one] + cmap_viridis(np.linspace(0, 1, 252)).tolist() + [color_ninety_nine]
     new_cmap = ListedColormap(colors)
 
     # Create a normalized matrix for plotting
@@ -522,13 +522,16 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     
         # Assign indices for normal omega values
         if np.any(mask_normal):
-            omega_min = 0
-            omega_max = 3
-            # Avoid division by zero
+            omega_min = np.nanmin(matrix[mask_normal])
+            omega_max = np.nanmax(matrix[mask_normal])
+            # Handle the case where all normal omega values are identical
             if omega_max == omega_min:
-                omega_max += 1e-6
-            # Use indices 1-255 for normal values
-            matrix_normalized[mask_normal] = ((matrix[mask_normal] - omega_min) / (omega_max - omega_min) * 252).astype(int) + 1
+                # Assign a middle index for the colormap to avoid confusion with special values
+                mid_index = (len(colors) - 3) // 2 + 1  # Middle index between 1 and len(colors) - 2
+                matrix_normalized[mask_normal] = mid_index
+            else:
+                # Use indices 1 to len(colors) - 2 for normal values
+                matrix_normalized[mask_normal] = ((matrix[mask_normal] - omega_min) / (omega_max - omega_min) * (len(colors) - 3)).astype(int) + 1
         else:
             omega_min = 0
             omega_max = 1
@@ -582,7 +585,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         
         # Create value-type masks
         # These masks should be mutually exclusive
-        normal_mask = (matrix_plot >= 1) & (matrix_plot <= 253)  # Normal omega values
+        normal_mask = (matrix_plot >= 1) & (matrix_plot <= len(colors) - 2)  # Normal omega values
         special_minus_one = (matrix_plot == -1)                  # Pink (-1) values
         special_ninety_nine = (matrix_plot == 256)              # Red (99) values
         nan_mask = ~(normal_mask | special_minus_one | special_ninety_nine)  # Everything else is NaN
@@ -714,7 +717,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     omega_min = min(omega_min_0, omega_min_1)
     omega_max = max(omega_max_0, omega_max_1)
-    norm = MidpointNormalize(vmin=1, vmax=253, midpoint=(253 - 1) / 2)
+    # norm = MidpointNormalize(vmin=1, vmax=253, midpoint=(253 - 1) / 2)
+
+    max_normal_index = len(colors) - 2
+    norm = MidpointNormalize(vmin=1, vmax=max_normal_index, midpoint=(max_normal_index - 1) / 2)
 
     # Create a ScalarMappable for the colorbar
     sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=Normalize(vmin=omega_min, vmax=omega_max))
