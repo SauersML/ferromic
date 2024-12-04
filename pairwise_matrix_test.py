@@ -305,7 +305,7 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
             response = requests.get(url, timeout=10)
             
             print(f"\nResponse status: {response.status_code}")  # Debug print
-            print(f"\nRaw API Response:\n{response.text}")  # Debug print
+            #print(f"\nRaw API Response:\n{response.text}")  # Debug print
             
             if not response.ok:
                 return None, f"ERROR: API request failed with status {response.status_code}: {response.text}"
