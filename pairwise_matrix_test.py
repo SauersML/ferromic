@@ -74,10 +74,23 @@ def read_and_preprocess_data(file_path):
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
     key = (seq1, seq2) if (seq1, seq2) in pairwise_dict else (seq2, seq1)
-    return pairwise_dict.get(key)
+    val = pairwise_dict.get(key)
+    if val is None:
+        print(f"\n=== DEBUG: Failed pairwise lookup ===")
+        print(f"Tried keys: {(seq1, seq2)}, {(seq2, seq1)}")
+        print(f"Key type attempted: {type((seq1, seq2))}")
+        print(f"Sample dict key type: {type(list(pairwise_dict.keys())[0])}")
+    return val
 
 def create_matrices(sequences_0, sequences_1, pairwise_dict):
     """Create matrices for two groups based on sequence assignments."""
+    print("\n=== DEBUG: create_matrices ===")
+    print(f"Number of sequences: Group 0={len(sequences_0)}, Group 1={len(sequences_1)}")
+    print("Sample sequences_0:", sequences_0[:3])
+    print("Sample sequences_1:", sequences_1[:3])
+    print("Sample pairwise_dict keys:", list(pairwise_dict.keys())[:3])
+    print("Sample pairwise_dict values:", list(pairwise_dict.values())[:3])
+
     if len(sequences_0) == 0 or len(sequences_1) == 0:
         return None, None
 
@@ -599,11 +612,23 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ax3 = fig.add_subplot(gs[0, 2])
     values_0 = matrix_0_full[np.tril_indices_from(matrix_0_full, k=-1)]
     values_1 = matrix_1_full[np.tril_indices_from(matrix_1_full, k=-1)]
+    
+    print("\n=== DEBUG: Histogram Data ===")
+    print(f"Raw values_0 shape: {values_0.shape}")
+    print(f"Raw values_1 shape: {values_1.shape}")
+    print(f"Raw values_0 unique: {np.unique(values_0)}")
+    print(f"Raw values_1 unique: {np.unique(values_1)}")
+    
     # Exclude NaN, -1, and 99 values for plotting
     values_0 = values_0[~np.isnan(values_0)]
     values_0 = values_0[(values_0 != -1) & (values_0 != 99)]
     values_1 = values_1[~np.isnan(values_1)]
     values_1 = values_1[(values_1 != -1) & (values_1 != 99)]
+    
+    print(f"Filtered values_0 shape: {values_0.shape}")
+    print(f"Filtered values_1 shape: {values_1.shape}")
+    print(f"Filtered values_0 unique: {np.unique(values_0)}")
+    print(f"Filtered values_1 unique: {np.unique(values_1)}")
     sns.kdeplot(values_0, ax=ax3, label='Group 0', fill=True, common_norm=False, color='#1f77b4', alpha=0.6)
     sns.kdeplot(values_1, ax=ax3, label='Group 1', fill=True, common_norm=False, color='#ff7f0e', alpha=0.6)
     ax3.set_title('Distribution of Omega Values', fontsize=14, pad=12)
