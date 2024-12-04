@@ -219,6 +219,8 @@ def compute_cliffs_delta(x, y):
 
 
 
+
+
 def create_visualization(matrix_0, matrix_1, cds, result):
     """Create visualizations for a CDS analysis including special omega values."""
 
@@ -246,15 +248,14 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         print(f"No data available for CDS: {cds}")
         return
 
-    # Prepare colormap for normal omega values... fix later
+    # Prepare colormap for normal omega values
     cmap_viridis = sns.color_palette("viridis", as_cmap=True)
 
     # Define colors for special omega values
     color_minus_one = (75/255, 0, 0)       # Very dark red/black
     color_ninety_nine = (1, 192/255, 192/255)  # Very light red
 
-    # Create a custom colormap by extending the viridis colormap with special colors... fix later
-    # Map -1 to index 0, normal omega values to indices 1-256, and 99 to index 257
+    # Create a custom colormap by extending the viridis colormap with special colors
     colors = [color_minus_one] + cmap_viridis(np.linspace(0, 1, 256)).tolist() + [color_ninety_nine]
     new_cmap = ListedColormap(colors)
 
@@ -266,12 +267,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         mask_ninety_nine = (matrix == 99)
         mask_normal = (~np.isnan(matrix)) & (~mask_minus_one) & (~mask_ninety_nine)
 
-        # Assign indices
-        # -1 -> 0
-        # Normal values -> scaled to 1-256
-        # 99 -> 257
-
-        # For normal omega values, scale them to indices 1-256
+        # Assign indices for normal omega values
         if np.any(mask_normal):
             omega_min = matrix[mask_normal].min()
             omega_max = matrix[mask_normal].max()
@@ -292,17 +288,12 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
         return matrix_normalized, omega_min, omega_max
 
-    # Normalize matrices
     matrix_0_norm, omega_min_0, omega_max_0 = normalize_matrix(matrix_0_full)
     matrix_1_norm, omega_min_1, omega_max_1 = normalize_matrix(matrix_1_full)
 
     # Use combined omega_min and omega_max for consistent scaling
     omega_min = min(omega_min_0, omega_min_1)
     omega_max = max(omega_max_0, omega_max_1)
-
-    # Mask NaN values
-    mask_0 = (matrix_0_norm == -1)
-    mask_1 = (matrix_1_norm == -1)
 
     # Reset any custom font settings to defaults
     plt.rcParams.update(plt.rcParamsDefault)
@@ -314,54 +305,50 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # Main title
     fig.suptitle(f'Pairwise Comparison Analysis: {cds}', fontsize=18, fontweight='bold', y=0.95)
 
-    # Function to plot the lower triangle of a matrix using seaborn heatmap... fix later
-    def plot_lower_triangle(ax, matrix_norm, mask, title, tick_labels):
-        n = matrix_norm.shape[0]
-        # Mask the upper triangle
-        mask_upper = np.triu(np.ones_like(matrix_norm, dtype=bool), k=1)  # k=1 to keep the diagonal
+    def plot_matrices(ax, matrix, title):
+        n = matrix.shape[0]
+
+        # Create masks for upper and lower triangles
+        special_values_mask = (matrix == 0) | (matrix == 257)
+        normal_values_mask = (matrix >= 1) & (matrix <= 256)
+
+        # Masks for upper triangle (show normal omega values only)
+        upper_triangle_mask = np.tril(np.ones_like(matrix, dtype=bool), k=-1) | special_values_mask | np.isnan(matrix)
+
+        # Masks for lower triangle (show special omega values only)
+        lower_triangle_mask = np.triu(np.ones_like(matrix, dtype=bool), k=1) | normal_values_mask | np.isnan(matrix)
+
         # Combine masks
-        combined_mask = mask_upper | mask
+        combined_mask = upper_triangle_mask & lower_triangle_mask
 
         # Invert the matrix indices to have (1,1) at the bottom-left
-        matrix_norm_inverted = matrix_norm[::-1, :]
+        matrix_inverted = matrix[::-1, :]
         combined_mask_inverted = combined_mask[::-1, :]
 
-        sns.heatmap(matrix_norm_inverted, cmap=new_cmap, ax=ax,
-                    cbar=False,
-                    mask=combined_mask_inverted,
-                    square=True,
-                    xticklabels=False,  # Remove tick numbers
-                    yticklabels=False)
+        sns.heatmap(matrix_inverted, cmap=new_cmap, ax=ax, mask=combined_mask_inverted, cbar=False, square=True, xticklabels=False, yticklabels=False)
 
         ax.set_title(title, fontsize=14, pad=12)
-        ax.tick_params(axis='both', which='both', length=0)  # Remove tick marks
-
-    # Prepare tick labels starting from 1
-    n0 = len(sequences_0)
-    n1 = len(sequences_1)
+        ax.tick_params(axis='both', which='both', length=0)
 
     # Plot for Group 0
     ax1 = fig.add_subplot(gs[0, 0])
-    plot_lower_triangle(ax1, matrix_0_norm, mask_0, f'Group 0 Matrix (n={n0})', None)
+    plot_matrices(ax1, matrix_0_norm, f'Group 0 Matrix (n={len(sequences_0)})')
 
     # Plot for Group 1
     ax2 = fig.add_subplot(gs[0, 1])
-    plot_lower_triangle(ax2, matrix_1_norm, mask_1, f'Group 1 Matrix (n={n1})', None)
+    plot_matrices(ax2, matrix_1_norm, f'Group 1 Matrix (n={len(sequences_1)})')
 
     # Distribution comparison between groups
     ax3 = fig.add_subplot(gs[0, 2])
-    # Extract the lower triangle values including the diagonal
-    values_0 = matrix_0_full[np.tril_indices_from(matrix_0_full)]
-    values_1 = matrix_1_full[np.tril_indices_from(matrix_1_full)]
+    values_0 = matrix_0_full[np.tril_indices_from(matrix_0_full, k=-1)]
+    values_1 = matrix_1_full[np.tril_indices_from(matrix_1_full, k=-1)]
     # Exclude NaN, -1, and 99 values for plotting
     values_0 = values_0[~np.isnan(values_0)]
     values_0 = values_0[(values_0 != -1) & (values_0 != 99)]
     values_1 = values_1[~np.isnan(values_1)]
     values_1 = values_1[(values_1 != -1) & (values_1 != 99)]
-    sns.kdeplot(values_0, ax=ax3, label='Group 0', fill=True,
-                common_norm=False, color='#1f77b4', alpha=0.6)
-    sns.kdeplot(values_1, ax=ax3, label='Group 1', fill=True,
-                common_norm=False, color='#ff7f0e', alpha=0.6)
+    sns.kdeplot(values_0, ax=ax3, label='Group 0', fill=True, common_norm=False, color='#1f77b4', alpha=0.6)
+    sns.kdeplot(values_1, ax=ax3, label='Group 1', fill=True, common_norm=False, color='#ff7f0e', alpha=0.6)
     ax3.set_title('Distribution of Omega Values', fontsize=14, pad=12)
     ax3.set_xlabel('Omega Value', fontsize=12)
     ax3.set_ylabel('Density', fontsize=12)
@@ -372,7 +359,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ax4 = fig.add_subplot(gs[1, :])
     ax4.axis('off')
 
-    # Prepare table data with indication of missing results
+    # Prepare table data
     effect_size = f"{result['observed_effect_size']:.4f}" if not np.isnan(result['observed_effect_size']) else 'N/A'
     p_value = f"{result['p_value']:.4e}" if not np.isnan(result['p_value']) else 'N/A'
     std_err = f"{result['std_err']:.4f}" if not np.isnan(result['std_err']) else 'N/A'
@@ -389,8 +376,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ]
 
     # Create table
-    table = ax4.table(cellText=table_data, loc='center', cellLoc='left',
-                      colWidths=[0.5, 0.5])
+    table = ax4.table(cellText=table_data, loc='center', cellLoc='left', colWidths=[0.5, 0.5])
     table.auto_set_font_size(False)
     table.set_fontsize(12)
     table.scale(1, 1.5)
@@ -406,7 +392,6 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Create colorbar
     from matplotlib.colors import Normalize
-    from matplotlib.colorbar import ColorbarBase
 
     # Custom normalization for colorbar
     class MidpointNormalize(Normalize):
@@ -438,6 +423,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png',
                 dpi=300, bbox_inches='tight')
     plt.close(fig)
+
+
+
+
 
 
 
