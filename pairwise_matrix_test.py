@@ -509,16 +509,14 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
     }
 
 def compute_overall_significance(cluster_results):
-    """Compute overall significance from independent clusters using Fisher's and Stouffer's methods."""
+    """Compute overall significance from independent clusters using RTP and Stouffer's methods."""
     import numpy as np
     from scipy import stats
     import mpmath
-
-    # Set the desired precision for mpmath (increase if needed)
-    mpmath.mp.dps = 1000
+    from scipy.special import logsumexp
 
     # Initialize default return values
-    overall_pvalue_fisher = np.nan
+    overall_pvalue_rtp = np.nan
     overall_pvalue_stouffer = np.nan
     overall_effect = np.nan
     n_valid_clusters = 0
@@ -532,103 +530,92 @@ def compute_overall_significance(cluster_results):
 
     if valid_clusters:
         # Collect cluster p-values
-        cluster_pvals = [c['combined_pvalue'] for c in valid_clusters]
+        cluster_pvals = np.array([c['combined_pvalue'] for c in valid_clusters])
+        
+        # Handle zero/small p-values
+        min_pvalue = np.nextafter(0, 1)
+        cluster_pvals = np.maximum(cluster_pvals, min_pvalue)
 
-        # Replace zeros or negative p-values with a minimum positive value in mpmath
-        min_pvalue = mpmath.mpf('1e-100')  # An arbitrary small positive number
-        cluster_pvals = [
-            mpmath.mpf(p) if p > 0 else min_pvalue
-            for p in cluster_pvals
-        ]
-
-        # Fisher's method using mpmath to prevent underflow
-        ln_pvals = [mpmath.log(p) for p in cluster_pvals]
-        fisher_stat = -2 * mpmath.fsum(ln_pvals)
-        df_fisher = 2 * len(cluster_pvals)
-
-        # Compute the p-value using mpmath's regularized upper incomplete gamma function
-        # The survival function for chi-squared is equivalent to the regularized upper incomplete gamma function
-        # p-value = Q(k/2, x/2) = gammainc(k/2, x/2, ∞, regularized=True)
-        p_value = mpmath.gammainc(df_fisher / 2, fisher_stat / 2, mpmath.inf, regularized=True)
-
-        # Ensure the p-value is not zero
-        if p_value == 0 or p_value < min_pvalue:
-            p_value = min_pvalue
-            print(f"Warning: Overall p-value underflow in Fisher's method. Set to min positive value in mpmath.")
-
-        overall_pvalue_fisher = float(p_value)  # Convert back to float for compatibility
+        # RTP method
+        n_tests = len(cluster_pvals)
+        k = int(np.sqrt(n_tests))  # Common choice for k
+        
+        # Sort p-values and compute log of product of k smallest
+        sorted_pvals = np.sort(cluster_pvals)
+        log_rtp_stat = np.sum(np.log(sorted_pvals[:k]))
+        
+        # Compute critical value in log space
+        log_crit_values = np.linspace(log_rtp_stat-100, np.log(1), 1000)
+        
+        # Compute p-value using numerical integration over log space
+        p_values = []
+        for log_w in log_crit_values:
+            w = np.exp(log_w)
+            p_threshold = np.exp(log_w/k)
+            if p_threshold < 1:
+                p = 1 - stats.binom.cdf(k-1, n_tests, p_threshold)
+                p_values.append(p)
+            else:
+                p_values.append(1.0)
+        
+        # Interpolate to get final p-value
+        overall_pvalue_rtp = np.interp(log_rtp_stat, log_crit_values, p_values)
+        
+        # Ensure reasonable bounds
+        if overall_pvalue_rtp < min_pvalue:
+            overall_pvalue_rtp = min_pvalue
+            print(f"Note: RTP p-value very small, set to {min_pvalue:.2e}")
 
         # Stouffer's Z method
-        from scipy.stats import norm
+        cluster_zscores = stats.norm.isf(cluster_pvals)
 
-        # Convert p-values from mpmath to float for compatibility with scipy
-        cluster_pvals_float = [float(p) for p in cluster_pvals]
-
-        # Handle extremely small p-values by setting a lower limit
-        min_pvalue_float = np.nextafter(0, 1)
-        cluster_pvals_float = [p if p > min_pvalue_float else min_pvalue_float for p in cluster_pvals_float]
-
-        # Convert p-values to Z-scores
-        cluster_zscores = norm.isf(cluster_pvals_float)
 
         # Use the number of comparisons as weights
         weights = np.array([c['n_comparisons'] for c in valid_clusters], dtype=float)
 
-        # Check for zero weights to avoid division by zero
+        # Check for zero weights
         if np.all(weights == 0) or np.isnan(weights).any():
-            weights = None
-            print("Warning: All weights are zero or NaN. Proceeding with equal weights in Stouffer's method.")
-        else:
-            # Normalize weights
-            weights_sum = weights.sum()
-            if weights_sum == 0 or np.isnan(weights_sum):
-                normalized_weights = np.ones_like(weights) / len(weights)
-            else:
-                normalized_weights = weights / weights_sum
+            weights = np.ones_like(cluster_pvals)
+            print("Note: Using equal weights in Stouffer's method.")
+
+        # Normalize weights
+        normalized_weights = weights / np.sum(weights)
 
         # Compute combined Z-score
-        if weights is not None:
-            combined_z = np.sum(cluster_zscores * normalized_weights)
-        else:
-            combined_z = np.mean(cluster_zscores)
+        combined_z = np.sum(cluster_zscores * normalized_weights)
 
-        # Compute overall p-value using Stouffer's method
-        overall_pvalue_stouffer = norm.sf(combined_z)
+        # Compute overall p-value using Stouffer's method with numerical stability
+        overall_pvalue_stouffer = stats.norm.sf(combined_z)
+        
+        if overall_pvalue_stouffer < min_pvalue:
+            overall_pvalue_stouffer = min_pvalue
+            print(f"Note: Stouffer p-value very small, set to {min_pvalue:.2e}")
 
-        # Ensure the p-value is not zero
-        if overall_pvalue_stouffer == 0 or overall_pvalue_stouffer < min_pvalue_float:
-            overall_pvalue_stouffer = min_pvalue_float
-            print(f"Warning: Overall p-value underflow to zero in Stouffer's method. Set to minimum positive float.")
-
-        # Compute weighted effect size with normalized weights
+        # Compute weighted effect size
         effect_sizes = np.array([c['weighted_effect_size'] for c in valid_clusters])
-        if weights is not None:
-            overall_effect = np.average(effect_sizes, weights=normalized_weights)
-        else:
-            overall_effect = np.mean(effect_sizes)
+        overall_effect = np.average(effect_sizes, weights=normalized_weights)
 
-        # Collect all unique pairwise comparisons across valid clusters
+        # Count comparisons
         all_unique_pairs = set()
         for c in valid_clusters:
             all_unique_pairs.update(c['cluster_pairs'])
         total_comparisons = len(all_unique_pairs)
         n_valid_clusters = len(valid_clusters)
 
-        # Print both p-values to the terminal
         print("\nOverall p-values from combining methods:")
-        print(f"Fisher's method p-value: {overall_pvalue_fisher:.4e}")
+        print(f"RTP method p-value (k={k}): {overall_pvalue_rtp:.4e}")
         print(f"Stouffer's Z method p-value: {overall_pvalue_stouffer:.4e}")
 
-        # Decide which overall p-value to return
-        overall_pvalue = overall_pvalue_stouffer
+        # Use RTP as the overall p-value
+        overall_pvalue = overall_pvalue_rtp
 
     else:
         print("No valid clusters available for significance computation.")
-        overall_pvalue = np.nan  # overall_pvalue is defined even if no valid clusters
+        overall_pvalue = np.nan
 
     return {
         'overall_pvalue': overall_pvalue,
-        'overall_pvalue_fisher': overall_pvalue_fisher,
+        'overall_pvalue_rtp': overall_pvalue_rtp,
         'overall_pvalue_stouffer': overall_pvalue_stouffer,
         'overall_effect': overall_effect,
         'n_valid_clusters': n_valid_clusters,
@@ -682,7 +669,7 @@ def main():
 
     # Convert numpy values to native Python types for JSON serialization
     json_safe_results = {
-        'overall_pvalue_fisher': float(overall_results['overall_pvalue_fisher']) if not np.isnan(overall_results['overall_pvalue_fisher']) else None,
+        'overall_pvalue_rtp': float(overall_results['overall_pvalue_rtp']) if not np.isnan(overall_results['overall_pvalue_rtp']) else None,
         'overall_pvalue_stouffer': float(overall_results['overall_pvalue_stouffer']) if not np.isnan(overall_results['overall_pvalue_stouffer']) else None,
         'overall_effect': float(overall_results['overall_effect']) if not np.isnan(overall_results['overall_effect']) else None,
         'n_valid_clusters': int(overall_results['n_valid_clusters']) if not np.isnan(overall_results['n_valid_clusters']) else None,
