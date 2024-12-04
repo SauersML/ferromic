@@ -332,7 +332,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         # Final mask: True means hide these values
         # For one triangle: show special values only
         # For other triangle: show normal values only
-        combined_mask = ~((upper_triangle & normal_values) | (lower_triangle & special_values))
+        combined_mask = ~(
+            (upper_triangle & normal_values) |  # Plot normal values on upper triangle
+            (lower_triangle & (special_minus_one | special_ninety_nine))  # Plot pink (-1) and purple (99) values on the same triangle
+        )
         combined_mask = combined_mask | nan_values  # Always mask NaN values
 
         # Invert the matrix indices to have (1,1) at the bottom-left
