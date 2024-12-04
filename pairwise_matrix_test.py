@@ -327,7 +327,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         # Create value type masks
         normal_values = (matrix_plot >= 1) & (matrix_plot <= 253)
         special_minus_one = (matrix_plot == -1)      # Pink (-1) values
-        special_ninety_nine = (matrix_plot == 254)   # Purple (99) values
+        special_ninety_nine = (matrix_plot == 256)   # Purple (99) values
         nan_values = np.isnan(matrix)
 
 
