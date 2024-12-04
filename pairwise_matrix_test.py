@@ -222,11 +222,77 @@ def compute_cliffs_delta(x, y):
     return cliffs_delta
 
 
+def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
+    """
+    Get gene annotation for a CDS with caching
+    Returns (gene_symbol, gene_name) or (None, None) if not found
+    """
+    # Load cache if it exists
+    cache = {}
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as f:
+            cache = json.load(f)
+    
+    # Check cache first
+    if cds in cache:
+        return cache[cds]['symbol'], cache[cds]['name']
 
+    def parse_coords(coord_str):
+        """Parse coordinate string into chr, start, end"""
+        try:
+            chr = coord_str.split('_start')[0]
+            start = coord_str.split('_start')[1].split('_end')[0]
+            end = coord_str.split('_end')[1]
+            return {'chr': chr, 'start': int(start), 'end': int(end)}
+        except:
+            return None
+
+    def query_mygene(chr, start, end):
+        """Query MyGene.info for genes at location"""
+        query = f'{chr}:{start}-{end} AND assembly:hg38'
+        base_url = 'http://mygene.info/v3/query'
+        params = {
+            'q': query,
+            'species': 'human',
+            'fields': 'symbol,name'
+        }
+        
+        try:
+            response = requests.get(f"{base_url}?{urlencode(params)}")
+            if response.ok:
+                return response.json()
+        except:
+            return None
+        return None
+
+    # Parse coordinates
+    loc = parse_coords(cds)
+    if not loc:
+        return None, None
+
+    # Query API
+    results = query_mygene(loc['chr'], loc['start'], loc['end'])
+    
+    if results and 'hits' in results and len(results['hits']) > 0:
+        # Get first hit
+        hit = results['hits'][0]
+        symbol = hit.get('symbol', 'Unknown')
+        name = hit.get('name', 'Unknown')
+        
+        # Update cache
+        cache[cds] = {'symbol': symbol, 'name': name}
+        with open(cache_file, 'w') as f:
+            json.dump(cache, f)
+        
+        return symbol, name
+    
+    return None, None
 
 
 def create_visualization(matrix_0, matrix_1, cds, result):
     """Create visualizations for a CDS analysis including special omega values."""
+
+    gene_symbol, gene_name = get_gene_annotation(cds)
 
     # Read the original unfiltered data for the specific CDS
     df_all = pd.read_csv('all_pairwise_results.csv')
@@ -316,6 +382,12 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # Main title
     fig.suptitle(f'Pairwise Comparison Analysis: {cds}', fontsize=18, fontweight='bold', y=0.95)
 
+    if gene_symbol and gene_name:
+        title = f'{gene_symbol}: {gene_name}\n{cds}'
+    else:
+        title = f'Pairwise Comparison Analysis: {cds}'
+    fig.suptitle(title, fontsize=18, fontweight='bold', y=0.95)
+
     def plot_matrices(ax, matrix, title):
         n = matrix.shape[0]
     
@@ -387,13 +459,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     table_data = [
         ['Metric', 'Value'],
+        ['Gene Symbol', gene_symbol if gene_symbol else 'Unknown'],
+        ['Gene Name', gene_name if gene_name else 'Unknown'],
         ['Observed Effect Size (from Mixed Model)', effect_size],
-        ['Standard Error', std_err],
         ['P-value', p_value],
-        ['Number of Sequences in Group 0', str(result['n0'])],
-        ['Number of Sequences in Group 1', str(result['n1'])],
-        ['Comparisons in Group 0', str(result['num_comp_group_0'])],
-        ['Comparisons in Group 1', str(result['num_comp_group_1'])]
     ]
 
     # Create table
