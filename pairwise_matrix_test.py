@@ -246,14 +246,14 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         print(f"No data available for CDS: {cds}")
         return
 
-    # Prepare colormap for normal omega values
+    # Prepare colormap for normal omega values... fix later
     cmap_viridis = sns.color_palette("viridis", as_cmap=True)
 
     # Define colors for special omega values
     color_minus_one = (75/255, 0, 0)       # Very dark red/black
     color_ninety_nine = (1, 192/255, 192/255)  # Very light red
 
-    # Create a custom colormap by extending the viridis colormap with special colors
+    # Create a custom colormap by extending the viridis colormap with special colors... fix later
     # Map -1 to index 0, normal omega values to indices 1-256, and 99 to index 257
     colors = [color_minus_one] + cmap_viridis(np.linspace(0, 1, 256)).tolist() + [color_ninety_nine]
     new_cmap = ListedColormap(colors)
@@ -314,7 +314,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # Main title
     fig.suptitle(f'Pairwise Comparison Analysis: {cds}', fontsize=18, fontweight='bold', y=0.95)
 
-    # Function to plot the lower triangle of a matrix using seaborn heatmap
+    # Function to plot the lower triangle of a matrix using seaborn heatmap... fix later
     def plot_lower_triangle(ax, matrix_norm, mask, title, tick_labels):
         n = matrix_norm.shape[0]
         # Mask the upper triangle
