@@ -393,7 +393,7 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
 
     # Extract gene information
     symbol = best_gene.get('geneName')  # Get short name
-    name = get_gene_info(gene_symbol) # Returns full human readable name
+    name = get_gene_info(symbol) # Returns full human readable name
 
     if symbol == 'Unknown':
         error_log.append("WARNING: No symbol found in gene data")
