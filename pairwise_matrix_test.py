@@ -268,7 +268,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Create a normalized matrix for plotting
     def normalize_matrix(matrix):
-        matrix_normalized = np.zeros_like(matrix, dtype=int)
+        matrix_normalized = np.zeros_like(matrix, dtype=float)
         # Mask for special values
         mask_minus_one = (matrix == -1)
         mask_ninety_nine = (matrix == 99)
