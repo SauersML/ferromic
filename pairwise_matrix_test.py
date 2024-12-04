@@ -310,12 +310,22 @@ def analyze_cds_parallel(args):
     n0 = len(sequences_0)
     n1 = len(sequences_1)
 
+    # Generate matrices for visualization (do this first)
+    matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
+
     # Set minimum required sequences per group
     min_sequences_per_group = 5
 
+    # Initialize base result dictionary with matrices
+    result = {
+        'matrix_0': matrix_0,
+        'matrix_1': matrix_1,
+        'pairwise_comparisons': set(pairwise_dict.keys())
+    }
+
     if n0 < min_sequences_per_group or n1 < min_sequences_per_group:
-        # Not enough sequences in one of the groups; return NaNs
-        result = {
+        # Not enough sequences in one of the groups
+        result.update({
             'observed_effect_size': np.nan,
             'p_value': np.nan,
             'n0': n0,
@@ -323,27 +333,19 @@ def analyze_cds_parallel(args):
             'num_comp_group_0': 0,
             'num_comp_group_1': 0,
             'std_err': np.nan
-        }
+        })
     else:
-        # Generate matrices for visualization
-        matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
-
-        # Call the analysis worker
-        result = analysis_worker((
+        # Call the analysis worker and update result
+        worker_result = analysis_worker((
             all_sequences, n0, pairwise_dict,
             sequences_0, sequences_1
         ))
-
-        # Include matrices in the result dictionary
-        result['matrix_0'] = matrix_0
-        result['matrix_1'] = matrix_1
-
-    # Pairwise comparisons for cluster analysis
-    result['pairwise_comparisons'] = set(pairwise_dict.keys())
+        result.update(worker_result)
 
     # Cache the result
     save_cached_result(cds, result)
     return cds, result
+
 
 def parse_cds_coordinates(cds_name):
     """Extract chromosome and coordinates from CDS name."""
