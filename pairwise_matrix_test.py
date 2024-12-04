@@ -190,36 +190,6 @@ def analysis_worker(args):
        
    except Exception as e:
        print(f"Model fitting failed with error: {str(e)}")
-       # Try simpler model without crossed effects
-       try:
-           print("Trying simpler model without crossed effects...")
-           model = MixedLM(
-               endog=df['omega_value'],
-               exog=sm.add_constant(df[['group']]),
-               groups=df['seq1_code']
-           )
-           result = model.fit(reml=False)
-           
-           effect_size = result.fe_params['group']
-           p_value = result.pvalues['group'] 
-           std_err = result.bse['group']
-           
-           print(f"Simpler model succeeded:")
-           print(f"Effect size: {effect_size:.4f}")
-           print(f"P-value: {p_value:.4e}")
-           print(f"Std error: {std_err:.4f}")
-           
-       except Exception as e2:
-           print(f"Simpler model also failed: {str(e2)}")
-           return {
-               'observed_effect_size': np.nan,
-               'p_value': np.nan,
-               'n0': n0,
-               'n1': len(all_sequences) - n0,
-               'std_err': np.nan,
-               'num_comp_group_0': (df['group'] == 0).sum(),
-               'num_comp_group_1': (df['group'] == 1).sum()
-           }
 
    return {
        'observed_effect_size': effect_size,
