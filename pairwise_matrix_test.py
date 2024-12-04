@@ -228,13 +228,12 @@ def get_gene_info(gene_id):
         url = f"http://mygene.info/v3/gene/{gene_id}"
         response = requests.get(url, timeout=10)
         if response.ok:
+            print("Raw response:", response.text)  # Print raw response
             data = response.json()
             return data.get('symbol'), data.get('name')
     except Exception:
         pass
     return None, None
-
-
 
 def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
     """
