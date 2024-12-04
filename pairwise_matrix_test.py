@@ -528,9 +528,6 @@ def compute_overall_significance(cluster_results):
     if valid_clusters:
         cluster_pvals = np.array([c['combined_pvalue'] for c in valid_clusters])
 
-        # Print smallest p-value for debugging
-        print(f"Smallest cluster p-value: {np.min(cluster_pvals):.2e}")
-
         # Use scipy.stats.combine_pvalues to combine p-values
         # Choose method: 'fisher', 'stouffer', or others as appropriate etc.
         statistic, overall_pvalue_combined = stats.combine_pvalues(cluster_pvals, method='fisher')
@@ -538,8 +535,7 @@ def compute_overall_significance(cluster_results):
         print(f"\nCombined p-value using Fisher's method: {overall_pvalue_combined:.4e}")
         print(f"Fisher's statistic: {statistic:.4f}")
 
-        # Alternatively, if you have weights (e.g., based on the number of comparisons),
-        # you can use Stouffer's method
+        # Stouffer's method
         weights = np.array([c['n_comparisons'] for c in valid_clusters], dtype=float)
 
         # Check for zero weights
@@ -547,7 +543,7 @@ def compute_overall_significance(cluster_results):
             weights = None
             print("Note: Weights not used in Stouffer's method due to zero or NaN values.")
 
-        # Use Stouffer's method with weights (if applicable)
+        # Use Stouffer's method with weights
         statistic_stouffer, pvalue_stouffer = stats.combine_pvalues(cluster_pvals, method='stouffer', weights=weights)
         print(f"Combined p-value using Stouffer's method: {pvalue_stouffer:.4e}")
         print(f"Stouffer's Z-score statistic: {statistic_stouffer:.4f}")
