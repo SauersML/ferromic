@@ -512,9 +512,7 @@ def compute_overall_significance(cluster_results):
     """Compute overall significance from independent clusters using RTP and Stouffer's methods."""
     import numpy as np
     from scipy import stats
-    import mpmath
-    from scipy.special import logsumexp
-
+    
     # Initialize default return values
     overall_pvalue_rtp = np.nan
     overall_pvalue_stouffer = np.nan
@@ -529,48 +527,24 @@ def compute_overall_significance(cluster_results):
     ]
 
     if valid_clusters:
-        # Collect cluster p-values
+        # Collect cluster p-values and ensure they're valid
         cluster_pvals = np.array([c['combined_pvalue'] for c in valid_clusters])
+        cluster_pvals = np.clip(cluster_pvals, np.nextafter(0, 1), 1)
         
-        # Handle zero/small p-values
-        min_pvalue = np.nextafter(0, 1)
-        cluster_pvals = np.maximum(cluster_pvals, min_pvalue)
-
+        # Print smallest p-value for debugging
+        print(f"Smallest cluster p-value: {np.min(cluster_pvals):.2e}")
+    
         # RTP method
         n_tests = len(cluster_pvals)
-        k = int(np.sqrt(n_tests))  # Common choice for k
-        
-        # Sort p-values and compute log of product of k smallest
-        sorted_pvals = np.sort(cluster_pvals)
-        log_rtp_stat = np.sum(np.log(sorted_pvals[:k]))
-        
-        # Compute critical value in log space
-        log_crit_values = np.linspace(log_rtp_stat-100, np.log(1), 1000)
-        
-        # Compute p-value using numerical integration over log space
-        p_values = []
-        for log_w in log_crit_values:
-            w = np.exp(log_w)
-            p_threshold = np.exp(log_w/k)
-            if p_threshold < 1:
-                p = 1 - stats.binom.cdf(k-1, n_tests, p_threshold)
-                p_values.append(p)
-            else:
-                p_values.append(1.0)
-        
-        # Interpolate to get final p-value
-        overall_pvalue_rtp = np.interp(log_rtp_stat, log_crit_values, p_values)
-        
-        # Ensure reasonable bounds
-        if overall_pvalue_rtp < min_pvalue:
-            overall_pvalue_rtp = min_pvalue
-            print(f"Note: RTP p-value very small, set to {min_pvalue:.2e}")
+        k = 1  # Use k=1 for minimum p-value
+    
+        smallest_p = np.min(cluster_pvals)
+        # Use the exponential approximation to avoid underflow
+        overall_pvalue_rtp = 1 - np.exp(-n_tests * smallest_p)
+        print(f"RTP calculation using exponential approximation: 1 - exp(-{n_tests} * {smallest_p:.2e})")
 
         # Stouffer's Z method
         cluster_zscores = stats.norm.isf(cluster_pvals)
-
-
-        # Use the number of comparisons as weights
         weights = np.array([c['n_comparisons'] for c in valid_clusters], dtype=float)
 
         # Check for zero weights
@@ -581,15 +555,9 @@ def compute_overall_significance(cluster_results):
         # Normalize weights
         normalized_weights = weights / np.sum(weights)
 
-        # Compute combined Z-score
+        # Compute combined Z-score and p-value
         combined_z = np.sum(cluster_zscores * normalized_weights)
-
-        # Compute overall p-value using Stouffer's method with numerical stability
         overall_pvalue_stouffer = stats.norm.sf(combined_z)
-        
-        if overall_pvalue_stouffer < min_pvalue:
-            overall_pvalue_stouffer = min_pvalue
-            print(f"Note: Stouffer p-value very small, set to {min_pvalue:.2e}")
 
         # Compute weighted effect size
         effect_sizes = np.array([c['weighted_effect_size'] for c in valid_clusters])
