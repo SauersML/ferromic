@@ -263,7 +263,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ]
 
     # Create a custom colormap by extending the viridis colormap with special colors
-    colors = [color_minus_one] + cmap_viridis(np.linspace(0, 1, 256)).tolist() + [color_ninety_nine]
+    colors = [color_minus_one] + cmap_viridis(np.linspace(1, 0, 256)).tolist() + [color_ninety_nine]
     new_cmap = ListedColormap(colors)
 
     # Create a normalized matrix for plotting
