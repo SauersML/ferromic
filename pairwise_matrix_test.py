@@ -632,7 +632,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # Create table
     table = ax4.table(cellText=table_data, loc='center', cellLoc='left', colWidths=[0.5, 0.5])
     table.auto_set_font_size(False)
-    table.set_fontsize(12)
+    table.set_fontsize(8)
     table.scale(1, 1.5)
 
     # Style the table
