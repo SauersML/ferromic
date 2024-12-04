@@ -709,12 +709,12 @@ def main():
     # Create visualizations for top significant results
     for _, row in significant_results.head().iterrows():
         cds = row['CDS']
-        result = results[cds]
+        viz_result = results[cds]  # Get full result with matrices
         create_visualization(
-            result['matrix_0'],
-            result['matrix_1'],
+            viz_result['matrix_0'],
+            viz_result['matrix_1'],
             cds,
-            result
+            row  # Use row for stats since they're the same
         )
 
     # Print summary statistics
