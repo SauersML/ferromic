@@ -314,10 +314,13 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     def plot_matrices(ax, matrix, title):
         n = matrix.shape[0]
+    
+        # Handle special values directly
+        matrix_plot = matrix.copy()
 
-        # Create masks for upper and lower triangles
-        special_values_mask = (matrix == 0) | (matrix == 257)
-        normal_values_mask = (matrix >= 1) & (matrix <= 256)
+        # Create masks for special values based on the original values (-1 and 99)
+        special_values_mask = (matrix_plot == 0) | (matrix_plot == 257)
+        normal_values_mask = (matrix_plot >= 1) & (matrix_plot <= 256)
 
         # Masks for upper triangle (show normal omega values only)
         upper_triangle_mask = np.tril(np.ones_like(matrix, dtype=bool), k=-1) | special_values_mask | np.isnan(matrix)
