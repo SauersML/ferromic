@@ -222,12 +222,17 @@ def compute_cliffs_delta(x, y):
     return cliffs_delta
 
 
+
+
+
+
 def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
     """
     Get gene annotation for a CDS with caching and detailed error reporting
     Returns (gene_symbol, gene_name, error_log) where error_log contains any warnings/errors
+    Uses UCSC API to look up genes that overlap with the given coordinates
     """
-    error_log = []  # List to collect all warnings and errors
+    error_log = []
     
     # Load cache if it exists
     cache = {}
@@ -273,14 +278,15 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         except Exception as e:
             return None, f"ERROR: Failed to parse coordinates: {str(e)}"
 
-    def query_mygene(chr, start, end):
-        """Query MyGene.info for genes at location"""
-        query = f'{chr}:{start}-{end} AND assembly:hg38'
-        base_url = 'http://mygene.info/v3/query'
+    def query_ucsc(chr, start, end):
+        """Query UCSC API for genes at location"""
+        base_url = "https://api.genome.ucsc.edu/getData/track"
         params = {
-            'q': query,
-            'species': 'human',
-            'fields': 'symbol,name'
+            'genome': 'hg38',
+            'track': 'ncbiRefSeq',  # Using NCBI RefSeq genes track
+            'chrom': chr,
+            'start': start,
+            'end': end
         }
         
         try:
@@ -290,10 +296,23 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
                 return None, f"ERROR: API request failed with status {response.status_code}: {response.text}"
                 
             data = response.json()
-            if not data:
+            if not data or 'ncbiRefSeq' not in data:
                 return None, "ERROR: Empty response from API"
                 
-            return data, None
+            # Filter for genes that overlap our region
+            overlapping_genes = []
+            for gene in data['ncbiRefSeq']:
+                gene_start = gene.get('chromStart', 0)
+                gene_end = gene.get('chromEnd', 0)
+                
+                # Check if our region falls within the gene's coordinates
+                if gene_start <= end and gene_end >= start:
+                    overlapping_genes.append(gene)
+            
+            if not overlapping_genes:
+                return None, "No overlapping genes found"
+                
+            return overlapping_genes, None
             
         except requests.Timeout:
             return None, "ERROR: API request timed out"
@@ -311,30 +330,45 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         return None, None, error_log
     
     # Query API
-    results, query_error = query_mygene(loc['chr'], loc['start'], loc['end'])
+    genes, query_error = query_ucsc(loc['chr'], loc['start'], loc['end'])
     if query_error:
         error_log.append(query_error)
         return None, None, error_log
 
-    if not results or 'hits' not in results:
-        error_log.append(f"WARNING: No hits found for coordinates {loc['chr']}:{loc['start']}-{loc['end']}")
-        return None, None, error_log
-        
-    if len(results['hits']) == 0:
-        error_log.append(f"WARNING: Empty hits list for coordinates {loc['chr']}:{loc['start']}-{loc['end']}")
+    if not genes:
+        error_log.append(f"WARNING: No genes found for coordinates {loc['chr']}:{loc['start']}-{loc['end']}")
         return None, None, error_log
 
-    # Get first hit
-    hit = results['hits'][0]
-    symbol = hit.get('symbol')
-    name = hit.get('name')
+    # Get the most relevant gene (the one that best contains our region)
+    best_gene = None
+    best_overlap = 0
+    region_length = loc['end'] - loc['start']
     
-    if not symbol:
-        error_log.append("WARNING: No symbol found in hit data")
-        symbol = 'Unknown'
-    if not name:
-        error_log.append("WARNING: No name found in hit data")
-        name = 'Unknown'
+    for gene in genes:
+        gene_start = gene.get('chromStart', 0)
+        gene_end = gene.get('chromEnd', 0)
+        
+        # Calculate how much of our region is contained within this gene
+        overlap_start = max(gene_start, loc['start'])
+        overlap_end = min(gene_end, loc['end'])
+        overlap = max(0, overlap_end - overlap_start)
+        
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_gene = gene
+
+    if not best_gene:
+        error_log.append("WARNING: Could not determine best matching gene")
+        return None, None, error_log
+
+    # Extract gene information
+    symbol = best_gene.get('name2', best_gene.get('name', 'Unknown'))
+    name = best_gene.get('geneSymbol', 'Unknown')
+    
+    if symbol == 'Unknown':
+        error_log.append("WARNING: No symbol found in gene data")
+    if name == 'Unknown':
+        error_log.append("WARNING: No name found in gene data")
 
     # Update cache
     try:
@@ -345,6 +379,11 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         error_log.append(f"WARNING: Failed to update cache file: {str(e)}")
 
     return symbol, name, error_log
+
+
+
+
+
 
 def create_visualization(matrix_0, matrix_1, cds, result):
     """Create visualizations for a CDS analysis including special omega values."""
