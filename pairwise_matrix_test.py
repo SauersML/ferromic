@@ -325,7 +325,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         lower_triangle = np.tril(np.ones_like(matrix, dtype=bool), k=-1)  # Exclude diagonal
 
         # Create value type masks
-        normal_values = (matrix_plot >= 1) & (matrix_plot <= 256)
+        normal_values = (matrix_plot >= 1) & (matrix_plot <= 255)
         special_values = (matrix_plot == -1) | (matrix_plot == 256)
         nan_values = np.isnan(matrix)
 
