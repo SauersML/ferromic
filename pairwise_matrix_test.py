@@ -443,6 +443,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Special values legend
     pos1 = ax1.get_position()
+    pos2 = ax2.get_position()
     legend_x = pos1.x1 + (pos2.x0 - pos1.x1) / 2 - 0.08
     legend_y = pos1.y0 - 0.1
     legend_width = 0.16
