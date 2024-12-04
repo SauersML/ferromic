@@ -330,9 +330,9 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         nan_values = np.isnan(matrix)
 
         # Final mask: True means hide these values
-        # For upper triangle: show special values only
-        # For lower triangle: show normal values only
-        combined_mask = ~((upper_triangle & special_values) | (lower_triangle & normal_values))
+        # For one triangle: show special values only
+        # For other triangle: show normal values only
+        combined_mask = ~((upper_triangle & normal_values) | (lower_triangle & special_values))
         combined_mask = combined_mask | nan_values  # Always mask NaN values
 
         # Invert the matrix indices to have (1,1) at the bottom-left
