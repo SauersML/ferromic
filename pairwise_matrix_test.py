@@ -225,7 +225,6 @@ def compute_cliffs_delta(x, y):
 
 
 
-
 def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
     """
     Get gene annotation for a CDS with caching and detailed error reporting
@@ -283,31 +282,51 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         base_url = "https://api.genome.ucsc.edu/getData/track"
         params = {
             'genome': 'hg38',
-            'track': 'ncbiRefSeq',  # Using NCBI RefSeq genes track
+            'track': 'knownGene',
             'chrom': chr,
             'start': start,
             'end': end
         }
         
         try:
-            response = requests.get(f"{base_url}?{urlencode(params)}", timeout=10)
+            url = f"{base_url}?{urlencode(params)}"
+            print(f"\nQuerying UCSC API URL: {url}")  # Debug print
+            response = requests.get(url, timeout=10)
+            
+            print(f"\nResponse status: {response.status_code}")  # Debug print
+            print(f"\nRaw API Response:\n{response.text}")  # Debug print
             
             if not response.ok:
                 return None, f"ERROR: API request failed with status {response.status_code}: {response.text}"
                 
             data = response.json()
-            if not data or 'ncbiRefSeq' not in data:
+            
+            # Print the structure of the response
+            print("\nResponse keys:", data.keys())
+            
+            if not data:
                 return None, "ERROR: Empty response from API"
                 
+            # Look for the track data - handle both possible response structures
+            track_data = None
+            if 'knownGene' in data:
+                track_data = data['knownGene']
+            elif isinstance(data, list):
+                track_data = data
+                
+            if not track_data:
+                return None, "No gene data found in response"
+            
             # Filter for genes that overlap our region
             overlapping_genes = []
-            for gene in data['ncbiRefSeq']:
+            for gene in track_data:
                 gene_start = gene.get('chromStart', 0)
                 gene_end = gene.get('chromEnd', 0)
                 
                 # Check if our region falls within the gene's coordinates
                 if gene_start <= end and gene_end >= start:
                     overlapping_genes.append(gene)
+                    print(f"\nFound overlapping gene: {gene}")  # Debug print
             
             if not overlapping_genes:
                 return None, "No overlapping genes found"
@@ -363,7 +382,7 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
 
     # Extract gene information
     symbol = best_gene.get('name2', best_gene.get('name', 'Unknown'))
-    name = best_gene.get('geneSymbol', 'Unknown')
+    name = best_gene.get('geneSymbol', best_gene.get('name', 'Unknown'))
     
     if symbol == 'Unknown':
         error_log.append("WARNING: No symbol found in gene data")
@@ -379,6 +398,7 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         error_log.append(f"WARNING: Failed to update cache file: {str(e)}")
 
     return symbol, name, error_log
+
 
 
 
