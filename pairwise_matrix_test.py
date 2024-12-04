@@ -509,8 +509,8 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     
         # Assign indices for normal omega values
         if np.any(mask_normal):
-            omega_min = matrix[mask_normal].min()
-            omega_max = matrix[mask_normal].max()
+            omega_min = 0
+            omega_max = 3
             # Avoid division by zero
             if omega_max == omega_min:
                 omega_max += 1e-6
