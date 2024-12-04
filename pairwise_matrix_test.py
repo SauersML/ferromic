@@ -222,18 +222,24 @@ def compute_cliffs_delta(x, y):
     return cliffs_delta
 
 
+
+
 def get_gene_info(gene_id):
-    """Get human-readable gene info from MyGene"""
+    """Get human-readable gene info from MyGene.info gene annotation API"""
     try:
-        url = f"http://mygene.info/v3/gene/{gene_id}"
+        # Use the gene annotation endpoint, not query endpoint
+        url = f"http://mygene.info/v3/gene/{gene_id}?fields=name" 
         response = requests.get(url, timeout=10)
         if response.ok:
             print("Raw response:", response.text)  # Print raw response
             data = response.json()
-            return data.get('symbol'), data.get('name')
-    except Exception:
-        pass
-    return None, None
+            return data.get('name', 'Unknown')
+    except Exception as e:
+        print(f"Error fetching gene info: {str(e)}")
+    return 'Unknown'
+
+
+
 
 def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
     """
