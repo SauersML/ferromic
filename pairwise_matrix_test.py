@@ -224,28 +224,54 @@ def compute_cliffs_delta(x, y):
 
 def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
     """
-    Get gene annotation for a CDS with caching
-    Returns (gene_symbol, gene_name) or (None, None) if not found
+    Get gene annotation for a CDS with caching and detailed error reporting
+    Returns (gene_symbol, gene_name, error_log) where error_log contains any warnings/errors
     """
+    error_log = []  # List to collect all warnings and errors
+    
     # Load cache if it exists
     cache = {}
-    if os.path.exists(cache_file):
-        with open(cache_file, 'r') as f:
-            cache = json.load(f)
-    
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                cache = json.load(f)
+    except json.JSONDecodeError as e:
+        error_log.append(f"WARNING: Cache file corrupt or invalid JSON: {str(e)}")
+    except Exception as e:
+        error_log.append(f"WARNING: Failed to load cache file: {str(e)}")
+
     # Check cache first
     if cds in cache:
-        return cache[cds]['symbol'], cache[cds]['name']
+        error_log.append(f"INFO: Found entry in cache for {cds}")
+        return cache[cds]['symbol'], cache[cds]['name'], error_log
 
     def parse_coords(coord_str):
         """Parse coordinate string into chr, start, end"""
+        if not coord_str:
+            return None, "ERROR: Empty coordinate string provided"
+            
         try:
-            chr = coord_str.split('_start')[0]
-            start = coord_str.split('_start')[1].split('_end')[0]
-            end = coord_str.split('_end')[1]
-            return {'chr': chr, 'start': int(start), 'end': int(end)}
-        except:
-            return None
+            parts = coord_str.split('_start')
+            if len(parts) != 2:
+                return None, "ERROR: Invalid coordinate format - missing '_start'"
+                
+            chr = parts[0]
+            start_end = parts[1].split('_end')
+            if len(start_end) != 2:
+                return None, "ERROR: Invalid coordinate format - missing '_end'"
+                
+            start = int(start_end[0])
+            end = int(start_end[1])
+            
+            if start > end:
+                return None, f"ERROR: Invalid coordinates - start ({start}) greater than end ({end})"
+                
+            return {'chr': chr, 'start': start, 'end': end}, None
+            
+        except ValueError as e:
+            return None, f"ERROR: Failed to parse coordinates - invalid numbers: {str(e)}"
+        except Exception as e:
+            return None, f"ERROR: Failed to parse coordinates: {str(e)}"
 
     def query_mygene(chr, start, end):
         """Query MyGene.info for genes at location"""
@@ -258,41 +284,91 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         }
         
         try:
-            response = requests.get(f"{base_url}?{urlencode(params)}")
-            if response.ok:
-                return response.json()
-        except:
-            return None
-        return None
+            response = requests.get(f"{base_url}?{urlencode(params)}", timeout=10)
+            
+            if not response.ok:
+                return None, f"ERROR: API request failed with status {response.status_code}: {response.text}"
+                
+            data = response.json()
+            if not data:
+                return None, "ERROR: Empty response from API"
+                
+            return data, None
+            
+        except requests.Timeout:
+            return None, "ERROR: API request timed out"
+        except requests.RequestException as e:
+            return None, f"ERROR: API request failed: {str(e)}"
+        except json.JSONDecodeError as e:
+            return None, f"ERROR: Failed to parse API response: {str(e)}"
+        except Exception as e:
+            return None, f"ERROR: Unexpected error during API query: {str(e)}"
 
     # Parse coordinates
-    loc = parse_coords(cds)
-    if not loc:
-        return None, None
-
-    # Query API
-    results = query_mygene(loc['chr'], loc['start'], loc['end'])
+    loc, parse_error = parse_coords(cds)
+    if parse_error:
+        error_log.append(parse_error)
+        return None, None, error_log
     
-    if results and 'hits' in results and len(results['hits']) > 0:
-        # Get first hit
-        hit = results['hits'][0]
-        symbol = hit.get('symbol', 'Unknown')
-        name = hit.get('name', 'Unknown')
+    # Query API
+    results, query_error = query_mygene(loc['chr'], loc['start'], loc['end'])
+    if query_error:
+        error_log.append(query_error)
+        return None, None, error_log
+
+    if not results or 'hits' not in results:
+        error_log.append(f"WARNING: No hits found for coordinates {loc['chr']}:{loc['start']}-{loc['end']}")
+        return None, None, error_log
         
-        # Update cache
+    if len(results['hits']) == 0:
+        error_log.append(f"WARNING: Empty hits list for coordinates {loc['chr']}:{loc['start']}-{loc['end']}")
+        return None, None, error_log
+
+    # Get first hit
+    hit = results['hits'][0]
+    symbol = hit.get('symbol')
+    name = hit.get('name')
+    
+    if not symbol:
+        error_log.append("WARNING: No symbol found in hit data")
+        symbol = 'Unknown'
+    if not name:
+        error_log.append("WARNING: No name found in hit data")
+        name = 'Unknown'
+
+    # Update cache
+    try:
         cache[cds] = {'symbol': symbol, 'name': name}
         with open(cache_file, 'w') as f:
             json.dump(cache, f)
-        
-        return symbol, name
-    
-    return None, None
+    except Exception as e:
+        error_log.append(f"WARNING: Failed to update cache file: {str(e)}")
 
+    return symbol, name, error_log
 
 def create_visualization(matrix_0, matrix_1, cds, result):
     """Create visualizations for a CDS analysis including special omega values."""
 
-    gene_symbol, gene_name = get_gene_annotation(cds)
+    gene_symbol, gene_name, error_log = get_gene_annotation(cds)
+    
+    # Print any errors or warnings that occurred
+    if error_log:
+        print(f"\nWarnings/Errors for CDS {cds}:")
+        for msg in error_log:
+            if msg.startswith("ERROR"):
+                print(f"🚫 {msg}")
+            elif msg.startswith("WARNING"):
+                print(f"⚠️ {msg}")
+            else:
+                print(f"ℹ️ {msg}")
+    
+    # Handle the results
+    if gene_symbol is None and gene_name is None:
+        print(f"❌ No annotation found for CDS: {cds}")
+    else:
+        print(f"✅ Found annotation:")
+        print(f"   Symbol: {gene_symbol}")
+        print(f"   Name: {gene_name}")
 
     # Read the original unfiltered data for the specific CDS
     df_all = pd.read_csv('all_pairwise_results.csv')
@@ -915,7 +991,7 @@ def main():
     significant_results = results_df.sort_values('p_value')
 
     # Create visualizations for top significant results
-    for _, row in significant_results.head(10).iterrows():
+    for _, row in significant_results.head(30).iterrows():
         cds = row['CDS']
         viz_result = results[cds]  # Get full result with matrices
         create_visualization(
