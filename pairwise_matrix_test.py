@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 import pickle
 from scipy import stats
+from scipy.stats import combine_pvalues
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -481,18 +482,27 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
     # After the loop, set total_comparisons to the number of unique pairs
     total_comparisons = len(cluster_pairs)
 
-    # Combine p-values by selecting the smallest p-value if we have valid data... perhaps: switch to median p-value
     if valid_cdss > 0:
         # Collect valid p-values
-        valid_pvals = cluster_data.loc[valid_indices]['p_value']
-
+        valid_pvals = cluster_data.loc[valid_indices]['p_value'].values
+    
         # Filter out invalid p-values
         valid_pvals = valid_pvals[~np.isnan(valid_pvals)]
         valid_pvals = valid_pvals[~np.isinf(valid_pvals)]
-
+    
         if len(valid_pvals) > 0:
-            # Use the smallest p-value as the combined p-value
-            combined_p = valid_pvals.min()
+            # Normalized weights based on CDS lengths
+            valid_weights = []
+            for idx in valid_indices:
+                cds = cluster_data.loc[idx, 'CDS']
+                weight = weights.get(cds, 1 / len(cluster_cdss))
+                valid_weights.append(weight)
+            valid_weights = np.array(valid_weights)
+            # Normalize weights so that they sum to 1
+            valid_weights /= valid_weights.sum()
+    
+            # Combine p-values using Stouffer's method with weights
+            z_stat, combined_p = combine_pvalues(valid_pvals, method='stouffer', weights=valid_weights)
         else:
             combined_p = np.nan
     else:
