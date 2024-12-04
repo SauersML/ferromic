@@ -399,8 +399,16 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         error_log.append("WARNING: Could not determine best matching gene")
         return None, None, error_log
 
-    # Extract gene information
-    symbol = best_gene.get('geneName')  # Get short name
+    # Extract gene information 
+    symbol = best_gene.get('geneName')
+    if symbol == 'none' or symbol.startswith('ENSG'):
+        # Try to find another gene with a proper symbol
+        for gene in genes:
+            potential_symbol = gene.get('geneName')
+            if potential_symbol != 'none' and not potential_symbol.startswith('ENSG'):
+                symbol = potential_symbol
+                break
+
     name = get_gene_info(symbol) # Returns full human readable name
 
     if symbol == 'Unknown':
