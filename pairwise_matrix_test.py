@@ -263,7 +263,8 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ]
 
     # Create a custom colormap by extending the viridis colormap with special colors
-    colors = [color_minus_one] + cmap_viridis(np.linspace(1, 0, 256)).tolist() + [color_ninety_nine]
+    # Now the indices are: -1 for special minus_one, 0-255 for viridis, 256 for special ninety_nine
+    colors = [color_minus_one] + [color_minus_one] + cmap_viridis(np.linspace(0, 1, 254)).tolist() + [color_ninety_nine]
     new_cmap = ListedColormap(colors)
 
     # Create a normalized matrix for plotting
@@ -273,7 +274,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         mask_minus_one = (matrix == -1)
         mask_ninety_nine = (matrix == 99)
         mask_normal = (~np.isnan(matrix)) & (~mask_minus_one) & (~mask_ninety_nine)
-
+    
         # Assign indices for normal omega values
         if np.any(mask_normal):
             omega_min = matrix[mask_normal].min()
@@ -281,18 +282,19 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             # Avoid division by zero
             if omega_max == omega_min:
                 omega_max += 1e-6
-            matrix_normalized[mask_normal] = ((matrix[mask_normal] - omega_min) / (omega_max - omega_min) * 255).astype(int) + 1
+            # Use indices 1-255 for normal values
+            matrix_normalized[mask_normal] = ((matrix[mask_normal] - omega_min) / (omega_max - omega_min) * 254).astype(int) + 1
         else:
             omega_min = 0
             omega_max = 1
-
-        # Assign indices for special values
-        matrix_normalized[mask_minus_one] = 0
-        matrix_normalized[mask_ninety_nine] = 257
-
-        # Assign NaN to a separate index (we'll mask it later)
-        matrix_normalized[np.isnan(matrix)] = -1
-
+    
+        # Use completely separate indices for special values
+        matrix_normalized[mask_minus_one] = -1    # SPECIAL INDEX FOR -1
+        matrix_normalized[mask_ninety_nine] = 256  # SPECIAL INDEX FOR 99
+    
+        # Assign NaN to a separate index
+        matrix_normalized[np.isnan(matrix)] = -2
+    
         return matrix_normalized, omega_min, omega_max
 
     matrix_0_norm, omega_min_0, omega_max_0 = normalize_matrix(matrix_0_full)
