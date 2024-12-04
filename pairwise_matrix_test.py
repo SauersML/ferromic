@@ -363,8 +363,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
                 print(f"ℹ️ {msg}")
     
     # Handle the results
-    if gene_symbol is None and gene_name is None:
+    if gene_symbol in [None, 'Unknown'] or gene_name in [None, 'Unknown']:
         print(f"❌ No annotation found for CDS: {cds}")
+        gene_symbol = None  # Reset to None if Unknown
+        gene_name = None    # Reset to None if Unknown
     else:
         print(f"✅ Found annotation:")
         print(f"   Symbol: {gene_symbol}")
