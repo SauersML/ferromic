@@ -257,7 +257,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         ax.set_title(title, fontsize=14, pad=12)
         ax.set_xlabel('Sequence Index', fontsize=12)
         ax.set_ylabel('Sequence Index', fontsize=12)
-        ax.tick_params(axis='both', which='major', labelsize=10)
+        ax.tick_params(axis='both', which='major', labelsize=4)
         # Ensure the x-axis labels are displayed correctly
         ax.xaxis.set_ticks_position('bottom')
         # Rotate x-axis labels if needed
