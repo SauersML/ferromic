@@ -337,7 +337,7 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
                 # Check if our region falls within the gene's coordinates
                 if gene_start <= end and gene_end >= start:
                     overlapping_genes.append(gene)
-                    print(f"\nFound overlapping gene: {gene}")  # Debug print
+                    #print(f"\nFound overlapping gene: {gene}")  # Debug print
             
             if not overlapping_genes:
                 return None, "No overlapping genes found"
