@@ -222,6 +222,17 @@ def compute_cliffs_delta(x, y):
     return cliffs_delta
 
 
+def get_gene_info(gene_id):
+    """Get human-readable gene info from MyGene"""
+    try:
+        url = f"http://mygene.info/v3/gene/{gene_id}"
+        response = requests.get(url, timeout=10)
+        if response.ok:
+            data = response.json()
+            return data.get('symbol'), data.get('name')
+    except Exception:
+        pass
+    return None, None
 
 
 
