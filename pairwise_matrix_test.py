@@ -509,13 +509,12 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
     }
 
 def compute_overall_significance(cluster_results):
-    """Compute overall significance from independent clusters using RTP and Stouffer's methods."""
+    """Compute overall significance from independent clusters using scipy's combine_pvalues."""
     import numpy as np
     from scipy import stats
-    
+
     # Initialize default return values
-    overall_pvalue_rtp = np.nan
-    overall_pvalue_stouffer = np.nan
+    overall_pvalue_combined = np.nan
     overall_effect = np.nan
     n_valid_clusters = 0
     total_comparisons = 0
@@ -527,40 +526,40 @@ def compute_overall_significance(cluster_results):
     ]
 
     if valid_clusters:
-        # Collect cluster p-values and ensure they're valid
         cluster_pvals = np.array([c['combined_pvalue'] for c in valid_clusters])
-        cluster_pvals = np.clip(cluster_pvals, np.nextafter(0, 1), 1)
-        
+
         # Print smallest p-value for debugging
         print(f"Smallest cluster p-value: {np.min(cluster_pvals):.2e}")
-    
-        # RTP method
-        n_tests = len(cluster_pvals)
-        k = 1  # Use k=1 for minimum p-value
-    
-        smallest_p = np.min(cluster_pvals)
-        # Use the exponential approximation to avoid underflow
-        overall_pvalue_rtp = 1 - np.exp(-n_tests * smallest_p)
-        print(f"RTP calculation using exponential approximation: 1 - exp(-{n_tests} * {smallest_p:.2e})")
 
-        # Stouffer's Z method
-        cluster_zscores = stats.norm.isf(cluster_pvals)
+        # Use scipy.stats.combine_pvalues to combine p-values
+        # Choose method: 'fisher', 'stouffer', or others as appropriate etc.
+        statistic, overall_pvalue_combined = stats.combine_pvalues(cluster_pvals, method='fisher')
+
+        print(f"\nCombined p-value using Fisher's method: {overall_pvalue_combined:.4e}")
+        print(f"Fisher's statistic: {statistic:.4f}")
+
+        # Alternatively, if you have weights (e.g., based on the number of comparisons),
+        # you can use Stouffer's method
         weights = np.array([c['n_comparisons'] for c in valid_clusters], dtype=float)
 
         # Check for zero weights
         if np.all(weights == 0) or np.isnan(weights).any():
-            weights = np.ones_like(cluster_pvals)
-            print("Note: Using equal weights in Stouffer's method.")
+            weights = None
+            print("Note: Weights not used in Stouffer's method due to zero or NaN values.")
 
-        # Normalize weights
-        normalized_weights = weights / np.sum(weights)
-
-        # Compute combined Z-score and p-value
-        combined_z = np.sum(cluster_zscores * normalized_weights)
-        overall_pvalue_stouffer = stats.norm.sf(combined_z)
+        # Use Stouffer's method with weights (if applicable)
+        statistic_stouffer, pvalue_stouffer = stats.combine_pvalues(cluster_pvals, method='stouffer', weights=weights)
+        print(f"Combined p-value using Stouffer's method: {pvalue_stouffer:.4e}")
+        print(f"Stouffer's Z-score statistic: {statistic_stouffer:.4f}")
 
         # Compute weighted effect size
         effect_sizes = np.array([c['weighted_effect_size'] for c in valid_clusters])
+
+        if weights is not None:
+            normalized_weights = weights / np.sum(weights)
+        else:
+            normalized_weights = np.ones_like(effect_sizes) / len(effect_sizes)
+
         overall_effect = np.average(effect_sizes, weights=normalized_weights)
 
         # Count comparisons
@@ -570,21 +569,19 @@ def compute_overall_significance(cluster_results):
         total_comparisons = len(all_unique_pairs)
         n_valid_clusters = len(valid_clusters)
 
-        print("\nOverall p-values from combining methods:")
-        print(f"RTP method p-value (k={k}): {overall_pvalue_rtp:.4e}")
-        print(f"Stouffer's Z method p-value: {overall_pvalue_stouffer:.4e}")
-
-        # Use RTP as the overall p-value
-        overall_pvalue = overall_pvalue_rtp
+        overall_pvalue = overall_pvalue_combined
 
     else:
         print("No valid clusters available for significance computation.")
         overall_pvalue = np.nan
+        overall_pvalue_combined = np.nan
+        overall_effect = np.nan
+        pvalue_stouffer = np.nan
 
     return {
         'overall_pvalue': overall_pvalue,
-        'overall_pvalue_rtp': overall_pvalue_rtp,
-        'overall_pvalue_stouffer': overall_pvalue_stouffer,
+        'overall_pvalue_fisher': overall_pvalue_combined,
+        'overall_pvalue_stouffer': pvalue_stouffer,
         'overall_effect': overall_effect,
         'n_valid_clusters': n_valid_clusters,
         'total_comparisons': total_comparisons
@@ -637,8 +634,8 @@ def main():
 
     # Convert numpy values to native Python types for JSON serialization
     json_safe_results = {
-        'overall_pvalue_rtp': float(overall_results['overall_pvalue_rtp']) if not np.isnan(overall_results['overall_pvalue_rtp']) else None,
-        'overall_pvalue_stouffer': float(overall_results['overall_pvalue_stouffer']) if not np.isnan(overall_results['overall_pvalue_stouffer']) else None,
+        'overall_pvalue': float(overall_results['overall_pvalue']) if not np.isnan(overall_results['overall_pvalue']) else None,
+        'overall_pvalue_fisher': float(overall_results['overall_pvalue_fisher']) if not np.isnan(overall_results['overall_pvalue_fisher']) else None,
         'overall_effect': float(overall_results['overall_effect']) if not np.isnan(overall_results['overall_effect']) else None,
         'n_valid_clusters': int(overall_results['n_valid_clusters']) if not np.isnan(overall_results['n_valid_clusters']) else None,
         'total_comparisons': int(overall_results['total_comparisons']) if not np.isnan(overall_results['total_comparisons']) else None
