@@ -98,6 +98,7 @@ def analysis_worker(args):
    """Mixed effects analysis for a single CDS with crossed random effects."""
    import statsmodels.api as sm
    from statsmodels.regression.mixed_linear_model import MixedLM
+   import numpy as np
    
    all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
 
@@ -156,37 +157,69 @@ def analysis_worker(args):
            'std_err': np.nan
        }
 
-   # Prepare model data
-   # Convert sequences to categorical codes for random effects
+   # Convert sequences to categorical and get codes
    df['seq1_code'] = pd.Categorical(df['seq1']).codes
    df['seq2_code'] = pd.Categorical(df['seq2']).codes
+
+   # Print diagnostic info
+   print(f"\nAnalyzing CDS with:")
+   print(f"Data shape: {df.shape}")
+   print(f"Unique seq1_codes: {len(df['seq1_code'].unique())}")
+   print(f"Unique seq2_codes: {len(df['seq2_code'].unique())}")
+   print(f"Group counts: {df['group'].value_counts()}")
    
    try:
        # Fit mixed model with crossed random effects
        model = MixedLM(
            endog=df['omega_value'],
            exog=sm.add_constant(df[['group']]),
-           groups=df['seq1_code'],  # First random effect
-           vc_formula={'seq2': '0 + C(seq2_code)'}  # Second random effect
+           groups=df['seq1_code'],
+           vc_formula={'seq2': '0 + C(seq2_code)'}
        )
-       result = model.fit()
+       result = model.fit(reml=False)  # Use ML estimation instead of REML
        
        # Extract results
-       effect_size = result.fe_params['group']  # Fixed effect
-       p_value = result.pvalues['group']  # P-value for group effect
-       std_err = result.bse['group']  # Standard error
+       effect_size = result.fe_params['group']
+       p_value = result.pvalues['group']
+       std_err = result.bse['group']
+
+       print(f"Successfully fit model:")
+       print(f"Effect size: {effect_size:.4f}")
+       print(f"P-value: {p_value:.4e}")
+       print(f"Std error: {std_err:.4f}")
        
-   except (ValueError, np.linalg.LinAlgError):
-       # Return NaNs if model fails to fit
-       return {
-           'observed_effect_size': np.nan,
-           'p_value': np.nan,
-           'n0': n0,
-           'n1': len(all_sequences) - n0,
-           'std_err': np.nan,
-           'num_comp_group_0': (df['group'] == 0).sum(),
-           'num_comp_group_1': (df['group'] == 1).sum()
-       }
+   except Exception as e:
+       print(f"Model fitting failed with error: {str(e)}")
+       # Try simpler model without crossed effects
+       try:
+           print("Trying simpler model without crossed effects...")
+           model = MixedLM(
+               endog=df['omega_value'],
+               exog=sm.add_constant(df[['group']]),
+               groups=df['seq1_code']
+           )
+           result = model.fit(reml=False)
+           
+           effect_size = result.fe_params['group']
+           p_value = result.pvalues['group'] 
+           std_err = result.bse['group']
+           
+           print(f"Simpler model succeeded:")
+           print(f"Effect size: {effect_size:.4f}")
+           print(f"P-value: {p_value:.4e}")
+           print(f"Std error: {std_err:.4f}")
+           
+       except Exception as e2:
+           print(f"Simpler model also failed: {str(e2)}")
+           return {
+               'observed_effect_size': np.nan,
+               'p_value': np.nan,
+               'n0': n0,
+               'n1': len(all_sequences) - n0,
+               'std_err': np.nan,
+               'num_comp_group_0': (df['group'] == 0).sum(),
+               'num_comp_group_1': (df['group'] == 1).sum()
+           }
 
    return {
        'observed_effect_size': effect_size,
@@ -197,7 +230,6 @@ def analysis_worker(args):
        'num_comp_group_0': (df['group'] == 0).sum(),
        'num_comp_group_1': (df['group'] == 1).sum(),
    }
-
 
 def compute_cliffs_delta(x, y):
     """Compute Cliff's Delta effect size."""
