@@ -497,19 +497,24 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Prepare colormap for normal omega values
     cmap_viridis = sns.color_palette("viridis", as_cmap=True)
-
+    
     # Define colors for special omega values
     color_minus_one = (242/255, 235/255, 250/255)  # Very light lavender
     color_ninety_nine = (1, 192/255, 192/255)  # Very light red
 
-    special_patches = [
-        mpatches.Patch(color=colors[special_minus_one_index], label='Sequences identical'),
-        mpatches.Patch(color=colors[special_ninety_nine_index], label='No non-synonymous variation')
-    ]
     # Create a custom colormap by extending the viridis colormap with special colors
-    # Now the indices are: -1 for special minus_one, 0-255 for viridis, 256 for special ninety_nine
     colors = [color_minus_one] + cmap_viridis(np.linspace(0, 1, 252)).tolist() + [color_ninety_nine]
     new_cmap = ListedColormap(colors)
+    
+    # Define indices for special values
+    special_minus_one_index = 0
+    special_ninety_nine_index = len(colors) - 1
+
+    # Now define special_patches using 'colors' and the indices
+    special_patches = [
+        mpatches.Patch(color=colors[special_minus_one_index], label='Identical sequences'),
+        mpatches.Patch(color=colors[special_ninety_nine_index], label='No non-synonymous variation')
+    ]
 
     # Create a normalized matrix for plotting
     def normalize_matrix(matrix):
