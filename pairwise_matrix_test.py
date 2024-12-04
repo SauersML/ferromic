@@ -503,10 +503,9 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     color_ninety_nine = (1, 192/255, 192/255)  # Very light red
 
     special_patches = [
-        mpatches.Patch(color=color_minus_one, label='Sequences identical'),
-        mpatches.Patch(color=color_ninety_nine, label='No non-synonymous variation')
+        mpatches.Patch(color=colors[special_minus_one_index], label='Sequences identical'),
+        mpatches.Patch(color=colors[special_ninety_nine_index], label='No non-synonymous variation')
     ]
-
     # Create a custom colormap by extending the viridis colormap with special colors
     # Now the indices are: -1 for special minus_one, 0-255 for viridis, 256 for special ninety_nine
     colors = [color_minus_one] + cmap_viridis(np.linspace(0, 1, 252)).tolist() + [color_ninety_nine]
@@ -537,8 +536,12 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             omega_max = 1
     
         # Use completely separate indices for special values
-        matrix_normalized[mask_minus_one] = -1    # SPECIAL INDEX FOR -1
-        matrix_normalized[mask_ninety_nine] = 256  # SPECIAL INDEX FOR 99
+        # Use specific indices within colormap range for special values
+        special_minus_one_index = 0
+        special_ninety_nine_index = len(colors) - 1
+        
+        matrix_normalized[mask_minus_one] = special_minus_one_index
+        matrix_normalized[mask_ninety_nine] = special_ninety_nine_index
     
         # Assign NaN to a separate index
         matrix_normalized[np.isnan(matrix)] = -2
@@ -586,11 +589,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         # Create value-type masks
         # These masks should be mutually exclusive
         normal_mask = (matrix_plot >= 1) & (matrix_plot <= len(colors) - 2)  # Normal omega values
-        special_minus_one = (matrix_plot == -1)                  # Pink (-1) values
-        special_ninety_nine = (matrix_plot == 256)              # Red (99) values
-        nan_mask = ~(normal_mask | special_minus_one | special_ninety_nine)  # Everything else is NaN
+        special_minus_one = (matrix_plot == 0)  # index for -1 values
+        special_ninety_nine = (matrix_plot == len(colors) - 1)  # index for 99 values
         
-        # Create final plotting matrix
+        # Create the final plotting matrix
         # Initialize with NaN
         plot_matrix = np.full_like(matrix_plot, np.nan, dtype=float)
         
@@ -598,8 +600,8 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         plot_matrix[upper_triangle & normal_mask] = matrix_plot[upper_triangle & normal_mask]
         
         # Fill lower triangle with special values only
-        plot_matrix[lower_triangle & special_minus_one] = -1
-        plot_matrix[lower_triangle & special_ninety_nine] = 256
+        plot_matrix[lower_triangle & special_minus_one] = 0  # Use index 0
+        plot_matrix[lower_triangle & special_ninety_nine] = len(colors) - 1  # Use last index
         
         # Print debug information
         n_upper = np.sum(~np.isnan(plot_matrix[upper_triangle]))
