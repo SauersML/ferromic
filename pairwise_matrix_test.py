@@ -320,18 +320,20 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         # Handle special values directly
         matrix_plot = matrix.copy()
 
-        # Create masks for special values based on the original values (-1 and 99)
-        special_values_mask = (matrix_plot == 0) | (matrix_plot == 257)
-        normal_values_mask = (matrix_plot >= 1) & (matrix_plot <= 256)
+        # Create base triangular masks
+        upper_triangle = np.triu(np.ones_like(matrix, dtype=bool), k=-1)  # Exclude diagonal
+        lower_triangle = np.tril(np.ones_like(matrix, dtype=bool), k=-1)  # Exclude diagonal
 
-        # Masks for upper triangle (show normal omega values only)
-        upper_triangle_mask = np.tril(np.ones_like(matrix, dtype=bool), k=-1) | special_values_mask | np.isnan(matrix)
+        # Create value type masks
+        normal_values = (matrix_plot >= 1) & (matrix_plot <= 256)
+        special_values = (matrix_plot == -1) | (matrix_plot == 256)
+        nan_values = np.isnan(matrix)
 
-        # Masks for lower triangle (show special omega values only)
-        lower_triangle_mask = np.triu(np.ones_like(matrix, dtype=bool), k=1) | normal_values_mask | np.isnan(matrix)
-
-        # Combine masks
-        combined_mask = upper_triangle_mask & lower_triangle_mask
+        # Final mask: True means hide these values
+        # For upper triangle: show special values only
+        # For lower triangle: show normal values only
+        combined_mask = ~((upper_triangle & special_values) | (lower_triangle & normal_values))
+        combined_mask = combined_mask | nan_values  # Always mask NaN values
 
         # Invert the matrix indices to have (1,1) at the bottom-left
         matrix_inverted = matrix[::-1, :]
