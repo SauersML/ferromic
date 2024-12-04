@@ -571,37 +571,62 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     fig.suptitle(title, fontsize=18, fontweight='bold', y=0.95)
 
     def plot_matrices(ax, matrix, title):
+        """Plot matrix with special values in lower triangle, normal values in upper triangle."""
         n = matrix.shape[0]
-    
-        # Handle special values directly
+        
+        # Make a copy of the matrix to avoid modifying original
         matrix_plot = matrix.copy()
-
-        # Create base triangular masks
-        upper_triangle = np.triu(np.ones_like(matrix, dtype=bool), k=-1)  # Exclude diagonal
-        lower_triangle = np.tril(np.ones_like(matrix, dtype=bool), k=-1)  # Exclude diagonal
-
-        # Create value type masks
-        normal_values = (matrix_plot >= 1) & (matrix_plot <= 253)
-        special_minus_one = (matrix_plot == -1)      # Pink (-1) values
-        special_ninety_nine = (matrix_plot == 256)   # Purple (99) values
-        nan_values = np.isnan(matrix)
-
-
-        # Final mask: True means hide these values
-        # For one triangle: show special values only
-        # For other triangle: show normal values only
-        combined_mask = ~(
-            (upper_triangle & normal_values) |                              # Plot normal values on one triangle
-            (lower_triangle & (special_ninety_nine | special_minus_one))    # Plot purple (99) and pink (-1) values on other triangle
+        
+        # Create basic triangular masks
+        upper_triangle = np.triu(np.ones_like(matrix, dtype=bool), k=1)  
+        lower_triangle = np.tril(np.ones_like(matrix, dtype=bool), k=-1)
+        
+        # Create value-type masks
+        # These masks should be mutually exclusive
+        normal_mask = (matrix_plot >= 1) & (matrix_plot <= 253)  # Normal omega values
+        special_minus_one = (matrix_plot == -1)                  # Pink (-1) values
+        special_ninety_nine = (matrix_plot == 256)              # Red (99) values
+        nan_mask = ~(normal_mask | special_minus_one | special_ninety_nine)  # Everything else is NaN
+        
+        # Create final plotting matrix
+        # Initialize with NaN
+        plot_matrix = np.full_like(matrix_plot, np.nan, dtype=float)
+        
+        # Fill upper triangle with normal values only
+        plot_matrix[upper_triangle & normal_mask] = matrix_plot[upper_triangle & normal_mask]
+        
+        # Fill lower triangle with special values only
+        plot_matrix[lower_triangle & special_minus_one] = -1
+        plot_matrix[lower_triangle & special_ninety_nine] = 256
+        
+        # Print debug information
+        n_upper = np.sum(~np.isnan(plot_matrix[upper_triangle]))
+        n_lower = np.sum(~np.isnan(plot_matrix[lower_triangle]))
+        print("\n=== DEBUG: Matrix Layout ===")
+        print(f"Number of values in upper triangle: {n_upper}")
+        print(f"Number of values in lower triangle: {n_lower}")
+        print(f"Unique values in upper triangle: {np.unique(plot_matrix[upper_triangle])}")
+        print(f"Unique values in lower triangle: {np.unique(plot_matrix[lower_triangle])}")
+        
+        # Create plot
+        # Invert the matrix for visualization (1,1 at bottom-left)
+        plot_matrix_inverted = plot_matrix[::-1, :]
+        
+        # Create mask for values we don't want to show (NaN)
+        mask = np.isnan(plot_matrix_inverted)
+        
+        # Plot using seaborn
+        sns.heatmap(
+            plot_matrix_inverted,
+            mask=mask,
+            cmap=new_cmap,
+            ax=ax,
+            cbar=False,
+            square=True,
+            xticklabels=False,
+            yticklabels=False
         )
-        combined_mask = combined_mask | nan_values  # Always mask NaN values
-
-        # Invert the matrix indices to have (1,1) at the bottom-left
-        matrix_inverted = matrix[::-1, :]
-        combined_mask_inverted = combined_mask[::-1, :]
-
-        sns.heatmap(matrix_inverted, cmap=new_cmap, ax=ax, mask=combined_mask_inverted, cbar=False, square=True, xticklabels=False, yticklabels=False)
-
+        
         ax.set_title(title, fontsize=14, pad=12)
         ax.tick_params(axis='both', which='both', length=0)
 
