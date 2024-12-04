@@ -16,6 +16,8 @@ from scipy import stats
 from scipy.stats import combine_pvalues
 from matplotlib.colors import ListedColormap, BoundaryNorm, LinearSegmentedColormap
 from matplotlib.colorbar import ColorbarBase
+import matplotlib.patches as mpatches
+
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -252,8 +254,13 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cmap_viridis = sns.color_palette("viridis", as_cmap=True)
 
     # Define colors for special omega values
-    color_minus_one = (230/255, 230/255, 250/255)  # Lavender
+    color_minus_one = (245/255, 240/255, 255/255)  # Very light lavender
     color_ninety_nine = (1, 192/255, 192/255)  # Very light red
+
+    special_patches = [
+        mpatches.Patch(color=color_minus_one, label='Sequences identical'),
+        mpatches.Patch(color=color_ninety_nine, label='No non-synonymous variation')
+    ]
 
     # Create a custom colormap by extending the viridis colormap with special colors
     colors = [color_minus_one] + cmap_viridis(np.linspace(0, 1, 256)).tolist() + [color_ninety_nine]
@@ -421,6 +428,13 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar_ax = fig.add_axes([pos.x1 + 0.02, pos.y0, 0.02, pos.height])
     cbar = plt.colorbar(sm, cax=cbar_ax)
     cbar.set_label('Omega Value', fontsize=12)
+
+    # Special values legend
+    legend_ax = fig.add_axes([pos.x1 + 0.15, pos.y0, 0.15, pos.height/4])
+    legend_ax.axis('off')
+    legend = legend_ax.legend(handles=special_patches, title='Special Values', 
+                            loc='center left', frameon=True, fontsize=10)
+    legend.get_title().set_fontsize(12)
 
     plt.tight_layout(rect=[0, 0, 0.9, 0.95])
 
