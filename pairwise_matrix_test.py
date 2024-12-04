@@ -335,8 +335,8 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         # For one triangle: show special values only
         # For other triangle: show normal values only
         combined_mask = ~(
-            (upper_triangle & normal_values) |  # Plot normal values on upper triangle
-            (lower_triangle & (special_minus_one | special_ninety_nine))  # Plot pink (-1) and purple (99) values on the same triangle
+            (upper_triangle & normal_values) |                              # Plot normal values on one triangle
+            (lower_triangle & (special_ninety_nine | special_minus_one))    # Plot purple (99) and pink (-1) values on other triangle
         )
         combined_mask = combined_mask | nan_values  # Always mask NaN values
 
@@ -442,10 +442,16 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar.set_label('Omega Value', fontsize=12)
 
     # Special values legend
-    legend_ax = fig.add_axes([pos.x1 + 0.15, pos.y0, 0.15, pos.height/4])
+    pos1 = ax1.get_position()
+    legend_x = pos1.x1 + (pos2.x0 - pos1.x1) / 2 - 0.08
+    legend_y = pos1.y0 - 0.1
+    legend_width = 0.16
+    legend_height = 0.1
+    
+    legend_ax = fig.add_axes([legend_x, legend_y, legend_width, legend_height])
     legend_ax.axis('off')
     legend = legend_ax.legend(handles=special_patches, title='Special Values', 
-                            loc='center left', frameon=True, fontsize=10)
+                           loc='center', ncol=2, frameon=True, fontsize=10)
     legend.get_title().set_fontsize(12)
 
     plt.tight_layout(rect=[0, 0, 0.9, 0.95])
