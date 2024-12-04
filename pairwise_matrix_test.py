@@ -218,33 +218,28 @@ def compute_cliffs_delta(x, y):
 
 
 def create_visualization(matrix_0, matrix_1, cds, result):
-    """Create enhanced visualizations for a CDS analysis."""
+    """Create visualizations for a CDS analysis."""
     if matrix_0 is None or matrix_1 is None:
         print(f"No data available for CDS: {cds}")
         return
 
-    # Set font styles for the entire figure
-    plt.rcParams.update({
-        'font.size': 12,
-        'font.family': 'Arial',
-        'axes.titlesize': 16,
-        'axes.labelsize': 14,
-    })
+    # Reset any custom font settings to defaults
+    plt.rcParams.update(plt.rcParamsDefault)
 
-    # Create a figure with specified size and adjusted layout
-    fig = plt.figure(figsize=(18, 10))
-    gs = plt.GridSpec(2, 3, height_ratios=[4, 1], width_ratios=[1, 1, 1.2], hspace=0.4, wspace=0.4)
+    # Create a figure with specified size and layout
+    fig = plt.figure(figsize=(16, 8))
+    gs = plt.GridSpec(2, 3, height_ratios=[4, 1], hspace=0.5, wspace=0.3)
 
     # Main title
     fig.suptitle(f'Pairwise Comparison Analysis: {cds}',
-                 fontsize=20, fontweight='bold', y=0.95)
+                 fontsize=16, fontweight='bold', y=0.98)
 
     # Custom colormap excluding white
     cmap = sns.color_palette("viridis", as_cmap=True)
 
-    # Function to display only the lower triangle of the matrix
+    # Function to display only one triangle of the matrix
     def get_triangle_mask(matrix, triangle='lower'):
-        mask = np.ones_like(matrix, dtype=bool)
+        mask = np.zeros_like(matrix, dtype=bool)
         if triangle == 'lower':
             mask[np.triu_indices_from(mask, k=1)] = True  # Mask upper triangle
         else:
@@ -256,11 +251,13 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         n = matrix.shape[0]
         if n != matrix.shape[1]:
             raise ValueError("Matrix must be square.")
-        mask = get_triangle_mask(matrix, triangle='lower')
+        # Set diagonal to NaN to exclude it
+        np.fill_diagonal(matrix, np.nan)
+        mask = get_triangle_mask(matrix, triangle='upper')  # Use 'upper' to get lower triangle
         return matrix, mask
 
-    matrix_0_plot, mask_0 = prepare_matrix(matrix_0)
-    matrix_1_plot, mask_1 = prepare_matrix(matrix_1)
+    matrix_0_plot, mask_0 = prepare_matrix(matrix_0.copy())
+    matrix_1_plot, mask_1 = prepare_matrix(matrix_1.copy())
 
     # Adjust axes labels to start from 1
     tick_labels_0 = [str(i + 1) for i in range(result['n0'])]
@@ -269,50 +266,46 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # Heatmap for Group 0
     ax1 = fig.add_subplot(gs[0, 0])
     sns.heatmap(matrix_0_plot, cmap=cmap, ax=ax1,
-                square=True,
-                cbar_kws={'label': 'Omega Value', 'shrink': 0.7},
                 mask=mask_0,
-                xticklabels=tick_labels_0,
-                yticklabels=tick_labels_0[::-1])  # Reverse y-tick labels
-    ax1.set_title(f'Group 0 Matrix (n={result["n0"]})', fontsize=16, pad=12)
+                cbar_kws={'label': 'Omega Value'},
+                xticklabels=tick_labels_0, yticklabels=tick_labels_0)
+    ax1.set_title(f'Group 0 Matrix (n={result["n0"]})', fontsize=14, pad=12)
     ax1.set_xlabel('Sequence Index', fontsize=12)
     ax1.set_ylabel('Sequence Index', fontsize=12)
     ax1.tick_params(axis='both', which='major', labelsize=10)
-    # Invert y-axis to have (1,1) at bottom-left
+    # Ensure (1,1) is at the bottom-left corner
     ax1.invert_yaxis()
 
     # Heatmap for Group 1
     ax2 = fig.add_subplot(gs[0, 1])
     sns.heatmap(matrix_1_plot, cmap=cmap, ax=ax2,
-                square=True,
-                cbar_kws={'label': 'Omega Value', 'shrink': 0.7},
                 mask=mask_1,
-                xticklabels=tick_labels_1,
-                yticklabels=tick_labels_1[::-1])  # Reverse y-tick labels
-    ax2.set_title(f'Group 1 Matrix (n={result["n1"]})', fontsize=16, pad=12)
+                cbar_kws={'label': 'Omega Value'},
+                xticklabels=tick_labels_1, yticklabels=tick_labels_1)
+    ax2.set_title(f'Group 1 Matrix (n={result["n1"]})', fontsize=14, pad=12)
     ax2.set_xlabel('Sequence Index', fontsize=12)
     ax2.set_ylabel('Sequence Index', fontsize=12)
     ax2.tick_params(axis='both', which='major', labelsize=10)
-    # Invert y-axis to have (1,1) at bottom-left
+    # Ensure (1,1) is at the bottom-left corner
     ax2.invert_yaxis()
 
     # Distribution comparison between groups
     ax3 = fig.add_subplot(gs[0, 2])
-    values_0 = matrix_0[np.tril_indices_from(matrix_0, k=-1)]
-    values_1 = matrix_1[np.tril_indices_from(matrix_1, k=-1)]
+    # Extract the lower triangle values excluding the diagonal
+    values_0 = matrix_0_plot[np.tril_indices_from(matrix_0_plot, k=-1)]
+    values_1 = matrix_1_plot[np.tril_indices_from(matrix_1_plot, k=-1)]
     sns.kdeplot(values_0[~np.isnan(values_0)], ax=ax3, label='Group 0',
-                fill=True, common_norm=False, color='#1f77b4', alpha=0.6, linewidth=2)
+                fill=True, common_norm=False, color='#1f77b4', alpha=0.6)
     sns.kdeplot(values_1[~np.isnan(values_1)], ax=ax3, label='Group 1',
-                fill=True, common_norm=False, color='#ff7f0e', alpha=0.6, linewidth=2)
-    ax3.set_title('Distribution of Omega Values', fontsize=16, pad=12)
-    ax3.set_xlabel('Omega Value', fontsize=14)
-    ax3.set_ylabel('Density', fontsize=14)
-    ax3.tick_params(axis='both', which='major', labelsize=12)
-    ax3.legend(title='Groups', title_fontsize=12, fontsize=11)
+                fill=True, common_norm=False, color='#ff7f0e', alpha=0.6)
+    ax3.set_title('Distribution of Omega Values', fontsize=14, pad=12)
+    ax3.set_xlabel('Omega Value', fontsize=12)
+    ax3.set_ylabel('Density', fontsize=12)
+    ax3.tick_params(axis='both', which='major', labelsize=10)
+    ax3.legend(title='Groups', title_fontsize=12, fontsize=10)
 
     # Results table
     ax4 = fig.add_subplot(gs[1, :])
-    ax4.axis('tight')
     ax4.axis('off')
 
     # Prepare table data with clear indication of missing results
@@ -333,24 +326,26 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Create table
     table = ax4.table(cellText=table_data, loc='center', cellLoc='left',
-                      colWidths=[0.5, 0.5], colLabels=None)
+                      colWidths=[0.5, 0.5])
     table.auto_set_font_size(False)
-    table.set_fontsize(14)
-    table.scale(1, 1.6)
+    table.set_fontsize(12)
+    table.scale(1, 1.5)
 
     # Style the table
     for (row, col), cell in table.get_celld().items():
         cell.set_edgecolor('gray')
         if row == 0:
-            cell.set_text_props(weight='bold', ha='center', fontsize=14)
+            cell.set_text_props(weight='bold', ha='center')
             cell.set_facecolor('#E6E6E6')
         elif col == 0:
             cell.set_text_props(weight='bold')
-        cell.set_height(0.1)
 
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png',
                 dpi=300, bbox_inches='tight')
     plt.close(fig)
+
+
 
 def analyze_cds_parallel(args):
     """Analyze a single CDS"""
