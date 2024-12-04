@@ -351,11 +351,11 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Plot for Group 0
     ax1 = fig.add_subplot(gs[0, 0])
-    plot_matrices(ax1, matrix_0_norm, f'Group 0 Matrix (n={len(sequences_0)})')
+    plot_matrices(ax1, matrix_0_norm, f'Direct Sequence Matrix (n={len(sequences_0)})')
 
     # Plot for Group 1
     ax2 = fig.add_subplot(gs[0, 1])
-    plot_matrices(ax2, matrix_1_norm, f'Group 1 Matrix (n={len(sequences_1)})')
+    plot_matrices(ax2, matrix_1_norm, f'Inverted Sequence Matrix (n={len(sequences_1)})')
 
     # Distribution comparison between groups
     ax3 = fig.add_subplot(gs[0, 2])
