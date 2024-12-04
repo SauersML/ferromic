@@ -14,6 +14,8 @@ from pathlib import Path
 import pickle
 from scipy import stats
 from scipy.stats import combine_pvalues
+from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.colorbar import ColorbarBase
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
