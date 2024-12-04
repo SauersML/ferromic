@@ -542,7 +542,6 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
         print("\n=== DEBUG: Value Mapping ===")
         print(f"Normalized values: {np.unique(matrix_normalized)}")
-        print(f"Values that should be normal (0.001) are mapped to: {matrix_normalized[matrix == 0.001]}")
     
         return matrix_normalized, omega_min, omega_max
 
