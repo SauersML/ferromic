@@ -257,7 +257,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         ax.set_title(title, fontsize=14, pad=12)
         ax.set_xlabel('Sequence Index', fontsize=12)
         ax.set_ylabel('Sequence Index', fontsize=12)
-        ax.tick_params(axis='both', which='major', labelsize=4)
+        ax.tick_params(axis='both', which='major', labelsize=2)
         # Ensure the x-axis labels are displayed correctly
         ax.xaxis.set_ticks_position('bottom')
         # Rotate x-axis labels if needed
@@ -363,7 +363,7 @@ def analyze_cds_parallel(args):
     matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
 
     # Set minimum required sequences per group
-    min_sequences_per_group = 5
+    min_sequences_per_group = 10
 
     # Initialize base result dictionary with matrices
     result = {
@@ -713,7 +713,7 @@ def main():
     significant_results = results_df.sort_values('p_value')
 
     # Create visualizations for top significant results
-    for _, row in significant_results.head().iterrows():
+    for _, row in significant_results.head(10).iterrows():
         cds = row['CDS']
         viz_result = results[cds]  # Get full result with matrices
         create_visualization(
