@@ -218,7 +218,7 @@ def compute_cliffs_delta(x, y):
 
 
 def create_visualization(matrix_0, matrix_1, cds, result):
-    """Create visualizations for a CDS analysis."""
+    """Create enhanced visualizations for a CDS analysis."""
     if matrix_0 is None or matrix_1 is None:
         print(f"No data available for CDS: {cds}")
         return
@@ -227,77 +227,71 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     plt.rcParams.update(plt.rcParamsDefault)
 
     # Create a figure with specified size and layout
-    fig = plt.figure(figsize=(16, 8))
-    gs = plt.GridSpec(2, 3, height_ratios=[4, 1], hspace=0.5, wspace=0.3)
+    fig = plt.figure(figsize=(16, 10))
+    gs = plt.GridSpec(2, 3, height_ratios=[4, 1], hspace=0.4, wspace=0.4)
 
     # Main title
-    fig.suptitle(f'Pairwise Comparison Analysis: {cds}',
-                 fontsize=16, fontweight='bold', y=0.98)
+    fig.suptitle(f'Pairwise Comparison Analysis: {cds}', fontsize=18, fontweight='bold', y=0.95)
 
     # Custom colormap excluding white
     cmap = sns.color_palette("viridis", as_cmap=True)
 
-    # Function to display only one triangle of the matrix
-    def get_triangle_mask(matrix, triangle='lower'):
-        mask = np.zeros_like(matrix, dtype=bool)
-        if triangle == 'lower':
-            mask[np.triu_indices_from(mask, k=1)] = True  # Mask upper triangle
-        else:
-            mask[np.tril_indices_from(mask, k=-1)] = True  # Mask lower triangle
-        return mask
-
-    # Prepare matrices and masks for plotting
-    def prepare_matrix(matrix):
+    # Function to plot the lower triangle of a matrix without masking
+    def plot_lower_triangle(ax, matrix, title, tick_labels):
         n = matrix.shape[0]
-        if n != matrix.shape[1]:
-            raise ValueError("Matrix must be square.")
-        # Set diagonal to NaN to exclude it
-        np.fill_diagonal(matrix, np.nan)
-        mask = get_triangle_mask(matrix, triangle='upper')  # Use 'upper' to get lower triangle
-        return matrix, mask
+        # Extract the indices for the lower triangle
+        x_coords, y_coords = np.meshgrid(np.arange(n), np.arange(n))
+        lower_tri_indices = np.tril_indices(n, k=-1)
+        # Extract the values for the lower triangle
+        values = matrix[lower_tri_indices]
 
-    matrix_0_plot, mask_0 = prepare_matrix(matrix_0.copy())
-    matrix_1_plot, mask_1 = prepare_matrix(matrix_1.copy())
+        # Create a scatter plot to represent the lower triangle
+        sc = ax.scatter(x_coords[lower_tri_indices], y_coords[lower_tri_indices],
+                        c=values, cmap=cmap, marker='s', s=100)
+        # Adjust axis labels and ticks
+        ax.set_xticks(range(n))
+        ax.set_yticks(range(n))
+        ax.set_xticklabels(tick_labels, fontsize=8)
+        ax.set_yticklabels(tick_labels, fontsize=8)
+        ax.set_xlabel('Sequence Index', fontsize=12)
+        ax.set_ylabel('Sequence Index', fontsize=12)
+        # Invert y-axis to have (1,1) at bottom-left
+        ax.invert_yaxis()
+        # Ensure x-axis labels are displayed right side up
+        ax.tick_params(axis='x', rotation=0)
+        ax.set_title(title, fontsize=14, pad=12)
+        # Add colorbar
+        cbar = plt.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
+        cbar.ax.set_ylabel('Omega Value', rotation=270, labelpad=15)
+        # Set axis limits
+        ax.set_xlim(-0.5, n - 1 + 0.5)
+        ax.set_ylim(n - 1 + 0.5, -0.5)
+        # Adjust aspect ratio
+        ax.set_aspect('equal')
 
-    # Adjust axes labels to start from 1
-    tick_labels_0 = [str(i + 1) for i in range(result['n0'])]
-    tick_labels_1 = [str(i + 1) for i in range(result['n1'])]
+    # Prepare tick labels starting from 1
+    n0 = result['n0']
+    n1 = result['n1']
+    tick_labels_0 = [str(i + 1) for i in range(n0)]
+    tick_labels_1 = [str(i + 1) for i in range(n1)]
 
-    # Heatmap for Group 0
+    # Plot for Group 0
     ax1 = fig.add_subplot(gs[0, 0])
-    sns.heatmap(matrix_0_plot, cmap=cmap, ax=ax1,
-                mask=mask_0,
-                cbar_kws={'label': 'Omega Value'},
-                xticklabels=tick_labels_0, yticklabels=tick_labels_0)
-    ax1.set_title(f'Group 0 Matrix (n={result["n0"]})', fontsize=14, pad=12)
-    ax1.set_xlabel('Sequence Index', fontsize=12)
-    ax1.set_ylabel('Sequence Index', fontsize=12)
-    ax1.tick_params(axis='both', which='major', labelsize=10)
-    # Ensure (1,1) is at the bottom-left corner
-    ax1.invert_yaxis()
+    plot_lower_triangle(ax1, matrix_0, f'Group 0 Matrix (n={n0})', tick_labels_0)
 
-    # Heatmap for Group 1
+    # Plot for Group 1
     ax2 = fig.add_subplot(gs[0, 1])
-    sns.heatmap(matrix_1_plot, cmap=cmap, ax=ax2,
-                mask=mask_1,
-                cbar_kws={'label': 'Omega Value'},
-                xticklabels=tick_labels_1, yticklabels=tick_labels_1)
-    ax2.set_title(f'Group 1 Matrix (n={result["n1"]})', fontsize=14, pad=12)
-    ax2.set_xlabel('Sequence Index', fontsize=12)
-    ax2.set_ylabel('Sequence Index', fontsize=12)
-    ax2.tick_params(axis='both', which='major', labelsize=10)
-    # Ensure (1,1) is at the bottom-left corner
-    ax2.invert_yaxis()
+    plot_lower_triangle(ax2, matrix_1, f'Group 1 Matrix (n={n1})', tick_labels_1)
 
     # Distribution comparison between groups
     ax3 = fig.add_subplot(gs[0, 2])
     # Extract the lower triangle values excluding the diagonal
-    values_0 = matrix_0_plot[np.tril_indices_from(matrix_0_plot, k=-1)]
-    values_1 = matrix_1_plot[np.tril_indices_from(matrix_1_plot, k=-1)]
-    sns.kdeplot(values_0[~np.isnan(values_0)], ax=ax3, label='Group 0',
-                fill=True, common_norm=False, color='#1f77b4', alpha=0.6)
-    sns.kdeplot(values_1[~np.isnan(values_1)], ax=ax3, label='Group 1',
-                fill=True, common_norm=False, color='#ff7f0e', alpha=0.6)
+    values_0 = matrix_0[np.tril_indices_from(matrix_0, k=-1)]
+    values_1 = matrix_1[np.tril_indices_from(matrix_1, k=-1)]
+    sns.kdeplot(values_0[~np.isnan(values_0)], ax=ax3, label='Group 0', fill=True,
+                common_norm=False, color='#1f77b4', alpha=0.6)
+    sns.kdeplot(values_1[~np.isnan(values_1)], ax=ax3, label='Group 1', fill=True,
+                common_norm=False, color='#ff7f0e', alpha=0.6)
     ax3.set_title('Distribution of Omega Values', fontsize=14, pad=12)
     ax3.set_xlabel('Omega Value', fontsize=12)
     ax3.set_ylabel('Density', fontsize=12)
@@ -318,10 +312,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         ['Observed Effect Size (from Mixed Model)', effect_size],
         ['Standard Error', std_err],
         ['P-value', p_value],
-        ['Number of Sequences in Group 0', f"{result['n0']}"],
-        ['Number of Sequences in Group 1', f"{result['n1']}"],
-        ['Comparisons in Group 0', f"{result['num_comp_group_0']}"],
-        ['Comparisons in Group 1', f"{result['num_comp_group_1']}"]
+        ['Number of Sequences in Group 0', str(n0)],
+        ['Number of Sequences in Group 1', str(n1)],
+        ['Comparisons in Group 0', str(result['num_comp_group_0'])],
+        ['Comparisons in Group 1', str(result['num_comp_group_1'])]
     ]
 
     # Create table
@@ -333,19 +327,17 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Style the table
     for (row, col), cell in table.get_celld().items():
-        cell.set_edgecolor('gray')
         if row == 0:
             cell.set_text_props(weight='bold', ha='center')
             cell.set_facecolor('#E6E6E6')
         elif col == 0:
             cell.set_text_props(weight='bold')
+        cell.set_edgecolor('gray')
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png',
+    plt.savefig(PLOTS_DIR / f'analysis_{cds.replace('/', '_')}.png',
                 dpi=300, bbox_inches='tight')
     plt.close(fig)
-
-
 
 def analyze_cds_parallel(args):
     """Analyze a single CDS"""
