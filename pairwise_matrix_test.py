@@ -217,8 +217,10 @@ def compute_cliffs_delta(x, y):
 
 
 
+
+
 def create_visualization(matrix_0, matrix_1, cds, result):
-    """Create enhanced visualizations for a CDS analysis."""
+    """Create visualizations for a CDS analysis."""
     if matrix_0 is None or matrix_1 is None:
         print(f"No data available for CDS: {cds}")
         return
@@ -236,38 +238,30 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # Custom colormap excluding white
     cmap = sns.color_palette("viridis", as_cmap=True)
 
-    # Function to plot the lower triangle of a matrix without masking
+    # Function to plot the lower triangle of a matrix using seaborn heatmap
     def plot_lower_triangle(ax, matrix, title, tick_labels):
         n = matrix.shape[0]
-        # Extract the indices for the lower triangle
-        x_coords, y_coords = np.meshgrid(np.arange(n), np.arange(n))
-        lower_tri_indices = np.tril_indices(n, k=-1)
-        # Extract the values for the lower triangle
-        values = matrix[lower_tri_indices]
+        # Mask the upper triangle
+        mask = np.triu(np.ones_like(matrix, dtype=bool), k=1)  # k=1 to keep the diagonal
+        # Invert the matrix indices to have (1,1) at the bottom-left
+        matrix_inverted = matrix[::-1, :]
+        mask_inverted = mask[::-1, :]
 
-        # Create a scatter plot to represent the lower triangle
-        sc = ax.scatter(x_coords[lower_tri_indices], y_coords[lower_tri_indices],
-                        c=values, cmap=cmap, marker='s', s=100)
-        # Adjust axis labels and ticks
-        ax.set_xticks(range(n))
-        ax.set_yticks(range(n))
-        ax.set_xticklabels(tick_labels, fontsize=8)
-        ax.set_yticklabels(tick_labels, fontsize=8)
+        sns.heatmap(matrix_inverted, cmap=cmap, ax=ax,
+                    mask=mask_inverted,
+                    cbar_kws={'label': 'Omega Value'},
+                    square=True,
+                    xticklabels=tick_labels,
+                    yticklabels=tick_labels[::-1])  # Reverse y-tick labels to match the inverted matrix
+
+        ax.set_title(title, fontsize=14, pad=12)
         ax.set_xlabel('Sequence Index', fontsize=12)
         ax.set_ylabel('Sequence Index', fontsize=12)
-        # Invert y-axis to have (1,1) at bottom-left
-        ax.invert_yaxis()
-        # Ensure x-axis labels are displayed right side up
-        ax.tick_params(axis='x', rotation=0)
-        ax.set_title(title, fontsize=14, pad=12)
-        # Add colorbar
-        cbar = plt.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
-        cbar.ax.set_ylabel('Omega Value', rotation=270, labelpad=15)
-        # Set axis limits
-        ax.set_xlim(-0.5, n - 1 + 0.5)
-        ax.set_ylim(n - 1 + 0.5, -0.5)
-        # Adjust aspect ratio
-        ax.set_aspect('equal')
+        ax.tick_params(axis='both', which='major', labelsize=10)
+        # Ensure the x-axis labels are displayed correctly
+        ax.xaxis.set_ticks_position('bottom')
+        # Rotate x-axis labels if needed
+        plt.setp(ax.get_xticklabels(), rotation=0)
 
     # Prepare tick labels starting from 1
     n0 = result['n0']
@@ -278,16 +272,16 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # Plot for Group 0
     ax1 = fig.add_subplot(gs[0, 0])
     plot_lower_triangle(ax1, matrix_0, f'Group 0 Matrix (n={n0})', tick_labels_0)
-
+    
     # Plot for Group 1
     ax2 = fig.add_subplot(gs[0, 1])
     plot_lower_triangle(ax2, matrix_1, f'Group 1 Matrix (n={n1})', tick_labels_1)
 
     # Distribution comparison between groups
     ax3 = fig.add_subplot(gs[0, 2])
-    # Extract the lower triangle values excluding the diagonal
-    values_0 = matrix_0[np.tril_indices_from(matrix_0, k=-1)]
-    values_1 = matrix_1[np.tril_indices_from(matrix_1, k=-1)]
+    # Extract the lower triangle values including the diagonal
+    values_0 = matrix_0[np.tril_indices_from(matrix_0)]
+    values_1 = matrix_1[np.tril_indices_from(matrix_1)]
     sns.kdeplot(values_0[~np.isnan(values_0)], ax=ax3, label='Group 0', fill=True,
                 common_norm=False, color='#1f77b4', alpha=0.6)
     sns.kdeplot(values_1[~np.isnan(values_1)], ax=ax3, label='Group 1', fill=True,
@@ -327,10 +321,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Style the table
     for (row, col), cell in table.get_celld().items():
-        if row == 0:
+        if (row == 0):
             cell.set_text_props(weight='bold', ha='center')
             cell.set_facecolor('#E6E6E6')
-        elif col == 0:
+        elif (col == 0):
             cell.set_text_props(weight='bold')
         cell.set_edgecolor('gray')
 
@@ -338,6 +332,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     plt.savefig(PLOTS_DIR / f'analysis_{cds.replace('/', '_')}.png',
                 dpi=300, bbox_inches='tight')
     plt.close(fig)
+
+
+
+
 
 def analyze_cds_parallel(args):
     """Analyze a single CDS"""
