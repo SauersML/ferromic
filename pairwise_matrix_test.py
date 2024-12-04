@@ -95,107 +95,108 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
     return matrix_0, matrix_1
 
 def analysis_worker(args):
-    """GEE analysis worker function for a single CDS."""
-    import statsmodels.api as sm
+   """Mixed effects analysis for a single CDS with crossed random effects."""
+   import statsmodels.api as sm
+   from statsmodels.regression.mixed_linear_model import MixedLM
+   
+   all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
 
-    all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
+   # Prepare data
+   data = []
+   for (seq1, seq2), omega in pairwise_dict.items():
+       # Determine group of the pair
+       if seq1 in sequences_0 and seq2 in sequences_0:
+           group = 0
+       elif seq1 in sequences_1 and seq2 in sequences_1:
+           group = 1
+       else:
+           continue  # Skip pairs not within the same group
 
-    # Prepare data for GEE
-    data = []
-    for (seq1, seq2), omega in pairwise_dict.items():
-        # Determine group of the pair
-        if seq1 in sequences_0 and seq2 in sequences_0:
-            group = 0
-        elif seq1 in sequences_1 and seq2 in sequences_1:
-            group = 1
-        else:
-            continue  # Skip pairs not within the same group
+       data.append({
+           'omega_value': omega,
+           'group': group,
+           'seq1': seq1,
+           'seq2': seq2
+       })
 
-        data.append({
-            'omega_value': omega,
-            'group': group,
-            'seq1': seq1,
-            'seq2': seq2
-        })
+   df = pd.DataFrame(data)
 
-    df = pd.DataFrame(data)
+   if df.empty:
+       return {
+           'observed_effect_size': np.nan,
+           'p_value': np.nan,
+           'n0': n0,
+           'n1': len(all_sequences) - n0,
+           'num_comp_group_0': 0,
+           'num_comp_group_1': 0,
+           'std_err': np.nan
+       }
 
-    if df.empty:
-        return {
-            'observed_effect_size': np.nan,
-            'p_value': np.nan,
-            'n0': n0,
-            'n1': len(all_sequences) - n0,
-            'num_comp_group_0': 0,
-            'num_comp_group_1': 0,
-            'std_err': np.nan
-        }
+   # Check if 'group' has at least two levels
+   if df['group'].nunique() < 2:
+       return {
+           'observed_effect_size': np.nan,
+           'p_value': np.nan,
+           'n0': n0,
+           'n1': len(all_sequences) - n0,
+           'num_comp_group_0': (df['group'] == 0).sum(),
+           'num_comp_group_1': (df['group'] == 1).sum(),
+           'std_err': np.nan
+       }
 
-    # Check if 'group' has at least two levels
-    if df['group'].nunique() < 2:
-        return {
-            'observed_effect_size': np.nan,
-            'p_value': np.nan,
-            'n0': n0,
-            'n1': len(all_sequences) - n0,
-            'num_comp_group_0': (df['group'] == 0).sum(),
-            'num_comp_group_1': (df['group'] == 1).sum(),
-            'std_err': np.nan
-        }
+   # Check if 'omega_value' has variation
+   if df['omega_value'].nunique() < 2:
+       return {
+           'observed_effect_size': np.nan,
+           'p_value': np.nan,
+           'n0': n0,
+           'n1': len(all_sequences) - n0,
+           'num_comp_group_0': (df['group'] == 0).sum(),
+           'num_comp_group_1': (df['group'] == 1).sum(),
+           'std_err': np.nan
+       }
 
-    # Check if 'omega_value' has variation
-    if df['omega_value'].nunique() < 2:
-        return {
-            'observed_effect_size': np.nan,
-            'p_value': np.nan,
-            'n0': n0,
-            'n1': len(all_sequences) - n0,
-            'num_comp_group_0': (df['group'] == 0).sum(),
-            'num_comp_group_1': (df['group'] == 1).sum(),
-            'std_err': np.nan
-        }
+   # Prepare model data
+   # Convert sequences to categorical codes for random effects
+   df['seq1_code'] = pd.Categorical(df['seq1']).codes
+   df['seq2_code'] = pd.Categorical(df['seq2']).codes
+   
+   try:
+       # Fit mixed model with crossed random effects
+       model = MixedLM(
+           endog=df['omega_value'],
+           exog=sm.add_constant(df[['group']]),
+           groups=df['seq1_code'],  # First random effect
+           vc_formula={'seq2': '0 + C(seq2_code)'}  # Second random effect
+       )
+       result = model.fit()
+       
+       # Extract results
+       effect_size = result.fe_params['group']  # Fixed effect
+       p_value = result.pvalues['group']  # P-value for group effect
+       std_err = result.bse['group']  # Standard error
+       
+   except (ValueError, np.linalg.LinAlgError):
+       # Return NaNs if model fails to fit
+       return {
+           'observed_effect_size': np.nan,
+           'p_value': np.nan,
+           'n0': n0,
+           'n1': len(all_sequences) - n0,
+           'std_err': np.nan,
+           'num_comp_group_0': (df['group'] == 0).sum(),
+           'num_comp_group_1': (df['group'] == 1).sum()
+       }
 
-    # Add constant term for intercept
-    df['intercept'] = 1
-
-    # Define dependent and independent variables
-    endog = df['omega_value']
-    exog = df[['intercept', 'group']]
-
-    # Since dependencies are assumed minimal, use Independence correlation structure
-    family = sm.families.Gaussian()
-    ind = sm.cov_struct.Independence()
-
-    # Fit GEE model with exception handling
-    try:
-        model = sm.GEE(endog, exog, groups=np.arange(len(df)), family=family, cov_struct=ind)
-        result = model.fit()
-    except (ValueError, np.linalg.LinAlgError):
-        # Return NaNs if the model fails to fit
-        return {
-            'observed_effect_size': np.nan,
-            'p_value': np.nan,
-            'n0': n0,
-            'n1': len(all_sequences) - n0,
-            'std_err': np.nan,
-            'num_comp_group_0': (df['group'] == 0).sum(),
-            'num_comp_group_1': (df['group'] == 1).sum()
-        }
-
-    # Extract effect size and p-value
-    effect_size = result.params.get('group', np.nan)
-    p_value = result.pvalues.get('group', np.nan)
-    std_err = result.bse.get('group', np.nan)
-
-    return {
-        'observed_effect_size': effect_size,
-        'p_value': p_value,
-        'n0': n0,
-        'n1': len(all_sequences) - n0,
-        'std_err': std_err,
-        'num_comp_group_0': (df['group'] == 0).sum(),
-        'num_comp_group_1': (df['group'] == 1).sum(),
-    }
+   return {
+       'observed_effect_size': effect_size,
+       'p_value': p_value,
+       'n0': n0,
+       'n1': len(all_sequences) - n0,
+       'std_err': std_err,
+       'num_comp_group_0': (df['group'] == 0).sum(),
+       'num_comp_group_1': (df['group'] == 1).sum(),
+   }
 
 
 def compute_cliffs_delta(x, y):
