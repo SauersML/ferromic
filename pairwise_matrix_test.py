@@ -733,25 +733,8 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             cell.set_text_props(weight='bold')
         cell.set_edgecolor('gray')
 
-    # Create colorbar
-    from matplotlib.colors import Normalize
 
-    # Custom normalization for colorbar
-    class MidpointNormalize(Normalize):
-        def __init__(self, vmin=None, vmax=None, midpoint=None, clip=False):
-            self.midpoint = midpoint
-            super().__init__(vmin, vmax, clip)
-
-        def __call__(self, value, clip=None):
-            # Normalize normal omega values between 0 and 1
-            normalized_value = super().__call__(value, clip)
-            return normalized_value
-
-    max_normal_index = len(colors) - 2
-    norm = MidpointNormalize(vmin=1, vmax=max_normal_index, midpoint=(max_normal_index - 1) / 2)
-
-    # Create a ScalarMappable for the colorbar with fixed 0->3 scale for omega values
-    sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=Normalize(vmin=0, vmax=3))
+    sm = plt.cm.ScalarMappable(cmap=cmap_viridis)
 
     sm.set_array([])
 
