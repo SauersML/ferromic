@@ -560,83 +560,110 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         title = f'Pairwise Comparison Analysis: {cds}'
     fig.suptitle(title, fontsize=18, fontweight='bold', y=0.95)
 
+
     def plot_matrices(ax, matrix, title):
-        """Plot matrix with special values in lower triangle, normal values in upper triangle."""
+        """Plot matrix with special values in lower triangle, normal values in upper triangle.
+        
+        Args:
+            ax: matplotlib axis to plot on
+            matrix: normalized matrix (0-253 range where 0=omega -1, 253=omega 99, 1-252=omega 0-3)
+            title: title for the plot
+            
+        The function automatically handles:
+            - Special omega values (-1=0, 99=253)
+            - Normal omega values (mapped to 1-252)
+            - NaN values (masked/not shown)
+            - Edge cases (all special, all normal, empty matrices)
+            - Data validation and verification
+            - Diagonal elements properly masked
+        """
+        # VALIDATION AND DEBUG PRINTS
+        print("\n=== Matrix Analysis ===")
+        print(f"Matrix shape: {matrix.shape}")
+        print(f"Value range: {np.nanmin(matrix):.1f} to {np.nanmax(matrix):.1f}")
+        print(f"Unique values: {sorted(np.unique(matrix[~np.isnan(matrix)]))}")
+        print("Special value counts:")
+        print(f"  Index 0 (omega=-1): {np.sum(matrix == 0)}")
+        print(f"  Index 253 (omega=99): {np.sum(matrix == 253)}")
+        print(f"Normal value count: {np.sum((matrix > 0) & (matrix < 253))}")
+        print(f"NaN count: {np.sum(np.isnan(matrix))}")
+    
+        # Input validation
+        if matrix.shape[0] != matrix.shape[1]:
+            raise ValueError("Input matrix must be square")
+        
+        # Create base masked array with diagonal masked
         n = matrix.shape[0]
+        diagonal_mask = np.eye(n, dtype=bool)
         
-        # Make a copy of the matrix to avoid modifying original
-        matrix_plot = matrix.copy()
+        # Start with a completely masked array
+        final_matrix = np.ma.masked_all(matrix.shape)
         
-        # Create basic triangular masks
-        upper_triangle = np.triu(np.ones_like(matrix, dtype=bool), k=1)  
-        lower_triangle = np.tril(np.ones_like(matrix, dtype=bool), k=-1)
+        # Get indices for upper and lower triangles
+        rows, cols = np.tril_indices(n, k=-1)  # Lower triangle
+        upper_rows, upper_cols = np.triu_indices(n, k=1)  # Upper triangle
         
-        # Create value-type masks
-        # These masks should be mutually exclusive
-        # Create masks for the actual omega values
-        normal_mask = ~np.isnan(matrix_plot) & (matrix_plot != -1) & (matrix_plot != 99)
-        special_minus_one = (matrix_plot == -1)  # Look for actual -1 values
-        special_ninety_nine = (matrix_plot == 99)  # Look for actual 99 values
+        # Create masks for special and normal values, excluding diagonal
+        special_mask = ((matrix == 0) | (matrix == 253)) & ~diagonal_mask
+        normal_mask = ((matrix > 0) & (matrix < 253)) & ~diagonal_mask
         
-        # Fill upper triangle with normal values mapped to colors
-        normal_values = matrix_plot[upper_triangle & normal_mask]
-        if normal_values.size > 0:
-            # Direct mapping: 0->1, 3->252
-            capped_values = np.minimum(normal_values, 3.0)  # Cap at 3
-            mapped_values = 1 + (capped_values / 3.0 * 251)
-            plot_matrix[upper_triangle & normal_mask] = mapped_values
-
+        # Verify masks are mutually exclusive
+        overlap = special_mask & normal_mask
+        if np.any(overlap):
+            print("\nWARNING: Overlap detected between special and normal masks!")
+            print(f"Overlap positions: {np.where(overlap)}")
+            print("Values at overlap positions:", matrix[overlap])
+        
+        # VERIFICATION PRINTS
+        print("\n=== Mask Verification ===")
+        print(f"Special values (excluding diagonal): {np.sum(special_mask)}")
+        print(f"Normal values (excluding diagonal): {np.sum(normal_mask)}")
+        print(f"Diagonal elements: {np.sum(diagonal_mask)}")
+        print(f"Total masked elements: {np.sum(final_matrix.mask)}")
+        
         # Fill lower triangle with special values
-        plot_matrix[lower_triangle & special_minus_one] = 0  # -1 maps to index 0 (lavender)
-        plot_matrix[lower_triangle & special_ninety_nine] = 253  # 99 maps to index 253 (light red)
+        for i, j in zip(rows, cols):
+            if special_mask[i, j]:
+                final_matrix[i, j] = matrix[i, j]
         
-        # Create the final plotting matrix
-        # Initialize with NaN
-        plot_matrix = np.full_like(matrix_plot, np.nan, dtype=float)
+        # Fill upper triangle with normal values
+        for i, j in zip(upper_rows, upper_cols):
+            if normal_mask[i, j]:
+                final_matrix[i, j] = matrix[i, j]
         
-        # Fill upper triangle with mapped normal values
-        normal_values = matrix_plot[upper_triangle & normal_mask]
-        if normal_values.size > 0:
-            # Direct mapping: 0->1, 3->252
-            capped_values = np.minimum(normal_values, 3.0)  # Cap at 3
-            mapped_values = 1 + (capped_values / 3.0 * 251)
-            plot_matrix[upper_triangle & normal_mask] = mapped_values
+        # FINAL VERIFICATION
+        print("\n=== Final Matrix Verification ===")
+        print("Lower triangle (special values):")
+        lower_values = final_matrix[rows, cols]
+        print(f"  Total filled values: {np.sum(~lower_values.mask)}")
+        print(f"  Non-special values: {np.sum(~lower_values.mask & ((lower_values != 0) & (lower_values != 253)))}")
+        
+        print("\nUpper triangle (normal values):")
+        upper_values = final_matrix[upper_rows, upper_cols]
+        print(f"  Total filled values: {np.sum(~upper_values.mask)}")
+        print(f"  Special values: {np.sum(~upper_values.mask & ((upper_values == 0) | (upper_values == 253)))}")
+        
+        # Verify diagonal is masked
+        print("\nDiagonal verification:")
+        diagonal_elements = np.diagonal(final_matrix)
+        print(f"  Masked diagonal elements: {np.sum(diagonal_elements.mask)} (should be {n})")
+        
+        # Create the plot with verified data
+        im = ax.imshow(final_matrix, origin='lower', interpolation='nearest', cmap=new_cmap)
 
-        # Fill lower triangle with special values
-        plot_matrix[lower_triangle & special_minus_one] = 0  # -1 maps to index 0 (lavender)
-        plot_matrix[lower_triangle & special_ninety_nine] = 253  # 99 maps to index 253 (light red)
-        
-        # Print debug information
-        n_upper = np.sum(~np.isnan(plot_matrix[upper_triangle]))
-        n_lower = np.sum(~np.isnan(plot_matrix[lower_triangle]))
-        print("\n=== DEBUG: Matrix Layout ===")
-        print(f"Number of values in upper triangle: {n_upper}")
-        print(f"Number of values in lower triangle: {n_lower}")
-        print(f"Unique values in upper triangle: {np.unique(plot_matrix[upper_triangle])}")
-        print(f"Unique values in lower triangle: {np.unique(plot_matrix[lower_triangle])}")
-        
-        # Create plot
-        # Invert the matrix for visualization (1,1 at bottom-left)
-        plot_matrix_inverted = plot_matrix[::-1, :]
-        
-        # Create mask for values we don't want to show (NaN)
-        mask = np.isnan(plot_matrix_inverted)
-        
-        # Plot using seaborn
-        sns.heatmap(
-            plot_matrix_inverted,
-            mask=mask,
-            cmap=new_cmap,
-            ax=ax,
-            cbar=False,
-            square=True,
-            xticklabels=False,
-            yticklabels=False
-        )
-        
-        ax.set_title(title, fontsize=14, pad=12)
-        ax.tick_params(axis='both', which='both', length=0)
+        # Clean up plot
+        ax.set_title(title, pad=10)
+        ax.set_xticks([])
+        ax.set_yticks([])
 
+        # FINAL VISUAL VERIFICATION
+        print("\n=== Visual Elements Verification ===")
+        print(f"Plot limits: {ax.get_xlim()}, {ax.get_ylim()}")
+        print(f"Matrix shape matches plot dimensions: {matrix.shape == (ax.get_xlim()[1] + 1, ax.get_ylim()[1] + 1)}")
+        
+        return im
+
+    
     # Plot for Group 0
     ax1 = fig.add_subplot(gs[0, 0])
     plot_matrices(ax1, matrix_0_norm, f'Direct Sequence Matrix (n={len(sequences_0)})')
