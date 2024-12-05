@@ -496,6 +496,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         return
 
     # Prepare colormap for normal omega values
+    # If omega = -1 → use light purple lavender color. If omega = 99 → use light red/pink color. If 0 ≤ omega ≤ 3 → map directly to color intensity (0→dark, 3→bright). If omega > 3 → treat as 3
     cmap_viridis = sns.color_palette("viridis", as_cmap=True)
     
     # Define colors for special omega values
