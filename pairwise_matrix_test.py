@@ -67,12 +67,18 @@ def read_and_preprocess_data(file_path):
 
     # Collect all unique sequence IDs from both 'Seq1' and 'Seq2' columns
     unique_seqs = pd.concat([df['Seq1'], df['Seq2']]).dropna().unique()
-    print(f"Total unique sequence IDs: {len(unique_seqs):,}")
-    
+
+    # Assign sequences to groups based on whether they end with '1'
+    group_0_seqs = [seq for seq in unique_seqs if not str(seq).endswith('1')]
+    group_1_seqs = [seq for seq in unique_seqs if str(seq).endswith('1')]
+
+    # Print the counts for each group
+    print(f"Total unique sequence IDs in Group 0: {len(group_0_seqs):,}")
+    print(f"Total unique sequence IDs in Group 1: {len(group_1_seqs):,}")
+
     print(f"Total valid comparisons: {len(df):,}")
     print(f"Unique CDSs found: {df['CDS'].nunique():,}")
     return df
-
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
     seq1 = str(seq1)
