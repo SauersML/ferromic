@@ -516,15 +516,19 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         mpatches.Patch(color=colors[special_ninety_nine_index], label='No non-synonymous variation')
     ]
 
-    # Create a normalized matrix for plotting
     def normalize_matrix(matrix):
         matrix_normalized = np.zeros_like(matrix, dtype=float)
-        # Mask for special values
+        
+        # Define indices for special values first
+        special_minus_one_index = 0  # First color (light lavender)
+        special_ninety_nine_index = len(colors) - 1  # Last color (light red)
+        
+        # Create masks for different value types
         mask_minus_one = (matrix == -1)
         mask_ninety_nine = (matrix == 99)
         mask_normal = (~np.isnan(matrix)) & (~mask_minus_one) & (~mask_ninety_nine)
     
-        # Assign indices for every type of value. Colors only depend on value:
+        # Assign indices for every type of value
         # NaN values get -2
         matrix_normalized[np.isnan(matrix)] = -2
         
@@ -536,29 +540,14 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         # Anything above 3 gets capped at brightest viridis color
         matrix_normalized[mask_normal] = np.clip(((matrix[mask_normal] / 3.0) * 251).astype(int) + 1, 1, 252)
     
-        # Use completely separate indices for special values
-        # Use specific indices within colormap range for special values
-        special_minus_one_index = 0
-        special_ninety_nine_index = len(colors) - 1
-        
-        matrix_normalized[mask_minus_one] = special_minus_one_index
-        matrix_normalized[mask_ninety_nine] = special_ninety_nine_index
-    
-        # Assign NaN to a separate index
-        matrix_normalized[np.isnan(matrix)] = -2
-
         print("\n=== DEBUG: Value Mapping ===")
         print(f"Normalized values: {np.unique(matrix_normalized)}")
     
-        return matrix_normalized, omega_min, omega_max
+        return matrix_normalized, 0, 3  # Return fixed min/max for our omega scale
 
 
     matrix_0_norm, omega_min_0, omega_max_0 = normalize_matrix(matrix_0_full)
     matrix_1_norm, omega_min_1, omega_max_1 = normalize_matrix(matrix_1_full)
-
-    # Use combined omega_min and omega_max for consistent scaling
-    omega_min = min(omega_min_0, omega_min_1)
-    omega_max = max(omega_max_0, omega_max_1)
 
     # Reset any custom font settings to defaults
     plt.rcParams.update(plt.rcParamsDefault)
@@ -718,15 +707,12 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             normalized_value = super().__call__(value, clip)
             return normalized_value
 
-    omega_min = min(omega_min_0, omega_min_1)
-    omega_max = max(omega_max_0, omega_max_1)
-    # norm = MidpointNormalize(vmin=1, vmax=253, midpoint=(253 - 1) / 2)
-
     max_normal_index = len(colors) - 2
     norm = MidpointNormalize(vmin=1, vmax=max_normal_index, midpoint=(max_normal_index - 1) / 2)
 
-    # Create a ScalarMappable for the colorbar
-    sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=Normalize(vmin=omega_min, vmax=omega_max))
+    # Create a ScalarMappable for the colorbar with fixed 0->3 scale for omega values
+    sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=Normalize(vmin=0, vmax=3))
+
     sm.set_array([])
 
     # Add the colorbar
