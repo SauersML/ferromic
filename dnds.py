@@ -827,8 +827,9 @@ def main():
     for idx, phy_file in enumerate(phy_files, 1):
         phy_filename = os.path.basename(phy_file)
         cds_id = phy_filename.replace('.phy', '')
-        output_csv = os.path.join(args.output_dir, f'{cds_id}.csv')
-        haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}_haplotype_stats.csv')
+        mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
+        output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}.csv')
+        haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
         if os.path.exists(output_csv) and os.path.exists(haplotype_output_csv):
             logging.info(f"Skipping {phy_file} - output files already exist")
             continue
