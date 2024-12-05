@@ -562,7 +562,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     fig.suptitle(title, fontsize=18, fontweight='bold', y=0.95)
     
     def plot_matrices(ax, matrix, title):
-        """Plot matrix with special values in lower triangle, normal values in upper triangle."""
+        """Plot matrix with special values in one triangle, normal values in other triangle."""
         n = matrix.shape[0]
         
         # Make a copy of the matrix to avoid modifying original
@@ -575,24 +575,21 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         # Initialize final plotting matrix with NaN
         plot_matrix = np.full_like(matrix_plot, np.nan, dtype=float)
         
-        # UPPER TRIANGLE (will be flipped to lower in real plot): Only normal values (0-3)
-        # Get values in upper triangle and create mask for normal values
-        upper_values = matrix_plot[upper_triangle]
-        upper_mask = ~np.isnan(matrix_plot) & (matrix_plot != -1) & (matrix_plot != 99) & upper_triangle
-        if np.any(upper_mask):
-            values = matrix_plot[upper_mask]
-            capped_values = np.minimum(values, 3.0)
+        # First find ALL normal and special values in the ENTIRE matrix
+        normal_values_mask = ~np.isnan(matrix_plot) & (matrix_plot != -1) & (matrix_plot != 99)
+        special_minus_one_mask = (matrix_plot == -1)
+        special_ninety_nine_mask = (matrix_plot == 99)
+
+        # Now force normal values into upper triangle ONLY, regardless of where they were
+        if np.any(normal_values_mask):
+            normal_values = matrix_plot[normal_values_mask]
+            capped_values = np.minimum(normal_values, 3.0)
             mapped_values = 1 + (capped_values / 3.0 * 251)
-            plot_matrix[upper_mask] = mapped_values
-        
-        # LOWER TRIANGLE (will be flipped to lower in real plot): Only special values (-1 and 99)
-        # We only look at special values in lower triangle
-        lower_special_minus_one = lower_triangle & (matrix_plot == -1)
-        lower_special_ninety_nine = lower_triangle & (matrix_plot == 99)
-        
-        # Apply special values to lower triangle only
-        plot_matrix[lower_special_minus_one] = 0  # -1 maps to index 0 (lavender)
-        plot_matrix[lower_special_ninety_nine] = 253  # 99 maps to index 253 (light red)
+            plot_matrix[upper_triangle & normal_values_mask] = mapped_values
+
+        # Force special values into lower triangle ONLY
+        plot_matrix[lower_triangle & special_minus_one_mask] = 0
+        plot_matrix[lower_triangle & special_ninety_nine_mask] = 253
         
         # Print debug information
         n_upper = np.sum(~np.isnan(plot_matrix[upper_triangle]))
@@ -603,7 +600,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         print(f"Unique values in upper triangle: {np.unique(plot_matrix[upper_triangle])}")
         print(f"Unique values in lower triangle: {np.unique(plot_matrix[lower_triangle])}")
         
-        # Create plot
+        # Create plot: this changes what is upper and lower
         # Invert the matrix for visualization (1,1 at bottom-left)
         plot_matrix_inverted = plot_matrix[::-1, :]
         
