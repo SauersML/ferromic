@@ -190,7 +190,7 @@ def analysis_worker(args):
             re_formula='0',  # No random intercept for 'groups' since it's a dummy
             data=df
         )
-        result = model.fit(reml=False)  # Use ML estimation
+        result = model.fit(reml=True)  # Or use ML estimation where reml=False?
 
         # Extract results
         effect_size = result.fe_params['group']
