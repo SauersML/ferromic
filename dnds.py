@@ -22,13 +22,6 @@ Usage:
     python3 dnds_analysis.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
 """
 
-
-"""
-If you add a value with an existing key, it overwrites the previous value. So if there were two sequences with the same sample name, only the last one would be kept, and the earlier one would be overwritten.
-If there are duplicate sample names with different sequences, the later sequence silently overwrites the earlier one.
-The overwritten sequence is completely lost from the analysis.
-"""
-
 import os
 import sys
 import glob
@@ -243,6 +236,7 @@ def parse_phy_file(filepath):
     dict: Dictionary of sequences keyed by sample name.
     """
     sequences = {}
+    duplicates_found = False
     with open(filepath, 'r') as file:
         lines = file.readlines()
         if not lines:
@@ -271,16 +265,18 @@ def parse_phy_file(filepath):
             if validated_seq:
                 # If this sample name already exists in sequences dict
                 if sample_name in sequences:
+                    duplicates_found = True
                     # Find how many duplicates of this name we already have
                     base_name = sample_name[:2] + sample_name[3:]  # Get name without 3rd char
                     dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
                     # Create new name by replacing 3rd character with dup_count
                     new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
+                    print(f"DUPLICATE FOUND in {os.path.basename(filepath)}: {sample_name} -> {new_name}")
                     logging.info(f"Duplicate sample name found. Renaming {sample_name} to {new_name}")
                     sequences[new_name] = validated_seq
                 else:
                     sequences[sample_name] = validated_seq
-    return sequences
+    return sequences, duplicates_found
 
 # ----------------------------
 # Caching Mechanism
@@ -418,10 +414,19 @@ def process_phy_file(args):
         return haplotype_output_csv
 
     # Parse sequences
-    sequences = parse_phy_file(phy_file)
+    sequences, has_duplicates = parse_phy_file(phy_file)
     if not sequences:
         logging.error(f"No valid sequences in {phy_file}. Skipping.")
         return None
+
+    if has_duplicates:
+        print(f"CLEARING CACHE for {os.path.basename(phy_file)} due to duplicates")
+        logging.info(f"Clearing cache for {os.path.basename(phy_file)} due to duplicates")
+        # Remove all cached entries for this CDS
+        cds_id = os.path.basename(phy_file).replace('.phy', '')
+        keys_to_remove = [k for k in cache.keys() if k[0] == cds_id]
+        for k in keys_to_remove:
+            del cache[k]
 
     # Assign groups
     sample_groups = {}
