@@ -73,6 +73,8 @@ def read_and_preprocess_data(file_path):
 
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
+    seq1 = str(seq1)
+    seq2 = str(seq2)
     key = (seq1, seq2) if (seq1, seq2) in pairwise_dict else (seq2, seq1)
     val = pairwise_dict.get(key)
     if val is None:
@@ -785,8 +787,8 @@ def analyze_cds_parallel(args):
         return cds, cached_result
 
     # Create pairwise dictionary
-    pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega']
-                     for _, row in df_cds.iterrows()}
+    pairwise_dict = {(str(row['Seq1']), str(row['Seq2'])): row['omega']
+        for _, row in df_cds.iterrows()}
 
     # Collect all unique sequences from both 'Seq1' and 'Seq2' columns
     all_seqs = pd.concat([df_cds['Seq1'], df_cds['Seq2']]).unique()
