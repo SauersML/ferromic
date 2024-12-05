@@ -559,7 +559,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     else:
         title = f'Pairwise Comparison Analysis: {cds}'
     fig.suptitle(title, fontsize=18, fontweight='bold', y=0.95)
-
+    
     def plot_matrices(ax, matrix, title):
         """Plot matrix with special values in lower triangle, normal values in upper triangle."""
         n = matrix.shape[0]
@@ -571,29 +571,27 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         upper_triangle = np.triu(np.ones_like(matrix, dtype=bool), k=1)  
         lower_triangle = np.tril(np.ones_like(matrix, dtype=bool), k=-1)
         
-        # Create value-type masks
-        # These masks should be mutually exclusive
-        # Create masks for the actual omega values
-        normal_mask = ~np.isnan(matrix_plot) & (matrix_plot != -1) & (matrix_plot != 99)
-        special_minus_one = (matrix_plot == -1)  # Look for actual -1 values
-        special_ninety_nine = (matrix_plot == 99)  # Look for actual 99 values
-
-        # Create the final plotting matrix
-        # Initialize with NaN
+        # Initialize final plotting matrix with NaN
         plot_matrix = np.full_like(matrix_plot, np.nan, dtype=float)
         
-        # Fill upper triangle with normal values mapped to colors
-        normal_values = matrix_plot[upper_triangle & normal_mask]
-        if normal_values.size > 0:
-            # Direct mapping: 0->1, 3->252
-            capped_values = np.minimum(normal_values, 3.0)  # Cap at 3
+        # UPPER TRIANGLE (will be flipped to lower in real plot): Only normal values (0-3)
+        # Get values in upper triangle and create mask for normal values
+        upper_values = matrix_plot[upper_triangle]
+        upper_mask = ~np.isnan(matrix_plot) & (matrix_plot != -1) & (matrix_plot != 99) & upper_triangle
+        if np.any(upper_mask):
+            values = matrix_plot[upper_mask]
+            capped_values = np.minimum(values, 3.0)
             mapped_values = 1 + (capped_values / 3.0 * 251)
-            plot_matrix[upper_triangle & normal_mask] = mapped_values
-
-        # Fill lower triangle with special values
-        plot_matrix[lower_triangle & special_minus_one] = 0  # -1 maps to index 0 (lavender)
-        plot_matrix[lower_triangle & special_ninety_nine] = 253  # 99 maps to index 253 (light red)
-    
+            plot_matrix[upper_mask] = mapped_values
+        
+        # LOWER TRIANGLE (will be flipped to lower in real plot): Only special values (-1 and 99)
+        # We only look at special values in lower triangle
+        lower_special_minus_one = lower_triangle & (matrix_plot == -1)
+        lower_special_ninety_nine = lower_triangle & (matrix_plot == 99)
+        
+        # Apply special values to lower triangle only
+        plot_matrix[lower_special_minus_one] = 0  # -1 maps to index 0 (lavender)
+        plot_matrix[lower_special_ninety_nine] = 253  # 99 maps to index 253 (light red)
         
         # Print debug information
         n_upper = np.sum(~np.isnan(plot_matrix[upper_triangle]))
@@ -625,6 +623,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         
         ax.set_title(title, fontsize=14, pad=12)
         ax.tick_params(axis='both', which='both', length=0)
+        
 
     # Plot for Group 0
     ax1 = fig.add_subplot(gs[0, 0])
