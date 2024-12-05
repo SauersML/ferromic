@@ -903,7 +903,7 @@ def parse_cds_coordinates(cds_name):
         print(f"Error parsing {cds_name}: {str(e)}")
         return None, None, None
 
-def build_overlap_clusters(results_df):
+def build_overlap_clusters(results_df): # test on longest instead
     """Build clusters of overlapping CDS regions."""
     print(f"\nAnalyzing {len(results_df)} CDS entries")
 
@@ -968,7 +968,7 @@ def build_overlap_clusters(results_df):
 
     return clusters
 
-def combine_cluster_evidence(cluster_cdss, results_df, results):
+def combine_cluster_evidence(cluster_cdss, results_df, results): 
     """Combine statistics for a cluster of overlapping CDSs using the smallest p-value."""
     cluster_data = results_df[results_df['CDS'].isin(cluster_cdss)]
 
