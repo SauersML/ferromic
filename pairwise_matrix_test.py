@@ -517,37 +517,31 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ]
 
     def normalize_matrix(matrix):
-        matrix_normalized = np.zeros_like(matrix, dtype=float)
-        
-        # Define indices for special values first
-        special_minus_one_index = 0  # First color (light lavender)
-        special_ninety_nine_index = len(colors) - 1  # Last color (light red)
+        matrix_normalized = np.full_like(matrix, -2, dtype=float)  # -2 represents NaN
         
         # Create masks for different value types
         mask_minus_one = (matrix == -1)
         mask_ninety_nine = (matrix == 99)
         mask_normal = (~np.isnan(matrix)) & (~mask_minus_one) & (~mask_ninety_nine)
-    
-        # Assign indices for every type of value
-        # NaN values get -2
-        matrix_normalized[np.isnan(matrix)] = -2
         
-        # Special values get their special fixed indices
-        matrix_normalized[mask_minus_one] = special_minus_one_index  # 0
-        matrix_normalized[mask_ninety_nine] = special_ninety_nine_index  # 253
+        # Special values get fixed indices
+        matrix_normalized[mask_minus_one] = 0  # First color (light lavender)
+        matrix_normalized[mask_ninety_nine] = 253  # Last color (light red)
         
-        # Normal values get mapped from 0->3 onto viridis range 1-252
-        # Anything above 3 gets capped at brightest viridis color
-        matrix_normalized[mask_normal] = np.clip(((matrix[mask_normal] / 3.0) * 251).astype(int) + 1, 1, 252)
-    
-        print("\n=== DEBUG: Value Mapping ===")
-        print(f"Normalized values: {np.unique(matrix_normalized)}")
-    
-        return matrix_normalized, 0, 3  # Return fixed min/max for our omega scale
+        # Normal values (0-3) get mapped to indices 1-252
+        normal_values = matrix[mask_normal]
+        if normal_values.size > 0:
+            # Cap values at 3.0
+            capped_values = np.minimum(normal_values, 3.0)
+            # Map 0->3 to 1->252
+            mapped_values = 1 + (capped_values / 3.0 * 251)
+            matrix_normalized[mask_normal] = mapped_values
+        
+        return matrix_normalized
 
 
-    matrix_0_norm, omega_min_0, omega_max_0 = normalize_matrix(matrix_0_full)
-    matrix_1_norm, omega_min_1, omega_max_1 = normalize_matrix(matrix_1_full)
+    matrix_0_norm = normalize_matrix(matrix_0_full)
+    matrix_1_norm = normalize_matrix(matrix_1_full)
 
     # Reset any custom font settings to defaults
     plt.rcParams.update(plt.rcParamsDefault)
