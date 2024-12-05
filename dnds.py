@@ -22,6 +22,13 @@ Usage:
     python3 dnds_analysis.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
 """
 
+
+"""
+If you add a value with an existing key, it overwrites the previous value. So if there were two sequences with the same sample name, only the last one would be kept, and the earlier one would be overwritten.
+If there are duplicate sample names with different sequences, the later sequence silently overwrites the earlier one.
+The overwritten sequence is completely lost from the analysis.
+"""
+
 import os
 import sys
 import glob
