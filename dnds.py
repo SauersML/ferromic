@@ -269,7 +269,17 @@ def parse_phy_file(filepath):
                 sequence = line[10:].replace(" ", "")
             validated_seq = validate_sequence(sequence)
             if validated_seq:
-                sequences[sample_name] = validated_seq
+                # If this sample name already exists in sequences dict
+                if sample_name in sequences:
+                    # Find how many duplicates of this name we already have
+                    base_name = sample_name[:2] + sample_name[3:]  # Get name without 3rd char
+                    dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
+                    # Create new name by replacing 3rd character with dup_count
+                    new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
+                    logging.info(f"Duplicate sample name found. Renaming {sample_name} to {new_name}")
+                    sequences[new_name] = validated_seq
+                else:
+                    sequences[sample_name] = validated_seq
     return sequences
 
 # ----------------------------
