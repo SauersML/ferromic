@@ -524,21 +524,17 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         mask_ninety_nine = (matrix == 99)
         mask_normal = (~np.isnan(matrix)) & (~mask_minus_one) & (~mask_ninety_nine)
     
-        # Assign indices for normal omega values
-        if np.any(mask_normal):
-            omega_min = np.nanmin(matrix[mask_normal])
-            omega_max = np.nanmax(matrix[mask_normal])
-            # Handle the case where all normal omega values are identical
-            if omega_max == omega_min:
-                # Assign a middle index for the colormap to avoid confusion with special values
-                mid_index = (len(colors) - 3) // 2 + 1  # Middle index between 1 and len(colors) - 2
-                matrix_normalized[mask_normal] = mid_index
-            else:
-                # Use indices 1 to len(colors) - 2 for normal values
-                matrix_normalized[mask_normal] = ((matrix[mask_normal] - omega_min) / (omega_max - omega_min) * (len(colors) - 3)).astype(int) + 1
-        else:
-            omega_min = 0
-            omega_max = 1
+        # Assign indices for every type of value. Colors only depend on value:
+        # NaN values get -2
+        matrix_normalized[np.isnan(matrix)] = -2
+        
+        # Special values get their special fixed indices
+        matrix_normalized[mask_minus_one] = special_minus_one_index  # 0
+        matrix_normalized[mask_ninety_nine] = special_ninety_nine_index  # 253
+        
+        # Normal values get mapped from 0->3 onto viridis range 1-252
+        # Anything above 3 gets capped at brightest viridis color
+        matrix_normalized[mask_normal] = np.clip(((matrix[mask_normal] / 3.0) * 251).astype(int) + 1, 1, 252)
     
         # Use completely separate indices for special values
         # Use specific indices within colormap range for special values
