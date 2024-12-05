@@ -65,6 +65,10 @@ def read_and_preprocess_data(file_path):
     # LATER we need to DROP -1 and 99 values for the analysis
     df = df.dropna(subset=['omega'])
 
+    # Collect all unique sequence IDs from both 'Seq1' and 'Seq2' columns
+    unique_seqs = pd.concat([df['Seq1'], df['Seq2']]).dropna().unique()
+    print(f"Total unique sequence IDs: {len(unique_seqs):,}")
+    
     print(f"Total valid comparisons: {len(df):,}")
     print(f"Unique CDSs found: {df['CDS'].nunique():,}")
     return df
