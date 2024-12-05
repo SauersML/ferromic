@@ -56,21 +56,50 @@ def save_cached_result(cds, result):
     with open(cache_path, 'wb') as f:
         pickle.dump(result, f)
 
+
 def read_and_preprocess_data(file_path):
     """Read and preprocess the CSV file."""
     print("Reading data...")
     df = pd.read_csv(file_path)
-
+    
     # Do not filter out omega values; include all omega values
-    # LATER we need to DROP -1 and 99 values for the analysis
     df = df.dropna(subset=['omega'])
-
+    
+    # Assign sequences to groups based on whether they end with '1' before making IDs unique
+    def assign_group(seq_id):
+        return 1 if str(seq_id).endswith('1') else 0
+    
     # Collect all unique sequence IDs from both 'Seq1' and 'Seq2' columns
-    unique_seqs = pd.concat([df['Seq1'], df['Seq2']]).dropna().unique()
-
-    # Assign sequences to groups based on whether they end with '1'
-    group_0_seqs = [seq for seq in unique_seqs if not str(seq).endswith('1')]
-    group_1_seqs = [seq for seq in unique_seqs if str(seq).endswith('1')]
+    unique_sequence_ids = pd.concat([df['Seq1'], df['Seq2']]).dropna().unique()
+    
+    # Create a mapping from original sequence IDs to unique IDs
+    seq_id_mapping = {}
+    sequence_group = {}
+    seq_id_counts = defaultdict(int)
+    
+    for seq_id in unique_sequence_ids:
+        # Increment count for this sequence ID
+        seq_id_counts[seq_id] += 1
+        # Create a unique ID by appending the count
+        unique_id = f"{seq_id}_{seq_id_counts[seq_id]}"
+        seq_id_mapping[seq_id, seq_id_counts[seq_id]] = unique_id
+        # Assign group to the unique ID
+        sequence_group[unique_id] = assign_group(seq_id)
+    
+    # Now, map the original Seq1 and Seq2 IDs to unique IDs
+    df['Seq1_original'] = df['Seq1']
+    df['Seq2_original'] = df['Seq2']
+    
+    # We need to map based on the sequence occurrence, so create helper columns
+    df['Seq1_occurrence'] = df.groupby('Seq1').cumcount() + 1
+    df['Seq2_occurrence'] = df.groupby('Seq2').cumcount() + 1
+    
+    df['Seq1'] = df.apply(lambda x: seq_id_mapping.get((x['Seq1'], x['Seq1_occurrence'])), axis=1)
+    df['Seq2'] = df.apply(lambda x: seq_id_mapping.get((x['Seq2'], x['Seq2_occurrence'])), axis=1)
+    
+    # Now, create lists of sequences in each group using the unique IDs
+    group_0_seqs = [seq_id for seq_id, group in sequence_group.items() if group == 0]
+    group_1_seqs = [seq_id for seq_id, group in sequence_group.items() if group == 1]
 
     # Print the counts for each group
     print(f"Total unique sequence IDs in Group 0: {len(group_0_seqs):,}")
@@ -79,6 +108,10 @@ def read_and_preprocess_data(file_path):
     print(f"Total valid comparisons: {len(df):,}")
     print(f"Unique CDSs found: {df['CDS'].nunique():,}")
     return df
+
+
+
+
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
     seq1 = str(seq1)
