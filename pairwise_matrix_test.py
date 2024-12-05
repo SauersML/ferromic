@@ -573,9 +573,22 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         
         # Create value-type masks
         # These masks should be mutually exclusive
-        normal_mask = (matrix_plot >= 1) & (matrix_plot <= len(colors) - 2)  # Normal omega values
-        special_minus_one = (matrix_plot == 0)  # index for -1 values
-        special_ninety_nine = (matrix_plot == len(colors) - 1)  # index for 99 values
+        # Create masks for the actual omega values
+        normal_mask = ~np.isnan(matrix_plot) & (matrix_plot != -1) & (matrix_plot != 99)
+        special_minus_one = (matrix_plot == -1)  # Look for actual -1 values
+        special_ninety_nine = (matrix_plot == 99)  # Look for actual 99 values
+        
+        # Fill upper triangle with normal values mapped to colors
+        normal_values = matrix_plot[upper_triangle & normal_mask]
+        if normal_values.size > 0:
+            # Direct mapping: 0->1, 3->252
+            capped_values = np.minimum(normal_values, 3.0)  # Cap at 3
+            mapped_values = 1 + (capped_values / 3.0 * 251)
+            plot_matrix[upper_triangle & normal_mask] = mapped_values
+
+        # Fill lower triangle with special values
+        plot_matrix[lower_triangle & special_minus_one] = 0  # -1 maps to index 0 (lavender)
+        plot_matrix[lower_triangle & special_ninety_nine] = 253  # 99 maps to index 253 (light red)
         
         # Create the final plotting matrix
         # Initialize with NaN
