@@ -42,6 +42,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import pickle
 
+COMPARE_BETWEEN_GROUPS = True  # Set to True to enable between-group comparisons
+
 # ----------------------------
 # Setup Logging
 # ----------------------------
@@ -341,7 +343,7 @@ def process_pair(args):
     group1 = sample_groups.get(seq1_name)
     group2 = sample_groups.get(seq2_name)
 
-    if group1 != group2:
+    if not COMPARE_BETWEEN_GROUPS and group1 != group2:
         logging.error(f"Sequences from different groups: {seq1_name}, {seq2_name}")
         return None
 
@@ -437,14 +439,18 @@ def process_phy_file(args):
             return None
         sample_groups[sample_name] = group
 
-    # Generate pairs within groups
-    group0_samples = [s for s, g in sample_groups.items() if g == 0]
-    group1_samples = [s for s, g in sample_groups.items() if g == 1]
-
-    group0_pairs = list(combinations(group0_samples, 2))
-    group1_pairs = list(combinations(group1_samples, 2))
-
-    pairs = group0_pairs + group1_pairs
+    # Generate pairs based on comparison mode
+    if COMPARE_BETWEEN_GROUPS:
+        # Generate all possible pairs between all samples
+        all_samples = list(sample_groups.keys())
+        pairs = list(combinations(all_samples, 2))
+    else:
+        # Generate only within-group pairs
+        group0_samples = [s for s, g in sample_groups.items() if g == 0]
+        group1_samples = [s for s, g in sample_groups.items() if g == 1]
+        group0_pairs = list(combinations(group0_samples, 2))
+        group1_pairs = list(combinations(group1_samples, 2))
+        pairs = group0_pairs + group1_pairs
 
     if not pairs:
         logging.error(f"No pairs to process in {phy_file}. Skipping.")
