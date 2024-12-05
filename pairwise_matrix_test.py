@@ -518,7 +518,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ]
 
     def normalize_matrix(matrix):
-        matrix_normalized = np.full_like(matrix, -2, dtype=float)  # -2 represents NaN
+        matrix_normalized = np.full_like(matrix, np.nan)
         
         # Create masks for different value types
         mask_minus_one = (matrix == -1)
@@ -594,12 +594,17 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         # Initialize with NaN
         plot_matrix = np.full_like(matrix_plot, np.nan, dtype=float)
         
-        # Fill upper triangle with normal values only
-        plot_matrix[upper_triangle & normal_mask] = matrix_plot[upper_triangle & normal_mask]
-        
-        # Fill lower triangle with special values only
-        plot_matrix[lower_triangle & special_minus_one] = 0  # Use index 0
-        plot_matrix[lower_triangle & special_ninety_nine] = len(colors) - 1  # Use last index
+        # Fill upper triangle with mapped normal values
+        normal_values = matrix_plot[upper_triangle & normal_mask]
+        if normal_values.size > 0:
+            # Direct mapping: 0->1, 3->252
+            capped_values = np.minimum(normal_values, 3.0)  # Cap at 3
+            mapped_values = 1 + (capped_values / 3.0 * 251)
+            plot_matrix[upper_triangle & normal_mask] = mapped_values
+
+        # Fill lower triangle with special values
+        plot_matrix[lower_triangle & special_minus_one] = 0  # -1 maps to index 0 (lavender)
+        plot_matrix[lower_triangle & special_ninety_nine] = 253  # 99 maps to index 253 (light red)
         
         # Print debug information
         n_upper = np.sum(~np.isnan(plot_matrix[upper_triangle]))
