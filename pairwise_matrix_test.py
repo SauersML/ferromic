@@ -1,3 +1,4 @@
+
 import pandas as pd
 import numpy as np
 from collections import defaultdict
@@ -581,12 +582,11 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         special_ninety_nine_mask = (matrix_plot == 99)
 
         # Now force normal values into upper triangle ONLY, regardless of where they were
-        upper_normal = np.logical_and(upper_triangle, normal_values_mask)
-        if np.any(upper_normal):
-            normal_values = matrix_plot[upper_normal]
+        if np.any(normal_values_mask):
+            normal_values = matrix_plot[normal_values_mask]
             capped_values = np.minimum(normal_values, 3.0)
             mapped_values = 1 + (capped_values / 3.0 * 251)
-            plot_matrix[upper_normal] = mapped_values
+            plot_matrix[upper_triangle & normal_values_mask] = mapped_values
 
         # Force special values into lower triangle ONLY
         plot_matrix[lower_triangle & special_minus_one_mask] = 0
