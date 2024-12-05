@@ -61,11 +61,9 @@ def read_and_preprocess_data(file_path):
     print("Reading data...")
     df = pd.read_csv(file_path)
 
-    # Filtering valid omega values
-    df = df[
-        (df['omega'] != -1) &
-        (df['omega'] != 99)
-    ].dropna(subset=['omega'])
+    # Do not filter out omega values; include all omega values
+    # LATER we need to DROP -1 and 99 values for the analysis
+    df = df.dropna(subset=['omega'])
 
     print(f"Total valid comparisons: {len(df):,}")
     print(f"Unique CDSs found: {df['CDS'].nunique():,}")
