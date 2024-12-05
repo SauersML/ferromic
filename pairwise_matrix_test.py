@@ -19,7 +19,6 @@ from matplotlib.colorbar import ColorbarBase
 import matplotlib.patches as mpatches
 import requests
 from urllib.parse import urlencode
-from joblib import Parallel, delayed
 
 
 # Suppress warnings
@@ -1130,7 +1129,7 @@ def main():
     significant_results = results_df.sort_values('p_value')
 
     # Create visualizations for top significant results
-    def process_row(row):
+    for _, row in significant_results.head(30).iterrows():
         cds = row['CDS']
         viz_result = results[cds]  # Get full result with matrices
         create_visualization(
@@ -1139,13 +1138,6 @@ def main():
             cds,
             row  # Use row for stats since they're the same
         )
-    
-    # Create visualizations for top significant results in parallel
-    Parallel(n_jobs=-1)(
-        delayed(process_row)(row) 
-        for _, row in significant_results.head(30).iterrows()
-    )
-
 
     # Print summary statistics
     valid_results = results_df[~results_df['p_value'].isna()]
