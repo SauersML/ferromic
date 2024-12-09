@@ -76,11 +76,11 @@ def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
     key = (seq1, seq2) if (seq1, seq2) in pairwise_dict else (seq2, seq1)
     val = pairwise_dict.get(key)
-    if val is None:
-        print(f"\n=== DEBUG: Failed pairwise lookup ===")
-        print(f"Tried keys: {(seq1, seq2)}, {(seq2, seq1)}")
-        print(f"Key type attempted: {type((seq1, seq2))}")
-        print(f"Sample dict key type: {type(list(pairwise_dict.keys())[0])}")
+    #if val is None:
+        #print(f"\n=== DEBUG: Failed pairwise lookup ===")
+        #print(f"Tried keys: {(seq1, seq2)}, {(seq2, seq1)}")
+        #print(f"Key type attempted: {type((seq1, seq2))}")
+        #print(f"Sample dict key type: {type(list(pairwise_dict.keys())[0])}")
     return val
 
 def create_matrices(sequences_0, sequences_1, pairwise_dict):
