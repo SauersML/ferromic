@@ -61,24 +61,16 @@ def read_and_preprocess_data(file_path):
     print("Reading data...")
     df = pd.read_csv(file_path)
 
-    # Do not filter out omega values; include all omega values
-    # LATER we need to DROP -1 and 99 values for the analysis
-    df = df.dropna(subset=['omega'])
-
-    # Collect all unique sequence IDs from both 'Seq1' and 'Seq2' columns
-    unique_seqs = pd.concat([df['Seq1'], df['Seq2']]).dropna().unique()
-
-    # Assign sequences to groups based on whether they end with '1'
-    group_0_seqs = [seq for seq in unique_seqs if not str(seq).endswith('1')]
-    group_1_seqs = [seq for seq in unique_seqs if str(seq).endswith('1')]
-
-    # Print the counts for each group
-    print(f"Total unique sequence IDs in Group 0: {len(group_0_seqs):,}")
-    print(f"Total unique sequence IDs in Group 1: {len(group_1_seqs):,}")
+    # Filtering valid omega values
+    df = df[
+        (df['omega'] != -1) &
+        (df['omega'] != 99)
+    ].dropna(subset=['omega'])
 
     print(f"Total valid comparisons: {len(df):,}")
     print(f"Unique CDSs found: {df['CDS'].nunique():,}")
     return df
+
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
     seq1 = str(seq1)
