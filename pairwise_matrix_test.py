@@ -56,59 +56,21 @@ def save_cached_result(cds, result):
     with open(cache_path, 'wb') as f:
         pickle.dump(result, f)
 
-
 def read_and_preprocess_data(file_path):
     """Read and preprocess the CSV file."""
     print("Reading data...")
     df = pd.read_csv(file_path)
-    
+
     # Do not filter out omega values; include all omega values
+    # LATER we need to DROP -1 and 99 values for the analysis
     df = df.dropna(subset=['omega'])
-    
-    # Assign sequences to groups based on whether they end with '1' before making IDs unique
-    def assign_group(seq_id):
-        return 1 if str(seq_id).endswith('1') else 0
 
-    # Before creating the mapping, we must have original IDs and occurrence counts.
-    # First, define Seq1_original and Seq2_original as copies of Seq1 and Seq2.
-    df['Seq1_original'] = df['Seq1']
-    df['Seq2_original'] = df['Seq2']
+    # Collect all unique sequence IDs from both 'Seq1' and 'Seq2' columns
+    unique_seqs = pd.concat([df['Seq1'], df['Seq2']]).dropna().unique()
 
-    # Compute occurrence counts per sequence ID as they appear
-    df['Seq1_occurrence'] = df.groupby('Seq1')['Seq1'].cumcount() + 1
-    df['Seq2_occurrence'] = df.groupby('Seq2')['Seq2'].cumcount() + 1
-    
-    # Now create a mapping from original sequence IDs + occurrence to unique IDs
-    seq_id_mapping = {}
-    sequence_group = {}
-    seq_id_counts = defaultdict(int)
-
-    # Iterate through rows to populate seq_id_mapping for each sequence occurrence
-    for _, row in df.iterrows():
-        s1, occ1 = row['Seq1_original'], row['Seq1_occurrence']
-        s2, occ2 = row['Seq2_original'], row['Seq2_occurrence']
-
-        # If Seq1 is valid and not yet mapped, create a unique ID
-        if pd.notnull(s1) and (s1, occ1) not in seq_id_mapping:
-            seq_id_counts[s1] += 1
-            unique_id = f"{s1}_{occ1}"
-            seq_id_mapping[(s1, occ1)] = unique_id
-            sequence_group[unique_id] = assign_group(s1)
-
-        # If Seq2 is valid and not yet mapped, create a unique ID
-        if pd.notnull(s2) and (s2, occ2) not in seq_id_mapping:
-            seq_id_counts[s2] += 1
-            unique_id = f"{s2}_{occ2}"
-            seq_id_mapping[(s2, occ2)] = unique_id
-            sequence_group[unique_id] = assign_group(s2)
-
-    # Map Seq1 and Seq2 to their unique IDs
-    df['Seq1'] = df.apply(lambda x: seq_id_mapping.get((x['Seq1_original'], x['Seq1_occurrence'])), axis=1)
-    df['Seq2'] = df.apply(lambda x: seq_id_mapping.get((x['Seq2_original'], x['Seq2_occurrence'])), axis=1)
-
-    # Now, create lists of sequences in each group using the unique IDs
-    group_0_seqs = [seq_id for seq_id, g in sequence_group.items() if g == 0]
-    group_1_seqs = [seq_id for seq_id, g in sequence_group.items() if g == 1]
+    # Assign sequences to groups based on whether they end with '1'
+    group_0_seqs = [seq for seq in unique_seqs if not str(seq).endswith('1')]
+    group_1_seqs = [seq for seq in unique_seqs if str(seq).endswith('1')]
 
     # Print the counts for each group
     print(f"Total unique sequence IDs in Group 0: {len(group_0_seqs):,}")
@@ -117,7 +79,6 @@ def read_and_preprocess_data(file_path):
     print(f"Total valid comparisons: {len(df):,}")
     print(f"Unique CDSs found: {df['CDS'].nunique():,}")
     return df
-
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
     seq1 = str(seq1)
@@ -909,7 +870,7 @@ def parse_cds_coordinates(cds_name):
         print(f"Error parsing {cds_name}: {str(e)}")
         return None, None, None
 
-def build_overlap_clusters(results_df): # test on longest instead
+def build_overlap_clusters(results_df):
     """Build clusters of overlapping CDS regions."""
     print(f"\nAnalyzing {len(results_df)} CDS entries")
 
@@ -974,7 +935,7 @@ def build_overlap_clusters(results_df): # test on longest instead
 
     return clusters
 
-def combine_cluster_evidence(cluster_cdss, results_df, results): 
+def combine_cluster_evidence(cluster_cdss, results_df, results):
     """Combine statistics for a cluster of overlapping CDSs using the smallest p-value."""
     cluster_data = results_df[results_df['CDS'].isin(cluster_cdss)]
 
