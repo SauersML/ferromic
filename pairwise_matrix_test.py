@@ -1,3 +1,4 @@
+
 import pandas as pd
 import numpy as np
 from collections import defaultdict
@@ -73,8 +74,6 @@ def read_and_preprocess_data(file_path):
 
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """Get omega value for a pair of sequences."""
-    seq1 = str(seq1)
-    seq2 = str(seq2)
     key = (seq1, seq2) if (seq1, seq2) in pairwise_dict else (seq2, seq1)
     val = pairwise_dict.get(key)
     if val is None:
@@ -192,7 +191,7 @@ def analysis_worker(args):
             re_formula='0',  # No random intercept for 'groups' since it's a dummy
             data=df
         )
-        result = model.fit(reml=True)  # Or use ML estimation where reml=False?
+        result = model.fit(reml=False)  # Use ML estimation
 
         # Extract results
         effect_size = result.fe_params['group']
@@ -562,110 +561,72 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         title = f'Pairwise Comparison Analysis: {cds}'
     fig.suptitle(title, fontsize=18, fontweight='bold', y=0.95)
 
-
     def plot_matrices(ax, matrix, title):
-        """Plot matrix with special values in lower triangle, normal values in upper triangle.
-        
-        Args:
-            ax: matplotlib axis to plot on
-            matrix: normalized matrix (0-253 range where 0=omega -1, 253=omega 99, 1-252=omega 0-3)
-            title: title for the plot
-            
-        The function automatically handles:
-            - Special omega values (-1=0, 99=253)
-            - Normal omega values (mapped to 1-252)
-            - NaN values (masked/not shown)
-            - Edge cases (all special, all normal, empty matrices)
-            - Data validation and verification
-            - Diagonal elements properly masked
-        """
-        # VALIDATION AND DEBUG PRINTS
-        print("\n=== Matrix Analysis ===")
-        print(f"Matrix shape: {matrix.shape}")
-        print(f"Value range: {np.nanmin(matrix):.1f} to {np.nanmax(matrix):.1f}")
-        print(f"Unique values: {sorted(np.unique(matrix[~np.isnan(matrix)]))}")
-        print("Special value counts:")
-        print(f"  Index 0 (omega=-1): {np.sum(matrix == 0)}")
-        print(f"  Index 253 (omega=99): {np.sum(matrix == 253)}")
-        print(f"Normal value count: {np.sum((matrix > 0) & (matrix < 253))}")
-        print(f"NaN count: {np.sum(np.isnan(matrix))}")
-    
-        # Input validation
-        if matrix.shape[0] != matrix.shape[1]:
-            raise ValueError("Input matrix must be square")
-        
-        # Create base masked array with diagonal masked
+        """Plot matrix with special values in lower triangle, normal values in upper triangle."""
         n = matrix.shape[0]
-        diagonal_mask = np.eye(n, dtype=bool)
         
-        # Start with a completely masked array
-        final_matrix = np.ma.masked_all(matrix.shape)
+        # Make a copy of the matrix to avoid modifying original
+        matrix_plot = matrix.copy()
         
-        # Get indices for upper and lower triangles
-        rows, cols = np.tril_indices(n, k=-1)  # Lower triangle
-        upper_rows, upper_cols = np.triu_indices(n, k=1)  # Upper triangle
+        # Create basic triangular masks
+        upper_triangle = np.triu(np.ones_like(matrix, dtype=bool), k=1)  
+        lower_triangle = np.tril(np.ones_like(matrix, dtype=bool), k=-1)
         
-        # Create masks for special and normal values, excluding diagonal
-        special_mask = ((matrix == 0) | (matrix == 253)) & ~diagonal_mask
-        normal_mask = ((matrix > 0) & (matrix < 253)) & ~diagonal_mask
+        # Create value-type masks
+        # These masks should be mutually exclusive
+        # Create masks for the actual omega values
+        normal_mask = ~np.isnan(matrix_plot) & (matrix_plot != -1) & (matrix_plot != 99)
+        special_minus_one = (matrix_plot == -1)  # Look for actual -1 values
+        special_ninety_nine = (matrix_plot == 99)  # Look for actual 99 values
+
+        # Create the final plotting matrix
+        # Initialize with NaN
+        plot_matrix = np.full_like(matrix_plot, np.nan, dtype=float)
         
-        # Verify masks are mutually exclusive
-        overlap = special_mask & normal_mask
-        if np.any(overlap):
-            print("\nWARNING: Overlap detected between special and normal masks!")
-            print(f"Overlap positions: {np.where(overlap)}")
-            print("Values at overlap positions:", matrix[overlap])
-        
-        # VERIFICATION PRINTS
-        print("\n=== Mask Verification ===")
-        print(f"Special values (excluding diagonal): {np.sum(special_mask)}")
-        print(f"Normal values (excluding diagonal): {np.sum(normal_mask)}")
-        print(f"Diagonal elements: {np.sum(diagonal_mask)}")
-        print(f"Total masked elements: {np.sum(final_matrix.mask)}")
-        
+        # Fill upper triangle with normal values mapped to colors
+        normal_values = matrix_plot[upper_triangle & normal_mask]
+        if normal_values.size > 0:
+            # Direct mapping: 0->1, 3->252
+            capped_values = np.minimum(normal_values, 3.0)  # Cap at 3
+            mapped_values = 1 + (capped_values / 3.0 * 251)
+            plot_matrix[upper_triangle & normal_mask] = mapped_values
+
         # Fill lower triangle with special values
-        for i, j in zip(rows, cols):
-            if special_mask[i, j]:
-                final_matrix[i, j] = matrix[i, j]
-        
-        # Fill upper triangle with normal values
-        for i, j in zip(upper_rows, upper_cols):
-            if normal_mask[i, j]:
-                final_matrix[i, j] = matrix[i, j]
-        
-        # FINAL VERIFICATION
-        print("\n=== Final Matrix Verification ===")
-        print("Lower triangle (special values):")
-        lower_values = final_matrix[rows, cols]
-        print(f"  Total filled values: {np.sum(~lower_values.mask)}")
-        print(f"  Non-special values: {np.sum(~lower_values.mask & ((lower_values != 0) & (lower_values != 253)))}")
-        
-        print("\nUpper triangle (normal values):")
-        upper_values = final_matrix[upper_rows, upper_cols]
-        print(f"  Total filled values: {np.sum(~upper_values.mask)}")
-        print(f"  Special values: {np.sum(~upper_values.mask & ((upper_values == 0) | (upper_values == 253)))}")
-        
-        # Verify diagonal is masked
-        print("\nDiagonal verification:")
-        diagonal_elements = np.diagonal(final_matrix)
-        print(f"  Masked diagonal elements: {np.sum(diagonal_elements.mask)} (should be {n})")
-        
-        # Create the plot with verified data
-        im = ax.imshow(final_matrix, origin='lower', interpolation='nearest', cmap=new_cmap)
-
-        # Clean up plot
-        ax.set_title(title, pad=10)
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-        # FINAL VISUAL VERIFICATION
-        print("\n=== Visual Elements Verification ===")
-        print(f"Plot limits: {ax.get_xlim()}, {ax.get_ylim()}")
-        print(f"Matrix shape matches plot dimensions: {matrix.shape == (ax.get_xlim()[1] + 1, ax.get_ylim()[1] + 1)}")
-        
-        return im
-
+        plot_matrix[lower_triangle & special_minus_one] = 0  # -1 maps to index 0 (lavender)
+        plot_matrix[lower_triangle & special_ninety_nine] = 253  # 99 maps to index 253 (light red)
     
+        
+        # Print debug information
+        n_upper = np.sum(~np.isnan(plot_matrix[upper_triangle]))
+        n_lower = np.sum(~np.isnan(plot_matrix[lower_triangle]))
+        print("\n=== DEBUG: Matrix Layout ===")
+        print(f"Number of values in upper triangle: {n_upper}")
+        print(f"Number of values in lower triangle: {n_lower}")
+        print(f"Unique values in upper triangle: {np.unique(plot_matrix[upper_triangle])}")
+        print(f"Unique values in lower triangle: {np.unique(plot_matrix[lower_triangle])}")
+        
+        # Create plot
+        # Invert the matrix for visualization (1,1 at bottom-left)
+        plot_matrix_inverted = plot_matrix[::-1, :]
+        
+        # Create mask for values we don't want to show (NaN)
+        mask = np.isnan(plot_matrix_inverted)
+        
+        # Plot using seaborn
+        sns.heatmap(
+            plot_matrix_inverted,
+            mask=mask,
+            cmap=new_cmap,
+            ax=ax,
+            cbar=False,
+            square=True,
+            xticklabels=False,
+            yticklabels=False
+        )
+        
+        ax.set_title(title, fontsize=14, pad=12)
+        ax.tick_params(axis='both', which='both', length=0)
+
     # Plot for Group 0
     ax1 = fig.add_subplot(gs[0, 0])
     plot_matrices(ax1, matrix_0_norm, f'Direct Sequence Matrix (n={len(sequences_0)})')
@@ -735,8 +696,25 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             cell.set_text_props(weight='bold')
         cell.set_edgecolor('gray')
 
+    # Create colorbar
+    from matplotlib.colors import Normalize
 
-    sm = plt.cm.ScalarMappable(cmap=cmap_viridis)
+    # Custom normalization for colorbar
+    class MidpointNormalize(Normalize):
+        def __init__(self, vmin=None, vmax=None, midpoint=None, clip=False):
+            self.midpoint = midpoint
+            super().__init__(vmin, vmax, clip)
+
+        def __call__(self, value, clip=None):
+            # Normalize normal omega values between 0 and 1
+            normalized_value = super().__call__(value, clip)
+            return normalized_value
+
+    max_normal_index = len(colors) - 2
+    norm = MidpointNormalize(vmin=1, vmax=max_normal_index, midpoint=(max_normal_index - 1) / 2)
+
+    # Create a ScalarMappable for the colorbar with fixed 0->3 scale for omega values
+    sm = plt.cm.ScalarMappable(cmap=cmap_viridis, norm=Normalize(vmin=0, vmax=3))
 
     sm.set_array([])
 
@@ -787,8 +765,8 @@ def analyze_cds_parallel(args):
         return cds, cached_result
 
     # Create pairwise dictionary
-    pairwise_dict = {(str(row['Seq1']), str(row['Seq2'])): row['omega']
-        for _, row in df_cds.iterrows()}
+    pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega']
+                     for _, row in df_cds.iterrows()}
 
     # Collect all unique sequences from both 'Seq1' and 'Seq2' columns
     all_seqs = pd.concat([df_cds['Seq1'], df_cds['Seq2']]).unique()
