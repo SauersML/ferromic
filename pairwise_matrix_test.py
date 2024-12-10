@@ -22,6 +22,7 @@ import requests
 from urllib.parse import urlencode
 from matplotlib.ticker import ScalarFormatter
 from matplotlib.ticker import FixedLocator, FixedFormatter
+from matplotlib.colors import LogNorm
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
