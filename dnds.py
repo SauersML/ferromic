@@ -27,7 +27,7 @@ import time
 import logging
 import pickle
 
-COMPARE_BETWEEN_GROUPS = True
+COMPARE_BETWEEN_GROUPS = False
 
 logging.basicConfig(
    level=logging.INFO,
