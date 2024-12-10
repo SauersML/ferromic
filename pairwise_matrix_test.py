@@ -593,12 +593,12 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar.ax.yaxis.get_offset_text().set_visible(False)
     cbar.update_ticks()
 
-    legend_ax = fig.add_axes([0.15, 0.88, 0.08, 0.08])
-    legend_ax.axis('off')
-    legend = legend_ax.legend(
+    legend = fig.legend(
         handles=special_patches,
         title='Special Values',
-        loc='center', ncol=1, frameon=True, fontsize=10
+        loc='lower left',
+        bbox_to_anchor=(0.05, 0.05),
+        ncol=1, frameon=True, fontsize=10
     )
     legend.get_title().set_fontsize(10)
 
@@ -670,9 +670,6 @@ def analyze_cds_parallel(args):
     # Generate matrices for visualization (do this first)
     matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
 
-    # Set minimum required sequences per group
-    min_sequences_per_group = 5
-
     # Initialize base result dictionary with matrices
     result = {
         'matrix_0': matrix_0,
@@ -699,11 +696,14 @@ def analyze_cds_parallel(args):
     
     valid_per_seq_group_0 = np.sum(~np.isnan(matrix_0), axis=1)
     valid_per_seq_group_1 = np.sum(~np.isnan(matrix_1), axis=1)
-    
+
+    # Set minimum required sequences per group
+    min_sequences_per_group = 3
+
     if (n0 < min_sequences_per_group or 
         n1 < min_sequences_per_group or
-        np.nansum(~np.isnan(matrix_0)) < 10 or 
-        np.nansum(~np.isnan(matrix_1)) < 10 or
+        np.nansum(~np.isnan(matrix_0)) < 3 or 
+        np.nansum(~np.isnan(matrix_1)) < 3 or
         not all(valid_per_seq_group_0 >= 2) or
         not all(valid_per_seq_group_1 >= 2)):
     
