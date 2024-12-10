@@ -1042,13 +1042,13 @@ def main():
     results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
 
     # Overall analysis
-    print("\nComputing overall significance...")
+    print("\nBuilding clusters...")
     clusters = build_overlap_clusters(results_df)
     cluster_stats = {}
     for cluster_id, cluster_cdss in clusters.items():
         cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df, results)
 
-
+    print("\nComputing overall significance...")
     # Compute overall significance
     overall_results = compute_overall_significance(cluster_stats)
 
