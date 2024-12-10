@@ -1154,6 +1154,9 @@ def main():
     print(f"Overall p-value: {overall_results['overall_pvalue']:.4e}")
     print(f"Overall effect size: {overall_results['overall_effect']:.4f}")
 
+    # Create a Manhattan plot for all CDSs
+    create_manhattan_plot(results_df, inv_file='inv_info.csv')
+
     # Sort results by original p-value, but only consider those with bonferroni_p_value < 0.05
     significant_results = results_df[results_df['bonferroni_p_value'] < 0.05].sort_values('p_value')
 
@@ -1174,9 +1177,6 @@ def main():
     print(f"Total CDSs analyzed: {len(results_df):,}")
     print(f"Valid analyses: {len(valid_results):,}")
     print(f"Significant CDSs (p < 0.05): {(valid_results['p_value'] < 0.05).sum():,}")
-
-    # Create a Manhattan plot for all CDSs
-    create_manhattan_plot(results_df, inv_file='inv_info.csv')
 
     end_time = datetime.now()
     print(f"\nAnalysis completed at {end_time}")
