@@ -46,8 +46,6 @@ GLOBAL_TOTAL_CDS = 0
 GLOBAL_TOTAL_COMPARISONS = 0
 
 # Preprocessing
-TRANSCRIPT_COORDS = parse_transcripts_from_gtf('../hg38.knownGene.gtf')
-
 def load_transcripts_from_gtf(gtf_path='../hg38.knownGene.gtf'):
     """
     Load all transcript_ids from the given GTF file into a set.
@@ -326,34 +324,6 @@ def estimate_total_comparisons(phy_dir):
 
     GLOBAL_TOTAL_COMPARISONS = total_comparisons
 
-
-def parse_transcripts_from_gtf(gtf_path='../hg38.knownGene.gtf'):
-    """
-    Parse the GTF file to get transcript coordinates.
-    Returns a dict: {transcript_id: (chrom, start, end)}
-    """
-    transcript_coords = {}
-    with open(gtf_path, 'r') as f:
-        for line in f:
-            if line.startswith('#'):
-                continue
-            fields = line.strip().split('\t')
-            if len(fields) < 9:
-                continue
-            feature_type = fields[2]
-            # We only record transcript lines because they give the transcript-level coordinates
-            if feature_type == 'transcript':
-                chrom = fields[0]
-                tx_start = int(fields[3])
-                tx_end = int(fields[4])
-                attr = fields[8]
-
-                # Extract transcript_id
-                m = re.search(r'transcript_id "([^"]+)"', attr)
-                if m:
-                    tid = m.group(1)
-                    transcript_coords[tid] = (chrom, tx_start, tx_end)
-    return transcript_coords
 
 def find_transcript_id_for_coords(chrom, start, end):
     """
