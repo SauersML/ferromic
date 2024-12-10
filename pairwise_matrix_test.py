@@ -1180,13 +1180,16 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
         x=label_points_x,
         y=label_points_y,
         ax=ax,
-        arrowprops=dict(arrowstyle='-', lw=0.5, color='black', shrinkA=0, shrinkB=0),
         force_text=2.0,
         force_points=2.0,
         expand_points=(2,2),
         expand_text=(2,2),
         lim=200
     )
+    
+    for txt, (x, y) in zip(text_objects, zip(label_points_x, label_points_y)):
+        x_text, y_text = txt.get_position()
+        ax.plot([x_text, x], [y_text, y], color='black', lw=0.5, zorder=3)
 
     plt.tight_layout()
     plt.savefig(os.path.join("plots", 'manhattan_plot.png'), dpi=300, bbox_inches='tight')
