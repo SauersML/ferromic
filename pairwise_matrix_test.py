@@ -499,7 +499,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     color_ninety_nine = (1, 192/255, 192/255)      # light red for no non-syn variation (99)
     special_patches = [
         mpatches.Patch(color=color_minus_one, label='Identical sequences'),
-        mpatches.Patch(color=color_ninety_nine, label='No non-syn variation')
+        mpatches.Patch(color=color_ninety_nine, label='No non-synonymous variation')
     ]
 
     from matplotlib.colors import LogNorm
