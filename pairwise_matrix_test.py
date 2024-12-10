@@ -620,7 +620,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     bonf_p_value_val = result.get('bonferroni_p_value', np.nan)
     bonf_p_value_str = f"Corrected p-value: {bonf_p_value_val:.4e}" if not np.isnan(bonf_p_value_val) else "P-value: N/A"
     ax3.text(
-        0.97, 0.97, f"{p_value_str}\n{bonf_p_value_str}",
+        0.97, 0.97, f"{bonf_p_value_str}",
         transform=ax3.transAxes,
         ha='right', va='top', fontsize=14,
         bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray')
