@@ -667,7 +667,7 @@ def analyze_cds_parallel(args):
     matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
 
     # Set minimum required sequences per group
-    min_sequences_per_group = 10
+    min_sequences_per_group = 5
 
     # Initialize base result dictionary with matrices
     result = {
@@ -676,7 +676,7 @@ def analyze_cds_parallel(args):
         'pairwise_comparisons': set(pairwise_dict.keys())
     }
 
-    if n0 < min_sequences_per_group or n1 < min_sequences_per_group:
+    if n0 < min_sequences_per_group or n1 < min_sequences_per_group or np.nansum(~np.isnan(matrix_0)) < 10 or np.nansum(~np.isnan(matrix_1)) < 10:
         # Not enough sequences in one of the groups
         result.update({
             'observed_effect_size': np.nan,
