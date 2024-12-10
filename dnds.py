@@ -45,6 +45,9 @@ GLOBAL_TOTAL_SEQS = 0
 GLOBAL_TOTAL_CDS = 0
 GLOBAL_TOTAL_COMPARISONS = 0
 
+# Preprocessing
+TRANSCRIPT_COORDS = parse_transcripts_from_gtf('../hg38.knownGene.gtf')
+
 def load_transcripts_from_gtf(gtf_path='../hg38.knownGene.gtf'):
     """
     Load all transcript_ids from the given GTF file into a set.
@@ -323,18 +326,76 @@ def estimate_total_comparisons(phy_dir):
 
     GLOBAL_TOTAL_COMPARISONS = total_comparisons
 
+
+def parse_transcripts_from_gtf(gtf_path='../hg38.knownGene.gtf'):
+    """
+    Parse the GTF file to get transcript coordinates.
+    Returns a dict: {transcript_id: (chrom, start, end)}
+    """
+    transcript_coords = {}
+    with open(gtf_path, 'r') as f:
+        for line in f:
+            if line.startswith('#'):
+                continue
+            fields = line.strip().split('\t')
+            if len(fields) < 9:
+                continue
+            feature_type = fields[2]
+            # We only record transcript lines because they give the transcript-level coordinates
+            if feature_type == 'transcript':
+                chrom = fields[0]
+                tx_start = int(fields[3])
+                tx_end = int(fields[4])
+                attr = fields[8]
+
+                # Extract transcript_id
+                m = re.search(r'transcript_id "([^"]+)"', attr)
+                if m:
+                    tid = m.group(1)
+                    transcript_coords[tid] = (chrom, tx_start, tx_end)
+    return transcript_coords
+
+def find_transcript_id_for_coords(chrom, start, end):
+    """
+    Given a chromosome and coordinates (start, end), find a transcript_id
+    that overlaps this region based on TRANSCRIPT_COORDS.
+
+    Overlap condition:
+    Transcript interval: [tx_start, tx_end]
+    Query interval: [start, end]
+
+    They overlap if: tx_start <= end and start <= tx_end
+    """
+    for tid, (t_chrom, t_start, t_end) in TRANSCRIPT_COORDS.items():
+        if t_chrom == chrom and t_start <= end and start <= t_end:
+            # Found an overlapping transcript
+            return tid
+    # No overlapping transcript found
+    return None
+
 def process_phy_file(args):
     pair_args = args
     phy_file, output_dir, codeml_path, total_files, file_index, cache = pair_args
 
     start_time = time.time()
     phy_filename = os.path.basename(phy_file)
-    cds_id = phy_filename.replace('.phy', '')
 
-    # Check if transcript_id is in GTF set (cds_id must be transcript_id)
-    if cds_id not in TRANSCRIPT_SET:
-        logging.warning(f"No Transcript_ID found for {cds_id} in GTF. Skipping.")
-        return None
+    # Extract chromosome, start, and end from the filename
+    basename = phy_filename.replace('.phy', '')
+    m = re.match(r'group_\d+_chr_(\w+)_start_(\d+)_end_(\d+)', basename)
+    if not m:
+        logging.warning(f"Filename format not recognized: {basename}")
+        continue
+    chrom, start_str, end_str = m.groups()
+    start = int(start_str)
+    end = int(end_str)
+
+    # Find a transcript_id that overlaps this genomic interval.
+    cds_id = find_transcript_id_for_coords(chrom, start, end)
+    
+    if not cds_id or cds_id not in TRANSCRIPT_SET:
+        logging.info(f"Skipping {phy_file} - transcript not found in GTF for coords: {chrom}:{start}-{end}")
+        continue
 
     mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
     output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}.csv')
