@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 dN/dS Analysis Script using PAML's CODEML
 
@@ -151,40 +152,47 @@ def parse_phy_file(filepath):
     if not os.path.exists(filepath):
         logging.error(f"File not found: {filepath}")
         return {}, False
+
     with open(filepath, 'r') as file:
         lines = file.readlines()
-        if not lines:
-            logging.error(f"PHYLIP file empty: {filepath}")
-            return {}, False
-        try:
-            num_sequences, seq_length = map(int, lines[0].strip().split())
-            sequence_lines = lines[1:]
-        except ValueError:
-            sequence_lines = lines
-        for line in sequence_lines:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split()
-            if len(parts) >= 2:
-                sample_name = parts[0]
-                sequence = ''.join(parts[1:])
+
+    if not lines:
+        logging.error(f"PHYLIP file is empty: {filepath}")
+        return sequences, duplicates_found
+
+    # Try parsing header; if fail, process all lines as sequences
+    try:
+        num_sequences, seq_length = map(int, lines[0].strip().split())
+        sequence_lines = lines[1:]
+    except ValueError:
+        logging.warning(f"No valid header found in {filepath}. Processing without header.")
+        sequence_lines = lines
+
+    for line in sequence_lines:
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) >= 2:
+            sample_name = parts[0]
+            sequence = ''.join(parts[1:])
+        else:
+            sample_name = line[:10].strip()
+            sequence = line[10:].replace(" ", "")
+        validated_seq = validate_sequence(sequence)
+        if validated_seq:
+            GLOBAL_TOTAL_SEQS += 1
+            if sample_name in sequences:
+                duplicates_found = True
+                base_name = sample_name[:2] + sample_name[3:]
+                dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
+                new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
+                logging.info(f"Duplicate {sample_name} -> {new_name}")
+                sequences[new_name] = validated_seq
+                GLOBAL_DUPLICATES += 1
             else:
-                sample_name = line[:10].strip()
-                sequence = line[10:].replace(" ", "")
-            validated_seq = validate_sequence(sequence)
-            if validated_seq:
-                GLOBAL_TOTAL_SEQS += 1
-                if sample_name in sequences:
-                    duplicates_found = True
-                    base_name = sample_name[:2] + sample_name[3:]
-                    dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
-                    new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
-                    logging.info(f"Duplicate {sample_name} -> {new_name}")
-                    sequences[new_name] = validated_seq
-                    GLOBAL_DUPLICATES += 1
-                else:
-                    sequences[sample_name] = validated_seq
+                sequences[sample_name] = validated_seq
+
     return sequences, duplicates_found
 
 def load_cache(cache_file):
@@ -367,6 +375,7 @@ def main():
     parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
     parser.add_argument('--codeml_path', type=str, default='codeml', help='Path to codeml executable.')
     args = parser.parse_args()
+
     os.makedirs(args.output_dir, exist_ok=True)
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
     cache = load_cache(cache_file)
