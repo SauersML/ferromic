@@ -326,21 +326,21 @@ def estimate_total_comparisons(phy_dir):
 
 
 def find_transcript_id_for_coords(chrom, start, end):
-    """
-    Given a chromosome and coordinates (start, end), find a transcript_id
-    that overlaps this region based on TRANSCRIPT_COORDS.
-
-    Overlap condition:
-    Transcript interval: [tx_start, tx_end]
-    Query interval: [start, end]
-
-    They overlap if: tx_start <= end and start <= tx_end
-    """
-    for tid, (t_chrom, t_start, t_end) in TRANSCRIPT_COORDS.items():
-        if t_chrom == chrom and t_start <= end and start <= t_end:
-            # Found an overlapping transcript
-            return tid
-    # No overlapping transcript found
+    with open('../hg38.knownGene.gtf','r') as f:
+        for line in f:
+            if line.startswith('#'):
+                continue
+            fields = line.strip().split('\t')
+            if len(fields) < 9:
+                continue
+            if fields[0] == chrom and fields[2] == 'transcript':
+                t_start = int(fields[3])
+                t_end = int(fields[4])
+                # Check overlap
+                if t_start <= end and start <= t_end:
+                    m = re.search(r'transcript_id "([^"]+)"', fields[8])
+                    if m:
+                        return m.group(1)
     return None
 
 def process_phy_file(args):
