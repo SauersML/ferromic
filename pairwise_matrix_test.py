@@ -935,6 +935,7 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
         'n_valid_cds': 1,
         'cluster_pairs': pairs
     }
+    
 def compute_overall_significance(cluster_results):
     """Compute overall significance from independent clusters using scipy's combine_pvalues."""
     import numpy as np
@@ -1297,119 +1298,6 @@ def main():
             row
         )
 
-    valid_results = results_df[~results_df['p_value'].isna()]
-    print("\nPer-CDS Analysis Summary:")
-    print(f"Total CDSs analyzed: {len(results_df):,}")
-    print(f"Valid analyses: {len(valid_results):,}")
-    print(f"Significant CDSs (p < 0.05): {(valid_results['p_value'] < 0.05).sum():,}")
-
-    end_time = datetime.now()
-    print(f"\nAnalysis completed at {end_time}")
-    print(f"Total runtime: {end_time - start_time}")
-
-if __name__ == "__main__":
-    main()
-
-
-
-
-def main():
-    start_time = datetime.now()
-    print(f"Analysis started at {start_time}")
-
-    # Read data
-    df = read_and_preprocess_data('all_pairwise_results.csv')
-
-    # Prepare arguments for parallel processing
-    cds_list = df['CDS'].unique()
-    cds_args = [(df[df['CDS'] == cds], cds) for cds in cds_list]
-
-    # Process CDSs in parallel
-    results = {}
-    with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
-        for cds, result in tqdm(
-            executor.map(analyze_cds_parallel, cds_args),
-            total=len(cds_args),
-            desc="Processing CDSs"
-        ):
-            results[cds] = result
-
-    # Convert results to DataFrame
-    results_df = pd.DataFrame([
-        {
-            'CDS': cds,
-            **{k: v for k, v in result.items()
-               if k not in ['matrix_0', 'matrix_1', 'pairwise_comparisons']}
-        }
-        for cds, result in results.items()
-    ])
-
-    # Save final results
-    results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
-
-    # Compute Bonferroni-corrected p-values using valid (non-NaN and >0) comparisons
-    valid_df = results_df[results_df['p_value'].notnull() & (results_df['p_value'] > 0)]
-    total_valid_comparisons = len(valid_df)
-    results_df['bonferroni_p_value'] = results_df['p_value'] * total_valid_comparisons
-    results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
-
-    # Overall analysis
-    print("\nBuilding clusters...")
-    clusters = load_clusters_cache()
-    if clusters is None:
-        # Clusters not cached, build them now
-        clusters = build_overlap_clusters(results_df)
-        # Save to cache for next time
-        save_clusters_cache(clusters)
-    else:
-        print("Loaded clusters from cache.")
-
-    cluster_stats = {}
-    for cluster_id, cluster_cdss in clusters.items():
-        cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df, results)
-
-    print("\nComputing overall significance...")
-    # Compute overall significance
-    overall_results = compute_overall_significance(cluster_stats)
-
-    # Convert numpy values to native Python types for JSON serialization
-    json_safe_results = {
-        'overall_pvalue': float(overall_results['overall_pvalue']) if not np.isnan(overall_results['overall_pvalue']) else None,
-        'overall_pvalue_fisher': float(overall_results['overall_pvalue_fisher']) if not np.isnan(overall_results['overall_pvalue_fisher']) else None,
-        'overall_effect': float(overall_results['overall_effect']) if not np.isnan(overall_results['overall_effect']) else None,
-        'n_valid_clusters': int(overall_results['n_valid_clusters']) if not np.isnan(overall_results['n_valid_clusters']) else None,
-        'total_comparisons': int(overall_results['total_comparisons']) if not np.isnan(overall_results['total_comparisons']) else None
-    }
-
-    # Save overall results
-    with open(RESULTS_DIR / 'overall_results.json', 'w') as f:
-        json.dump(json_safe_results, f, indent=2)
-
-    # Print overall results
-    print("\nOverall Analysis Results:")
-    print(f"Number of independent clusters: {overall_results['n_valid_clusters']}")
-    print(f"Total unique CDS pairs: {overall_results['total_comparisons']:,}")
-    print(f"Overall p-value: {overall_results['overall_pvalue']:.4e}")
-    print(f"Overall effect size: {overall_results['overall_effect']:.4f}")
-
-    # Create a Manhattan plot for all CDSs
-    create_manhattan_plot(results_df, inv_file='inv_info.csv')
-
-    # Sort results by original p-value, but only consider those with bonferroni_p_value < 0.05
-    significant_results = results_df[results_df['bonferroni_p_value'] < 0.05].sort_values('p_value')
-
-    # Create visualizations for top significant results
-    for _, row in significant_results.head(30).iterrows():
-        cds = row['CDS']
-        viz_result = results[cds]  # Get full result with matrices
-        create_visualization(
-            viz_result['matrix_0'],
-            viz_result['matrix_1'],
-            cds,
-            row  # Use row for stats since they're the same
-        )
-
-    # Print summary statistics
     valid_results = results_df[~results_df['p_value'].isna()]
     print("\nPer-CDS Analysis Summary:")
     print(f"Total CDSs analyzed: {len(results_df):,}")
