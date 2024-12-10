@@ -593,11 +593,11 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar.ax.yaxis.get_offset_text().set_visible(False)
     cbar.update_ticks()
 
-    legend = fig.legend(
+    legend = ax1.legend(
         handles=special_patches,
         title='Special Values',
-        loc='lower left',
-        bbox_to_anchor=(0.05, 0.05),
+        loc='upper left',
+        bbox_to_anchor=(0.0, -0.2),
         ncol=1, frameon=True, fontsize=10
     )
     legend.get_title().set_fontsize(10)
@@ -704,8 +704,8 @@ def analyze_cds_parallel(args):
         n1 < min_sequences_per_group or
         np.nansum(~np.isnan(matrix_0)) < 3 or 
         np.nansum(~np.isnan(matrix_1)) < 3 or
-        not all(valid_per_seq_group_0 >= 2) or
-        not all(valid_per_seq_group_1 >= 2)):
+        not all(valid_per_seq_group_0 >= 5) or
+        not all(valid_per_seq_group_1 >= 5):
     
         # Not enough sequences/valid comparisons
         result.update({
