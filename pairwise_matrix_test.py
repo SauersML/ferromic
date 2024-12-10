@@ -705,7 +705,7 @@ def analyze_cds_parallel(args):
         np.nansum(~np.isnan(matrix_0)) < 3 or 
         np.nansum(~np.isnan(matrix_1)) < 3 or
         not all(valid_per_seq_group_0 >= 5) or
-        not all(valid_per_seq_group_1 >= 5):
+        not all(valid_per_seq_group_1 >= 5)):
     
         # Not enough sequences/valid comparisons
         result.update({
