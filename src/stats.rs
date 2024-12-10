@@ -770,8 +770,9 @@ fn process_variants(
 
         // Write sequences to PHYLIP file
         let filename = format!(
-            "group_{}_chr_{}_start_{}_end_{}.phy",
+            "group_{}_{}_chr_{}_start_{}_end_{}.phy",
             haplotype_group,
+            cds.transcript_id,
             chromosome,
             cds_start,
             cds_end
@@ -1005,8 +1006,12 @@ fn make_sequences(
 
         // Write sequences to PHYLIP file
         let filename = format!(
-            "group_{}_chr_{}_start_{}_end_{}.phy",
-            haplotype_group, chromosome, cds_start, cds_end
+            "group_{}_{}_chr_{}_start_{}_end_{}.phy",
+            haplotype_group,
+            cds.transcript_id,
+            chromosome,
+            cds_start,
+            cds_end
         );
 
         let char_sequences: HashMap<String, Vec<char>> = cds_sequences
@@ -2365,6 +2370,7 @@ fn parse_gff_file(
         }
         
         let cds_region = CdsRegion {
+            transcript_id: transcript_id.clone(),
             start: min_start,
             end: max_end,
         };
@@ -2414,9 +2420,9 @@ fn parse_gff_file(
 }
 
 
-// IN PROGRESS
 // Struct to hold CDS region information
 struct CdsRegion {
+    transcript_id: String,
     start: i64,
     end: i64,
 }
