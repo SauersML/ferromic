@@ -996,29 +996,29 @@ def compute_overall_significance(cluster_results):
     }
 
 
-def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
-    """
-    Create a refined Manhattan-style plot of CDS p-values along the genome.
-    """
-
-    required_cols = {'CDS', 'p_value', 'chrom', 'start', 'end'}
+def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annotate=10):
+    required_cols = {'CDS', 'p_value', 'chrom', 'start', 'end', 'observed_effect_size'}
     if not required_cols.issubset(results_df.columns):
         raise ValueError(f"results_df must contain columns: {required_cols}")
-    
-    # Filter valid p-values (non-NaN, > 0)
-    valid_mask = results_df['p_value'].notnull() & (results_df['p_value'] > 0)
-    valid_pvals = results_df.loc[valid_mask, 'p_value']
-    m = len(valid_pvals)  # number of valid p-values
 
-    # Bonferroni correction: p_adj = p * m
+    # Filter to valid p-values
+    valid_mask = results_df['p_value'].notnull() & (results_df['p_value'] > 0)
+    if valid_mask.sum() == 0:
+        print("No valid p-values found. Cannot create plot.")
+        return
+
+    valid_pvals = results_df.loc[valid_mask, 'p_value']
+    m = len(valid_pvals)
+
+    # Compute Bonferroni-corrected p-values
     results_df['bonferroni_p_value'] = np.nan
     results_df.loc[valid_mask, 'bonferroni_p_value'] = results_df.loc[valid_mask, 'p_value'] * m
     results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
 
-    # Compute -log10(p) for plotting
+    # Compute -log10(p)
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
 
-    # Read inversion info
+    # Read inversions
     inv_df = pd.read_csv(inv_file)
     inv_df = inv_df.dropna(subset=['chr', 'region_start', 'region_end'])
 
@@ -1029,113 +1029,173 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
         subset = cds_df[(cds_df['chrom'] == c) & (cds_df['start'] <= e) & (cds_df['end'] >= s)]
         return len(subset) > 0
 
-    # Filter inversions to only those overlapping at least one CDS
     inv_df = inv_df[inv_df.apply(lambda row: overlaps(row, results_df), axis=1)]
 
+    # Sort chromosomes in a natural order
     def chr_sort_key(ch):
-        if ch.startswith('chr'):
-            ch_str = ch[3:]
-        else:
-            ch_str = ch
+        base = ch.replace('chr', '')
         try:
-            return (0, int(ch_str))
-        except ValueError:
+            return (0, int(base))
+        except:
             mapping = {'X': 23, 'Y': 24, 'M': 25}
-            return (1, mapping.get(ch_str, 99))
+            return (1, mapping.get(base, 99))
 
     unique_chroms = sorted(results_df['chrom'].dropna().unique(), key=chr_sort_key)
 
-    chrom_max_end = results_df.groupby('chrom')['end'].max().to_dict()
-    offset = {}
-    current_offset = 0
-    inter_chrom_spacing = 5e6  # 5Mb gap
+    # Instead of using actual genomic positions, assign equal width per chromosome.
+    # For example, if we have N chromosomes, let's give each one a unit width of 1.0.
+    # Within that chromosome, we linearly distribute points based on their start positions.
+    # We'll just scale their start position relative to that chromosome.
+    chrom_to_index = {c: i for i, c in enumerate(unique_chroms)}
+
+    # For each chromosome, determine the min and max coordinate to scale positions
+    chrom_ranges = {}
     for c in unique_chroms:
-        offset[c] = current_offset
-        current_offset += chrom_max_end[c] + inter_chrom_spacing
+        chr_df = results_df[results_df['chrom'] == c]
+        c_min = chr_df['start'].min()
+        c_max = chr_df['end'].max()
+        # Just use positions relative to c_min and c_max
+        chrom_ranges[c] = (c_min, c_max)
 
-    results_df['genomic_pos'] = results_df.apply(lambda row: row['start'] + offset[row['chrom']], axis=1)
+    # Assign x-position: x = chromosome_index + ( (start - c_min) / (c_max - c_min) ) * 1.0
+    # If the chromosome has no variation (should not happen), fallback to 0.5
+    xs = []
+    for idx, row in results_df.iterrows():
+        c = row['chrom']
+        if c not in chrom_ranges:
+            xs.append(np.nan)
+            continue
+        c_min, c_max = chrom_ranges[c]
+        if c_max > c_min:
+            rel_pos = (row['start'] - c_min) / (c_max - c_min)
+        else:
+            rel_pos = 0.5
+        xs.append(chrom_to_index[c] + rel_pos)
+    results_df['plot_x'] = xs
 
+    # Color points by effect size
+    # Determine colormap bounds
+    eff = results_df['observed_effect_size']
+    eff_min, eff_max = eff.min(), eff.max()
+    if np.isnan(eff_min) or np.isnan(eff_max):
+        # If no effect sizes are available, default to zero-centered range
+        eff_min, eff_max = -1, 1
+    # If min and max are the same, just offset slightly
+    if eff_min == eff_max:
+        eff_min -= 0.1
+        eff_max += 0.1
+
+    cmap = plt.get_cmap('coolwarm')
+
+    # Prepare the figure
     plt.figure(figsize=(20, 10))
-    sns.set_style("whitegrid", {'axes.edgecolor': '.8', 'grid.color': '.8'})
-    sns.set_context("talk")
+    sns.set_style("ticks")
+    ax = plt.gca()
 
-    # Plot alternating chromosome backgrounds
-    for i, c in enumerate(unique_chroms):
-        chr_start = offset[c]
-        chr_end = offset[c] + chrom_max_end[c]
-        color = 'whitesmoke' if i % 2 == 0 else 'white'
-        plt.axvspan(chr_start, chr_end, color=color, alpha=1.0, zorder=0)
-
-    # Plot inversions
+    # Draw inversion regions as vertical spans
+    # Now that we have equal widths, we must adapt inversions to these scaled units.
+    # We'll place them behind points. For each inversion, we find min and max coordinates within that chromosome range.
     for _, inv in inv_df.iterrows():
         inv_chr = inv['chr']
-        if inv_chr in offset:
-            inv_x_start = inv['region_start'] + offset[inv_chr]
-            inv_x_end = inv['region_end'] + offset[inv_chr]
-            plt.axvspan(inv_x_start, inv_x_end, color='lightsalmon', alpha=0.3, zorder=1)
+        if inv_chr not in chrom_to_index:
+            continue
+        c_idx = chrom_to_index[inv_chr]
+        c_min, c_max = chrom_ranges[inv_chr]
+        # Scale inversion start/end to the chromosome block
+        if c_max > c_min:
+            rel_start = (inv['region_start'] - c_min) / (c_max - c_min)
+            rel_end = (inv['region_end'] - c_min) / (c_max - c_min)
+        else:
+            rel_start = 0.4
+            rel_end = 0.6
+        inv_x_start = c_idx + max(0, min(rel_start, 1))
+        inv_x_end = c_idx + min(1, max(rel_end, 0))
+        ax.axvspan(inv_x_start, inv_x_end, color='lightsalmon', alpha=0.3, zorder=0)
 
-    chrom_colors = {c: ('#1f77b4' if i % 2 == 0 else '#ff7f0e') for i, c in enumerate(unique_chroms)}
-    scatter_colors = results_df['chrom'].map(chrom_colors)
-    plt.scatter(
-        results_df['genomic_pos'],
+    # Plot points colored by effect size
+    scatter = ax.scatter(
+        results_df['plot_x'],
         results_df['neg_log_p'],
-        c=scatter_colors,
+        c=eff,
+        cmap=cmap,
         s=20,
         alpha=0.7,
         linewidth=0,
-        zorder=2
+        zorder=2,
+        vmin=eff_min,
+        vmax=eff_max
     )
 
-    sig_threshold = -np.log10(0.05)
-    plt.axhline(y=sig_threshold, color='red', linestyle='--', linewidth=2, zorder=3, label='p=0.05')
+    # Add colorbar for effect size
+    cb = plt.colorbar(scatter, ax=ax, fraction=0.02, pad=0.02)
+    cb.set_label('Observed Effect Size', fontsize=16)
+    cb.ax.tick_params(labelsize=14)
 
+    # Draw significance lines
+    sig_threshold = -np.log10(0.05)
+    ax.axhline(y=sig_threshold, color='red', linestyle='--', linewidth=2, zorder=3, label='p=0.05')
     if m > 0:
         bonf_threshold = -np.log10(0.05 / m)
         if np.isfinite(bonf_threshold) and bonf_threshold > 0:
-            plt.axhline(y=bonf_threshold, color='darkred', linestyle='--', linewidth=2, zorder=3, label='p=0.05 (Bonf.)')
+            ax.axhline(y=bonf_threshold, color='darkred', linestyle='--', linewidth=2, zorder=3,
+                       label='p=0.05 (Bonferroni-corrected)')
 
-    ax = plt.gca()
-    ylim = ax.get_ylim()
-    plt.ylim(0, max(ylim[1], sig_threshold+1))
+    # Set y-limit to make sure lines are visible
+    current_ylim = ax.get_ylim()
+    new_ylim = max(current_ylim[1], sig_threshold+1)
+    if m > 0 and np.isfinite(bonf_threshold):
+        new_ylim = max(new_ylim, bonf_threshold+1)
+    ax.set_ylim(0, new_ylim)
 
-    # Add chromosome labels in a separate axis
-    ax_chrom = ax.figure.add_axes([ax.get_position().x0, 0.02, ax.get_position().width, 0.05], sharex=ax)
-    ax_chrom.set_ylim(0, 1)
-    ax_chrom.set_yticks([])
-    ax_chrom.set_yticklabels([])
-    ax_chrom.tick_params(left=False, labelleft=False)
-    ax_chrom.spines["top"].set_visible(False)
-    ax_chrom.spines["right"].set_visible(False)
-    ax_chrom.spines["left"].set_visible(False)
-    ax_chrom.spines["bottom"].set_visible(False)
-    ax_chrom.set_xlabel('Chromosomes', fontsize=20, fontweight='bold')
-    ax_chrom.xaxis.set_visible(False)
+    # Set x ticks at chromosome midpoints
+    # Each chromosome spans [i, i+1], midpoint = i+0.5
+    xticks = [i+0.5 for i in range(len(unique_chroms))]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(unique_chroms, rotation=90, fontsize=14)
 
-    for i, c in enumerate(unique_chroms):
-        chr_start = offset[c]
-        chr_end = offset[c] + chrom_max_end[c]
-        midpoint = (chr_start + chr_end) / 2
-        ax_chrom.text(midpoint, 0.5, c, ha='center', va='center', fontsize=16, fontweight='bold')
-
-    ax.set_xlabel('Genomic Position (linearized)', fontsize=18)
+    # Axis labels
+    ax.set_xlabel('Chromosome', fontsize=18)
     ax.set_ylabel('-log10(p-value)', fontsize=18)
     ax.set_title('Manhattan Plot of CDS Significance', fontsize=24, fontweight='bold', pad=20)
 
+    # Add a legend for the significance lines
     handles, labels = ax.get_legend_handles_labels()
-    if not handles:
-        import matplotlib.lines as mlines
-        line05 = mlines.Line2D([], [], color='red', linestyle='--', label='p=0.05')
-        h = [line05]
-        if m > 0 and np.isfinite(bonf_threshold) and bonf_threshold > 0:
-            lineBonf = mlines.Line2D([], [], color='darkred', linestyle='--', label='p=0.05 (Bonf.)')
-            h.append(lineBonf)
-        handles = h
-    legend = ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=14)
+    legend = ax.legend(handles=handles, fontsize=14, frameon=True)
     legend.get_frame().set_edgecolor('0.8')
 
-    plt.subplots_adjust(left=0.07, right=0.98, top=0.9, bottom=0.15)
-    PLOTS_DIR.mkdir(exist_ok=True)
-    plt.savefig(PLOTS_DIR / 'manhattan_plot.png', bbox_inches='tight', dpi=300)
+    # Make grid lines fewer and less prominent
+    ax.grid(False)
+    # Only add a faint horizontal grid for reference
+    ax.yaxis.grid(True, which='major', color='lightgray', linestyle='--', lw=0.5)
+    ax.xaxis.grid(False)
+
+    # Annotate top hits with gene names
+    # Sort by p-value ascending
+    significant_hits = results_df[valid_mask].sort_values('p_value').head(top_hits_to_annotate)
+    for _, hit_row in significant_hits.iterrows():
+        cds = hit_row['CDS']
+        gene_symbol, gene_name, err_log = get_gene_annotation(cds)  
+        # If we got a gene name/symbol, annotate
+        if gene_symbol and gene_symbol not in [None, 'Unknown']:
+            label_txt = f"{gene_symbol}"
+        else:
+            label_txt = None
+
+        if label_txt:
+            # Place the text slightly above the point
+            ax.text(
+                hit_row['plot_x'], 
+                hit_row['neg_log_p'] + 0.5,
+                label_txt,
+                fontsize=12, 
+                ha='center', 
+                va='bottom', 
+                color='black', 
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
+            )
+
+    plt.tight_layout()
+    plt.savefig(PLOTS_DIR / 'manhattan_plot.png', dpi=300, bbox_inches='tight')
     plt.close()
 
 
