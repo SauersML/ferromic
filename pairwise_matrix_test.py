@@ -584,15 +584,16 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar.set_label('Omega Value', fontsize=16)
     cbar.ax.tick_params(labelsize=14)
 
-    # Add special values legend below the matrices
-    legend_ax = fig.add_axes([0.30, 0.45, 0.4, 0.05])  # coordinates in figure fraction
+    # Add special values legend in a very small, vertical layout
+    legend_ax = fig.add_axes([0.32, 0.41, 0.05, 0.1])  # Smaller, vertical space
     legend_ax.axis('off')
     legend = legend_ax.legend(
         handles=special_patches,
         title='Special Values',
-        loc='center', ncol=2, frameon=True, fontsize=14
+        loc='upper left', ncol=1, frameon=True, fontsize=8
     )
-    legend.get_title().set_fontsize(16)
+    legend.get_title().set_fontsize(10)
+
 
     # Extract normal omega values for distribution plot
     values_direct = matrix_0_full[np.tril_indices_from(matrix_0_full, k=-1)]
@@ -617,8 +618,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # Add P-value text inside the histogram subplot (top-right corner)
     p_value_val = result.get('p_value', np.nan)
     bonf_p_value_val = result.get('bonferroni_p_value', np.nan)
-    p_value_str = f"P-value: {p_value_val:.4e}" if not np.isnan(p_value_val) else "P-value: N/A"
-    bonf_p_value_str = f"Bonf. Corr: {bonf_p_value_val:.4e}" if not np.isnan(bonf_p_value_val) else "Bonf. Corr: N/A"
+    bonf_p_value_str = f"Corrected p-value: {bonf_p_value_val:.4e}" if not np.isnan(bonf_p_value_val) else "P-value: N/A"
     ax3.text(
         0.97, 0.97, f"{p_value_str}\n{bonf_p_value_str}",
         transform=ax3.transAxes,
