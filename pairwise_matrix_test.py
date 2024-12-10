@@ -998,7 +998,6 @@ def compute_overall_significance(cluster_results):
 
 
 
-
 def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annotate=10):
     import numpy as np
     import seaborn as sns
@@ -1007,10 +1006,6 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     from matplotlib.ticker import FixedLocator, FixedFormatter
     from adjustText import adjust_text
     import os
-
-    required_cols = {'CDS', 'p_value', 'chrom', 'start', 'end', 'observed_effect_size'}
-    if not required_cols.issubset(results_df.columns):
-        raise ValueError(f"results_df must contain columns: {required_cols}")
 
     # Filter to valid p-values
     valid_mask = results_df['p_value'].notnull() & (results_df['p_value'] > 0)
@@ -1032,7 +1027,6 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     # Read inversion file
     inv_df = pd.read_csv(inv_file).dropna(subset=['chr', 'region_start', 'region_end'])
 
-    # We must ensure that the inversion overlaps a CDS with a valid p-value:
     def overlaps(inv_row, cds_df):
         c = inv_row['chr']
         s = inv_row['region_start']
@@ -1045,7 +1039,6 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
 
     inv_df = inv_df[inv_df.apply(lambda row: overlaps(row, results_df), axis=1)]
 
-    # Sort chromosomes
     def chr_sort_key(ch):
         base = ch.replace('chr', '')
         try:
@@ -1056,7 +1049,6 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
 
     unique_chroms = sorted(results_df['chrom'].dropna().unique(), key=chr_sort_key)
 
-    # Determine plot_x coordinates
     chrom_to_index = {c: i for i, c in enumerate(unique_chroms)}
     chrom_ranges = {}
     for c in unique_chroms:
@@ -1079,25 +1071,21 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
         xs.append(chrom_to_index[c] + rel_pos)
     results_df['plot_x'] = xs
 
-    # Z-score effect sizes and clip to ±1
     eff = results_df['observed_effect_size']
     eff_mean = eff.mean()
     eff_std = eff.std()
     if eff_std == 0 or np.isnan(eff_std):
         eff_std = 1.0
     eff_z = (eff - eff_mean) / eff_std
-    eff_z = np.clip(eff_z, -1, 1)  # saturate at ±1
+    eff_z = np.clip(eff_z, -1, 1)
 
-    # Define colormap: blue-gray-red with gray at center
     cmap = LinearSegmentedColormap.from_list('custom_diverging', ['blue', 'gray', 'red'])
     norm = TwoSlopeNorm(vmin=-1, vcenter=0.0, vmax=1)
 
-    # Create figure
     plt.figure(figsize=(20, 10))
     sns.set_style("ticks")
     ax = plt.gca()
 
-    # Highlight inversion regions with a lighter yellow ('khaki') and lower alpha
     for _, inv in inv_df.iterrows():
         inv_chr = inv['chr']
         if inv_chr not in chrom_to_index:
@@ -1114,7 +1102,6 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
         inv_x_end = c_idx + min(1, max(rel_end, 0))
         ax.axvspan(inv_x_start, inv_x_end, color='khaki', alpha=0.2, zorder=0)
 
-    # Scatter plot
     scatter = ax.scatter(
         results_df['plot_x'],
         results_df['neg_log_p'],
@@ -1127,12 +1114,10 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
         zorder=2
     )
 
-    # Colorbar
     cb = plt.colorbar(scatter, ax=ax, fraction=0.02, pad=0.02)
     cb.set_label('Z-scored Effect Size', fontsize=16)
     cb.ax.tick_params(labelsize=14)
 
-    # Significance lines
     sig_threshold = -np.log10(0.05)
     ax.axhline(y=sig_threshold, color='red', linestyle='--', linewidth=2, zorder=3, label='p=0.05')
     if m > 0:
@@ -1141,131 +1126,30 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
             ax.axhline(y=bonf_threshold, color='darkred', linestyle='--', linewidth=2, zorder=3,
                        label='p=0.05 (Bonferroni)')
 
-    # Y-limits
     current_ylim = ax.get_ylim()
     new_ylim = max(current_ylim[1], sig_threshold+1)
     if m > 0 and np.isfinite(bonf_threshold):
         new_ylim = max(new_ylim, bonf_threshold+1)
     ax.set_ylim(0, new_ylim)
 
-    # Setup x-axis ticks:
-    # Major ticks at chromosome boundaries
     ax.set_xticks(range(len(unique_chroms)+1), minor=False)
-    # Minor ticks at chromosome midpoints
     ax.set_xticks([i+0.5 for i in range(len(unique_chroms))], minor=True)
-
-    # No labels on major ticks (boundaries)
     ax.set_xticklabels(['']*(len(unique_chroms)+1), minor=False)
-
-    # Bold chromosome labels at midpoints, rotated for readability
     ax.set_xticklabels(unique_chroms, rotation=45, ha='right', fontsize=14, fontweight='bold', minor=True)
 
-    # Axis labels and title
     ax.set_xlabel('Chromosome', fontsize=18)
     ax.set_ylabel('-log10(p-value)', fontsize=18)
     ax.set_title('Manhattan Plot of CDS Significance', fontsize=24, fontweight='bold', pad=20)
 
-    # Legend to top right
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(handles=handles, fontsize=14, frameon=True, loc='upper right')
 
-    # Light horizontal grid
     ax.yaxis.grid(True, which='major', color='lightgray', linestyle='--', lw=0.5)
     ax.xaxis.grid(False)
 
-    # Annotate top hits
     significant_hits = results_df[valid_mask].sort_values('p_value').head(top_hits_to_annotate)
 
-    # Gene annotation function reused from above
-    def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
-        # Exactly as defined above in the code, no placeholders
-        if not os.path.exists(cache_file):
-            cache = {}
-        else:
-            with open(cache_file, 'r') as f:
-                try:
-                    cache = json.load(f)
-                except:
-                    cache = {}
-        if cds in cache:
-            return cache[cds]['symbol'], cache[cds]['name'], []
-        # parse coords
-        def parse_coords(coord_str):
-            try:
-                parts = coord_str.split(':')
-                if len(parts)!=2:
-                    return None,"Err"
-                chr=parts[0]
-                start_end=parts[1].split('-')
-                if len(start_end)!=2:
-                    return None,"Err"
-                start=int(start_end[0])
-                end=int(start_end[1])
-                return {'chr':chr,'start':start,'end':end},None
-            except:
-                return None,"Err"
-        loc,_=parse_coords(cds)
-        if loc is None:
-            return None,None,[]
-
-        base_url = "https://api.genome.ucsc.edu/getData/track"
-        params = {
-            'genome': 'hg38',
-            'track': 'knownGene',
-            'chrom': loc['chr'],
-            'start': loc['start'],
-            'end': loc['end']
-        }
-        try:
-            from urllib.parse import urlencode
-            import requests
-            url = f"{base_url}?{urlencode(params)}"
-            response = requests.get(url, timeout=10)
-            if not response.ok:
-                return None, None, []
-            data = response.json()
-            if 'knownGene' in data:
-                track_data = data['knownGene']
-            else:
-                track_data = data if isinstance(data,list) else []
-            if not track_data:
-                return None,None,[]
-            best_gene = None
-            best_overlap=0
-            for g in track_data:
-                gs=g.get('chromStart',0)
-                ge=g.get('chromEnd',0)
-                overlap = max(0, min(ge,loc['end'])-max(gs,loc['start']))
-                if overlap>best_overlap:
-                    best_overlap=overlap
-                    best_gene=g
-            if not best_gene:
-                return None,None,[]
-
-            symbol=best_gene.get('geneName')
-            if symbol=='none' or symbol.startswith('ENSG'):
-                # find another
-                for gg in track_data:
-                    sym2=gg.get('geneName')
-                    if sym2!='none' and not sym2.startswith('ENSG'):
-                        symbol=sym2
-                        break
-            def get_gene_info(gene_symbol):
-                url=f"http://mygene.info/v3/query?q=symbol:{gene_symbol}&species=human&fields=name"
-                resp=requests.get(url,timeout=10)
-                if resp.ok:
-                    dat=resp.json()
-                    if dat.get('hits'):
-                        return dat['hits'][0].get('name','Unknown')
-                return 'Unknown'
-            name = get_gene_info(symbol)
-            cache[cds]={'symbol':symbol,'name':name}
-            with open(cache_file,'w') as f:
-                json.dump(cache,f)
-            return symbol,name,[]
-        except:
-            return None,None,[]
-
+    # Use the existing get_gene_annotation function
     text_objects = []
     label_points_x = []
     label_points_y = []
@@ -1278,28 +1162,25 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
             label_txt = None
 
         if label_txt:
-            # Start label slightly above and to the right to help adjust_text
             txt = ax.text(
-                hit_row['plot_x'], 
-                hit_row['neg_log_p'] + 0.5,
+                hit_row['plot_x'],
+                hit_row['neg_log_p'] + 1.0,
                 label_txt,
-                fontsize=12, 
-                ha='center', 
-                va='bottom', 
-                color='black',
-                bbox=dict(boxstyle="round,pad=0.3", fc="khaki", ec="gray", alpha=0.8)
+                fontsize=12,
+                ha='center',
+                va='bottom',
+                color='black'
             )
             text_objects.append(txt)
             label_points_x.append(hit_row['plot_x'])
             label_points_y.append(hit_row['neg_log_p'])
 
-    # Adjust texts with stronger forces to prevent overlap
     adjust_text(
         text_objects,
         x=label_points_x,
         y=label_points_y,
         ax=ax,
-        arrowprops=dict(arrowstyle='->', lw=0.5, color='black'),
+        arrowprops=dict(arrowstyle='<-', lw=0.5, color='black'),
         force_text=2.0,
         force_points=2.0,
         expand_points=(2,2),
