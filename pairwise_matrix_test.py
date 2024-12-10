@@ -1135,7 +1135,7 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
 
     plt.subplots_adjust(left=0.07, right=0.98, top=0.9, bottom=0.15)
     PLOTS_DIR.mkdir(exist_ok=True)
-    plt.savefig(PLOTS_DIR / 'enhanced_manhattan_plot.png', bbox_inches='tight', dpi=300)
+    plt.savefig(PLOTS_DIR / 'manhattan_plot.png', bbox_inches='tight', dpi=300)
     plt.close()
 
 
