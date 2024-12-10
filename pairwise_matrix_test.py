@@ -681,6 +681,22 @@ def analyze_cds_parallel(args):
     }
 
 
+    # If either matrix is None, it means one group had no sequences.
+    if matrix_0 is None or matrix_1 is None:
+        # Not enough data to proceed
+        result.update({
+            'observed_effect_size': np.nan,
+            'p_value': np.nan,
+            'n0': n0,
+            'n1': n1,
+            'num_comp_group_0': 0,
+            'num_comp_group_1': 0,
+            'std_err': np.nan
+        })
+        # Return early
+        save_cached_result(cds, result)
+        return cds, result
+    
     valid_per_seq_group_0 = np.sum(~np.isnan(matrix_0), axis=1)
     valid_per_seq_group_1 = np.sum(~np.isnan(matrix_1), axis=1)
     
@@ -690,8 +706,8 @@ def analyze_cds_parallel(args):
         np.nansum(~np.isnan(matrix_1)) < 10 or
         not all(valid_per_seq_group_0 >= 2) or
         not all(valid_per_seq_group_1 >= 2)):
-
-        # Not enough sequences in one of the groups
+    
+        # Not enough sequences/valid comparisons
         result.update({
             'observed_effect_size': np.nan,
             'p_value': np.nan,
@@ -702,14 +718,13 @@ def analyze_cds_parallel(args):
             'std_err': np.nan
         })
     else:
-        # Call the analysis worker and update result
+        # Proceed with analysis
         worker_result = analysis_worker((
             all_sequences, n0, pairwise_dict,
             sequences_0, sequences_1
         ))
         result.update(worker_result)
-
-    # Cache the result
+    
     save_cached_result(cds, result)
     return cds, result
 
