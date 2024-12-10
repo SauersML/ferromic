@@ -769,149 +769,161 @@ def parse_cds_coordinates(cds_name):
 
 def build_overlap_clusters(results_df):
     """Build clusters of overlapping CDS regions."""
-    print(f"\nAnalyzing {len(results_df)} CDS entries")
-
-    # Initialize clusters
-    clusters = {}
-    cluster_id = 0
-    cds_to_cluster = {}
-
-    # Sort CDSs by chromosome and start position
     cds_coords = []
     for cds in results_df['CDS']:
         chrom, start, end = parse_cds_coordinates(cds)
-        if None not in (chrom, start, end):
+        if (chrom is not None) and (start is not None) and (end is not None):
             cds_coords.append((chrom, start, end, cds))
 
-    print(f"\nSuccessfully parsed {len(cds_coords)} CDS coordinates")
-    if len(cds_coords) == 0:
-        print("No CDS coordinates could be parsed! Check CDS name format.")
-        # Print a few example CDS names
-        print("\nExample CDS names:")
-        for cds in results_df['CDS'].head():
-            print(cds)
+    cds_coords.sort(key=lambda x: (x[0], x[1]))
 
-    # Sort by chromosome and start position
-    cds_coords.sort()
-
-    # Build clusters
-    active_regions = []  # (chrom, end, cluster_id)
+    clusters = {}
+    cluster_id = 0
+    active = []
 
     for chrom, start, end, cds in cds_coords:
-        # Remove finished active regions
-        active_regions = [(c, e, cid) for c, e, cid in active_regions
-                          if c != chrom or e >= start]
-
-        # Find overlapping clusters
-        overlapping_clusters = set(cid for c, e, cid in active_regions
-                                   if c == chrom and e >= start)
-
-        if not overlapping_clusters:
-            # Create new cluster
+        active = [(c, e, cid) for c, e, cid in active if not (c == chrom and e < start)]
+        overlapping = {cid for c, e, cid in active if c == chrom and e >= start}
+        if not overlapping:
             clusters[cluster_id] = {cds}
-            cds_to_cluster[cds] = cluster_id
-            active_regions.append((chrom, end, cluster_id))
+            active.append((chrom, end, cluster_id))
             cluster_id += 1
         else:
-            # Merge overlapping clusters
-            target_cluster = min(overlapping_clusters)
-            clusters[target_cluster].add(cds)
-            cds_to_cluster[cds] = target_cluster
-
-            # Merge other overlapping clusters
-            for cid in overlapping_clusters:
-                if cid != target_cluster:
-                    clusters[target_cluster].update(clusters[cid])
+            target = min(overlapping)
+            clusters[target].add(cds)
+            merged = []
+            for c, e, cid in active:
+                if cid in overlapping and cid != target:
+                    clusters[target].update(clusters[cid])
                     del clusters[cid]
+                if cid in overlapping:
+                    merged.append((c, e, target))
+                else:
+                    merged.append((c, e, cid))
+            merged.append((chrom, end, target))
+            active = merged
 
-            # Update active regions
-            active_regions = [(c, e, target_cluster) if cid in overlapping_clusters
-                              else (c, e, cid)
-                              for c, e, cid in active_regions]
-            active_regions.append((chrom, end, target_cluster))
-
+    # After merging, clusters dict contains the final clusters
     return clusters
 
+
 def combine_cluster_evidence(cluster_cdss, results_df, results):
-    """Combine statistics for a cluster of overlapping CDSs using the smallest p-value."""
-    cluster_data = results_df[results_df['CDS'].isin(cluster_cdss)]
+    """Select the single largest CDS by amino acid length from the cluster and use its statistics."""
 
-    # Get weights based on CDS length
-    weights = {}
-    total_length = 0
-    for cds in cluster_cdss:
-        _, start, end = parse_cds_coordinates(cds)
-        if None not in (start, end):
-            length = end - start
-            weights[cds] = length
-            total_length += length
+    # Helper function to load GTF and compute amino acid lengths
+    if not hasattr(combine_cluster_evidence, "_aa_length_map"):
+        combine_cluster_evidence._aa_length_map = {}
+        combine_cluster_evidence._interval_map = defaultdict(list)
+        combine_cluster_evidence._chrom_strand = {}
 
-    # Normalize weights
-    for cds in weights:
-        weights[cds] /= total_length
+        with open("hg38.knownGene.gtf", "r") as f:
+            cds_lengths = defaultdict(int)
+            for line in f:
+                if not line.strip() or line.startswith("#"):
+                    continue
+                fields = line.strip().split('\t')
+                if len(fields) < 9:
+                    continue
+                feature = fields[2]
+                if feature != "CDS":
+                    continue
+                chrom = fields[0]
+                start = int(fields[3])
+                end = int(fields[4])
+                attrs = fields[8].strip().split(';')
+                attr_dict = {}
+                for a in attrs:
+                    a = a.strip()
+                    if a:
+                        k,v = a.split(' ',1)
+                        v = v.strip('"')
+                        attr_dict[k] = v
+                tid = attr_dict.get("transcript_id", None)
+                if tid is None:
+                    continue
+                combine_cluster_evidence._interval_map[tid].append((start, end))
+                combine_cluster_evidence._chrom_strand[tid] = (chrom, fields[6])
+                cds_lengths[tid] += (end - start + 1)
 
-    # Initialize statistics
-    weighted_effect_size = 0.0
-    valid_cdss = 0
-    valid_indices = []
+            for t, length in cds_lengths.items():
+                aa = length / 3.0
+                combine_cluster_evidence._aa_length_map[t] = aa
 
-    # Initialize a set to collect unique pairwise comparisons for the cluster
-    cluster_pairs = set()
+    # Function to find transcript_id for a given CDS coordinate if possible.
+    # We'll consider a transcript matches if its intervals cover this CDS fully.
+    # This is WRONG. We must fix this later by adding transcript ID or similar to the results.
+    def find_transcript_id_for_cds(cds_name):
+        chrom, start, end = parse_cds_coordinates(cds_name)
+        if chrom is None:
+            return None
+        best_tid = None
+        best_len = -1
+        for tid, intervals in combine_cluster_evidence._interval_map.items():
+            t_chrom, _ = combine_cluster_evidence._chrom_strand[tid]
+            if t_chrom != chrom:
+                continue
+            merged = []
+            for s,e in sorted(intervals, key=lambda x:x[0]):
+                if not merged or s > merged[-1][1]+1:
+                    merged.append([s,e])
+                else:
+                    merged[-1][1] = max(merged[-1][1], e)
+            covered = False
+            needed = start
+            for ms,me in merged:
+                if ms <= needed <= me:
+                    if me >= end:
+                        covered = True
+                        break
+                    else:
+                        needed = me+1
+                elif ms > needed:
+                    break
+            if covered:
+                aa_len = combine_cluster_evidence._aa_length_map.get(tid, -1)
+                if aa_len > best_len:
+                    best_len = aa_len
+                    best_tid = tid
+        return best_tid
 
-    for idx, row in cluster_data.iterrows():
-        cds = row['CDS']
-        effect_size = row['observed_effect_size']
+    # Compute the amino acid length for each CDS in the cluster
+    best_cds = None
+    best_len = -1
+    for c in cluster_cdss:
+        tid = find_transcript_id_for_cds(c)
+        if tid is not None:
+            aa_len = combine_cluster_evidence._aa_length_map.get(tid, -1)
+            if aa_len > best_len:
+                best_len = aa_len
+                best_cds = c
 
-        if np.isnan(effect_size):
-            continue  # Skip invalid entries
+    if best_cds is None or best_len <= 0:
+        return {
+            'combined_pvalue': np.nan,
+            'weighted_effect_size': np.nan,
+            'n_comparisons': 0,
+            'n_valid_cds': 0,
+            'cluster_pairs': set()
+        }
 
-        weight = weights.get(cds, 1 / len(cluster_cdss))
-        weighted_effect_size += effect_size * weight
+    chosen = results_df[results_df['CDS'] == best_cds].dropna(subset=['observed_effect_size','p_value'])
+    if len(chosen) == 0:
+        return {
+            'combined_pvalue': np.nan,
+            'weighted_effect_size': np.nan,
+            'n_comparisons': 0,
+            'n_valid_cds': 0,
+            'cluster_pairs': set()
+        }
 
-        # Accumulate unique pairwise comparisons from the results dictionary
-        cds_pairs = results[cds]['pairwise_comparisons']
-        cluster_pairs.update(cds_pairs)
-
-        valid_cdss += 1
-        valid_indices.append(idx)
-
-    # After the loop, set total_comparisons to the number of unique pairs
-    total_comparisons = len(cluster_pairs)
-
-    if valid_cdss > 0:
-        # Collect valid p-values
-        valid_pvals = cluster_data.loc[valid_indices]['p_value'].values
-    
-        # Filter out invalid p-values
-        valid_pvals = valid_pvals[~np.isnan(valid_pvals)]
-        valid_pvals = valid_pvals[~np.isinf(valid_pvals)]
-    
-        if len(valid_pvals) > 0:
-            # Normalized weights based on CDS lengths
-            valid_weights = []
-            for idx in valid_indices:
-                cds = cluster_data.loc[idx, 'CDS']
-                weight = weights.get(cds, 1 / len(cluster_cdss))
-                valid_weights.append(weight)
-            valid_weights = np.array(valid_weights)
-            # Normalize weights so that they sum to 1
-            valid_weights /= valid_weights.sum()
-    
-            # Combine p-values using Stouffer's method with weights
-            z_stat, combined_p = combine_pvalues(valid_pvals, method='stouffer', weights=valid_weights)
-        else:
-            combined_p = np.nan
-    else:
-        combined_p = np.nan
-        weighted_effect_size = np.nan
-        total_comparisons = 0
-
+    row = chosen.iloc[0]
+    pairs = results[best_cds]['pairwise_comparisons'] if best_cds in results else set()
     return {
-        'combined_pvalue': combined_p,
-        'weighted_effect_size': weighted_effect_size,
-        'n_comparisons': total_comparisons,
-        'n_valid_cds': valid_cdss,
-        'cluster_pairs': cluster_pairs
+        'combined_pvalue': row['p_value'],
+        'weighted_effect_size': row['observed_effect_size'],
+        'n_comparisons': len(pairs),
+        'n_valid_cds': 1,
+        'cluster_pairs': pairs
     }
 
 def compute_overall_significance(cluster_results):
