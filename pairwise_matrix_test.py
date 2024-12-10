@@ -21,6 +21,7 @@ import matplotlib.patches as mpatches
 import requests
 from urllib.parse import urlencode
 from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import FixedLocator, FixedFormatter
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -584,15 +585,22 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     from matplotlib.cm import ScalarMappable
     sm = ScalarMappable(norm=LogNorm(vmin=0.0000000001, vmax=50), cmap=cmap_normal)
     sm.set_array([])
-    cbar = plt.colorbar(sm, cax=cbar_ax, ticks=[0.01, 1, 3, 10, 50])
-    cbar.ax.set_yticklabels(['0', '1', '3', '10', '50'])
+
+    # Create the colorbar as before, but don't set ticks or labels yet
+    cbar = plt.colorbar(sm, cax=cbar_ax)
+    
+    # Now explicitly set the ticks and labels we want
+    desired_ticks = [0.0000000001, 1, 3, 10, 50]  # Make sure all are within vmin and vmax
+    desired_labels = ['0', '1', '3', '10', '50']
+    
+    # Use FixedLocator and FixedFormatter to force these ticks and labels
+    cbar.ax.yaxis.set_major_locator(FixedLocator(desired_ticks))
+    cbar.ax.yaxis.set_major_formatter(FixedFormatter(desired_labels))
+    
     cbar.set_label('Omega Value', fontsize=16)
     cbar.ax.tick_params(labelsize=14)
+    
 
-    # Force normal (non-exponent) formatting on the colorbar ticks
-    cbar.ax.yaxis.set_major_formatter(ScalarFormatter())
-    cbar.ax.yaxis.get_offset_text().set_visible(False)
-    cbar.update_ticks()
 
     legend = ax1.legend(
         handles=special_patches,
