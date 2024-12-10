@@ -20,7 +20,7 @@ from matplotlib.colorbar import ColorbarBase
 import matplotlib.patches as mpatches
 import requests
 from urllib.parse import urlencode
-
+from matplotlib.ticker import ScalarFormatter
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -584,7 +584,12 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar.set_label('Omega Value', fontsize=16)
     cbar.ax.tick_params(labelsize=14)
 
-    legend_ax = fig.add_axes([0.45, 0.55, 0.10, 0.10])
+    # Force normal (non-exponent) formatting on the colorbar ticks
+    cbar.ax.yaxis.set_major_formatter(ScalarFormatter())
+    cbar.ax.yaxis.get_offset_text().set_visible(False)
+    cbar.update_ticks()
+
+    legend_ax = fig.add_axes([0.15, 0.88, 0.08, 0.08])
     legend_ax.axis('off')
     legend = legend_ax.legend(
         handles=special_patches,
