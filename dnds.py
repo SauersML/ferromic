@@ -383,9 +383,7 @@ def process_phy_file(args):
     # Extract chromosome, start, and end from the filename
     basename = phy_filename.replace('.phy', '')
     m = re.match(r'group_\d+_chr_(\w+)_start_(\d+)_end_(\d+)', basename)
-    if not m:
-        logging.warning(f"Filename format not recognized: {basename}")
-        continue
+    
     chrom, start_str, end_str = m.groups()
     start = int(start_str)
     end = int(end_str)
