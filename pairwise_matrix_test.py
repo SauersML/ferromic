@@ -511,9 +511,9 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cmap_normal = sns.color_palette("viridis", as_cmap=True)
 
     plt.rcParams.update(plt.rcParamsDefault)
-    fig = plt.figure(figsize=(16, 10))
+    fig = plt.figure(figsize=(15, 8))
 
-    gs = plt.GridSpec(1, 3, width_ratios=[1, 1, 1], hspace=0.5, wspace=0.3)
+    gs = plt.GridSpec(1, 4, width_ratios=[1, 1, 0.2, 3], hspace=0.5, wspace=1.0)
 
     # Main title
     if gene_symbol and gene_name:
@@ -586,7 +586,8 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     plot_matrices(ax2, matrix_1_full, f'Inverted Sequence Matrix (n={len(sequences_inverted)})')
 
     # Distribution plot of normal omega values
-    ax3 = fig.add_subplot(gs[0, 2])
+    ax3 = fig.add_subplot(gs[0, 3])
+
     values_direct = matrix_0_full[np.tril_indices_from(matrix_0_full, k=-1)]
     values_inverted = matrix_1_full[np.tril_indices_from(matrix_1_full, k=-1)]
 
