@@ -45,26 +45,6 @@ GLOBAL_TOTAL_SEQS = 0
 GLOBAL_TOTAL_CDS = 0
 GLOBAL_TOTAL_COMPARISONS = 0
 
-# Preprocessing
-def load_transcripts_from_gtf(gtf_path='../hg38.knownGene.gtf'):
-    """
-    Load all transcript_ids from the given GTF file into a set.
-    We assume each line has transcript_id "XYZ" in its attributes.
-    """
-    transcript_set = set()
-    with open(gtf_path, 'r') as f:
-        for line in f:
-            if line.startswith('#'):
-                continue
-            fields = line.strip().split('\t')
-            if len(fields) < 9:
-                continue
-            attr = fields[8]
-            m = re.search(r'transcript_id "([^"]+)"', attr)
-            if m:
-                tid = m.group(1)
-                transcript_set.add(tid)
-    return transcript_set
 
 def validate_sequence(seq):
     global GLOBAL_INVALID_SEQS
@@ -324,25 +304,6 @@ def estimate_total_comparisons(phy_dir):
 
     GLOBAL_TOTAL_COMPARISONS = total_comparisons
 
-
-def find_transcript_id_for_coords(chrom, start, end):
-    with open('../hg38.knownGene.gtf','r') as f:
-        for line in f:
-            if line.startswith('#'):
-                continue
-            fields = line.strip().split('\t')
-            if len(fields) < 9:
-                continue
-            if fields[0] == chrom and fields[2] == 'transcript':
-                t_start = int(fields[3])
-                t_end = int(fields[4])
-                # Check overlap
-                if t_start <= end and start <= t_end:
-                    m = re.search(r'transcript_id "([^"]+)"', fields[8])
-                    if m:
-                        return m.group(1)
-    return None
-
 def process_phy_file(args):
     pair_args = args
     phy_file, output_dir, codeml_path, total_files, file_index, cache = pair_args
@@ -357,12 +318,6 @@ def process_phy_file(args):
     chrom, start_str, end_str = m.groups()
     start = int(start_str)
     end = int(end_str)
-
-    # Find a transcript_id that overlaps this genomic interval.
-    cds_id = find_transcript_id_for_coords(chrom, start, end)
-    
-    if not cds_id or cds_id not in TRANSCRIPT_SET:
-        logging.info(f"Skipping {phy_file} - transcript not found in GTF for coords: {chrom}:{start}-{end}")
 
     mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
     output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}.csv')
@@ -428,8 +383,6 @@ def process_phy_file(args):
             update_progress(res)
 
     df = pd.DataFrame(results, columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'])
-    # Add Transcript_ID = cds_id (we know cds_id is valid from GTF check)
-    df['Transcript_ID'] = cds_id
 
     df.to_csv(output_csv, index=False)
 
@@ -449,7 +402,6 @@ def process_phy_file(args):
             'Haplotype': sample,
             'Group': sample_groups[sample],
             'CDS': cds_id,
-            'Transcript_ID': cds_id,
             'Mean_dNdS': mean_omega,
             'Median_dNdS': median_omega,
             'Num_Comparisons': len(omega_vals)
@@ -471,10 +423,6 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-
-    # Load transcript set from GTF
-    global TRANSCRIPT_SET
-    TRANSCRIPT_SET = load_transcripts_from_gtf('../hg38.knownGene.gtf')
 
     # Load cache
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
@@ -502,10 +450,6 @@ def main():
     for phy_file in phy_files:
         phy_filename = os.path.basename(phy_file)
         cds_id = phy_filename.replace('.phy','')
-        # Check transcript_id
-        if cds_id not in TRANSCRIPT_SET:
-            logging.info(f"Skipping {phy_file} - transcript not found in GTF.")
-            continue
         mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
         output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}.csv')
         haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
