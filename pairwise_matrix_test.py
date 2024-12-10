@@ -1001,6 +1001,12 @@ def main():
     # Save final results
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
 
+    # Compute Bonferroni-corrected p-values using valid (non-NaN and >0) comparisons
+    valid_df = results_df[results_df['p_value'].notnull() & (results_df['p_value'] > 0)]
+    total_valid_comparisons = len(valid_df)
+    results_df['bonferroni_p_value'] = results_df['p_value'] * total_valid_comparisons
+    results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
+
     # Overall analysis
     print("\nComputing overall significance...")
     clusters = build_overlap_clusters(results_df)
@@ -1032,8 +1038,8 @@ def main():
     print(f"Overall p-value: {overall_results['overall_pvalue']:.4e}")
     print(f"Overall effect size: {overall_results['overall_effect']:.4f}")
 
-    # Sort results by p-value
-    significant_results = results_df.sort_values('p_value')
+    # Sort results by original p-value, but only consider those with bonferroni_p_value < 0.05
+    significant_results = results_df[results_df['bonferroni_p_value'] < 0.05].sort_values('p_value')
 
     # Create visualizations for top significant results
     for _, row in significant_results.head(30).iterrows():
