@@ -62,6 +62,10 @@ def read_and_preprocess_data(file_path):
     print("Reading data...")
     df = pd.read_csv(file_path)
 
+    # Convert CDS name from chrX_startY_endZ to chrX:Y-Z
+    df['CDS'] = df['CDS'].str.replace('_start', ':', regex=False)
+    df['CDS'] = df['CDS'].str.replace('_end', '-', regex=False)
+
     # Filtering valid omega values
     df = df[
         (df['omega'] != -1) &
