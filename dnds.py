@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 dN/dS Analysis Script using PAML's CODEML
 
@@ -38,27 +37,23 @@ logging.basicConfig(
    ]
 )
 
-# Global counters
 GLOBAL_INVALID_SEQS = 0
 GLOBAL_DUPLICATES = 0
 GLOBAL_TOTAL_SEQS = 0
 GLOBAL_TOTAL_CDS = 0
 GLOBAL_TOTAL_COMPARISONS = 0
 
-
 def validate_sequence(seq):
     global GLOBAL_INVALID_SEQS
     if len(seq) % 3 != 0:
         GLOBAL_INVALID_SEQS += 1
         return None
-
     valid_bases = set('ATCGNatcgn-')
     if not set(seq).issubset(valid_bases):
         invalid_chars = set(seq) - valid_bases
         logging.warning(f"Invalid chars {invalid_chars} found. Skipping.")
         GLOBAL_INVALID_SEQS += 1
         return None
-
     return seq.upper()
 
 def extract_group_from_sample(sample_name):
@@ -123,11 +118,9 @@ def parse_codeml_output(outfile_dir):
     if not os.path.exists(rst_file):
         logging.error(f"CODEML output file not found: {rst_file}")
         return None, None, None
-
     try:
         with open(rst_file, 'r') as f:
             content = f.read()
-
         pattern = re.compile(
             r"t=\s*[\d\.]+\s+S=\s*([\d\.]+)\s+N=\s*([\d\.]+)\s+"
             r"dN/dS=\s*([\d\.]+)\s+dN=\s*([\d\.]+)\s+dS=\s*([\d\.]+)"
@@ -152,31 +145,22 @@ def get_safe_process_count():
     return safe_processes
 
 def parse_phy_file(filepath):
-    """
-    Parse a PHYLIP file to extract sequences.
-    Returns (sequences, duplicates_found).
-    """
     global GLOBAL_DUPLICATES, GLOBAL_TOTAL_SEQS
     sequences = {}
     duplicates_found = False
-
     if not os.path.exists(filepath):
         logging.error(f"File not found: {filepath}")
         return {}, False
-
     with open(filepath, 'r') as file:
         lines = file.readlines()
         if not lines:
             logging.error(f"PHYLIP file empty: {filepath}")
             return {}, False
-
         try:
             num_sequences, seq_length = map(int, lines[0].strip().split())
             sequence_lines = lines[1:]
         except ValueError:
-            # This is expected
             sequence_lines = lines
-
         for line in sequence_lines:
             line = line.strip()
             if not line:
@@ -220,48 +204,37 @@ def save_cache(cache_file, cache_data):
 def process_pair(args):
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, cache = args
     seq1_name, seq2_name = pair
-
     cache_key = (cds_id, seq1_name, seq2_name, COMPARE_BETWEEN_GROUPS)
     if cache_key in cache:
         return cache[cache_key]
-
     if seq1_name not in sequences or seq2_name not in sequences:
         logging.error(f"Sequences missing: {seq1_name}, {seq2_name}")
         return None
-
     group1 = sample_groups.get(seq1_name)
     group2 = sample_groups.get(seq2_name)
-
     if not COMPARE_BETWEEN_GROUPS and group1 != group2:
         return None
-
     if sequences[seq1_name] == sequences[seq2_name]:
-        # Identical seqs
         result = (seq1_name, seq2_name, group1, group2, 0.0, 0.0, -1.0, cds_id)
         cache[cache_key] = result
         return result
-
     working_dir = os.path.join(temp_dir, f'{seq1_name}_{seq2_name}')
     if not os.path.exists(working_dir):
         os.makedirs(working_dir)
-
     seqfile = os.path.join(working_dir, 'seqfile.phy')
     with open(seqfile, 'w') as f:
         f.write(f" 2 {len(sequences[seq1_name])}\n")
         f.write(f"{seq1_name} {sequences[seq1_name]}\n")
         f.write(f"{seq2_name} {sequences[seq2_name]}\n")
-
     treefile = os.path.join(working_dir, 'tree.txt')
     with open(treefile, 'w') as f:
         f.write(f"({seq1_name},{seq2_name});\n")
-
     ctl_path = create_paml_ctl(seqfile, 'mlc', working_dir)
     success = run_codeml(ctl_path, working_dir, codeml_path)
     if not success:
         result = (seq1_name, seq2_name, group1, group2, np.nan, np.nan, np.nan, cds_id)
         cache[cache_key] = result
         return result
-
     dn, ds, omega = parse_codeml_output(working_dir)
     if omega is None:
         omega = np.nan
@@ -271,15 +244,12 @@ def process_pair(args):
 
 def estimate_total_comparisons(phy_dir):
     global GLOBAL_TOTAL_CDS, GLOBAL_TOTAL_COMPARISONS
-    # This just counts comparisons, also increments global counters due to parse_phy_file calls.
     phy_files = glob.glob(os.path.join(phy_dir, '*.phy'))
     total_comparisons = 0
     for phy_file in phy_files:
         sequences, duplicates = parse_phy_file(phy_file)
         if not sequences:
             continue
-
-        # Assign groups
         sample_groups = {}
         skip_file = False
         for s in sequences.keys():
@@ -290,55 +260,43 @@ def estimate_total_comparisons(phy_dir):
             sample_groups[s] = g
         if skip_file:
             continue
-
         if COMPARE_BETWEEN_GROUPS:
             pairs = list(combinations(sequences.keys(), 2))
         else:
             group0_samples = [s for s, g in sample_groups.items() if g == 0]
             group1_samples = [s for s, g in sample_groups.items() if g == 1]
             pairs = list(combinations(group0_samples, 2)) + list(combinations(group1_samples, 2))
-
         if pairs:
             GLOBAL_TOTAL_CDS += 1
         total_comparisons += len(pairs)
-
     GLOBAL_TOTAL_COMPARISONS = total_comparisons
 
 def process_phy_file(args):
-    pair_args = args
-    phy_file, output_dir, codeml_path, total_files, file_index, cache = pair_args
-
+    phy_file, output_dir, codeml_path, total_files, file_index, cache = args
     start_time = time.time()
     phy_filename = os.path.basename(phy_file)
-
-    # Extract chromosome, start, and end from the filename
     basename = phy_filename.replace('.phy', '')
     m = re.match(r'group_\d+_chr_(\w+)_start_(\d+)_end_(\d+)', basename)
-    
     chrom, start_str, end_str = m.groups()
     start = int(start_str)
     end = int(end_str)
-
+    cds_id = basename
     mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
     output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}.csv')
     haplotype_output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
-
     if os.path.exists(output_csv) and os.path.exists(haplotype_output_csv):
         logging.info(f"Results exist for {cds_id}. Skipping.")
         return haplotype_output_csv
-
     sequences, has_duplicates = parse_phy_file(phy_file)
     if not sequences:
         logging.error(f"No valid sequences in {phy_file}. Skipping.")
         return None
-
     if has_duplicates:
         print(f"CLEARING CACHE for {os.path.basename(phy_file)} due to duplicates")
         logging.info(f"Clearing cache for {os.path.basename(phy_file)}")
         keys_to_remove = [k for k in cache.keys() if k[0] == cds_id]
         for k in keys_to_remove:
             del cache[k]
-
     sample_groups = {}
     for sample_name in sequences.keys():
         g = extract_group_from_sample(sample_name)
@@ -346,7 +304,6 @@ def process_phy_file(args):
             logging.error(f"No group for {sample_name}. Skipping file.")
             return None
         sample_groups[sample_name] = g
-
     if COMPARE_BETWEEN_GROUPS:
         all_samples = list(sample_groups.keys())
         pairs = list(combinations(all_samples, 2))
@@ -354,22 +311,17 @@ def process_phy_file(args):
         group0_samples = [s for s, gg in sample_groups.items() if gg == 0]
         group1_samples = [s for s, gg in sample_groups.items() if gg == 1]
         pairs = list(combinations(group0_samples, 2)) + list(combinations(group1_samples, 2))
-
     if not pairs:
         logging.error(f"No pairs in {phy_file}.")
         return None
-
     temp_dir = os.path.join(output_dir, 'temp', cds_id)
     os.makedirs(temp_dir, exist_ok=True)
-
     pool_args = [(pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, cache) for pair in pairs]
-
     num_processes = get_safe_process_count()
     manager = multiprocessing.Manager()
     progress_counter = manager.Value('i', 0)
     total_pairs = len(pool_args)
     results = []
-
     def update_progress(result):
         if result:
             results.append(result)
@@ -377,16 +329,11 @@ def process_phy_file(args):
             progress_counter.value += 1
             pct = (progress_counter.value / total_pairs)*100
             logging.info(f"Progress: {progress_counter.value}/{total_pairs} pairs ({pct:.2f}%)")
-
     with multiprocessing.Pool(processes=num_processes) as pool:
         for res in pool.imap_unordered(process_pair, pool_args):
             update_progress(res)
-
     df = pd.DataFrame(results, columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'])
-
     df.to_csv(output_csv, index=False)
-
-    # Haplotype stats
     hap_stats = []
     for sample in sequences.keys():
         sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
@@ -408,7 +355,6 @@ def process_phy_file(args):
         })
     hap_df = pd.DataFrame(hap_stats)
     hap_df.to_csv(haplotype_output_csv, index=False)
-
     shutil.rmtree(temp_dir, ignore_errors=True)
     end_time = time.time()
     logging.info(f"Processed {phy_file} in {end_time-start_time:.2f}s")
@@ -421,18 +367,12 @@ def main():
     parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
     parser.add_argument('--codeml_path', type=str, default='codeml', help='Path to codeml executable.')
     args = parser.parse_args()
-
     os.makedirs(args.output_dir, exist_ok=True)
-
-    # Load cache
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
     cache = load_cache(cache_file)
-
-    # Pre-run estimate
     estimate_total_comparisons(args.phy_dir)
     phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
     total_files = len(phy_files)
-
     logging.info("=== START OF RUN SUMMARY ===")
     logging.info(f"Total PHYLIP files: {total_files}")
     logging.info(f"Total sequences encountered: {GLOBAL_TOTAL_SEQS}")
@@ -440,12 +380,9 @@ def main():
     logging.info(f"Duplicates: {GLOBAL_DUPLICATES}")
     logging.info(f"Total CDS: {GLOBAL_TOTAL_CDS}")
     logging.info(f"Expected comparisons: {GLOBAL_TOTAL_COMPARISONS}")
-
     cached_results_count = len(cache)
     remaining = GLOBAL_TOTAL_COMPARISONS - cached_results_count
     logging.info(f"Cache: {cached_results_count} results. {remaining} remain.")
-
-    # Filter work
     work_args = []
     for phy_file in phy_files:
         phy_filename = os.path.basename(phy_file)
@@ -457,11 +394,9 @@ def main():
             logging.info(f"Skipping {phy_file}, output exists.")
             continue
         work_args.append((phy_file, args.output_dir, args.codeml_path, total_files, len(work_args)+1, cache))
-
     total_new_files = len(work_args)
     completed_comparisons = cached_results_count
     start_time = time.time()
-
     def print_eta(completed, total, start):
         elapsed = time.time()-start
         if elapsed>0 and completed>0:
@@ -475,7 +410,6 @@ def main():
                 logging.info(f"Progress: {completed}/{total}, ETA:N/A")
         else:
             logging.info(f"Progress: {completed}/{total}, ETA:N/A")
-
     for idx, arg_t in enumerate(work_args, 1):
         phy_file = arg_t[0]
         logging.info(f"Processing file {idx}/{total_new_files}: {phy_file}")
@@ -488,7 +422,6 @@ def main():
         percent = (completed_comparisons/GLOBAL_TOTAL_COMPARISONS*100) if GLOBAL_TOTAL_COMPARISONS>0 else 0
         logging.info(f"Overall: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
         print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, start_time)
-
     end_time = time.time()
     final_invalid_pct = (GLOBAL_INVALID_SEQS/GLOBAL_TOTAL_SEQS*100) if GLOBAL_TOTAL_SEQS>0 else 0
     logging.info("=== END OF RUN SUMMARY ===")
@@ -500,7 +433,6 @@ def main():
     logging.info(f"Expected comps: {GLOBAL_TOTAL_COMPARISONS}")
     logging.info(f"Completed comps: {completed_comparisons}")
     logging.info(f"Total time: {(end_time-start_time)/60:.2f} min")
-
     logging.info("dN/dS analysis done.")
 
 if __name__ == '__main__':
