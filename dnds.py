@@ -1,21 +1,14 @@
+#!/usr/bin/env python3
 """
 dN/dS Analysis Script using PAML's CODEML
 
 This script calculates pairwise dN/dS values using PAML's CODEML program.
-It processes input files that contain nucleotide sequences in a custom format:
-each line corresponds to a single sample and its sequence, with the sample name
-ending in "_0" or "_1" immediately followed by the sequence, without any spaces.
-
-For example:
-EUR_CEU_NA12878_0TGGACAACTACGCAGATC...
-SAS_ITU_HG04217_1TGGACAACTACGCAGATC...
-
-No header lines are used. The code will extract the sample name by identifying
-the point at which "_0" or "_1" appears, and treat everything after that as
-the sequence.
+It processes PHYLIP files containing nucleotide sequences, computes pairwise
+comparisons within groups (or between groups if enabled), and outputs pairwise
+and haplotype statistics.
 
 Usage:
-    python3 dnds_analysis.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
+    python3 dnds.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
 """
 
 import os
@@ -156,50 +149,44 @@ def parse_phy_file(filepath):
     global GLOBAL_DUPLICATES, GLOBAL_TOTAL_SEQS
     sequences = {}
     duplicates_found = False
-
     if not os.path.exists(filepath):
         logging.error(f"File not found: {filepath}")
         return {}, False
-
     with open(filepath, 'r') as file:
         lines = file.readlines()
+        if not lines:
+            logging.error(f"PHYLIP file empty: {filepath}")
+            return {}, False
+        try:
+            num_sequences, seq_length = map(int, lines[0].strip().split())
+            sequence_lines = lines[1:]
+        except ValueError:
+            sequence_lines = lines
 
-    if not lines:
-        logging.error(f"PHYLIP file is empty: {filepath}")
-        return {}, False
-
-    # We assume no header. Each line should have a sample name ending in _0 or _1,
-    # followed immediately by the sequence. We must extract these with a regex.
-    # The pattern: (.+_(0|1))([ATCGNatcgn-]+)
-    pattern = re.compile(r'(?P<sample>.+_(0|1))(?P<seq>[ATCGNatcgn-]+)')
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        match = pattern.match(line)
-        if not match:
-            logging.error(f"Line does not match expected format in {filepath}: {line}")
-            continue
-
-        sample_name = match.group('sample')
-        sequence = match.group('seq')
-
-        validated_seq = validate_sequence(sequence)
-        if validated_seq:
-            GLOBAL_TOTAL_SEQS += 1
-            if sample_name in sequences:
-                duplicates_found = True
-                # Rename duplicates if needed
-                base_name = sample_name[:2] + sample_name[3:]
-                dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
-                new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
-                logging.info(f"Duplicate {sample_name} -> {new_name}")
-                sequences[new_name] = validated_seq
-                GLOBAL_DUPLICATES += 1
+        for line in sequence_lines:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                sample_name = parts[0]
+                sequence = ''.join(parts[1:])
             else:
-                sequences[sample_name] = validated_seq
-
+                sample_name = line[:10].strip()
+                sequence = line[10:].replace(" ", "")
+            validated_seq = validate_sequence(sequence)
+            if validated_seq:
+                GLOBAL_TOTAL_SEQS += 1
+                if sample_name in sequences:
+                    duplicates_found = True
+                    base_name = sample_name[:2] + sample_name[3:]
+                    dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
+                    new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
+                    logging.info(f"Duplicate {sample_name} -> {new_name}")
+                    sequences[new_name] = validated_seq
+                    GLOBAL_DUPLICATES += 1
+                else:
+                    sequences[sample_name] = validated_seq
     return sequences, duplicates_found
 
 def load_cache(cache_file):
@@ -275,7 +262,6 @@ def estimate_total_comparisons(phy_dir):
         sequences, duplicates = parse_phy_file(phy_file)
         if not sequences:
             continue
-
         sample_groups = {}
         skip_file = False
         for s in sequences.keys():
@@ -358,22 +344,22 @@ def process_phy_file(args):
     pool_args = [(pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, cache) for pair in pairs]
 
     num_processes = get_safe_process_count()
-    manager = multiprocessing.Manager()
-    progress_counter = manager.Value('i', 0)
-    total_pairs = len(pool_args)
     results = []
+    completed = 0
+    total_pairs = len(pool_args)
 
-    def update_progress(result):
-        if result:
-            results.append(result)
-        with progress_counter.get_lock():
-            progress_counter.value += 1
-            pct = (progress_counter.value / total_pairs)*100
-            logging.info(f"Progress: {progress_counter.value}/{total_pairs} pairs ({pct:.2f}%)")
+    # Callback to update progress
+    def on_result(res):
+        nonlocal completed
+        if res is not None:
+            results.append(res)
+        completed += 1
+        pct = (completed / total_pairs) * 100
+        logging.info(f"Progress: {completed}/{total_pairs} pairs ({pct:.2f}%)")
 
     with multiprocessing.Pool(processes=num_processes) as pool:
-        for res in pool.imap_unordered(process_pair, pool_args):
-            update_progress(res)
+        for r in pool.imap_unordered(process_pair, pool_args):
+            on_result(r)
 
     df = pd.DataFrame(results, columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'])
     df.to_csv(output_csv, index=False)
@@ -452,12 +438,12 @@ def main():
 
     def print_eta(completed, total, start):
         elapsed = time.time()-start
-        if elapsed > 0 and completed > 0:
-            rate = completed / elapsed
-            remain = total - completed
-            if rate > 0:
-                eta_sec = remain / rate
-                hrs = eta_sec / 3600
+        if elapsed>0 and completed>0:
+            rate = completed/elapsed
+            remain = total-completed
+            if rate>0:
+                eta_sec=remain/rate
+                hrs=eta_sec/3600
                 logging.info(f"Progress: {completed}/{total} comps. ETA: {hrs:.2f}h")
             else:
                 logging.info(f"Progress: {completed}/{total}, ETA:N/A")
@@ -473,12 +459,12 @@ def main():
         new_size = len(cache)
         newly_done = new_size - old_size
         completed_comparisons += newly_done
-        percent = (completed_comparisons / GLOBAL_TOTAL_COMPARISONS * 100) if GLOBAL_TOTAL_COMPARISONS > 0 else 0
+        percent = (completed_comparisons/GLOBAL_TOTAL_COMPARISONS*100) if GLOBAL_TOTAL_COMPARISONS>0 else 0
         logging.info(f"Overall: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
         print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, start_time)
 
     end_time = time.time()
-    final_invalid_pct = (GLOBAL_INVALID_SEQS / GLOBAL_TOTAL_SEQS * 100) if GLOBAL_TOTAL_SEQS > 0 else 0
+    final_invalid_pct = (GLOBAL_INVALID_SEQS/GLOBAL_TOTAL_SEQS*100) if GLOBAL_TOTAL_SEQS>0 else 0
     logging.info("=== END OF RUN SUMMARY ===")
     logging.info(f"Total PHYLIP: {total_files}")
     logging.info(f"Total seq: {GLOBAL_TOTAL_SEQS}")
@@ -487,7 +473,7 @@ def main():
     logging.info(f"Total CDS: {GLOBAL_TOTAL_CDS}")
     logging.info(f"Expected comps: {GLOBAL_TOTAL_COMPARISONS}")
     logging.info(f"Completed comps: {completed_comparisons}")
-    logging.info(f"Total time: {(end_time - start_time) / 60:.2f} min")
+    logging.info(f"Total time: {(end_time-start_time)/60:.2f} min")
 
     logging.info("dN/dS analysis done.")
 
