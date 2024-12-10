@@ -822,207 +822,12 @@ def build_overlap_clusters(results_df):
     return clusters
 
 
-def combine_cluster_evidence(cluster_cdss, results_df, results):
-    """Select the single largest CDS by amino acid length from the cluster and use its statistics."""
-
-    # Helper function to load GTF and compute amino acid lengths
-    if not hasattr(combine_cluster_evidence, "_aa_length_map"):
-        combine_cluster_evidence._aa_length_map = {}
-        combine_cluster_evidence._interval_map = defaultdict(list)
-        combine_cluster_evidence._chrom_strand = {}
-
-        with open("hg38.knownGene.gtf", "r") as f:
-            cds_lengths = defaultdict(int)
-            for line in f:
-                if not line.strip() or line.startswith("#"):
-                    continue
-                fields = line.strip().split('\t')
-                if len(fields) < 9:
-                    continue
-                feature = fields[2]
-                if feature != "CDS":
-                    continue
-                chrom = fields[0]
-                start = int(fields[3])
-                end = int(fields[4])
-                attrs = fields[8].strip().split(';')
-                attr_dict = {}
-                for a in attrs:
-                    a = a.strip()
-                    if a:
-                        k,v = a.split(' ',1)
-                        v = v.strip('"')
-                        attr_dict[k] = v
-                tid = attr_dict.get("transcript_id", None)
-                if tid is None:
-                    continue
-                combine_cluster_evidence._interval_map[tid].append((start, end))
-                combine_cluster_evidence._chrom_strand[tid] = (chrom, fields[6])
-                cds_lengths[tid] += (end - start + 1)
-
-            for t, length in cds_lengths.items():
-                aa = length / 3.0
-                combine_cluster_evidence._aa_length_map[t] = aa
-
-    # Function to find transcript_id for a given CDS coordinate if possible.
-    # We'll consider a transcript matches if its intervals cover this CDS fully.
-    # This is WRONG. We must fix this later by adding transcript ID or similar to the results.
-    def find_transcript_id_for_cds(cds_name):
-        chrom, start, end = parse_cds_coordinates(cds_name)
-        if chrom is None:
-            return None
-        best_tid = None
-        best_len = -1
-        for tid, intervals in combine_cluster_evidence._interval_map.items():
-            t_chrom, _ = combine_cluster_evidence._chrom_strand[tid]
-            if t_chrom != chrom:
-                continue
-            merged = []
-            for s,e in sorted(intervals, key=lambda x:x[0]):
-                if not merged or s > merged[-1][1]+1:
-                    merged.append([s,e])
-                else:
-                    merged[-1][1] = max(merged[-1][1], e)
-            covered = False
-            needed = start
-            for ms,me in merged:
-                if ms <= needed <= me:
-                    if me >= end:
-                        covered = True
-                        break
-                    else:
-                        needed = me+1
-                elif ms > needed:
-                    break
-            if covered:
-                aa_len = combine_cluster_evidence._aa_length_map.get(tid, -1)
-                if aa_len > best_len:
-                    best_len = aa_len
-                    best_tid = tid
-        return best_tid
-
-    # Compute the amino acid length for each CDS in the cluster
-    best_cds = None
-    best_len = -1
-    for c in cluster_cdss:
-        tid = find_transcript_id_for_cds(c)
-        if tid is not None:
-            aa_len = combine_cluster_evidence._aa_length_map.get(tid, -1)
-            if aa_len > best_len:
-                best_len = aa_len
-                best_cds = c
-
-    if best_cds is None or best_len <= 0:
-        return {
-            'combined_pvalue': np.nan,
-            'weighted_effect_size': np.nan,
-            'n_comparisons': 0,
-            'n_valid_cds': 0,
-            'cluster_pairs': set()
-        }
-
-    chosen = results_df[results_df['CDS'] == best_cds].dropna(subset=['observed_effect_size','p_value'])
-    if len(chosen) == 0:
-        return {
-            'combined_pvalue': np.nan,
-            'weighted_effect_size': np.nan,
-            'n_comparisons': 0,
-            'n_valid_cds': 0,
-            'cluster_pairs': set()
-        }
-
-    row = chosen.iloc[0]
-    pairs = results[best_cds]['pairwise_comparisons'] if best_cds in results else set()
-    return {
-        'combined_pvalue': row['p_value'],
-        'weighted_effect_size': row['observed_effect_size'],
-        'n_comparisons': len(pairs),
-        'n_valid_cds': 1,
-        'cluster_pairs': pairs
-    }
-
-def compute_overall_significance(cluster_results):
-    """Compute overall significance from independent clusters using scipy's combine_pvalues."""
-    import numpy as np
-    from scipy import stats
-
-    # Initialize default return values
-    overall_pvalue_combined = np.nan
-    overall_effect = np.nan
-    n_valid_clusters = 0
-    total_comparisons = 0
-
-    # Filter out clusters with valid combined_pvalue and weighted_effect_size
-    valid_clusters = [
-        c for c in cluster_results.values()
-        if not np.isnan(c['combined_pvalue']) and not np.isnan(c['weighted_effect_size'])
-    ]
-
-    if valid_clusters:
-        cluster_pvals = np.array([c['combined_pvalue'] for c in valid_clusters])
-
-        # Use scipy.stats.combine_pvalues to combine p-values
-        # Choose method: 'fisher', 'stouffer', or others as appropriate etc.
-        statistic, overall_pvalue_combined = stats.combine_pvalues(cluster_pvals, method='fisher')
-
-        print(f"\nCombined p-value using Fisher's method: {overall_pvalue_combined:.4e}")
-        print(f"Fisher's statistic: {statistic:.4f}")
-
-        # Stouffer's method
-        weights = np.array([c['n_comparisons'] for c in valid_clusters], dtype=float)
-
-        # Check for zero weights
-        if np.all(weights == 0) or np.isnan(weights).any():
-            weights = None
-            print("Note: Weights not used in Stouffer's method due to zero or NaN values.")
-
-        # Use Stouffer's method with weights
-        statistic_stouffer, pvalue_stouffer = stats.combine_pvalues(cluster_pvals, method='stouffer', weights=weights)
-        print(f"Combined p-value using Stouffer's method: {pvalue_stouffer:.4e}")
-        print(f"Stouffer's Z-score statistic: {statistic_stouffer:.4f}")
-
-        # Compute weighted effect size
-        effect_sizes = np.array([c['weighted_effect_size'] for c in valid_clusters])
-
-        if weights is not None:
-            normalized_weights = weights / np.sum(weights)
-        else:
-            normalized_weights = np.ones_like(effect_sizes) / len(effect_sizes)
-
-        overall_effect = np.average(effect_sizes, weights=normalized_weights)
-
-        # Count comparisons
-        all_unique_pairs = set()
-        for c in valid_clusters:
-            all_unique_pairs.update(c['cluster_pairs'])
-        total_comparisons = len(all_unique_pairs)
-        n_valid_clusters = len(valid_clusters)
-
-        overall_pvalue = overall_pvalue_combined
-
-    else:
-        print("No valid clusters available for significance computation.")
-        overall_pvalue = np.nan
-        overall_pvalue_combined = np.nan
-        overall_effect = np.nan
-        pvalue_stouffer = np.nan
-
-    return {
-        'overall_pvalue': overall_pvalue,
-        'overall_pvalue_fisher': overall_pvalue_combined,
-        'overall_pvalue_stouffer': pvalue_stouffer,
-        'overall_effect': overall_effect,
-        'n_valid_clusters': n_valid_clusters,
-        'total_comparisons': total_comparisons
-    }
-
-
 
 def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
     """
-    Create a Manhattan plot of CDS p-values along the genome.
+    Create a refined Manhattan-style plot of CDS p-values along the genome.
     """
-    
+
     required_cols = {'CDS', 'p_value', 'chrom', 'start', 'end'}
     if not required_cols.issubset(results_df.columns):
         raise ValueError(f"results_df must contain columns: {required_cols}")
@@ -1033,21 +838,17 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
     m = len(valid_pvals)  # number of valid p-values
 
     # Bonferroni correction: p_adj = p * m
-    # Assign corrected p-values to a new column
     results_df['bonferroni_p_value'] = np.nan
     results_df.loc[valid_mask, 'bonferroni_p_value'] = results_df.loc[valid_mask, 'p_value'] * m
     results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
 
-    # Compute -log10(p) using bonferroni corrected p-values for display
-    # Use original p-values for the vertical axis
+    # Compute -log10(p) for plotting
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
 
     # Read inversion info
     inv_df = pd.read_csv(inv_file)
     inv_df = inv_df.dropna(subset=['chr', 'region_start', 'region_end'])
-    
-    # Determine which inversions contain at least one CDS
-    # A CDS overlaps an inversion if chr matches and intervals overlap
+
     def overlaps(inv_row, cds_df):
         c = inv_row['chr']
         s = inv_row['region_start']
@@ -1058,43 +859,29 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
     # Filter inversions to only those overlapping at least one CDS
     inv_df = inv_df[inv_df.apply(lambda row: overlaps(row, results_df), axis=1)]
 
-    # Sort chromosomes in a natural order ('chrX' format)
-    # Put numeric chromosomes first, then X/Y/M if present
     def chr_sort_key(ch):
-        # Extract numeric part if any
-        # Expected format: 'chr1', 'chr2', ... 'chrX', 'chrY', 'chrM'
-        # We'll handle 'chr' prefix, then numeric sorting for digits, then special cases
         if ch.startswith('chr'):
             ch_str = ch[3:]
         else:
             ch_str = ch
-        # Try numeric
         try:
             return (0, int(ch_str))
         except ValueError:
-            # non-numeric like X, Y, M
-            # Assign an order: X=23, Y=24, M=25 or similar
             mapping = {'X': 23, 'Y': 24, 'M': 25}
             return (1, mapping.get(ch_str, 99))
-    
+
     unique_chroms = sorted(results_df['chrom'].dropna().unique(), key=chr_sort_key)
 
-    # Determine per-chrom some stats for layout
     chrom_max_end = results_df.groupby('chrom')['end'].max().to_dict()
-
-    # Compute offsets to linearize genomic positions
     offset = {}
     current_offset = 0
-    inter_chrom_spacing = 5e6  # 5Mb gap between chromosomes
+    inter_chrom_spacing = 5e6  # 5Mb gap
     for c in unique_chroms:
         offset[c] = current_offset
-        # Add chromosome length + spacing
         current_offset += chrom_max_end[c] + inter_chrom_spacing
 
     results_df['genomic_pos'] = results_df.apply(lambda row: row['start'] + offset[row['chrom']], axis=1)
 
-    # Prepare plot
-    # Larger figure for better readability
     plt.figure(figsize=(20, 10))
     sns.set_style("whitegrid", {'axes.edgecolor': '.8', 'grid.color': '.8'})
     sns.set_context("talk")
@@ -1112,10 +899,8 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
         if inv_chr in offset:
             inv_x_start = inv['region_start'] + offset[inv_chr]
             inv_x_end = inv['region_end'] + offset[inv_chr]
-            # Use a distinctive color with some transparency
             plt.axvspan(inv_x_start, inv_x_end, color='lightsalmon', alpha=0.3, zorder=1)
-    
-    # Plot points
+
     chrom_colors = {c: ('#1f77b4' if i % 2 == 0 else '#ff7f0e') for i, c in enumerate(unique_chroms)}
     scatter_colors = results_df['chrom'].map(chrom_colors)
     plt.scatter(
@@ -1128,34 +913,24 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
         zorder=2
     )
 
-    # Highlight significance thresholds
-    # Original significance line at p=0.05: -log10(0.05) ~ 1.301
     sig_threshold = -np.log10(0.05)
     plt.axhline(y=sig_threshold, color='red', linestyle='--', linewidth=2, zorder=3, label='p=0.05')
 
-    # Bonferroni significance line
-    # If we want to show a corrected threshold: p=0.05/m
     if m > 0:
         bonf_threshold = -np.log10(0.05 / m)
-        if bonf_threshold > 0:
+        if np.isfinite(bonf_threshold) and bonf_threshold > 0:
             plt.axhline(y=bonf_threshold, color='darkred', linestyle='--', linewidth=2, zorder=3, label='p=0.05 (Bonf.)')
 
-    # Chromosome labels: 
-    # We can annotate them directly under their midpoint
     ax = plt.gca()
     ylim = ax.get_ylim()
-    # Move plot upward and place chromosome labels below
     plt.ylim(0, max(ylim[1], sig_threshold+1))
-    
-    # Add chromosome labels
-    # We'll create a twin axis that shares the x-axis but is placed below
+
+    # Add chromosome labels in a separate axis
     ax_chrom = ax.figure.add_axes([ax.get_position().x0, 0.02, ax.get_position().width, 0.05], sharex=ax)
     ax_chrom.set_ylim(0, 1)
     ax_chrom.set_yticks([])
     ax_chrom.set_yticklabels([])
     ax_chrom.tick_params(left=False, labelleft=False)
-
-    # Turn off the x-axis line and ticks for this axis
     ax_chrom.spines["top"].set_visible(False)
     ax_chrom.spines["right"].set_visible(False)
     ax_chrom.spines["left"].set_visible(False)
@@ -1163,7 +938,6 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
     ax_chrom.set_xlabel('Chromosomes', fontsize=20, fontweight='bold')
     ax_chrom.xaxis.set_visible(False)
 
-    # Annotate chromosome names at their midpoint
     for i, c in enumerate(unique_chroms):
         chr_start = offset[c]
         chr_end = offset[c] + chrom_max_end[c]
@@ -1174,27 +948,136 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
     ax.set_ylabel('-log10(p-value)', fontsize=18)
     ax.set_title('Manhattan Plot of CDS Significance', fontsize=24, fontweight='bold', pad=20)
 
-    # Add legend
     handles, labels = ax.get_legend_handles_labels()
-
     if not handles:
         import matplotlib.lines as mlines
         line05 = mlines.Line2D([], [], color='red', linestyle='--', label='p=0.05')
-        if m > 0 and bonf_threshold > 0:
+        h = [line05]
+        if m > 0 and np.isfinite(bonf_threshold) and bonf_threshold > 0:
             lineBonf = mlines.Line2D([], [], color='darkred', linestyle='--', label='p=0.05 (Bonf.)')
-            handles = [line05, lineBonf]
-        else:
-            handles = [line05]
+            h.append(lineBonf)
+        handles = h
     legend = ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=14)
     legend.get_frame().set_edgecolor('0.8')
 
-    # Tighten layout
     plt.subplots_adjust(left=0.07, right=0.98, top=0.9, bottom=0.15)
-
-    # Save figure
     PLOTS_DIR.mkdir(exist_ok=True)
     plt.savefig(PLOTS_DIR / 'enhanced_manhattan_plot.png', bbox_inches='tight', dpi=300)
     plt.close()
+
+
+def main():
+    start_time = datetime.now()
+    print(f"Analysis started at {start_time}")
+
+    # Read data
+    df = read_and_preprocess_data('all_pairwise_results.csv')
+
+    # Prepare arguments for parallel processing
+    cds_list = df['CDS'].unique()
+    cds_args = [(df[df['CDS'] == cds], cds) for cds in cds_list]
+
+    # Process CDSs in parallel
+    results = {}
+    with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
+        for cds, result in tqdm(
+            executor.map(analyze_cds_parallel, cds_args),
+            total=len(cds_args),
+            desc="Processing CDSs"
+        ):
+            results[cds] = result
+
+    # Convert results to DataFrame
+    results_df = pd.DataFrame([
+        {
+            'CDS': cds,
+            **{k: v for k, v in result.items()
+               if k not in ['matrix_0', 'matrix_1', 'pairwise_comparisons']}
+        }
+        for cds, result in results.items()
+    ])
+
+    # Parse coordinates from CDS and add to results_df
+    coords = results_df['CDS'].apply(parse_cds_coordinates)
+    results_df[['chrom', 'start', 'end']] = pd.DataFrame(coords.tolist(), index=results_df.index)
+    # Drop rows where parsing failed
+    results_df.dropna(subset=['chrom','start','end'], inplace=True)
+
+    # Save final results
+    results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
+
+    # Compute Bonferroni-corrected p-values
+    valid_df = results_df[results_df['p_value'].notnull() & (results_df['p_value'] > 0)]
+    total_valid_comparisons = len(valid_df)
+    results_df['bonferroni_p_value'] = results_df['p_value'] * total_valid_comparisons
+    results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
+
+    # Overall analysis
+    print("\nBuilding clusters...")
+    clusters = load_clusters_cache()
+    if clusters is None:
+        clusters = build_overlap_clusters(results_df)
+        save_clusters_cache(clusters)
+    else:
+        print("Loaded clusters from cache.")
+
+    cluster_stats = {}
+    for cluster_id, cluster_cdss in clusters.items():
+        cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df, results)
+
+    print("\nComputing overall significance...")
+    overall_results = compute_overall_significance(cluster_stats)
+
+    json_safe_results = {
+        'overall_pvalue': float(overall_results['overall_pvalue']) if not np.isnan(overall_results['overall_pvalue']) else None,
+        'overall_pvalue_fisher': float(overall_results['overall_pvalue_fisher']) if not np.isnan(overall_results['overall_pvalue_fisher']) else None,
+        'overall_effect': float(overall_results['overall_effect']) if not np.isnan(overall_results['overall_effect']) else None,
+        'n_valid_clusters': int(overall_results['n_valid_clusters']) if not np.isnan(overall_results['n_valid_clusters']) else None,
+        'total_comparisons': int(overall_results['total_comparisons']) if not np.isnan(overall_results['total_comparisons']) else None
+    }
+
+    with open(RESULTS_DIR / 'overall_results.json', 'w') as f:
+        json.dump(json_safe_results, f, indent=2)
+
+    print("\nOverall Analysis Results:")
+    print(f"Number of independent clusters: {overall_results['n_valid_clusters']}")
+    print(f"Total unique CDS pairs: {overall_results['total_comparisons']:,}")
+    print(f"Overall p-value: {overall_results['overall_pvalue']:.4e}" if overall_results['overall_pvalue'] is not np.nan else "Overall p-value: NaN")
+    print(f"Overall effect size: {overall_results['overall_effect']:.4f}" if overall_results['overall_effect'] is not np.nan else "Overall effect size: NaN")
+
+    # Create a Manhattan plot for all CDSs (now that we have chrom, start, end)
+    create_manhattan_plot(results_df, inv_file='inv_info.csv')
+
+    # Identify significant results
+    significant_results = results_df[
+        (results_df['bonferroni_p_value'].notnull()) & (results_df['bonferroni_p_value'] < 0.05)
+    ].sort_values('p_value')
+
+    # Create visualizations for top significant results
+    for _, row in significant_results.head(30).iterrows():
+        cds = row['CDS']
+        viz_result = results[cds]  # Get full result with matrices
+        create_visualization(
+            viz_result['matrix_0'],
+            viz_result['matrix_1'],
+            cds,
+            row
+        )
+
+    valid_results = results_df[~results_df['p_value'].isna()]
+    print("\nPer-CDS Analysis Summary:")
+    print(f"Total CDSs analyzed: {len(results_df):,}")
+    print(f"Valid analyses: {len(valid_results):,}")
+    print(f"Significant CDSs (p < 0.05): {(valid_results['p_value'] < 0.05).sum():,}")
+
+    end_time = datetime.now()
+    print(f"\nAnalysis completed at {end_time}")
+    print(f"Total runtime: {end_time - start_time}")
+
+if __name__ == "__main__":
+    main()
+
+
 
 
 def main():
