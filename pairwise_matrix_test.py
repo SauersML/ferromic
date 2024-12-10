@@ -569,11 +569,11 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Plot Direct matrix (top row, first column)
     ax1 = fig.add_subplot(gs[0, 0])
-    plot_matrices(ax1, matrix_0_full, f'Direct Seq. Matrix (n={len(sequences_direct)})')
+    plot_matrices(ax1, matrix_0_full, f'Direct Sequences (n={len(sequences_direct)})')
 
     # Plot Inverted matrix (top row, second column)
     ax2 = fig.add_subplot(gs[0, 1])
-    plot_matrices(ax2, matrix_1_full, f'Inverted Seq. Matrix (n={len(sequences_inverted)})')
+    plot_matrices(ax2, matrix_1_full, f'Inverted Sequences (n={len(sequences_inverted)})')
 
     # Add colorbar in top row, third column
     cbar_ax = fig.add_subplot(gs[0, 2])
