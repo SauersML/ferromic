@@ -511,9 +511,9 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cmap_normal = sns.color_palette("viridis", as_cmap=True)
 
     plt.rcParams.update(plt.rcParamsDefault)
-    fig = plt.figure(figsize=(15, 8))
+    fig = plt.figure(figsize=(12, 4))
 
-    gs = plt.GridSpec(1, 4, width_ratios=[1, 1, 0.2, 3], hspace=0.5, wspace=1.0)
+    gs = plt.GridSpec(1, 4, width_ratios=[1, 1, 0.3, 1.2], hspace=0.1, wspace=0.8)
 
     # Main title
     if gene_symbol and gene_name:
