@@ -597,7 +597,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         handles=special_patches,
         title='Special Values',
         loc='upper left',
-        bbox_to_anchor=(0.0, -0.2),
+        bbox_to_anchor=(0.0, -0.1),
         ncol=1, frameon=True, fontsize=10
     )
     legend.get_title().set_fontsize(10)
