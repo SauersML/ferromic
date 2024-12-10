@@ -292,14 +292,14 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
             return None, "ERROR: Empty coordinate string provided"
             
         try:
-            parts = coord_str.split('_start')
+            parts = coord_str.split(':')
             if len(parts) != 2:
-                return None, "ERROR: Invalid coordinate format - missing '_start'"
+                return None, "ERROR: Invalid coordinate format - missing ':'"
                 
             chr = parts[0]
-            start_end = parts[1].split('_end')
+            start_end = parts[1].split('-')
             if len(start_end) != 2:
-                return None, "ERROR: Invalid coordinate format - missing '_end'"
+                return None, "ERROR: Invalid coordinate format - missing '-'"
                 
             start = int(start_end[0])
             end = int(start_end[1])
