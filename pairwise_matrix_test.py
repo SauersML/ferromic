@@ -513,7 +513,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     plt.rcParams.update(plt.rcParamsDefault)
     fig = plt.figure(figsize=(16, 10))
 
-    gs = plt.GridSpec(1, 3, width_ratios=[1, 1, 2], hspace=0.6, wspace=0.1)
+    gs = plt.GridSpec(1, 3, width_ratios=[1, 1, 1], hspace=0.5, wspace=0.3)
 
     # Main title
     if gene_symbol and gene_name:
@@ -648,7 +648,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     )
     legend.get_title().set_fontsize(12)
 
-    plt.tight_layout(rect=[0, 0, 0.9, 0.95])
+    plt.tight_layout()
     
     # Save the figure
     plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png',
