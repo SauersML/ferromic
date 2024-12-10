@@ -193,7 +193,7 @@ def parse_phy_file(filepath):
             num_sequences, seq_length = map(int, lines[0].strip().split())
             sequence_lines = lines[1:]
         except ValueError:
-            logging.warning(f"No valid header in {filepath}. Processing without header.")
+            # This is expected
             sequence_lines = lines
 
         for line in sequence_lines:
