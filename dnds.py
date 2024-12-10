@@ -393,7 +393,6 @@ def process_phy_file(args):
     
     if not cds_id or cds_id not in TRANSCRIPT_SET:
         logging.info(f"Skipping {phy_file} - transcript not found in GTF for coords: {chrom}:{start}-{end}")
-        continue
 
     mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
     output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}.csv')
