@@ -1180,7 +1180,7 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
         x=label_points_x,
         y=label_points_y,
         ax=ax,
-        arrowprops=dict(arrowstyle='-', lw=0.5, color='black')
+        arrowprops=dict(arrowstyle='-', lw=0.5, color='black'),
         force_text=2.0,
         force_points=2.0,
         expand_points=(2,2),
