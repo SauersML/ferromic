@@ -518,44 +518,41 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # We'll handle plotting by separating normal and special values:
     # - Normal values on upper triangle
     # - Special values on lower triangle
-
+    
     plt.rcParams.update(plt.rcParamsDefault)
     fig = plt.figure(figsize=(16, 10))
-    gs = plt.GridSpec(2, 3, height_ratios=[4, 1], hspace=0.6, wspace=0.6)
 
+    # GridSpec reduce horizontal spacing between the matrices and increase spacing before the histogram
+    gs = plt.GridSpec(2, 3, height_ratios=[4, 1], width_ratios=[1, 1, 1.5], hspace=0.6, wspace=0.3)
+    
     # Main title
     if gene_symbol and gene_name:
         title_str = f'{gene_symbol}: {gene_name}\n{cds}'
     else:
         title_str = f'Pairwise Comparison Analysis: {cds}'
     fig.suptitle(title_str, fontsize=18, fontweight='bold', y=0.95)
-
+    
     def plot_matrices(ax, matrix, title_str):
         """Plot the matrix with:
-        - Normal omega values (not -1 or 99) in the UPPER triangle, using log scale.
-        - Special values (-1, 99) in the LOWER triangle with discrete colors.
+        - Normal omega values in upper triangle (log scale)
+        - Special values (-1, 99) in lower triangle
         """
         n = matrix.shape[0]
         upper_triangle = np.triu(np.ones_like(matrix, dtype=bool), k=1)
         lower_triangle = np.tril(np.ones_like(matrix, dtype=bool), k=-1)
-
+    
         # Identify masks
         special_minus_one = (matrix == -1)
         special_ninety_nine = (matrix == 99)
         normal_mask = (~np.isnan(matrix)) & (~special_minus_one) & (~special_ninety_nine)
-
+    
         # NORMAL VALUES: upper triangle only
         normal_data = matrix.copy()
-        # Keep only normal values in upper triangle
         normal_data[~(normal_mask & upper_triangle)] = np.nan
-        # Clip normal values for log scale
         normal_data = np.where(normal_data < 0.01, 0.01, normal_data)
         normal_data = np.where(normal_data > 50, 50, normal_data)
-
-        # Invert rows for plotting
         normal_data_inv = normal_data[::-1, :]
-
-        # Plot normal values
+    
         sns.heatmap(
             normal_data_inv,
             cmap=cmap_normal,
@@ -567,22 +564,16 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             yticklabels=False,
             mask=np.isnan(normal_data_inv)
         )
-
+    
         # SPECIAL VALUES: lower triangle
-        # Create a small colormap for special values
         from matplotlib.colors import ListedColormap
         special_cmap = ListedColormap([color_minus_one, color_ninety_nine])
-
         special_data = np.full_like(matrix, np.nan, dtype=float)
-        # Map -1 to 0 index, 99 to 1 index
         special_data[special_minus_one] = 0
         special_data[special_ninety_nine] = 1
-        # Only show in lower triangle
         special_data[~lower_triangle] = np.nan
-
         special_data_inv = special_data[::-1, :]
-
-        # Overlay special values
+    
         sns.heatmap(
             special_data_inv,
             cmap=special_cmap,
@@ -593,29 +584,28 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             yticklabels=False,
             mask=np.isnan(special_data_inv)
         )
-
+    
         ax.set_title(title_str, fontsize=14, pad=12)
         ax.tick_params(axis='both', which='both', length=0)
-
+    
     # Plot Direct matrix
     ax1 = fig.add_subplot(gs[0, 0])
     plot_matrices(ax1, matrix_0_full, f'Direct Sequence Matrix (n={len(sequences_direct)})')
-
+    
     # Plot Inverted matrix
     ax2 = fig.add_subplot(gs[0, 1])
     plot_matrices(ax2, matrix_1_full, f'Inverted Sequence Matrix (n={len(sequences_inverted)})')
-
-    # Distribution plot of normal omega values (excluding special)
+    
+    # Distribution plot of normal omega values
     ax3 = fig.add_subplot(gs[0, 2])
     values_direct = matrix_0_full[np.tril_indices_from(matrix_0_full, k=-1)]
     values_inverted = matrix_1_full[np.tril_indices_from(matrix_1_full, k=-1)]
-
-    # Filter out NaN and special values
+    
     values_direct = values_direct[~np.isnan(values_direct)]
     values_direct = values_direct[(values_direct != -1) & (values_direct != 99)]
     values_inverted = values_inverted[~np.isnan(values_inverted)]
     values_inverted = values_inverted[(values_inverted != -1) & (values_inverted != 99)]
-
+    
     sns.kdeplot(values_direct, ax=ax3, label='Direct', fill=True, common_norm=False, color='#1f77b4', alpha=0.6)
     sns.kdeplot(values_inverted, ax=ax3, label='Inverted', fill=True, common_norm=False, color='#ff7f0e', alpha=0.6)
     ax3.set_title('Distribution of Omega Values', fontsize=14, pad=12)
@@ -623,14 +613,14 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ax3.set_ylabel('Density', fontsize=12)
     ax3.tick_params(axis='both', which='major', labelsize=10)
     ax3.legend(title='Groups', title_fontsize=12, fontsize=10)
-
+    
     # Results table
     ax4 = fig.add_subplot(gs[1, :])
     ax4.axis('off')
     effect_size = f"{result['observed_effect_size']:.4f}" if not np.isnan(result['observed_effect_size']) else 'N/A'
     p_value = f"{result['p_value']:.4e}" if not np.isnan(result['p_value']) else 'N/A'
     std_err = f"{result['std_err']:.4f}" if not np.isnan(result['std_err']) else 'N/A'
-
+    
     table_data = [
         ['Metric', 'Value'],
         ['Gene Symbol', gene_symbol if gene_symbol else 'Unknown'],
@@ -638,12 +628,12 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         ['Observed Effect Size (from Mixed Model)', effect_size],
         ['P-value', p_value],
     ]
-
+    
     table = ax4.table(cellText=table_data, loc='center', cellLoc='left', colWidths=[0.5, 0.5])
     table.auto_set_font_size(False)
     table.set_fontsize(8)
     table.scale(1, 1.5)
-
+    
     for (row, col), cell in table.get_celld().items():
         if row == 0:
             cell.set_text_props(weight='bold', ha='center')
@@ -651,21 +641,18 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         elif col == 0:
             cell.set_text_props(weight='bold')
         cell.set_edgecolor('gray')
-
-    # Add colorbar for normal values
-    # Position next to ax2
+    
+    # Add colorbar
     pos = ax2.get_position()
     cbar_ax = fig.add_axes([pos.x1 + 0.02, pos.y0, 0.02, pos.height])
     from matplotlib.cm import ScalarMappable
     sm = ScalarMappable(norm=LogNorm(vmin=0.01, vmax=50), cmap=cmap_normal)
     sm.set_array([])
-
     cbar = plt.colorbar(sm, cax=cbar_ax)
     cbar.set_label('Omega Value', fontsize=12)
-    # Set log ticks at meaningful values
     cbar.set_ticks([0.1, 1, 3, 10, 50])
     cbar.set_ticklabels(['0.1', '1', '3', '10', '50'])
-
+    
     # Special values legend
     pos1 = ax1.get_position()
     pos2 = ax2.get_position()
@@ -673,7 +660,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     legend_y = pos1.y0 - 0.1
     legend_width = 0.16
     legend_height = 0.1
-
+    
     legend_ax = fig.add_axes([legend_x, legend_y, legend_width, legend_height])
     legend_ax.axis('off')
     legend = legend_ax.legend(
@@ -682,18 +669,18 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         loc='center', ncol=2, frameon=True, fontsize=10
     )
     legend.get_title().set_fontsize(12)
-
+    
     plt.tight_layout(rect=[0, 0, 0.9, 0.95])
-
+    
     # Save the figure
     plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png',
                 dpi=300, bbox_inches='tight')
     plt.close(fig)
-
-
-
-
-
+    
+    
+    
+    
+    
 
 
 
