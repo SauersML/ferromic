@@ -823,6 +823,179 @@ def build_overlap_clusters(results_df):
 
 
 
+
+
+def combine_cluster_evidence(cluster_cdss, results_df, results):
+    """Select the single largest CDS by amino acid length from the cluster and use its statistics."""
+    # Helper function to load GTF and compute amino acid lengths
+    if not hasattr(combine_cluster_evidence, "_aa_length_map"):
+        combine_cluster_evidence._aa_length_map = {}
+        combine_cluster_evidence._interval_map = defaultdict(list)
+        combine_cluster_evidence._chrom_strand = {}
+        with open("hg38.knownGene.gtf", "r") as f:
+            cds_lengths = defaultdict(int)
+            for line in f:
+                if not line.strip() or line.startswith("#"):
+                    continue
+                fields = line.strip().split('\t')
+                if len(fields) < 9:
+                    continue
+                feature = fields[2]
+                if feature != "CDS":
+                    continue
+                chrom = fields[0]
+                start = int(fields[3])
+                end = int(fields[4])
+                attrs = fields[8].strip().split(';')
+                attr_dict = {}
+                for a in attrs:
+                    a = a.strip()
+                    if a:
+                        k,v = a.split(' ',1)
+                        v = v.strip('"')
+                        attr_dict[k] = v
+                tid = attr_dict.get("transcript_id", None)
+                if tid is None:
+                    continue
+                combine_cluster_evidence._interval_map[tid].append((start, end))
+                combine_cluster_evidence._chrom_strand[tid] = (chrom, fields[6])
+                cds_lengths[tid] += (end - start + 1)
+            for t, length in cds_lengths.items():
+                aa = length / 3.0
+                combine_cluster_evidence._aa_length_map[t] = aa
+    # Function to find transcript_id for a given CDS coordinate if possible.
+    # We'll consider a transcript matches if its intervals cover this CDS fully.
+    # This is WRONG. We must fix this later by adding transcript ID or similar to the results.
+    def find_transcript_id_for_cds(cds_name):
+        chrom, start, end = parse_cds_coordinates(cds_name)
+        if chrom is None:
+            return None
+        best_tid = None
+        best_len = -1
+        for tid, intervals in combine_cluster_evidence._interval_map.items():
+            t_chrom, _ = combine_cluster_evidence._chrom_strand[tid]
+            if t_chrom != chrom:
+                continue
+            merged = []
+            for s,e in sorted(intervals, key=lambda x:x[0]):
+                if not merged or s > merged[-1][1]+1:
+                    merged.append([s,e])
+                else:
+                    merged[-1][1] = max(merged[-1][1], e)
+            covered = False
+            needed = start
+            for ms,me in merged:
+                if ms <= needed <= me:
+                    if me >= end:
+                        covered = True
+                        break
+                    else:
+                        needed = me+1
+                elif ms > needed:
+                    break
+            if covered:
+                aa_len = combine_cluster_evidence._aa_length_map.get(tid, -1)
+                if aa_len > best_len:
+                    best_len = aa_len
+                    best_tid = tid
+        return best_tid
+    # Compute the amino acid length for each CDS in the cluster
+    best_cds = None
+    best_len = -1
+    for c in cluster_cdss:
+        tid = find_transcript_id_for_cds(c)
+        if tid is not None:
+            aa_len = combine_cluster_evidence._aa_length_map.get(tid, -1)
+            if aa_len > best_len:
+                best_len = aa_len
+                best_cds = c
+    if best_cds is None or best_len <= 0:
+        return {
+            'combined_pvalue': np.nan,
+            'weighted_effect_size': np.nan,
+            'n_comparisons': 0,
+            'n_valid_cds': 0,
+            'cluster_pairs': set()
+        }
+    chosen = results_df[results_df['CDS'] == best_cds].dropna(subset=['observed_effect_size','p_value'])
+    if len(chosen) == 0:
+        return {
+            'combined_pvalue': np.nan,
+            'weighted_effect_size': np.nan,
+            'n_comparisons': 0,
+            'n_valid_cds': 0,
+            'cluster_pairs': set()
+        }
+    row = chosen.iloc[0]
+    pairs = results[best_cds]['pairwise_comparisons'] if best_cds in results else set()
+    return {
+        'combined_pvalue': row['p_value'],
+        'weighted_effect_size': row['observed_effect_size'],
+        'n_comparisons': len(pairs),
+        'n_valid_cds': 1,
+        'cluster_pairs': pairs
+    }
+def compute_overall_significance(cluster_results):
+    """Compute overall significance from independent clusters using scipy's combine_pvalues."""
+    import numpy as np
+    from scipy import stats
+    # Initialize default return values
+    overall_pvalue_combined = np.nan
+    overall_effect = np.nan
+    n_valid_clusters = 0
+    total_comparisons = 0
+    # Filter out clusters with valid combined_pvalue and weighted_effect_size
+    valid_clusters = [
+        c for c in cluster_results.values()
+        if not np.isnan(c['combined_pvalue']) and not np.isnan(c['weighted_effect_size'])
+    ]
+    if valid_clusters:
+        cluster_pvals = np.array([c['combined_pvalue'] for c in valid_clusters])
+        # Use scipy.stats.combine_pvalues to combine p-values
+        # Choose method: 'fisher', 'stouffer', or others as appropriate etc.
+        statistic, overall_pvalue_combined = stats.combine_pvalues(cluster_pvals, method='fisher')
+        print(f"\nCombined p-value using Fisher's method: {overall_pvalue_combined:.4e}")
+        print(f"Fisher's statistic: {statistic:.4f}")
+        # Stouffer's method
+        weights = np.array([c['n_comparisons'] for c in valid_clusters], dtype=float)
+        # Check for zero weights
+        if np.all(weights == 0) or np.isnan(weights).any():
+            weights = None
+            print("Note: Weights not used in Stouffer's method due to zero or NaN values.")
+        # Use Stouffer's method with weights
+        statistic_stouffer, pvalue_stouffer = stats.combine_pvalues(cluster_pvals, method='stouffer', weights=weights)
+        print(f"Combined p-value using Stouffer's method: {pvalue_stouffer:.4e}")
+        print(f"Stouffer's Z-score statistic: {statistic_stouffer:.4f}")
+        # Compute weighted effect size
+        effect_sizes = np.array([c['weighted_effect_size'] for c in valid_clusters])
+        if weights is not None:
+            normalized_weights = weights / np.sum(weights)
+        else:
+            normalized_weights = np.ones_like(effect_sizes) / len(effect_sizes)
+        overall_effect = np.average(effect_sizes, weights=normalized_weights)
+        # Count comparisons
+        all_unique_pairs = set()
+        for c in valid_clusters:
+            all_unique_pairs.update(c['cluster_pairs'])
+        total_comparisons = len(all_unique_pairs)
+        n_valid_clusters = len(valid_clusters)
+        overall_pvalue = overall_pvalue_combined
+    else:
+        print("No valid clusters available for significance computation.")
+        overall_pvalue = np.nan
+        overall_pvalue_combined = np.nan
+        overall_effect = np.nan
+        pvalue_stouffer = np.nan
+    return {
+        'overall_pvalue': overall_pvalue,
+        'overall_pvalue_fisher': overall_pvalue_combined,
+        'overall_pvalue_stouffer': pvalue_stouffer,
+        'overall_effect': overall_effect,
+        'n_valid_clusters': n_valid_clusters,
+        'total_comparisons': total_comparisons
+    }
+
+
 def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
     """
     Create a refined Manhattan-style plot of CDS p-values along the genome.
