@@ -3,9 +3,15 @@
 dN/dS Analysis Script using PAML's CODEML
 
 This script calculates pairwise dN/dS values using PAML's CODEML program.
-It processes PHYLIP files containing nucleotide sequences, computes pairwise
-comparisons within groups (or between groups if enabled), and outputs pairwise
-and haplotype statistics.
+It processes input files that contain nucleotide sequences. Each line corresponds
+to a single sample and its sequence, with the sample name ending in "_0" or "_1"
+immediately followed by the sequence, without any intervening space.
+
+For example:
+AMR_CLM_HG01352_0AAGAAGTAC...
+
+No header lines are assumed. The code extracts the sample name by identifying
+the "_0" or "_1" suffix and then takes the rest of the line as the sequence.
 
 Usage:
     python3 dnds.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
@@ -152,41 +158,46 @@ def parse_phy_file(filepath):
     if not os.path.exists(filepath):
         logging.error(f"File not found: {filepath}")
         return {}, False
+
     with open(filepath, 'r') as file:
         lines = file.readlines()
-        if not lines:
-            logging.error(f"PHYLIP file empty: {filepath}")
-            return {}, False
-        try:
-            num_sequences, seq_length = map(int, lines[0].strip().split())
-            sequence_lines = lines[1:]
-        except ValueError:
-            sequence_lines = lines
 
-        for line in sequence_lines:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split()
-            if len(parts) >= 2:
-                sample_name = parts[0]
-                sequence = ''.join(parts[1:])
+    if not lines:
+        logging.error(f"PHYLIP file is empty: {filepath}")
+        return {}, False
+
+    # We assume no header. Each line should have a sample name ending in _0 or _1,
+    # followed immediately by the sequence. We use a regex to identify the sample name.
+    # The pattern: (.*_(0|1))([ATCGNatcgn-]+)
+    # We split at the last occurrence of _0 or _1 before the sequence starts.
+    pattern = re.compile(r'(?P<name>.+_(0|1))(?P<seq>[ATCGNatcgn-]+)', re.IGNORECASE)
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        match = pattern.match(line)
+        if not match:
+            logging.error(f"Line does not match expected format in {filepath}: {line}")
+            continue
+
+        sample_name = match.group('name')
+        sequence = match.group('seq')
+
+        validated_seq = validate_sequence(sequence)
+        if validated_seq:
+            GLOBAL_TOTAL_SEQS += 1
+            if sample_name in sequences:
+                duplicates_found = True
+                base_name = sample_name[:2] + sample_name[3:]
+                dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
+                new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
+                logging.info(f"Duplicate {sample_name} -> {new_name}")
+                sequences[new_name] = validated_seq
+                GLOBAL_DUPLICATES += 1
             else:
-                sample_name = line[:10].strip()
-                sequence = line[10:].replace(" ", "")
-            validated_seq = validate_sequence(sequence)
-            if validated_seq:
-                GLOBAL_TOTAL_SEQS += 1
-                if sample_name in sequences:
-                    duplicates_found = True
-                    base_name = sample_name[:2] + sample_name[3:]
-                    dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
-                    new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
-                    logging.info(f"Duplicate {sample_name} -> {new_name}")
-                    sequences[new_name] = validated_seq
-                    GLOBAL_DUPLICATES += 1
-                else:
-                    sequences[sample_name] = validated_seq
+                sequences[sample_name] = validated_seq
+
     return sequences, duplicates_found
 
 def load_cache(cache_file):
@@ -348,7 +359,6 @@ def process_phy_file(args):
     completed = 0
     total_pairs = len(pool_args)
 
-    # Callback to update progress
     def on_result(res):
         nonlocal completed
         if res is not None:
