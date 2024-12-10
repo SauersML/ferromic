@@ -587,7 +587,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar_ax = fig.add_subplot(gs[0, 2])
     
     # Create a ScalarMappable with a logarithmic scale color normalization
-    sm = ScalarMappable(norm=LogNorm(vmin=1e-10, vmax=50), cmap=cmap_normal)
+    sm = ScalarMappable(norm=LogNorm(vmin=0.01, vmax=50), cmap=cmap_normal)
     sm.set_array([])
     
     # Generate the colorbar without predefined ticks and labels
