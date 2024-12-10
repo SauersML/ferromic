@@ -66,11 +66,15 @@ def read_and_preprocess_data(file_path):
     df['CDS'] = df['CDS'].str.replace('_start', ':', regex=False)
     df['CDS'] = df['CDS'].str.replace('_end', '-', regex=False)
 
-    # Filtering valid omega values
+    # Convert omega to numeric, coerce non-numeric to NaN
+    df['omega'] = pd.to_numeric(df['omega'], errors='coerce')
+    
+    # Now filter valid omega values
     df = df[
         (df['omega'] != -1) &
         (df['omega'] != 99)
     ].dropna(subset=['omega'])
+
 
     print(f"Total valid comparisons: {len(df):,}")
     print(f"Unique CDSs found: {df['CDS'].nunique():,}")
@@ -108,14 +112,14 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
         for j in range(i + 1, n0):
             val = get_pairwise_value(sequences_0[i], sequences_0[j], pairwise_dict)
             if val is not None:
-                matrix_0[i, j] = matrix_0[j, i] = val
+                matrix_0[i, j] = matrix_0[j, i] = float(val)
 
     # Fill matrix 1
     for i in range(n1):
         for j in range(i + 1, n1):
             val = get_pairwise_value(sequences_1[i], sequences_1[j], pairwise_dict)
             if val is not None:
-                matrix_1[i, j] = matrix_1[j, i] = val
+                matrix_1[i, j] = matrix_1[j, i] = float(val)
 
     return matrix_0, matrix_1
 
