@@ -24,7 +24,6 @@ from matplotlib.ticker import FixedLocator, FixedFormatter
 from matplotlib.colors import LogNorm
 from matplotlib.cm import ScalarMappable
 
-
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
@@ -1021,83 +1020,182 @@ def compute_overall_significance(cluster_results):
 
 def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
     """
-    Create a Manhattan-style plot of all CDS p-values along the genome,
-    overlaying inversion regions from the given inv_file.
+    Create a Manhattan plot of CDS p-values along the genome.
     """
-    # Read inversion info
-    inv_df = pd.read_csv(inv_file)
+    
+    required_cols = {'CDS', 'p_value', 'chrom', 'start', 'end'}
+    if not required_cols.issubset(results_df.columns):
+        raise ValueError(f"results_df must contain columns: {required_cols}")
+    
+    # Filter valid p-values (non-NaN, > 0)
+    valid_mask = results_df['p_value'].notnull() & (results_df['p_value'] > 0)
+    valid_pvals = results_df.loc[valid_mask, 'p_value']
+    m = len(valid_pvals)  # number of valid p-values
 
-    # We have parsed coordinates for each CDS
-    # results_df should already have CDS, p_value
-    # Parse coords
-    if not {'chrom', 'start', 'end'}.issubset(results_df.columns):
-        coords = results_df['CDS'].apply(parse_cds_coordinates)
-        results_df[['chrom', 'start', 'end']] = pd.DataFrame(coords.tolist(), index=results_df.index)
-        results_df.dropna(subset=['chrom','start','end'], inplace=True)
+    # Bonferroni correction: p_adj = p * m
+    # Assign corrected p-values to a new column
+    results_df['bonferroni_p_value'] = np.nan
+    results_df.loc[valid_mask, 'bonferroni_p_value'] = results_df.loc[valid_mask, 'p_value'] * m
+    results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
 
-    # Compute -log10(p)
+    # Compute -log10(p) using bonferroni corrected p-values for display
+    # Use original p-values for the vertical axis
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
 
-    # Determine chromosome order and offsets
-    unique_chroms = sorted(results_df['chrom'].unique(), key=lambda x: (x.startswith('chr'), x))
-    chrom_max = results_df.groupby('chrom')['end'].max().to_dict()
+    # Read inversion info
+    inv_df = pd.read_csv(inv_file)
+    inv_df = inv_df.dropna(subset=['chr', 'region_start', 'region_end'])
+    
+    # Determine which inversions contain at least one CDS
+    # A CDS overlaps an inversion if chr matches and intervals overlap
+    def overlaps(inv_row, cds_df):
+        c = inv_row['chr']
+        s = inv_row['region_start']
+        e = inv_row['region_end']
+        subset = cds_df[(cds_df['chrom'] == c) & (cds_df['start'] <= e) & (cds_df['end'] >= s)]
+        return len(subset) > 0
 
+    # Filter inversions to only those overlapping at least one CDS
+    inv_df = inv_df[inv_df.apply(lambda row: overlaps(row, results_df), axis=1)]
+
+    # Sort chromosomes in a natural order ('chrX' format)
+    # Put numeric chromosomes first, then X/Y/M if present
+    def chr_sort_key(ch):
+        # Extract numeric part if any
+        # Expected format: 'chr1', 'chr2', ... 'chrX', 'chrY', 'chrM'
+        # We'll handle 'chr' prefix, then numeric sorting for digits, then special cases
+        if ch.startswith('chr'):
+            ch_str = ch[3:]
+        else:
+            ch_str = ch
+        # Try numeric
+        try:
+            return (0, int(ch_str))
+        except ValueError:
+            # non-numeric like X, Y, M
+            # Assign an order: X=23, Y=24, M=25 or similar
+            mapping = {'X': 23, 'Y': 24, 'M': 25}
+            return (1, mapping.get(ch_str, 99))
+    
+    unique_chroms = sorted(results_df['chrom'].dropna().unique(), key=chr_sort_key)
+
+    # Determine per-chrom some stats for layout
+    chrom_max_end = results_df.groupby('chrom')['end'].max().to_dict()
+
+    # Compute offsets to linearize genomic positions
     offset = {}
     current_offset = 0
+    inter_chrom_spacing = 5e6  # 5Mb gap between chromosomes
     for c in unique_chroms:
         offset[c] = current_offset
-        current_offset += chrom_max[c] + 1000000  # gap of 1Mb
+        # Add chromosome length + spacing
+        current_offset += chrom_max_end[c] + inter_chrom_spacing
 
     results_df['genomic_pos'] = results_df.apply(lambda row: row['start'] + offset[row['chrom']], axis=1)
 
-    # Create figure
-    plt.figure(figsize=(14, 8), dpi=300)
+    # Prepare plot
+    # Larger figure for better readability
+    plt.figure(figsize=(20, 10))
+    sns.set_style("whitegrid", {'axes.edgecolor': '.8', 'grid.color': '.8'})
+    sns.set_context("talk")
 
-    # Light background for chromosomes
+    # Plot alternating chromosome backgrounds
     for i, c in enumerate(unique_chroms):
-        if i % 2 == 0:
-            plt.axvspan(offset[c], offset[c]+chrom_max[c], color='lightgrey', alpha=0.1)
+        chr_start = offset[c]
+        chr_end = offset[c] + chrom_max_end[c]
+        color = 'whitesmoke' if i % 2 == 0 else 'white'
+        plt.axvspan(chr_start, chr_end, color=color, alpha=1.0, zorder=0)
 
     # Plot inversions
     for _, inv in inv_df.iterrows():
         inv_chr = inv['chr']
-        inv_start = inv['region_start']
-        inv_end = inv['region_end']
         if inv_chr in offset:
-            inv_x_start = inv_start + offset[inv_chr]
-            inv_x_end = inv_end + offset[inv_chr]
-            plt.axvspan(inv_x_start, inv_x_end, color='red', alpha=0.1)
-
-    # Color by chromosome
-    palette = sns.color_palette("tab20", n_colors=len(unique_chroms))
-    chrom_color_map = {c: palette[i % len(palette)] for i, c in enumerate(unique_chroms)}
-
-    # Scatter plot
+            inv_x_start = inv['region_start'] + offset[inv_chr]
+            inv_x_end = inv['region_end'] + offset[inv_chr]
+            # Use a distinctive color with some transparency
+            plt.axvspan(inv_x_start, inv_x_end, color='lightsalmon', alpha=0.3, zorder=1)
+    
+    # Plot points
+    chrom_colors = {c: ('#1f77b4' if i % 2 == 0 else '#ff7f0e') for i, c in enumerate(unique_chroms)}
+    scatter_colors = results_df['chrom'].map(chrom_colors)
     plt.scatter(
-        results_df['genomic_pos'], 
+        results_df['genomic_pos'],
         results_df['neg_log_p'],
-        c=[chrom_color_map[ch] for ch in results_df['chrom']],
-        s=20, edgecolor='black', linewidth=0.5, alpha=0.7
+        c=scatter_colors,
+        s=20,
+        alpha=0.7,
+        linewidth=0,
+        zorder=2
     )
 
-    # Significance line at p=0.05
+    # Highlight significance thresholds
+    # Original significance line at p=0.05: -log10(0.05) ~ 1.301
     sig_threshold = -np.log10(0.05)
-    plt.axhline(y=sig_threshold, color='red', linestyle='--', label='p=0.05')
+    plt.axhline(y=sig_threshold, color='red', linestyle='--', linewidth=2, zorder=3, label='p=0.05')
 
-    # Label chromosomes
-    for c in unique_chroms:
-        plt.text(offset[c] + (chrom_max[c] / 2), -0.2, c, ha='center', va='top', fontsize=12, fontweight='bold')
+    # Bonferroni significance line
+    # If we want to show a corrected threshold: p=0.05/m
+    if m > 0:
+        bonf_threshold = -np.log10(0.05 / m)
+        if bonf_threshold > 0:
+            plt.axhline(y=bonf_threshold, color='darkred', linestyle='--', linewidth=2, zorder=3, label='p=0.05 (Bonf.)')
 
-    plt.xlabel('Genomic Position (linearized)')
-    plt.ylabel('-log10(p-value)')
-    plt.title('Manhattan-Style Plot of CDS Significance', fontsize=18, fontweight='bold')
-    plt.legend(loc='upper right', frameon=True)
-    plt.tight_layout()
+    # Chromosome labels: 
+    # We can annotate them directly under their midpoint
+    ax = plt.gca()
+    ylim = ax.get_ylim()
+    # Move plot upward and place chromosome labels below
+    plt.ylim(0, max(ylim[1], sig_threshold+1))
+    
+    # Add chromosome labels
+    # We'll create a twin axis that shares the x-axis but is placed below
+    ax_chrom = ax.figure.add_axes([ax.get_position().x0, 0.02, ax.get_position().width, 0.05], sharex=ax)
+    ax_chrom.set_ylim(0, 1)
+    ax_chrom.set_yticks([])
+    ax_chrom.set_yticklabels([])
+    ax_chrom.tick_params(left=False, labelleft=False)
 
-    # Save plot
+    # Turn off the x-axis line and ticks for this axis
+    ax_chrom.spines["top"].set_visible(False)
+    ax_chrom.spines["right"].set_visible(False)
+    ax_chrom.spines["left"].set_visible(False)
+    ax_chrom.spines["bottom"].set_visible(False)
+    ax_chrom.set_xlabel('Chromosomes', fontsize=20, fontweight='bold')
+    ax_chrom.xaxis.set_visible(False)
+
+    # Annotate chromosome names at their midpoint
+    for i, c in enumerate(unique_chroms):
+        chr_start = offset[c]
+        chr_end = offset[c] + chrom_max_end[c]
+        midpoint = (chr_start + chr_end) / 2
+        ax_chrom.text(midpoint, 0.5, c, ha='center', va='center', fontsize=16, fontweight='bold')
+
+    ax.set_xlabel('Genomic Position (linearized)', fontsize=18)
+    ax.set_ylabel('-log10(p-value)', fontsize=18)
+    ax.set_title('Manhattan Plot of CDS Significance', fontsize=24, fontweight='bold', pad=20)
+
+    # Add legend
+    handles, labels = ax.get_legend_handles_labels()
+
+    if not handles:
+        import matplotlib.lines as mlines
+        line05 = mlines.Line2D([], [], color='red', linestyle='--', label='p=0.05')
+        if m > 0 and bonf_threshold > 0:
+            lineBonf = mlines.Line2D([], [], color='darkred', linestyle='--', label='p=0.05 (Bonf.)')
+            handles = [line05, lineBonf]
+        else:
+            handles = [line05]
+    legend = ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=14)
+    legend.get_frame().set_edgecolor('0.8')
+
+    # Tighten layout
+    plt.subplots_adjust(left=0.07, right=0.98, top=0.9, bottom=0.15)
+
+    # Save figure
     PLOTS_DIR.mkdir(exist_ok=True)
-    plt.savefig(PLOTS_DIR / 'manhattan_plot_all_CDS.png', bbox_inches='tight')
+    plt.savefig(PLOTS_DIR / 'enhanced_manhattan_plot.png', bbox_inches='tight', dpi=300)
     plt.close()
+
 
 def main():
     start_time = datetime.now()
