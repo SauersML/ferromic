@@ -1,5 +1,5 @@
 
-import pandas as p
+import pandas as pd
 import numpy as np
 from collections import defaultdict
 import seaborn as sns
