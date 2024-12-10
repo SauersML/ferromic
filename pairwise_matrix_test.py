@@ -584,13 +584,12 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar.set_label('Omega Value', fontsize=16)
     cbar.ax.tick_params(labelsize=14)
 
-    # Add special values legend in a very small, vertical layout
-    legend_ax = fig.add_axes([0.32, 0.41, 0.05, 0.1])  # Smaller, vertical space
+    legend_ax = fig.add_axes([0.50, 0.55, 0.15, 0.15])  # Positioned between plots
     legend_ax.axis('off')
     legend = legend_ax.legend(
         handles=special_patches,
         title='Special Values',
-        loc='upper left', ncol=1, frameon=True, fontsize=8
+        loc='center', ncol=1, frameon=True, fontsize=10
     )
     legend.get_title().set_fontsize(10)
 
