@@ -1086,7 +1086,14 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     sns.set_style("ticks")
     ax = plt.gca()
 
+    dark_yellow = '#FFD700'
+    light_yellow = '#FFFACD'
+    
     for _, inv in inv_df.iterrows():
+        # Only plot if '0_single_1_recur' is 0 or 1
+        if inv['0_single_1_recur'] not in [0, 1]:
+            continue
+    
         inv_chr = inv['chr']
         if inv_chr not in chrom_to_index:
             continue
@@ -1100,7 +1107,23 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
             rel_end = 0.6
         inv_x_start = c_idx + max(0, min(rel_start, 1))
         inv_x_end = c_idx + min(1, max(rel_end, 0))
-        ax.axvspan(inv_x_start, inv_x_end, color='khaki', alpha=0.2, zorder=0)
+    
+        # Choose color based on '0_single_1_recur'
+        if inv['0_single_1_recur'] == 1:
+            inv_color = dark_yellow
+            inv_label = "Recurrent inversion"
+        else:
+            inv_color = light_yellow
+            inv_label = "Single-event inversion"
+    
+        ax.axvspan(inv_x_start, inv_x_end, color=inv_color, alpha=0.2, zorder=0, label=inv_label)
+    
+    # Add a custom legend for inversion types
+    handles = [
+        mpatches.Patch(color=dark_yellow, alpha=0.2, label='Recurrent inversion'),
+        mpatches.Patch(color=light_yellow, alpha=0.2, label='Single-event inversion')
+    ]
+    ax.legend(handles=handles, loc='upper left', fontsize=14, frameon=True)
 
     scatter = ax.scatter(
         results_df['plot_x'],
