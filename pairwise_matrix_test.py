@@ -582,9 +582,10 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     # Add colorbar in top row, third column
     cbar_ax = fig.add_subplot(gs[0, 2])
     from matplotlib.cm import ScalarMappable
-    sm = ScalarMappable(norm=LogNorm(vmin=0.01, vmax=50), cmap=cmap_normal)
+    sm = ScalarMappable(norm=LogNorm(vmin=0.0000000001, vmax=50), cmap=cmap_normal)
     sm.set_array([])
-    cbar = plt.colorbar(sm, cax=cbar_ax)
+    cbar = plt.colorbar(sm, cax=cbar_ax, ticks=[0.01, 1, 3, 10, 50])
+    cbar.ax.set_yticklabels(['0', '1', '3', '10', '50'])
     cbar.set_label('Omega Value', fontsize=16)
     cbar.ax.tick_params(labelsize=14)
 
