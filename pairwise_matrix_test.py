@@ -449,18 +449,10 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
 
 
 def create_visualization(matrix_0, matrix_1, cds, result):
-    """Create visualizations for a CDS analysis with the requested modifications:
-    - Normal omega values plotted on a log scale (0.01 to 50) in the upper triangle,
-      providing more color resolution at lower values.
-    - Special values (-1, 99) displayed in the lower triangle with their own colors.
-    - Rename 'Group 0' to 'Direct' and 'Group 1' to 'Inverted' in all labels and titles.
-    - No numeric mention of -1 and 99 on the colorbar (they remain represented by patches in a separate legend).
-    - Keep the original filtering logic in read_and_preprocess_data (no changes there).
-    """
+    """Create visualizations for a CDS analysis with p-value text in upper-right corner of histogram."""
 
     gene_symbol, gene_name, error_log = get_gene_annotation(cds)
     
-    # Print any errors or warnings that occurred
     if error_log:
         print(f"\nWarnings/Errors for CDS {cds}:")
         for msg in error_log:
@@ -473,19 +465,14 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     
     # Handle gene annotation
     if gene_symbol in [None, 'Unknown'] or gene_name in [None, 'Unknown']:
-        print(f"❌ No annotation found for CDS: {cds}")
         gene_symbol = None
         gene_name = None
-    else:
-        print(f"✅ Found annotation:")
-        print(f"   Symbol: {gene_symbol}")
-        print(f"   Name: {gene_name}")
 
     # Re-read all data for this CDS to retrieve special values too
     df_all = pd.read_csv('all_pairwise_results.csv')
     df_cds_all = df_all[df_all['CDS'] == cds]
 
-    # Create pairwise dict including all omega values (including -1 and 99)
+    # Create pairwise dict including all omega values (including special values)
     pairwise_dict_all = {(row['Seq1'], row['Seq2']): row['omega']
                          for _, row in df_cds_all.iterrows()}
 
@@ -515,23 +502,18 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     from matplotlib.colors import LogNorm
     cmap_normal = sns.color_palette("viridis", as_cmap=True)
 
-    # We'll handle plotting by separating normal and special values:
-    # - Normal values on upper triangle
-    # - Special values on lower triangle
-    
     plt.rcParams.update(plt.rcParamsDefault)
     fig = plt.figure(figsize=(16, 10))
 
-    # GridSpec reduce horizontal spacing between the matrices and increase spacing before the histogram
-    gs = plt.GridSpec(2, 3, height_ratios=[4, 1], width_ratios=[1, 1, 1.5], hspace=0.6, wspace=0.3)
-    
+    gs = plt.GridSpec(1, 3, width_ratios=[1, 1, 1.5], hspace=0.6, wspace=0.3)
+
     # Main title
     if gene_symbol and gene_name:
         title_str = f'{gene_symbol}: {gene_name}\n{cds}'
     else:
         title_str = f'Pairwise Comparison Analysis: {cds}'
     fig.suptitle(title_str, fontsize=18, fontweight='bold', y=0.95)
-    
+
     def plot_matrices(ax, matrix, title_str):
         """Plot the matrix with:
         - Normal omega values in upper triangle (log scale)
@@ -540,19 +522,18 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         n = matrix.shape[0]
         upper_triangle = np.triu(np.ones_like(matrix, dtype=bool), k=1)
         lower_triangle = np.tril(np.ones_like(matrix, dtype=bool), k=-1)
-    
-        # Identify masks
+
         special_minus_one = (matrix == -1)
         special_ninety_nine = (matrix == 99)
         normal_mask = (~np.isnan(matrix)) & (~special_minus_one) & (~special_ninety_nine)
-    
+
         # NORMAL VALUES: upper triangle only
         normal_data = matrix.copy()
         normal_data[~(normal_mask & upper_triangle)] = np.nan
         normal_data = np.where(normal_data < 0.01, 0.01, normal_data)
         normal_data = np.where(normal_data > 50, 50, normal_data)
         normal_data_inv = normal_data[::-1, :]
-    
+
         sns.heatmap(
             normal_data_inv,
             cmap=cmap_normal,
@@ -564,7 +545,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             yticklabels=False,
             mask=np.isnan(normal_data_inv)
         )
-    
+
         # SPECIAL VALUES: lower triangle
         from matplotlib.colors import ListedColormap
         special_cmap = ListedColormap([color_minus_one, color_ninety_nine])
@@ -573,7 +554,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         special_data[special_ninety_nine] = 1
         special_data[~lower_triangle] = np.nan
         special_data_inv = special_data[::-1, :]
-    
+
         sns.heatmap(
             special_data_inv,
             cmap=special_cmap,
@@ -584,28 +565,28 @@ def create_visualization(matrix_0, matrix_1, cds, result):
             yticklabels=False,
             mask=np.isnan(special_data_inv)
         )
-    
+
         ax.set_title(title_str, fontsize=14, pad=12)
         ax.tick_params(axis='both', which='both', length=0)
-    
+
     # Plot Direct matrix
     ax1 = fig.add_subplot(gs[0, 0])
     plot_matrices(ax1, matrix_0_full, f'Direct Sequence Matrix (n={len(sequences_direct)})')
-    
+
     # Plot Inverted matrix
     ax2 = fig.add_subplot(gs[0, 1])
     plot_matrices(ax2, matrix_1_full, f'Inverted Sequence Matrix (n={len(sequences_inverted)})')
-    
+
     # Distribution plot of normal omega values
     ax3 = fig.add_subplot(gs[0, 2])
     values_direct = matrix_0_full[np.tril_indices_from(matrix_0_full, k=-1)]
     values_inverted = matrix_1_full[np.tril_indices_from(matrix_1_full, k=-1)]
-    
+
     values_direct = values_direct[~np.isnan(values_direct)]
     values_direct = values_direct[(values_direct != -1) & (values_direct != 99)]
     values_inverted = values_inverted[~np.isnan(values_inverted)]
     values_inverted = values_inverted[(values_inverted != -1) & (values_inverted != 99)]
-    
+
     sns.kdeplot(values_direct, ax=ax3, label='Direct', fill=True, common_norm=False, color='#1f77b4', alpha=0.6)
     sns.kdeplot(values_inverted, ax=ax3, label='Inverted', fill=True, common_norm=False, color='#ff7f0e', alpha=0.6)
     ax3.set_title('Distribution of Omega Values', fontsize=14, pad=12)
@@ -613,36 +594,25 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ax3.set_ylabel('Density', fontsize=12)
     ax3.tick_params(axis='both', which='major', labelsize=10)
     ax3.legend(title='Groups', title_fontsize=12, fontsize=10)
-    
-    # Results table
-    ax4 = fig.add_subplot(gs[1, :])
-    ax4.axis('off')
-    effect_size = f"{result['observed_effect_size']:.4f}" if not np.isnan(result['observed_effect_size']) else 'N/A'
-    p_value = f"{result['p_value']:.4e}" if not np.isnan(result['p_value']) else 'N/A'
-    std_err = f"{result['std_err']:.4f}" if not np.isnan(result['std_err']) else 'N/A'
-    
-    table_data = [
-        ['Metric', 'Value'],
-        ['Gene Symbol', gene_symbol if gene_symbol else 'Unknown'],
-        ['Gene Name', gene_name if gene_name else 'Unknown'],
-        ['Observed Effect Size (from Mixed Model)', effect_size],
-        ['P-value', p_value],
-    ]
-    
-    table = ax4.table(cellText=table_data, loc='center', cellLoc='left', colWidths=[0.5, 0.5])
-    table.auto_set_font_size(False)
-    table.set_fontsize(8)
-    table.scale(1, 1.5)
-    
-    for (row, col), cell in table.get_celld().items():
-        if row == 0:
-            cell.set_text_props(weight='bold', ha='center')
-            cell.set_facecolor('#E6E6E6')
-        elif col == 0:
-            cell.set_text_props(weight='bold')
-        cell.set_edgecolor('gray')
-    
-    # Add colorbar
+
+    # Extract the p-value information and add to the upper-right corner of the histogram
+    p_value_val = result.get('p_value', np.nan)
+    bonf_p_value_val = result.get('bonferroni_p_value', np.nan)
+    p_value_str = f"P-value: {p_value_val:.4e}" if not np.isnan(p_value_val) else "P-value: N/A"
+    bonf_p_value_str = f"Bonf. Corr: {bonf_p_value_val:.4e}" if not np.isnan(bonf_p_value_val) else "Bonf. Corr: N/A"
+
+    # Add text at top-right corner inside the axis
+    ax3.text(
+        0.95, 0.95,
+        f"{p_value_str}\n{bonf_p_value_str}",
+        transform=ax3.transAxes,
+        ha='right',
+        va='top',
+        fontsize=10,
+        bbox=dict(facecolor='white', alpha=0.7, edgecolor='gray')
+    )
+
+    # Add colorbar for the matrices
     pos = ax2.get_position()
     cbar_ax = fig.add_axes([pos.x1 + 0.02, pos.y0, 0.02, pos.height])
     from matplotlib.cm import ScalarMappable
@@ -652,7 +622,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar.set_label('Omega Value', fontsize=12)
     cbar.set_ticks([0.1, 1, 3, 10, 50])
     cbar.set_ticklabels(['0.1', '1', '3', '10', '50'])
-    
+
     # Special values legend
     pos1 = ax1.get_position()
     pos2 = ax2.get_position()
@@ -660,7 +630,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     legend_y = pos1.y0 - 0.1
     legend_width = 0.16
     legend_height = 0.1
-    
+
     legend_ax = fig.add_axes([legend_x, legend_y, legend_width, legend_height])
     legend_ax.axis('off')
     legend = legend_ax.legend(
@@ -669,18 +639,14 @@ def create_visualization(matrix_0, matrix_1, cds, result):
         loc='center', ncol=2, frameon=True, fontsize=10
     )
     legend.get_title().set_fontsize(12)
-    
+
     plt.tight_layout(rect=[0, 0, 0.9, 0.95])
     
     # Save the figure
     plt.savefig(PLOTS_DIR / f'analysis_{cds.replace("/", "_")}.png',
                 dpi=300, bbox_inches='tight')
     plt.close(fig)
-    
-    
-    
-    
-    
+
 
 
 
