@@ -1,5 +1,5 @@
 
-import pandas as pd
+import pandas as p
 import numpy as np
 from collections import defaultdict
 import seaborn as sns
@@ -584,7 +584,7 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar.set_label('Omega Value', fontsize=16)
     cbar.ax.tick_params(labelsize=14)
 
-    legend_ax = fig.add_axes([0.50, 0.55, 0.15, 0.15])  # Positioned between plots
+    legend_ax = fig.add_axes([0.45, 0.55, 0.10, 0.10])
     legend_ax.axis('off')
     legend = legend_ax.legend(
         handles=special_patches,
