@@ -767,6 +767,23 @@ def parse_cds_coordinates(cds_name):
         print(f"Error parsing {cds_name}: {str(e)}")
         return None, None, None
 
+
+CLUSTERS_CACHE_PATH = CACHE_DIR / "clusters.pkl"
+
+def load_clusters_cache():
+    if CLUSTERS_CACHE_PATH.exists():
+        try:
+            with open(CLUSTERS_CACHE_PATH, 'rb') as f:
+                clusters = pickle.load(f)
+            return clusters
+        except Exception as e:
+            print(f"WARNING: Failed to load clusters cache: {e}")
+    return None
+
+def save_clusters_cache(clusters):
+    with open(CLUSTERS_CACHE_PATH, 'wb') as f:
+        pickle.dump(clusters, f)
+
 def build_overlap_clusters(results_df):
     """Build clusters of overlapping CDS regions."""
     cds_coords = []
@@ -1125,7 +1142,15 @@ def main():
 
     # Overall analysis
     print("\nBuilding clusters...")
-    clusters = build_overlap_clusters(results_df)
+    clusters = load_clusters_cache()
+    if clusters is None:
+        # Clusters not cached, build them now
+        clusters = build_overlap_clusters(results_df)
+        # Save to cache for next time
+        save_clusters_cache(clusters)
+    else:
+        print("Loaded clusters from cache.")
+
     cluster_stats = {}
     for cluster_id, cluster_cdss in clusters.items():
         cluster_stats[cluster_id] = combine_cluster_evidence(cluster_cdss, results_df, results)
