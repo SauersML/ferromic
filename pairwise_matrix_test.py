@@ -462,11 +462,17 @@ def create_visualization(matrix_0, matrix_1, cds, result):
                 print(f"⚠️ {msg}")
             else:
                 print(f"ℹ️ {msg}")
-    
+
     # Handle gene annotation
     if gene_symbol in [None, 'Unknown'] or gene_name in [None, 'Unknown']:
+        print(f"❌ No annotation found for CDS: {cds}")
         gene_symbol = None
         gene_name = None
+    else:
+        print(f"✅ Found annotation:")
+        print(f"   Symbol: {gene_symbol}")
+        print(f"   Name: {gene_name}")
+
 
     # Re-read all data for this CDS to retrieve special values too
     df_all = pd.read_csv('all_pairwise_results.csv')
