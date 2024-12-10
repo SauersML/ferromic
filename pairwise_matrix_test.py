@@ -23,6 +23,8 @@ from urllib.parse import urlencode
 from matplotlib.ticker import ScalarFormatter
 from matplotlib.ticker import FixedLocator, FixedFormatter
 from matplotlib.colors import LogNorm
+from matplotlib.cm import ScalarMappable
+
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -581,27 +583,27 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     ax2 = fig.add_subplot(gs[0, 1])
     plot_matrices(ax2, matrix_1_full, f'Inverted Sequences (n={len(sequences_inverted)})')
 
-    # Add colorbar in top row, third column
+    # Add the colorbar in the top row, third column
     cbar_ax = fig.add_subplot(gs[0, 2])
-    from matplotlib.cm import ScalarMappable
-    sm = ScalarMappable(norm=LogNorm(vmin=0.0000000001, vmax=50), cmap=cmap_normal)
+    
+    # Create a ScalarMappable with a logarithmic scale color normalization
+    sm = ScalarMappable(norm=LogNorm(vmin=1e-10, vmax=50), cmap=cmap_normal)
     sm.set_array([])
-
-    # Create the colorbar as before, but don't set ticks or labels yet
+    
+    # Generate the colorbar without predefined ticks and labels
     cbar = plt.colorbar(sm, cax=cbar_ax)
     
-    # Now explicitly set the ticks and labels we want
-    desired_ticks = [0.0000000001, 1, 3, 10, 50]  # Make sure all are within vmin and vmax
+    # Specify the exact ticks and corresponding labels
+    desired_ticks = [1e-10, 1, 3, 10, 50]
     desired_labels = ['0', '1', '3', '10', '50']
     
-    # Use FixedLocator and FixedFormatter to force these ticks and labels
+    # Apply the fixed ticks and labels to the colorbar
     cbar.ax.yaxis.set_major_locator(FixedLocator(desired_ticks))
     cbar.ax.yaxis.set_major_formatter(FixedFormatter(desired_labels))
     
+    # Set the colorbar label and tick label size
     cbar.set_label('Omega Value', fontsize=16)
     cbar.ax.tick_params(labelsize=14)
-    
-
 
     legend = ax1.legend(
         handles=special_patches,
