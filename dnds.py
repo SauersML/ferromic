@@ -68,7 +68,6 @@ def load_transcripts_from_gtf(gtf_path='../hg38.knownGene.gtf'):
 def validate_sequence(seq):
     global GLOBAL_INVALID_SEQS
     if len(seq) % 3 != 0:
-        logging.warning(f"Sequence length {len(seq)} not divisible by 3. Skipping.")
         GLOBAL_INVALID_SEQS += 1
         return None
 
