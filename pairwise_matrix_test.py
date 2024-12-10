@@ -1001,6 +1001,88 @@ def compute_overall_significance(cluster_results):
         'total_comparisons': total_comparisons
     }
 
+
+
+def create_manhattan_plot(results_df, inv_file='inv_info.csv'):
+    """
+    Create a Manhattan-style plot of all CDS p-values along the genome,
+    overlaying inversion regions from the given inv_file.
+    """
+    # Read inversion info
+    inv_df = pd.read_csv(inv_file)
+
+    # We have parsed coordinates for each CDS
+    # results_df should already have CDS, p_value
+    # Parse coords
+    if not {'chrom', 'start', 'end'}.issubset(results_df.columns):
+        coords = results_df['CDS'].apply(parse_cds_coordinates)
+        results_df[['chrom', 'start', 'end']] = pd.DataFrame(coords.tolist(), index=results_df.index)
+        results_df.dropna(subset=['chrom','start','end'], inplace=True)
+
+    # Compute -log10(p)
+    results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
+
+    # Determine chromosome order and offsets
+    unique_chroms = sorted(results_df['chrom'].unique(), key=lambda x: (x.startswith('chr'), x))
+    chrom_max = results_df.groupby('chrom')['end'].max().to_dict()
+
+    offset = {}
+    current_offset = 0
+    for c in unique_chroms:
+        offset[c] = current_offset
+        current_offset += chrom_max[c] + 1000000  # gap of 1Mb
+
+    results_df['genomic_pos'] = results_df.apply(lambda row: row['start'] + offset[row['chrom']], axis=1)
+
+    # Create figure
+    plt.figure(figsize=(14, 8), dpi=300)
+
+    # Light background for chromosomes
+    for i, c in enumerate(unique_chroms):
+        if i % 2 == 0:
+            plt.axvspan(offset[c], offset[c]+chrom_max[c], color='lightgrey', alpha=0.1)
+
+    # Plot inversions
+    for _, inv in inv_df.iterrows():
+        inv_chr = inv['chr']
+        inv_start = inv['region_start']
+        inv_end = inv['region_end']
+        if inv_chr in offset:
+            inv_x_start = inv_start + offset[inv_chr]
+            inv_x_end = inv_end + offset[inv_chr]
+            plt.axvspan(inv_x_start, inv_x_end, color='red', alpha=0.1)
+
+    # Color by chromosome
+    palette = sns.color_palette("tab20", n_colors=len(unique_chroms))
+    chrom_color_map = {c: palette[i % len(palette)] for i, c in enumerate(unique_chroms)}
+
+    # Scatter plot
+    plt.scatter(
+        results_df['genomic_pos'], 
+        results_df['neg_log_p'],
+        c=[chrom_color_map[ch] for ch in results_df['chrom']],
+        s=20, edgecolor='black', linewidth=0.5, alpha=0.7
+    )
+
+    # Significance line at p=0.05
+    sig_threshold = -np.log10(0.05)
+    plt.axhline(y=sig_threshold, color='red', linestyle='--', label='p=0.05')
+
+    # Label chromosomes
+    for c in unique_chroms:
+        plt.text(offset[c] + (chrom_max[c] / 2), -0.2, c, ha='center', va='top', fontsize=12, fontweight='bold')
+
+    plt.xlabel('Genomic Position (linearized)')
+    plt.ylabel('-log10(p-value)')
+    plt.title('Manhattan-Style Plot of CDS Significance', fontsize=18, fontweight='bold')
+    plt.legend(loc='upper right', frameon=True)
+    plt.tight_layout()
+
+    # Save plot
+    PLOTS_DIR.mkdir(exist_ok=True)
+    plt.savefig(PLOTS_DIR / 'manhattan_plot_all_CDS.png', bbox_inches='tight')
+    plt.close()
+
 def main():
     start_time = datetime.now()
     print(f"Analysis started at {start_time}")
