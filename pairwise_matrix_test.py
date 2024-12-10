@@ -476,6 +476,8 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
     # Re-read all data for this CDS to retrieve special values too
     df_all = pd.read_csv('all_pairwise_results.csv')
+    df_all['CDS'] = df_all['CDS'].str.replace('_start', ':', regex=False)
+    df_all['CDS'] = df_all['CDS'].str.replace('_end', '-', regex=False)
     df_cds_all = df_all[df_all['CDS'] == cds]
 
     # Create pairwise dict including all omega values (including special values)
