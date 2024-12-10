@@ -594,9 +594,9 @@ def create_visualization(matrix_0, matrix_1, cds, result):
     cbar = plt.colorbar(sm, cax=cbar_ax)
     
     # Specify the exact ticks and corresponding labels
-    desired_ticks = [1e-10, 1, 3, 10, 50]
+    desired_ticks = [0.01, 1, 3, 10, 50]
     desired_labels = ['0', '1', '3', '10', '50']
-    
+
     # Apply the fixed ticks and labels to the colorbar
     cbar.ax.yaxis.set_major_locator(FixedLocator(desired_ticks))
     cbar.ax.yaxis.set_major_formatter(FixedFormatter(desired_labels))
