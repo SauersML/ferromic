@@ -690,23 +690,33 @@ fn process_variants(
     // Process CDS regions and generate sequences
     for cds in cds_regions {
         // Check overlap with region
-        if cds.end < region_start || cds.start > region_end {
-            continue; // No overlap
+        let mut combined_sequences: HashMap<String, Vec<u8>> = HashMap::new();
+        for &(seg_start, seg_end) in &cds.segments {
+            if seg_end < region_start || seg_start > region_end {
+                continue; // No overlap for this segment
+            }
+            let cds_start = std::cmp::max(seg_start - 1, region_start - 1); // 0-based
+            let cds_end = std::cmp::min(seg_end, region_end);
+        
+            // Extract each segment, apply variants, and append to combined_sequences instead of writing now.
         }
 
-        // Adjust CDS start and end to overlap with region
-        let cds_start = std::cmp::max(cds.start - 1, region_start - 1); // 0-based
-        let cds_end = std::cmp::min(cds.end, region_end);
-
-        // Make sure length is multiple of 3
-        let mut cds_length = cds_end - cds_start; // No +1 needed for half-open intervals
-        let remainder = cds_length % 3;
-        if remainder != 0 {
-            cds_length -= remainder;
+        // After processing all segments into combined_sequences, compute final length:
+        let full_seq_lengths: Vec<usize> = combined_sequences.values().map(|v| v.len()).collect();
+        if full_seq_lengths.is_empty() { continue; }
+        let final_length = full_seq_lengths[0];
+        // Check all are equal length
+        if !full_seq_lengths.iter().all(|&l| l == final_length) {
+            eprintln!("Error: Not all sequences are the same length after concatenation. Skipping."); // Across haplotypes
+            continue;
         }
 
-        // Adjust cds_end
-        let cds_end = cds_start + cds_length - 1;
+        // Now make sure length is multiple of 3
+        let remainder = final_length % 3;
+        let final_trimmed_length = final_length - remainder;
+        for seq in combined_sequences.values_mut() {
+            seq.truncate(final_trimmed_length);
+        }
 
         // For each haplotype sequence, extract CDS sequence
         let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
@@ -777,10 +787,20 @@ fn process_variants(
             cds_end
         );
 
-        let char_sequences: HashMap<String, Vec<char>> = hap_sequences.into_iter()
+
+        let filename = format!(
+            "group_{}_{}_chr_{}_combined.phy",
+            haplotype_group,
+            cds.transcript_id,
+            chromosome
+        );
+        
+        // Convert combined_sequences to char sequences as before
+        let char_sequences: HashMap<String, Vec<char>> = combined_sequences
+            .into_iter()
             .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
             .collect();
-
+        
         write_phylip_file(&filename, &char_sequences)?;
     }
 
@@ -959,23 +979,54 @@ fn make_sequences(
     // For each CDS, extract sequences and write to PHYLIP file
     for cds in cds_regions {
         // Check overlap with region
-        if cds.end < region_start || cds.start > region_end {
-            continue; // No overlap
+        let mut combined_cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
+        for (name, original_seq) in &hap_sequences {
+            combined_cds_sequences.insert(name.clone(), Vec::new());
+        }
+        
+        for &(seg_start, seg_end) in &cds.segments {
+            if seg_end < region_start || seg_start > region_end {
+                continue;
+            }
+        
+            let cds_start = std::cmp::max(seg_start - 1, region_start - 1); // 0-based
+            let cds_end = std::cmp::min(seg_end, region_end);
+        
+            // Extract per-segment and append to combined_cds_sequences[name]
+        }
+        
+        // After processing all segments, write one final .phy file
+        let filename = format!(
+            "group_{}_{}_chr_{}_combined.phy",
+            haplotype_group,
+            cds.transcript_id,
+            chromosome
+        );
+        
+        // Convert combined_cds_sequences to char sequences
+        let char_sequences: HashMap<String, Vec<char>> = combined_cds_sequences
+            .into_iter()
+            .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
+            .collect();
+        
+        write_phylip_file(&filename, &char_sequences)?;
+
+        // After processing all segments into combined_sequences, compute final length:
+        let full_seq_lengths: Vec<usize> = combined_sequences.values().map(|v| v.len()).collect();
+        if full_seq_lengths.is_empty() { continue; }
+        let final_length = full_seq_lengths[0];
+        // Check all are equal length
+        if !full_seq_lengths.iter().all(|&l| l == final_length) {
+            eprintln!("Error: Not all sequences are the same length after concatenation. Skipping.");
+            continue;
         }
 
-        // Adjust CDS start and end to overlap with region
-        let cds_start = std::cmp::max(cds.start - 1, region_start - 1); // 0-based
-        let cds_end = std::cmp::min(cds.end, region_end); // Or just let cds_end = cds.end;
-
-        // Make sure length is multiple of 3
-        let mut cds_length = cds_end - cds_start; // No +1 needed for half-open intervals
-        let remainder = cds_length % 3;
-        if remainder != 0 {
-            cds_length -= remainder;
+        // Now make sure length is multiple of 3
+        let remainder = final_length % 3;
+        let final_trimmed_length = final_length - remainder;
+        for seq in combined_sequences.values_mut() {
+            seq.truncate(final_trimmed_length);
         }
-
-        // Adjust cds_end
-        let cds_end = cds_start + cds_length - 1;
 
         // For each haplotype sequence, extract CDS sequence
         let mut cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1013,11 +1064,20 @@ fn make_sequences(
             cds_end
         );
 
-        let char_sequences: HashMap<String, Vec<char>> = cds_sequences
+        
+        let filename = format!(
+            "group_{}_{}_chr_{}_combined.phy",
+            haplotype_group,
+            cds.transcript_id,
+            chromosome
+        );
+        
+        // Convert combined_sequences to char sequences
+        let char_sequences: HashMap<String, Vec<char>> = combined_sequences
             .into_iter()
             .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
             .collect();
-
+        
         write_phylip_file(&filename, &char_sequences)?;
     }
 
@@ -2368,17 +2428,18 @@ fn parse_gff_file(
                     segments.iter().map(|&(s, e, _)| e - s + 1).collect::<Vec<_>>());
         }
         
+        let segs: Vec<(i64,i64)> = segments.iter().map(|&(s,e,_)| (s,e)).collect();
         let cds_region = CdsRegion {
             transcript_id: transcript_id.clone(),
-            start: min_start,
-            end: max_end,
+            segments: segs,
         };
-        
-        println!("  CDS region: {}-{}", cds_region.start, cds_region.end);
-        println!("    Genomic span: {}", transcript_span);
-        println!("    Total coding length: {}", total_coding_length);
-        
         cds_regions.push(cds_region);
+        
+        let min_start_for_print = cds_region.segments.iter().map(|(s,_)| s).min().unwrap();
+        let max_end_for_print = cds_region.segments.iter().map(|(_,e)| e).max().unwrap();
+        println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
+        println!("    Genomic span: {}", transcript_span);
+        println!("    Total coding length: {}", total_coding_length);  
     }
 
     if stats.total_transcripts > 0 {
@@ -2422,8 +2483,7 @@ fn parse_gff_file(
 // Struct to hold CDS region information
 struct CdsRegion {
     transcript_id: String,
-    start: i64,
-    end: i64,
+    segments: Vec<(i64, i64)>,
 }
 
 // IN PROGRESS
