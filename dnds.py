@@ -107,6 +107,9 @@ def find_stop_codons(seq):
     Returns list of (position, codon) tuples."""
     stop_codons = {'TAA', 'TAG', 'TGA'}
     stops = []
+    logging.info(f"[DEBUG] STOPS: Checking sequence of length {len(seq)}")
+    if len(seq) > 5000:
+        logging.warning(f"[DEBUG] STOPS: ALERT - Sequence length {len(seq)} is suspiciously long")
     # Look at every codon
     for i in range(0, len(seq)-2, 3):
         codon = seq[i:i+3]
