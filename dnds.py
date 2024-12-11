@@ -345,17 +345,35 @@ def parse_phy_file(filepath):
             logging.info(f"[DEBUG] PARSE: Processing line {line_num}, length={len(line)}")
             logging.info(f"[DEBUG] PARSE: Line start: {line[:50]}...")
             
+            # First find the sequence split point
             parts = line.split()
             if len(parts) >= 2:
-                # Standard PHYLIP format with space
-                sample_name = parts[0]
+                orig_name = parts[0]
                 sequence = ''.join(parts[1:])
-                logging.info(f"[DEBUG] PARSE: Split on space - Name={sample_name} (len={len(sample_name)}), Seq len={len(sequence)}")
             else:
-                # No space - assume first 10 chars are name. Fix later.
-                sample_name = line[:10].strip()
-                sequence = line[10:].replace(" ", "")
-                logging.info(f"[DEBUG] PARSE: No space found - Name={sample_name} (len={len(sample_name)}), Seq len={len(sequence)}")
+                # Find last underscore which should be _0 or _1
+                last_underscore = line.rfind('_')
+                orig_name = line[:last_underscore+2]  # Include the _0 or _1
+                sequence = line[last_underscore+2:]
+                
+            # Now transform the name
+            name_parts = orig_name.split('_')
+            if len(name_parts) >= 4:  # Should be like AFR_MSL_HG03486_1
+                first = name_parts[0][:3]   # First 3 chars of first part
+                second = name_parts[1][:3]  # First 3 chars of second part
+                hg_part = name_parts[-2]    # The HG... part
+                group = name_parts[-1]      # The 0 or 1
+    
+                # Hash the HG part to get 2 chars
+                hash_val = abs(hash(hg_part)) % 100  # Get last 2 digits
+                hash_str = f"{hash_val:02d}"  # Pad to 2 digits
+
+                # Construct 10-char name: 3 + 3 + 2 + 1 + 1 = 10
+                sample_name = f"{first}{second}{hash_str}_{group}"
+                logging.info(f"[DEBUG] PARSE: Transformed {orig_name} -> {sample_name}")
+            else:
+                logging.error(f"[DEBUG] PARSE: Invalid name format: {orig_name}")
+                continue
 
             validated_seq = validate_sequence(sequence, filepath, sample_name, line)
             if validated_seq:
