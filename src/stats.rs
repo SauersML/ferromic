@@ -777,19 +777,12 @@ fn process_variants(
             continue;
         }
     
-    // Trim length to a multiple of 3?
     let remainder = final_length % 3;
-    let trimmed_length = final_length - remainder;
-    for seq in combined_sequences.values_mut() {
-        seq.truncate(trimmed_length);
-    }
-
-    // If final combined coding sequence is not divisible by three, skip
-    if trimmed_length % 3 != 0 {
-        eprintln!("Warning: Skipping transcript {} for haplotype group {} on chr {} because final coding sequence length ({}) is not divisible by 3.", transcript_id, haplotype_group, chromosome, trimmed_length);
+    if remainder != 0 {
+        eprintln!("Warning: Skipping transcript {} for haplotype group {} on chr {} because final coding sequence length ({}) is not divisible by 3.", transcript_id, haplotype_group, chromosome, final_length);
         continue;
     }
-    
+
     // Check for stop codons in the final coding sequences
     let stop_codons = ["TAA", "TAG", "TGA"];
     let mut skip_due_to_stop = false;
@@ -1046,11 +1039,10 @@ fn make_sequences(
             continue;
         }
 
-        // Now make sure length is multiple of 3
-        let remainder = final_length % 3;
-        let final_trimmed_length = final_length - remainder;
-        for seq in combined_sequences.values_mut() {
-            seq.truncate(final_trimmed_length);
+        // Check if length is multiple of 3
+        if final_length % 3 != 0 {
+            eprintln!("Warning: Skipping because final length ({}) is not divisible by 3.", final_length);
+            continue;
         }
 
         // For each haplotype sequence, extract CDS sequence
