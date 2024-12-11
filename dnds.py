@@ -117,39 +117,70 @@ def find_stop_codons(seq):
             stops.append((i, codon))
     return stops
 
-def validate_sequence(seq):
+def validate_sequence(seq, filepath, sample_name, full_line):
     """Validate a coding sequence for length, valid chars, and stop codons."""
+    logging.info(f"[DEBUG] VALIDATE for {filepath}")
+    logging.info(f"[DEBUG] VALIDATE: Sample={sample_name}")
+    
     # Early return if empty
     if not seq:
+        logging.warning(f"[DEBUG] VALIDATE-FAIL: Empty sequence for {sample_name} in {filepath}")
         increment_counter('invalid_seqs')
         return None
-    logging.info(f"[DEBUG] VALIDATE: Input sequence length = {len(seq)}")
         
-    # Convert to uppercase once at start
-    seq = seq.upper()
+    # Length checks
+    line_len = len(full_line)
+    seq_len = len(seq)
+    logging.info(f"[DEBUG] VALIDATE-LENGTHS: Full line={line_len}, Sequence={seq_len}")
+    if seq_len > line_len:
+        logging.error(f"[DEBUG] VALIDATE-FAIL: Sequence longer than line! Line={line_len}, Seq={seq_len}")
+        increment_counter('invalid_seqs')
+        return None
     
-    # Length
-    if len(seq) % 3 != 0:
+    # Basic length check
+    if seq_len % 3 != 0:
+        logging.warning(f"[DEBUG] VALIDATE-FAIL: Length {seq_len} not divisible by 3 for {sample_name}")
         increment_counter('invalid_seqs')
         return None
 
-    # Valid chars
-    valid_bases = set('ATCGN-')  # Already uppercase
-    if not set(seq).issubset(valid_bases):
-        invalid_chars = set(seq) - valid_bases
-        logging.warning(f"[DEBUG] Invalid chars {invalid_chars} found. Skipping sequence.")
+    # Convert to uppercase and get first/last parts for context
+    seq = seq.upper()
+    seq_start = seq[:50]
+    seq_end = seq[-50:] if len(seq) > 50 else ""
+    logging.info(f"[DEBUG] VALIDATE-SEQ: Start={seq_start}...")
+    logging.info(f"[DEBUG] VALIDATE-SEQ: End=...{seq_end}")
+    
+    # Valid chars check
+    valid_bases = set('ATCGN-')
+    invalid_chars = set(seq) - valid_bases
+    if invalid_chars:
+        logging.warning(f"[DEBUG] VALIDATE-FAIL: Invalid chars {invalid_chars} in {filepath}, sample {sample_name}")
         increment_counter('invalid_seqs')
         return None
         
-    # Stop codons
-    logging.info(f"[DEBUG] VALIDATE: About to check stops in sequence of length {len(seq)}")
-    stop_positions = find_stop_codons(seq)
-    if stop_positions:
-        increment_counter('stop_codons')
-        for pos, codon in stop_positions:
-            logging.warning(f"[DEBUG] STOPS-FOUND: Found stop codon {codon} at position {pos}. Sequence context: ...{seq[max(0,pos-10):pos]}[{codon}]{seq[pos+3:pos+13]}...")
-        return seq  # We return the sequence but log the warning
+    # Position sanity check
+    for i in range(0, len(seq)-2, 3):
+        if i > line_len:
+            logging.error(f"[DEBUG] VALIDATE-FAIL: Position {i} exceeds line length {line_len}")
+            return None
+            
+    # Stop codons check with extensive logging
+    stop_codons = {'TAA', 'TAG', 'TGA'}
+    for i in range(0, len(seq)-2, 3):
+        codon = seq[i:i+3]
+        if codon in stop_codons:
+            increment_counter('stop_codons')
+            pre_context = seq[max(0,i-10):i]
+            post_context = seq[i+3:i+13]
+            logging.warning(f"[DEBUG] STOP-CODON in {filepath}")
+            logging.warning(f"[DEBUG] STOP-CODON: file={filepath}")
+            logging.warning(f"[DEBUG] STOP-CODON: sample={sample_name}")
+            logging.warning(f"[DEBUG] STOP-CODON: position={i}")
+            logging.warning(f"[DEBUG] STOP-CODON: codon={codon}")
+            logging.warning(f"[DEBUG] STOP-CODON: context=...{pre_context}[{codon}]{post_context}...")
+            logging.warning(f"[DEBUG] STOP-CODON: line_len={line_len}, seq_len={seq_len}")
 
+    # Return validated sequence
     return seq
 
 def extract_group_from_sample(sample_name):
