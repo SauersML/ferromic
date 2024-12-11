@@ -1843,7 +1843,8 @@ fn process_vcf(
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
     let chr_length = {
-        let mut fasta_reader = bio::io::fasta::IndexedReader::from_file(&Path::new(&args.reference_path))?;
+        let mut fasta_reader = bio::io::fasta::IndexedReader::from_file(&Path::new(&args.reference_path))
+            .map_err(|e| VcfError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
         let seq_info = fasta_reader.index.sequences().iter()
             .find(|seq| seq.name == chr || seq.name == format!("chr{}", chr))
             .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?;
