@@ -687,83 +687,78 @@ fn process_variants(
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
     let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
-    // Process CDS regions and generate sequences
+    // Process CDS regions and generate final coding sequences per transcript
     for cds in cds_regions {
-        let cds_start = cds.segments.iter().map(|(s,_)| *s).min().unwrap();
-        let cds_end = cds.segments.iter().map(|(_,e)| *e).max().unwrap();
-
-        // Check overlap with region
+        let transcript_id = &cds.transcript_id;
+        let cds_min = cds.segments.iter().map(|(s,_)| *s).min().unwrap();
+        let cds_max = cds.segments.iter().map(|(_,e)| *e).max().unwrap();
+    
+        // Map each haplotype to a combined coding sequence
         let mut combined_sequences: HashMap<String, Vec<u8>> = HashMap::new();
-        for &(seg_start, seg_end) in &cds.segments {
-            if seg_end < region_start || seg_start > region_end {
-                continue; // No overlap for this segment
-            }
-            let cds_start = std::cmp::max(seg_start - 1, region_start - 1); // 0-based
-            let cds_end = std::cmp::min(seg_end, region_end);
-        
-            // Extract each segment, apply variants, and append to combined_sequences instead of writing now.
-        }
-
-        // After processing all segments into combined_sequences, compute final length:
-        let full_seq_lengths: Vec<usize> = combined_sequences.values().map(|v| v.len()).collect();
-        if full_seq_lengths.is_empty() { continue; }
-        let final_length = full_seq_lengths[0];
-        // Check all are equal length
-        if !full_seq_lengths.iter().all(|&l| l == final_length) {
-            eprintln!("Error: Not all sequences are the same length after concatenation. Skipping."); // Across haplotypes
-            continue;
-        }
-
-        // Now make sure length is multiple of 3
-        let remainder = final_length % 3;
-        let final_trimmed_length = final_length - remainder;
-        for seq in combined_sequences.values_mut() {
-            seq.truncate(final_trimmed_length);
-        }
-
-        // For each haplotype sequence, extract CDS sequence
-        let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
         for (sample_idx, hap_idx) in &haplotype_indices {
             let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
-            let start_offset = (cds_start - region_start) as usize;
-            let end_offset = (cds_end - region_start) as usize; // No +1 needed for half-open intervals
-
-            if end_offset > reference_sequence.len() {
-                eprintln!(
-                    "Warning: CDS end offset {} exceeds reference sequence length {} for sample {}. Skipping CDS.",
-                    end_offset, reference_sequence.len(), sample_name
-                );
+            combined_sequences.insert(sample_name, Vec::new());
+        }
+    
+        // Determine overlapping segments and append them to each haplotype’s sequence
+        let mut segment_map = Vec::new();
+        {
+            let mut current_length = 0;
+            for &(seg_start, seg_end) in &cds.segments {
+                if seg_end < region_start || seg_start > region_end {
+                    continue;
+                }
+                let overlap_start = std::cmp::max(seg_start, region_start);
+                let overlap_end = std::cmp::min(seg_end, region_end);
+                let start_offset = (overlap_start - region_start) as usize;
+                let end_offset = (overlap_end - region_start + 1) as usize;
+    
+                if end_offset > reference_sequence.len() {
+                    continue;
+                }
+    
+                let segment_ref_seq = &reference_sequence[start_offset..end_offset];
+                for (sample_idx, hap_idx) in &haplotype_indices {
+                    let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+                    combined_sequences.get_mut(&sample_name).unwrap().extend_from_slice(segment_ref_seq);
+                }
+    
+                let segment_len = end_offset - start_offset;
+                segment_map.push((overlap_start, overlap_end, current_length));
+                current_length += segment_len;
+            }
+        }
+    
+        // Apply variants to the combined coding sequences
+        for variant in variants {
+            if variant.position < cds_min || variant.position > cds_max {
                 continue;
             }
-
-            let sequence = reference_sequence[start_offset..end_offset].to_vec();
-            hap_sequences.insert(sample_name, sequence);
-        }
-
-        // Apply variants
-        for variant in variants {
-            if variant.position >= cds_start && variant.position <= cds_end {
-                let pos_in_seq = (variant.position - cds_start) as usize;
-
+            let mut pos_in_cds = None;
+            for &(seg_s, seg_e, offset) in &segment_map {
+                if variant.position >= seg_s && variant.position <= seg_e {
+                    let rel = variant.position - seg_s;
+                    let idx = offset + rel as usize;
+                    pos_in_cds = Some(idx);
+                    break;
+                }
+            }
+    
+            if let Some(pos_in_seq) = pos_in_cds {
                 for (sample_idx, hap_idx) in &haplotype_indices {
                     if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
                         if let Some(allele) = alleles.get(*hap_idx) {
                             let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
-                            if let Some(seq) = hap_sequences.get_mut(&sample_name) {
-                                if pos_in_seq >= seq.len() {
-                                    eprintln!(
-                                        "Warning: Position {} is out of bounds for sequence of length {}. Skipping variant.",
-                                        pos_in_seq, seq.len()
-                                    );
-                                    continue;
-                                }
-                                let map = position_allele_map.lock();
-                                if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
-                                    seq[pos_in_seq] = if *allele == 0 {
-                                        ref_allele as u8
-                                    } else {
-                                        alt_allele as u8
-                                    };
+                            if let Some(seq) = combined_sequences.get_mut(&sample_name) {
+                                if pos_in_seq < seq.len() {
+                                    let map = position_allele_map.lock();
+                                    if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                                        seq[pos_in_seq] = if *allele == 0 {
+                                            ref_allele as u8
+                                        } else {
+                                            alt_allele as u8
+                                        };
+                                    }
                                 }
                             }
                         }
@@ -771,42 +766,30 @@ fn process_variants(
                 }
             }
         }
-
-        if hap_sequences.is_empty() {
-            eprintln!(
-                "No haplotype sequences generated for CDS region {}-{}. Skipping PHYLIP file writing.",
-                cds_start, cds_end
-            );
+    
+        // Make sure all sequences are the same length across haplotypes
+        let full_seq_lengths: Vec<usize> = combined_sequences.values().map(|v| v.len()).collect();
+        if full_seq_lengths.is_empty() {
             continue;
         }
-
-        let cds_start = cds.segments.iter().map(|(s,_)| *s).min().unwrap();
-        let cds_end = cds.segments.iter().map(|(_,e)| *e).max().unwrap();
-
-        // Write sequences to PHYLIP file
-        let filename = format!(
-            "group_{}_{}_chr_{}_start_{}_end_{}.phy",
-            haplotype_group,
-            cds.transcript_id,
-            chromosome,
-            cds_start,
-            cds_end
-        );
-
-
-        let filename = format!(
-            "group_{}_{}_chr_{}_combined.phy",
-            haplotype_group,
-            cds.transcript_id,
-            chromosome
-        );
-        
-        // Convert combined_sequences to char sequences as before
+        let final_length = full_seq_lengths[0];
+        if !full_seq_lengths.iter().all(|&l| l == final_length) {
+            continue;
+        }
+    
+        // Trim length to a multiple of 3. Completed combined CDSs should already be multiples of 3 naturally. Individual CDS parts do not have to be multiples of 3 before combining.
+        let remainder = final_length % 3;
+        let trimmed_length = final_length - remainder;
+        for seq in combined_sequences.values_mut() {
+            seq.truncate(trimmed_length);
+        }
+    
+        // Convert to char sequences and write out a single final PHYLIP file per transcript
+        let filename = format!("group_{}_{}_chr_{}_combined.phy", haplotype_group, transcript_id, chromosome);
         let char_sequences: HashMap<String, Vec<char>> = combined_sequences
             .into_iter()
             .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
             .collect();
-        
         write_phylip_file(&filename, &char_sequences)?;
     }
 
