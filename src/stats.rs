@@ -277,6 +277,7 @@ fn main() -> Result<(), VcfError> {
             _filtering_stats,
         ) = process_vcf(
             &vcf_file,
+            &Path::new(&args.reference_path),
             &chr,
             start,
             end,
@@ -1202,6 +1203,7 @@ fn process_config_entries(
         // Pass the mask and allow regions (clone the Arc)
         let variants_data = match process_vcf(
             &vcf_file,
+            &Path::new(&args.reference_path),
             &chr,
             min_start,
             max_end,
@@ -1824,6 +1826,7 @@ fn collect_vcf_chromosomes(vcf_folder: &str) -> Result<Vec<String>, VcfError> {
 // Function to process a VCF file
 fn process_vcf(
     file: &Path,
+    reference_path: &Path,
     chr: &str,
     start: i64,
     end: i64,
@@ -1843,9 +1846,11 @@ fn process_vcf(
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
     let chr_length = {
-        let mut fasta_reader = bio::io::fasta::IndexedReader::from_file(&Path::new(reference_path))
+        let mut fasta_reader = bio::io::fasta::IndexedReader::from_file(&reference_path)
             .map_err(|e| VcfError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
-        let seq_info = fasta_reader.index.sequences().iter()
+        // Create an owned copy of the sequences
+        let sequences = fasta_reader.index.sequences().to_vec();
+        let seq_info = sequences.iter()
             .find(|seq| seq.name == chr || seq.name == format!("chr{}", chr))
             .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?;
         seq_info.len as i64
