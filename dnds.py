@@ -352,7 +352,7 @@ def parse_phy_file(filepath):
                 sequence = ''.join(parts[1:])
                 logging.info(f"[DEBUG] PARSE: Split on space - Name={sample_name} (len={len(sample_name)}), Seq len={len(sequence)}")
             else:
-                # No space - assume first 10 chars are name
+                # No space - assume first 10 chars are name. Fix later.
                 sample_name = line[:10].strip()
                 sequence = line[10:].replace(" ", "")
                 logging.info(f"[DEBUG] PARSE: No space found - Name={sample_name} (len={len(sample_name)}), Seq len={len(sequence)}")
