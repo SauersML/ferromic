@@ -17,7 +17,6 @@ use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
 use prettytable::{Table, row};
-use std::env::args;
 
 // Define command-line arguments using clap
 #[derive(Parser, Debug)]
