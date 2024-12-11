@@ -1086,41 +1086,47 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     sns.set_style("ticks")
     ax = plt.gca()
 
-    dark_yellow = '#FFD700'
-    light_yellow = '#FFFACD'
-        
-    # Define colors for each inversion type (Green for recurrent, Yellow for single)
     recurrent_color = 'green'
     single_color = 'yellow'
     
     for _, inv in inv_df.iterrows():
-        if inv['0_single_1_recur'] not in [0, 1]:
-            continue
-    
         inv_chr = inv['chr']
         if inv_chr not in chrom_to_index:
             continue
+        
         c_idx = chrom_to_index[inv_chr]
         c_min, c_max = chrom_ranges[inv_chr]
+    
+        # Calculate relative positions and filter large inversions
+        inv_size = inv['region_end'] - inv['region_start']
+        chrom_size = c_max - c_min if c_max > c_min else 1  # Avoid division by zero
+    
+        # Skip inversions larger than 50% of the chromosome
+        if inv_size > 0.5 * chrom_size:
+            continue
+    
         if c_max > c_min:
             rel_start = (inv['region_start'] - c_min) / (c_max - c_min)
             rel_end = (inv['region_end'] - c_min) / (c_max - c_min)
         else:
             rel_start = 0.4
             rel_end = 0.6
+    
         inv_x_start = c_idx + max(0, min(rel_start, 1))
         inv_x_end = c_idx + min(1, max(rel_end, 0))
     
-        # Choose color based on '0_single_1_recur'
-        if inv['0_single_1_recur'] == 1:
+        # Determine color based on inversion type (0_single_1_recur)
+        # If '0_single_1_recur' is not 0 or 1, just default to single_color
+        inversion_type = inv.get('0_single_1_recur', 0)
+        if inversion_type == 1:
             inv_color = recurrent_color
         else:
             inv_color = single_color
     
-        # Just plot the region, no label
+        # Plot inversion region (no label here to avoid duplicates in legend)
         ax.axvspan(inv_x_start, inv_x_end, color=inv_color, alpha=0.2, zorder=0)
-
-    # After plotting all inversions, add ONE legend with two patches only
+    
+    # Create a single legend with two patches
     recurrent_patch = mpatches.Patch(color=recurrent_color, alpha=0.2, label='Recurrent inversion')
     single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
     ax.legend(handles=[recurrent_patch, single_patch], loc='upper left', fontsize=14, frameon=True)
