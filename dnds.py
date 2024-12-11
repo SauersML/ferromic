@@ -297,10 +297,12 @@ def parse_phy_file(filepath):
         if idx == idx_0:
             sample_name = line[:idx+2]
             sequence = line[idx+2:]
+            split_type = "_0"
         else:
             sample_name = line[:idx+2]
             sequence = line[idx+2:]
-        logging.info(f"[DEBUG] Validating sequence from file: {filepath}")
+            split_type = "_1"
+        logging.info(f"[DEBUG] PARSE: for {filepath}, line len={len(line)}, Split at {split_type} pos={idx}, Name={sample_name}, Seq len={len(sequence)}")
         validated_seq = validate_sequence(sequence)
         if validated_seq:
             increment_counter('total_seqs')
