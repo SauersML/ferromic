@@ -780,6 +780,9 @@ fn process_variants(
             continue;
         }
 
+        let cds_start = cds.segments.iter().map(|(s,_)| *s).min().unwrap();
+        let cds_end = cds.segments.iter().map(|(_,e)| *e).max().unwrap();
+
         // Write sequences to PHYLIP file
         let filename = format!(
             "group_{}_{}_chr_{}_start_{}_end_{}.phy",
@@ -981,6 +984,9 @@ fn make_sequences(
 
     // For each CDS, extract sequences and write to PHYLIP file
     for cds in cds_regions {
+        let cds_start = cds.segments.iter().map(|(s,_)| *s).min().unwrap();
+        let cds_end = cds.segments.iter().map(|(_,e)| *e).max().unwrap();
+
         // Check overlap with region
         let mut combined_cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
         for (name, original_seq) in &hap_sequences {
@@ -1050,6 +1056,9 @@ fn make_sequences(
             let cds_seq = seq[start_offset..end_offset].to_vec();
             cds_sequences.insert(sample_name.clone(), cds_seq);
         }
+
+        let cds_start = cds.segments.iter().map(|(s,_)| *s).min().unwrap();
+        let cds_end = cds.segments.iter().map(|(_,e)| *e).max().unwrap();
 
         if cds_sequences.is_empty() {
             eprintln!(
@@ -2432,22 +2441,22 @@ fn parse_gff_file(
             println!("    Individual segment lengths: {:?}", 
                     segments.iter().map(|&(s, e, _)| e - s + 1).collect::<Vec<_>>());
         }
-        
+
         let segs: Vec<(i64,i64)> = segments.iter().map(|&(s,e,_)| (s,e)).collect();
         let cds_region = CdsRegion {
             transcript_id: transcript_id.clone(),
             segments: segs,
         };
-    
+
         let cds_start = cds_region.segments.iter().map(|(s, _)| *s).min().unwrap();
         let cds_end = cds_region.segments.iter().map(|(_, e)| *e).max().unwrap();
         let min_start_for_print = cds_region.segments.iter().map(|(s,_)| s).min().unwrap();
         let max_end_for_print = cds_region.segments.iter().map(|(_,e)| e).max().unwrap();
-    
-        // Print before pushing cds_region, so it's not moved yet:
+
+        // Print before pushing:
         println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
-    
-        // Now push after we're done using cds_region:
+
+        // Now push after printing, so no borrow occurs after move:
         cds_regions.push(cds_region);
 
         println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
