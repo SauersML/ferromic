@@ -140,7 +140,10 @@ def run_codeml(ctl_path, working_dir, codeml_path):
             logging.error(f"CODEML failed at {relative_codeml_path}: {error_msg}")
             logging.error(f"[DEBUG] To replicate this run: cd {full_working_dir} && {' '.join(command)}")
             return False
-        return True
+        else:
+            # SUCCESS MESSAGE:
+            logging.info("***** PAML run completed successfully! *****")
+            return True
     except subprocess.TimeoutExpired:
         process.kill()
         logging.error("[DEBUG] CODEML timed out.")
