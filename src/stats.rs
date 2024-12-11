@@ -2157,11 +2157,11 @@ fn read_reference_sequence(
     }
 
     // Calculate region length and allocate buffer
-    let region_length = (adjusted_end - start as u64 + 1) as usize;
+    let region_length = (adjusted_end - (start as u64) + 1) as usize;
     let mut sequence = Vec::with_capacity(region_length);
 
     // Fetch and read the sequence with proper error handling
-    reader.fetch(actual_chr_name, (start - 1) as u64, end as u64) // Check indexing
+    reader.fetch(actual_chr_name, (start - 1) as u64, end as u64 + 1)?
         .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
             format!("Failed to fetch region {}:{}-{}: {}", actual_chr_name, start, adjusted_end, e)
