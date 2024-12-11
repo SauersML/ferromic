@@ -2450,7 +2450,7 @@ fn parse_gff_file(
 
         let cds_start = cds_region.segments.iter().map(|(s, _)| *s).min().unwrap();
         let cds_end = cds_region.segments.iter().map(|(_, e)| *e).max().unwrap();
-        let min_start_for_print = cds_region.segments.iter().map(|(s,_)| s).min().unwrap();
+        let min_start_for_print = cds_region.segments.clone().iter().map(|(s,_)| s).min().unwrap();
         let max_end_for_print = cds_region.segments.iter().map(|(_,e)| e).max().unwrap();
 
         // Print before pushing:
