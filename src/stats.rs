@@ -303,10 +303,9 @@ fn main() -> Result<(), VcfError> {
                 .map(|v| v.position)
                 .unwrap_or(0)
                 .max(chr_length)
-                - start
-                + 1
+                - (start - 1)
         } else {
-            end - start + 1
+            end - (start - 1)
         };
 
         if end == i64::MAX
@@ -549,7 +548,7 @@ fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64
         let overlap_start = std::cmp::max(region_start, start);
         let overlap_end = std::cmp::min(region_end, end);
         if overlap_start <= overlap_end {
-            total += overlap_end - overlap_start + 1;
+            total += overlap_end - overlap_start;
         } else if end > region_end {
             break; // No further overlaps possible
         }
@@ -700,7 +699,7 @@ fn process_variants(
         let cds_end = std::cmp::min(cds.end, region_end);
 
         // Make sure length is multiple of 3
-        let mut cds_length = cds_end - cds_start + 1;
+        let cds_length = cds_end - cds_start; // No +1 needed for half-open intervals
         let remainder = cds_length % 3;
         if remainder != 0 {
             cds_length -= remainder;
@@ -714,7 +713,7 @@ fn process_variants(
         for (sample_idx, hap_idx) in &haplotype_indices {
             let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
             let start_offset = (cds_start - region_start) as usize;
-            let end_offset = (cds_end - region_start + 1) as usize;
+            let end_offset = (cds_end - region_start) as usize; // No +1 needed for half-open intervals
 
             if end_offset > reference_sequence.len() {
                 eprintln!(
@@ -969,7 +968,7 @@ fn make_sequences(
         let cds_end = std::cmp::min(cds.end, region_end); // Or just let cds_end = cds.end;
 
         // Make sure length is multiple of 3
-        let mut cds_length = cds_end - cds_start + 1;
+        let cds_length = cds_end - cds_start; // No +1 needed for half-open intervals
         let remainder = cds_length % 3;
         if remainder != 0 {
             cds_length -= remainder;
@@ -982,7 +981,7 @@ fn make_sequences(
         let mut cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
         for (sample_name, seq) in &hap_sequences {
             let start_offset = (cds_start - region_start) as usize;
-            let end_offset = (cds_end - region_start + 1) as usize;
+            let end_offset = (cds_end - region_start) as usize; // No +1 needed for half-open intervals
 
             if end_offset > seq.len() {
                 eprintln!(
@@ -1426,7 +1425,7 @@ fn calculate_adjusted_sequence_length(
     // Calculate the total length of unmasked intervals
     let adjusted_length: i64 = unmasked_intervals
         .iter()
-        .map(|&(start, end)| end - start + 1)
+        .map(|&(start, end)| end - start)
         .sum();
 
     adjusted_length
@@ -1457,10 +1456,10 @@ fn subtract_regions(
                 } else {
                     // There is overlap
                     if mask_start > curr_start {
-                        new_intervals.push((curr_start, mask_start - 1));
+                        new_intervals.push((curr_start, mask_start));
                     }
                     if mask_end < curr_end {
-                        new_intervals.push((mask_end + 1, curr_end));
+                        new_intervals.push((mask_end, curr_end));
                     }
                 }
             }
