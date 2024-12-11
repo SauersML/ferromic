@@ -1179,8 +1179,9 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     ax.set_ylabel('-log10(p-value)', fontsize=18)
     ax.set_title('Manhattan Plot of CDS Significance', fontsize=24, fontweight='bold', pad=20)
 
-    handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles=handles, fontsize=14, frameon=True, loc='upper right')
+    handles_auto, labels_auto = ax.get_legend_handles_labels()
+    all_handles = [recurrent_patch, single_patch, recurrent_large_patch, single_large_patch] + handles_auto
+    ax.legend(handles=all_handles, fontsize=14, frameon=True, loc='upper right')
 
     ax.yaxis.grid(True, which='major', color='lightgray', linestyle='--', lw=0.5)
     ax.xaxis.grid(False)
