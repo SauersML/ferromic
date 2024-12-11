@@ -51,7 +51,8 @@ ETA_DATA = {
     'start_time': None,
     'completed': 0,
     'rate_smoothed': None,  # Exponential moving average for rate
-    'alpha': 0.2  # smoothing factor
+    'alpha': 0.2,  # smoothing factor
+    'stop_codons': 0
 }
 
 # We use a manager to keep track of global counters in parallel
@@ -101,20 +102,50 @@ def print_eta(completed, total, start_time, eta_data):
 def increment_counter(key, amount=1):
     GLOBAL_COUNTERS[key] = GLOBAL_COUNTERS.get(key,0)+amount
 
+def find_stop_codons(seq):
+    """Find in-frame stop codons in a sequence.
+    Returns list of (position, codon) tuples."""
+    stop_codons = {'TAA', 'TAG', 'TGA'}
+    stops = []
+    # Look at every codon
+    for i in range(0, len(seq)-2, 3):
+        codon = seq[i:i+3]
+        if codon in stop_codons:
+            stops.append((i, codon))
+    return stops
+
 def validate_sequence(seq):
-    # This function is crucial; let's keep it efficient.
-    # Validate length multiple of 3
+    """Validate a coding sequence for length, valid chars, and stop codons."""
+    # Early return if empty
+    if not seq:
+        increment_counter('invalid_seqs')
+        return None
+        
+    # Convert to uppercase once at start
+    seq = seq.upper()
+    
+    # Length
     if len(seq) % 3 != 0:
         increment_counter('invalid_seqs')
         return None
-    # Check valid chars
-    valid_bases = set('ATCGNatcgn-')
+
+    # Valid chars
+    valid_bases = set('ATCGN-')  # Already uppercase
     if not set(seq).issubset(valid_bases):
         invalid_chars = set(seq) - valid_bases
         logging.warning(f"[DEBUG] Invalid chars {invalid_chars} found. Skipping sequence.")
         increment_counter('invalid_seqs')
         return None
-    return seq.upper()
+        
+    # Stop codons
+    stop_positions = find_stop_codons(seq)
+    if stop_positions:
+        increment_counter('stop_codons')
+        for pos, codon in stop_positions:
+            logging.warning(f"[DEBUG] Found premature stop codon {codon} at position {pos}")
+        return seq  # We return the sequence but log the warning
+            
+    return seq
 
 def extract_group_from_sample(sample_name):
     # Slight optimization by checking last 2 chars
