@@ -52,7 +52,6 @@ ETA_DATA = {
     'completed': 0,
     'rate_smoothed': None,  # Exponential moving average for rate
     'alpha': 0.2,  # smoothing factor
-    'stop_codons': 0
 }
 
 # We use a manager to keep track of global counters in parallel
@@ -62,7 +61,8 @@ GLOBAL_COUNTERS = manager.dict({
     'duplicates': 0,
     'total_seqs': 0,
     'total_cds': 0,
-    'total_comparisons': 0
+    'total_comparisons': 0,
+    'stop_codons': 0
 })
 
 def print_eta(completed, total, start_time, eta_data):
@@ -299,61 +299,84 @@ def get_safe_process_count():
     safe_processes = max(1, min(total_cpus, total_cpus)) # Let's just use all cores
     return safe_processes
 
+
+# Example of input format:
+"""
+{ head -n 4 ./group_0_chr_19_start_49487634_end_49491815.phy; tail -n 4 ./group_0_chr_19_start_49487634_end_49491815.phy; } | awk '{ print substr($0, 1, 40) " ... " substr($0, length($0)-39, 40) }'
+AFR_MSL_HG03486_1GGAGGTGCAGGTATGGGCTCCGC ... TACACAGAGGTCCTCAAGACCCACGGACTCCTGGTCTGAG
+SAS_STU_HG03683_0GGAGGTGCAGGTATGGGCTCCGC ... TACACAGAGGTCCTCAAGACCCACGGACTCCTGGTCTGAG
+EAS_KHV_HG02059_0GGAGGTGCAGGTATGGGCTCCGC ... TACACAGAGGTCCTCAAGACCCACGGACTCCTGGTCTGAG
+EAS_CDX_HG00864_1GGAGGTGCAGGTATGGGCTCCGC ... TACACAGAGGTCCTCAAGACCCACGGACTCCTGGTCTGAG
+AFR_LWK_NA19036_0GGAGGTGCAGGTATGGGCTCCGC ... TACACAGAGGTCCTCAAGACCCACGGACTCCTGGTCTGAG
+AMR_PUR_HG00733_1GGAGGTGCAGGTATGGGCTCCGC ... TACACAGAGGTCCTCAAGACCCACGGACTCCTGGTCTGAG
+AMR_PUR_HG00731_0GGAGGTGCAGGTATGGGCTCCGC ... TACACAGAGGTCCTCAAGACCCACGGACTCCTGGTCTGAG
+EAS_KHV_HG01596_1GGAGGTGCAGGTATGGGCTCCGC ... TACACAGAGGTCCTCAAGACCCACGGACTCCTGGTCTGAG
+"""
+
 def parse_phy_file(filepath):
-    # Parse lines more efficiently: no complex regex for each line
-    # We'll just find the last occurrence of '_0' or '_1'
-    # A line looks like: SAMPLE_0ATGCG..., we must split at '_0' or '_1'
+    logging.info(f"[DEBUG] PARSE-START: Processing {filepath}")
     sequences = {}
     duplicates_found = False
-    if not os.path.exists(filepath):
-        logging.error(f"[DEBUG] File not found: {filepath}")
-        return {}, False
-
+    
     with open(filepath, 'r') as file:
-        lines = file.read().split('\n')
+        lines = file.readlines()
+        logging.info(f"[DEBUG] PARSE: Read {len(lines)} total lines from file")
+        
+        if not lines:
+            logging.error(f"[DEBUG] PARSE-ERROR: PHYLIP file is empty: {filepath}")
+            return sequences, duplicates_found
 
-    if not lines or all(len(l.strip())==0 for l in lines):
-        logging.error(f"[DEBUG] PHYLIP file empty: {filepath}")
-        return {}, False
-
-    for line in lines:
-        line=line.strip()
-        if not line:
-            continue
-        # Find last occurrence of '_0' or '_1'
-        # We'll search from end
-        idx_0 = line.rfind('_0')
-        idx_1 = line.rfind('_1')
-        idx = max(idx_0, idx_1)
-        if idx == -1:
-            logging.error(f"[DEBUG] Line does not match expected format: {line}")
-            continue
-        # check which one we matched:
-        sample_name = None
-        if idx == idx_0:
-            sample_name = line[:idx+2]
-            sequence = line[idx+2:]
-            split_type = "_0"
-        else:
-            sample_name = line[:idx+2]
-            sequence = line[idx+2:]
-            split_type = "_1"
-        logging.info(f"[DEBUG] PARSE: for {filepath}, line len={len(line)}, Split at {split_type} pos={idx}, Name={sample_name}, Seq len={len(sequence)}")
-        validated_seq = validate_sequence(sequence, filepath, sample_name, line)
-
-        if validated_seq:
-            increment_counter('total_seqs')
-            if sample_name in sequences:
-                duplicates_found = True
-                # Generate a unique duplicate name
-                base_name = sample_name[:2] + sample_name[3:]
-                dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
-                new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
-                logging.info(f"[DEBUG] Duplicate {sample_name} -> {new_name}")
-                sequences[new_name] = validated_seq
-                increment_counter('duplicates')
+        # Try to parse PHYLIP header
+        try:
+            num_sequences, seq_length = map(int, lines[0].strip().split())
+            sequence_lines = lines[1:]
+            logging.info(f"[DEBUG] PARSE-HEADER: Found PHYLIP header - expecting {num_sequences} sequences of length {seq_length}")
+        except ValueError:
+            logging.warning(f"[DEBUG] PARSE-HEADER: No valid PHYLIP header in {filepath}. Processing without header.")
+            sequence_lines = lines
+            
+        # Process each line
+        for line_num, line in enumerate(sequence_lines, 1):
+            line = line.strip()
+            if not line:
+                logging.info(f"[DEBUG] PARSE: Skipping empty line {line_num}")
+                continue
+                
+            logging.info(f"[DEBUG] PARSE: Processing line {line_num}, length={len(line)}")
+            logging.info(f"[DEBUG] PARSE: Line start: {line[:50]}...")
+            
+            parts = line.split()
+            if len(parts) >= 2:
+                # Standard PHYLIP format with space
+                sample_name = parts[0]
+                sequence = ''.join(parts[1:])
+                logging.info(f"[DEBUG] PARSE: Split on space - Name={sample_name} (len={len(sample_name)}), Seq len={len(sequence)}")
             else:
-                sequences[sample_name] = validated_seq
+                # No space - assume first 10 chars are name
+                sample_name = line[:10].strip()
+                sequence = line[10:].replace(" ", "")
+                logging.info(f"[DEBUG] PARSE: No space found - Name={sample_name} (len={len(sample_name)}), Seq len={len(sequence)}")
+
+            validated_seq = validate_sequence(sequence, filepath, sample_name, line)
+            if validated_seq:
+                increment_counter('total_seqs')
+                if sample_name in sequences:
+                    duplicates_found = True
+                    # Generate a unique duplicate name
+                    base_name = sample_name[:2] + sample_name[3:]
+                    dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
+                    new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
+                    logging.warning(f"[DEBUG] PARSE-DUPLICATE: {sample_name} -> {new_name}")
+                    sequences[new_name] = validated_seq
+                    increment_counter('duplicates')
+                else:
+                    sequences[sample_name] = validated_seq
+                    logging.info(f"[DEBUG] PARSE-VALID: Added sequence for {sample_name}")
+    
+    logging.info(f"[DEBUG] PARSE-COMPLETE: Found {len(sequences)} valid sequences in {filepath}")
+    if duplicates_found:
+        logging.warning(f"[DEBUG] PARSE-COMPLETE: Found duplicates in {filepath}")
+        
     return sequences, duplicates_found
 
 def load_cache(cache_file):
