@@ -2450,8 +2450,14 @@ fn parse_gff_file(
 
         let cds_start = cds_region.segments.iter().map(|(s, _)| *s).min().unwrap();
         let cds_end = cds_region.segments.iter().map(|(_, e)| *e).max().unwrap();
-        let min_start_for_print = cds_region.segments.clone().iter().map(|(s,_)| s).min().unwrap();
-        let max_end_for_print = cds_region.segments.clone().iter().map(|(_,e)| e).max().unwrap();
+
+        // Create a local variable holding the cloned segments
+        let cloned_segments = cds_region.segments.clone();
+        
+        let min_start_for_print = cloned_segments.iter().map(|(s,_)| s).min().unwrap();
+        let max_end_for_print = cloned_segments.iter().map(|(_,e)| e).max().unwrap();
+        
+        println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
 
         // Print before pushing:
         println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
