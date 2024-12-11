@@ -6,7 +6,7 @@ This script calculates pairwise dN/dS values using PAML's CODEML program.
 It processes input files that contain nucleotide sequences, each with a sample name 
 ending in "_0" or "_1" directly followed by the sequence (no space).
 For example:
-AMR_CLM_HG01352_0AAGAAGTAC...
+ABC_XYZ_HG01352_0ACGGAGTAC...
 
 No header lines are assumed. We will:
 1. Massively speed it up by using efficient parsing and parallelization at all steps.
