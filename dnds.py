@@ -300,6 +300,7 @@ def parse_phy_file(filepath):
         else:
             sample_name = line[:idx+2]
             sequence = line[idx+2:]
+        logging.info(f"[DEBUG] Validating sequence from file: {filepath}")
         validated_seq = validate_sequence(sequence)
         if validated_seq:
             increment_counter('total_seqs')
@@ -609,6 +610,7 @@ def main():
     logging.info(f"Total PHYLIP: {total_files}")
     logging.info(f"Total seq: {GLOBAL_TOTAL_SEQS}")
     logging.info(f"Invalid seq: {GLOBAL_INVALID_SEQS} ({final_invalid_pct:.2f}%)")
+    logging.info(f"Sequences with stop codons: {GLOBAL_COUNTERS['stop_codons']}")
     logging.info(f"Duplicates: {GLOBAL_DUPLICATES}")
     logging.info(f"Total CDS: {GLOBAL_TOTAL_CDS}")
     logging.info(f"Expected comps: {GLOBAL_TOTAL_COMPARISONS}")
