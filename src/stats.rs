@@ -777,20 +777,51 @@ fn process_variants(
             continue;
         }
     
-        // Trim length to a multiple of 3. Completed combined CDSs should already be multiples of 3 naturally. Individual CDS parts do not have to be multiples of 3 before combining.
-        let remainder = final_length % 3;
-        let trimmed_length = final_length - remainder;
-        for seq in combined_sequences.values_mut() {
-            seq.truncate(trimmed_length);
-        }
+    // Trim length to a multiple of 3?
+    let remainder = final_length % 3;
+    let trimmed_length = final_length - remainder;
+    for seq in combined_sequences.values_mut() {
+        seq.truncate(trimmed_length);
+    }
+
+    // If final combined coding sequence is not divisible by three, skip
+    if trimmed_length % 3 != 0 {
+        eprintln!("Warning: Skipping transcript {} for haplotype group {} on chr {} because final coding sequence length ({}) is not divisible by 3.", transcript_id, haplotype_group, chromosome, trimmed_length);
+        continue;
+    }
     
-        // Convert to char sequences and write out a single final PHYLIP file per transcript
-        let filename = format!("group_{}_{}_chr_{}_combined.phy", haplotype_group, transcript_id, chromosome);
-        let char_sequences: HashMap<String, Vec<char>> = combined_sequences
-            .into_iter()
-            .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
-            .collect();
-        write_phylip_file(&filename, &char_sequences)?;
+    // Check for stop codons in the final coding sequences
+    let stop_codons = ["TAA", "TAG", "TGA"];
+    let mut skip_due_to_stop = false;
+    for (sample_name, seq) in &combined_sequences {
+        let seq_str = String::from_utf8_lossy(seq);
+        let upper_seq = seq_str.to_ascii_uppercase();
+        for i in (0..upper_seq.len()).step_by(3) {
+            if i + 2 < upper_seq.len() {
+                let codon = &upper_seq[i..i+3];
+                if stop_codons.contains(&codon) {
+                    eprintln!("Warning: Skipping transcript {} for haplotype group {} on chr {} due to internal stop codon '{}' at codon position {} in sample {}.", transcript_id, haplotype_group, chromosome, codon, i/3, sample_name);
+                    skip_due_to_stop = true;
+                    break;
+                }
+            }
+        }
+        if skip_due_to_stop {
+            break;
+        }
+    }
+
+    if skip_due_to_stop {
+        continue;
+    }
+
+    // Convert to char sequences and write out a single final PHYLIP file per transcript
+    let filename = format!("group_{}_{}_chr_{}_combined.phy", haplotype_group, transcript_id, chromosome);
+    let char_sequences: HashMap<String, Vec<char>> = combined_sequences
+        .into_iter()
+        .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
+        .collect();
+    write_phylip_file(&filename, &char_sequences)?;
     }
 
     // Print the current contents before clearing
