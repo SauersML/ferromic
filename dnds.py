@@ -109,7 +109,8 @@ def run_codeml(ctl_path, working_dir, codeml_path):
         )
         stdout, stderr = process.communicate(timeout=300)
         if process.returncode != 0:
-            logging.error(f"CODEML failed: {stderr.decode('utf-8')}")
+            abs_codeml_path = os.path.abspath(os.path.join(working_dir, codeml_path))
+            logging.error(f"CODEML failed at {abs_codeml_path}: {stderr.decode('utf-8')}")
             return False
         return True
     except subprocess.TimeoutExpired:
