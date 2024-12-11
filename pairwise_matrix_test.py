@@ -1132,8 +1132,8 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
     
     # Large recurrent and single (use the same colors but with hatch and different alpha for legend)
-    recurrent_large_patch = mpatches.Patch(facecolor=recurrent_color, hatch='//', alpha=0.1, label='Large recurrent inversion')
-    single_large_patch = mpatches.Patch(facecolor=single_color, hatch='//', alpha=0.1, label='Large single-event inversion')
+    recurrent_large_patch = mpatches.Patch(facecolor=recurrent_color, hatch='//', alpha=0.0, label='Large recurrent inversion')
+    single_large_patch = mpatches.Patch(facecolor=single_color, hatch='//', alpha=0.0, label='Large single-event inversion')
     
     ax.legend(
         handles=[recurrent_patch, single_patch, recurrent_large_patch, single_large_patch],
