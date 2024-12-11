@@ -699,7 +699,7 @@ fn process_variants(
         let cds_end = std::cmp::min(cds.end, region_end);
 
         // Make sure length is multiple of 3
-        let cds_length = cds_end - cds_start; // No +1 needed for half-open intervals
+        let mut cds_length = cds_end - cds_start; // No +1 needed for half-open intervals
         let remainder = cds_length % 3;
         if remainder != 0 {
             cds_length -= remainder;
@@ -968,7 +968,7 @@ fn make_sequences(
         let cds_end = std::cmp::min(cds.end, region_end); // Or just let cds_end = cds.end;
 
         // Make sure length is multiple of 3
-        let cds_length = cds_end - cds_start; // No +1 needed for half-open intervals
+        let mut cds_length = cds_end - cds_start; // No +1 needed for half-open intervals
         let remainder = cds_length % 3;
         if remainder != 0 {
             cds_length -= remainder;
@@ -2280,7 +2280,7 @@ fn parse_gff_file(
 
     println!("\n{}", "Processing CDS regions by transcript...".green().bold());
     let mut cds_regions = Vec::new();
-    let mut transcripts_processed = 0;
+    let transcripts_processed = 0;
 
     #[derive(Default)]
     struct TranscriptStats {
