@@ -88,6 +88,7 @@ def extract_group_from_sample(sample_name):
         return None
 
 def create_paml_ctl(seqfile, outfile, working_dir):
+    seqfile = os.path.abspath(seqfile)  # Absolute path
     ctl_content = f"""
       seqfile = {seqfile}
       treefile = tree.txt
