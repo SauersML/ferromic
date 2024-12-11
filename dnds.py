@@ -119,16 +119,15 @@ def find_stop_codons(seq):
 
 def validate_sequence(seq, filepath, sample_name, full_line):
     """
-    Validate a coding sequence for:
+    Validate a coding sequence:
     - Non-empty
     - Length divisible by 3
-    - Valid characters only (A,T,C,G,N,-)
-    - No internal stop codons (TAA, TAG, TGA)
-    - Sequence length must not exceed the line length in an impossible manner.
-      However, since we strictly parse via regex, seq_len should always be 
-      <= line_len logically. We still keep the check.
+    - Valid chars: A,T,C,G,N,-
+    - No stop codons (TAA, TAG, TGA)
+    - Check that sequence length does not exceed line length (should never happen due to parsing)
+    - If absurdly long sequences appear, we fail immediately
 
-    This function returns the uppercase, validated sequence or None if invalid.
+    Returns uppercase validated sequence or None if invalid.
     """
     logging.info(f"[DEBUG] VALIDATE for {filepath}")
     logging.info(f"[DEBUG] VALIDATE: Sample={sample_name}")
@@ -141,6 +140,12 @@ def validate_sequence(seq, filepath, sample_name, full_line):
     seq = seq.upper()
     line_len = len(full_line)
     seq_len = len(seq)
+
+    MAX_CDS_LENGTH = 150000
+    if seq_len > MAX_CDS_LENGTH:
+        logging.error(f"[DEBUG] VALIDATE-FAIL: Sequence too long for a CDS ({seq_len} chars), sample={sample_name} in {filepath}")
+        increment_counter('invalid_seqs')
+        return None
 
     logging.info(f"[DEBUG] VALIDATE-LENGTHS: Full line={line_len}, Sequence={seq_len}")
     if seq_len > line_len:
@@ -176,11 +181,9 @@ def validate_sequence(seq, filepath, sample_name, full_line):
             logging.warning(f"[DEBUG] STOP-CODON: codon={codon}")
             logging.warning(f"[DEBUG] STOP-CODON: context=...{pre_context}[{codon}]{post_context}...")
             logging.warning(f"[DEBUG] STOP-CODON: line_len={line_len}, seq_len={seq_len}")
-            # Snce it's CDS, we consider it invalid:
             increment_counter('invalid_seqs')
             return None
 
-    # Passed all checks
     return seq
 
 def extract_group_from_sample(sample_name):
