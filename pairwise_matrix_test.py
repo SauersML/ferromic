@@ -1086,8 +1086,8 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     sns.set_style("ticks")
     ax = plt.gca()
 
-    recurrent_color = 'green'
-    single_color = 'yellow'
+    recurrent_color = 'purple'
+    single_color = 'green'
     
     for _, inv in inv_df.iterrows():
         inv_chr = inv['chr']
