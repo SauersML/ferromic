@@ -1097,39 +1097,48 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
         c_idx = chrom_to_index[inv_chr]
         c_min, c_max = chrom_ranges[inv_chr]
     
-        # Calculate relative positions and filter large inversions
         inv_size = inv['region_end'] - inv['region_start']
-        chrom_size = c_max - c_min if c_max > c_min else 1  # Avoid division by zero
-    
-        # Skip inversions larger than 50% of the chromosome
-        if inv_size > 0.5 * chrom_size:
-            continue
+        chrom_size = c_max - c_min if c_max > c_min else 1
     
         if c_max > c_min:
             rel_start = (inv['region_start'] - c_min) / (c_max - c_min)
             rel_end = (inv['region_end'] - c_min) / (c_max - c_min)
         else:
+            # Fallback positions if parsing fails
             rel_start = 0.4
             rel_end = 0.6
     
         inv_x_start = c_idx + max(0, min(rel_start, 1))
         inv_x_end = c_idx + min(1, max(rel_end, 0))
     
-        # Determine color based on inversion type (0_single_1_recur)
-        # If '0_single_1_recur' is not 0 or 1, just default to single_color
+        # Determine inversion type (0 or 1)
         inversion_type = inv.get('0_single_1_recur', 0)
         if inversion_type == 1:
             inv_color = recurrent_color
         else:
             inv_color = single_color
     
-        # Plot inversion region (no label here to avoid duplicates in legend)
-        ax.axvspan(inv_x_start, inv_x_end, color=inv_color, alpha=0.2, zorder=0)
+        # If inversion >50% of chromosome length, apply a pattern and lower alpha
+        if inv_size > 0.5 * chrom_size:
+            # Large inversion: use a hatch pattern and a different alpha
+            ax.axvspan(inv_x_start, inv_x_end, color=inv_color, alpha=0.1, zorder=0, hatch='//')
+        else:
+            # Normal sized inversion: no hatch
+            ax.axvspan(inv_x_start, inv_x_end, color=inv_color, alpha=0.2, zorder=0)
     
-    # Create a single legend with two patches
+    # Create legend entries:
+    # Normal-sized recurrent and single
     recurrent_patch = mpatches.Patch(color=recurrent_color, alpha=0.2, label='Recurrent inversion')
     single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
-    ax.legend(handles=[recurrent_patch, single_patch], loc='upper left', fontsize=14, frameon=True)
+    
+    # Large recurrent and single (use the same colors but with hatch and different alpha for legend)
+    recurrent_large_patch = mpatches.Patch(facecolor=recurrent_color, hatch='//', alpha=0.1, label='Large recurrent inversion')
+    single_large_patch = mpatches.Patch(facecolor=single_color, hatch='//', alpha=0.1, label='Large single-event inversion')
+    
+    ax.legend(
+        handles=[recurrent_patch, single_patch, recurrent_large_patch, single_large_patch],
+        loc='upper left', fontsize=14, frameon=True
+    )
 
     scatter = ax.scatter(
         results_df['plot_x'],
