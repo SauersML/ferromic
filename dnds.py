@@ -455,13 +455,6 @@ def main():
     parser.add_argument('--codeml_path', type=str, default='../../../../../paml/bin/codeml', help='Path to codeml executable.')
     args = parser.parse_args()
 
-    # Convert codeml_path to absolute
-    args.codeml_path = os.path.abspath(args.codeml_path)
-    logging.info(f"[DEBUG] Using CODEML at: {args.codeml_path}")
-    if not os.path.isfile(args.codeml_path):
-        logging.error(f"[DEBUG] codeml_path does not exist or is not a file: {args.codeml_path}")
-        sys.exit(1)
-
     os.makedirs(args.output_dir, exist_ok=True)
 
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
