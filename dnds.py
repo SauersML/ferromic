@@ -125,29 +125,40 @@ def create_paml_ctl(seqfile, outfile, working_dir):
 def run_codeml(ctl_path, working_dir, codeml_path):
     # Print debug paths
     relative_codeml_path = codeml_path
+    full_working_dir = os.path.abspath(working_dir)
+    command = [relative_codeml_path, ctl_path]
+
     logging.info(f"[DEBUG] Running CODEML path: {relative_codeml_path}")
-    logging.info(f"[DEBUG] Working directory for CODEML: {os.path.abspath(working_dir)}")
+    logging.info(f"[DEBUG] Control file: {ctl_path}")
+    logging.info(f"[DEBUG] Working directory for CODEML: {full_working_dir}")
+    logging.info(f"[DEBUG] Full command: {' '.join(command)} (run in {full_working_dir})")
+
     try:
         process = subprocess.Popen(
-            [relative_codeml_path],
-            cwd=working_dir,
+            command,
+            cwd=full_working_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
         stdout, stderr = process.communicate(timeout=300)
         if process.returncode != 0:
-            logging.error(f"CODEML failed at {relative_codeml_path}: {stderr.decode('utf-8')}")
+            error_msg = stderr.decode('utf-8')
+            logging.error(f"CODEML failed at {relative_codeml_path}: {error_msg}")
+            logging.error(f"[DEBUG] To replicate this run: cd {full_working_dir} && {' '.join(command)}")
             return False
         return True
     except subprocess.TimeoutExpired:
         process.kill()
         logging.error("[DEBUG] CODEML timed out.")
+        logging.error(f"[DEBUG] To replicate this run: cd {full_working_dir} && {' '.join(command)}")
         return False
     except FileNotFoundError as fnf:
         logging.error(f"[DEBUG] Error running CODEML: {fnf}")
+        logging.error(f"[DEBUG] To replicate this run: cd {full_working_dir} && {' '.join(command)}")
         return False
     except Exception as e:
         logging.error(f"[DEBUG] Error running CODEML: {e}")
+        logging.error(f"[DEBUG] To replicate this run: cd {full_working_dir} && {' '.join(command)}")
         return False
 
 def parse_codeml_output(outfile_dir):
