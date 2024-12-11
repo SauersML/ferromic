@@ -8,13 +8,6 @@ ending in "_0" or "_1" directly followed by the sequence (no space).
 For example:
 ABC_XYZ_HG01352_0ACGGAGTAC...
 
-No header lines are assumed. We will:
-1. Massively speed it up by using efficient parsing and parallelization at all steps.
-2. Leverage all available cores for both the estimation and processing steps.
-3. Add copious progress and debug print statements.
-4. Fix the CODEML path error by using an absolute path and print it.
-5. Print absolute paths and debug info everywhere.
-
 Usage:
     python3 dnds.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
 """
@@ -289,10 +282,10 @@ def process_pair(args):
         os.makedirs(working_dir)
 
     seqfile = os.path.join(working_dir, 'seqfile.phy')
-    with open(seqfile, 'w') as f:
+    with open(seqfile, 'w') as f: # Remeber: we need TWO SPACES here
         f.write(f" 2 {len(sequences[seq1_name])}\n")
-        f.write(f"{seq1_name} {sequences[seq1_name]}\n")
-        f.write(f"{seq2_name} {sequences[seq2_name]}\n")
+        f.write(f"{seq1_name}  {sequences[seq1_name]}\n")
+        f.write(f"{seq2_name}  {sequences[seq2_name]}\n")
 
     treefile = os.path.join(working_dir, 'tree.txt')
     with open(treefile, 'w') as f:
