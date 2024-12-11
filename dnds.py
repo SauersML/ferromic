@@ -615,6 +615,53 @@ def process_phy_file(args):
     logging.info(f"[DEBUG] Processed {phy_file} in {end_time-start_time:.2f}s")
     return haplotype_output_csv
 
+
+def cluster_overlapping_cds(cds_info_list):
+    # cds_info_list: [(cds_id, seq), ...]
+    
+    # 1. Build a graph of overlaps
+    # We'll represent this as adjacency lists. Each CDS is a node.
+    adjacency = {cds_id: set() for cds_id, _ in cds_info_list}
+
+    # 2. Compare each CDS pair for overlap
+    # This is O(N^2). If N is huge, you might need optimization (e.g. hashing, prefix trees).
+    for i, (idA, seqA) in enumerate(cds_info_list):
+        for j in range(i+1, len(cds_info_list)):
+            idB, seqB = cds_info_list[j]
+            if sequences_overlap(seqA, seqB):
+                adjacency[idA].add(idB)
+                adjacency[idB].add(idA)
+
+    # 3. Find connected components in this graph
+    visited = set()
+    clusters = []
+    
+    def dfs(node, component):
+        visited.add(node)
+        component.append(node)
+        for neigh in adjacency[node]:
+            if neigh not in visited:
+                dfs(neigh, component)
+
+    for cds_id, _ in cds_info_list:
+        if cds_id not in visited:
+            comp = []
+            dfs(cds_id, comp)
+            clusters.append(comp)
+    
+    # 4. For each cluster, select the longest CDS by sequence length
+    allowed_cds_ids = set()
+    id_to_seq = {cid: seq for cid, seq in cds_info_list}
+    for cluster in clusters:
+        # Find longest
+        longest_cds = max(cluster, key=lambda x: len(id_to_seq[x]))
+        allowed_cds_ids.add(longest_cds)
+    
+    return allowed_cds_ids
+
+
+
+
 def main():
     parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
@@ -658,7 +705,18 @@ def main():
     logging.info(f"[DEBUG] Estimating comparisons took {end_estimate - start_estimate:.2f}s")
 
     work_args = []
+    cds_info_list = []
+
     for phy_file in phy_files:
+        sequences, _ = parse_phy_file(phy_file)
+        if not sequences:
+            continue
+        # Pick longest sequence from this file
+        longest_sample = max(sequences.items(), key=lambda x: len(x[1]))
+        cds_id = os.path.basename(phy_file).replace('.phy','')
+        cds_info_list.append((cds_id, longest_sample[1]))
+        allowed_cds_ids = cluster_overlapping_cds(cds_info_list)
+
         phy_filename = os.path.basename(phy_file)
         cds_id = phy_filename.replace('.phy','')
         mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
