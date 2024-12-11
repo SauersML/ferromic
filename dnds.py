@@ -439,7 +439,7 @@ def process_pair(args):
         os.makedirs(working_dir)
 
     seqfile = os.path.join(working_dir, 'seqfile.phy')
-    with open(seqfile, 'w') as f: # Remeber: we need TWO SPACES here
+    with open(seqfile, 'w') as f: # Remeber: we need TWO SPACES here. PAML considers two consecutive spaces as the end of a species name
         f.write(f" 2 {len(sequences[seq1_name])}\n")
         f.write(f"{seq1_name}  {sequences[seq1_name]}\n")
         f.write(f"{seq2_name}  {sequences[seq2_name]}\n")
