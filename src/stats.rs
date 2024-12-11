@@ -2287,8 +2287,8 @@ fn parse_gff_file(
         total_transcripts: usize,
         non_divisible_by_three: usize,
         total_cds_segments: usize,
-        single_exon_transcripts: usize,
-        multi_exon_transcripts: usize,
+        single_cds_transcripts: usize,
+        multi_cds_transcripts: usize,
         total_coding_length: i64,
         shortest_transcript_length: Option<i64>,
         longest_transcript_length: Option<i64>,
@@ -2307,9 +2307,9 @@ fn parse_gff_file(
         stats.total_cds_segments += segments.len();
 
         if segments.len() == 1 {
-            stats.single_exon_transcripts += 1;
+            stats.single_cds_transcripts += 1;
         } else {
-            stats.multi_exon_transcripts += 1;
+            stats.multi_cds_transcripts += 1;
         }
 
         // Check for gaps between segments
@@ -2387,12 +2387,12 @@ fn parse_gff_file(
         println!("Total CDS segments: {}", stats.total_cds_segments);
         println!("Average segments per transcript: {:.2}", 
                  stats.total_cds_segments as f64 / stats.total_transcripts as f64);
-        println!("Single-exon transcripts: {} ({:.1}%)", 
-                 stats.single_exon_transcripts,
-                 100.0 * stats.single_exon_transcripts as f64 / stats.total_transcripts as f64);
-        println!("Multi-exon transcripts: {} ({:.1}%)", 
-                 stats.multi_exon_transcripts,
-                 100.0 * stats.multi_exon_transcripts as f64 / stats.total_transcripts as f64);
+        println!("Single-cds transcripts: {} ({:.1}%)", 
+                 stats.single_cds_transcripts,
+                 100.0 * stats.single_cds_transcripts as f64 / stats.total_transcripts as f64);
+        println!("Multi-cds transcripts: {} ({:.1}%)", 
+                 stats.multi_cds_transcripts,
+                 100.0 * stats.multi_cds_transcripts as f64 / stats.total_transcripts as f64);
         println!("Transcripts with gaps: {} ({:.1}%)",
                  stats.transcripts_with_gaps,
                  100.0 * stats.transcripts_with_gaps as f64 / stats.total_transcripts as f64);
