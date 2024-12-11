@@ -123,6 +123,7 @@ def validate_sequence(seq):
     if not seq:
         increment_counter('invalid_seqs')
         return None
+    logging.info(f"[DEBUG] VALIDATE: Input sequence length = {len(seq)}")
         
     # Convert to uppercase once at start
     seq = seq.upper()
@@ -141,13 +142,14 @@ def validate_sequence(seq):
         return None
         
     # Stop codons
+    logging.info(f"[DEBUG] VALIDATE: About to check stops in sequence of length {len(seq)}")
     stop_positions = find_stop_codons(seq)
     if stop_positions:
         increment_counter('stop_codons')
         for pos, codon in stop_positions:
-            logging.warning(f"[DEBUG] Found premature stop codon {codon} at position {pos}")
+            logging.warning(f"[DEBUG] STOPS-FOUND: Found stop codon {codon} at position {pos}. Sequence context: ...{seq[max(0,pos-10):pos]}[{codon}]{seq[pos+3:pos+13]}...")
         return seq  # We return the sequence but log the warning
-            
+
     return seq
 
 def extract_group_from_sample(sample_name):
