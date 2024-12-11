@@ -689,6 +689,9 @@ fn process_variants(
 
     // Process CDS regions and generate sequences
     for cds in cds_regions {
+        let cds_start = cds.segments.iter().map(|(s,_)| *s).min().unwrap();
+        let cds_end = cds.segments.iter().map(|(_,e)| *e).max().unwrap();
+
         // Check overlap with region
         let mut combined_sequences: HashMap<String, Vec<u8>> = HashMap::new();
         for &(seg_start, seg_end) in &cds.segments {
@@ -1010,6 +1013,8 @@ fn make_sequences(
             .collect();
         
         write_phylip_file(&filename, &char_sequences)?;
+
+        let mut combined_sequences: HashMap<String, Vec<u8>> = HashMap::new();
 
         // After processing all segments into combined_sequences, compute final length:
         let full_seq_lengths: Vec<usize> = combined_sequences.values().map(|v| v.len()).collect();
@@ -2433,13 +2438,21 @@ fn parse_gff_file(
             transcript_id: transcript_id.clone(),
             segments: segs,
         };
-        cds_regions.push(cds_region);
-        
+    
+        let cds_start = cds_region.segments.iter().map(|(s, _)| *s).min().unwrap();
+        let cds_end = cds_region.segments.iter().map(|(_, e)| *e).max().unwrap();
         let min_start_for_print = cds_region.segments.iter().map(|(s,_)| s).min().unwrap();
         let max_end_for_print = cds_region.segments.iter().map(|(_,e)| e).max().unwrap();
+    
+        // Print before pushing cds_region, so it's not moved yet:
+        println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
+    
+        // Now push after we're done using cds_region:
+        cds_regions.push(cds_region);
+
         println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
         println!("    Genomic span: {}", transcript_span);
-        println!("    Total coding length: {}", total_coding_length);  
+        println!("    Total coding length: {}", total_coding_length); 
     }
 
     if stats.total_transcripts > 0 {
