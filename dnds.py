@@ -124,19 +124,19 @@ def create_paml_ctl(seqfile, outfile, working_dir):
 
 def run_codeml(ctl_path, working_dir, codeml_path):
     # Print debug paths
-    possible_codeml_path = os.path.abspath(codeml_path)
-    logging.info(f"[DEBUG] Running CODEML path: {possible_codeml_path}")
+    relative_codeml_path = codeml_path
+    logging.info(f"[DEBUG] Running CODEML path: {relative_codeml_path}")
     logging.info(f"[DEBUG] Working directory for CODEML: {os.path.abspath(working_dir)}")
     try:
         process = subprocess.Popen(
-            [possible_codeml_path],
+            [relative_codeml_path],
             cwd=working_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
         stdout, stderr = process.communicate(timeout=300)
         if process.returncode != 0:
-            logging.error(f"CODEML failed at {possible_codeml_path}: {stderr.decode('utf-8')}")
+            logging.error(f"CODEML failed at {relative_codeml_path}: {stderr.decode('utf-8')}")
             return False
         return True
     except subprocess.TimeoutExpired:
