@@ -118,38 +118,41 @@ def find_stop_codons(seq):
     return stops
 
 def validate_sequence(seq, filepath, sample_name, full_line):
-    """Validate a coding sequence for length, valid chars, and stop codons."""
+    """
+    Validate a coding sequence for:
+    - Non-empty
+    - Length divisible by 3
+    - Valid characters only (A,T,C,G,N,-)
+    - No internal stop codons (TAA, TAG, TGA)
+    - Sequence length must not exceed the line length in an impossible manner.
+      However, since we strictly parse via regex, seq_len should always be 
+      <= line_len logically. We still keep the check.
+
+    This function returns the uppercase, validated sequence or None if invalid.
+    """
     logging.info(f"[DEBUG] VALIDATE for {filepath}")
     logging.info(f"[DEBUG] VALIDATE: Sample={sample_name}")
-    
-    # Early return if empty
+
     if not seq:
         logging.warning(f"[DEBUG] VALIDATE-FAIL: Empty sequence for {sample_name} in {filepath}")
         increment_counter('invalid_seqs')
         return None
-        
-    # Length checks
+
+    seq = seq.upper()
     line_len = len(full_line)
     seq_len = len(seq)
+
     logging.info(f"[DEBUG] VALIDATE-LENGTHS: Full line={line_len}, Sequence={seq_len}")
     if seq_len > line_len:
         logging.error(f"[DEBUG] VALIDATE-FAIL: Sequence longer than line! Line={line_len}, Seq={seq_len}")
         increment_counter('invalid_seqs')
         return None
-    
-    # Basic length check
+
     if seq_len % 3 != 0:
         logging.warning(f"[DEBUG] VALIDATE-FAIL: Length {seq_len} not divisible by 3 for {sample_name}")
         increment_counter('invalid_seqs')
         return None
 
-    # Convert to uppercase and get first/last parts for context
-    seq = seq.upper()
-    seq_start = seq[:50]
-    seq_end = seq[-50:] if len(seq) > 50 else ""
-    logging.info(f"[DEBUG] VALIDATE-SEQ: Start={seq_start}...")
-    logging.info(f"[DEBUG] VALIDATE-SEQ: End=...{seq_end}")
-    
     # Valid chars check
     valid_bases = set('ATCGN-')
     invalid_chars = set(seq) - valid_bases
@@ -157,20 +160,14 @@ def validate_sequence(seq, filepath, sample_name, full_line):
         logging.warning(f"[DEBUG] VALIDATE-FAIL: Invalid chars {invalid_chars} in {filepath}, sample {sample_name}")
         increment_counter('invalid_seqs')
         return None
-        
-    # Position sanity check
-    for i in range(0, len(seq)-2, 3):
-        if i > line_len:
-            logging.error(f"[DEBUG] VALIDATE-FAIL: Position {i} exceeds line length {line_len}")
-            return None
-            
-    # Stop codons check with extensive logging
+
+    # Check for stop codons
     stop_codons = {'TAA', 'TAG', 'TGA'}
-    for i in range(0, len(seq)-2, 3):
+    for i in range(0, seq_len-2, 3):
         codon = seq[i:i+3]
         if codon in stop_codons:
             increment_counter('stop_codons')
-            pre_context = seq[max(0,i-10):i]
+            pre_context = seq[max(0, i-10):i]
             post_context = seq[i+3:i+13]
             logging.warning(f"[DEBUG] STOP-CODON in {filepath}")
             logging.warning(f"[DEBUG] STOP-CODON: file={filepath}")
@@ -179,8 +176,11 @@ def validate_sequence(seq, filepath, sample_name, full_line):
             logging.warning(f"[DEBUG] STOP-CODON: codon={codon}")
             logging.warning(f"[DEBUG] STOP-CODON: context=...{pre_context}[{codon}]{post_context}...")
             logging.warning(f"[DEBUG] STOP-CODON: line_len={line_len}, seq_len={seq_len}")
+            # Snce it's CDS, we consider it invalid:
+            increment_counter('invalid_seqs')
+            return None
 
-    # Return validated sequence
+    # Passed all checks
     return seq
 
 def extract_group_from_sample(sample_name):
@@ -314,66 +314,69 @@ EAS_KHV_HG01596_1GGAGGTGCAGGTATGGGCTCCGC ... TACACAGAGGTCCTCAAGACCCACGGACTCCTGGT
 """
 
 def parse_phy_file(filepath):
+    """
+    Parse the input file line by line. Each line should contain a sample name 
+    ending with '_0' or '_1' immediately followed by the nucleotide sequence.
+    No spaces or PHYLIP headers are expected.
+    Format (strict):
+    ^([A-Za-z0-9_]+_[01])([ATCGN-]+)$
+
+    Returns:
+        sequences (dict): {sample_name: sequence}
+        duplicates_found (bool)
+    """
     logging.info(f"[DEBUG] PARSE-START: Processing {filepath}")
     sequences = {}
     duplicates_found = False
-    
-    with open(filepath, 'r') as file:
-        lines = file.readlines()
-        logging.info(f"[DEBUG] PARSE: Read {len(lines)} total lines from file")
-        
-        if not lines:
-            logging.error(f"[DEBUG] PARSE-ERROR: PHYLIP file is empty: {filepath}")
+
+    # Regex to strictly match the expected format:
+    # Group 1: sample name ending in _0 or _1
+    # Group 2: sequence composed only of ATCGN-
+    line_pattern = re.compile(r'^([A-Za-z0-9_]+_[01])([ATCGNatcgn-]+)$')
+
+    # Ensure file exists and is readable
+    if not os.path.isfile(filepath):
+        logging.error(f"[DEBUG] PARSE-ERROR: File does not exist or is not readable: {filepath}")
+        return sequences, duplicates_found
+
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as file:
+        lines = file.read().split('\n')  # robust against different line endings
+        if not lines or all(len(l.strip()) == 0 for l in lines):
+            logging.error(f"[DEBUG] PARSE-ERROR: Input file empty or only whitespace: {filepath}")
             return sequences, duplicates_found
 
-        # Try to parse PHYLIP header
-        try:
-            num_sequences, seq_length = map(int, lines[0].strip().split())
-            sequence_lines = lines[1:]
-            logging.info(f"[DEBUG] PARSE-HEADER: Found PHYLIP header - expecting {num_sequences} sequences of length {seq_length}")
-        except ValueError:
-            logging.warning(f"[DEBUG] PARSE-HEADER: No valid PHYLIP header in {filepath}. Processing without header.")
-            sequence_lines = lines
-            
-        # Process each line
-        for line_num, line in enumerate(sequence_lines, 1):
+        for line_num, line in enumerate(lines, 1):
             line = line.strip()
             if not line:
                 logging.info(f"[DEBUG] PARSE: Skipping empty line {line_num}")
                 continue
-                
-            logging.info(f"[DEBUG] PARSE: Processing line {line_num}, length={len(line)}")
-            logging.info(f"[DEBUG] PARSE: Line start: {line[:50]}...")
-            
-            # First find the sequence split point
-            parts = line.split()
-            if len(parts) >= 2:
-                orig_name = parts[0]
-                sequence = ''.join(parts[1:])
-            else:
-                # Find last underscore which should be _0 or _1
-                last_underscore = line.rfind('_')
-                orig_name = line[:last_underscore+2]  # Include the _0 or _1
-                sequence = line[last_underscore+2:]
-                
-            # Now transform the name
-            name_parts = orig_name.split('_')
-            if len(name_parts) >= 4:  # Should be like AFR_MSL_HG03486_1
-                first = name_parts[0][:3]   # First 3 chars of first part
-                second = name_parts[1][:3]  # First 3 chars of second part
-                hg_part = name_parts[-2]    # The HG... part
-                group = name_parts[-1]      # The 0 or 1
-    
-                # Hash the HG part to get 2 chars
-                hash_val = abs(hash(hg_part)) % 100  # Get last 2 digits
-                hash_str = f"{hash_val:02d}"  # Pad to 2 digits
 
-                # Construct 10-char name: 3 + 3 + 2 + 1 + 1 = 10
-                sample_name = f"{first}{second}{hash_str}_{group}"
-                logging.info(f"[DEBUG] PARSE: Transformed {orig_name} -> {sample_name}")
-            else:
+            # Match line against strict pattern
+            match = line_pattern.match(line)
+            if not match:
+                logging.warning(f"[DEBUG] PARSE: Line {line_num} in {filepath} does not match expected format. Skipping.")
+                continue
+
+            orig_name = match.group(1)
+            sequence = match.group(2)
+
+            # Transform name
+            name_parts = orig_name.split('_')
+            if len(name_parts) < 4:
                 logging.error(f"[DEBUG] PARSE: Invalid name format: {orig_name}")
                 continue
+            
+            first = name_parts[0][:3]
+            second = name_parts[1][:3]
+            hg_part = name_parts[-2]
+            group = name_parts[-1]  # should be '0' or '1'
+
+            # Hash the HG part
+            hash_val = abs(hash(hg_part)) % 100
+            hash_str = f"{hash_val:02d}"
+
+            sample_name = f"{first}{second}{hash_str}_{group}"
+            logging.info(f"[DEBUG] PARSE: Transformed {orig_name} -> {sample_name}")
 
             validated_seq = validate_sequence(sequence, filepath, sample_name, line)
             if validated_seq:
@@ -390,11 +393,11 @@ def parse_phy_file(filepath):
                 else:
                     sequences[sample_name] = validated_seq
                     logging.info(f"[DEBUG] PARSE-VALID: Added sequence for {sample_name}")
-    
+
     logging.info(f"[DEBUG] PARSE-COMPLETE: Found {len(sequences)} valid sequences in {filepath}")
     if duplicates_found:
         logging.warning(f"[DEBUG] PARSE-COMPLETE: Found duplicates in {filepath}")
-        
+
     return sequences, duplicates_found
 
 def load_cache(cache_file):
