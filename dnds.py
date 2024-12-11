@@ -308,7 +308,8 @@ def parse_phy_file(filepath):
             sequence = line[idx+2:]
             split_type = "_1"
         logging.info(f"[DEBUG] PARSE: for {filepath}, line len={len(line)}, Split at {split_type} pos={idx}, Name={sample_name}, Seq len={len(sequence)}")
-        validated_seq = validate_sequence(sequence)
+        validated_seq = validate_sequence(sequence, filepath, sample_name, line)
+
         if validated_seq:
             increment_counter('total_seqs')
             if sample_name in sequences:
