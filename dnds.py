@@ -47,6 +47,13 @@ GLOBAL_TOTAL_SEQS = 0
 GLOBAL_TOTAL_CDS = 0
 GLOBAL_TOTAL_COMPARISONS = 0
 
+ETA_DATA = {
+    'start_time': None,
+    'completed': 0,
+    'rate_smoothed': None,  # Exponential moving average for rate
+    'alpha': 0.2  # smoothing factor
+}
+
 # We use a manager to keep track of global counters in parallel
 manager = multiprocessing.Manager()
 GLOBAL_COUNTERS = manager.dict({
@@ -56,6 +63,40 @@ GLOBAL_COUNTERS = manager.dict({
     'total_cds': 0,
     'total_comparisons': 0
 })
+
+def print_eta(completed, total, start_time, eta_data):
+    """
+    Print a stable ETA using an exponential moving average for comparisons/sec.
+    :param completed: number of completed comparisons
+    :param total: total comparisons expected
+    :param start_time: start time of the run (float)
+    :param eta_data: dictionary to hold and update ETA state
+    """
+    if total <= 0 or completed <= 0:
+        logging.info(f"Progress: {completed}/{total}, ETA:N/A")
+        return
+
+    elapsed = time.time() - start_time
+    current_rate = completed / elapsed  # current instantaneous rate
+
+    # Update smoothed rate
+    if eta_data['rate_smoothed'] is None:
+        eta_data['rate_smoothed'] = current_rate
+    else:
+        # Apply exponential smoothing
+        alpha = eta_data['alpha']
+        eta_data['rate_smoothed'] = alpha * current_rate + (1 - alpha) * eta_data['rate_smoothed']
+
+    # Use the smoothed rate to estimate ETA
+    if eta_data['rate_smoothed'] <= 0:
+        logging.info(f"Progress: {completed}/{total}, ETA:N/A")
+        return
+
+    remain = total - completed
+    eta_sec = remain / eta_data['rate_smoothed']
+    hrs = eta_sec / 3600
+
+    logging.info(f"Progress: {completed}/{total} comps. ETA: {hrs:.2f}h")
 
 def increment_counter(key, amount=1):
     GLOBAL_COUNTERS[key] = GLOBAL_COUNTERS.get(key,0)+amount
@@ -483,6 +524,7 @@ def main():
     GLOBAL_DUPLICATES = GLOBAL_COUNTERS['duplicates']
     GLOBAL_TOTAL_CDS = GLOBAL_COUNTERS['total_cds']
     GLOBAL_TOTAL_COMPARISONS = GLOBAL_COUNTERS['total_comparisons']
+    ETA_DATA['start_time'] = time.time()
     end_estimate = time.time()
 
     logging.info("=== START OF RUN SUMMARY ===")
@@ -525,24 +567,10 @@ def main():
         new_size = len(cache)
         newly_done = new_size - old_size
         completed_comparisons += newly_done
-        percent = (completed_comparisons/GLOBAL_TOTAL_COMPARISONS*100) if GLOBAL_TOTAL_COMPARISONS>0 else 0
+        percent = (completed_comparisons / GLOBAL_TOTAL_COMPARISONS * 100) if GLOBAL_TOTAL_COMPARISONS > 0 else 0
         logging.info(f"Overall: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
-        # Just reprint ETA
-        def print_eta(cmp, tot, start):
-            elapsed = time.time()-start
-            if elapsed>0 and cmp>0:
-                rate = cmp/elapsed
-                remain = tot-cmp
-                if rate>0:
-                    eta_sec=remain/rate
-                    hrs=eta_sec/3600
-                    logging.info(f"Progress: {cmp}/{tot} comps. ETA: {hrs:.2f}h")
-                else:
-                    logging.info(f"Progress: {cmp}/{tot}, ETA:N/A")
-            else:
-                logging.info(f"Progress: {cmp}/{tot}, ETA:N/A")
-
-        print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, start_time)
+        
+        print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, start_time, ETA_DATA)
 
     end_time = time.time()
     final_invalid_pct = (GLOBAL_INVALID_SEQS/GLOBAL_TOTAL_SEQS*100) if GLOBAL_TOTAL_SEQS>0 else 0
