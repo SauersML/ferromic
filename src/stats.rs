@@ -1819,8 +1819,14 @@ fn process_vcf(
 ), VcfError> {
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
-    let chr_length = 0;
-    
+    let chr_length = {
+        let mut fasta_reader = bio::io::fasta::IndexedReader::from_file(&Path::new(&args.reference_path))?;
+        let seq_info = fasta_reader.index.sequences().iter()
+            .find(|seq| seq.name == chr || seq.name == format!("chr{}", chr))
+            .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?;
+        seq_info.len as i64
+    };
+
     // Existing unfiltered and filtered variants storage
     let unfiltered_variants = Arc::new(Mutex::new(Vec::new()));
     let filtered_variants = Arc::new(Mutex::new(Vec::new()));
