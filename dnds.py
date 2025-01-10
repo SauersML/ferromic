@@ -191,30 +191,51 @@ def run_codeml(ctl_path, working_dir, codeml_path):
     print(f"Running codeml with control file: {ctl_path}")
     sys.stdout.flush()
     command = [codeml_path, ctl_path]
+    
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Target working directory: {working_dir}")
+    print(f"Command: {' '.join(command)}")
+    sys.stdout.flush()
+    
     try:
-        # Send codeml's output to /dev/null so it never blocks writing to a pipe.
-        process = subprocess.Popen(
+        result = subprocess.run(
             command,
             cwd=working_dir,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=300,
+            text=True  # Get string output instead of bytes
         )
-        # We still communicate with a timeout, but there's no output pipe to fill.
-        stdout, stderr = process.communicate(timeout=300)
-
-        if process.returncode != 0:
-            logging.error("CODEML failed (non-zero exit), check mlc or rst.")
-            print("CODEML failed (non-zero exit), check mlc or rst.")
+        
+        # Print the actual output for debugging
+        print("STDOUT:")
+        print(result.stdout)
+        print("STDERR:")
+        print(result.stderr)
+        sys.stdout.flush()
+        
+        if result.returncode != 0:
+            logging.error(f"CODEML failed with return code {result.returncode}")
+            print(f"CODEML failed with return code {result.returncode}")
             sys.stdout.flush()
             return False
-        else:
-            print("CODEML completed successfully.")
+            
+        # Check if the expected output files exist
+        mlc_file = os.path.join(working_dir, 'mlc')
+        rst_file = os.path.join(working_dir, 'rst')
+        if not (os.path.exists(mlc_file) and os.path.exists(rst_file)):
+            logging.error("CODEML did not produce expected output files")
+            print("CODEML did not produce expected output files")
             sys.stdout.flush()
-            return True
-    except subprocess.TimeoutExpired:
-        process.kill()
-        logging.error("CODEML timed out.")
-        print("CODEML timed out.")
+            return False
+            
+        print("CODEML completed successfully.")
+        sys.stdout.flush()
+        return True
+        
+    except subprocess.TimeoutExpired as e:
+        logging.error(f"CODEML timed out after {e.timeout} seconds")
+        print(f"CODEML timed out after {e.timeout} seconds")
         sys.stdout.flush()
         return False
     except FileNotFoundError as fnf:
