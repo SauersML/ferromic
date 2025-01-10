@@ -165,21 +165,6 @@ def validate_sequence(seq, filepath, sample_name, full_line):
     sys.stdout.flush()
     return seq
 
-def extract_group_from_sample(sample_name):
-    print(f"Extracting group from sample name: {sample_name}")
-    sys.stdout.flush()
-    if len(sample_name) < 2:
-        print("Group extraction failed: name too short")
-        sys.stdout.flush()
-        return None
-    if sample_name[-2] == '_' and sample_name[-1] in ['L', 'R']:
-        group = int(sample_name[-1])
-        print(f"Group extracted: {group}")
-        sys.stdout.flush()
-        return group
-    print("Group extraction failed: no group suffix")
-    sys.stdout.flush()
-    return None
 
 def create_paml_ctl(seqfile, outfile, working_dir):
     print(f"Creating PAML control file in {working_dir}")
