@@ -581,7 +581,7 @@ def main():
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
     cache = load_cache(cache_file)
 
-   preload_transcript_coords('../hg38.knownGene.gtf')
+    preload_transcript_coords('../hg38.knownGene.gtf')
 
     print("Gathering .phy files...")
     sys.stdout.flush()
