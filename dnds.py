@@ -676,13 +676,9 @@ def main():
             return
 
         sample_groups = {}
+        sample_groups = {}
         for s in sequences.keys():
-            g = extract_group_from_sample(s)
-            if g is None:
-                print("Failed to extract group from sample, skipping.")
-                sys.stdout.flush()
-                return
-            sample_groups[s] = g
+            sample_groups[s] = int(group_num)
 
         if COMPARE_BETWEEN_GROUPS:
             all_samples = list(sample_groups.keys())
