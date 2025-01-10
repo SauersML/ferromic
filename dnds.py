@@ -172,7 +172,7 @@ def extract_group_from_sample(sample_name):
         print("Group extraction failed: name too short")
         sys.stdout.flush()
         return None
-    if sample_name[-2] == '_' and sample_name[-1] in ['0', '1']:
+    if sample_name[-2] == '_' and sample_name[-1] in ['L', 'R']:
         group = int(sample_name[-1])
         print(f"Group extracted: {group}")
         sys.stdout.flush()
@@ -297,7 +297,7 @@ def parse_phy_file(filepath):
     sys.stdout.flush()
     sequences = {}
     duplicates_found = False
-    line_pattern = re.compile(r'^([A-Za-z0-9_]+_[01])([ATCGNatcgn-]+)$')
+    line_pattern = re.compile(r'^([A-Za-z0-9_]+_[LR])([ATCGNatcgn-]+)$')
 
     if not os.path.isfile(filepath):
         print("File does not exist.")
