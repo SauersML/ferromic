@@ -192,17 +192,19 @@ def run_codeml(ctl_path, working_dir, codeml_path):
     sys.stdout.flush()
     command = [codeml_path, ctl_path]
     try:
+        # Send codeml's output to /dev/null so it never blocks writing to a pipe.
         process = subprocess.Popen(
             command,
             cwd=working_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
+        # We still communicate with a timeout, but there's no output pipe to fill.
         stdout, stderr = process.communicate(timeout=300)
+
         if process.returncode != 0:
-            error_msg = stderr.decode('utf-8')
-            logging.error(f"CODEML failed: {error_msg}")
-            print(f"CODEML failed with error: {error_msg}")
+            logging.error("CODEML failed (non-zero exit), check mlc or rst.")
+            print("CODEML failed (non-zero exit), check mlc or rst.")
             sys.stdout.flush()
             return False
         else:
