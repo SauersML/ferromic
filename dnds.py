@@ -585,9 +585,13 @@ def main():
     print("Starting main process...")
     sys.stdout.flush()
     parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
+   
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    codeml_inferred = os.path.abspath(os.path.join(script_dir, '..', 'paml', 'bin', 'codeml'))
+   
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
     parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
-    parser.add_argument('--codeml_path', type=str, default='../paml/bin/codeml', help='Path to codeml executable.')
+    parser.add_argument('--codeml_path', type=str, default=codeml_inferred, help='Path to codeml executable.')
     args = parser.parse_args()
 
     # Attempt to load existing validation cache
