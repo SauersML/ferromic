@@ -282,7 +282,7 @@ def parse_phy_file(filepath):
     sys.stdout.flush()
     sequences = {}
     duplicates_found = False
-    line_pattern = re.compile(r'^([A-Za-z0-9_]+_[LR])([ATCGNatcgn-]+)$')
+    line_pattern = re.compile(r'^([A-Za-z0-9_]+_[LR01])([ATCGNatcgn-]+)$')
 
     if not os.path.isfile(filepath):
         print("File does not exist.")
