@@ -745,20 +745,23 @@ def main():
     print("Processing each allowed CDS file...")
     sys.stdout.flush()
     for idx, phy_file in enumerate(final_phy_files, 1):
-        logging.info(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
-        print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
-        sys.stdout.flush()
-        old_size = len(cache)
-        run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, cache)
-        save_cache(cache_file, cache)
-        new_size = len(cache)
-        newly_done = new_size - old_size
-        completed_comparisons += newly_done
-        percent = (completed_comparisons / GLOBAL_TOTAL_COMPARISONS * 100) if GLOBAL_TOTAL_COMPARISONS > 0 else 0
-        logging.info(f"Overall: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
-        print(f"Overall progress: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
-        sys.stdout.flush()
-        print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, start_time, ETA_DATA)
+            basename = os.path.basename(phy_file)
+            m = filename_pattern.match(basename)
+            group_num = m.group(1)
+            logging.info(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
+            print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
+            sys.stdout.flush()
+            old_size = len(cache)
+            run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, cache)
+            save_cache(cache_file, cache)
+            new_size = len(cache)
+            newly_done = new_size - old_size
+            completed_comparisons += newly_done
+            percent = (completed_comparisons / GLOBAL_TOTAL_COMPARISONS * 100) if GLOBAL_TOTAL_COMPARISONS > 0 else 0
+            logging.info(f"Overall: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
+            print(f"Overall progress: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
+            sys.stdout.flush()
+            print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, start_time, ETA_DATA)
 
     end_time = time.time()
     final_invalid_pct = (GLOBAL_INVALID_SEQS/GLOBAL_TOTAL_SEQS*100) if GLOBAL_TOTAL_SEQS>0 else 0
