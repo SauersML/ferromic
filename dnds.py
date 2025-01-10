@@ -614,6 +614,7 @@ def main():
     # Attempt to load existing validation cache
     if os.path.exists(VALIDATION_CACHE_FILE):
         try:
+            global VALIDATION_CACHE
             with open(VALIDATION_CACHE_FILE, 'rb') as f:
                 VALIDATION_CACHE = pickle.load(f)
             print(f"Loaded validation cache with {len(VALIDATION_CACHE)} entries.")
