@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 dN/dS Analysis Script using PAML's CODEML
 
@@ -43,6 +42,7 @@ import time
 import logging
 import pickle
 from functools import partial
+import hashlib
 
 COMPARE_BETWEEN_GROUPS = False
 
