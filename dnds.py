@@ -46,6 +46,9 @@ import hashlib
 
 COMPARE_BETWEEN_GROUPS = False
 
+VALIDATION_CACHE = {}
+VALIDATION_CACHE_FILE = 'validation_results.pkl'
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -570,6 +573,15 @@ def main():
     parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
     parser.add_argument('--codeml_path', type=str, default='../paml/bin/codeml', help='Path to codeml executable.')
     args = parser.parse_args()
+
+    # Attempt to load existing validation cache
+    if os.path.exists(VALIDATION_CACHE_FILE):
+        try:
+            with open(VALIDATION_CACHE_FILE, 'rb') as f:
+                VALIDATION_CACHE = pickle.load(f)
+            print(f"Loaded validation cache with {len(VALIDATION_CACHE)} entries.")
+        except Exception as e:
+            print(f"Could not load validation cache: {e}")
 
     print(f"PHY_DIR: {args.phy_dir}")
     print(f"OUTPUT_DIR: {args.output_dir}")
