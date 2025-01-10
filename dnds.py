@@ -203,7 +203,7 @@ def run_codeml(ctl_path, working_dir, codeml_path):
             cwd=working_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=300,
+            timeout=30,
             text=True  # Get string output instead of bytes
         )
         
