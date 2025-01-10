@@ -188,64 +188,130 @@ def create_paml_ctl(seqfile, outfile, working_dir):
     return ctl_path
 
 def run_codeml(ctl_path, working_dir, codeml_path):
+    print("\n=== STARTING DETAILED CODEML EXECUTION DEBUG ===")
     print(f"Running codeml with control file: {ctl_path}")
     sys.stdout.flush()
     command = [codeml_path, ctl_path]
     
+    # Debug environment
+    print("\n=== ENVIRONMENT CHECK ===")
     print(f"Current working directory: {os.getcwd()}")
     print(f"Target working directory: {working_dir}")
-    print(f"Command: {' '.join(command)}")
-    sys.stdout.flush()
+    print(f"Command to run: {' '.join(command)}")
+    print(f"Does codeml exist? {os.path.exists(codeml_path)}")
+    print(f"Is codeml executable? {os.access(codeml_path, os.X_OK)}")
+    print(f"Codeml absolute path: {os.path.abspath(codeml_path)}")
+    print(f"Working dir exists? {os.path.exists(working_dir)}")
     
+    # Debug input files
+    print("\n=== INPUT FILES CHECK ===")
+    print(f"Control file exists? {os.path.exists(ctl_path)}")
+    print("Control file contents:")
+    with open(ctl_path, 'r') as f:
+        print(f.read())
+    
+    seqfile = None
+    treefile = None
+    with open(ctl_path, 'r') as f:
+        for line in f:
+            if 'seqfile' in line:
+                seqfile = line.split('=')[1].strip()
+            if 'treefile' in line:
+                treefile = line.split('=')[1].strip()
+    
+    print(f"Sequence file exists? {os.path.exists(seqfile) if seqfile else 'Not found'}")
+    print(f"Tree file exists? {os.path.exists(treefile) if treefile else 'Not found'}")
+    
+    if seqfile and os.path.exists(seqfile):
+        print("\nSequence file contents:")
+        with open(seqfile, 'r') as f:
+            print(f.read())
+    
+    if treefile and os.path.exists(treefile):
+        print("\nTree file contents:")
+        with open(treefile, 'r') as f:
+            print(f.read())
+    
+    print("\n=== DIRECTORY CONTENTS ===")
+    print(f"Working directory contents: {os.listdir(working_dir)}")
+    
+    print("\n=== ATTEMPTING CODEML EXECUTION ===")
     try:
+        print("Starting subprocess.run...")
+        sys.stdout.flush()
+        
+        # Try running codeml directly first
+        print("Testing codeml directly...")
+        test_result = subprocess.run([codeml_path, '--help'], 
+                                   stdout=subprocess.PIPE, 
+                                   stderr=subprocess.PIPE,
+                                   timeout=5,
+                                   text=True)
+        print(f"Codeml help test return code: {test_result.returncode}")
+        print("Codeml help output:")
+        print(test_result.stdout)
+        print(test_result.stderr)
+        
+        # Now try the actual run
+        print("\nStarting actual codeml run...")
         result = subprocess.run(
             command,
             cwd=working_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=30,
-            text=True  # Get string output instead of bytes
+            text=True
         )
         
-        # Print the actual output for debugging
-        print("STDOUT:")
+        print("\n=== CODEML EXECUTION COMPLETED ===")
+        print(f"Return code: {result.returncode}")
+        print("\nSTDOUT:")
         print(result.stdout)
-        print("STDERR:")
+        print("\nSTDERR:")
         print(result.stderr)
-        sys.stdout.flush()
+        
+        print("\n=== CHECKING OUTPUT FILES ===")
+        expected_files = ['mlc', 'rst', '2ML.dN', '2ML.dS', '2ML.t']
+        for f in expected_files:
+            path = os.path.join(working_dir, f)
+            exists = os.path.exists(path)
+            print(f"{f} exists? {exists}")
+            if exists:
+                size = os.path.getsize(path)
+                print(f"{f} size: {size} bytes")
+                if size < 1000:  # If file is small enough, show contents
+                    print(f"{f} contents:")
+                    with open(path, 'r') as file:
+                        print(file.read())
+        
+        print("\n=== POST-EXECUTION DIRECTORY CONTENTS ===")
+        print(f"Working directory contents after execution: {os.listdir(working_dir)}")
         
         if result.returncode != 0:
-            logging.error(f"CODEML failed with return code {result.returncode}")
-            print(f"CODEML failed with return code {result.returncode}")
-            sys.stdout.flush()
+            print("\n=== EXECUTION FAILED ===")
             return False
             
-        # Check if the expected output files exist
-        mlc_file = os.path.join(working_dir, 'mlc')
-        rst_file = os.path.join(working_dir, 'rst')
-        if not (os.path.exists(mlc_file) and os.path.exists(rst_file)):
-            logging.error("CODEML did not produce expected output files")
-            print("CODEML did not produce expected output files")
-            sys.stdout.flush()
+        if not (os.path.exists(os.path.join(working_dir, 'mlc')) and 
+                os.path.exists(os.path.join(working_dir, 'rst'))):
+            print("\n=== MISSING OUTPUT FILES ===")
             return False
             
-        print("CODEML completed successfully.")
-        sys.stdout.flush()
+        print("\n=== EXECUTION SUCCESSFUL ===")
         return True
         
     except subprocess.TimeoutExpired as e:
-        logging.error(f"CODEML timed out after {e.timeout} seconds")
-        print(f"CODEML timed out after {e.timeout} seconds")
-        sys.stdout.flush()
-        return False
-    except FileNotFoundError as fnf:
-        logging.error(f"CODEML not found: {fnf}")
-        print(f"CODEML not found: {fnf}")
+        print("\n=== TIMEOUT ERROR ===")
+        print(f"Codeml timed out after {e.timeout} seconds")
+        print("Final directory contents:")
+        print(os.listdir(working_dir))
         sys.stdout.flush()
         return False
     except Exception as e:
-        logging.error(f"Error running CODEML: {e}")
-        print(f"Error running CODEML: {e}")
+        print("\n=== UNEXPECTED ERROR ===")
+        print(f"Error type: {type(e)}")
+        print(f"Error message: {str(e)}")
+        print(f"Directory contents at error:")
+        print(os.listdir(working_dir))
         sys.stdout.flush()
         return False
 
