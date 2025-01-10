@@ -191,115 +191,44 @@ def create_paml_ctl(seqfile, outfile, working_dir):
     return ctl_path
 
 def run_codeml(ctl_path, working_dir, codeml_path):
-    print("\n=== STARTING DETAILED CODEML EXECUTION DEBUG ===")
-    print(f"Running codeml with control file: {ctl_path}")
-    sys.stdout.flush()
-    command = [codeml_path, ctl_path]
+    """Run codeml exactly as we would manually: codeml /path/to/ctl"""
+    print(f"\n=== RUNNING CODEML ===")
+    print(f"Control file: {ctl_path}")
     
-    # Debug environment
-    print("\n=== ENVIRONMENT CHECK ===")
-    print(f"Current working directory: {os.getcwd()}")
-    print(f"Target working directory: {working_dir}")
-    print(f"Command to run: {' '.join(command)}")
-    print(f"Does codeml exist? {os.path.exists(codeml_path)}")
-    print(f"Is codeml executable? {os.access(codeml_path, os.X_OK)}")
-    print(f"Codeml absolute path: {os.path.abspath(codeml_path)}")
-    print(f"Working dir exists? {os.path.exists(working_dir)}")
-
-    treefile = None
-    with open(ctl_path, 'r') as f:
-        for line in f:
-            if 'treefile' in line:
-                treefile = line.split('=')[1].strip()
-    print(f"Tree file exists? {os.path.exists(treefile) if treefile else 'Not found'}")
+    # Verify all files exist
+    print("\nChecking files:")
+    print(f"Control file exists? {os.path.exists(ctl_path)}")
+    print(f"Working dir contents: {os.listdir(working_dir)}")
+    print(f"Codeml exists? {os.path.exists(codeml_path)}")
     
-    if treefile and os.path.exists(treefile):
-        print("\nTree file contents:")
-        with open(treefile, 'r') as f:
-            print(f.read())
+    # Build exact command like manual run
+    cmd = [codeml_path, ctl_path]
+    cmdstr = " ".join(cmd)
+    print(f"\nRunning command: {cmdstr}")
     
-    print("\n=== DIRECTORY CONTENTS ===")
-    print(f"Working directory contents: {os.listdir(working_dir)}")
-    
-    print("\n=== ATTEMPTING CODEML EXECUTION ===")
     try:
-        print("Starting subprocess.run...")
-        sys.stdout.flush()
-        
-        # Try running codeml directly first
-        print("Testing codeml directly...")
-        test_result = subprocess.run([codeml_path, '--help'], 
-                                   stdout=subprocess.PIPE, 
-                                   stderr=subprocess.PIPE,
-                                   timeout=5,
-                                   text=True)
-        print(f"Codeml help test return code: {test_result.returncode}")
-        print("Codeml help output:")
-        print(test_result.stdout)
-        print(test_result.stderr)
-        
-        # Now try the actual run
-        print("\nStarting actual codeml run...")
+        # Run exactly like shell - no stdout/stderr capture, no cwd
         result = subprocess.run(
-            command,
-            cwd=working_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
-            text=True
+            cmd,
+            timeout=30  # 30 seconds max
         )
         
-        print("\n=== CODEML EXECUTION COMPLETED ===")
-        print(f"Return code: {result.returncode}")
-        print("\nSTDOUT:")
-        print(result.stdout)
-        print("\nSTDERR:")
-        print(result.stderr)
-        
-        print("\n=== CHECKING OUTPUT FILES ===")
-        expected_files = ['mlc', 'rst', '2ML.dN', '2ML.dS', '2ML.t']
-        for f in expected_files:
-            path = os.path.join(working_dir, f)
-            exists = os.path.exists(path)
-            print(f"{f} exists? {exists}")
-            if exists:
-                size = os.path.getsize(path)
-                print(f"{f} size: {size} bytes")
-                if size < 1000:  # If file is small enough, show contents
-                    print(f"{f} contents:")
-                    with open(path, 'r') as file:
-                        print(file.read())
-        
-        print("\n=== POST-EXECUTION DIRECTORY CONTENTS ===")
-        print(f"Working directory contents after execution: {os.listdir(working_dir)}")
-        
-        if result.returncode != 0:
-            print("\n=== EXECUTION FAILED ===")
+        # Check if mlc was created
+        mlc = os.path.join(working_dir, 'mlc')
+        if os.path.exists(mlc):
+            print("Success - mlc file created")
+            return True
+        else:
+            print("Failed - no mlc file created")
             return False
             
-        if not (os.path.exists(os.path.join(working_dir, 'mlc')) and 
-                os.path.exists(os.path.join(working_dir, 'rst'))):
-            print("\n=== MISSING OUTPUT FILES ===")
-            return False
-            
-        print("\n=== EXECUTION SUCCESSFUL ===")
-        return True
-        
-    except subprocess.TimeoutExpired as e:
-        print("\n=== TIMEOUT ERROR ===")
-        print(f"Codeml timed out after {e.timeout} seconds")
-        print("Final directory contents:")
-        print(os.listdir(working_dir))
-        sys.stdout.flush()
+    except subprocess.TimeoutExpired:
+        print("Timed out after 30 seconds")
         return False
     except Exception as e:
-        print("\n=== UNEXPECTED ERROR ===")
-        print(f"Error type: {type(e)}")
-        print(f"Error message: {str(e)}")
-        print(f"Directory contents at error:")
-        print(os.listdir(working_dir))
-        sys.stdout.flush()
+        print(f"Error running codeml: {e}")
         return False
+
 
 def parse_codeml_output(outfile_dir):
     print(f"Parsing CODEML output in {outfile_dir}")
