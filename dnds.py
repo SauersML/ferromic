@@ -7,8 +7,8 @@ This script calculates pairwise dN/dS values using PAML's CODEML program.
 
 1. Input Files:
    Each input file is a PHYLIP-like file with lines consisting of:
-   SAMPLE_NAME_0/1 + SEQUENCE (no spaces). For example:
-       ABC_XYZ_HG01352_0ACGGAGTAC...
+   SAMPLE_NAME_L/R + SEQUENCE (no spaces). For example:
+       ABC_XYZ_HG01352_LACGGAGTAC...
    Where each sample name ends with "_0" or "_1" before the sequence.
 
    The input file names follow a pattern including a transcript ID and chromosome info:
