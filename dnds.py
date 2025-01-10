@@ -442,12 +442,9 @@ def estimate_one_file(phy_file):
         return (0,0)
     sample_groups = {}
     skip_file = False
+    # Force all sequences in this file to use the group number from the filename:
     for s in sequences.keys():
-        g = extract_group_from_sample(s)
-        if g is None:
-            skip_file = True
-            break
-        sample_groups[s] = g
+        sample_groups[s] = int(group_num)
     if skip_file:
         return (0,0)
 
