@@ -284,7 +284,6 @@ def parse_phy_file(filepath):
 
     if not os.path.isfile(filepath):
         print("File does not exist.")
-        save_cache(VALIDATION_CACHE_FILE, VALIDATION_CACHE)
         return sequences, duplicates_found
    
     with open(filepath, 'r', encoding='utf-8', errors='replace') as file:
@@ -347,7 +346,6 @@ def parse_phy_file(filepath):
     GLOBAL_COUNTERS['duplicates']   = GLOBAL_COUNTERS.get('duplicates',   0) + local_duplicates
 
     print(f"Finished parsing {filepath}, found {len(sequences)} sequences (duplicates_found={duplicates_found})")
-    save_cache(VALIDATION_CACHE_FILE, VALIDATION_CACHE)
     return sequences, duplicates_found
 
 def load_cache(cache_file):
