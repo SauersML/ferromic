@@ -192,15 +192,6 @@ def create_paml_ctl(seqfile, outfile, working_dir):
 
 def run_codeml(ctl_path, working_dir, codeml_path):
     """Run codeml exactly as we would manually: codeml /path/to/ctl"""
-    print(f"\n=== RUNNING CODEML ===")
-    print(f"Control file: {ctl_path}")
-    
-    # Verify all files exist
-    print("\nChecking files:")
-    print(f"Control file exists? {os.path.exists(ctl_path)}")
-    print(f"Working dir contents: {os.listdir(working_dir)}")
-    print(f"Codeml exists? {os.path.exists(codeml_path)}")
-    
     # Build exact command like manual run
     cmd = [codeml_path, ctl_path]
     cmdstr = " ".join(cmd)
@@ -216,10 +207,10 @@ def run_codeml(ctl_path, working_dir, codeml_path):
         # Check if mlc was created
         mlc = os.path.join(working_dir, 'mlc')
         if os.path.exists(mlc):
-            print("Success - mlc file created")
+            print("Success: mlc file created")
             return True
         else:
-            print("Failed - no mlc file created")
+            print("Failed: no mlc file created")
             return False
             
     except subprocess.TimeoutExpired:
