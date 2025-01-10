@@ -210,11 +210,6 @@ def run_codeml(ctl_path, working_dir, codeml_path):
                 treefile = line.split('=')[1].strip()
     print(f"Tree file exists? {os.path.exists(treefile) if treefile else 'Not found'}")
     
-    if seqfile and os.path.exists(seqfile):
-        print("\nSequence file contents:")
-        with open(seqfile, 'r') as f:
-            print(f.read())
-    
     if treefile and os.path.exists(treefile):
         print("\nTree file contents:")
         with open(treefile, 'r') as f:
