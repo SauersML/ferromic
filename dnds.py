@@ -419,7 +419,7 @@ def process_pair(args):
     cache[cache_key] = result
     return result
 
-def estimate_one_file(phy_file):
+def estimate_one_file(phy_file, group_num):
     print(f"Estimating comparisons for file {phy_file}")
     sys.stdout.flush()
     sequences, duplicates = parse_phy_file(phy_file)
@@ -622,7 +622,10 @@ def main():
     print("Estimating total comparisons...")
     sys.stdout.flush()
     def quick_estimate(phy):
-        return estimate_one_file(phy)
+        base = os.path.basename(phy)
+        m = filename_pattern.match(base)
+        group_num = m.group(1)
+        return estimate_one_file(phy, group_num)
     results = [quick_estimate(p) for p in final_phy_files]
     total_cds = sum(r[0] for r in results)
     total_comps = sum(r[1] for r in results)
@@ -656,7 +659,7 @@ def main():
     start_time = time.time()
     completed_comparisons = cached_results_count
 
-    def run_cds_file(phy_file, output_dir, codeml_path, cache):
+    def run_cds_file(phy_file, group_num, output_dir, codeml_path, cache):
         print(f"Running CDS file: {phy_file}")
         sys.stdout.flush()
         cds_id = os.path.basename(phy_file).replace('.phy','')
@@ -675,7 +678,6 @@ def main():
             sys.stdout.flush()
             return
 
-        sample_groups = {}
         sample_groups = {}
         for s in sequences.keys():
             sample_groups[s] = int(group_num)
@@ -747,7 +749,7 @@ def main():
         print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
         sys.stdout.flush()
         old_size = len(cache)
-        run_cds_file(phy_file, args.output_dir, args.codeml_path, cache)
+        run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, cache)
         save_cache(cache_file, cache)
         new_size = len(cache)
         newly_done = new_size - old_size
