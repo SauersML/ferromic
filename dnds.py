@@ -812,6 +812,15 @@ def main():
     logging.info(f"Completed comps: {completed_comparisons}")
     logging.info(f"Total time: {(end_time - start_time)/60:.2f} min")
 
+   
+    # Save the validation cache
+    try:
+        with open(VALIDATION_CACHE_FILE, 'wb') as f:
+            pickle.dump(VALIDATION_CACHE, f)
+        print(f"Validation cache saved with {len(VALIDATION_CACHE)} entries.")
+    except Exception as e:
+        print(f"Could not save validation cache: {e}")
+
     logging.info("dN/dS analysis done.")
     print("dN/dS analysis done.")
     sys.stdout.flush()
