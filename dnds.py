@@ -326,8 +326,8 @@ def parse_phy_file(filepath):
             hg_part = name_parts[-2]
             group = name_parts[-1]
 
-            hash_val = abs(hash(hg_part)) % 100
-            hash_str = f"{hash_val:02d}"
+            md5_val = hashlib.md5(hg_part.encode('utf-8')).hexdigest()
+            hash_str = md5_val[:2]
             sample_name = f"{first}{second}{hash_str}_{group}"
 
            
