@@ -307,6 +307,22 @@ def parse_phy_file(filepath):
             hash_str = f"{hash_val:02d}"
             sample_name = f"{first}{second}{hash_str}_{group}"
 
+
+            
+            # Build a cache key. Using (filepath, sample_name, md5_of_sequence)
+            seq_hash = hashlib.md5(sequence.encode('utf-8')).hexdigest()
+            cache_key = (os.path.basename(filepath), sample_name, seq_hash)
+            
+            if cache_key in VALIDATION_CACHE:
+                # We already know the validation result
+                validated_seq, stop_codon_found = VALIDATION_CACHE[cache_key]
+                print(f"Skipping validation for {sample_name}, found in cache.")
+            else:
+                # We must validate for the first time
+                validated_seq, stop_codon_found = validate_sequence(sequence, filepath, sample_name, line)
+                # Store the outcome in the cache
+                VALIDATION_CACHE[cache_key] = (validated_seq, stop_codon_found)
+
             # Validate without calling manager dict increments
             validated_seq, stop_codon_found = validate_sequence(sequence, filepath, sample_name, line)
             if validated_seq is None:
