@@ -448,54 +448,15 @@ def estimate_one_file(phy_file, group_num):
     return (cds_count, pair_count)
 
 def get_transcript_coordinates(transcript_id):
+    global TRANSCRIPT_COORDS
     print(f"Getting transcript coordinates for {transcript_id}")
-    sys.stdout.flush()
-    gtf_file = '../hg38.knownGene.gtf'
-    min_start = None
-    max_end = None
-    chrom = None
-    try:
-        with open(gtf_file, 'r') as f:
-            for line in f:
-                if line.strip() == '' or line.startswith('#'):
-                    continue
-                fields = line.split('\t')
-                if len(fields) < 9:
-                    continue
-                feature_type = fields[2]
-                if feature_type != 'CDS':
-                    continue
-
-                attrs = fields[8].strip()
-                tid = None
-                for attr in attrs.split(';'):
-                    attr = attr.strip()
-                    if attr.startswith('transcript_id "'):
-                        tid = attr.split('"')[1]
-                        break
-
-                if tid == transcript_id:
-                    chr_ = fields[0]
-                    start = int(fields[3])
-                    end = int(fields[4])
-                    if chrom is None:
-                        chrom = chr_
-                    if min_start is None or start < min_start:
-                        min_start = start
-                    if max_end is None or end > max_end:
-                        max_end = end
-    except Exception as e:
-        print(f"Error reading GTF or processing coordinates: {e}")
-        sys.stdout.flush()
-
-    if chrom is not None and min_start is not None and max_end is not None:
-        print(f"Coordinates for {transcript_id}: {chrom}, {min_start}, {max_end}")
-        sys.stdout.flush()
-        return (chrom, min_start, max_end)
-    else:
+    if transcript_id not in TRANSCRIPT_COORDS:
         print(f"No coordinates found for {transcript_id}")
-        sys.stdout.flush()
         return (None, None, None)
+
+    chrom, min_start, max_end = TRANSCRIPT_COORDS[transcript_id]
+    print(f"Coordinates for {transcript_id}: {chrom}, {min_start}, {max_end}")
+    return (chrom, min_start, max_end)
 
 def overlaps(a_start, a_end, b_start, b_end):
     return not (b_end < a_start or a_end < b_start)
@@ -542,6 +503,65 @@ def cluster_by_coordinates(cds_meta):
     sys.stdout.flush()
     return clusters
 
+
+
+TRANSCRIPT_COORDS = {}  # Global dictionary storing all transcript -> coords
+
+def load_gtf_into_dict(gtf_file):
+    """Parse the entire GTF once, storing min/max CDS coords per transcript."""
+    transcript_dict = {}
+    with open(gtf_file, 'r') as f:
+        for line in f:
+            if not line.strip() or line.startswith('#'):
+                continue
+            fields = line.split('\t')
+            if len(fields) < 9:
+                continue
+            if fields[2] != 'CDS':
+                continue
+
+            chr_ = fields[0]
+            start = int(fields[3])
+            end = int(fields[4])
+            attrs = fields[8].strip()
+            tid = None
+            for attr in attrs.split(';'):
+                attr = attr.strip()
+                if attr.startswith('transcript_id "'):
+                    tid = attr.split('"')[1]
+                    break
+            if tid is None:
+                continue
+
+            # If first time, store directly; else update min/max
+            if tid not in transcript_dict:
+                transcript_dict[tid] = [chr_, start, end]
+            else:
+                existing_chr, existing_start, existing_end = transcript_dict[tid]
+                if chr_ != existing_chr:
+                    # If there's a mismatch, keep the first chromosome
+                    pass
+                if start < existing_start:
+                    transcript_dict[tid][1] = start
+                if end > existing_end:
+                    transcript_dict[tid][2] = end
+
+    # Convert [chr, start, end] lists to tuples
+    for k in transcript_dict:
+        c, s, e = transcript_dict[k]
+        transcript_dict[k] = (c, s, e)
+    return transcript_dict
+
+
+def preload_transcript_coords(gtf_file):
+    """Load the GTF exactly once into TRANSCRIPT_COORDS dict."""
+    global TRANSCRIPT_COORDS
+    if not TRANSCRIPT_COORDS:
+        TRANSCRIPT_COORDS = load_gtf_into_dict(gtf_file)
+        print(f"[INFO] GTF loaded into memory: {len(TRANSCRIPT_COORDS)} transcripts.")
+
+
+
 def main():
     print("Starting main process...")
     sys.stdout.flush()
@@ -560,6 +580,8 @@ def main():
 
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
     cache = load_cache(cache_file)
+
+   preload_transcript_coords('../hg38.knownGene.gtf')
 
     print("Gathering .phy files...")
     sys.stdout.flush()
