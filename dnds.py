@@ -79,11 +79,6 @@ GLOBAL_COUNTERS = manager.dict({
     'stop_codons': 0
 })
 
-def increment_counter(key, amount=1):
-    print(f"Incrementing counter {key} by {amount}")
-    sys.stdout.flush()
-    GLOBAL_COUNTERS[key] = GLOBAL_COUNTERS.get(key, 0) + amount
-
 def print_eta(completed, total, start_time, eta_data):
     print("Calculating ETA for progress...")
     sys.stdout.flush()
@@ -111,59 +106,49 @@ def print_eta(completed, total, start_time, eta_data):
     print(f"Completed {completed} of {total}, ETA: {hrs:.2f} hours")
     sys.stdout.flush()
 
+
+
+
 def validate_sequence(seq, filepath, sample_name, full_line):
     print(f"Validating sequence for sample {sample_name} from file {filepath}")
-    sys.stdout.flush()
     if not seq:
         print("Invalid sequence: empty")
-        sys.stdout.flush()
-        increment_counter('invalid_seqs')
-        return None
+        return None, False
 
     seq = seq.upper()
     line_len = len(full_line)
     seq_len = len(seq)
-
     MAX_CDS_LENGTH = 150000
+
     if seq_len > MAX_CDS_LENGTH:
         print("Invalid sequence: exceeds max length")
-        sys.stdout.flush()
-        increment_counter('invalid_seqs')
-        return None
+        return None, False
 
     if seq_len > line_len:
         print("Invalid sequence: sequence length greater than line length?")
-        sys.stdout.flush()
-        increment_counter('invalid_seqs')
-        return None
+        return None, False
 
     if seq_len % 3 != 0:
         print("Invalid sequence: length not divisible by 3")
-        sys.stdout.flush()
-        increment_counter('invalid_seqs')
-        return None
+        return None, False
 
     valid_bases = set('ATCGN-')
     invalid_chars = set(seq) - valid_bases
     if invalid_chars:
         print(f"Invalid sequence: contains invalid characters {invalid_chars}")
-        sys.stdout.flush()
-        increment_counter('invalid_seqs')
-        return None
+        return None, False
 
     stop_codons = {'TAA', 'TAG', 'TGA'}
-    for i in range(0, seq_len-2, 3):
+    for i in range(0, seq_len - 2, 3):
         codon = seq[i:i+3]
         if codon in stop_codons:
             print(f"Invalid sequence: in-frame stop codon {codon}")
-            sys.stdout.flush()
-            increment_counter('stop_codons')
-            increment_counter('invalid_seqs')
-            return None
+            return None, True
 
     print("Sequence validated successfully.")
-    sys.stdout.flush()
-    return seq
+    return seq, False
+
+
 
 
 def create_paml_ctl(seqfile, outfile, working_dir):
@@ -277,16 +262,21 @@ def get_safe_process_count():
     sys.stdout.flush()
     return total_cpus
 
+
 def parse_phy_file(filepath):
     print(f"Parsing phy file: {filepath}")
-    sys.stdout.flush()
     sequences = {}
     duplicates_found = False
     line_pattern = re.compile(r'^([A-Za-z0-9_]+_[LR01])([ATCGNatcgn-]+)$')
 
+    # Local counters to avoid constant manager dict updates
+    local_invalid_seqs = 0
+    local_duplicates = 0
+    local_total_seqs = 0
+    local_stop_codons = 0
+
     if not os.path.isfile(filepath):
         print("File does not exist.")
-        sys.stdout.flush()
         return sequences, duplicates_found
 
     with open(filepath, 'r', encoding='utf-8', errors='replace') as file:
@@ -298,12 +288,13 @@ def parse_phy_file(filepath):
             match = line_pattern.match(line)
             if not match:
                 continue
+
             orig_name = match.group(1)
             sequence = match.group(2)
             name_parts = orig_name.split('_')
             if len(name_parts) < 4:
-                # If name parsing fails, skip
                 continue
+
             first = name_parts[0][:3]
             second = name_parts[1][:3]
             hg_part = name_parts[-2]
@@ -313,23 +304,33 @@ def parse_phy_file(filepath):
             hash_str = f"{hash_val:02d}"
             sample_name = f"{first}{second}{hash_str}_{group}"
 
-            validated_seq = validate_sequence(sequence, filepath, sample_name, line)
-            if validated_seq:
-                increment_counter('total_seqs')
+            # Validate without calling manager dict increments
+            validated_seq, stop_codon_found = validate_sequence(sequence, filepath, sample_name, line)
+            if validated_seq is None:
+                local_invalid_seqs += 1
+                if stop_codon_found:
+                    local_stop_codons += 1
+            else:
+                local_total_seqs += 1
                 if sample_name in sequences:
-                    print(f"Duplicate found for {sample_name}, renaming...")
-                    sys.stdout.flush()
                     duplicates_found = True
+                    local_duplicates += 1
                     base_name = sample_name[:2] + sample_name[3:]
-                    dup_count = sum(1 for s in sequences.keys() if s[:2] + s[3:] == base_name)
+                    dup_count = sum(1 for s in sequences if s[:2] + s[3:] == base_name)
                     new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
                     sequences[new_name] = validated_seq
-                    increment_counter('duplicates')
                 else:
                     sequences[sample_name] = validated_seq
+
+    # Single manager dict updates after we finish all lines
+    GLOBAL_COUNTERS['invalid_seqs'] = GLOBAL_COUNTERS.get('invalid_seqs', 0) + local_invalid_seqs
+    GLOBAL_COUNTERS['stop_codons'] = GLOBAL_COUNTERS.get('stop_codons', 0) + local_stop_codons
+    GLOBAL_COUNTERS['total_seqs']   = GLOBAL_COUNTERS.get('total_seqs',   0) + local_total_seqs
+    GLOBAL_COUNTERS['duplicates']   = GLOBAL_COUNTERS.get('duplicates',   0) + local_duplicates
+
     print(f"Finished parsing {filepath}, found {len(sequences)} sequences (duplicates_found={duplicates_found})")
-    sys.stdout.flush()
     return sequences, duplicates_found
+
 
 def load_cache(cache_file):
     print(f"Loading cache from {cache_file}")
