@@ -157,10 +157,13 @@ def validate_sequence(seq, filepath, sample_name, full_line):
 def create_paml_ctl(seqfile, outfile, working_dir):
     print(f"Creating PAML control file in {working_dir}")
     sys.stdout.flush()
+    # Make all paths absolute
     seqfile = os.path.abspath(seqfile)
+    treefile = os.path.abspath(os.path.join(working_dir, "tree.txt"))
+    outfile = os.path.abspath(os.path.join(working_dir, outfile))
     ctl_content = f"""
       seqfile = {seqfile}
-      treefile = tree.txt
+      treefile = {treefile}
       outfile = {outfile}
       noisy = 0
       verbose = 0
