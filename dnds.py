@@ -203,25 +203,6 @@ def run_codeml(ctl_path, working_dir, codeml_path):
     print(f"Codeml absolute path: {os.path.abspath(codeml_path)}")
     print(f"Working dir exists? {os.path.exists(working_dir)}")
     
-    # Debug input files
-    print("\n=== INPUT FILES CHECK ===")
-    print(f"Control file exists? {os.path.exists(ctl_path)}")
-    print("Control file contents:")
-    with open(ctl_path, 'r') as f:
-        print(f.read())
-    
-    seqfile = None
-    treefile = None
-    with open(ctl_path, 'r') as f:
-        for line in f:
-            if 'seqfile' in line:
-                seqfile = line.split('=')[1].strip()
-            if 'treefile' in line:
-                treefile = line.split('=')[1].strip()
-    
-    print(f"Sequence file exists? {os.path.exists(seqfile) if seqfile else 'Not found'}")
-    print(f"Tree file exists? {os.path.exists(treefile) if treefile else 'Not found'}")
-    
     if seqfile and os.path.exists(seqfile):
         print("\nSequence file contents:")
         with open(seqfile, 'r') as f:
