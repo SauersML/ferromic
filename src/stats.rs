@@ -725,7 +725,7 @@ fn process_variants(
         // Map each haplotype to a combined coding sequence
         let mut combined_sequences: HashMap<String, Vec<u8>> = HashMap::new();
         for (sample_idx, hap_idx) in &haplotype_indices {
-            let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+            let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
             combined_sequences.insert(sample_name, Vec::new());
         }
     
@@ -748,7 +748,7 @@ fn process_variants(
     
                 let segment_ref_seq = &reference_sequence[start_offset..end_offset];
                 for (sample_idx, hap_idx) in &haplotype_indices {
-                    let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+                    let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
                     combined_sequences.get_mut(&sample_name).unwrap().extend_from_slice(segment_ref_seq);
                 }
     
@@ -777,7 +777,7 @@ fn process_variants(
                 for (sample_idx, hap_idx) in &haplotype_indices {
                     if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
                         if let Some(allele) = alleles.get(*hap_idx) {
-                            let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+                            let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
                             if let Some(seq) = combined_sequences.get_mut(&sample_name) {
                                 if pos_in_seq < seq.len() {
                                     let map = position_allele_map.lock();
@@ -922,7 +922,7 @@ fn make_sequences(
     // Initialize sequences for each sample haplotype with the reference sequence
     let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
     for (sample_idx, hap_idx) in &haplotype_indices {
-        let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+        let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
         hap_sequences.insert(sample_name, reference_sequence.to_vec());
     }
 
@@ -933,7 +933,7 @@ fn make_sequences(
             for (sample_idx, hap_idx) in &haplotype_indices {
                 if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
                     if let Some(allele) = alleles.get(*hap_idx) {
-                        let sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);
+                        let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
                         if let Some(seq) = hap_sequences.get_mut(&sample_name) {
                             if pos_in_seq >= seq.len() {
                                 eprintln!(
