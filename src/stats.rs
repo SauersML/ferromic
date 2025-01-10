@@ -557,33 +557,35 @@ fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64
     total
 }
 
+
 /*
-A note on haplotype groups and the use of "0" and "1," since this can be confusing and hard to follow.
+When the code calls something like:
+    let filename = format!("group_{}_{}_chr_{}_combined.phy", haplotype_group, transcript_id, chromosome);
+it creates one .phy file per combination of haplotype_group (0 or 1), transcript_id, and chromosome. This file can contain sequences from many samples, as long as their config entries say those samples’ haplotypes belong to that group.
 
-When the code calls something like  
-let filename = format!("group_{}_{}_chr_{}_combined.phy", haplotype_group, transcript_id, chromosome);  
-it creates one .phy file per combination of haplotype_group (0 or 1), transcript_id, and chromosome. This file can contain sequences from many samples, as long as their config entries say those samples’ haplotypes belong to that group.  
+Inside the file, each line is written by something like:
+    writeln!(writer, "{}{}", padded_name, sequence);
+where padded_name = format!("{:<10}", sample_name).
 
-Inside the file, each line is written by something like:  
-writeln!(writer, "{}{}", padded_name, sequence);  
-where padded_name = format!("{:<10}", sample_name).  
+Now, the final sample_name is constructed with “_L” or “_R” to distinguish the left or right haplotype. Specifically, for (sample_idx, hap_idx) in haplotype_indices, the code does something like:
+    sample_name = match *hap_idx {
+        0 => format!("{}_L", sample_names[*sample_idx]),
+        1 => format!("{}_R", sample_names[*sample_idx]),
+        _ => panic!("Unexpected hap_idx"),
+    };
+and hap_sequences.insert(sample_name, reference_sequence);
 
-The sample_name itself is constructed by appending “_0” or “_1” to the original sample name. Specifically, for (sample_idx, hap_idx) in haplotype_indices, the program does:  
-sample_name = format!("{}_{}", sample_names[*sample_idx], hap_idx);  
-and hap_sequences.insert(sample_name, reference_sequence).  
+Here, hap_idx of 0 means the sample’s left haplotype belongs to that inversion group; 1 means its right haplotype belongs. This logic comes from comparing haplotype_group (the “0 or 1” being processed) against the config file’s HashMap<String, (u8, u8)>, which might store (left_tsv, right_tsv) as (0,1) or (1,1). If the left_tsv matches haplotype_group, you push (sample_index, 0). If the right_tsv matches, you push (sample_index, 1).
 
-Here, hap_idx is 0 if the sample’s left haplotype belongs to that group, or 1 if the right haplotype belongs to that group.
-This comes from comparing haplotype_group (the “0 or 1” you are processing) with the values in the config file’s HashMap<String, (u8, u8)>, where (left_tsv, right_tsv) might be (0,1) or (1,1).
-If the left_tsv matches the haplotype_group, you push (sample_index, 0). If the right_tsv matches, you push (sample_index, 1).  
+Therefore, the “_L” or “_R” in the sample name is purely about left vs. right sides in the VCF and avoids collisions in naming. Meanwhile, the config’s “0” or “1” refers to which inversion group each side belongs to, not left/right in the final file name.
 
-This means, in the sample name, _0 or _1 correspond to something arbitrary: this indicates if the haplotype group selected corresponds to the left or right side of that VCF, and prevents naming collisions.
+If a sample’s config entry says (left_tsv=0, right_tsv=1), that sample appears in group_0’s file as SampleName_L (if the left side belongs to group 0) and in group_1’s file as SampleName_R (if the right side belongs to group 1). Any side not matching the requested group is skipped.
 
-If a sample’s config entry says left_tsv=0 and right_tsv=1, then that sample will appear in group_0’s file as SampleName_0 and in group_1’s file as SampleName_1. If a side does not match the requested group, it is skipped.  
+Keep in mind that 0 or 1 in the config is about which haplotype group (e.g., reference or inverted) each side belongs to, whereas the “0|1” in the VCF refers to ref vs. alt alleles at a position. The config tells you which side (left or right) to collect into group_0 or group_1, and the VCF tells you whether that haplotype is ref or alt at each site.
 
-Keep in mind that the config’s 0 or 1 is about which inversion or haplotype group each side belongs to, whereas the VCF’s “0|1” notation refers to reference vs. alternate alleles at a position. The config determines which side (left or right) you collect into group_0 or group_1, and the VCF determines whether that haplotype is ref or alt at each variant site.  
-
-The file group_0_<transcript>_chr_<...>.phy stores all haplotypes that the config labels as group 0, with lines like “SampleA_0” or “SampleB_1” (if the right side also happened to be group 0). Meanwhile, group_1_<transcript>_chr_<...>.phy holds the group 1 haplotypes, labeled “SampleA_1,” “SampleB_0,” etc., depending on each sample’s config. If your config uses 1 to mean “inversion,” then group_1_... will contain inverted haplotypes, and group_0_... will contain the non-inverted ones.
+Hence the files named group_0_<transcript>_chr_<...>.phy gather all haplotypes labeled as group 0, with lines like “SampleA_L” or “SampleB_R” (whichever sides matched group 0). Meanwhile, group_1_<transcript>_chr_<...>.phy holds group 1 haplotypes, labeled “SampleA_R,” “SampleB_L,” and so on, depending on each sample’s config. If your config uses 1 to mean “inversion,” then group_1_... will contain inverted haplotypes, while group_0_... contains non-inverted.
 */
+
 
 fn process_variants(
     variants: &[Variant],
