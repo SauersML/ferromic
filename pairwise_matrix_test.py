@@ -31,7 +31,6 @@ warnings.filterwarnings('ignore')
 CACHE_DIR = Path("cache")
 RESULTS_DIR = Path("results")
 PLOTS_DIR = Path("plots")
-N_PERMUTATIONS = 10000  # Number of permutations for the permutation test
 
 # Create necessary directories
 for directory in [CACHE_DIR, RESULTS_DIR, PLOTS_DIR]:
