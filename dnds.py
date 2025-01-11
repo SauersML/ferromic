@@ -192,17 +192,23 @@ def create_paml_ctl(seqfile, outfile, working_dir):
 
 def run_codeml(ctl_path, working_dir, codeml_path):
     """
-    Run codeml in working_dir so it picks up codeml.ctl automatically.
+    Run codeml in working_dir so it picks up codeml.ctl automatically,
+    but skip copying if src == dst.
     """
     import shutil
+    import os
+    import subprocess
+    import time
 
     # Convert all paths to absolute
     ctl_path = os.path.abspath(ctl_path)
     working_dir = os.path.abspath(working_dir)
     codeml_path = os.path.abspath(codeml_path)
 
-    # Copy/overwrite the .ctl file into working_dir
-    shutil.copy2(ctl_path, os.path.join(working_dir, 'codeml.ctl'))
+    # Only copy if src != dst
+    dst_ctl = os.path.join(working_dir, 'codeml.ctl')
+    if not os.path.samefile(ctl_path, dst_ctl):
+        shutil.copy2(ctl_path, dst_ctl)
 
     cmd = [codeml_path]
     cmdstr = " ".join(cmd)
