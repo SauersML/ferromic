@@ -211,13 +211,13 @@ def run_codeml(ctl_path, working_dir, codeml_path):
             timeout=30  # 30 seconds max
         )
         
-        # Check if mlc was created
-        mlc = os.path.join(working_dir, 'mlc')
-        if os.path.exists(mlc):
-            print("Success: mlc file created")
+        # Check if results.txt was created
+        results.txt = os.path.join(working_dir, 'results.txt')
+        if os.path.exists(results.txt):
+            print("Success: results.txt file created")
             return True
         else:
-            print("Failed: no mlc file created")
+            print("Failed: no results.txt file created")
             return False
             
     except subprocess.TimeoutExpired:
@@ -421,7 +421,7 @@ def process_pair(args):
     print("Created tree.txt for codeml input.")
     sys.stdout.flush()
 
-    ctl_path = create_paml_ctl(seqfile, 'mlc', working_dir)
+    ctl_path = create_paml_ctl(seqfile, 'results.txt', working_dir)
     success = run_codeml(ctl_path, working_dir, codeml_path)
     if not success:
         print("Codeml run failed, returning NaN values.")
