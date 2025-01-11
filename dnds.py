@@ -834,7 +834,7 @@ def main():
             print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
             sys.stdout.flush()
             old_size = len(CACHE)
-            run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, cache)
+            run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, None)
             save_cache(cache_file, cache)
             new_size = len(CACHE)
             newly_done = new_size - old_size
