@@ -403,7 +403,7 @@ def process_pair(args):
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, _ = args
     seq1_name, seq2_name = pair
     cache_key = (cds_id, seq1_name, seq2_name, COMPARE_BETWEEN_GROUPS)
-    print(f"Processing pair: {seq1_name}, {seq2_name} for {cds_id}")
+    #print(f"Processing pair: {seq1_name}, {seq2_name} for {cds_id}")
     sys.stdout.flush()
     if cache_key in CACHE:
         print("Pair result found in cache, skipping computation.")
@@ -424,7 +424,7 @@ def process_pair(args):
         return None
 
     if sequences[seq1_name] == sequences[seq2_name]:
-        print("Sequences are identical, returning omega = -1.")
+        #print("Sequences are identical, returning omega = -1.")
         sys.stdout.flush()
         result = (seq1_name, seq2_name, group1, group2, 0.0, 0.0, -1.0, cds_id)
         CACHE[cache_key] = result
