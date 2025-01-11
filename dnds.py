@@ -237,8 +237,13 @@ def parse_codeml_output(outfile_dir):
         sys.stdout.flush()
         return None, None, None
     try:
-        with open(rst_file, 'r') as f:
-            content = f.read()
+       with open(rst_file, 'r') as f:
+           lines = f.readlines()
+       content = "".join(lines)
+       last_lines = lines[-5:] if len(lines) >= 5 else lines
+       print("Last 5 lines of rst file:")
+       for line in last_lines:
+          print(line.rstrip())
         pattern = re.compile(
             r"t=\s*[\d\.]+\s+S=\s*([\d\.]+)\s+N=\s*([\d\.]+)\s+dN/dS=\s*([\d\.]+)\s+dN=\s*([\d\.]+)\s+dS=\s*([\d\.]+)"
         )
