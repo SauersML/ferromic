@@ -191,11 +191,18 @@ def create_paml_ctl(seqfile, outfile, working_dir):
     return ctl_path
 
 def run_codeml(ctl_path, working_dir, codeml_path):
-    """Run codeml exactly as we would manually: codeml /path/to/ctl"""
+    """
+    Run codeml exactly as we would manually
+    """
+    # Convert all paths to absolute paths
+    ctl_path = os.path.abspath(ctl_path)
+    working_dir = os.path.abspath(working_dir)
+    codeml_path = os.path.abspath(codeml_path)
+
     # Build exact command like manual run
     cmd = [codeml_path, ctl_path]
     cmdstr = " ".join(cmd)
-    print(f"\nRunning command: {cmdstr}")
+    print(f"\nRunning command (with absolute paths): {cmdstr}")
     
     try:
         # Run exactly like shell - no stdout/stderr capture, no cwd
