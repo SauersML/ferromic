@@ -81,6 +81,7 @@ GLOBAL_COUNTERS = manager.dict({
     'total_comparisons': 0,
     'stop_codons': 0
 })
+CACHE = manager.dict()
 
 def print_eta(completed, total, start_time, eta_data):
     print("Calculating ETA for progress...")
@@ -383,32 +384,31 @@ def load_cache(cache_file):
     if os.path.exists(cache_file):
         with open(cache_file, 'rb') as f:
             data = pickle.load(f)
-        print(f"Cache loaded with {len(data)} entries.")
+            CACHE.update(data)
+        print(f"Cache loaded with {len(CACHE)} entries.")
         sys.stdout.flush()
-        return data
     else:
         print("No cache file found, starting fresh.")
         sys.stdout.flush()
-        return {}
 
 def save_cache(cache_file, cache_data):
     print(f"Saving cache to {cache_file} with {len(cache_data)} entries.")
     sys.stdout.flush()
     with open(cache_file, 'wb') as f:
-        pickle.dump(cache_data, f)
+        pickle.dump(dict(cache_data), f)
     print("Cache saved.")
     sys.stdout.flush()
 
 def process_pair(args):
-    pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, cache = args
+    pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, _ = args
     seq1_name, seq2_name = pair
     cache_key = (cds_id, seq1_name, seq2_name, COMPARE_BETWEEN_GROUPS)
     print(f"Processing pair: {seq1_name}, {seq2_name} for {cds_id}")
     sys.stdout.flush()
-    if cache_key in cache:
+    if cache_key in CACHE:
         print("Pair result found in cache, skipping computation.")
         sys.stdout.flush()
-        return cache[cache_key]
+        return CACHE[cache_key]
 
     if seq1_name not in sequences or seq2_name not in sequences:
         print("One of the sequences is missing, returning None.")
@@ -427,7 +427,7 @@ def process_pair(args):
         print("Sequences are identical, returning omega = -1.")
         sys.stdout.flush()
         result = (seq1_name, seq2_name, group1, group2, 0.0, 0.0, -1.0, cds_id)
-        cache[cache_key] = result
+        CACHE[cache_key] = result
         return result
 
     working_dir = os.path.join(temp_dir, f'{seq1_name}_{seq2_name}')
@@ -453,7 +453,7 @@ def process_pair(args):
         print("Codeml run failed, returning NaN values.")
         sys.stdout.flush()
         result = (seq1_name, seq2_name, group1, group2, np.nan, np.nan, np.nan, cds_id)
-        cache[cache_key] = result
+        CACHE[cache_key] = result
         return result
 
     dn, ds, omega = parse_codeml_output(working_dir)
@@ -462,7 +462,7 @@ def process_pair(args):
     print(f"Pair processed: dn={dn}, ds={ds}, omega={omega}")
     sys.stdout.flush()
     result = (seq1_name, seq2_name, group1, group2, dn, ds, omega, cds_id)
-    cache[cache_key] = result
+    CACHE[cache_key] = result
     return result
 
 def estimate_one_file(phy_file, group_num):
@@ -638,7 +638,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
-    cache = load_cache(cache_file)
+    load_cache(cache_file)
 
     preload_transcript_coords('../hg38.knownGene.gtf')
 
@@ -731,7 +731,7 @@ def main():
     logging.info(f"Valid sequences: {valid_sequences} ({valid_percentage:.2f}%)")
     logging.info(f"Total CDS after clustering: {GLOBAL_TOTAL_CDS}")
     logging.info(f"Expected comparisons: {GLOBAL_TOTAL_COMPARISONS}")
-    cached_results_count = len(cache)
+    cached_results_count = len(CACHE)
     remaining = GLOBAL_TOTAL_COMPARISONS - cached_results_count
     logging.info(f"Cache: {cached_results_count} results. {remaining} remain.")
 
@@ -833,10 +833,10 @@ def main():
             logging.info(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
             print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
             sys.stdout.flush()
-            old_size = len(cache)
+            old_size = len(CACHE)
             run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, cache)
             save_cache(cache_file, cache)
-            new_size = len(cache)
+            new_size = len(CACHE)
             newly_done = new_size - old_size
             completed_comparisons += newly_done
             percent = (completed_comparisons / GLOBAL_TOTAL_COMPARISONS * 100) if GLOBAL_TOTAL_COMPARISONS > 0 else 0
