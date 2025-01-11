@@ -256,30 +256,37 @@ def parse_codeml_output(outfile_dir):
     try:
         with open(rst_file, 'r') as f:
             lines = f.readlines()
-        content = "".join(lines)
+        
         last_lines = lines[-5:] if len(lines) >= 5 else lines
         print("Last 5 lines of rst file:")
         for line in last_lines:
             print(line.rstrip())
-        pattern = re.compile(
-            r"t=\s*[\d\.]+\s+S=\s*([\d\.]+)\s+N=\s*([\d\.]+)\s+dN/dS=\s*([\d\.]+)\s+dN=\s*([\d\.]+)\s+dS=\s*([\d\.]+)"
-        )
-        match = pattern.search(content)
-        if match:
-            dN = float(match.group(4))
-            dS = float(match.group(5))
-            omega = float(match.group(3))
-            print(f"Parsed dN={dN}, dS={dS}, omega={omega}")
-            sys.stdout.flush()
-            return dN, dS, omega
-        else:
-            print("No match for expected pattern in rst file.")
-            sys.stdout.flush()
-            return None, None, None
+            
+        # Find the line with the values (it has seq seq in front)
+        for line in lines:
+            if line.strip().startswith("seq seq"):
+                # Get the next line which contains the values
+                values_line = next(lines)
+                values = values_line.strip().split()
+                # Values are in positions:
+                # dN = 4th value 
+                # dS = 5th value
+                # dN/dS = 6th value
+                dN = float(values[4])
+                dS = float(values[5])
+                omega = float(values[6])
+                print(f"Parsed dN={dN}, dS={dS}, omega={omega}")
+                sys.stdout.flush()
+                return dN, dS, omega
+                
+        print("Could not find values line in rst file.")
+        sys.stdout.flush()
+        return None, None, None
     except Exception as e:
         print(f"Error parsing CODEML output: {e}")
         sys.stdout.flush()
         return None, None, None
+
 
 def get_safe_process_count():
     print("Getting safe process count for multiprocessing...")
