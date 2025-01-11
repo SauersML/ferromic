@@ -794,8 +794,8 @@ def main():
         print(f"Haplotype stats saved to {haplotype_output_csv}")
         sys.stdout.flush()
 
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        print("Temporary directory cleaned up.")
+        #shutil.rmtree(temp_dir, ignore_errors=True)
+        #print("Temporary directory cleaned up.")
         sys.stdout.flush()
 
     print("Processing each allowed CDS file...")
