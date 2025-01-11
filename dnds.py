@@ -263,17 +263,19 @@ def parse_codeml_output(outfile_dir):
             print(line.rstrip())
             
         # Find the line with the values (it has seq seq in front)
-        for line in lines:
+        for i, line in enumerate(lines):
             if line.strip().startswith("seq seq"):
                 # Get the next line which contains the values
-                values_line = next(lines)
+                values_line = lines[i + 1]  # Use index instead of next()
                 values = values_line.strip().split()
                 # Values are in positions:
-                # dN = 4th value 
-                # dS = 5th value
-                # dN/dS = 6th value
+                # N = 3rd value 
+                # S = 4th value
+                # dN = 5th value  
+                # dS = 6th value
+                # dN/dS = 7th value
                 dN = float(values[4])
-                dS = float(values[5])
+                dS = float(values[5]) 
                 omega = float(values[6])
                 print(f"Parsed dN={dN}, dS={dS}, omega={omega}")
                 sys.stdout.flush()
