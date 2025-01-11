@@ -212,8 +212,8 @@ def run_codeml(ctl_path, working_dir, codeml_path):
         )
         
         # Check if results.txt was created
-        results.txt = os.path.join(working_dir, 'results.txt')
-        if os.path.exists(results.txt):
+        results_file = os.path.join(working_dir, 'results.txt')
+        if os.path.exists(results_file):
             print("Success: results.txt file created")
             return True
         else:
