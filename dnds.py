@@ -192,26 +192,36 @@ def create_paml_ctl(seqfile, outfile, working_dir):
 
 def run_codeml(ctl_path, working_dir, codeml_path):
     """
-    Run codeml exactly as we would manually
+    Run codeml in working_dir so it picks up codeml.ctl automatically.
     """
-    # Convert all paths to absolute paths
+    import shutil
+
+    # Convert all paths to absolute
     ctl_path = os.path.abspath(ctl_path)
     working_dir = os.path.abspath(working_dir)
     codeml_path = os.path.abspath(codeml_path)
 
-    # Build exact command like manual run
-    cmd = [codeml_path, ctl_path]
+    # Copy/overwrite the .ctl file into working_dir
+    shutil.copy2(ctl_path, os.path.join(working_dir, 'codeml.ctl'))
+
+    cmd = [codeml_path]
     cmdstr = " ".join(cmd)
-    print(f"\nRunning command (with absolute paths): {cmdstr}")
-    
+    print(f"\nRunning command (with absolute paths) in working_dir: {cmdstr}")
+
     try:
-        # Run exactly like shell - no stdout/stderr capture, no cwd
-        result = subprocess.run(
+        process = subprocess.Popen(
             cmd,
-            timeout=30  # 30 seconds max
+            cwd=working_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE
         )
-        
-        # Check if results.txt was created
+        stdout, stderr = process.communicate(input=b'\n', timeout=30)
+
+        if process.returncode != 0:
+            print(f"codeml exited with error. Stderr:\n{stderr.decode().strip()}")
+            return False
+
         results_file = os.path.join(working_dir, 'results.txt')
         if os.path.exists(results_file):
             print("Success: results.txt file created")
@@ -219,9 +229,10 @@ def run_codeml(ctl_path, working_dir, codeml_path):
         else:
             print("Failed: no results.txt file created")
             return False
-            
+
     except subprocess.TimeoutExpired:
         print("Timed out after 30 seconds")
+        process.kill()
         return False
     except Exception as e:
         print(f"Error running codeml: {e}")
