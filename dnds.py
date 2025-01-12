@@ -617,8 +617,19 @@ def main():
     pair_db = shelve.open(shelve_path, writeback=False)
 
     preload_transcript_coords('../hg38.knownGene.gtf')
-
-    print("Gathering .phy files...")
+   
+    print("Gathering all existing CSVs to skip up front.")
+    csv_files = glob.glob(os.path.join(args.output_dir, '*.csv'))
+    completed_cds_ids = set()
+    for csv_file in csv_files:
+        if csv_file.endswith('_haplotype_stats.csv'):
+            continue
+        base_name = os.path.basename(csv_file).replace('.csv', '')
+        hap_name = os.path.join(args.output_dir, f'{base_name}_haplotype_stats.csv')
+        if os.path.exists(hap_name):
+            completed_cds_ids.add(base_name)
+   
+    print(f"Found {len(completed_cds_ids)} completed CSV sets. Now gathering .phy files...")
     sys.stdout.flush()
     phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
     total_files = len(phy_files)
