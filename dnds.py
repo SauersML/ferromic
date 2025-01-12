@@ -788,17 +788,15 @@ def main():
             for r in pool.imap_unordered(process_pair, pool_args, chunksize=10):
                 if r is not None:
                     seq1, seq2, grp1, grp2, dn, ds, omega, cid = r
-                    newkey = (cid, seq1, seq2, COMPARE_BETWEEN_GROUPS)
+                    newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
                     shelve_db[newkey] = r
 
         # Gather final results from shelve
         relevant_keys = []
         for pair in all_pairs:
-            final_key = (cds_id, pair[0], pair[1], COMPARE_BETWEEN_GROUPS)
-            # Note the key is slightly different from newkey above, just watch order
-            # We'll unify them by consistent ordering
-            if final_key in shelve_db:
-                relevant_keys.append(final_key)
+           final_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
+           if final_key in shelve_db:
+               relevant_keys.append(final_key)
 
         final_results = []
         for k in relevant_keys:
