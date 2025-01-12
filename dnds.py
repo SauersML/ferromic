@@ -686,7 +686,19 @@ def main():
         if best_id:
             allowed_cds_ids.add(best_id)
 
-    final_phy_files = [f for f in phy_files if os.path.basename(f).replace('.phy','') in allowed_cds_ids]
+    all_phy_filtered = [f for f in phy_files if os.path.basename(f).replace('.phy','') in allowed_cds_ids]
+    print(f"Filtering out {len(all_phy_filtered)} .phy files by coordinate clustering...")
+   
+    # Now skip any that already have completed CSV/haplotype CSV
+    final_phy_files = []
+    for pf in all_phy_filtered:
+        cds_id = os.path.basename(pf).replace('.phy', '')
+        if cds_id in completed_cds_ids:
+            print(f"Skipping {pf}, CSV/haplotype CSV are already complete.")
+        else:
+            final_phy_files.append(pf)
+   
+    print(f"After skipping completed CSVs up front, we have {len(final_phy_files)} files to process.")
 
     print("Estimating total comparisons...")
     sys.stdout.flush()
