@@ -894,20 +894,39 @@ def main():
     # Save final counters (not pairwise data) to the pkl file if we want
     save_cache(cache_file, GLOBAL_COUNTERS)
 
-    # Save the validation cache
-    try:
-        with open(VALIDATION_CACHE_FILE, 'wb') as f:
-            pickle.dump(VALIDATION_CACHE, f)
-        print(f"Validation cache saved with {len(VALIDATION_CACHE)} entries.")
-    except Exception as e:
-        print(f"Could not save validation cache: {e}")
+     # Save the validation cache
+     try:
+         with open(VALIDATION_CACHE_FILE, 'wb') as f:
+             pickle.dump(VALIDATION_CACHE, f)
+         print(f"Validation cache saved with {len(VALIDATION_CACHE)} entries.")
+     except Exception as e:
+         print(f"Could not save validation cache: {e}")
+      
+       # Combine all per-file CSVs into a single final CSV
+       def consolidate_all_csvs(csv_dir, final_csv='all_pairwise_results.csv'):
+           all_dfs = []
+           csv_files = glob.glob(os.path.join(csv_dir, '*.csv'))
+         for cf in csv_files:
+               if cf.endswith('_haplotype_stats.csv'):
+                  continue
+               df = pd.read_csv(cf)
+               all_dfs.append(df)
+           if all_dfs:
+               combined = pd.concat(all_dfs, ignore_index=True)
+               outpath = os.path.join(csv_dir, final_csv)
+               combined.to_csv(outpath, index=False)
+               print(f"Final combined CSV with {len(combined)} rows saved to {outpath}")
+           else:
+               print("No CSV files found to combine at the end.")
+       
+       # Now do it right before closing pair_db
+       consolidate_all_csvs(args.output_dir, 'all_pairwise_results.csv')
+      
+       pair_db.close()
+       logging.info("dN/dS analysis done.")
+       print("dN/dS analysis done.")
+       sys.stdout.flush()
 
-    # Close the shelve with pairwise results
-    pair_db.close()
-
-    logging.info("dN/dS analysis done.")
-    print("dN/dS analysis done.")
-    sys.stdout.flush()
 
 
 if __name__ == '__main__':
