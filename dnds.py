@@ -3,7 +3,6 @@ dN/dS Analysis Script using PAML's CODEML
 
 This script calculates pairwise dN/dS values using PAML's CODEML program.
 
-
 1. Input Files:
    Each input file is a PHYLIP-like file with lines consisting of:
    SAMPLE_NAME_L/R + SEQUENCE (no spaces). For example:
@@ -41,6 +40,7 @@ import argparse
 import time
 import logging
 import pickle
+import shelve
 from functools import partial
 import hashlib
 
@@ -72,6 +72,7 @@ ETA_DATA = {
     'alpha': 0.2,  # smoothing factor
 }
 
+# We keep the Manager for counters but no longer store pairwise results in a Manager dict
 manager = multiprocessing.Manager()
 GLOBAL_COUNTERS = manager.dict({
     'invalid_seqs': 0,
@@ -81,7 +82,8 @@ GLOBAL_COUNTERS = manager.dict({
     'total_comparisons': 0,
     'stop_codons': 0
 })
-CACHE = manager.dict()
+
+CACHE = None
 
 def print_eta(completed, total, start_time, eta_data):
     print("Calculating ETA for progress...")
@@ -109,8 +111,6 @@ def print_eta(completed, total, start_time, eta_data):
     logging.info(f"Progress: {completed}/{total} comps. ETA: {hrs:.2f}h")
     print(f"Completed {completed} of {total}, ETA: {hrs:.2f} hours")
     sys.stdout.flush()
-
-
 
 
 def validate_sequence(seq, filepath, sample_name, full_line):
@@ -153,12 +153,9 @@ def validate_sequence(seq, filepath, sample_name, full_line):
     return seq, False
 
 
-
-
 def create_paml_ctl(seqfile, outfile, working_dir):
     print(f"Creating PAML control file in {working_dir}")
     sys.stdout.flush()
-    # Make all paths absolute
     seqfile = os.path.abspath(seqfile)
     treefile = os.path.abspath(os.path.join(working_dir, "tree.txt"))
     outfile = os.path.abspath(os.path.join(working_dir, outfile))
@@ -191,6 +188,7 @@ def create_paml_ctl(seqfile, outfile, working_dir):
     sys.stdout.flush()
     return ctl_path
 
+
 def run_codeml(ctl_path, working_dir, codeml_path):
     """
     Run codeml in working_dir so it picks up codeml.ctl automatically,
@@ -201,12 +199,10 @@ def run_codeml(ctl_path, working_dir, codeml_path):
     import subprocess
     import time
 
-    # Convert all paths to absolute
     ctl_path = os.path.abspath(ctl_path)
     working_dir = os.path.abspath(working_dir)
     codeml_path = os.path.abspath(codeml_path)
 
-    # Only copy if src != dst
     dst_ctl = os.path.join(working_dir, 'codeml.ctl')
     if not os.path.samefile(ctl_path, dst_ctl):
         shutil.copy2(ctl_path, dst_ctl)
@@ -262,26 +258,18 @@ def parse_codeml_output(outfile_dir):
         print("Last 5 lines of rst file:")
         for line in last_lines:
             print(line.rstrip())
-            
-        # Find the line with the values (it has seq seq in front)
+
         for i, line in enumerate(lines):
             if line.strip().startswith("seq seq"):
-                # Get the next line which contains the values
-                values_line = lines[i + 1]  # Use index instead of next()
+                values_line = lines[i + 1]
                 values = values_line.strip().split()
-                # Values are in positions:
-                # N = 3rd value 
-                # S = 4th value
-                # dN = 5th value  
-                # dS = 6th value
-                # dN/dS = 7th value
                 dN = float(values[4])
-                dS = float(values[5]) 
+                dS = float(values[5])
                 omega = float(values[6])
                 print(f"Parsed dN={dN}, dS={dS}, omega={omega}")
                 sys.stdout.flush()
                 return dN, dS, omega
-                
+
         print("Could not find values line in rst file.")
         sys.stdout.flush()
         return None, None, None
@@ -306,7 +294,7 @@ def parse_phy_file(filepath):
     duplicates_found = False
     line_pattern = re.compile(r'^([A-Za-z0-9_]+_[LR01])([ATCGNatcgn-]+)$')
 
-    # Local counters to avoid constant manager dict updates
+    # local counters to avoid repeated manager dict updates
     local_invalid_seqs = 0
     local_duplicates = 0
     local_total_seqs = 0
@@ -315,7 +303,7 @@ def parse_phy_file(filepath):
     if not os.path.isfile(filepath):
         print("File does not exist.")
         return sequences, duplicates_found
-   
+
     with open(filepath, 'r', encoding='utf-8', errors='replace') as file:
         lines = file.read().strip().split('\n')
         for line_num, line in enumerate(lines, 1):
@@ -341,18 +329,16 @@ def parse_phy_file(filepath):
             hash_str = md5_val[:2]
             sample_name = f"{first}{second}{hash_str}_{group}"
 
-           
-            # Build a cache key. Using (filepath, sample_name, md5_of_sequence)
             seq_hash = hashlib.md5(sequence.encode('utf-8')).hexdigest()
             cache_key = (os.path.basename(filepath), sample_name, seq_hash)
-            
+
             if cache_key in VALIDATION_CACHE:
                 validated_seq, stop_codon_found = VALIDATION_CACHE[cache_key]
                 print(f"Skipping validation for {sample_name}, found in cache.")
             else:
                 validated_seq, stop_codon_found = validate_sequence(sequence, filepath, sample_name, line)
                 VALIDATION_CACHE[cache_key] = (validated_seq, stop_codon_found)
-            
+
             if validated_seq is None:
                 local_invalid_seqs += 1
                 if stop_codon_found:
@@ -369,7 +355,6 @@ def parse_phy_file(filepath):
                 else:
                     sequences[sample_name] = validated_seq
 
-    # Single manager dict updates after we finish all lines
     GLOBAL_COUNTERS['invalid_seqs'] = GLOBAL_COUNTERS.get('invalid_seqs', 0) + local_invalid_seqs
     GLOBAL_COUNTERS['stop_codons'] = GLOBAL_COUNTERS.get('stop_codons', 0) + local_stop_codons
     GLOBAL_COUNTERS['total_seqs']   = GLOBAL_COUNTERS.get('total_seqs',   0) + local_total_seqs
@@ -378,38 +363,41 @@ def parse_phy_file(filepath):
     print(f"Finished parsing {filepath}, found {len(sequences)} sequences (duplicates_found={duplicates_found})")
     return sequences, duplicates_found
 
+
 def load_cache(cache_file):
     print(f"Loading cache from {cache_file}")
     sys.stdout.flush()
     if os.path.exists(cache_file):
         with open(cache_file, 'rb') as f:
             data = pickle.load(f)
-            CACHE.update(data)
-        print(f"Cache loaded with {len(CACHE)} entries.")
+            if data:
+                for k,v in data.items():
+                    GLOBAL_COUNTERS[k] = v
+        print(f"Cache loaded with {len(data)} entries (only counters).")
         sys.stdout.flush()
     else:
         print("No cache file found, starting fresh.")
         sys.stdout.flush()
 
 def save_cache(cache_file, cache_data):
-    print(f"Saving cache to {cache_file} with {len(cache_data)} entries.")
+    print(f"Saving cache to {cache_file} with {len(cache_data)} entries (only counters).")
     sys.stdout.flush()
     with open(cache_file, 'wb') as f:
-        pickle.dump(dict(cache_data), f)
+        # Convert manager dict to normal dict if needed
+        normal_dict = dict(cache_data)
+        pickle.dump(normal_dict, f)
     print("Cache saved.")
     sys.stdout.flush()
 
+
 def process_pair(args):
+    """
+    The worker function no longer consults a manager dict for pairwise caching.
+    We keep the rest the same for minimal changes, except we skip references to 'CACHE'.
+    """
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, _ = args
     seq1_name, seq2_name = pair
-    cache_key = (cds_id, seq1_name, seq2_name, COMPARE_BETWEEN_GROUPS)
-    #print(f"Processing pair: {seq1_name}, {seq2_name} for {cds_id}")
-    sys.stdout.flush()
-    if cache_key in CACHE:
-        print("Pair result found in cache, skipping computation.")
-        sys.stdout.flush()
-        return CACHE[cache_key]
-
+    # No more 'if cache_key in CACHE:' checks. We compute or skip based on the sequence logic:
     if seq1_name not in sequences or seq2_name not in sequences:
         print("One of the sequences is missing, returning None.")
         sys.stdout.flush()
@@ -417,18 +405,14 @@ def process_pair(args):
 
     group1 = sample_groups.get(seq1_name)
     group2 = sample_groups.get(seq2_name)
-
     if not COMPARE_BETWEEN_GROUPS and group1 != group2:
         print("Not comparing between groups, and groups differ. Skipping.")
         sys.stdout.flush()
         return None
 
     if sequences[seq1_name] == sequences[seq2_name]:
-        #print("Sequences are identical, returning omega = -1.")
         sys.stdout.flush()
-        result = (seq1_name, seq2_name, group1, group2, 0.0, 0.0, -1.0, cds_id)
-        CACHE[cache_key] = result
-        return result
+        return (seq1_name, seq2_name, group1, group2, 0.0, 0.0, -1.0, cds_id)
 
     working_dir = os.path.join(temp_dir, f'{seq1_name}_{seq2_name}')
     os.makedirs(working_dir, exist_ok=True)
@@ -452,18 +436,15 @@ def process_pair(args):
     if not success:
         print("Codeml run failed, returning NaN values.")
         sys.stdout.flush()
-        result = (seq1_name, seq2_name, group1, group2, np.nan, np.nan, np.nan, cds_id)
-        CACHE[cache_key] = result
-        return result
+        return (seq1_name, seq2_name, group1, group2, np.nan, np.nan, np.nan, cds_id)
 
     dn, ds, omega = parse_codeml_output(working_dir)
     if omega is None:
         omega = np.nan
     print(f"Pair processed: dn={dn}, ds={ds}, omega={omega}")
     sys.stdout.flush()
-    result = (seq1_name, seq2_name, group1, group2, dn, ds, omega, cds_id)
-    CACHE[cache_key] = result
-    return result
+    return (seq1_name, seq2_name, group1, group2, dn, ds, omega, cds_id)
+
 
 def estimate_one_file(phy_file, group_num):
     print(f"Estimating comparisons for file {phy_file}")
@@ -473,7 +454,6 @@ def estimate_one_file(phy_file, group_num):
         return (0,0)
     sample_groups = {}
     skip_file = False
-    # Force all sequences in this file to use the group number from the filename:
     for s in sequences.keys():
         sample_groups[s] = int(group_num)
     if skip_file:
@@ -482,8 +462,8 @@ def estimate_one_file(phy_file, group_num):
     if COMPARE_BETWEEN_GROUPS:
         pairs = list(combinations(sequences.keys(), 2))
     else:
-        g0 = [s for s,g in sample_groups.items() if g==0]
-        g1 = [s for s,g in sample_groups.items() if g==1]
+        g0 = [s for s,g in sample_groups.items() if g == 0]
+        g1 = [s for s,g in sample_groups.items() if g == 1]
         pairs = list(combinations(g0,2)) + list(combinations(g1,2))
 
     cds_count = 1 if pairs else 0
@@ -491,6 +471,7 @@ def estimate_one_file(phy_file, group_num):
     print(f"File {phy_file} estimation: {cds_count} CDS, {pair_count} comparisons")
     sys.stdout.flush()
     return (cds_count, pair_count)
+
 
 def get_transcript_coordinates(transcript_id):
     global TRANSCRIPT_COORDS
@@ -549,7 +530,6 @@ def cluster_by_coordinates(cds_meta):
     return clusters
 
 
-
 TRANSCRIPT_COORDS = {}  # Global dictionary storing all transcript -> coords
 
 def load_gtf_into_dict(gtf_file):
@@ -578,43 +558,35 @@ def load_gtf_into_dict(gtf_file):
             if tid is None:
                 continue
 
-            # If first time, store directly; else update min/max
             if tid not in transcript_dict:
                 transcript_dict[tid] = [chr_, start, end]
             else:
                 existing_chr, existing_start, existing_end = transcript_dict[tid]
                 if chr_ != existing_chr:
-                    # If there's a mismatch, keep the first chromosome
                     pass
                 if start < existing_start:
                     transcript_dict[tid][1] = start
                 if end > existing_end:
                     transcript_dict[tid][2] = end
 
-    # Convert [chr, start, end] lists to tuples
     for k in transcript_dict:
         c, s, e = transcript_dict[k]
         transcript_dict[k] = (c, s, e)
     return transcript_dict
 
-
 def preload_transcript_coords(gtf_file):
-    """Load the GTF exactly once into TRANSCRIPT_COORDS dict."""
     global TRANSCRIPT_COORDS
     if not TRANSCRIPT_COORDS:
         TRANSCRIPT_COORDS = load_gtf_into_dict(gtf_file)
         print(f"[INFO] GTF loaded into memory: {len(TRANSCRIPT_COORDS)} transcripts.")
 
 
-
 def main():
     print("Starting main process...")
     sys.stdout.flush()
     parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
-   
     script_dir = os.path.dirname(os.path.abspath(__file__))
     codeml_inferred = os.path.abspath(os.path.join(script_dir, '..', 'paml', 'bin', 'codeml'))
-   
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
     parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
     parser.add_argument('--codeml_path', type=str, default=codeml_inferred, help='Path to codeml executable.')
@@ -639,6 +611,10 @@ def main():
 
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
     load_cache(cache_file)
+
+    # Open a shelve file for actual pairwise results
+    shelve_path = os.path.join(args.output_dir, 'results_cache.shelve')
+    pair_db = shelve.open(shelve_path, writeback=False)
 
     preload_transcript_coords('../hg38.knownGene.gtf')
 
@@ -708,12 +684,14 @@ def main():
         m = filename_pattern.match(base)
         group_num = m.group(1)
         return estimate_one_file(phy, group_num)
+
     results = [quick_estimate(p) for p in final_phy_files]
     total_cds = sum(r[0] for r in results)
     total_comps = sum(r[1] for r in results)
     GLOBAL_COUNTERS['total_cds'] = total_cds
     GLOBAL_COUNTERS['total_comparisons'] = total_comps
 
+    # Pull counters out for easy usage
     GLOBAL_TOTAL_SEQS = GLOBAL_COUNTERS['total_seqs']
     GLOBAL_INVALID_SEQS = GLOBAL_COUNTERS['invalid_seqs']
     GLOBAL_DUPLICATES = GLOBAL_COUNTERS['duplicates']
@@ -731,7 +709,9 @@ def main():
     logging.info(f"Valid sequences: {valid_sequences} ({valid_percentage:.2f}%)")
     logging.info(f"Total CDS after clustering: {GLOBAL_TOTAL_CDS}")
     logging.info(f"Expected comparisons: {GLOBAL_TOTAL_COMPARISONS}")
-    cached_results_count = len(CACHE)
+
+    # Count how many are in pair_db
+    cached_results_count = len(pair_db.keys())
     remaining = GLOBAL_TOTAL_COMPARISONS - cached_results_count
     logging.info(f"Cache: {cached_results_count} results. {remaining} remain.")
 
@@ -741,7 +721,11 @@ def main():
     start_time = time.time()
     completed_comparisons = cached_results_count
 
-    def run_cds_file(phy_file, group_num, output_dir, codeml_path, cache):
+    def run_cds_file(phy_file, group_num, output_dir, codeml_path, shelve_db):
+        """
+        Now we skip pairs already in shelve_db, only compute new ones,
+        then gather all results from shelve to write the CSV and haplotype stats.
+        """
         print(f"Running CDS file: {phy_file}")
         sys.stdout.flush()
         cds_id = os.path.basename(phy_file).replace('.phy','')
@@ -766,13 +750,13 @@ def main():
 
         if COMPARE_BETWEEN_GROUPS:
             all_samples = list(sample_groups.keys())
-            pairs = list(combinations(all_samples, 2))
+            all_pairs = list(combinations(all_samples, 2))
         else:
             g0 = [x for x,y in sample_groups.items() if y==0]
             g1 = [x for x,y in sample_groups.items() if y==1]
-            pairs = list(combinations(g0,2)) + list(combinations(g1,2))
+            all_pairs = list(combinations(g0,2)) + list(combinations(g1,2))
 
-        if not pairs:
+        if not all_pairs:
             print("No pairs to compare, skipping.")
             sys.stdout.flush()
             return
@@ -780,18 +764,47 @@ def main():
         temp_dir = os.path.join(output_dir, 'temp', cds_id)
         os.makedirs(temp_dir, exist_ok=True)
 
-        pool_args = [(pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, cache) for pair in pairs]
-        num_processes = get_safe_process_count()
-        print(f"Running codeml on {len(pairs)} pairs with {num_processes} processes.")
+        # Filter out already-cached pairs in shelve_db
+        to_compute = []
+        for pair in all_pairs:
+            check_key = (cds_id, pair[0], pair[1], COMPARE_BETWEEN_GROUPS)
+            if check_key not in shelve_db:
+                to_compute.append(pair)
+
+        if not to_compute:
+            print(f"All {len(all_pairs)} pairs for {cds_id} are already cached, skipping codeml.")
+            sys.stdout.flush()
+            return
+
+        print(f"Computing {len(to_compute)} new pairs out of {len(all_pairs)} total.")
         sys.stdout.flush()
 
-        results = []
+        pool_args = [(pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, None) for pair in to_compute]
+        num_processes = get_safe_process_count()
+        print(f"Running codeml on {len(to_compute)} pairs with {num_processes} processes.")
+        sys.stdout.flush()
+
         with multiprocessing.Pool(processes=num_processes) as pool:
             for r in pool.imap_unordered(process_pair, pool_args, chunksize=10):
                 if r is not None:
-                    results.append(r)
+                    seq1, seq2, grp1, grp2, dn, ds, omega, cid = r
+                    newkey = (cid, seq1, seq2, COMPARE_BETWEEN_GROUPS)
+                    shelve_db[newkey] = r
 
-        df = pd.DataFrame(results, columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'])
+        # Gather final results from shelve
+        relevant_keys = []
+        for pair in all_pairs:
+            final_key = (cds_id, pair[0], pair[1], COMPARE_BETWEEN_GROUPS)
+            # Note the key is slightly different from newkey above, just watch order
+            # We'll unify them by consistent ordering
+            if final_key in shelve_db:
+                relevant_keys.append(final_key)
+
+        final_results = []
+        for k in relevant_keys:
+            final_results.append(shelve_db[k])
+
+        df = pd.DataFrame(final_results, columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'])
         df.to_csv(output_csv, index=False)
         print(f"Results saved to {output_csv}")
         sys.stdout.flush()
@@ -820,30 +833,28 @@ def main():
         print(f"Haplotype stats saved to {haplotype_output_csv}")
         sys.stdout.flush()
 
-        #shutil.rmtree(temp_dir, ignore_errors=True)
-        #print("Temporary directory cleaned up.")
-        sys.stdout.flush()
-
     print("Processing each allowed CDS file...")
     sys.stdout.flush()
     for idx, phy_file in enumerate(final_phy_files, 1):
-            basename = os.path.basename(phy_file)
-            m = filename_pattern.match(basename)
-            group_num = m.group(1)
-            logging.info(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
-            print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
-            sys.stdout.flush()
-            old_size = len(CACHE)
-            run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, None)
-            save_cache(cache_file, CACHE)
-            new_size = len(CACHE)
-            newly_done = new_size - old_size
-            completed_comparisons += newly_done
-            percent = (completed_comparisons / GLOBAL_TOTAL_COMPARISONS * 100) if GLOBAL_TOTAL_COMPARISONS > 0 else 0
-            logging.info(f"Overall: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
-            print(f"Overall progress: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
-            sys.stdout.flush()
-            print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, start_time, ETA_DATA)
+        basename = os.path.basename(phy_file)
+        m = filename_pattern.match(basename)
+        group_num = m.group(1)
+        logging.info(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
+        print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
+        sys.stdout.flush()
+
+        # We'll skip the old manager dict approach entirely
+        old_size = len(pair_db.keys())
+        run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, pair_db)
+        new_size = len(pair_db.keys())
+
+        newly_done = new_size - old_size
+        completed_comparisons += newly_done
+        percent = (completed_comparisons / GLOBAL_TOTAL_COMPARISONS * 100) if GLOBAL_TOTAL_COMPARISONS > 0 else 0
+        logging.info(f"Overall: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
+        print(f"Overall progress: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
+        sys.stdout.flush()
+        print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, start_time, ETA_DATA)
 
     end_time = time.time()
     final_invalid_pct = (GLOBAL_INVALID_SEQS/GLOBAL_TOTAL_SEQS*100) if GLOBAL_TOTAL_SEQS>0 else 0
@@ -859,7 +870,9 @@ def main():
     logging.info(f"Completed comps: {completed_comparisons}")
     logging.info(f"Total time: {(end_time - start_time)/60:.2f} min")
 
-   
+    # Save final counters (not pairwise data) to the pkl file if we want
+    save_cache(cache_file, GLOBAL_COUNTERS)
+
     # Save the validation cache
     try:
         with open(VALIDATION_CACHE_FILE, 'wb') as f:
@@ -868,9 +881,13 @@ def main():
     except Exception as e:
         print(f"Could not save validation cache: {e}")
 
+    # Close the shelve with pairwise results
+    pair_db.close()
+
     logging.info("dN/dS analysis done.")
     print("dN/dS analysis done.")
     sys.stdout.flush()
+
 
 if __name__ == '__main__':
     main()
