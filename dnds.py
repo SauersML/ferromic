@@ -604,6 +604,40 @@ def main():
     shelve_path = os.path.join(args.output_dir, 'results_cache.shelve')
     pair_db = shelve.open(shelve_path, writeback=False)
 
+    csv_files_to_load = glob.glob(os.path.join(args.output_dir, '*.csv'))
+    count_loaded_from_csv = 0
+    for csv_path in csv_files_to_load:
+        if not csv_path.endswith('_haplotype_stats.csv'):
+            try:
+                df_existing = pd.read_csv(csv_path)
+                if {'Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'}.issubset(df_existing.columns):
+                    for _, row in df_existing.iterrows():
+                        seq1_val = str(row['Seq1'])
+                        seq2_val = str(row['Seq2'])
+                        group1_val = row['Group1']
+                        group2_val = row['Group2']
+                        dn_val = row['dN']
+                        ds_val = row['dS']
+                        omega_val = row['omega']
+                        cid_val = str(row['CDS'])
+                        cache_key = f"{cid_val}::{seq1_val}::{seq2_val}::{COMPARE_BETWEEN_GROUPS}"
+                        if cache_key not in pair_db:
+                            pair_db[cache_key] = (
+                                seq1_val,
+                                seq2_val,
+                                group1_val,
+                                group2_val,
+                                dn_val,
+                                ds_val,
+                                omega_val,
+                                cid_val
+                            )
+                            count_loaded_from_csv += 1
+            except Exception as e:
+                print(f"Failed to load CSV {csv_path}: {str(e)}")
+
+    print(f"Preloaded {count_loaded_from_csv} comparisons from existing CSV files into the shelve cache.")
+
     preload_transcript_coords('../hg38.knownGene.gtf')
 
     print("Gathering all existing CSVs to skip up front.")
