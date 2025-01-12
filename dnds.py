@@ -767,7 +767,7 @@ def main():
         # Filter out already-cached pairs in shelve_db
         to_compute = []
         for pair in all_pairs:
-            check_key = (cds_id, pair[0], pair[1], COMPARE_BETWEEN_GROUPS)
+            check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
             if check_key not in shelve_db:
                 to_compute.append(pair)
 
