@@ -4,22 +4,22 @@ dN/dS Analysis Script using PAML's CODEML
 This script calculates pairwise dN/dS values using PAML's CODEML program.
 
 1. Input Files:
-   Each input file is a PHYLIP-like file with lines consisting of:
-   SAMPLE_NAME_L/R + SEQUENCE (no spaces). For example:
-       ABC_XYZ_HG01352_LACGGAGTAC...
-   Where each sample name ends with "_L" or "_R" before the sequence.
+    Each input file is a PHYLIP-like file with lines consisting of:
+    SAMPLE_NAME_L/R + SEQUENCE (no spaces). For example:
+        ABC_XYZ_HG01352_LACGGAGTAC...
+    Where each sample name ends with "_L" or "_R" before the sequence.
 
-   The input file names follow a pattern including a transcript ID and chromosome info:
-       group_0_ENST00000706755.1_chr_19_combined.phy
-       group_1_ENST00000704003.1_chr_7_combined.phy
-       ...
-   Each file corresponds to a single CDS/transcript variant (one full alignment).
+    The input file names follow a pattern including a transcript ID and chromosome info:
+        group_0_ENST00000706755.1_chr_19_combined.phy
+        group_1_ENST00000704003.1_chr_7_combined.phy
+        ...
+    Each file corresponds to a single CDS/transcript variant (one full alignment).
 
 2. Sequence Validation:
-   - Sequences must be non-empty, length divisible by 3.
-   - Only valid bases: A,T,C,G,N,-
-   - No in-frame stop codons (TAA,TAG,TGA).
-   - If invalid, the sequence is discarded.
+    - Sequences must be non-empty, length divisible by 3.
+    - Only valid bases: A,T,C,G,N,-
+    - No in-frame stop codons (TAA,TAG,TGA).
+    - If invalid, the sequence is discarded.
 
 Usage:
     python3 dnds.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
@@ -112,7 +112,6 @@ def print_eta(completed, total, start_time, eta_data):
     print(f"Completed {completed} of {total}, ETA: {hrs:.2f} hours")
     sys.stdout.flush()
 
-
 def validate_sequence(seq, filepath, sample_name, full_line):
     print(f"Validating sequence for sample {sample_name} from file {filepath}")
     if not seq:
@@ -152,7 +151,6 @@ def validate_sequence(seq, filepath, sample_name, full_line):
     print("Sequence validated successfully.")
     return seq, False
 
-
 def create_paml_ctl(seqfile, outfile, working_dir):
     print(f"Creating PAML control file in {working_dir}")
     sys.stdout.flush()
@@ -187,7 +185,6 @@ def create_paml_ctl(seqfile, outfile, working_dir):
     print(f"PAML control file created at {ctl_path}")
     sys.stdout.flush()
     return ctl_path
-
 
 def run_codeml(ctl_path, working_dir, codeml_path):
     """
@@ -241,7 +238,6 @@ def run_codeml(ctl_path, working_dir, codeml_path):
         print(f"Error running codeml: {e}")
         return False
 
-
 def parse_codeml_output(outfile_dir):
     print(f"Parsing CODEML output in {outfile_dir}")
     sys.stdout.flush()
@@ -253,7 +249,7 @@ def parse_codeml_output(outfile_dir):
     try:
         with open(rst_file, 'r') as f:
             lines = f.readlines()
-        
+
         last_lines = lines[-5:] if len(lines) >= 5 else lines
         print("Last 5 lines of rst file:")
         for line in last_lines:
@@ -278,7 +274,6 @@ def parse_codeml_output(outfile_dir):
         sys.stdout.flush()
         return None, None, None
 
-
 def get_safe_process_count():
     print("Getting safe process count for multiprocessing...")
     sys.stdout.flush()
@@ -286,7 +281,6 @@ def get_safe_process_count():
     print(f"Detected {total_cpus} CPUs.")
     sys.stdout.flush()
     return total_cpus
-
 
 def parse_phy_file(filepath):
     print(f"Parsing phy file: {filepath}")
@@ -363,7 +357,6 @@ def parse_phy_file(filepath):
     print(f"Finished parsing {filepath}, found {len(sequences)} sequences (duplicates_found={duplicates_found})")
     return sequences, duplicates_found
 
-
 def load_cache(cache_file):
     print(f"Loading cache from {cache_file}")
     sys.stdout.flush()
@@ -383,12 +376,10 @@ def save_cache(cache_file, cache_data):
     print(f"Saving cache to {cache_file} with {len(cache_data)} entries (only counters).")
     sys.stdout.flush()
     with open(cache_file, 'wb') as f:
-        # Convert manager dict to normal dict if needed
         normal_dict = dict(cache_data)
         pickle.dump(normal_dict, f)
     print("Cache saved.")
     sys.stdout.flush()
-
 
 def process_pair(args):
     """
@@ -397,7 +388,6 @@ def process_pair(args):
     """
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, _ = args
     seq1_name, seq2_name = pair
-    # No more 'if cache_key in CACHE:' checks. We compute or skip based on the sequence logic:
     if seq1_name not in sequences or seq2_name not in sequences:
         print("One of the sequences is missing, returning None.")
         sys.stdout.flush()
@@ -445,7 +435,6 @@ def process_pair(args):
     sys.stdout.flush()
     return (seq1_name, seq2_name, group1, group2, dn, ds, omega, cds_id)
 
-
 def estimate_one_file(phy_file, group_num):
     print(f"Estimating comparisons for file {phy_file}")
     sys.stdout.flush()
@@ -471,7 +460,6 @@ def estimate_one_file(phy_file, group_num):
     print(f"File {phy_file} estimation: {cds_count} CDS, {pair_count} comparisons")
     sys.stdout.flush()
     return (cds_count, pair_count)
-
 
 def get_transcript_coordinates(transcript_id):
     global TRANSCRIPT_COORDS
@@ -529,11 +517,12 @@ def cluster_by_coordinates(cds_meta):
     sys.stdout.flush()
     return clusters
 
-
-TRANSCRIPT_COORDS = {}  # Global dictionary storing all transcript -> coords
+TRANSCRIPT_COORDS = {}
 
 def load_gtf_into_dict(gtf_file):
-    """Parse the entire GTF once, storing min/max CDS coords per transcript."""
+    """
+    Parse the entire GTF once, storing min/max CDS coords per transcript.
+    """
     transcript_dict = {}
     with open(gtf_file, 'r') as f:
         for line in f:
@@ -580,7 +569,6 @@ def preload_transcript_coords(gtf_file):
         TRANSCRIPT_COORDS = load_gtf_into_dict(gtf_file)
         print(f"[INFO] GTF loaded into memory: {len(TRANSCRIPT_COORDS)} transcripts.")
 
-
 def main():
     print("Starting main process...")
     sys.stdout.flush()
@@ -617,7 +605,7 @@ def main():
     pair_db = shelve.open(shelve_path, writeback=False)
 
     preload_transcript_coords('../hg38.knownGene.gtf')
-   
+
     print("Gathering all existing CSVs to skip up front.")
     csv_files = glob.glob(os.path.join(args.output_dir, '*.csv'))
     completed_cds_ids = set()
@@ -628,7 +616,7 @@ def main():
         hap_name = os.path.join(args.output_dir, f'{base_name}_haplotype_stats.csv')
         if os.path.exists(hap_name):
             completed_cds_ids.add(base_name)
-   
+
     print(f"Found {len(completed_cds_ids)} completed CSV sets. Now gathering .phy files...")
     sys.stdout.flush()
     phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
@@ -688,7 +676,7 @@ def main():
 
     all_phy_filtered = [f for f in phy_files if os.path.basename(f).replace('.phy','') in allowed_cds_ids]
     print(f"Filtering out {len(all_phy_filtered)} .phy files by coordinate clustering...")
-   
+
     # Now skip any that already have completed CSV/haplotype CSV
     final_phy_files = []
     for pf in all_phy_filtered:
@@ -697,7 +685,7 @@ def main():
             print(f"Skipping {pf}, CSV/haplotype CSV are already complete.")
         else:
             final_phy_files.append(pf)
-   
+
     print(f"After skipping completed CSVs up front, we have {len(final_phy_files)} files to process.")
 
     print("Estimating total comparisons...")
@@ -733,7 +721,6 @@ def main():
     logging.info(f"Total CDS after clustering: {GLOBAL_TOTAL_CDS}")
     logging.info(f"Expected comparisons: {GLOBAL_TOTAL_COMPARISONS}")
 
-    # Count how many are in pair_db
     cached_results_count = len(pair_db.keys())
     remaining = GLOBAL_TOTAL_COMPARISONS - cached_results_count
     logging.info(f"Cache: {cached_results_count} results. {remaining} remain.")
@@ -787,7 +774,6 @@ def main():
         temp_dir = os.path.join(output_dir, 'temp', cds_id)
         os.makedirs(temp_dir, exist_ok=True)
 
-        # Filter out already-cached pairs in shelve_db
         to_compute = []
         for pair in all_pairs:
             check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
@@ -814,12 +800,11 @@ def main():
                     newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
                     shelve_db[newkey] = r
 
-        # Gather final results from shelve
         relevant_keys = []
         for pair in all_pairs:
-           final_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
-           if final_key in shelve_db:
-               relevant_keys.append(final_key)
+            final_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
+            if final_key in shelve_db:
+                relevant_keys.append(final_key)
 
         final_results = []
         for k in relevant_keys:
@@ -864,7 +849,6 @@ def main():
         print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
         sys.stdout.flush()
 
-        # We'll skip the old manager dict approach entirely
         old_size = len(pair_db.keys())
         run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, pair_db)
         new_size = len(pair_db.keys())
@@ -891,43 +875,37 @@ def main():
     logging.info(f"Completed comps: {completed_comparisons}")
     logging.info(f"Total time: {(end_time - start_time)/60:.2f} min")
 
-    # Save final counters (not pairwise data) to the pkl file if we want
     save_cache(cache_file, GLOBAL_COUNTERS)
 
-     # Save the validation cache
-     try:
-         with open(VALIDATION_CACHE_FILE, 'wb') as f:
-             pickle.dump(VALIDATION_CACHE, f)
-         print(f"Validation cache saved with {len(VALIDATION_CACHE)} entries.")
-     except Exception as e:
-         print(f"Could not save validation cache: {e}")
-      
-       # Combine all per-file CSVs into a single final CSV
-       def consolidate_all_csvs(csv_dir, final_csv='all_pairwise_results.csv'):
-           all_dfs = []
-           csv_files = glob.glob(os.path.join(csv_dir, '*.csv'))
-         for cf in csv_files:
-               if cf.endswith('_haplotype_stats.csv'):
-                  continue
-               df = pd.read_csv(cf)
-               all_dfs.append(df)
-           if all_dfs:
-               combined = pd.concat(all_dfs, ignore_index=True)
-               outpath = os.path.join(csv_dir, final_csv)
-               combined.to_csv(outpath, index=False)
-               print(f"Final combined CSV with {len(combined)} rows saved to {outpath}")
-           else:
-               print("No CSV files found to combine at the end.")
-       
-       # Now do it right before closing pair_db
-       consolidate_all_csvs(args.output_dir, 'all_pairwise_results.csv')
-      
-       pair_db.close()
-       logging.info("dN/dS analysis done.")
-       print("dN/dS analysis done.")
-       sys.stdout.flush()
+    try:
+        with open(VALIDATION_CACHE_FILE, 'wb') as f:
+            pickle.dump(VALIDATION_CACHE, f)
+        print(f"Validation cache saved with {len(VALIDATION_CACHE)} entries.")
+    except Exception as e:
+        print(f"Could not save validation cache: {e}")
 
+    def consolidate_all_csvs(csv_dir, final_csv='all_pairwise_results.csv'):
+        all_dfs = []
+        csv_files = glob.glob(os.path.join(csv_dir, '*.csv'))
+        for cf in csv_files:
+            if cf.endswith('_haplotype_stats.csv'):
+                continue
+            df = pd.read_csv(cf)
+            all_dfs.append(df)
+        if all_dfs:
+            combined = pd.concat(all_dfs, ignore_index=True)
+            outpath = os.path.join(csv_dir, final_csv)
+            combined.to_csv(outpath, index=False)
+            print(f"Final combined CSV with {len(combined)} rows saved to {outpath}")
+        else:
+            print("No CSV files found to combine at the end.")
 
+    consolidate_all_csvs(args.output_dir, 'all_pairwise_results.csv')
+
+    pair_db.close()
+    logging.info("dN/dS analysis done.")
+    print("dN/dS analysis done.")
+    sys.stdout.flush()
 
 if __name__ == '__main__':
     main()
