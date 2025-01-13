@@ -432,13 +432,11 @@ def db_count_keys(conn):
     return row[0] if row else 0
 
 def _read_csv_rows(csv_path):
-    """
-    Single top-level function to read existing CSV rows,
-    returning (cache_key, record_tuple) for each row.
-    """
+    print(f"[CSV Loader] Starting to read {csv_path}")
     rows_to_insert = []
     try:
         df_existing = pd.read_csv(csv_path)
+        print(f"[CSV Loader] Successfully read {len(df_existing)} rows from {csv_path}")
         required_cols = {'Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega', 'CDS'}
         if required_cols.issubset(df_existing.columns):
             for _, row in df_existing.iterrows():
@@ -703,7 +701,13 @@ def main():
 
     if csv_files_to_load:
         with multiprocessing.Pool(processes=parallel_csv) as pool:
-            all_csv_data = pool.map(_read_csv_rows, csv_files_to_load, chunksize=50)
+            all_csv_data = []
+            for result in tqdm(
+                pool.imap_unordered(_read_csv_rows, csv_files_to_load, chunksize=50),
+                total=len(csv_files_to_load),
+                desc="Loading CSVs"
+            ):
+                all_csv_data.append(result)
         for result_list in all_csv_data:
             for cache_key, record_tuple in result_list:
                 if not db_has_key(db_conn, cache_key):
