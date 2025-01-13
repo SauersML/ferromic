@@ -43,6 +43,7 @@ import pickle
 import sqlite3
 from functools import partial
 import hashlib
+import tqdm
 
 COMPARE_BETWEEN_GROUPS = False
 
