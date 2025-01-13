@@ -292,30 +292,15 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         return cache[cds]['symbol'], cache[cds]['name'], error_log
 
     def parse_coords(coord_str):
-        """Parse coordinate string into chr, start, end"""
         if not coord_str:
             return None, "ERROR: Empty coordinate string provided"
-            
         try:
-            parts = coord_str.split(':')
-            if len(parts) != 2:
-                return None, "ERROR: Invalid coordinate format - missing ':'"
-                
-            chr = parts[0]
-            start_end = parts[1].split('-')
-            if len(start_end) != 2:
-                return None, "ERROR: Invalid coordinate format - missing '-'"
-                
-            start = int(start_end[0])
-            end = int(start_end[1])
-            
-            if start > end:
-                return None, f"ERROR: Invalid coordinates - start ({start}) greater than end ({end})"
-                
-            return {'chr': chr, 'start': start, 'end': end}, None
-            
-        except ValueError as e:
-            return None, f"ERROR: Failed to parse coordinates - invalid numbers: {str(e)}"
+            if '_chr_' in coord_str:
+                left, right = coord_str.split('_chr_')
+                right = right.replace('_combined', '')
+                chr_val = 'chr' + right
+                return {'chr': chr_val, 'start': 0, 'end': 0}, None
+            return None, "ERROR: Invalid coordinate format"
         except Exception as e:
             return None, f"ERROR: Failed to parse coordinates: {str(e)}"
 
