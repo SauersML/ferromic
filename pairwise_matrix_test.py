@@ -160,7 +160,7 @@ def analysis_worker(args):
     std_err = np.nan
 
     # Check if DataFrame has sufficient data
-    if df.empty or df['group'].nunique() < 2 or df['omega_value'].nunique() < 2:
+    if df.empty or df['group'].nunique() < 1 or df['omega_value'].nunique() < 1:
         return {
             'observed_effect_size': effect_size,
             'p_value': p_value,
@@ -655,14 +655,14 @@ def analyze_cds_parallel(args):
     valid_per_seq_group_1 = np.sum(~np.isnan(matrix_1), axis=1)
 
     # Set minimum required sequences per group
-    min_sequences_per_group = 3
+    min_sequences_per_group = 1
 
     if (n0 < min_sequences_per_group or 
         n1 < min_sequences_per_group or
-        np.nansum(~np.isnan(matrix_0)) < 3 or 
-        np.nansum(~np.isnan(matrix_1)) < 3 or
-        not all(valid_per_seq_group_0 >= 5) or
-        not all(valid_per_seq_group_1 >= 5)):
+        np.nansum(~np.isnan(matrix_0)) < 1 or 
+        np.nansum(~np.isnan(matrix_1)) < 1 or
+        not all(valid_per_seq_group_0 >= 1) or
+        not all(valid_per_seq_group_1 >= 1)):
     
         # Not enough sequences/valid comparisons
         result.update({
