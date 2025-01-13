@@ -387,7 +387,7 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         name = f"Transcript_{transcript_id}"
     except Exception as ex:
         error_log.append(f"ERROR: Failed to fetch from Ensembl: {str(ex)}")
-        return None, None, error_log found for coordinates {loc['chr']}:{loc['start']}-{loc['end']}")
+        return None, None, error_log
 
     # Get the most relevant gene (the one that best contains our region)
     best_gene = None
