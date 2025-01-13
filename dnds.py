@@ -40,7 +40,7 @@ import argparse
 import time
 import logging
 import pickle
-import shelve
+import sqlite3
 from functools import partial
 import hashlib
 
@@ -72,7 +72,6 @@ ETA_DATA = {
     'alpha': 0.2,  # smoothing factor
 }
 
-# We keep the Manager for counters but no longer store pairwise results in a Manager dict
 manager = multiprocessing.Manager()
 GLOBAL_COUNTERS = manager.dict({
     'invalid_seqs': 0,
@@ -84,6 +83,8 @@ GLOBAL_COUNTERS = manager.dict({
 })
 
 CACHE = None
+
+NUM_PARALLEL = 32
 
 def print_eta(completed, total, start_time, eta_data):
     print("Calculating ETA for progress...")
@@ -187,14 +188,8 @@ def create_paml_ctl(seqfile, outfile, working_dir):
     return ctl_path
 
 def run_codeml(ctl_path, working_dir, codeml_path):
-    """
-    Run codeml in working_dir so it picks up codeml.ctl automatically,
-    but skip copying if src == dst.
-    """
     import shutil
-    import os
     import subprocess
-    import time
 
     ctl_path = os.path.abspath(ctl_path)
     working_dir = os.path.abspath(working_dir)
@@ -274,21 +269,12 @@ def parse_codeml_output(outfile_dir):
         sys.stdout.flush()
         return None, None, None
 
-def get_safe_process_count():
-    print("Getting safe process count for multiprocessing...")
-    sys.stdout.flush()
-    total_cpus = multiprocessing.cpu_count()
-    print(f"Detected {total_cpus} CPUs.")
-    sys.stdout.flush()
-    return total_cpus
-
 def parse_phy_file(filepath):
     print(f"Parsing phy file: {filepath}")
     sequences = {}
     duplicates_found = False
     line_pattern = re.compile(r'^([A-Za-z0-9_]+_[LR01])([ATCGNatcgn-]+)$')
 
-    # local counters to avoid repeated manager dict updates
     local_invalid_seqs = 0
     local_duplicates = 0
     local_total_seqs = 0
@@ -358,13 +344,16 @@ def parse_phy_file(filepath):
     return sequences, duplicates_found
 
 def load_cache(cache_file):
+    """
+    We only use this to load global counters from a pickle, not pairwise results.
+    """
     print(f"Loading cache from {cache_file}")
     sys.stdout.flush()
     if os.path.exists(cache_file):
         with open(cache_file, 'rb') as f:
             data = pickle.load(f)
             if data:
-                for k,v in data.items():
+                for k, v in data.items():
                     GLOBAL_COUNTERS[k] = v
         print(f"Cache loaded with {len(data)} entries (only counters).")
         sys.stdout.flush()
@@ -373,6 +362,9 @@ def load_cache(cache_file):
         sys.stdout.flush()
 
 def save_cache(cache_file, cache_data):
+    """
+    Save only counters to a pickle, not pairwise results.
+    """
     print(f"Saving cache to {cache_file} with {len(cache_data)} entries (only counters).")
     sys.stdout.flush()
     with open(cache_file, 'wb') as f:
@@ -381,9 +373,103 @@ def save_cache(cache_file, cache_data):
     print("Cache saved.")
     sys.stdout.flush()
 
+def init_sqlite_db(db_path):
+    """
+    Initialize (or reuse) a SQLite database to store pairwise results,
+    with a table 'pairwise_cache' that has a unique primary key on 'cache_key'.
+    """
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pairwise_cache (
+            cache_key TEXT PRIMARY KEY,
+            seq1 TEXT,
+            seq2 TEXT,
+            group1 INTEGER,
+            group2 INTEGER,
+            dN REAL,
+            dS REAL,
+            omega REAL,
+            cds TEXT
+        )
+    """)
+    conn.commit()
+    return conn
+
+def db_insert_or_ignore(conn, cache_key, record_tuple):
+    """
+    Insert a record into pairwise_cache if 'cache_key' doesn't already exist.
+    record_tuple is (seq1, seq2, group1, group2, dN, dS, omega, cds).
+    """
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO pairwise_cache "
+            "(cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (cache_key,) + record_tuple
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Error inserting into SQLite: {e}")
+
+def db_has_key(conn, cache_key):
+    """
+    Check if a cache_key exists in pairwise_cache.
+    """
+    cursor = conn.execute(
+        "SELECT cache_key FROM pairwise_cache WHERE cache_key=? LIMIT 1",
+        (cache_key,)
+    )
+    row = cursor.fetchone()
+    return row is not None
+
+def db_count_keys(conn):
+    """
+    Return how many total records exist in pairwise_cache.
+    """
+    cursor = conn.execute("SELECT COUNT(*) FROM pairwise_cache")
+    row = cursor.fetchone()
+    return row[0] if row else 0
+
+def _read_csv_rows(csv_path):
+    """
+    Single top-level function to read existing CSV rows,
+    returning (cache_key, record_tuple) for each row.
+    """
+    rows_to_insert = []
+    try:
+        df_existing = pd.read_csv(csv_path)
+        required_cols = {'Seq1', 'Seq2', 'Group1', 'Group2', 'dN', 'dS', 'omega', 'CDS'}
+        if required_cols.issubset(df_existing.columns):
+            for _, row in df_existing.iterrows():
+                seq1_val = str(row['Seq1'])
+                seq2_val = str(row['Seq2'])
+                group1_val = row['Group1']
+                group2_val = row['Group2']
+                dn_val = row['dN']
+                ds_val = row['dS']
+                omega_val = row['omega']
+                cid_val = str(row['CDS'])
+                cache_key = f"{cid_val}::{seq1_val}::{seq2_val}::{COMPARE_BETWEEN_GROUPS}"
+                record_tuple = (
+                    seq1_val,
+                    seq2_val,
+                    group1_val,
+                    group2_val,
+                    dn_val,
+                    ds_val,
+                    omega_val,
+                    cid_val
+                )
+                rows_to_insert.append((cache_key, record_tuple))
+    except Exception as e:
+        print(f"Failed to load CSV {csv_path}: {str(e)}")
+    return rows_to_insert
+
 def process_pair(args):
     """
-    The worker function no longer consults a manager dict for pairwise caching.
+    The worker function for pairwise dN/dS. 
+    Returns a tuple or None if the pair is invalid or skipped.
     """
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, _ = args
     seq1_name, seq2_name = pair
@@ -439,26 +525,29 @@ def estimate_one_file(phy_file, group_num):
     sys.stdout.flush()
     sequences, duplicates = parse_phy_file(phy_file)
     if not sequences:
-        return (0,0)
+        return (0, 0)
+
     sample_groups = {}
     skip_file = False
     for s in sequences.keys():
         sample_groups[s] = int(group_num)
     if skip_file:
-        return (0,0)
+        return (0, 0)
 
     if COMPARE_BETWEEN_GROUPS:
         pairs = list(combinations(sequences.keys(), 2))
     else:
-        g0 = [s for s,g in sample_groups.items() if g == 0]
-        g1 = [s for s,g in sample_groups.items() if g == 1]
-        pairs = list(combinations(g0,2)) + list(combinations(g1,2))
+        g0 = [s for s, g in sample_groups.items() if g == 0]
+        g1 = [s for s, g in sample_groups.items() if g == 1]
+        pairs = list(combinations(g0, 2)) + list(combinations(g1, 2))
 
     cds_count = 1 if pairs else 0
     pair_count = len(pairs)
     print(f"File {phy_file} estimation: {cds_count} CDS, {pair_count} comparisons")
     sys.stdout.flush()
     return (cds_count, pair_count)
+
+TRANSCRIPT_COORDS = {}
 
 def get_transcript_coordinates(transcript_id):
     global TRANSCRIPT_COORDS
@@ -491,7 +580,7 @@ def cluster_by_coordinates(cds_meta):
         cds_list = chr_map[chrom]
         adjacency = {c[0]: set() for c in cds_list}
         for i in range(len(cds_list)):
-            for j in range(i+1, len(cds_list)):
+            for j in range(i + 1, len(cds_list)):
                 idA, tidA, chA, stA, enA, seqA = cds_list[i]
                 idB, tidB, chB, stB, enB, seqB = cds_list[j]
                 if overlaps(stA, enA, stB, enB):
@@ -516,12 +605,7 @@ def cluster_by_coordinates(cds_meta):
     sys.stdout.flush()
     return clusters
 
-TRANSCRIPT_COORDS = {}
-
 def load_gtf_into_dict(gtf_file):
-    """
-    Parse the entire GTF once, storing min/max CDS coords per transcript.
-    """
     transcript_dict = {}
     with open(gtf_file, 'r') as f:
         for line in f:
@@ -568,39 +652,6 @@ def preload_transcript_coords(gtf_file):
         TRANSCRIPT_COORDS = load_gtf_into_dict(gtf_file)
         print(f"[INFO] GTF loaded into memory: {len(TRANSCRIPT_COORDS)} transcripts.")
 
-def _read_csv_rows(csv_path):
-    """
-    Single top-level function to read existing CSV rows into the shelve cache.
-    """
-    rows_to_insert = []
-    try:
-        df_existing = pd.read_csv(csv_path)
-        required_cols = {'Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'}
-        if required_cols.issubset(df_existing.columns):
-            for _, row in df_existing.iterrows():
-                seq1_val = str(row['Seq1'])
-                seq2_val = str(row['Seq2'])
-                group1_val = row['Group1']
-                group2_val = row['Group2']
-                dn_val = row['dN']
-                ds_val = row['dS']
-                omega_val = row['omega']
-                cid_val = str(row['CDS'])
-                cache_key = f"{cid_val}::{seq1_val}::{seq2_val}::{COMPARE_BETWEEN_GROUPS}"
-                rows_to_insert.append((cache_key, (
-                    seq1_val,
-                    seq2_val,
-                    group1_val,
-                    group2_val,
-                    dn_val,
-                    ds_val,
-                    omega_val,
-                    cid_val
-                )))
-    except Exception as e:
-        print(f"Failed to load CSV {csv_path}: {str(e)}")
-    return rows_to_insert
-
 def main():
     print("Starting main process...")
     sys.stdout.flush()
@@ -629,32 +680,37 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    # Load counters from pickle
     cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
     load_cache(cache_file)
 
-    # Open a shelve file for actual pairwise results
-    shelve_path = os.path.join(args.output_dir, 'results_cache.shelve')
-    pair_db = shelve.open(shelve_path, writeback=False)
+    # Initialize SQLite DB
+    db_path = os.path.join(args.output_dir, 'pairwise_results.sqlite')
+    db_conn = init_sqlite_db(db_path)
 
+    # Pre-load existing CSV data into the SQLite cache
     csv_files_to_load = [
         f for f in glob.glob(os.path.join(args.output_dir, '*.csv'))
         if not f.endswith('_haplotype_stats.csv')
     ]
 
-    num_cpus_csv = min(len(csv_files_to_load), get_safe_process_count())
+    print(f"Found {len(csv_files_to_load)} CSV files to scan for existing results.")
+    sys.stdout.flush()
+
+    # Force concurrency to 32
+    parallel_csv = min(NUM_PARALLEL, len(csv_files_to_load))
     count_loaded_from_csv = 0
 
-    # Parallel load of CSV rows (for large numbers of CSVs)
-    with multiprocessing.Pool(processes=num_cpus_csv) as pool:
-        all_csv_data = pool.map(_read_csv_rows, csv_files_to_load, chunksize=1)
+    if csv_files_to_load:
+        with multiprocessing.Pool(processes=parallel_csv) as pool:
+            all_csv_data = pool.map(_read_csv_rows, csv_files_to_load, chunksize=1)
+        for result_list in all_csv_data:
+            for cache_key, record_tuple in result_list:
+                if not db_has_key(db_conn, cache_key):
+                    db_insert_or_ignore(db_conn, cache_key, record_tuple)
+                    count_loaded_from_csv += 1
 
-    for result_list in all_csv_data:
-        for cache_key, record_tuple in result_list:
-            if cache_key not in pair_db:
-                pair_db[cache_key] = record_tuple
-                count_loaded_from_csv += 1
-
-    print(f"Preloaded {count_loaded_from_csv} comparisons from existing CSV files into the shelve cache.")
+    print(f"Preloaded {count_loaded_from_csv} comparison records from CSV into the SQLite DB.")
 
     preload_transcript_coords('../hg38.knownGene.gtf')
 
@@ -679,7 +735,6 @@ def main():
     filename_pattern = re.compile(r'^group_(\d+)_([A-Za-z0-9\.]+)_chr_([A-Za-z0-9]+)_combined\.phy$')
 
     cds_meta_all = []
-    all_sequences_data = {}
 
     print("Parsing all phy files for metadata...")
     sys.stdout.flush()
@@ -690,7 +745,6 @@ def main():
             continue
         group_num = m.group(1)
         transcript_id = m.group(2)
-        chromosome = m.group(3)
 
         chr_, st, en = get_transcript_coordinates(transcript_id)
         if chr_ is None or st is None or en is None:
@@ -703,7 +757,7 @@ def main():
 
         cds_id = basename.replace('.phy', '')
         cds_meta_all.append((cds_id, transcript_id, chr_, st, en, sequences))
-        all_sequences_data[cds_id] = sequences
+
     print(f"Metadata parsing complete. {len(cds_meta_all)} CDS entries collected.")
     sys.stdout.flush()
 
@@ -717,7 +771,7 @@ def main():
         best_id = None
         best_len = -1
         for cid in cluster:
-            _,_,_,_,_,seqs = cds_id_to_data[cid]
+            _, _, _, _, _, seqs = cds_id_to_data[cid]
             if seqs:
                 length = len(next(iter(seqs.values())))
                 if length > best_len:
@@ -726,10 +780,9 @@ def main():
         if best_id:
             allowed_cds_ids.add(best_id)
 
-    all_phy_filtered = [f for f in phy_files if os.path.basename(f).replace('.phy','') in allowed_cds_ids]
+    all_phy_filtered = [f for f in phy_files if os.path.basename(f).replace('.phy', '') in allowed_cds_ids]
     print(f"Filtering out {len(all_phy_filtered)} .phy files by coordinate clustering...")
 
-    # Now skip any that already have completed CSV/haplotype CSV
     final_phy_files = []
     for pf in all_phy_filtered:
         cds_id = os.path.basename(pf).replace('.phy', '')
@@ -754,12 +807,13 @@ def main():
     GLOBAL_COUNTERS['total_cds'] = total_cds
     GLOBAL_COUNTERS['total_comparisons'] = total_comps
 
-    # Pull counters out for easy usage
+    # Extract counters
     GLOBAL_TOTAL_SEQS = GLOBAL_COUNTERS['total_seqs']
     GLOBAL_INVALID_SEQS = GLOBAL_COUNTERS['invalid_seqs']
     GLOBAL_DUPLICATES = GLOBAL_COUNTERS['duplicates']
     GLOBAL_TOTAL_CDS = GLOBAL_COUNTERS['total_cds']
     GLOBAL_TOTAL_COMPARISONS = GLOBAL_COUNTERS['total_comparisons']
+
     valid_sequences = GLOBAL_TOTAL_SEQS - GLOBAL_INVALID_SEQS
     valid_percentage = (valid_sequences / GLOBAL_TOTAL_SEQS * 100) if GLOBAL_TOTAL_SEQS > 0 else 0
 
@@ -773,7 +827,8 @@ def main():
     logging.info(f"Total CDS after clustering: {GLOBAL_TOTAL_CDS}")
     logging.info(f"Expected comparisons: {GLOBAL_TOTAL_COMPARISONS}")
 
-    cached_results_count = len(pair_db.keys())
+    # Count how many are already in the DB
+    cached_results_count = db_count_keys(db_conn)
     remaining = GLOBAL_TOTAL_COMPARISONS - cached_results_count
     logging.info(f"Cache: {cached_results_count} results. {remaining} remain.")
 
@@ -783,14 +838,10 @@ def main():
     start_time = time.time()
     completed_comparisons = cached_results_count
 
-    def run_cds_file(phy_file, group_num, output_dir, codeml_path, shelve_db):
-        """
-        Now we skip pairs already in shelve_db, only compute new ones,
-        then gather all results from shelve to write the CSV and haplotype stats.
-        """
+    def run_cds_file(phy_file, group_num, output_dir, codeml_path, db_conn):
         print(f"Running CDS file: {phy_file}")
         sys.stdout.flush()
-        cds_id = os.path.basename(phy_file).replace('.phy','')
+        cds_id = os.path.basename(phy_file).replace('.phy', '')
         mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
         output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}.csv')
         haplotype_output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
@@ -814,9 +865,9 @@ def main():
             all_samples = list(sample_groups.keys())
             all_pairs = list(combinations(all_samples, 2))
         else:
-            g0 = [x for x,y in sample_groups.items() if y==0]
-            g1 = [x for x,y in sample_groups.items() if y==1]
-            all_pairs = list(combinations(g0,2)) + list(combinations(g1,2))
+            g0 = [x for x, y in sample_groups.items() if y == 0]
+            g1 = [x for x, y in sample_groups.items() if y == 1]
+            all_pairs = list(combinations(g0, 2)) + list(combinations(g1, 2))
 
         if not all_pairs:
             print("No pairs to compare, skipping.")
@@ -829,49 +880,79 @@ def main():
         to_compute = []
         for pair in all_pairs:
             check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
-            if check_key not in shelve_db:
+            if not db_has_key(db_conn, check_key):
                 to_compute.append(pair)
 
         if not to_compute:
-            print(f"All {len(all_pairs)} pairs for {cds_id} are already cached, skipping codeml.")
+            print(f"All {len(all_pairs)} pairs for {cds_id} are already in DB, skipping codeml.")
             sys.stdout.flush()
             return
 
         print(f"Computing {len(to_compute)} new pairs out of {len(all_pairs)} total.")
         sys.stdout.flush()
 
-        pool_args = [(pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, None) for pair in to_compute]
-        num_processes = get_safe_process_count()
+        pool_args = [
+            (pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, None)
+            for pair in to_compute
+        ]
+        # Force concurrency to 32 for pairwise computations
+        num_processes = min(NUM_PARALLEL, len(to_compute))
         print(f"Running codeml on {len(to_compute)} pairs with {num_processes} processes.")
         sys.stdout.flush()
 
+        results_accum = []
         with multiprocessing.Pool(processes=num_processes) as pool:
             for r in pool.imap_unordered(process_pair, pool_args, chunksize=10):
                 if r is not None:
-                    seq1, seq2, grp1, grp2, dn, ds, omega, cid = r
-                    newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
-                    shelve_db[newkey] = r
+                    results_accum.append(r)
 
+        for r in results_accum:
+            seq1, seq2, grp1, grp2, dn, ds, omega, cid = r
+            newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
+            record_tuple = (seq1, seq2, grp1, grp2, dn, ds, omega, cid)
+            db_insert_or_ignore(db_conn, newkey, record_tuple)
+
+        # Gather final results from the DB for this CDS
         relevant_keys = []
         for pair in all_pairs:
             final_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
-            if final_key in shelve_db:
-                relevant_keys.append(final_key)
+            relevant_keys.append(final_key)
 
-        final_results = []
-        for k in relevant_keys:
-            final_results.append(shelve_db[k])
+        # We load them back out of the DB to produce the final CSV
+        results_for_csv = []
+        query_placeholders = ",".join(["?"] * len(relevant_keys))
+        # We'll chunk if relevant_keys is huge
+        CHUNK_SIZE = 10000
+        start_index = 0
+        while start_index < len(relevant_keys):
+            chunk_keys = relevant_keys[start_index : start_index + CHUNK_SIZE]
+            in_clause = ",".join(["?"] * len(chunk_keys))
+            sql = f"""
+                SELECT cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds
+                FROM pairwise_cache
+                WHERE cache_key IN ({in_clause})
+            """
+            rows = db_conn.execute(sql, chunk_keys).fetchall()
+            for row in rows:
+                # row = (cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds)
+                results_for_csv.append(row[1:])  # skipping cache_key index 0
+            start_index += CHUNK_SIZE
 
-        df = pd.DataFrame(final_results, columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'])
+        # results_for_csv items are (seq1, seq2, group1, group2, dN, dS, omega, cds)
+        df = pd.DataFrame(
+            results_for_csv,
+            columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS']
+        )
         df.to_csv(output_csv, index=False)
         print(f"Results saved to {output_csv}")
         sys.stdout.flush()
 
+        # Build haplotype stats
         hap_stats = []
         for sample in sequences.keys():
             sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
             omega_vals = sample_df['omega'].dropna()
-            omega_vals = omega_vals[~omega_vals.isin([-1,99])]
+            omega_vals = omega_vals[~omega_vals.isin([-1, 99])]
             if not omega_vals.empty:
                 mean_omega = omega_vals.mean()
                 median_omega = omega_vals.median()
@@ -893,6 +974,8 @@ def main():
 
     print("Processing each allowed CDS file...")
     sys.stdout.flush()
+    completed_comparisons = db_count_keys(db_conn)
+
     for idx, phy_file in enumerate(final_phy_files, 1):
         basename = os.path.basename(phy_file)
         m = filename_pattern.match(basename)
@@ -901,20 +984,26 @@ def main():
         print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
         sys.stdout.flush()
 
-        old_size = len(pair_db.keys())
-        run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, pair_db)
-        new_size = len(pair_db.keys())
+        old_size = db_count_keys(db_conn)
+        run_cds_file(phy_file, group_num, args.output_dir, args.codeml_path, db_conn)
+        new_size = db_count_keys(db_conn)
 
         newly_done = new_size - old_size
         completed_comparisons += newly_done
-        percent = (completed_comparisons / GLOBAL_TOTAL_COMPARISONS * 100) if GLOBAL_TOTAL_COMPARISONS > 0 else 0
+        percent = (
+            (completed_comparisons / GLOBAL_TOTAL_COMPARISONS) * 100
+            if GLOBAL_TOTAL_COMPARISONS > 0
+            else 0
+        )
         logging.info(f"Overall: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
         print(f"Overall progress: {completed_comparisons}/{GLOBAL_TOTAL_COMPARISONS} comps ({percent:.2f}%)")
         sys.stdout.flush()
-        print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, start_time, ETA_DATA)
+        print_eta(completed_comparisons, GLOBAL_TOTAL_COMPARISONS, ETA_DATA['start_time'], ETA_DATA)
 
     end_time = time.time()
-    final_invalid_pct = (GLOBAL_INVALID_SEQS/GLOBAL_TOTAL_SEQS*100) if GLOBAL_TOTAL_SEQS>0 else 0
+    final_invalid_pct = (
+        (GLOBAL_INVALID_SEQS / GLOBAL_TOTAL_SEQS * 100) if GLOBAL_TOTAL_SEQS > 0 else 0
+    )
 
     logging.info("=== END OF RUN SUMMARY ===")
     logging.info(f"Total PHYLIP: {total_files}")
@@ -925,10 +1014,13 @@ def main():
     logging.info(f"Total CDS (final): {GLOBAL_TOTAL_CDS}")
     logging.info(f"Expected comps: {GLOBAL_TOTAL_COMPARISONS}")
     logging.info(f"Completed comps: {completed_comparisons}")
-    logging.info(f"Total time: {(end_time - start_time)/60:.2f} min")
+    logging.info(f"Total time: {(end_time - ETA_DATA['start_time'])/60:.2f} min"
+                 if ETA_DATA['start_time'] else f"Total time: {((end_time - start_time)/60):.2f} min")
 
+    # Save updated counters
     save_cache(cache_file, GLOBAL_COUNTERS)
 
+    # Save the updated validation cache
     try:
         with open(VALIDATION_CACHE_FILE, 'wb') as f:
             pickle.dump(VALIDATION_CACHE, f)
@@ -954,7 +1046,7 @@ def main():
 
     consolidate_all_csvs(args.output_dir, 'all_pairwise_results.csv')
 
-    pair_db.close()
+    db_conn.close()
     logging.info("dN/dS analysis done.")
     print("dN/dS analysis done.")
     sys.stdout.flush()
