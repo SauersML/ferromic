@@ -384,7 +384,6 @@ def save_cache(cache_file, cache_data):
 def process_pair(args):
     """
     The worker function no longer consults a manager dict for pairwise caching.
-    We keep the rest the same for minimal changes, except we skip references to 'CACHE'.
     """
     pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, _ = args
     seq1_name, seq2_name = pair
@@ -569,6 +568,35 @@ def preload_transcript_coords(gtf_file):
         TRANSCRIPT_COORDS = load_gtf_into_dict(gtf_file)
         print(f"[INFO] GTF loaded into memory: {len(TRANSCRIPT_COORDS)} transcripts.")
 
+def _read_csv_rows_global(csv_path):
+    rows_to_insert = []
+    try:
+        df_existing = pd.read_csv(csv_path)
+        if {'Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'}.issubset(df_existing.columns):
+            for _, row in df_existing.iterrows():
+                seq1_val = str(row['Seq1'])
+                seq2_val = str(row['Seq2'])
+                group1_val = row['Group1']
+                group2_val = row['Group2']
+                dn_val = row['dN']
+                ds_val = row['dS']
+                omega_val = row['omega']
+                cid_val = str(row['CDS'])
+                cache_key = f"{cid_val}::{seq1_val}::{seq2_val}::{COMPARE_BETWEEN_GROUPS}"
+                rows_to_insert.append((cache_key, (
+                    seq1_val,
+                    seq2_val,
+                    group1_val,
+                    group2_val,
+                    dn_val,
+                    ds_val,
+                    omega_val,
+                    cid_val
+                )))
+    except Exception as e:
+        print(f"Failed to load CSV {csv_path}: {str(e)}")
+    return rows_to_insert
+
 def main():
     print("Starting main process...")
     sys.stdout.flush()
@@ -608,48 +636,23 @@ def main():
         f for f in glob.glob(os.path.join(args.output_dir, '*.csv'))
         if not f.endswith('_haplotype_stats.csv')
     ]
-    
+
     def _read_csv_rows(csv_path):
-        rows_to_insert = []
-        try:
-            df_existing = pd.read_csv(csv_path)
-            if {'Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'}.issubset(df_existing.columns):
-                for _, row in df_existing.iterrows():
-                    seq1_val = str(row['Seq1'])
-                    seq2_val = str(row['Seq2'])
-                    group1_val = row['Group1']
-                    group2_val = row['Group2']
-                    dn_val = row['dN']
-                    ds_val = row['dS']
-                    omega_val = row['omega']
-                    cid_val = str(row['CDS'])
-                    cache_key = f"{cid_val}::{seq1_val}::{seq2_val}::{COMPARE_BETWEEN_GROUPS}"
-                    rows_to_insert.append((cache_key, (
-                        seq1_val,
-                        seq2_val,
-                        group1_val,
-                        group2_val,
-                        dn_val,
-                        ds_val,
-                        omega_val,
-                        cid_val
-                    )))
-        except Exception as e:
-            print(f"Failed to load CSV {csv_path}: {str(e)}")
-        return rows_to_insert
-    
+        # Just call the top-level version so it's not a local function.
+        return _read_csv_rows_global(csv_path)
+
     num_cpus_csv = min(len(csv_files_to_load), get_safe_process_count())
     count_loaded_from_csv = 0
-    
+
     with multiprocessing.Pool(processes=num_cpus_csv) as pool:
         all_csv_data = pool.map(_read_csv_rows, csv_files_to_load, chunksize=1)
-    
+
     for result_list in all_csv_data:
         for cache_key, record_tuple in result_list:
             if cache_key not in pair_db:
                 pair_db[cache_key] = record_tuple
                 count_loaded_from_csv += 1
-    
+
     print(f"Preloaded {count_loaded_from_csv} comparisons from existing CSV files into the shelve cache.")
 
     preload_transcript_coords('../hg38.knownGene.gtf')
