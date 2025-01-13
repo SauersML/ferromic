@@ -745,13 +745,13 @@ def parse_cds_coordinates(cds_name):
         if '/' in cds_name:  # If it's a path, take the last part
             cds_name = cds_name.split('/')[-1]
 
-        if '_' in cds_name:  # Expected format
-            parts = cds_name.split('_')
-            if len(parts) == 3 and parts[1].startswith('start') and parts[2].startswith('end'):
-                chrom = parts[0]
-                start = int(parts[1].replace('start', ''))
-                end = int(parts[2].replace('end', ''))
-                return chrom, start, end
+        if '_chr_' in cds_name:
+            left, right = cds_name.split('_chr_')
+            right = right.replace('_combined', '')
+            chrom = 'chr' + right
+            start = 0
+            end = 0
+            return chrom, start, end
         elif ':' in cds_name:
             chrom, coords = cds_name.split(':')
             start, end = map(int, coords.replace('-', '..').split('..'))
