@@ -390,46 +390,6 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         error_log.append(f"ERROR: Failed to fetch from Ensembl: {str(ex)}")
         return None, None, error_log
 
-    # Get the most relevant gene (the one that best contains our region)
-    best_gene = None
-    best_overlap = 0
-    region_length = loc['end'] - loc['start']
-    
-    for gene in genes:
-        gene_start = gene.get('chromStart', 0)
-        gene_end = gene.get('chromEnd', 0)
-        
-        # Calculate how much of our region is contained within this gene
-        overlap_start = max(gene_start, loc['start'])
-        overlap_end = min(gene_end, loc['end'])
-        overlap = max(0, overlap_end - overlap_start)
-        
-        if overlap > best_overlap:
-            best_overlap = overlap
-            best_gene = gene
-
-    if not best_gene:
-        error_log.append("WARNING: Could not determine best matching gene")
-        return None, None, error_log
-
-    # Extract gene information 
-    symbol = best_gene.get('geneName')
-    if symbol == 'none' or symbol.startswith('ENSG'):
-        # Try to find another gene with a proper symbol
-        for gene in genes:
-            potential_symbol = gene.get('geneName')
-            if potential_symbol != 'none' and not potential_symbol.startswith('ENSG'):
-                symbol = potential_symbol
-                break
-
-    name = get_gene_info(symbol) # Returns full human readable name
-
-    if symbol == 'Unknown':
-        error_log.append("WARNING: No symbol found in gene data")
-    if name == 'Unknown':
-        error_log.append("WARNING: No name found in gene data")
-
-    # Update cache
     try:
         cache[cds] = {'symbol': symbol, 'name': name}
         with open(cache_file, 'w') as f:
@@ -438,8 +398,6 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         error_log.append(f"WARNING: Failed to update cache file: {str(e)}")
 
     return symbol, name, error_log
-
-
 
 
 def create_visualization(matrix_0, matrix_1, cds, result):
