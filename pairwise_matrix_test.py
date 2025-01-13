@@ -384,21 +384,46 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
             error_log.append(f"ERROR: Ensembl request failed with status {r.status_code}: {r.text}")
             return None, None, error_log
         info = r.json()
+        chrom = f"chr{info['seq_region_name']}"
+        start = int(info['start'])
+        end   = int(info['end'])
+        
         symbol = transcript_id
-        name = f"Transcript_{transcript_id}"
+        name   = f"Transcript_{transcript_id}"
+        
+        cache[cds] = {
+            'symbol': symbol,
+            'name': name,
+            'chrom': chrom,
+            'start': start,
+            'end': end
+        }
     except Exception as ex:
         error_log.append(f"ERROR: Failed to fetch from Ensembl: {str(ex)}")
         return None, None, error_log
-
+    
     try:
-        cache[cds] = {'symbol': symbol, 'name': name}
+        cache[cds] = {
+            'symbol': symbol,
+            'name': name,
+            'chrom': chrom,
+            'start': start,
+            'end': end
+        }
         with open(cache_file, 'w') as f:
             json.dump(cache, f)
     except Exception as e:
         error_log.append(f"WARNING: Failed to update cache file: {str(e)}")
-
-    return symbol, name, error_log
-
+    
+    cached_entry = cache[cds]
+    return (
+        cached_entry['symbol'],
+        cached_entry['name'],
+        cached_entry['chrom'],
+        cached_entry['start'],
+        cached_entry['end'],
+        error_log
+    )
 
 def create_visualization(matrix_0, matrix_1, cds, result):
     # Retrieve gene annotation
@@ -1212,10 +1237,6 @@ def main():
         }
         for cds, result in results.items()
     ])
-
-    results_df['chrom'] = None
-    results_df['start'] = None
-    results_df['end'] = None
 
     # Save final results
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
