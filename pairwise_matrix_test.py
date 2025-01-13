@@ -376,6 +376,7 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         return None, None, error_log
     
     transcript_id = match.group(1)
+    transcript_id = re.sub(r'\.\d+$', '', transcript_id)  # Remove suffix like ".8"
     ensembl_url = f"https://rest.ensembl.org/lookup/id/{transcript_id}?content-type=application/json"
     try:
         r = requests.get(ensembl_url, timeout=10)
