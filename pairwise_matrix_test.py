@@ -734,8 +734,8 @@ def parse_cds_coordinates(cds_name):
             left, right = cds_name.split('_chr_')
             right = right.replace('_combined', '')
             chrom = 'chr' + right
-            start = 0
-            end = 0
+            start = 1
+            end = 10 # fix later
             return chrom, start, end
         elif ':' in cds_name:
             chrom, coords = cds_name.split(':')
