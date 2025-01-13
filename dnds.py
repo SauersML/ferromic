@@ -726,9 +726,7 @@ def main():
         if csv_file.endswith('_haplotype_stats.csv'):
             continue
         base_name = os.path.basename(csv_file).replace('.csv', '')
-        hap_name = os.path.join(args.output_dir, f'{base_name}_haplotype_stats.csv')
-        if os.path.exists(hap_name):
-            completed_cds_ids.add(base_name)
+        completed_cds_ids.add(base_name)
 
     print(f"Found {len(completed_cds_ids)} completed CSV sets. Now gathering .phy files...")
     sys.stdout.flush()
@@ -851,7 +849,7 @@ def main():
         output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}.csv')
         haplotype_output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
 
-        if os.path.exists(output_csv) and os.path.exists(haplotype_output_csv):
+        if os.path.exists(output_csv):
             print("Output already exists, skipping file.")
             sys.stdout.flush()
             return
