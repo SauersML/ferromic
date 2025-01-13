@@ -568,11 +568,15 @@ def preload_transcript_coords(gtf_file):
         TRANSCRIPT_COORDS = load_gtf_into_dict(gtf_file)
         print(f"[INFO] GTF loaded into memory: {len(TRANSCRIPT_COORDS)} transcripts.")
 
-def _read_csv_rows_global(csv_path):
+def _read_csv_rows(csv_path):
+    """
+    Single top-level function to read existing CSV rows into the shelve cache.
+    """
     rows_to_insert = []
     try:
         df_existing = pd.read_csv(csv_path)
-        if {'Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'}.issubset(df_existing.columns):
+        required_cols = {'Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS'}
+        if required_cols.issubset(df_existing.columns):
             for _, row in df_existing.iterrows():
                 seq1_val = str(row['Seq1'])
                 seq2_val = str(row['Seq2'])
@@ -637,13 +641,10 @@ def main():
         if not f.endswith('_haplotype_stats.csv')
     ]
 
-    def _read_csv_rows(csv_path):
-        # Just call the top-level version so it's not a local function.
-        return _read_csv_rows_global(csv_path)
-
     num_cpus_csv = min(len(csv_files_to_load), get_safe_process_count())
     count_loaded_from_csv = 0
 
+    # Parallel load of CSV rows (for large numbers of CSVs)
     with multiprocessing.Pool(processes=num_cpus_csv) as pool:
         all_csv_data = pool.map(_read_csv_rows, csv_files_to_load, chunksize=1)
 
