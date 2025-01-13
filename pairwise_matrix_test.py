@@ -18,6 +18,7 @@ from matplotlib.colors import ListedColormap, BoundaryNorm, LinearSegmentedColor
 from matplotlib.colorbar import ColorbarBase
 import matplotlib.patches as mpatches
 import requests
+import re
 from urllib.parse import urlencode
 from matplotlib.ticker import ScalarFormatter
 from matplotlib.ticker import FixedLocator, FixedFormatter
@@ -369,21 +370,24 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         except Exception as e:
             return None, f"ERROR: Unexpected error during API query: {str(e)}"
 
-    # Parse coordinates
-    loc, parse_error = parse_coords(cds)
-    if parse_error:
-        error_log.append(parse_error)
+    match = re.search(r'(ENST\d+\.\d+)', cds)
+    if not match:
+        error_log.append("ERROR: Could not find an ENST in this CDS name")
         return None, None, error_log
     
-    # Query API
-    genes, query_error = query_ucsc(loc['chr'], loc['start'], loc['end'])
-    if query_error:
-        error_log.append(query_error)
-        return None, None, error_log
-
-    if not genes:
-        error_log.append(f"WARNING: No genes found for coordinates {loc['chr']}:{loc['start']}-{loc['end']}")
-        return None, None, error_log
+    transcript_id = match.group(1)
+    ensembl_url = f"https://rest.ensembl.org/lookup/id/{transcript_id}?content-type=application/json"
+    try:
+        r = requests.get(ensembl_url, timeout=10)
+        if not r.ok:
+            error_log.append(f"ERROR: Ensembl request failed with status {r.status_code}: {r.text}")
+            return None, None, error_log
+        info = r.json()
+        symbol = transcript_id
+        name = f"Transcript_{transcript_id}"
+    except Exception as ex:
+        error_log.append(f"ERROR: Failed to fetch from Ensembl: {str(ex)}")
+        return None, None, error_log found for coordinates {loc['chr']}:{loc['start']}-{loc['end']}")
 
     # Get the most relevant gene (the one that best contains our region)
     best_gene = None
@@ -1250,11 +1254,9 @@ def main():
         for cds, result in results.items()
     ])
 
-    # Parse coordinates from CDS and add to results_df
-    coords = results_df['CDS'].apply(parse_cds_coordinates)
-    results_df[['chrom', 'start', 'end']] = pd.DataFrame(coords.tolist(), index=results_df.index)
-    # Drop rows where parsing failed
-    results_df.dropna(subset=['chrom','start','end'], inplace=True)
+    results_df['chrom'] = None
+    results_df['start'] = None
+    results_df['end'] = None
 
     # Save final results
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
