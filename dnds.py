@@ -703,7 +703,7 @@ def main():
 
     if csv_files_to_load:
         with multiprocessing.Pool(processes=parallel_csv) as pool:
-            all_csv_data = pool.map(_read_csv_rows, csv_files_to_load, chunksize=1)
+            all_csv_data = pool.map(_read_csv_rows, csv_files_to_load, chunksize=50)
         for result_list in all_csv_data:
             for cache_key, record_tuple in result_list:
                 if not db_has_key(db_conn, cache_key):
