@@ -714,23 +714,27 @@ def analyze_cds_parallel(args):
 def parse_cds_coordinates(cds_name):
     """Extract chromosome and coordinates from CDS name."""
     try:
-        # Try different possible formats
-        if '/' in cds_name:  # If it's a path, take the last part
+        # If it's a path, keep only the final filename
+        if '/' in cds_name:
             cds_name = cds_name.split('/')[-1]
 
-        if '_chr_' in cds_name:
-            left, right = cds_name.split('_chr_')
-            right = right.replace('_combined', '')
-            chrom = 'chr' + right
-            start = 1
-            end = 10 # fix later
+        # Look for pattern: _chr_<chr>_start_<start>_end_<end>
+        m = re.search(r'_chr_(.*?)_start_(\d+)_end_(\d+)', cds_name)
+        if m:
+            chrom_part = m.group(1)  # e.g. "19"
+            start_str = m.group(2)   # e.g. "1000"
+            end_str = m.group(3)     # e.g. "2000"
+            chrom = 'chr' + chrom_part
+            start = int(start_str)
+            end = int(end_str)
             return chrom, start, end
-        elif ':' in cds_name:
+
+        # As a fallback, if we have a colon-based pattern: "chr19:1000-2000"
+        if ':' in cds_name:
             chrom, coords = cds_name.split(':')
             start, end = map(int, coords.replace('-', '..').split('..'))
             return chrom, start, end
 
-        # If parsing fails
         print(f"Failed to parse: {cds_name}")
         return None, None, None
     except Exception as e:
