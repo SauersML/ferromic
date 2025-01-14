@@ -753,16 +753,19 @@ fn process_variants(
                     continue;
                 }
             
-                // Trim partial codons from the left, respecting the GFF frame
-                //    (frame_val is 0,1,2 meaning how many bases to complete the codon)
+                // Trim partial codons from the left, respecting the GFF frame.
                 let left_shift = ((overlap_start - seg_start) + frame_val) % 3;
                 let trimmed_start = overlap_start + left_shift;
                 if trimmed_start > overlap_end {
                     continue;
                 }
             
-                // Trim from the right so the total length is multiple of 3
-                // Double check correctness...
+                // First we align 'trimmed_start' to a codon boundary 
+                // (based on frame). Then we subtract 'remainder' from the right 
+                // so that the final length is a multiple of 3. This make sure the 
+                // segment is fully codon-aligned, with no partial codons.
+            
+                // Trim from the right so the total length is multiple of 3.
                 let length = overlap_end - trimmed_start + 1;
                 let remainder = length % 3;
                 let trimmed_end = overlap_end - remainder;
