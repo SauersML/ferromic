@@ -560,7 +560,14 @@ fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64
 
 /*
 When the code calls something like:
-    let filename = format!("group_{}_{}_chr_{}_combined.phy", haplotype_group, transcript_id, chromosome);
+    let filename = format!(
+    "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
+    haplotype_group,
+    transcript_id,
+    chromosome,
+    region_start,
+    region_end
+);
 it creates one .phy file per combination of haplotype_group (0 or 1), transcript_id, and chromosome. This file can contain sequences from many samples, as long as their config entries say those samples’ haplotypes belong to that group.
 
 Inside the file, each line is written by something like:
@@ -840,7 +847,14 @@ fn process_variants(
     }
 
     // Convert to char sequences and write out a single final PHYLIP file per transcript
-    let filename = format!("group_{}_{}_chr_{}_combined.phy", haplotype_group, transcript_id, chromosome);
+    let filename = format!(
+        "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
+        haplotype_group,
+        transcript_id,
+        chromosome,
+        region_start,
+        region_end
+    );
     let char_sequences: HashMap<String, Vec<char>> = combined_sequences
         .into_iter()
         .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
