@@ -1058,10 +1058,12 @@ fn make_sequences(
         
         // After processing all segments, write one final .phy file
         let filename = format!(
-            "group_{}_{}_chr_{}_combined.phy",
+            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
             haplotype_group,
             cds.transcript_id,
-            chromosome
+            chromosome,
+            cds_start,
+            cds_end
         );
         
         // Convert combined_cds_sequences to char sequences
@@ -1131,10 +1133,12 @@ fn make_sequences(
 
         
         let filename = format!(
-            "group_{}_{}_chr_{}_combined.phy",
+            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
             haplotype_group,
             cds.transcript_id,
-            chromosome
+            chromosome,
+            cds_start,
+            cds_end
         );
         
         // Convert combined_sequences to char sequences
