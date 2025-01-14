@@ -292,22 +292,6 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         error_log.append(f"INFO: Found entry in cache for {cds}")
         return cache[cds]['symbol'], cache[cds]['name'], error_log
 
-    def parse_coords(coord_str):
-        """Parse the chr, start, and end from a string containing _chr_<chr>_start_<start>_end_<end>."""
-        if not coord_str:
-            return None, "ERROR: Empty coordinate string provided"
-        try:
-            m = re.search(r'_chr_(.*?)_start_(\d+)_end_(\d+)', coord_str)
-            if m:
-                chrom_part = m.group(1)
-                start_str = m.group(2)
-                end_str = m.group(3)
-                chr_val = 'chr' + chrom_part
-                return {'chr': chr_val, 'start': int(start_str), 'end': int(end_str)}, None
-            return None, "ERROR: Invalid coordinate format"
-        except Exception as e:
-            return None, f"ERROR: Failed to parse coordinates: {str(e)}"
-
     def query_ucsc(chr, start, end):
         """Query UCSC API for genes at location"""
         base_url = "https://api.genome.ucsc.edu/getData/track"
