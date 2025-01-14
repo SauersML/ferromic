@@ -742,27 +742,59 @@ fn process_variants(
         let mut segment_map = Vec::new();
         {
             let mut current_length = 0;
-            for &(seg_start, seg_end) in &cds.segments {
+            for &(seg_start, seg_end, frame_val) in &cds.segments {
                 if seg_end < region_start || seg_start > region_end {
                     continue;
                 }
+                // Calculate raw overlap
                 let overlap_start = std::cmp::max(seg_start, region_start);
-                let overlap_end = std::cmp::min(seg_end, region_end);
-                let start_offset = (overlap_start - region_start) as usize;
-                let end_offset = (overlap_end - region_start + 1) as usize;
-    
+                let overlap_end   = std::cmp::min(seg_end,   region_end);
+                if overlap_end < overlap_start {
+                    continue;
+                }
+            
+                // Trim partial codons from the left, respecting the GFF frame
+                //    (frame_val is 0,1,2 meaning how many bases to complete the codon)
+                let left_shift = ((overlap_start - seg_start) + frame_val) % 3;
+                let trimmed_start = overlap_start + left_shift;
+                if trimmed_start > overlap_end {
+                    continue;
+                }
+            
+                // Trim from the right so the total length is multiple of 3
+                // Double check correctness...
+                let length = overlap_end - trimmed_start + 1;
+                let remainder = length % 3;
+                let trimmed_end = overlap_end - remainder;
+                if trimmed_end < trimmed_start {
+                    continue;
+                }
+            
+                // Now slice the reference
+                let start_offset = (trimmed_start - region_start) as usize;
+                let end_offset   = (trimmed_end - region_start + 1) as usize;
+            
                 if end_offset > reference_sequence.len() {
                     continue;
                 }
-    
-                let segment_ref_seq = &reference_sequence[start_offset..end_offset];
+            
+                l
+            
+                // Append to each haplotype’s combined sequence
                 for (sample_idx, hap_idx) in &haplotype_indices {
-                    let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
-                    combined_sequences.get_mut(&sample_name).unwrap().extend_from_slice(segment_ref_seq);
+                    let sample_name = match *hap_idx {
+                        0 => format!("{}_L", sample_names[*sample_idx]),
+                        1 => format!("{}_R", sample_names[*sample_idx]),
+                        _ => panic!("Unexpected hap_idx!"),
+                    };
+                    combined_sequences
+                        .get_mut(&sample_name)
+                        .unwrap()
+                        .extend_from_slice(segment_ref_seq);
                 }
-    
+            
                 let segment_len = end_offset - start_offset;
-                segment_map.push((overlap_start, overlap_end, current_length));
+                segment_map.push((trimmed_start, trimmed_end, current_length));
                 current_length += segment_len;
             }
         }
@@ -1045,7 +1077,7 @@ fn make_sequences(
             combined_cds_sequences.insert(name.clone(), Vec::new());
         }
         
-        for &(seg_start, seg_end) in &cds.segments {
+        for &(seg_start, seg_end, frame_val) in &cds.segments {
             if seg_end < region_start || seg_start > region_end {
                 continue;
             }
@@ -2508,10 +2540,10 @@ fn parse_gff_file(
                     segments.iter().map(|&(s, e, _)| e - s + 1).collect::<Vec<_>>());
         }
 
-        let segs: Vec<(i64,i64)> = segments.iter().map(|&(s,e,_)| (s,e)).collect();
         let cds_region = CdsRegion {
             transcript_id: transcript_id.clone(),
-            segments: segs,
+            // Use the entire triple (start,end,frame) directly
+            segments,
         };
 
         let cds_start = cds_region.segments.iter().map(|(s, _)| *s).min().unwrap();
@@ -2577,7 +2609,8 @@ fn parse_gff_file(
 // Struct to hold CDS region information
 struct CdsRegion {
     transcript_id: String,
-    segments: Vec<(i64, i64)>,
+    // Store (start, end, frame) instead of just (start, end)
+    segments: Vec<(i64, i64, i64)>,
 }
 
 // IN PROGRESS
