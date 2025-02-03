@@ -746,28 +746,26 @@ fn process_variants(
                 if seg_end < region_start || seg_start > region_end {
                     continue;
                 }
-                // Calculate raw overlap
+                // Compute raw overlap of this CDS segment with the region
                 let overlap_start = std::cmp::max(seg_start, region_start);
                 let overlap_end   = std::cmp::min(seg_end,   region_end);
                 if overlap_end < overlap_start {
                     continue;
                 }
-            
-                // Skip `frame_val` bases at the left to honor the partial-codon bridging:
+
+                // Skip `frame_val` bases at the left for partial-codon bridging:
                 let skip = ((overlap_start - seg_start) + frame_val) % 3;
                 let exon_start = overlap_start + skip;
                 if exon_start > overlap_end {
                     continue;
                 }
-                
-                // Do NOT forcibly trim the right end here;
-                // just use overlap_end directly.
+
+                // Do NOT forcibly trim the right end; just use overlap_end directly.
                 let exon_end = overlap_end;
-                
-                // Convert these to offsets into our `reference_sequence` buffer:
+
+                // Convert these to offsets in `reference_sequence`
                 let start_offset = (exon_start - region_start) as usize;
                 let end_offset   = (exon_end   - region_start + 1) as usize;
-                
                 if end_offset > reference_sequence.len() {
                     continue;
                 }
