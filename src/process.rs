@@ -1166,16 +1166,12 @@ fn make_sequences(
         for (name, original_seq) in &hap_sequences {
             combined_cds_sequences.insert(name.clone(), Vec::new());
         }
+
         
-        for &(seg_start, seg_end, strand_char, frame_val) in &cds.segments {
-            if seg_end < region_start || seg_start > region_end {
-                continue;
-            }
+        let cds_start = std::cmp::max(seg_start - 1, region_start - 1); // 0-based.... or just seg_start??? Double check this.
+        let cds_end = std::cmp::min(seg_end, region_end);
         
-            let cds_start = std::cmp::max(seg_start - 1, region_start - 1); // 0-based
-            let cds_end = std::cmp::min(seg_end, region_end);
-        
-            // Extract per-segment and append to combined_cds_sequences[name]
+        // Extract per-segment and append to combined_cds_sequences[name]
         }
         
         // After processing all segments, write one final .phy file
