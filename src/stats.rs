@@ -753,72 +753,11 @@ fn process_variants(
                     continue;
                 }
 
-                // Skip `frame_val` bases at the left for partial-codon bridging:
-                let skip = ((overlap_start - seg_start) + frame_val) % 3;
-                
-                if skip > 0 {
-                    use colored::Colorize;
-                
-                    let left_clip_start = overlap_start;
-                    let left_clip_end = overlap_start + skip - 1;
-                    let trim_slice = &reference_sequence[(left_clip_start - region_start) as usize
-                                                         .. (left_clip_end - region_start + 1) as usize];
-                    let trim_str: String = trim_slice.iter().map(|&b| b as char).collect();
-                
-                    eprintln!(
-                        "{} {}: Skipping {} leftover base(s) from the LEFT side for transcript {}.\n  Overlap: {}..{}.  Partial codon portion: [{}]",
-                        "[CDS boundary]".bold().red(),
-                        "SKIP".yellow(),
-                        skip,
-                        transcript_id.blue(),
-                        left_clip_start,
-                        left_clip_end,
-                        trim_str.magenta().bold(),
-                    );
-                }
-                
-                let exon_start = overlap_start + skip;
-                if exon_start > overlap_end {
-                    continue;
-                }
-
-                // Force trim at right boundry
+                let exon_start = overlap_start;
                 let mut exon_end = overlap_end;
-                let exon_length = exon_end - exon_start + 1;
-                let remainder_right = exon_length % 3;
-                
-                // If there are 1–2 leftover bases that don't form a complete codon, trim them off:
-                if remainder_right != 0 {
-                    // For debug: show the slice we are about to remove
-                    let trim_start = exon_end - remainder_right + 1;
-                    let trim_slice = &reference_sequence[(trim_start - region_start) as usize
-                                                         .. (exon_end - region_start + 1) as usize];
-                    let trim_str: String = trim_slice.iter().map(|&b| b as char).collect();
-                
-                    eprintln!(
-                        "{} {}: Removing {} leftover base(s) from the right side for transcript {}.\n  Original overlap: {}..{}.   Partial codon: [{}]",
-                        "[CDS boundary]".bold().red(),
-                        "TRIM".yellow(),
-                        remainder_right,
-                        transcript_id.blue(),
-                        exon_start,
-                        exon_end,
-                        trim_str.magenta().bold(),
-                    );
-                
-                    // Actually trim
-                    exon_end -= remainder_right;
-                    if exon_end < exon_start {
-                        // Entire overlap is just a partial codon, so skip
-                        eprintln!(
-                            "{} {}: Entire overlap was partial, skipping it. ({}..{})",
-                            "[CDS boundary]".bold().red(),
-                            "NOTE".yellow(),
-                            exon_start,
-                            overlap_end
-                        );
-                        continue;
-                    }
+
+                if exon_end < exon_start {
+                    continue;
                 }
                 
                 // Now convert these to offsets in `reference_sequence`
