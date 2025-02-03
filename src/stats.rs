@@ -249,7 +249,7 @@ fn main() -> Result<(), VcfError> {
             end
         )?;
         
-        let cds_regions = parse_gff_file(
+        let cds_regions = parse_gtf_file(
             &Path::new(&args.gff_path),
             chr,
             start,
@@ -1273,7 +1273,7 @@ fn process_config_entries(
             entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX)
         )?;
         
-        let cds_regions = parse_gff_file(
+        let cds_regions = parse_gtf_file(
             &Path::new(&args.gff_path),
             &chr,
             entries.iter().map(|e| e.start).min().unwrap_or(0),
@@ -1419,7 +1419,7 @@ fn process_config_entries(
                 entry.end
             )?;
             
-            let cds_regions = parse_gff_file(
+            let cds_regions = parse_gtf_file(
                 &Path::new(&args.gff_path),
                 &chr,
                 entry.start,
@@ -1453,7 +1453,7 @@ fn process_config_entries(
                 entry.end
             )?;
             
-            let cds_regions = parse_gff_file(
+            let cds_regions = parse_gtf_file(
                 &Path::new(&args.gff_path),
                 &chr,
                 entry.start,
@@ -2328,7 +2328,7 @@ fn read_reference_sequence(
 // IN PROGRESS
 // Helper function to parse GFF file and extract CDS regions
 // GTF and GFF use 1-based coordinate system
-fn parse_gff_file(
+fn parse_gtf_file(
     gff_path: &Path, 
     chr: &str,
     region_start: i64,
