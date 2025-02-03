@@ -57,8 +57,8 @@ struct Args {
     #[arg(long = "reference")]
     reference_path: String,
 
-    #[arg(long = "gff")]
-    gff_path: String,
+    #[arg(long = "gtf")]
+    gtf_path: String,
 }
 
 // Data structures
@@ -250,7 +250,7 @@ fn main() -> Result<(), VcfError> {
         )?;
         
         let cds_regions = parse_gtf_file(
-            &Path::new(&args.gff_path),
+            &Path::new(&args.gtf_path),
             chr,
             start,
             end
@@ -753,7 +753,7 @@ fn process_variants(
                     continue;
                 }
             
-                // Trim partial codons from the left, respecting the GFF frame.
+                // Trim partial codons from the left, respecting the GTF frame.
                 let left_shift = ((overlap_start - seg_start) + frame_val) % 3;
                 let trimmed_start = overlap_start + left_shift;
                 if trimmed_start > overlap_end {
@@ -1274,7 +1274,7 @@ fn process_config_entries(
         )?;
         
         let cds_regions = parse_gtf_file(
-            &Path::new(&args.gff_path),
+            &Path::new(&args.gtf_path),
             &chr,
             entries.iter().map(|e| e.start).min().unwrap_or(0),
             entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX)
@@ -1420,7 +1420,7 @@ fn process_config_entries(
             )?;
             
             let cds_regions = parse_gtf_file(
-                &Path::new(&args.gff_path),
+                &Path::new(&args.gtf_path),
                 &chr,
                 entry.start,
                 entry.end
@@ -1454,7 +1454,7 @@ fn process_config_entries(
             )?;
             
             let cds_regions = parse_gtf_file(
-                &Path::new(&args.gff_path),
+                &Path::new(&args.gtf_path),
                 &chr,
                 entry.start,
                 entry.end
@@ -2326,22 +2326,22 @@ fn read_reference_sequence(
 
 
 // IN PROGRESS
-// Helper function to parse GFF file and extract CDS regions
+// Helper function to parse GTF file and extract CDS regions
 // GTF and GFF use 1-based coordinate system
 fn parse_gtf_file(
-    gff_path: &Path, 
+    gtf_path: &Path, 
     chr: &str,
     region_start: i64,
     region_end: i64,
 ) -> Result<Vec<CdsRegion>, VcfError> {
-    println!("\n{}", "Parsing GFF file...".green().bold());
+    println!("\n{}", "Parsing GTF file...".green().bold());
     println!("Chromosome: {}", chr);
     println!("Region: {}-{}", region_start, region_end);
 
-    let file = File::open(gff_path).map_err(|e| {
+    let file = File::open(gtf_path).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("GFF file not found: {:?}", e),
+            format!("GTF file not found: {:?}", e),
         ))
     })?;
     let reader = BufReader::new(file);
@@ -2353,7 +2353,7 @@ fn parse_gtf_file(
     let mut transcripts_found = HashSet::new();
     let mut malformed_attributes = 0;
 
-    println!("Reading GFF entries...");
+    println!("Reading GTF entries...");
 
     for (line_num, line_result) in reader.lines().enumerate() {
         let line = line_result?;
@@ -2461,7 +2461,7 @@ fn parse_gtf_file(
             .push((start, end, strand_char, frame));
     }
 
-    println!("\n{}", "GFF Parsing Statistics:".blue().bold());
+    println!("\n{}", "GTF Parsing Statistics:".blue().bold());
     println!("Total CDS entries processed: {}", processed_lines);
     println!("Skipped lines: {}", skipped_lines);
     println!("Unique transcripts found: {}", transcripts_found.len());
