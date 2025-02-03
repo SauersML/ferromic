@@ -754,6 +754,7 @@ fn process_variants(
                 }
 
                 // Compute how far we are into the codon at the left boundary
+                // TODO: make sure this doesn't affect bridge codons, just query boundary
                 let left_offset_in_cds = (frame_val + (overlap_start - seg_start)) % 3;
                 
                 // Skip exactly that many bases on the left, so we start at a codon boundary
