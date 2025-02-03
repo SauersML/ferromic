@@ -728,8 +728,8 @@ fn process_variants(
     // Process CDS regions and generate final coding sequences per transcript
     for cds in cds_regions {
         let transcript_id = &cds.transcript_id;
-        let cds_min = cds.segments.iter().map(|(s, _, _)| *s).min().unwrap();
-        let cds_max = cds.segments.iter().map(|(_, e, _)| *e).max().unwrap();
+        let cds_min = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
+        let cds_max = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
     
         // Map each haplotype to a combined coding sequence
         let mut combined_sequences: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1086,8 +1086,8 @@ fn make_sequences(
 
     // For each CDS, extract sequences and write to PHYLIP file
     for cds in cds_regions {
-        let cds_start = cds.segments.iter().map(|(s, _, _)| *s).min().unwrap();
-        let cds_end = cds.segments.iter().map(|(_, e, _)| *e).max().unwrap();
+        let cds_start = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
+        let cds_end = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
 
         // Check overlap with region
         let mut combined_cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1160,8 +1160,8 @@ fn make_sequences(
             cds_sequences.insert(sample_name.clone(), cds_seq);
         }
 
-        let cds_start = cds.segments.iter().map(|(s, _, _)| *s).min().unwrap();
-        let cds_end = cds.segments.iter().map(|(_, e, _)| *e).max().unwrap();
+        let cds_start = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
+        let cds_end = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
 
         if cds_sequences.is_empty() {
             eprintln!(
@@ -2347,7 +2347,7 @@ fn parse_gff_file(
     let reader = BufReader::new(file);
     
     // Change to use transcript ID as key since CDS belongs to transcripts
-    let mut transcript_cdss: HashMap<String, Vec<(i64, i64, i64)>> = HashMap::new();
+    let mut transcript_cdss: HashMap<String, Vec<(i64, i64, char, i64)>> = HashMap::new();
     let mut skipped_lines = 0;
     let mut processed_lines = 0;
     let mut transcripts_found = HashSet::new();
@@ -2524,8 +2524,8 @@ fn parse_gff_file(
             continue;
         }
 
-        let min_start = segments.iter().map(|&(s, _, _)| s).min().unwrap();
-        let max_end = segments.iter().map(|&(_, e, _)| e).max().unwrap();
+        let min_start = segments.iter().map(|&(s, _, _, _)| s).min().unwrap();
+        let max_end = segments.iter().map(|&(_, e, _, _)| e).max().unwrap();
         let transcript_span = max_end - min_start + 1;
         
         // Calculate actual coding length (sum of CDS lengths)
@@ -2565,14 +2565,14 @@ fn parse_gff_file(
             segments,
         };
 
-        let cds_start = cds_region.segments.iter().map(|(s, _, _)| *s).min().unwrap();
-        let cds_end = cds_region.segments.iter().map(|(_, e, _)| *e).max().unwrap();
+        let cds_start = cds_region.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
+        let cds_end = cds_region.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
 
         // Create a local variable holding the cloned segments
         let cloned_segments = cds_region.segments.clone();
         
-        let min_start_for_print = cloned_segments.iter().map(|(s, _, _)| s).min().unwrap();
-        let max_end_for_print = cloned_segments.iter().map(|(_, e, _)| e).max().unwrap();
+        let min_start_for_print = cloned_segments.iter().map(|(s, _, _, _)| s).min().unwrap();
+        let max_end_for_print = cloned_segments.iter().map(|(_, e, _, _)| e).max().unwrap();
         
         println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
 
@@ -2628,9 +2628,10 @@ fn parse_gff_file(
 // Struct to hold CDS region information
 struct CdsRegion {
     transcript_id: String,
-    // Store (start, end, strand, frame)
+    // Store (start, end, strand_char, frame)
     segments: Vec<(i64, i64, char, i64)>,
 }
+
 
 // IN PROGRESS
 // Write sequences to PHYLIP file
