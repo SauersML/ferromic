@@ -793,6 +793,7 @@ fn process_variants(
                     combined_sequences
                         .get_mut(&sample_name)
                         .unwrap()
+                        let segment_ref_seq = &reference_sequence[start_offset..end_offset];
                         .extend_from_slice(segment_ref_seq);
                 }
             
