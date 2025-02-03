@@ -753,21 +753,35 @@ fn process_variants(
                     continue;
                 }
 
-                let exon_start = overlap_start;
-                let mut exon_end = overlap_end;
 
-                if exon_end < exon_start {
+                // Adjust the left boundary based on frame_val and actual overlap
+                let left_cut = overlap_start - seg_start;
+                let true_frame = (frame_val + left_cut) % 3;
+                let skip_left = if true_frame > 0 { 3 - true_frame } else { 0 };
+                let exon_start = overlap_start + skip_left;
+                if exon_start > overlap_end {
                     continue;
                 }
                 
-                // Now convert these to offsets in `reference_sequence`
+                // Adjust the right boundary so that the final length is a multiple of three.... fix later.
+                let length_so_far = (exon_start - seg_start) + frame_val;
+                let overlap_len = overlap_end - exon_start + 1;
+                let remainder_right = (length_so_far + overlap_len) % 3;
+                let mut exon_end = overlap_end;
+                if remainder_right > 0 {
+                    exon_end -= remainder_right;
+                    if exon_end < exon_start {
+                        continue;
+                    }
+                }
+                
                 let start_offset = (exon_start - region_start) as usize;
-                let end_offset   = (exon_end   - region_start + 1) as usize;
+                let end_offset = (exon_end - region_start + 1) as usize;
                 if end_offset > reference_sequence.len() {
                     continue;
                 }
-                            
-                // Append to each haplotype’s combined sequence, with reverse‐complement if minus strand
+                
+                // Append to each haplotype's combined sequence, reverse‐complement if minus strand
                 for (sample_idx, hap_idx) in &haplotype_indices {
                     let sample_name = match *hap_idx {
                         0 => format!("{}_L", sample_names[*sample_idx]),
@@ -775,11 +789,9 @@ fn process_variants(
                         _ => panic!("Unexpected hap_idx!"),
                     };
                     let seq = combined_sequences.get_mut(&sample_name).unwrap();
-                    
-                    // Copy the exact slice so we can mutate if needed
+                
                     let mut segment_ref_seq = reference_sequence[start_offset..end_offset].to_vec();
                 
-                    // If it's minus strand, reverse + complement
                     if strand_char == '-' {
                         segment_ref_seq.reverse();
                         for b in segment_ref_seq.iter_mut() {
@@ -792,14 +804,13 @@ fn process_variants(
                             };
                         }
                     }
-                
-                    // Now extend the combined sequence with the (possibly reversed) slice
                     seq.extend_from_slice(&segment_ref_seq);
                 }
-            
+                
                 let segment_len = end_offset - start_offset;
                 segment_map.push((exon_start, exon_end, current_length));
                 current_length += segment_len;
+                
             }
         }
     
