@@ -753,30 +753,21 @@ fn process_variants(
                     continue;
                 }
             
-                // Trim partial codons from the left, respecting the GTF frame.
-                let left_shift = ((overlap_start - seg_start) + frame_val) % 3;
-                let trimmed_start = overlap_start + left_shift;
-                if trimmed_start > overlap_end {
+                // Skip `frame_val` bases at the left to honor the partial-codon bridging:
+                let skip = ((overlap_start - seg_start) + frame_val) % 3;
+                let exon_start = overlap_start + skip;
+                if exon_start > overlap_end {
                     continue;
                 }
-            
-                // First we align 'trimmed_start' to a codon boundary 
-                // (based on frame). Then we subtract 'remainder' from the right 
-                // so that the final length is a multiple of 3. This make sure the 
-                // segment is fully codon-aligned, with no partial codons.
-            
-                // Trim from the right so the total length is multiple of 3.
-                let length = overlap_end - trimmed_start + 1;
-                let remainder = length % 3;
-                let trimmed_end = overlap_end - remainder;
-                if trimmed_end < trimmed_start {
-                    continue;
-                }
-            
-                // Now slice the reference
-                let start_offset = (trimmed_start - region_start) as usize;
-                let end_offset   = (trimmed_end - region_start + 1) as usize;
-            
+                
+                // Do NOT forcibly trim the right end here;
+                // just use overlap_end directly.
+                let exon_end = overlap_end;
+                
+                // Convert these to offsets into our `reference_sequence` buffer:
+                let start_offset = (exon_start - region_start) as usize;
+                let end_offset   = (exon_end   - region_start + 1) as usize;
+                
                 if end_offset > reference_sequence.len() {
                     continue;
                 }
