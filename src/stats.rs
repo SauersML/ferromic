@@ -755,12 +755,34 @@ fn process_variants(
 
                 // Skip `frame_val` bases at the left for partial-codon bridging:
                 let skip = ((overlap_start - seg_start) + frame_val) % 3;
+                
+                if skip > 0 {
+                    use colored::Colorize;
+                
+                    let left_clip_start = overlap_start;
+                    let left_clip_end = overlap_start + skip - 1;
+                    let trim_slice = &reference_sequence[(left_clip_start - region_start) as usize
+                                                         .. (left_clip_end - region_start + 1) as usize];
+                    let trim_str: String = trim_slice.iter().map(|&b| b as char).collect();
+                
+                    eprintln!(
+                        "{} {}: Skipping {} leftover base(s) from the LEFT side for transcript {}.\n  Overlap: {}..{}.  Partial codon portion: [{}]",
+                        "[CDS boundary]".bold().red(),
+                        "SKIP".yellow(),
+                        skip,
+                        transcript_id.blue(),
+                        left_clip_start,
+                        left_clip_end,
+                        trim_str.magenta().bold(),
+                    );
+                }
+                
                 let exon_start = overlap_start + skip;
                 if exon_start > overlap_end {
                     continue;
                 }
 
-                // Force trim at right boundry... left finished already?
+                // Force trim at right boundry
                 let mut exon_end = overlap_end;
                 let exon_length = exon_end - exon_start + 1;
                 let remainder_right = exon_length % 3;
