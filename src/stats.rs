@@ -742,7 +742,7 @@ fn process_variants(
         let mut segment_map = Vec::new();
         {
             let mut current_length = 0;
-            for &(seg_start, seg_end, frame_val) in &cds.segments {
+            for &(seg_start, seg_end, strand_char, frame_val) in &cds.segments {
                 if seg_end < region_start || seg_start > region_end {
                     continue;
                 }
@@ -780,10 +780,8 @@ fn process_variants(
                 if end_offset > reference_sequence.len() {
                     continue;
                 }
-            
-                
-            
-                // Append to each haplotype’s combined sequence
+                            
+                // Append to each haplotype’s combined sequence, with reverse‐complement if minus strand
                 for (sample_idx, hap_idx) in &haplotype_indices {
                     let sample_name = match *hap_idx {
                         0 => format!("{}_L", sample_names[*sample_idx]),
@@ -791,8 +789,26 @@ fn process_variants(
                         _ => panic!("Unexpected hap_idx!"),
                     };
                     let seq = combined_sequences.get_mut(&sample_name).unwrap();
-                    let segment_ref_seq = &reference_sequence[start_offset..end_offset];
-                    seq.extend_from_slice(segment_ref_seq);
+                    
+                    // Copy the exact slice so we can mutate if needed
+                    let mut segment_ref_seq = reference_sequence[start_offset..end_offset].to_vec();
+                
+                    // If it's minus strand, reverse + complement
+                    if strand_char == '-' {
+                        segment_ref_seq.reverse();
+                        for b in segment_ref_seq.iter_mut() {
+                            *b = match *b {
+                                b'A' | b'a' => b'T',
+                                b'T' | b't' => b'A',
+                                b'C' | b'c' => b'G',
+                                b'G' | b'g' => b'C',
+                                _ => b'N',
+                            };
+                        }
+                    }
+                
+                    // Now extend the combined sequence with the (possibly reversed) slice
+                    seq.extend_from_slice(&segment_ref_seq);
                 }
             
                 let segment_len = end_offset - start_offset;
@@ -1079,7 +1095,7 @@ fn make_sequences(
             combined_cds_sequences.insert(name.clone(), Vec::new());
         }
         
-        for &(seg_start, seg_end, frame_val) in &cds.segments {
+        for &(seg_start, seg_end, strand_char, frame_val) in &cds.segments {
             if seg_end < region_start || seg_start > region_end {
                 continue;
             }
@@ -2387,6 +2403,7 @@ fn parse_gff_file(
             continue;
         }
 
+        let strand_char = fields[6].chars().next().unwrap_or('.');
         let frame: i64 = fields[7].parse().unwrap_or_else(|_| {
             eprintln!("Warning: Invalid frame at line {}, using 0", line_num + 1);
             0
@@ -2438,10 +2455,10 @@ fn parse_gff_file(
             transcripts_found.insert(transcript_id.clone());
         }
 
-        // Store CDS segment with frame exactly as given in GFF
+        // Store CDS segment with strand + frame
         transcript_cdss.entry(transcript_id)
             .or_default()
-            .push((start, end, frame));
+            .push((start, end, strand_char, frame));
     }
 
     println!("\n{}", "GFF Parsing Statistics:".blue().bold());
@@ -2611,8 +2628,8 @@ fn parse_gff_file(
 // Struct to hold CDS region information
 struct CdsRegion {
     transcript_id: String,
-    // Store (start, end, frame) instead of just (start, end)
-    segments: Vec<(i64, i64, i64)>,
+    // Store (start, end, strand, frame)
+    segments: Vec<(i64, i64, char, i64)>,
 }
 
 // IN PROGRESS
