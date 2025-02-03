@@ -760,10 +760,46 @@ fn process_variants(
                     continue;
                 }
 
-                // Do NOT forcibly trim the right end; just use overlap_end directly.
-                let exon_end = overlap_end;
-
-                // Convert these to offsets in `reference_sequence`
+                // Force trim at right boundry... left finished already?
+                let mut exon_end = overlap_end;
+                let exon_length = exon_end - exon_start + 1;
+                let remainder_right = exon_length % 3;
+                
+                // If there are 1–2 leftover bases that don't form a complete codon, trim them off:
+                if remainder_right != 0 {
+                    // For debug: show the slice we are about to remove
+                    let trim_start = exon_end - remainder_right + 1;
+                    let trim_slice = &reference_sequence[(trim_start - region_start) as usize
+                                                         .. (exon_end - region_start + 1) as usize];
+                    let trim_str: String = trim_slice.iter().map(|&b| b as char).collect();
+                
+                    eprintln!(
+                        "{} {}: Removing {} leftover base(s) from the right side for transcript {}.\n  Original overlap: {}..{}.   Partial codon: [{}]",
+                        "[CDS boundary]".bold().red(),
+                        "TRIM".yellow(),
+                        remainder_right,
+                        transcript_id.blue(),
+                        exon_start,
+                        exon_end,
+                        trim_str.magenta().bold(),
+                    );
+                
+                    // Actually trim
+                    exon_end -= remainder_right;
+                    if exon_end < exon_start {
+                        // Entire overlap is just a partial codon, so skip
+                        eprintln!(
+                            "{} {}: Entire overlap was partial, skipping it. ({}..{})",
+                            "[CDS boundary]".bold().red(),
+                            "NOTE".yellow(),
+                            exon_start,
+                            overlap_end
+                        );
+                        continue;
+                    }
+                }
+                
+                // Now convert these to offsets in `reference_sequence`
                 let start_offset = (exon_start - region_start) as usize;
                 let end_offset   = (exon_end   - region_start + 1) as usize;
                 if end_offset > reference_sequence.len() {
