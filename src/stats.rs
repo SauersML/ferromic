@@ -781,7 +781,7 @@ fn process_variants(
                     continue;
                 }
             
-                l
+                
             
                 // Append to each haplotype’s combined sequence
                 for (sample_idx, hap_idx) in &haplotype_indices {
