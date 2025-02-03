@@ -743,7 +743,7 @@ fn process_variants(
             // rounding them to codon boundaries, and converting back to genomic coords.
 
             fn genomic_to_cds(
-                gpos: i64,
+                gpos: i64, // genomic position
                 segments: &[(i64, i64, char, i64)],
             ) -> Option<i64> {
                 // This function finds how many coding bases precede 'gpos' in the transcript
