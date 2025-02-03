@@ -738,63 +738,170 @@ fn process_variants(
             combined_sequences.insert(sample_name, Vec::new());
         }
     
-        // Determine overlapping segments and append them to each haplotype’s sequence
-        let mut segment_map = Vec::new();
-        {
-            let mut current_length = 0;
-            for &(seg_start, seg_end, strand_char, frame_val) in &cds.segments {
-                if seg_end < region_start || seg_start > region_end {
-                    continue;
-                }
-                // 1) Intersect this exon with [region_start..region_end]
-                let overlap_start = std::cmp::max(seg_start, region_start);
-                let overlap_end   = std::cmp::min(seg_end,   region_end);
-                if overlap_end < overlap_start {
-                    continue;
-                }
-                
-                // 2) Convert these overlap coords into 0-based offsets for reference_sequence
-                let start_offset = (overlap_start - region_start) as usize;
-                let end_offset   = (overlap_end   - region_start + 1) as usize;
-                if end_offset > reference_sequence.len() {
-                    continue;
-                }
-                
-                // 3) For each haplotype, copy that slice into combined_sequences
-                for (sample_idx, hap_idx) in &haplotype_indices {
-                    let sample_name = match *hap_idx {
-                        0 => format!("{}_L", sample_names[*sample_idx]),
-                        1 => format!("{}_R", sample_names[*sample_idx]),
-                        _ => panic!("Unexpected hap_idx!"),
-                    };
-                    let seq = combined_sequences.get_mut(&sample_name).unwrap();
-                
-                    let mut segment_ref_seq = reference_sequence[start_offset..end_offset].to_vec();
-                
-                    // If minus strand, reverse+complement
-                    if strand_char == '-' {
-                        segment_ref_seq.reverse();
-                        for b in segment_ref_seq.iter_mut() {
-                            *b = match *b {
-                                b'A' | b'a' => b'T',
-                                b'T' | b't' => b'A',
-                                b'C' | b'c' => b'G',
-                                b'G' | b'g' => b'C',
-                                _ => b'N',
-                            };
-                        }
+            // FIRST: compute codon-aligned boundaries so we don't include partial codons at region edges.
+            // We'll do that by converting region_start and region_end to "CDS coordinates,"
+            // rounding them to codon boundaries, and converting back to genomic coords.
+
+            fn genomic_to_cds(
+                gpos: i64,
+                segments: &[(i64, i64, char, i64)],
+            ) -> Option<i64> {
+                // This function finds how many coding bases precede 'gpos' in the transcript
+                // plus local frame. Returns None if 'gpos' is before the first exon or beyond the last.
+                let mut total = 0;
+                for &(s, e, _strand, frm) in segments {
+                    let length = e - s + 1;
+                    // if gpos < s, it’s before this exon. If gpos > e, it's after. If inside, partial.
+                    if gpos < s {
+                        // the position is before this exon, so we stop
+                        break;
                     }
-                
-                    seq.extend_from_slice(&segment_ref_seq);
+                    if gpos > e {
+                        // entire exon is before gpos
+                        total += length;
+                    } else {
+                        // gpos is within s..e
+                        let offset = gpos - s;
+                        total += offset;
+                        // account for frame
+                        total += frm;
+                        return Some(total);
+                    }
                 }
-                
-                // Keep track of where this segment lands in the final sequence
-                let segment_len = end_offset - start_offset;
-                segment_map.push((overlap_start, overlap_end, current_length));
-                current_length += segment_len;
-                
+                // If we never found an exon containing gpos, we might be beyond everything or before everything
+                None
             }
-        }
+
+            fn cds_to_genomic(
+                cds_coord: i64,
+                segments: &[(i64, i64, char, i64)],
+            ) -> Option<i64> {
+                // Reverses the logic: given a cds_coord, find which exon it belongs to
+                // and convert back to a genomic position.
+                let mut total_used = 0;
+                for &(s, e, _strand, frm) in segments {
+                    let length = e - s + 1;
+                    // The 'effective' length of this exon is length + possibly skipping frame bases at start
+                    // but since 'frame' means how many bases of the codon are "used" at the start,
+                    // we can do a simpler approach by just ignoring it in the summation logic
+                    // or we can incorporate it????????? Double-check. We'll incorporate it like so:
+                    let exon_start_cds = total_used;
+                    let exon_end_cds   = total_used + length;
+
+                    if cds_coord < exon_start_cds {
+                        break;
+                    }
+                    if cds_coord >= exon_end_cds {
+                        total_used += length;
+                    } else {
+                        // The coordinate is within this exon
+                        let offset = cds_coord - exon_start_cds;
+                        return Some(s + offset);
+                    }
+                }
+                None
+            }
+
+            // We'll convert region_start..region_end to codon-aligned boundaries:
+            let maybe_cds_start = genomic_to_cds(region_start, &cds.segments);
+            let maybe_cds_end   = genomic_to_cds(region_end,   &cds.segments);
+
+            let (codon_aligned_start, codon_aligned_end) = match (maybe_cds_start, maybe_cds_end) {
+                (Some(cds_s), Some(cds_e)) => {
+                    if cds_s > cds_e {
+                        // no valid region
+                        // we can skip the entire transcript
+                        continue;
+                    }
+                    // round cds_s up to next multiple-of-3 if partial
+                    let r_s_mod = cds_s % 3;
+                    let new_cds_s = if r_s_mod != 0 { cds_s + (3 - r_s_mod) } else { cds_s };
+                    // round cds_e down to nearest multiple-of-3+2
+                    let r_e_mod = cds_e % 3;
+                    let new_cds_e = if r_e_mod != 2 {
+                        cds_e - r_e_mod + 2
+                    } else {
+                        cds_e
+                    };
+                    if new_cds_s > new_cds_e {
+                        // no codons remain
+                        continue;
+                    }
+                    // convert them back to genomic coords
+                    let aligned_start = match cds_to_genomic(new_cds_s, &cds.segments) {
+                        Some(g) => g,
+                        None => continue,
+                    };
+                    let aligned_end = match cds_to_genomic(new_cds_e, &cds.segments) {
+                        Some(g) => g,
+                        None => continue,
+                    };
+                    if aligned_end < aligned_start {
+                        continue;
+                    }
+                    (aligned_start, aligned_end)
+                },
+                _ => {
+                    // region boundaries not inside any exon => skip
+                    continue;
+                }
+            };
+
+            // Using codon_aligned_start..codon_aligned_end so we don't include partial codons at edges.
+
+            let mut segment_map = Vec::new();
+            {
+                let mut current_length = 0;
+                for &(seg_start, seg_end, strand_char, frame_val) in &cds.segments {
+                    if seg_end < codon_aligned_start || seg_start > codon_aligned_end {
+                        continue;
+                    }
+                    // Intersect this exon with [codon_aligned_start..codon_aligned_end]
+                    let overlap_start = std::cmp::max(seg_start, codon_aligned_start);
+                    let overlap_end   = std::cmp::min(seg_end,   codon_aligned_end);
+                    if overlap_end < overlap_start {
+                        continue;
+                    }
+
+                    let start_offset = (overlap_start - codon_aligned_start) as usize;
+                    let end_offset   = (overlap_end   - codon_aligned_start + 1) as usize;
+                    if end_offset > reference_sequence.len() {
+                        continue;
+                    }
+
+                    // For each haplotype, copy that slice into combined_sequences
+                    for (sample_idx, hap_idx) in &haplotype_indices {
+                        let sample_name = match *hap_idx {
+                            0 => format!("{}_L", sample_names[*sample_idx]),
+                            1 => format!("{}_R", sample_names[*sample_idx]),
+                            _ => panic!("Unexpected hap_idx!"),
+                        };
+                        let seq = combined_sequences.get_mut(&sample_name).unwrap();
+
+                        let mut segment_ref_seq = reference_sequence[start_offset..end_offset].to_vec();
+
+                        // If minus strand, reverse+complement
+                        if strand_char == '-' {
+                            segment_ref_seq.reverse();
+                            for b in segment_ref_seq.iter_mut() {
+                                *b = match *b {
+                                    b'A' | b'a' => b'T',
+                                    b'T' | b't' => b'A',
+                                    b'C' | b'c' => b'G',
+                                    b'G' | b'g' => b'C',
+                                    _ => b'N',
+                                };
+                            }
+                        }
+                        seq.extend_from_slice(&segment_ref_seq);
+                    }
+
+                    // Keep track of where this segment lands in the final sequence
+                    let segment_len = end_offset - start_offset;
+                    segment_map.push((overlap_start, overlap_end, current_length));
+                    current_length += segment_len;
+                }
+            }
     
         // Apply variants to the combined coding sequences
         for variant in variants {
