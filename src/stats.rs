@@ -801,7 +801,7 @@ fn process_variants(
                 }
             
                 let segment_len = end_offset - start_offset;
-                segment_map.push((trimmed_start, trimmed_end, current_length));
+                segment_map.push((exon_start, exon_end, current_length));
                 current_length += segment_len;
             }
         }
