@@ -791,10 +791,9 @@ fn process_variants(
                         _ => panic!("Unexpected hap_idx!"),
                     };
                     combined_sequences
-                        .get_mut(&sample_name)
-                        .unwrap()
+                        let seq = combined_sequences.get_mut(&sample_name).unwrap();
                         let segment_ref_seq = &reference_sequence[start_offset..end_offset];
-                        .extend_from_slice(segment_ref_seq);
+                        seq.extend_from_slice(segment_ref_seq);
                 }
             
                 let segment_len = end_offset - start_offset;
