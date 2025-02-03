@@ -753,35 +753,31 @@ fn process_variants(
                     continue;
                 }
 
-
-                // Adjust the left boundary based on frame_val and actual overlap
-                let left_cut = overlap_start - seg_start;
-                let true_frame = (frame_val + left_cut) % 3;
-                let skip_left = if true_frame > 0 { 3 - true_frame } else { 0 };
-                let exon_start = overlap_start + skip_left;
+                // Compute how far we are into the codon at the left boundary
+                let left_offset_in_cds = (frame_val + (overlap_start - seg_start)) % 3;
+                
+                // Skip exactly that many bases on the left, so we start at a codon boundary
+                let exon_start = overlap_start + left_offset_in_cds;
                 if exon_start > overlap_end {
                     continue;
                 }
                 
-                // Adjust the right boundary so that the final length is a multiple of three.... fix later.
-                let length_so_far = (exon_start - seg_start) + frame_val;
-                let overlap_len = overlap_end - exon_start + 1;
-                let remainder_right = (length_so_far + overlap_len) % 3;
-                let mut exon_end = overlap_end;
-                if remainder_right > 0 {
-                    exon_end -= remainder_right;
-                    if exon_end < exon_start {
-                        continue;
-                    }
+                // Figure out how long the remaining overlap is, then remove any partial codon on the right
+                let length = overlap_end - exon_start + 1;
+                let remainder_right = length % 3;
+                let mut exon_end = overlap_end - remainder_right;
+                if exon_end < exon_start {
+                    continue;
                 }
                 
+                // Convert these to offsets in reference_sequence
                 let start_offset = (exon_start - region_start) as usize;
-                let end_offset = (exon_end - region_start + 1) as usize;
+                let end_offset   = (exon_end   - region_start + 1) as usize;
                 if end_offset > reference_sequence.len() {
                     continue;
                 }
                 
-                // Append to each haplotype's combined sequence, reverse‐complement if minus strand
+                // Append to each haplotype’s sequence, reverse‐complement if minus strand
                 for (sample_idx, hap_idx) in &haplotype_indices {
                     let sample_name = match *hap_idx {
                         0 => format!("{}_L", sample_names[*sample_idx]),
@@ -790,8 +786,10 @@ fn process_variants(
                     };
                     let seq = combined_sequences.get_mut(&sample_name).unwrap();
                 
+                    // Grab the slice
                     let mut segment_ref_seq = reference_sequence[start_offset..end_offset].to_vec();
                 
+                    // If minus strand, reverse and complement
                     if strand_char == '-' {
                         segment_ref_seq.reverse();
                         for b in segment_ref_seq.iter_mut() {
