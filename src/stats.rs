@@ -1929,7 +1929,7 @@ fn process_vcf(
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
     let chr_length = {
-        let mut fasta_reader = bio::io::fasta::IndexedReader::from_file(&reference_path)
+        let fasta_reader = bio::io::fasta::IndexedReader::from_file(&reference_path)
             .map_err(|e| VcfError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
         // Create an owned copy of the sequences
         let sequences = fasta_reader.index.sequences().to_vec();
