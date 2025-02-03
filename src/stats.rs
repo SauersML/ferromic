@@ -2489,7 +2489,7 @@ fn parse_gff_file(
     let mut stats = TranscriptStats::default();
 
     for (transcript_id, mut segments) in transcript_cdss {
-        segments.sort_by_key(|&(start, _, _)| start);
+        segments.sort_by_key(|&(start, _, _, _)| start);
         
         println!("\nProcessing transcript: {}", transcript_id);
         println!("Found {} CDS segments", segments.len());
@@ -2512,7 +2512,7 @@ fn parse_gff_file(
 
         // Calculate total coding length and check individual segments
         let mut coding_segments = Vec::new();
-        for (i, &(start, end, frame)) in segments.iter().enumerate() {
+        for (i, &(start, end, _, frame)) in segments.iter().enumerate() {
             let segment_length = end - start + 1;
             println!("  Segment {}: {}-{} (length: {}, frame: {})", 
                     i + 1, start, end, segment_length, frame);
@@ -2530,7 +2530,7 @@ fn parse_gff_file(
         
         // Calculate actual coding length (sum of CDS lengths)
         let total_coding_length: i64 = segments.iter()
-            .map(|&(s, e, _)| e - s + 1)
+            .map(|&(s, e, _, _)| e - s + 1)
             .sum();
 
         stats.total_coding_length += total_coding_length;
@@ -2556,7 +2556,7 @@ fn parse_gff_file(
                     "!".yellow(), total_coding_length);
             println!("    Remainder when divided by 3: {}", total_coding_length % 3);
             println!("    Individual segment lengths: {:?}", 
-                    segments.iter().map(|&(s, e, _)| e - s + 1).collect::<Vec<_>>());
+                    segments.iter().map(|&(s, e, _, _)| e - s + 1).collect::<Vec<_>>());
         }
 
         let cds_region = CdsRegion {
