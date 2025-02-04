@@ -23,7 +23,8 @@ use ferromic::stats::{
 };
 
 use rayon::ThreadPoolBuilder;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::Path;
 use colored::Colorize;
