@@ -1,5 +1,10 @@
-use ferromic::process::VcfError;
-use ferromic::Args;
+use ferromic::process::{
+    process_config_entries,
+    process_vcf,
+    display_seqinfo_entries,
+    VcfError,
+};
+
 use ferromic::parse::{
     parse_regions_file,
     parse_config_file,
@@ -8,12 +13,14 @@ use ferromic::parse::{
     read_reference_sequence,
     parse_gtf_file,
 };
+
 use ferromic::stats::{
     count_segregating_sites,
     calculate_pairwise_differences,
     calculate_watterson_theta,
     calculate_pi,
 };
+
 use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
