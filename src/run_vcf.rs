@@ -3,6 +3,7 @@ use ferromic::process::{
     process_vcf,
     display_seqinfo_entries,
     VcfError,
+    Args,
 };
 
 use ferromic::parse::{
