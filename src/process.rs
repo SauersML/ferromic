@@ -82,7 +82,7 @@ struct Args {
 
 // Data structures
 #[derive(Debug, Clone)]
-struct ConfigEntry {
+pub struct ConfigEntry {
     seqname: String,
     start: i64,
     end: i64,
@@ -151,7 +151,7 @@ struct MissingDataInfo {
 
 // Custom error types
 #[derive(Debug)]
-enum VcfError {
+pub enum VcfError {
     Io(io::Error),
     Parse(String),
     InvalidRegion(String),
@@ -1865,7 +1865,7 @@ fn process_vcf(
 
 
 // Struct to hold CDS region information
-struct CdsRegion {
+pub struct CdsRegion {
     transcript_id: String,
     // Store (start, end, strand_char, frame)
     segments: Vec<(i64, i64, char, i64)>,
