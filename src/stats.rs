@@ -1,4 +1,3 @@
-mod process;
 use rayon::prelude::*;
 use process::Variant;
 
