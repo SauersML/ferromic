@@ -199,7 +199,7 @@ pub fn parse_region(region: &str) -> Result<(i64, i64), VcfError> {
 
 
 
-fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
+pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     let path = Path::new(folder);
     let chr_specific_files: Vec<_> = fs::read_dir(path)?
         .filter_map(|entry| entry.ok())
