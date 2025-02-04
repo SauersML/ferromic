@@ -316,7 +316,7 @@ fn collect_vcf_chromosomes(vcf_folder: &str) -> Result<Vec<String>, VcfError> {
 
 
 // Function to validate VCF header
-fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
+pub fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
     let fields: Vec<&str> = header.split('\t').collect();
     let required_fields = vec!["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"];
 
