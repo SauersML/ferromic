@@ -1169,11 +1169,9 @@ pub fn process_config_entries(
                 entry.end
             )?;
             
-            let cds_regions = parse_gtf_file(
+            let all_transcripts = parse_gtf_file(
                 &Path::new(&args.gtf_path),
-                &chr,
-                entry.start,
-                entry.end
+                &chr
             )?;
             
             let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) =
@@ -1202,12 +1200,10 @@ pub fn process_config_entries(
                 entry.start,
                 entry.end
             )?;
-            
-            let cds_regions = parse_gtf_file(
+    
+            let all_transcripts = parse_gtf_file(
                 &Path::new(&args.gtf_path),
-                &chr,
-                entry.start,
-                entry.end
+                &chr
             )?;
 
             // Process haplotype_group=1 (unfiltered)
