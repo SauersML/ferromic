@@ -510,10 +510,6 @@ fn parse_gtf_file(
             }
         };
 
-        if end < region_start || start > region_end {
-            continue;
-        }
-
         let strand_char = fields[6].chars().next().unwrap_or('.');
         let frame: i64 = fields[7].parse().unwrap_or_else(|_| {
             eprintln!("Warning: Invalid frame at line {}, using 0", line_num + 1);
