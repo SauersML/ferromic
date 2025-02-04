@@ -107,9 +107,7 @@ fn main() -> Result<(), VcfError> {
         
         let cds_regions = parse_gtf_file(
             &Path::new(&args.gtf_path),
-            chr,
-            start,
-            end
+            chr
         )?;
         
 
