@@ -605,6 +605,15 @@ pub fn parse_gtf_file(
     let mut stats = TranscriptStats::default();
 
     for (transcript_id, mut segments) in transcript_cdss {
+        // Skip entire transcript if it has no exons overlapping the query:
+        let transcript_overlaps_region = segments
+            .iter()
+            .any(|&(s, e, _, _)| e >= region_start && s <= region_end);
+    
+        if !transcript_overlaps_region {
+            continue;
+        }
+    
         segments.sort_by_key(|&(start, _, _, _)| start);
         
         println!("\nProcessing transcript: {}", transcript_id);
