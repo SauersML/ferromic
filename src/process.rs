@@ -1054,184 +1054,144 @@ pub fn process_config_entries(
         }
 
         for entry in entries {
-            println!(
-                "Processing entry: {}:{}-{}",
-                entry.seqname, entry.start, entry.end
-            );
-
-            // Define regions
+            println!("Processing entry: {}:{}-{}", entry.seqname, entry.start, entry.end);
+        
+            // Calculate stats for region
             let sequence_length = entry.end - entry.start + 1;
-
-            // Calculate adjusted sequence length considering allow and mask regions
             let adjusted_sequence_length = calculate_adjusted_sequence_length(
                 entry.start,
                 entry.end,
                 allow.as_ref().and_then(|a| a.get(&chr)),
                 mask.as_ref().and_then(|m| m.get(&chr)),
             );
-
-            // Process haplotype_group=0 (unfiltered)
-            println!("Processing region {}-{} with {} variants", 
-                    entry.start, entry.end, unfiltered_variants.len());
-            
-            let variants_in_region: Vec<_> = unfiltered_variants.iter()
+        
+            // Filter variants for stats pass
+            let region_variants: Vec<Variant> = unfiltered_variants.iter()
                 .filter(|v| v.position >= entry.start && v.position <= entry.end)
                 .cloned()
                 .collect();
-            println!("Found {} variants in region", variants_in_region.len());
-
-            // Add these lines before calling process_variants
-            let ref_sequence = read_reference_sequence(
-                &Path::new(&args.reference_path),
-                &chr,
+            println!("Found {} variants in region {}-{}", region_variants.len(), entry.start, entry.end);
+        
+            // Process haplotype_group=0 and haplotype_group=1 with region_variants for unfiltered
+            let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf) = match process_variants(
+                &region_variants,
+                &sample_names,
+                0,
+                &entry.samples_unfiltered,
                 entry.start,
-                entry.end
-            )?;
-            
-            let all_transcripts = parse_gtf_file(
-                &Path::new(&args.gtf_path),
-                &chr
-            )?;
-            
-            let (num_segsites_0, w_theta_0, pi_0, n_hap_0_no_filter) =
-                match process_variants(
-                    &variants_in_region,
-                    &sample_names,
-                    0,
-                    &entry.samples_unfiltered,
-                    entry.start,
-                    entry.end,
-                    None,
-                    Arc::clone(&seqinfo_storage),
-                    Arc::clone(&position_allele_map),
-                    entry.seqname.clone(),
-                    false,  // unfiltered variants
-                    &ref_sequence,
-                    &cds_regions,
-                )? {
-                    Some(values) => values,
-                    None => continue, // Skip writing this record
-                };
-
-            let ref_sequence = read_reference_sequence(
-                &Path::new(&args.reference_path),
-                &chr,
+                entry.end,
+                None,
+                Arc::clone(&seqinfo_storage),
+                Arc::clone(&position_allele_map),
+                entry.seqname.clone(),
+                false,
+                &ref_sequence,
+                &cds_regions,
+            )? {
+                Some(vals) => vals,
+                None => {
+                    println!("No haplotypes found for group 0 in region {}-{}", entry.start, entry.end);
+                    continue;
+                }
+            };
+            let (num_segsites_1, w_theta_1, pi_1, n_hap_1_unf) = match process_variants(
+                &unfiltered_variants,
+                &sample_names,
+                1,
+                &entry.samples_unfiltered,
                 entry.start,
-                entry.end
-            )?;
-    
-            let all_transcripts = parse_gtf_file(
-                &Path::new(&args.gtf_path),
-                &chr
-            )?;
-
-            // Process haplotype_group=1 (unfiltered)
-            let (num_segsites_1, w_theta_1, pi_1, n_hap_1_no_filter) =
-                match process_variants(
-                    &unfiltered_variants,
-                    &sample_names,
-                    1,
-                    &entry.samples_unfiltered,
-                    entry.start,
-                    entry.end,
-                    None,
-                    Arc::clone(&seqinfo_storage),
-                    Arc::clone(&position_allele_map),
-                    entry.seqname.clone(),
-                    false,  // unfiltered variants
-                    &ref_sequence,
-                    &cds_regions,
-                )? {
-                    Some(values) => values,
-                    None => continue, // Skip writing this record
-                };
-
-            // Calculate allele frequency of inversions (no filter)
-            let inversion_freq_no_filter =
-                calculate_inversion_allele_frequency(&entry.samples_unfiltered);
-
-            // Process haplotype_group=0 (filtered)
-            let (num_segsites_0_filt, w_theta_0_filt, pi_0_filt, n_hap_0_filt) =
-                match process_variants(
-                    &_filtered_variants,
-                    &sample_names,
-                    0,
-                    &entry.samples_filtered,
-                    entry.start,
-                    entry.end,
-                    Some(adjusted_sequence_length),
-                    Arc::clone(&seqinfo_storage),
-                    Arc::clone(&position_allele_map),
-                    entry.seqname.clone(),
-                    true,  // filtered variants
-                    &ref_sequence,
-                    &cds_regions,
-                )? {
-                    Some(values) => values,
-                    None => continue, // Skip writing this record
-                };
-
-            // Process haplotype_group=1 (filtered)
-            let (num_segsites_1_filt, w_theta_1_filt, pi_1_filt, n_hap_1_filt) =
-                match process_variants(
-                    &_filtered_variants,
-                    &sample_names,
-                    1,
-                    &entry.samples_filtered,
-                    entry.start,
-                    entry.end,
-                    Some(adjusted_sequence_length),
-                    Arc::clone(&seqinfo_storage),
-                    Arc::clone(&position_allele_map),
-                    entry.seqname.clone(),
-                    true,  // filtered variants
-                    &ref_sequence,
-                    &cds_regions,
-                )? {
-                    Some(values) => values,
-                    None => continue, // Skip writing this record
-                };
-
-            // Calculate allele frequency of inversions
-            let inversion_freq_filt =
-                calculate_inversion_allele_frequency(&entry.samples_filtered);
-
-            // Write the aggregated results to CSV
-            writer
-                .write_record(&[
-                    &entry.seqname,
-                    &entry.start.to_string(),
-                    &entry.end.to_string(),
-                    &sequence_length.to_string(),          // 0_sequence_length
-                    &sequence_length.to_string(),          // 1_sequence_length
-                    &adjusted_sequence_length.to_string(), // 0_sequence_length_adjusted
-                    &adjusted_sequence_length.to_string(), // 1_sequence_length_adjusted
-                    &num_segsites_0.to_string(),           // 0_segregating_sites
-                    &num_segsites_1.to_string(),           // 1_segregating_sites
-                    &format!("{:.6}", w_theta_0),          // 0_w_theta
-                    &format!("{:.6}", w_theta_1),          // 1_w_theta
-                    &format!("{:.6}", pi_0),               // 0_pi
-                    &format!("{:.6}", pi_1),               // 1_pi
-                    &num_segsites_0_filt.to_string(),      // 0_segregating_sites_filtered
-                    &num_segsites_1_filt.to_string(),      // 1_segregating_sites_filtered
-                    &format!("{:.6}", w_theta_0_filt),     // 0_w_theta_filtered
-                    &format!("{:.6}", w_theta_1_filt),     // 1_w_theta_filtered
-                    &format!("{:.6}", pi_0_filt),          // 0_pi_filtered
-                    &format!("{:.6}", pi_1_filt),          // 1_pi_filtered
-                    &n_hap_0_no_filter.to_string(),        // 0_num_hap_no_filter
-                    &n_hap_1_no_filter.to_string(),        // 1_num_hap_no_filter
-                    &n_hap_0_filt.to_string(),             // 0_num_hap_filter
-                    &n_hap_1_filt.to_string(),             // 1_num_hap_filter
-                    // -1.0 should never occur
-                    &format!("{:.6}", inversion_freq_no_filter.unwrap_or(-1.0)), // inversion_freq_no_filter
-                    &format!("{:.6}", inversion_freq_filt.unwrap_or(-1.0)),      // inversion_freq_filter
-                ])
-                .map_err(|e| VcfError::Io(e.into()))?;
-
-            println!(
-                "Successfully wrote record for {}:{}-{}",
-                entry.seqname, entry.start, entry.end
-            );
+                entry.end,
+                None,
+                Arc::clone(&seqinfo_storage),
+                Arc::clone(&position_allele_map),
+                entry.seqname.clone(),
+                false,
+                &ref_sequence,
+                &cds_regions,
+            )? {
+                Some(vals) => vals,
+                None => {
+                    println!("No haplotypes found for group 1 in region {}-{}", entry.start, entry.end);
+                    continue;
+                }
+            };
+            let inversion_freq_no_filter = calculate_inversion_allele_frequency(&entry.samples_unfiltered);
+        
+            // Filtered pass
+            let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f) = match process_variants(
+                &_filtered_variants,
+                &sample_names,
+                0,
+                &entry.samples_filtered,
+                entry.start,
+                entry.end,
+                Some(adjusted_sequence_length),
+                Arc::clone(&seqinfo_storage),
+                Arc::clone(&position_allele_map),
+                entry.seqname.clone(),
+                true,
+                &ref_sequence,
+                &cds_regions,
+            )? {
+                Some(vals) => vals,
+                None => {
+                    println!("No haplotypes found for group 0 (filtered) in region {}-{}", entry.start, entry.end);
+                    continue;
+                }
+            };
+            let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f) = match process_variants(
+                &_filtered_variants,
+                &sample_names,
+                1,
+                &entry.samples_filtered,
+                entry.start,
+                entry.end,
+                Some(adjusted_sequence_length),
+                Arc::clone(&seqinfo_storage),
+                Arc::clone(&position_allele_map),
+                entry.seqname.clone(),
+                true,
+                &ref_sequence,
+                &cds_regions,
+            )? {
+                Some(vals) => vals,
+                None => {
+                    println!("No haplotypes found for group 1 (filtered) in region {}-{}", entry.start, entry.end);
+                    continue;
+                }
+            };
+            let inversion_freq_filt = calculate_inversion_allele_frequency(&entry.samples_filtered);
+        
+            // Write CSV row
+            writer.write_record(&[
+                &entry.seqname,
+                &entry.start.to_string(),
+                &entry.end.to_string(),
+                &sequence_length.to_string(),
+                &sequence_length.to_string(),
+                &adjusted_sequence_length.to_string(),
+                &adjusted_sequence_length.to_string(),
+                &num_segsites_0.to_string(),
+                &num_segsites_1.to_string(),
+                &format!("{:.6}", w_theta_0),
+                &format!("{:.6}", w_theta_1),
+                &format!("{:.6}", pi_0),
+                &format!("{:.6}", pi_1),
+                &num_segsites_0_f.to_string(),
+                &num_segsites_1_f.to_string(),
+                &format!("{:.6}", w_theta_0_f),
+                &format!("{:.6}", w_theta_1_f),
+                &format!("{:.6}", pi_0_f),
+                &format!("{:.6}", pi_1_f),
+                &n_hap_0_unf.to_string(),
+                &n_hap_1_unf.to_string(),
+                &n_hap_0_f.to_string(),
+                &n_hap_1_f.to_string(),
+                &format!("{:.6}", inversion_freq_no_filter.unwrap_or(-1.0)),
+                &format!("{:.6}", inversion_freq_filt.unwrap_or(-1.0)),
+            ]).map_err(|e| VcfError::Io(e.into()))?;
+        
+            println!("Wrote stats for entry {}:{}-{}", entry.seqname, entry.start, entry.end);
             writer.flush().map_err(|e| VcfError::Io(e.into()))?;
         }
     }
