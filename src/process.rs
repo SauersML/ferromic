@@ -84,11 +84,11 @@ struct Args {
 // Data structures
 #[derive(Debug, Clone)]
 pub struct ConfigEntry {
-    seqname: String,
-    start: i64,
-    end: i64,
-    samples_unfiltered: HashMap<String, (u8, u8)>,
-    samples_filtered: HashMap<String, (u8, u8)>,
+    pub seqname: String,
+    pub start: i64,
+    pub end: i64,
+    pub samples_unfiltered: HashMap<String, (u8, u8)>,
+    pub samples_filtered: HashMap<String, (u8, u8)>,
 }
 
 #[derive(Debug)]
