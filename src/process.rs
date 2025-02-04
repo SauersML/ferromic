@@ -7,6 +7,16 @@ use crate::stats::{
     calculate_inversion_allele_frequency,
 };
 
+use crate::parse::{
+    parse_regions_file,
+    parse_config_file,
+    parse_region,
+    find_vcf_file,
+    open_vcf_reader,
+    read_reference_sequence,
+    parse_gtf_file,
+};
+
 use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
