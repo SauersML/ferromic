@@ -1176,7 +1176,7 @@ fn make_sequences(
             combined_cds_sequences.insert(name.clone(), Vec::new());
         }
 
-        let cds_start = std::cmp::max(cds_start - 1, region_start - 1); // 0-based.... or just seg_start??? Double check this.
+        let cds_start = std::cmp::max(cds_start - 1, region_start - 1); // 0-based.... or just cds_start??? Double check this.
         let cds_end = std::cmp::min(cds_end, region_end);
                 
         // After processing all segments, write one final .phy file
