@@ -1,3 +1,5 @@
+use crate::process::{VcfError, ConfigEntry, CdsRegion};
+
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufRead};
 use std::path::{Path, PathBuf};
