@@ -248,7 +248,7 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     }
 }
 
-fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send>, VcfError> {
+pub fn open_vcf_reader(path: &Path) -> Result<Box<dyn BufRead + Send>, VcfError> {
     let file = File::open(path)?;
     
     if path.extension().and_then(|s| s.to_str()) == Some("gz") {
