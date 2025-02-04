@@ -1,6 +1,3 @@
-mod stats;
-use stats::*;
-
 use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
