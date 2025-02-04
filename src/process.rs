@@ -44,41 +44,41 @@ use prettytable::{Table, row};
 pub struct Args {
     // Folder containing VCF files
     #[arg(short, long = "vcf_folder")]
-    vcf_folder: String,
+    pub vcf_folder: String,
 
     // Chromosome to process
     #[arg(short, long = "chr")]
-    chr: Option<String>,
+    pub chr: Option<String>,
 
     // Region to process (start-end)
     #[arg(short, long = "region")]
-    region: Option<String>,
+    pub region: Option<String>,
 
     // Configuration file
     #[arg(long = "config_file")]
-    config_file: Option<String>,
+    pub config_file: Option<String>,
 
     // Output file
     #[arg(short, long = "output_file")]
-    output_file: Option<String>,
+    pub output_file: Option<String>,
 
     // Minimum genotype quality
     #[arg(long = "min_gq", default_value = "30")]
-    min_gq: u16,
+    pub min_gq: u16,
 
     // Mask file (regions to exclude)
     #[arg(long = "mask_file")]
-    mask_file: Option<String>,
+    pub mask_file: Option<String>,
 
     // Allow file (regions to include)
     #[arg(long = "allow_file")]
-    allow_file: Option<String>,
+    pub allow_file: Option<String>,
 
     #[arg(long = "reference")]
-    reference_path: String,
+    pub reference_path: String,
 
     #[arg(long = "gtf")]
-    gtf_path: String,
+    pub gtf_path: String,
 }
 
 // Data structures
@@ -194,7 +194,7 @@ impl From<io::Error> for VcfError {
     }
 }
 
-fn display_seqinfo_entries(seqinfo: &[SeqInfo], limit: usize) {
+pub fn display_seqinfo_entries(seqinfo: &[SeqInfo], limit: usize) {
     // Create a buffer for the table output
     let mut output = Vec::new();
     let mut table = Table::new();
@@ -1293,7 +1293,7 @@ pub fn process_config_entries(
 
 
 // Function to process a VCF file
-fn process_vcf(
+pub fn process_vcf(
     file: &Path,
     reference_path: &Path,
     chr: &str,
