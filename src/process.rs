@@ -133,14 +133,14 @@ pub struct Variant {
 
 // IN PROGRESS
 #[derive(Debug, Clone)]
-struct SeqInfo {
-    sample_index: usize,         // The index of the sample this allele belongs to
-    haplotype_group: u8,         // 0 or 1 for haplotype group
-    vcf_allele: Option<u8>,      // The VCF allele value (0 or 1) (can be None)
-    nucleotide: Option<u8>,      // The allele nucleotide (A, T, C, G) in u8 form (can be None)
-    chromosome: String,          // Chromosome identifier
-    position: i64,               // Chromosome position
-    filtered: bool,              // Was this allele filtered or not
+pub struct SeqInfo {
+    pub sample_index: usize,    // The index of the sample this allele belongs to
+    pub haplotype_group: u8,    // 0 or 1 for haplotype group
+    pub vcf_allele: Option<u8>, // The VCF allele value (0 or 1) (can be None)
+    pub nucleotide: Option<u8>, // The allele nucleotide (A, T, C, G) in u8 form (can be None)
+    pub chromosome: String,     // Chromosome identifier
+    pub position: i64,          // Chromosome position
+    pub filtered: bool,         // Was this allele filtered or not
 }
 
 #[derive(Debug, Default, Clone)]
