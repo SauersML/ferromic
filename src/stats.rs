@@ -1,25 +1,5 @@
 include!("process.rs");
 
-use clap::Parser;
-use colored::*;
-use flate2::read::MultiGzDecoder;
-use indicatif::{ProgressBar, ProgressStyle};
-use parking_lot::Mutex;
-use rayon::prelude::*;
-use rayon::ThreadPoolBuilder;
-use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader};
-use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::collections::{HashMap, HashSet};
-use csv::{WriterBuilder};
-use crossbeam_channel::bounded;
-use std::time::Duration;
-use std::sync::Arc;
-use std::thread;
-use prettytable::{Table, row};
-
 fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 { // Not used
     let mut total = 0;
     for &(start, end) in mask {
