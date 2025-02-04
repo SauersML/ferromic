@@ -681,18 +681,10 @@ fn process_variants(
             {
                 let mut current_length = 0;
                 for &(seg_start, seg_end, strand_char, frame_val) in &cds.segments {
-                    if seg_end < codon_aligned_start || seg_start > codon_aligned_end {
-                        continue;
-                    }
-                    // Intersect this exon with [codon_aligned_start..codon_aligned_end]
-                    let overlap_start = std::cmp::max(seg_start, codon_aligned_start);
-                    let overlap_end   = std::cmp::min(seg_end,   codon_aligned_end);
-                    if overlap_end < overlap_start {
-                        continue;
-                    }
-
+                    let overlap_start = seg_start;
+                    let overlap_end   = seg_end;
                     let start_offset = (overlap_start - codon_aligned_start) as usize;
-                    let end_offset   = (overlap_end   - codon_aligned_start + 1) as usize;
+                    let end_offset   = (overlap_end - codon_aligned_start + 1) as usize;
                     if end_offset > reference_sequence.len() {
                         continue;
                     }
