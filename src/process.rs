@@ -700,7 +700,7 @@ fn make_sequences(
     region_start: i64,
     region_end: i64,
     reference_sequence: &[u8],
-    cds_regions: &[CdsRegion],
+    cds_regions: &[TranscriptCDS],
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: &str,
 ) -> Result<(), VcfError> {
