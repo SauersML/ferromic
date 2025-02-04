@@ -842,7 +842,7 @@ fn make_sequences(
             cds_end
         );
 
-        
+    
         let filename = format!(
             "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
             haplotype_group,
@@ -851,13 +851,37 @@ fn make_sequences(
             cds_start,
             cds_end
         );
-        
-        // Convert combined_sequences to char sequences
-        let char_sequences: HashMap<String, Vec<char>> = combined_sequences
+
+        // Validate each haplotype's final coding sequence
+        let mut valid_map = HashMap::new();
+        for (hap_name, seq_bytes) in combined_sequences {
+            match validate_coding_sequence(&seq_bytes) {
+                Ok(_) => {
+                    valid_map.insert(hap_name, seq_bytes);
+                }
+                Err(reason) => {
+                    eprintln!(
+                        "Skipping haplotype {} for transcript {} on chr {} due to: {}",
+                        hap_name, cds.transcript_id, chromosome, reason
+                    );
+                }
+            }
+        }
+
+        if valid_map.is_empty() {
+            eprintln!(
+                "No valid haplotypes remain for transcript {} on chr {}. Skipping PHYLIP file.",
+                cds.transcript_id, chromosome
+            );
+            continue;
+        }
+
+        // Convert valid_map to char sequences, then write .phy
+        let char_sequences: HashMap<String, Vec<char>> = valid_map
             .into_iter()
             .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
             .collect();
-        
+
         write_phylip_file(&filename, &char_sequences)?;
     }
 
