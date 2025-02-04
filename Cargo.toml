@@ -45,5 +45,5 @@ name = "vcf_merge"
 path = "src/merge.rs"
 
 [[bin]]
-name = "vcf_stats"
-path = "src/stats.rs"
+name = "vcf_process"
+path = "src/process.rs"
