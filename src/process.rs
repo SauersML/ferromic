@@ -115,7 +115,7 @@ impl FilteringStats {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-struct Variant {
+pub struct Variant {
     position: i64,
     genotypes: Vec<Option<Vec<u8>>>,
 }
