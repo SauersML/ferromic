@@ -848,6 +848,56 @@ fn process_variants(
     Ok(Some((num_segsites, w_theta, pi, n)))
 }
 
+/// Validate a final coding sequence. Returns `Ok(())` if valid; otherwise an error explaining why.
+pub fn validate_coding_sequence(seq: &[u8]) -> Result<(), String> {
+    if seq.is_empty() {
+        return Err("CDS is empty".to_string());
+    }
+    if seq.len() % 3 != 0 {
+        return Err(format!("Length {} not divisible by 3", seq.len()));
+    }
+    if seq.len() < 3 {
+        return Err(format!("CDS length {} is too short", seq.len()));
+    }
+
+    // Check for ATG start
+    let start_codon = seq[0..3]
+        .iter()
+        .map(|b| b.to_ascii_uppercase())
+        .collect::<Vec<u8>>();
+    if start_codon != b"ATG" {
+        return Err(format!(
+            "Does not begin with ATG (found {:?})",
+            String::from_utf8_lossy(&start_codon)
+        ));
+    }
+
+    // Check for internal stop codons
+    let stops = [b"TAA", b"TAG", b"TGA"];
+    let seq_upper: Vec<u8> = seq.iter().map(|b| b.to_ascii_uppercase()).collect();
+    for i in (0..seq_upper.len()).step_by(3) {
+        if i + 2 < seq_upper.len() {
+            let codon = &seq_upper[i..i + 3];
+            if stops.iter().any(|stop| stop == codon) {
+                return Err(format!(
+                    "Internal stop codon {} at codon index {}",
+                    String::from_utf8_lossy(codon),
+                    i / 3
+                ));
+            }
+        }
+    }
+
+    // Make sure only valid nucleotides [ACGTN]
+    for (i, &nt) in seq_upper.iter().enumerate() {
+        if !matches!(nt, b'A' | b'C' | b'G' | b'T' | b'N') {
+            return Err(format!("Invalid nucleotide '{}' at position {}", nt as char, i));
+        }
+    }
+
+    Ok(())
+}
+
 fn make_sequences(
     variants: &[Variant],
     sample_names: &[String],
