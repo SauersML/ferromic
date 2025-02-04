@@ -41,7 +41,7 @@ use prettytable::{Table, row};
 // Define command-line arguments using clap
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-struct Args {
+pub struct Args {
     // Folder containing VCF files
     #[arg(short, long = "vcf_folder")]
     vcf_folder: String,
