@@ -116,8 +116,8 @@ impl FilteringStats {
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct Variant {
-    position: i64,
-    genotypes: Vec<Option<Vec<u8>>>,
+    pub position: i64,
+    pub genotypes: Vec<Option<Vec<u8>>>,
 }
 
 // IN PROGRESS
