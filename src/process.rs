@@ -103,16 +103,16 @@ struct RegionStats {
 }
 
 #[derive(Debug, Default)]
-struct FilteringStats {
-    total_variants: usize,
-    _filtered_variants: usize,
-    filtered_due_to_mask: usize,
-    filtered_due_to_allow: usize,
-    filtered_positions: HashSet<i64>,
-    missing_data_variants: usize,
-    low_gq_variants: usize,
-    multi_allelic_variants: usize,
-    filtered_examples: Vec<String>,
+pub struct FilteringStats {
+    pub total_variants: usize,
+    pub _filtered_variants: usize,
+    pub filtered_due_to_mask: usize,
+    pub filtered_due_to_allow: usize,
+    pub filtered_positions: HashSet<i64>,
+    pub missing_data_variants: usize,
+    pub low_gq_variants: usize,
+    pub multi_allelic_variants: usize,
+    pub filtered_examples: Vec<String>,
 }
 
 impl FilteringStats {
