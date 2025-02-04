@@ -1004,24 +1004,32 @@ pub fn process_config_entries(
             .push(entry);
     }
 
+
     for (chr, entries) in regions_per_chr {
         println!("Processing chromosome: {}", chr);
-
-        // Read reference sequence and CDS regions once per chromosome
+    
+        // Read reference sequence once per chromosome.
         let ref_sequence = read_reference_sequence(
             &Path::new(&args.reference_path),
             &chr,
             entries.iter().map(|e| e.start).min().unwrap_or(0),
             entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX)
         )?;
-        
-        let cds_regions = parse_gtf_file(
+
+        // Parse GTF for the entire chromosome, ignoring user region in this step.
+        let all_transcripts = parse_gtf_file(
             &Path::new(&args.gtf_path),
-            &chr,
-            entries.iter().map(|e| e.start).min().unwrap_or(0),
-            entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX)
+            &chr
         )?;
-        
+
+        // Build a QueryRegion from the config entries' min and max.
+        let query_min = entries.iter().map(|e| e.start).min().unwrap_or(0);
+        let query_max = entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX);
+        let query_region = QueryRegion { start: query_min, end: query_max };
+    
+        // Filter transcripts by overlap and print logs.
+        let cds_regions = filter_and_log_transcripts(all_transcripts, query_region);
+
         // Determine the range to process
         let min_start = entries.iter().map(|e| e.start).min().unwrap_or(0);
         let max_end = entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX);
