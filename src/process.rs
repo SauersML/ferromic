@@ -774,34 +774,31 @@ fn process_variants(
             continue;
         }
     
-    let remainder = final_length % 3;
-    if remainder != 0 {
-        eprintln!("Warning: Skipping transcript {} for haplotype group {} on chr {} because final coding sequence length ({}) is not divisible by 3.", transcript_id, haplotype_group, chromosome, final_length);
-        continue;
-    }
+    // Validate each haplotype's combined CDS
+    let mut valid_map = HashMap::new();
+    let mut invalid_count = 0;
 
-    // Check for stop codons in the final coding sequences
-    let stop_codons = ["TAA", "TAG", "TGA"];
-    let mut skip_due_to_stop = false;
-    for (sample_name, seq) in &combined_sequences {
-        let seq_str = String::from_utf8_lossy(seq);
-        let upper_seq = seq_str.to_ascii_uppercase();
-        for i in (0..upper_seq.len()).step_by(3) {
-            if i + 2 < upper_seq.len() {
-                let codon = &upper_seq[i..i+3];
-                if stop_codons.contains(&codon) {
-                    eprintln!("Warning: Skipping transcript {} for haplotype group {} on chr {} due to internal stop codon '{}' at codon position {} in sample {}.", transcript_id, haplotype_group, chromosome, codon, i/3, sample_name);
-                    skip_due_to_stop = true;
-                    break;
-                }
+    for (sample_name, seq_bytes) in &combined_sequences {
+        match validate_coding_sequence(seq_bytes) {
+            Ok(_) => {
+                valid_map.insert(sample_name.clone(), seq_bytes.clone());
+            }
+            Err(reason) => {
+                eprintln!(
+                    "Skipping haplotype {} for transcript {} (group {}) on chr {}: {}",
+                    sample_name, transcript_id, haplotype_group, chromosome, reason
+                );
+                invalid_count += 1;
             }
         }
-        if skip_due_to_stop {
-            break;
-        }
     }
 
-    if skip_due_to_stop {
+    // If every haplotype failed, skip this transcript
+    if valid_map.is_empty() {
+        eprintln!(
+            "Skipping entire transcript {} for group {} on chr {} because all haplotypes failed validation.",
+            transcript_id, haplotype_group, chromosome
+        );
         continue;
     }
 
