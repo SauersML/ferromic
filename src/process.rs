@@ -878,7 +878,7 @@ pub fn validate_coding_sequence(seq: &[u8]) -> Result<(), String> {
     for i in (0..seq_upper.len()).step_by(3) {
         if i + 2 < seq_upper.len() {
             let codon = &seq_upper[i..i + 3];
-            if stops.iter().any(|stop| stop == codon) {
+            if stops.iter().any(|stop| *stop == codon) {
                 return Err(format!(
                     "Internal stop codon {} at codon index {}",
                     String::from_utf8_lossy(codon),
