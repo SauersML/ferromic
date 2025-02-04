@@ -5,6 +5,7 @@ use std::io::{self, BufReader, BufRead};
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use flate2::read::MultiGzDecoder;
+use colored::Colorize;
 
 // Function to parse regions file (mask or allow)
 pub fn parse_regions_file(
