@@ -1,7 +1,4 @@
-mod stats;
-mod parse;
-
-use stats::{
+use crate::stats::{ 
     count_segregating_sites,
     calculate_pairwise_differences,
     calculate_watterson_theta,
@@ -10,7 +7,7 @@ use stats::{
     calculate_inversion_allele_frequency,
 };
 
-use parse::{
+use crate::parse::{ 
     parse_regions_file,
     parse_config_file,
     parse_region,
