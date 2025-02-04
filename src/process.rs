@@ -150,6 +150,33 @@ pub struct MissingDataInfo {
     pub positions_with_missing: HashSet<i64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+/// The user query region for statistics.
+/// This region is inclusive of [start..end] positions in 0-based coordinates.
+pub struct QueryRegion {
+    /// Inclusive 0-based start position
+    pub start: i64,
+    /// Inclusive 0-based end position
+    pub end: i64,
+}
+
+impl QueryRegion {
+    /// Returns true if the given position lies in [start..end].
+    pub fn contains(&self, pos: i64) -> bool {
+        pos >= self.start && pos <= self.end
+    }
+}
+
+#[derive(Debug)]
+/// Represents one transcript's coding sequence. It stores all CDS segments
+/// belonging to a single transcript (no introns).
+pub struct TranscriptCDS {
+    /// The transcript identifier from the GTF
+    pub transcript_id: String,
+    /// A list of CDS segments: (start, end, strand_char, frame)
+    pub segments: Vec<(i64, i64, char, i64)>,
+}
+
 // Custom error types
 #[derive(Debug)]
 pub enum VcfError {
