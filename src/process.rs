@@ -918,7 +918,7 @@ fn make_sequences(
     Ok(())
 }
 
-fn process_config_entries(
+pub fn process_config_entries(
     config_entries: &[ConfigEntry],
     vcf_folder: &str,
     output_file: &Path,
