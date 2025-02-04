@@ -449,15 +449,13 @@ pub fn read_reference_sequence(
 // Helper function to parse GTF file and extract CDS regions
 // GTF and GFF use 1-based coordinate system
 pub fn parse_gtf_file(
-    gtf_path: &Path, 
+    gtf_path: &Path,
     chr: &str,
-    region_start: i64,
-    region_end: i64,
-) -> Result<Vec<CdsRegion>, VcfError> {
-    println!("\n{}", "Parsing GTF file...".green().bold());
-    println!("Chromosome: {}", chr);
-    println!("Region: {}-{}", region_start, region_end);
+) -> Result<Vec<TranscriptCDS>, VcfError> {
+    // Print overall GTF parsing context.
+    println!("\nParsing GTF file for chromosome: {}", chr);
 
+    // Open the GTF file.
     let file = File::open(gtf_path).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::NotFound,
@@ -465,9 +463,10 @@ pub fn parse_gtf_file(
         ))
     })?;
     let reader = BufReader::new(file);
-    
-    // Change to use transcript ID as key since CDS belongs to transcripts
-    let mut transcript_cdss: HashMap<String, Vec<(i64, i64, char, i64)>> = HashMap::new();
+
+    // Map of transcript_id -> list of CDS segments.
+    let mut transcript_map: HashMap<String, Vec<(i64, i64, char, i64)>> = HashMap::new();
+
     let mut skipped_lines = 0;
     let mut processed_lines = 0;
     let mut transcripts_found = HashSet::new();
@@ -475,6 +474,7 @@ pub fn parse_gtf_file(
 
     println!("Reading GTF entries...");
 
+    // Read each line, parse if CDS, and store in transcript_map.
     for (line_num, line_result) in reader.lines().enumerate() {
         let line = line_result?;
         if line.starts_with('#') {
@@ -492,6 +492,7 @@ pub fn parse_gtf_file(
             continue;
         }
 
+        // Only process CDS features.
         if fields[2] != "CDS" {
             continue;
         }
@@ -525,11 +526,11 @@ pub fn parse_gtf_file(
             0
         });
 
-        // Parse attributes to get transcript_id and gene_name
+        // Parse attributes to find transcript_id (and gene_name, if present).
         let attributes = fields[8];
         let mut transcript_id = None;
         let mut gene_name = None;
-        
+
         for attr in attributes.split(';') {
             let attr = attr.trim();
             let parts: Vec<&str> = if attr.contains('=') {
@@ -548,7 +549,7 @@ pub fn parse_gtf_file(
             match key {
                 "transcript_id" => transcript_id = Some(value.to_string()),
                 "gene_name" => gene_name = Some(value.to_string()),
-                _ => continue,
+                _ => {}
             }
         }
 
@@ -557,200 +558,51 @@ pub fn parse_gtf_file(
             None => {
                 malformed_attributes += 1;
                 if malformed_attributes <= 5 {
-                    eprintln!("Warning: Could not find transcript_id in attributes at line {}: {}", 
+                    eprintln!("Warning: Could not find transcript_id in attributes at line {}: {}",
                              line_num + 1, attributes);
                 }
                 continue;
             }
         };
 
-        // Store for later reporting
+        // Track transcripts found
         if let Some(gene) = gene_name {
             transcripts_found.insert(format!("{}:{}", gene, transcript_id));
         } else {
             transcripts_found.insert(transcript_id.clone());
         }
 
-        // Store CDS segment with strand + frame
-        let overlaps_region = !(end < region_start || start > region_end);
-        if overlaps_region {
-            transcripts_of_interest.insert(transcript_id.clone());
-        }
-        if transcripts_of_interest.contains(&transcript_id) {
-            transcript_cdss.entry(transcript_id)
-                .or_default()
-                .push((start, end, strand_char, frame));
-        }
+        // Push this CDS segment into the map for that transcript.
+        transcript_map.entry(transcript_id)
+            .or_default()
+            .push((start, end, strand_char, frame));
     }
 
-    println!("\n{}", "GTF Parsing Statistics:".blue().bold());
+    // Print summary of how many lines, transcripts, etc.
+    println!("\nFinished reading GTF.");
     println!("Total CDS entries processed: {}", processed_lines);
     println!("Skipped lines: {}", skipped_lines);
     println!("Unique transcripts found: {}", transcripts_found.len());
     if malformed_attributes > 0 {
-        println!("{}", format!("Entries with missing transcript IDs: {}", malformed_attributes).yellow());
+        println!("Entries with missing transcript IDs: {}", malformed_attributes);
     }
 
-    println!("\n{}", "Processing CDS regions by transcript...".green().bold());
-    let mut cds_regions = Vec::new();
-    let transcripts_processed = 0;
+    // Now build a vector of TranscriptCDS objects.
+    let mut transcripts_vec = Vec::new();
 
-    #[derive(Default)]
-    struct TranscriptStats {
-        total_transcripts: usize,
-        non_divisible_by_three: usize,
-        total_cds_segments: usize,
-        single_cds_transcripts: usize,
-        multi_cds_transcripts: usize,
-        total_coding_length: i64,
-        shortest_transcript_length: Option<i64>,
-        longest_transcript_length: Option<i64>,
-        transcripts_with_gaps: usize,
-    }
-
-    let mut stats = TranscriptStats::default();
-
-    for (transcript_id, mut segments) in transcript_cdss {
-        // Skip entire transcript if it has no exons overlapping the query:
-        let transcript_overlaps_region = segments
-            .iter()
-            .any(|&(s, e, _, _)| e >= region_start && s <= region_end);
-    
-        if !transcript_overlaps_region {
-            continue;
-        }
-    
-        segments.sort_by_key(|&(start, _, _, _)| start);
-        
-        println!("\nProcessing transcript: {}", transcript_id);
-        println!("Found {} CDS segments", segments.len());
-
-        stats.total_transcripts += 1;
-        stats.total_cds_segments += segments.len();
-
-        if segments.len() == 1 {
-            stats.single_cds_transcripts += 1;
-        } else {
-            stats.multi_cds_transcripts += 1;
-        }
-
-        // Check for gaps between segments
-        let has_gaps = segments.windows(2)
-            .any(|w| w[1].0 - w[0].1 > 1);
-        if has_gaps {
-            stats.transcripts_with_gaps += 1;
-        }
-
-        // Calculate total coding length and check individual segments
-        let mut coding_segments = Vec::new();
-        for (i, &(start, end, _, frame)) in segments.iter().enumerate() {
-            let segment_length = end - start + 1;
-            println!("  Segment {}: {}-{} (length: {}, frame: {})", 
-                    i + 1, start, end, segment_length, frame);
-            coding_segments.push((start, end));
-        }
-
-        if segments.is_empty() {
-            println!("  {} No valid segments for transcript {}", "!".red(), transcript_id);
-            continue;
-        }
-
-        let min_start = segments.iter().map(|&(s, _, _, _)| s).min().unwrap();
-        let max_end = segments.iter().map(|&(_, e, _, _)| e).max().unwrap();
-        let transcript_span = max_end - min_start + 1;
-        
-        // Calculate actual coding length (sum of CDS lengths)
-        let total_coding_length: i64 = segments.iter()
-            .map(|&(s, e, _, _)| e - s + 1)
-            .sum();
-
-        stats.total_coding_length += total_coding_length;
-
-        // Update length stats
-        match stats.shortest_transcript_length {
-            None => stats.shortest_transcript_length = Some(total_coding_length),
-            Some(current) => if total_coding_length < current {
-                stats.shortest_transcript_length = Some(total_coding_length)
-            }
-        }
-        
-        match stats.longest_transcript_length {
-            None => stats.longest_transcript_length = Some(total_coding_length),
-            Some(current) => if total_coding_length > current {
-                stats.longest_transcript_length = Some(total_coding_length)
-            }
-        }
-
-        if total_coding_length % 3 != 0 {
-            stats.non_divisible_by_three += 1;
-            println!("  {} Warning: Total CDS length {} not divisible by 3", 
-                    "!".yellow(), total_coding_length);
-            println!("    Remainder when divided by 3: {}", total_coding_length % 3);
-            println!("    Individual segment lengths: {:?}", 
-                    segments.iter().map(|&(s, e, _, _)| e - s + 1).collect::<Vec<_>>());
-        }
-
-        let cds_region = CdsRegion {
-            transcript_id: transcript_id.clone(),
-            // Use the entire triple (start,end,frame) directly
+    for (tid, mut segments) in transcript_map {
+        segments.sort_by_key(|&(s, _, _, _)| s);
+        transcripts_vec.push(TranscriptCDS {
+            transcript_id: tid,
             segments,
-        };
-
-        let cds_start = cds_region.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
-        let cds_end = cds_region.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
-
-        // Create a local variable holding the cloned segments
-        let cloned_segments = cds_region.segments.clone();
-        
-        let min_start_for_print = cloned_segments.iter().map(|(s, _, _, _)| s).min().unwrap();
-        let max_end_for_print = cloned_segments.iter().map(|(_, e, _, _)| e).max().unwrap();
-        
-        println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
-
-        // Print before pushing:
-        println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
-
-        // Now push after printing, so no borrow occurs after move:
-        cds_regions.push(cds_region);
-
-        println!("  CDS region: {}-{}", min_start_for_print, max_end_for_print);
-        println!("    Genomic span: {}", transcript_span);
-        println!("    Total coding length: {}", total_coding_length); 
+        });
     }
 
-    if stats.total_transcripts > 0 {
-        println!("\n{}", "CDS Processing Summary:".blue().bold());
-        println!("Total transcripts processed: {}", stats.total_transcripts);
-        println!("Total CDS segments: {}", stats.total_cds_segments);
-        println!("Average segments per transcript: {:.2}", 
-                 stats.total_cds_segments as f64 / stats.total_transcripts as f64);
-        println!("Single-cds transcripts: {} ({:.1}%)", 
-                 stats.single_cds_transcripts,
-                 100.0 * stats.single_cds_transcripts as f64 / stats.total_transcripts as f64);
-        println!("Multi-cds transcripts: {} ({:.1}%)", 
-                 stats.multi_cds_transcripts,
-                 100.0 * stats.multi_cds_transcripts as f64 / stats.total_transcripts as f64);
-        println!("Transcripts with gaps: {} ({:.1}%)",
-                 stats.transcripts_with_gaps,
-                 100.0 * stats.transcripts_with_gaps as f64 / stats.total_transcripts as f64);
-        println!("Non-divisible by three: {} ({:.1}%)", 
-                 stats.non_divisible_by_three,
-                 100.0 * stats.non_divisible_by_three as f64 / stats.total_transcripts as f64);
-        println!("Total coding bases: {}", stats.total_coding_length);
-        
-        if let Some(shortest) = stats.shortest_transcript_length {
-            println!("Shortest transcript: {} bp", shortest);
-        }
-        if let Some(longest) = stats.longest_transcript_length {
-            println!("Longest transcript: {} bp", longest);
-        }
-        println!("Average transcript length: {:.1} bp",
-                 stats.total_coding_length as f64 / stats.total_transcripts as f64);
+    println!("\nNumber of transcripts returned: {}", transcripts_vec.len());
+    if transcripts_vec.is_empty() {
+        println!("No CDS transcripts parsed for chromosome {}", chr);
     }
 
-    if cds_regions.is_empty() {
-        println!("{}", "No valid CDS regions found!".red());
-    }
-
-    Ok(cds_regions)
+    // Return them all (we do not filter by user region here).
+    Ok(transcripts_vec)
 }
