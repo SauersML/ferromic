@@ -1867,9 +1867,9 @@ fn process_vcf(
 
 // Struct to hold CDS region information
 pub struct CdsRegion {
-    transcript_id: String,
+    pub transcript_id: String,
     // Store (start, end, strand_char, frame)
-    segments: Vec<(i64, i64, char, i64)>,
+    pub segments: Vec<(i64, i64, char, i64)>,
 }
 
 
