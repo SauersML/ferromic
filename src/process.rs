@@ -1,4 +1,4 @@
-mod stats
+mod stats;
 use stats::*;
 
 use clap::Parser;
