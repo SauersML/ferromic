@@ -144,10 +144,10 @@ struct SeqInfo {
 }
 
 #[derive(Debug, Default, Clone)]
-struct MissingDataInfo {
-    total_data_points: usize,
-    missing_data_points: usize,
-    positions_with_missing: HashSet<i64>,
+pub struct MissingDataInfo {
+    pub total_data_points: usize,
+    pub missing_data_points: usize,
+    pub positions_with_missing: HashSet<i64>,
 }
 
 // Custom error types
