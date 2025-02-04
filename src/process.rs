@@ -498,8 +498,8 @@ When the code calls something like:
     haplotype_group,
     transcript_id,
     chromosome,
-    region_start,
-    region_end
+    cds_start,
+    cds_end
 );
 it creates one .phy file per combination of haplotype_group (0 or 1), transcript_id, and chromosome. This file can contain sequences from many samples, as long as their config entries say those samples’ haplotypes belong to that group.
 
@@ -670,117 +670,12 @@ fn process_variants(
             let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
             combined_sequences.insert(sample_name, Vec::new());
         }
-    
-            // FIRST: compute codon-aligned boundaries so we don't include partial codons at region edges.
-            // We'll do that by converting region_start and region_end to "CDS coordinates,"
-            // rounding them to codon boundaries, and converting back to genomic coords.
 
-            fn genomic_to_cds(
-                gpos: i64, // genomic position
-                segments: &[(i64, i64, char, i64)],
-            ) -> Option<i64> {
-                // This function finds how many coding bases precede 'gpos' in the transcript
-                // plus local frame. Returns None if 'gpos' is before the first exon or beyond the last.
-                let mut total = 0;
-                for &(s, e, _strand, frm) in segments {
-                    let length = e - s + 1;
-                    // if gpos < s, it’s before this exon. If gpos > e, it's after. If inside, partial.
-                    if gpos < s {
-                        // the position is before this exon, so we stop
-                        break;
-                    }
-                    if gpos > e {
-                        // entire exon is before gpos
-                        total += length;
-                    } else {
-                        // gpos is within s..e
-                        let offset = gpos - s;
-                        total += offset;
-                        // account for frame
-                        total += frm;
-                        return Some(total);
-                    }
-                }
-                // If we never found an exon containing gpos, we might be beyond everything or before everything
-                None
-            }
-
-            fn cds_to_genomic(
-                cds_coord: i64,
-                segments: &[(i64, i64, char, i64)],
-            ) -> Option<i64> {
-                // Reverses the logic: given a cds_coord, find which exon it belongs to
-                // and convert back to a genomic position.
-                let mut total_used = 0;
-                for &(s, e, _strand, frm) in segments {
-                    let length = e - s + 1;
-                    // The 'effective' length of this exon is length + possibly skipping frame bases at start
-                    // but since 'frame' means how many bases of the codon are "used" at the start,
-                    // we can do a simpler approach by just ignoring it in the summation logic
-                    // or we can incorporate it????????? Double-check. We'll incorporate it like so:
-                    let exon_start_cds = total_used;
-                    let exon_end_cds   = total_used + length;
-
-                    if cds_coord < exon_start_cds {
-                        break;
-                    }
-                    if cds_coord >= exon_end_cds {
-                        total_used += length;
-                    } else {
-                        // The coordinate is within this exon
-                        let offset = cds_coord - exon_start_cds;
-                        return Some(s + offset);
-                    }
-                }
-                None
-            }
-
-            // We'll convert region_start..region_end to codon-aligned boundaries:
-            let maybe_cds_start = genomic_to_cds(region_start, &cds.segments);
-            let maybe_cds_end   = genomic_to_cds(region_end,   &cds.segments);
-
-            let (codon_aligned_start, codon_aligned_end) = match (maybe_cds_start, maybe_cds_end) {
-                (Some(cds_s), Some(cds_e)) => {
-                    if cds_s > cds_e {
-                        // no valid region
-                        // we can skip the entire transcript
-                        continue;
-                    }
-                    // round cds_s up to next multiple-of-3 if partial
-                    let r_s_mod = cds_s % 3;
-                    let new_cds_s = if r_s_mod != 0 { cds_s + (3 - r_s_mod) } else { cds_s };
-                    // round cds_e down to nearest multiple-of-3+2
-                    let r_e_mod = cds_e % 3;
-                    let new_cds_e = if r_e_mod != 2 {
-                        cds_e - r_e_mod + 2
-                    } else {
-                        cds_e
-                    };
-                    if new_cds_s > new_cds_e {
-                        // no codons remain
-                        continue;
-                    }
-                    // convert them back to genomic coords
-                    let aligned_start = match cds_to_genomic(new_cds_s, &cds.segments) {
-                        Some(g) => g,
-                        None => continue,
-                    };
-                    let aligned_end = match cds_to_genomic(new_cds_e, &cds.segments) {
-                        Some(g) => g,
-                        None => continue,
-                    };
-                    if aligned_end < aligned_start {
-                        continue;
-                    }
-                    (aligned_start, aligned_end)
-                },
-                _ => {
-                    // region boundaries not inside any exon => skip
-                    continue;
-                }
-            };
-
-            // Using codon_aligned_start..codon_aligned_end so we don't include partial codons at edges.
+            // Just use the entire CDS:
+            let cds_min = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
+            let cds_max = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
+            let codon_aligned_start = cds_min;
+            let codon_aligned_end   = cds_max;
 
             let mut segment_map = Vec::new();
             {
