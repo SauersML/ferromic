@@ -808,8 +808,8 @@ fn process_variants(
         haplotype_group,
         transcript_id,
         chromosome,
-        region_start,
-        region_end
+        cds_start,
+        cds_end
     );
     let char_sequences: HashMap<String, Vec<char>> = combined_sequences
         .into_iter()
