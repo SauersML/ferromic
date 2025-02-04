@@ -1,4 +1,5 @@
-include!("stats.rs");
+mod stats
+use stats::*;
 
 use clap::Parser;
 use colored::*;
