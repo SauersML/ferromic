@@ -1,3 +1,5 @@
+include!("process.rs");
+
 use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
