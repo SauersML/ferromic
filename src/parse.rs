@@ -1,4 +1,4 @@
-use crate::process::{VcfError, ConfigEntry, CdsRegion};
+use crate::process::{VcfError, ConfigEntry, CdsRegion, TranscriptCDS};
 
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufRead};
