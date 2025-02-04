@@ -339,290 +339,208 @@ fn process_variants(
     reference_sequence: &[u8],
     cds_regions: &[TranscriptCDS],
 ) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
-    // Map sample names to indices
+    // 1) Map sample names to indices
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
         vcf_sample_id_to_index.insert(sample_id, i);
     }
 
-    // Collect haplotype indices for the specified group
+    // 2) Collect haplotype indices for this group
     let mut haplotype_indices = Vec::new();
-    for (sample_name, &(left_tsv, right_tsv)) in sample_filter.iter() {
-        if let Some(&i) = vcf_sample_id_to_index.get(sample_name.as_str()) {
-            if left_tsv == haplotype_group as u8 {
-                haplotype_indices.push((i, 0)); // Include left haplotype
+    for (sample_name, &(left_tsv, right_tsv)) in sample_filter {
+        if let Some(&idx) = vcf_sample_id_to_index.get(sample_name.as_str()) {
+            if left_tsv == haplotype_group {
+                haplotype_indices.push((idx, 0));
             }
-            if right_tsv == haplotype_group as u8 {
-                haplotype_indices.push((i, 1)); // Include right haplotype
+            if right_tsv == haplotype_group {
+                haplotype_indices.push((idx, 1));
             }
         }
     }
-
     if haplotype_indices.is_empty() {
-        println!(
-            "No haplotypes found for the specified group {}.",
-            haplotype_group
-        );
+        println!("No haplotypes found for group {}", haplotype_group);
         return Ok(None);
     }
 
+    // 3) STATS PASS: region-based
     let mut num_segsites = 0;
     let mut tot_pair_diff = 0;
     let n = haplotype_indices.len();
-
-    // Early return if no variants
     if variants.is_empty() {
-        return Ok(Some((0, 0.0, 0.0, n))); // Return zero values but valid result
+        return Ok(Some((0, 0.0, 0.0, n)));
     }
-
-    // Collect alleles and compute statistics
     for variant in variants {
-        if variant.position < region_start || variant.position > region_end { // Check
-            continue;
+        if variant.position < region_start || variant.position > region_end {
+            continue; // skip from stats
         }
-
         let mut variant_alleles = Vec::new();
-
         for &(sample_idx, allele_idx) in &haplotype_indices {
             let allele = variant.genotypes.get(sample_idx)
-                .and_then(|gt| gt.as_ref())
+                .and_then(|x| x.as_ref())
                 .and_then(|alleles| alleles.get(allele_idx))
                 .copied();
-
-
-                // Convert VCF allele to actual nucleotide
-                let nucleotide = if let Some(allele_val) = allele {
-                    let map = position_allele_map.lock();
-                    if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
-                        match allele_val {
-                            0 => Some(ref_allele as u8),
-                            1 => Some(alt_allele as u8),
-                            _ => Some(b'N')
-                        }
-                    } else {
-                        eprintln!("Warning: No allele mapping found for position {}", variant.position);
-                        Some(b'N')
-                    }
-                } else {
-                    None
-                };
-                
-
-                // Create and store SeqInfo
+            if let Some(allele_val) = allele {
+                let map = position_allele_map.lock();
+                let nucleotide = map.get(&variant.position).map(|&(ra, aa)| {
+                    if allele_val == 0 { ra as u8 } else { aa as u8 }
+                });
                 let seq_info = SeqInfo {
                     sample_index: sample_idx,
                     haplotype_group,
-                    vcf_allele: allele,
+                    vcf_allele: Some(allele_val),
                     nucleotide,
                     chromosome: chromosome.clone(),
                     position: variant.position,
-                    filtered: is_filtered_set, // MUST USE ACTUAL FILTERING INFO.
-                    // Perhaps since different aspects are updated in different places we can update sections of SeqInfo at a time. However, need way to ID same allele each update
+                    filtered: is_filtered_set,
                 };
-        
-                // Store SeqInfo if we have a valid nucleotide
-                if let Some(allele_val) = allele {
-                    let mut storage = seqinfo_storage.lock();
-                    storage.push(seq_info);
-                    variant_alleles.push(allele_val);
-                }
+                seqinfo_storage.lock().push(seq_info);
+                variant_alleles.push(allele_val);
+            }
         }
-
-        // Determine if the variant is a segregating site
-        let unique_alleles: HashSet<u8> = variant_alleles.iter().cloned().collect();
+        let unique_alleles: HashSet<_> = variant_alleles.iter().cloned().collect();
         if unique_alleles.len() > 1 {
             num_segsites += 1;
         }
-
-        // Compute pairwise differences
-        if !variant_alleles.is_empty() {
-            for i in 0..n {
-                if let Some(&allele_i) = variant_alleles.get(i) {
-                    for j in (i + 1)..n {
-                        if let Some(&allele_j) = variant_alleles.get(j) {
-                            if allele_i != allele_j {
-                                tot_pair_diff += 1;
-                            }
+        for i in 0..n {
+            if let Some(&allele_i) = variant_alleles.get(i) {
+                for j in (i + 1)..n {
+                    if let Some(&allele_j) = variant_alleles.get(j) {
+                        if allele_i != allele_j {
+                            tot_pair_diff += 1;
                         }
                     }
                 }
             }
         }
     }
+    let seq_len = adjusted_sequence_length.unwrap_or(region_end - region_start + 1);
+    let w_theta = calculate_watterson_theta(num_segsites, n, seq_len);
+    let pi = calculate_pi(tot_pair_diff, n, seq_len);
 
-    let seq_length = adjusted_sequence_length.unwrap_or(region_end - region_start + 1);
-    let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
-    let pi = calculate_pi(tot_pair_diff, n, seq_length);
-
-    // Process CDS regions and generate final coding sequences per transcript
+    // 4) FULL CDS PASS: entire transcript
     for cds in cds_regions {
-        let transcript_id = &cds.transcript_id;
-        let cds_min = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
-        let cds_max = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
-    
-        // Map each haplotype to a combined coding sequence
-        let mut combined_sequences: HashMap<String, Vec<u8>> = HashMap::new();
-        for (sample_idx, hap_idx) in &haplotype_indices {
-            let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
-            combined_sequences.insert(sample_name, Vec::new());
+        let tid = &cds.transcript_id;
+        let cds_min = cds.segments.iter().map(|&(s,_,_,_)| s).min().unwrap();
+        let cds_max = cds.segments.iter().map(|&(_,e,_,_)| e).max().unwrap();
+
+        // Prepare empty sequences for each sample
+        let mut combined: HashMap<String, Vec<u8>> = HashMap::new();
+        for (sidx, hidx) in &haplotype_indices {
+            let nm = match *hidx {
+                0 => format!("{}_L", sample_names[*sidx]),
+                1 => format!("{}_R", sample_names[*sidx]),
+                _ => panic!("Unexpected hap index")
+            };
+            combined.insert(nm, Vec::new());
         }
 
-            // Just use the entire CDS:
-            let cds_min = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
-            let cds_max = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
-            let codon_aligned_start = cds_min;
-            let codon_aligned_end   = cds_max;
-
-            let mut segment_map = Vec::new();
-            {
-                let mut current_length = 0;
-                for &(seg_start, seg_end, strand_char, frame_val) in &cds.segments {
-                    let overlap_start = seg_start;
-                    let overlap_end   = seg_end;
-                    let start_offset = (overlap_start - codon_aligned_start) as usize;
-                    let end_offset   = (overlap_end - codon_aligned_start + 1) as usize;
-                    if end_offset > reference_sequence.len() {
-                        continue;
-                    }
-
-                    // For each haplotype, copy that slice into combined_sequences
-                    for (sample_idx, hap_idx) in &haplotype_indices {
-                        let sample_name = match *hap_idx {
-                            0 => format!("{}_L", sample_names[*sample_idx]),
-                            1 => format!("{}_R", sample_names[*sample_idx]),
-                            _ => panic!("Unexpected hap_idx!"),
-                        };
-                        let seq = combined_sequences.get_mut(&sample_name).unwrap();
-
-                        let mut segment_ref_seq = reference_sequence[start_offset..end_offset].to_vec();
-
-                        // If minus strand, reverse+complement
-                        if strand_char == '-' {
-                            segment_ref_seq.reverse();
-                            for b in segment_ref_seq.iter_mut() {
-                                *b = match *b {
-                                    b'A' | b'a' => b'T',
-                                    b'T' | b't' => b'A',
-                                    b'C' | b'c' => b'G',
-                                    b'G' | b'g' => b'C',
-                                    _ => b'N',
-                                };
-                            }
-                        }
-                        seq.extend_from_slice(&segment_ref_seq);
-                    }
-
-                    // Keep track of where this segment lands in the final sequence
-                    let segment_len = end_offset - start_offset;
-                    segment_map.push((overlap_start, overlap_end, current_length));
-                    current_length += segment_len;
-                }
+        let mut segment_map = Vec::new();
+        let mut current_len = 0;
+        for &(seg_s, seg_e, strand, _fr) in &cds.segments {
+            let length = seg_e.saturating_sub(seg_s).saturating_add(1) as usize;
+            if seg_s < 0 {
+                eprintln!("Skipping negative start {} for transcript {} on {}", seg_s, tid, chromosome);
+                continue;
             }
-    
-        // Apply variants to the combined coding sequences
+            let off = seg_s as usize;
+            if off.checked_add(length).unwrap_or(usize::MAX) > reference_sequence.len() {
+                eprintln!("Skipping out-of-bounds {}..{} for transcript {} on {}", seg_s, seg_e, tid, chromosome);
+                continue;
+            }
+            for (sidx, hidx) in &haplotype_indices {
+                let nm = match *hidx {
+                    0 => format!("{}_L", sample_names[*sidx]),
+                    1 => format!("{}_R", sample_names[*sidx]),
+                    _ => panic!("Unexpected hap index")
+                };
+                let vec_ref = &mut combined.get_mut(&nm).unwrap();
+                let mut chunk = reference_sequence[off..off+length].to_vec();
+                if strand == '-' {
+                    chunk.reverse();
+                    for b in chunk.iter_mut() {
+                        *b = match *b {
+                            b'A' | b'a' => b'T',
+                            b'T' | b't' => b'A',
+                            b'C' | b'c' => b'G',
+                            b'G' | b'g' => b'C',
+                            _ => b'N'
+                        };
+                    }
+                }
+                vec_ref.extend_from_slice(&chunk);
+            }
+            segment_map.push((seg_s, seg_e, current_len));
+            current_len += length;
+        }
+
         for variant in variants {
             if variant.position < cds_min || variant.position > cds_max {
                 continue;
             }
-            let mut pos_in_cds = None;
-            for &(seg_s, seg_e, offset) in &segment_map {
-                if variant.position >= seg_s && variant.position <= seg_e {
-                    let rel = variant.position - seg_s;
-                    let idx = offset + rel as usize;
-                    pos_in_cds = Some(idx);
-                    break;
-                }
-            }
-    
-            if let Some(pos_in_seq) = pos_in_cds {
-                for (sample_idx, hap_idx) in &haplotype_indices {
-                    if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
-                        if let Some(allele) = alleles.get(*hap_idx) {
-                            let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
-                            if let Some(seq) = combined_sequences.get_mut(&sample_name) {
-                                if pos_in_seq < seq.len() {
-                                    let map = position_allele_map.lock();
-                                    if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
-                                        seq[pos_in_seq] = if *allele == 0 {
-                                            ref_allele as u8
-                                        } else {
-                                            alt_allele as u8
-                                        };
+            for &(s,e,offset) in &segment_map {
+                if variant.position >= s && variant.position <= e {
+                    let rel = variant.position.saturating_sub(s) as usize;
+                    let index_cds = offset + rel;
+                    for (sidx, hidx) in &haplotype_indices {
+                        if let Some(Some(alleles)) = variant.genotypes.get(*sidx) {
+                            if let Some(al) = alleles.get(*hidx) {
+                                let nm = match *hidx {
+                                    0 => format!("{}_L", sample_names[*sidx]),
+                                    1 => format!("{}_R", sample_names[*sidx]),
+                                    _ => panic!("Unexpected hap index")
+                                };
+                                if let Some(seqvec) = combined.get_mut(&nm) {
+                                    if index_cds < seqvec.len() {
+                                        let map = position_allele_map.lock();
+                                        if let Some(&(ra, aa)) = map.get(&variant.position) {
+                                            seqvec[index_cds] = if *al == 0 {
+                                                ra as u8
+                                            } else {
+                                                aa as u8
+                                            };
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                    break;
                 }
             }
         }
-    
-        // Make sure all sequences are the same length across haplotypes
-        let full_seq_lengths: Vec<usize> = combined_sequences.values().map(|v| v.len()).collect();
-        if full_seq_lengths.is_empty() {
+
+        let lens: Vec<usize> = combined.values().map(|v| v.len()).collect();
+        if lens.is_empty() {
             continue;
         }
-        let final_length = full_seq_lengths[0];
-        if !full_seq_lengths.iter().all(|&l| l == final_length) {
+        let fl = lens[0];
+        if !lens.iter().all(|&x| x == fl) {
+            eprintln!("Transcript {} has differing lengths among haplotypes", tid);
             continue;
         }
-    
-    // Validate each haplotype's combined CDS
-    let mut valid_map = HashMap::new();
-    let mut invalid_count = 0;
 
-    for (sample_name, seq_bytes) in &combined_sequences {
-        match validate_coding_sequence(seq_bytes) {
-            Ok(_) => {
-                valid_map.insert(sample_name.clone(), seq_bytes.clone());
-            }
-            Err(reason) => {
-                eprintln!(
-                    "Skipping haplotype {} for transcript {} (group {}) on chr {}: {}",
-                    sample_name, transcript_id, haplotype_group, chromosome, reason
-                );
-                invalid_count += 1;
-            }
+        let mut final_map = HashMap::new();
+        for (nm, data) in combined {
+            let chars: Vec<char> = data.iter().map(|&b| b as char).collect();
+            final_map.insert(nm, chars);
         }
-    }
-
-    // If every haplotype failed, skip this transcript
-    if valid_map.is_empty() {
-        eprintln!(
-            "Skipping entire transcript {} for group {} on chr {} because all haplotypes failed validation.",
-            transcript_id, haplotype_group, chromosome
+        let outphy = format!(
+            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
+            haplotype_group, tid, chromosome, cds_min, cds_max
         );
-        continue;
+        write_phylip_file(&outphy, &final_map)?;
     }
 
-    // Convert to char sequences and write out a single final PHYLIP file per transcript
-    let filename = format!(
-        "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
-        haplotype_group,
-        transcript_id,
-        chromosome,
-        cds_min,
-        cds_max
-    );
-    let char_sequences: HashMap<String, Vec<char>> = combined_sequences
-        .into_iter()
-        .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
-        .collect();
-    write_phylip_file(&filename, &char_sequences)?;
-    }
-
-    // Print the current contents before clearing
+    // Display stats pass seqinfo
     {
         let seqinfo = seqinfo_storage.lock();
-        if !seqinfo.is_empty() {
-            display_seqinfo_entries(&seqinfo, 12);
+        if seqinfo.is_empty() {
+            println!("No SeqInfo in stats pass for group {}", haplotype_group);
         } else {
-            println!("No SeqInfo entries were stored.");
+            display_seqinfo_entries(&seqinfo, 12);
         }
     }
-
-    // Clear storage for next group
     seqinfo_storage.lock().clear();
 
     if is_filtered_set {
@@ -639,6 +557,7 @@ fn process_variants(
             &chromosome,
         )?;
     }
+
     Ok(Some((num_segsites, w_theta, pi, n)))
 }
 
