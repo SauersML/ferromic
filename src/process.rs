@@ -1,3 +1,12 @@
+use crate::stats::{
+    count_segregating_sites,
+    calculate_pairwise_differences,
+    calculate_watterson_theta,
+    calculate_pi,
+    calculate_adjusted_sequence_length,
+    calculate_inversion_allele_frequency,
+};
+
 use clap::Parser;
 use colored::*;
 use flate2::read::MultiGzDecoder;
