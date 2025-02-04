@@ -262,11 +262,14 @@ fn main() -> Result<(), VcfError> {
             format!("Processing VCF file: {}", vcf_file.display()).cyan()
         );
         
+        let cds_min = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
+        let cds_max = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
+        
         let ref_sequence = read_reference_sequence(
             &Path::new(&args.reference_path),
             chr,
-            start,
-            end
+            cds_min,
+            cds_max
         )?;
         
         let cds_regions = parse_gtf_file(
