@@ -15,6 +15,7 @@ use crate::parse::{
     open_vcf_reader,
     read_reference_sequence,
     parse_gtf_file,
+    validate_vcf_header,
 };
 
 use clap::Parser;
