@@ -1,3 +1,8 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use rayon::prelude::*;
+use crate::process::Variant;
+
 fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 { // Not used
     let mut total = 0;
     for &(start, end) in mask {
