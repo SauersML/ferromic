@@ -1,4 +1,4 @@
-use crate::stats::{
+use ferromic::stats::{
     count_segregating_sites,
     calculate_pairwise_differences,
     calculate_watterson_theta,
@@ -7,7 +7,7 @@ use crate::stats::{
     calculate_inversion_allele_frequency,
 };
 
-use crate::parse::{
+use ferromic::parse::{
     parse_regions_file,
     parse_config_file,
     parse_region,
