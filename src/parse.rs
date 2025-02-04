@@ -572,9 +572,15 @@ pub fn parse_gtf_file(
         }
 
         // Store CDS segment with strand + frame
-        transcript_cdss.entry(transcript_id)
-            .or_default()
-            .push((start, end, strand_char, frame));
+        let overlaps_region = !(end < region_start || start > region_end);
+        if overlaps_region {
+            transcripts_of_interest.insert(transcript_id.clone());
+        }
+        if transcripts_of_interest.contains(&transcript_id) {
+            transcript_cdss.entry(transcript_id)
+                .or_default()
+                .push((start, end, strand_char, frame));
+        }
     }
 
     println!("\n{}", "GTF Parsing Statistics:".blue().bold());
