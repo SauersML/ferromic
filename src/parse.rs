@@ -1,5 +1,5 @@
 // Function to parse regions file (mask or allow)
-fn parse_regions_file(
+pub fn parse_regions_file(
     path: &Path,
 ) -> Result<HashMap<String, Vec<(i64, i64)>>, VcfError> {
     let is_bed_file = path.extension().and_then(|s| s.to_str()) == Some("bed");
@@ -72,7 +72,7 @@ fn parse_regions_file(
 }
 
 
-fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
+pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(b'\t')
         .from_path(path)
@@ -170,7 +170,7 @@ fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 }
 
 
-fn parse_region(region: &str) -> Result<(i64, i64), VcfError> {
+pub fn parse_region(region: &str) -> Result<(i64, i64), VcfError> {
     let parts: Vec<&str> = region.split('-').collect();
     if parts.len() != 2 {
         return Err(VcfError::InvalidRegion(
@@ -321,7 +321,7 @@ fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
 }
 
 
-fn read_reference_sequence(
+pub fn read_reference_sequence(
     fasta_path: &Path,
     chr: &str, 
     start: i64,
@@ -439,7 +439,7 @@ fn read_reference_sequence(
 // IN PROGRESS
 // Helper function to parse GTF file and extract CDS regions
 // GTF and GFF use 1-based coordinate system
-fn parse_gtf_file(
+pub fn parse_gtf_file(
     gtf_path: &Path, 
     chr: &str,
     region_start: i64,
