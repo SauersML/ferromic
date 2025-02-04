@@ -1322,8 +1322,161 @@ pub fn process_config_entries(
     }
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
+    // We finish process_config_entries as before.
     println!("Processing complete. Check the output file: {:?}", output_file);
     Ok(())
+}
+
+// This function filters the TranscriptCDS by QueryRegion overlap and prints stats 
+fn filter_and_log_transcripts(
+    transcripts: Vec<TranscriptCDS>,
+    query: QueryRegion
+) -> Vec<TranscriptCDS> {
+    use colored::Colorize;
+
+    println!("\n{}", "Processing CDS regions by transcript...".green().bold());
+    let mut filtered = Vec::new();
+    let mut transcripts_processed = 0;
+
+    #[derive(Default)]
+    struct TranscriptStats {
+        total_transcripts: usize,
+        non_divisible_by_three: usize,
+        total_cds_segments: usize,
+        single_cds_transcripts: usize,
+        multi_cds_transcripts: usize,
+        total_coding_length: i64,
+        shortest_transcript_length: Option<i64>,
+        longest_transcript_length: Option<i64>,
+        transcripts_with_gaps: usize,
+    }
+
+    let mut stats = TranscriptStats::default();
+
+    // Iterate all transcripts, decide if they overlap query region, do the logging.
+    for mut tcds in transcripts {
+        // Compute bounding region.
+        let cds_min = tcds.segments.iter().map(|&(s, _, _, _)| s).min().unwrap_or(0);
+        let cds_max = tcds.segments.iter().map(|&(_, e, _, _)| e).max().unwrap_or(-1);
+
+        // If no segments or invalid range, skip
+        if cds_max < 0 || tcds.segments.is_empty() {
+            continue;
+        }
+
+        // Check overlap
+        let overlaps_query = (cds_max >= query.start) && (cds_min <= query.end);
+        if !overlaps_query {
+            continue;
+        }
+
+        tcds.segments.sort_by_key(|&(s, _, _, _)| s);
+
+        println!("\nProcessing transcript: {}", tcds.transcript_id);
+        println!("Found {} CDS segments", tcds.segments.len());
+        stats.total_transcripts += 1;
+        stats.total_cds_segments += tcds.segments.len();
+
+        if tcds.segments.len() == 1 {
+            stats.single_cds_transcripts += 1;
+        } else {
+            stats.multi_cds_transcripts += 1;
+        }
+
+        let has_gaps = tcds.segments.windows(2)
+            .any(|w| w[1].0 - w[0].1 > 1);
+        if has_gaps {
+            stats.transcripts_with_gaps += 1;
+        }
+
+        let mut coding_segments = Vec::new();
+        for (i, &(start, end, _, frame)) in tcds.segments.iter().enumerate() {
+            let segment_length = end - start + 1;
+            println!("  Segment {}: {}-{} (length: {}, frame: {})", 
+                    i + 1, start, end, segment_length, frame);
+            coding_segments.push((start, end));
+        }
+
+        // Compute total coding length
+        let total_coding_length: i64 = tcds.segments.iter()
+            .map(|&(s, e, _, _)| e - s + 1)
+            .sum();
+        stats.total_coding_length += total_coding_length;
+
+        // Track shortest/longest
+        match stats.shortest_transcript_length {
+            None => stats.shortest_transcript_length = Some(total_coding_length),
+            Some(current) => if total_coding_length < current {
+                stats.shortest_transcript_length = Some(total_coding_length)
+            }
+        }
+        match stats.longest_transcript_length {
+            None => stats.longest_transcript_length = Some(total_coding_length),
+            Some(current) => if total_coding_length > current {
+                stats.longest_transcript_length = Some(total_coding_length)
+            }
+        }
+
+        if total_coding_length % 3 != 0 {
+            stats.non_divisible_by_three += 1;
+            println!("  {} Warning: Total CDS length {} not divisible by 3", 
+                    "!".yellow(), total_coding_length);
+            println!("    Remainder when divided by 3: {}", total_coding_length % 3);
+            println!("    Individual segment lengths: {:?}", 
+                    tcds.segments.iter().map(|&(s, e, _, _)| e - s + 1).collect::<Vec<_>>());
+        }
+
+        let min_start = tcds.segments.iter().map(|&(s, _, _, _)| s).min().unwrap();
+        let max_end = tcds.segments.iter().map(|&(_, e, _, _)| e).max().unwrap();
+        let transcript_span = max_end - min_start + 1;
+
+        println!("  CDS region: {}-{}", min_start, max_end);
+        println!("    Genomic span: {}", transcript_span);
+        println!("    Total coding length: {}", total_coding_length);
+
+        filtered.push(tcds);
+        transcripts_processed += 1;
+    }
+
+    if stats.total_transcripts > 0 {
+        println!("\n{}", "CDS Processing Summary:".blue().bold());
+        println!("Total transcripts processed: {}", stats.total_transcripts);
+        println!("Total CDS segments: {}", stats.total_cds_segments);
+        println!("Average segments per transcript: {:.2}", 
+                 stats.total_cds_segments as f64 / stats.total_transcripts as f64);
+        println!("Single-cds transcripts: {} ({:.1}%)", 
+                 stats.single_cds_transcripts,
+                 100.0 * stats.single_cds_transcripts as f64 / stats.total_transcripts as f64);
+        println!("Multi-cds transcripts: {} ({:.1}%)", 
+                 stats.multi_cds_transcripts,
+                 100.0 * stats.multi_cds_transcripts as f64 / stats.total_transcripts as f64);
+        println!("Transcripts with gaps: {} ({:.1}%)",
+                 stats.transcripts_with_gaps,
+                 100.0 * stats.transcripts_with_gaps as f64 / stats.total_transcripts as f64);
+        println!("Non-divisible by three: {} ({:.1}%)", 
+                 stats.non_divisible_by_three,
+                 100.0 * stats.non_divisible_by_three as f64 / stats.total_transcripts as f64);
+        println!("Total coding bases: {}", stats.total_coding_length);
+
+        if let Some(shortest) = stats.shortest_transcript_length {
+            println!("Shortest transcript: {} bp", shortest);
+        }
+        if let Some(longest) = stats.longest_transcript_length {
+            println!("Longest transcript: {} bp", longest);
+        }
+        let avg_len = if stats.total_transcripts == 0 { 
+            0.0 
+        } else { 
+            stats.total_coding_length as f64 / stats.total_transcripts as f64 
+        };
+        println!("Average transcript length: {:.1} bp", avg_len);
+    }
+
+    if filtered.is_empty() {
+        println!("{}", "No valid CDS regions found!".red());
+    }
+
+    filtered
 }
 
 
