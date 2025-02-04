@@ -1,3 +1,27 @@
+use ferromic::process::VcfError;
+use ferromic::Args;
+use ferromic::parse::{
+    parse_regions_file,
+    parse_config_file,
+    parse_region,
+    find_vcf_file,
+    read_reference_sequence,
+    parse_gtf_file,
+};
+use ferromic::stats::{
+    count_segregating_sites,
+    calculate_pairwise_differences,
+    calculate_watterson_theta,
+    calculate_pi,
+};
+use rayon::ThreadPoolBuilder;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::path::Path;
+use colored::Colorize;
+use clap::Parser;
+
+
 fn main() -> Result<(), VcfError> {
     let args = Args::parse();
 
