@@ -18,7 +18,7 @@ fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64
     total
 }
 
-fn calculate_adjusted_sequence_length(
+pub fn calculate_adjusted_sequence_length(
     region_start: i64,
     region_end: i64,
     allow_regions_chr: Option<&Vec<(i64, i64)>>,
@@ -86,7 +86,7 @@ fn subtract_regions(
     result
 }
 
-fn calculate_inversion_allele_frequency(
+pub fn calculate_inversion_allele_frequency(
     sample_filter: &HashMap<String, (u8, u8)>,
 ) -> Option<f64> {
     let mut num_ones = 0;
@@ -114,7 +114,7 @@ fn calculate_inversion_allele_frequency(
     }
 }
 
-fn count_segregating_sites(variants: &[Variant]) -> usize {
+pub fn count_segregating_sites(variants: &[Variant]) -> usize {
     variants
         .par_iter()
         .filter(|v| {
@@ -128,7 +128,7 @@ fn count_segregating_sites(variants: &[Variant]) -> usize {
         .count()
 }
 
-fn calculate_pairwise_differences(
+pub fn calculate_pairwise_differences(
     variants: &[Variant],
     n: usize,
 ) -> Vec<((usize, usize), usize, Vec<i64>)> {
@@ -158,11 +158,11 @@ fn calculate_pairwise_differences(
     }).collect()
 }
 
-fn harmonic(n: usize) -> f64 {
+pub fn harmonic(n: usize) -> f64 {
     (1..=n).map(|i| 1.0 / i as f64).sum()
 }
 
-fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
+pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
     // Handle edge cases
     if n <= 1 || seq_length == 0 {
         return f64::INFINITY; // Return infinity if only 1 or fewer haplotypes or if sequence length is zero
@@ -175,7 +175,7 @@ fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64
     seg_sites as f64 / harmonic_value / seq_length as f64
 }
 
-fn calculate_pi(tot_pair_diff: usize, n: usize, seq_length: i64) -> f64 {
+pub fn calculate_pi(tot_pair_diff: usize, n: usize, seq_length: i64) -> f64 {
     // Handle edge cases
     if n <= 1 || seq_length == 0 {
         return f64::INFINITY; // Return infinity if only 1 or fewer haplotypes or if sequence length is zero
