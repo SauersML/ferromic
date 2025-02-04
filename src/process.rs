@@ -570,7 +570,7 @@ fn process_variants(
 
     // Collect alleles and compute statistics
     for variant in variants {
-        if variant.position < region_start || variant.position > region_end {
+        if variant.position < region_start || variant.position > region_end { // Check
             continue;
         }
 
