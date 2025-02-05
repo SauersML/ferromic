@@ -619,7 +619,7 @@ fn make_sequences(
     sample_filter: &HashMap<String, (u8, u8)>,
     region_start: i64,
     region_end: i64,
-    reference_path: &Path,
+    reference_sequence: &[u8],
     cds_regions: &[TranscriptCDS],
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: &str,
