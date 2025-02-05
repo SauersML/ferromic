@@ -1158,6 +1158,9 @@ def main():
     results_df = pd.DataFrame([
         {
             'CDS': cds,
+            'chrom': parse_cds_coordinates(cds)[0],
+            'start': parse_cds_coordinates(cds)[1],
+            'end': parse_cds_coordinates(cds)[2],
             **{k: v for k, v in result.items()
                if k not in ['matrix_0', 'matrix_1', 'pairwise_comparisons']}
         }
