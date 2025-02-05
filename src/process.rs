@@ -443,7 +443,9 @@ fn process_variants(
                 eprintln!("Skipping negative start {} for transcript {} on {}", seg_s, tid, chromosome);
                 continue;
             }
-            let off = seg_s as usize;
+
+            // Convert from 1-based GTF start to 0-based index in reference... double-check
+            let offset_0_based = seg_s.saturating_sub(1) as usize;
             if off.checked_add(length).unwrap_or(usize::MAX) > reference_sequence.len() {
                 eprintln!("Skipping out-of-bounds {}..{} for transcript {} on {}", seg_s, seg_e, tid, chromosome);
                 continue;
@@ -965,14 +967,23 @@ pub fn process_config_entries(
 
 
     for (chr, entries) in regions_per_chr {
-        println!("Processing chromosome: {}", chr);
-    
-        // Read reference sequence once per chromosome.
+        // Load the entire chromosome so no transcript CDS goes out of range.
+        let chr_length = {
+            println!("Processing chromosome: {}", chr);
+            let fasta_reader = bio::io::fasta::IndexedReader::from_file(&Path::new(&args.reference_path))?;
+            let sequences = fasta_reader.index.sequences();
+            let seq_info = sequences
+                .iter()
+                .find(|seq| seq.name == chr || seq.name == format!("chr{}", chr))
+                .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?;
+            seq_info.len as i64
+        };
+
         let ref_sequence = read_reference_sequence(
             &Path::new(&args.reference_path),
             &chr,
-            entries.iter().map(|e| e.start).min().unwrap_or(0),
-            entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX)
+            0,
+            chr_length - 1
         )?;
 
         // Parse GTF for the entire chromosome, ignoring user region in this step.
