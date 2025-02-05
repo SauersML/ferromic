@@ -275,16 +275,19 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
 
     # For each chromosome with an inversion, draw connection lines from the lower linear axis (true base-pair space)
     # to the main plot's zoomed-in inversion boundaries.
-    for c in chr_trans_info:
+    for c in unique_chroms:
+        if c not in chr_trans_info:
+            continue
         c_idx = chrom_to_index[c]
-        A = chr_trans_info[c]['A']  # Normalized inversion start (linear coordinate)
-        B = chr_trans_info[c]['B']  # Normalized inversion end (linear coordinate)
-        fA = chr_trans_info[c]['fA']  # Transformed inversion start (main plot coordinate)
-        fB = chr_trans_info[c]['fB']  # Transformed inversion end (main plot coordinate)
+        # Lower bar: use the true (linear) normalized inversion boundaries
+        A = chr_trans_info[c]['A']
+        B = chr_trans_info[c]['B']
         lower_left = c_idx + A
         lower_right = c_idx + B
-        main_left = c_idx + fA
-        main_right = c_idx + fB
+        # Main plot: use the transformed (zoomed) inversion boundaries
+        main_left = c_idx + transform_coordinate(A, A, B)
+        main_right = c_idx + transform_coordinate(B, A, B)
+        # Draw two connection lines for chromosome c
         con_left = ConnectionPatch(xyA=(lower_left, 0.5), xyB=(main_left, 0),
                                     coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
                                     color="black", lw=0.5, linestyle="--")
