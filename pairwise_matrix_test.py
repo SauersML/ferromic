@@ -1124,7 +1124,7 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
         expand_text=(2,2),
         lim=200
     )
-    
+
     for txt, (x, y) in zip(text_objects, zip(label_points_x, label_points_y)):
         x_text, y_text = txt.get_position()
         ax.plot([x_text, x], [y_text, y], color='black', lw=0.5, zorder=3, alpha=0.5)
@@ -1138,7 +1138,7 @@ def main():
     print(f"Analysis started at {start_time}")
 
     # Read data
-    df = read_and_preprocess_data('all_pairwise_results.csv')
+    df = read_and_preprocess_data('prev_pairwise_results.csv')
 
     # Prepare arguments for parallel processing
     cds_list = df['CDS'].unique()
