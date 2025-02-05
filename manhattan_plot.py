@@ -267,35 +267,35 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         c_idx = chrom_to_index[c]
         # Draw a horizontal line representing the chromosome from its start to end in linear coords
         ax_bar.hlines(0.5, c_idx, c_idx+1, color='black', lw=2)
-    ax_bar.set_xticks([i+0.5 for i in range(len(unique_chroms))])
-    ax_bar.set_xticklabels([c.replace("chr", "") for c in unique_chroms], fontsize=14, fontweight='bold')
+    xticks = []
+    xtick_labels = []
+    for c in unique_chroms:
+        c_idx = chrom_to_index[c]
+        c_min, c_max = chrom_ranges[c]
+        xticks.extend([c_idx, c_idx+1])
+        xtick_labels.extend([f"{c_min:.0f}", f"{c_max:.0f}"])
+    ax_bar.set_xticks(xticks)
+    ax_bar.set_xticklabels(xtick_labels, fontsize=10)
     ax_bar.spines['top'].set_visible(False)
     ax_bar.spines['right'].set_visible(False)
     ax_bar.spines['left'].set_visible(False)
 
-    # For each chromosome with an inversion, draw connection lines from the lower linear axis (true base-pair space)
-    # to the main plot's zoomed-in inversion boundaries.
+
+    # For each chromosome, connect the full displayed chromosome borders from the main plot to their actual linear coordinates on the lower axis.
     for c in unique_chroms:
-        if c not in chr_trans_info:
-            continue
         c_idx = chrom_to_index[c]
-        # Lower bar: use the true (linear) normalized inversion boundaries
-        A = chr_trans_info[c]['A']
-        B = chr_trans_info[c]['B']
-        lower_left = c_idx + A
-        lower_right = c_idx + B
-        # Main plot: use the transformed (zoomed) inversion boundaries
-        main_left = c_idx + transform_coordinate(A, A, B)
-        main_right = c_idx + transform_coordinate(B, A, B)
-        # Draw two connection lines for chromosome c
-        con_left = ConnectionPatch(xyA=(lower_left, 0.5), xyB=(main_left, 0),
-                                    coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
-                                    color="black", lw=0.5, linestyle="--")
-        fig.add_artist(con_left)
-        con_right = ConnectionPatch(xyA=(lower_right, 0.5), xyB=(main_right, 0),
-                                     coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
-                                     color="black", lw=0.5, linestyle="--")
-        fig.add_artist(con_right)
+        c_min, c_max = chrom_ranges[c]
+        # In the main plot, each chromosome is displayed over [c_idx, c_idx+1].
+        # On the lower axis, we map the true base pair coordinates such that c_idx corresponds to c_min and c_idx+1 to c_max.
+        # Draw connection lines at the left and right borders.
+        con_border_left = ConnectionPatch(xyA=(c_idx, 0.5), xyB=(c_idx, 0),
+                                          coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
+                                          color="black", lw=0.5, linestyle="--")
+        fig.add_artist(con_border_left)
+        con_border_right = ConnectionPatch(xyA=(c_idx+1, 0.5), xyB=(c_idx+1, 0),
+                                           coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
+                                           color="black", lw=0.5, linestyle="--")
+        fig.add_artist(con_border_right)
 
     
     plt.tight_layout()
