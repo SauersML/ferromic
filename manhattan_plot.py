@@ -239,6 +239,9 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_bar.hlines(0.5, c_idx, c_idx+1, color='black', lw=2)
     ax_bar.set_xticks([i+0.5 for i in range(len(unique_chroms))])
     ax_bar.set_xticklabels([c.replace("chr", "") for c in unique_chroms], fontsize=14, fontweight='bold')
+    ax_bar.spines['top'].set_visible(False)
+    ax_bar.spines['right'].set_visible(False)
+    ax_bar.spines['left'].set_visible(False)
 
     # For each inversion, draw connecting lines from the lower linear axis (ax_bar) to the main plot x-axis (ax)
     for _, inv in inv_df.iterrows():
