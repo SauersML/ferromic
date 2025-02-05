@@ -18,7 +18,6 @@ from matplotlib.colors import ListedColormap, BoundaryNorm, LinearSegmentedColor
 from matplotlib.colorbar import ColorbarBase
 import matplotlib.patches as mpatches
 import requests
-import re
 from urllib.parse import urlencode
 from matplotlib.ticker import ScalarFormatter
 from matplotlib.ticker import FixedLocator, FixedFormatter
@@ -160,7 +159,7 @@ def analysis_worker(args):
     std_err = np.nan
 
     # Check if DataFrame has sufficient data
-    if df.empty or df['group'].nunique() < 1 or df['omega_value'].nunique() < 1:
+    if df.empty or df['group'].nunique() < 2 or df['omega_value'].nunique() < 2:
         return {
             'observed_effect_size': effect_size,
             'p_value': p_value,
@@ -290,82 +289,172 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
     # Check cache first
     if cds in cache:
         error_log.append(f"INFO: Found entry in cache for {cds}")
-        return cache[cds]['symbol'], cache[cds]['name'], cache[cds].get('chrom'), cache[cds].get('start'), cache[cds].get('end'), error_log
+        return cache[cds]['symbol'], cache[cds]['name'], error_log
 
-    if cds.startswith("chr"):
-        # Use the coordinates from the CDS name
-        chrom, start, end = parse_cds_coordinates(cds)
-        if chrom is None:
-            error_log.append("ERROR: Could not parse coordinates from CDS name")
-            return None, None, None, None, None, error_log
-        # (Option 1: Simple fallback) For now, simply use the coordinates as the gene symbol and name.
-        symbol = f"{chrom}:{start}-{end}"
-        name = f"Gene_{chrom}_{start}_{end}"
-        # Save to cache
-        cache[cds] = {
-            'symbol': symbol,
-            'name': name,
-            'chrom': chrom,
-            'start': start,
-            'end': end
-        }
-    else:
-        # Otherwise, try to find an ENST identifier as before
-        match = re.search(r'(ENST\d+\.\d+)', cds)
-        if not match:
-            error_log.append("ERROR: Could not find an ENST in this CDS name")
-            return None, None, None, None, None, error_log
-        transcript_id = match.group(1)
-        transcript_id = re.sub(r'\.\d+$', '', transcript_id)
-        ensembl_url = f"https://rest.ensembl.org/lookup/id/{transcript_id}?content-type=application/json"
+    def parse_coords(coord_str):
+        """Parse coordinate string into chr, start, end"""
+        if not coord_str:
+            return None, "ERROR: Empty coordinate string provided"
+            
         try:
-            r = requests.get(ensembl_url, timeout=10)
-            if not r.ok:
-                error_log.append(f"ERROR: Ensembl request failed with status {r.status_code}: {r.text}")
-                return None, None, None, None, None, error_log
-            info = r.json()
-            chrom = f"chr{info['seq_region_name']}"
-            start = int(info['start'])
-            end   = int(info['end'])
-            symbol = transcript_id
-            name   = f"Transcript_{transcript_id}"
-            cache[cds] = {
-                'symbol': symbol,
-                'name': name,
-                'chrom': chrom,
-                'start': start,
-                'end': end
-            }
-        except Exception as ex:
-            error_log.append(f"ERROR: Failed to fetch from Ensembl: {str(ex)}")
-            return None, None, None, None, None, error_log
-    
-    try:
-        cache[cds] = {
-            'symbol': symbol,
-            'name': name,
-            'chrom': chrom,
+            parts = coord_str.split(':')
+            if len(parts) != 2:
+                return None, "ERROR: Invalid coordinate format - missing ':'"
+                
+            chr = parts[0]
+            start_end = parts[1].split('-')
+            if len(start_end) != 2:
+                return None, "ERROR: Invalid coordinate format - missing '-'"
+                
+            start = int(start_end[0])
+            end = int(start_end[1])
+            
+            if start > end:
+                return None, f"ERROR: Invalid coordinates - start ({start}) greater than end ({end})"
+                
+            return {'chr': chr, 'start': start, 'end': end}, None
+            
+        except ValueError as e:
+            return None, f"ERROR: Failed to parse coordinates - invalid numbers: {str(e)}"
+        except Exception as e:
+            return None, f"ERROR: Failed to parse coordinates: {str(e)}"
+
+    def query_ucsc(chr, start, end):
+        """Query UCSC API for genes at location"""
+        base_url = "https://api.genome.ucsc.edu/getData/track"
+        params = {
+            'genome': 'hg38',
+            'track': 'knownGene',
+            'chrom': chr,
             'start': start,
             'end': end
         }
+        
+        try:
+            url = f"{base_url}?{urlencode(params)}"
+            print(f"\nQuerying UCSC API URL: {url}")  # Debug print
+            response = requests.get(url, timeout=10)
+            
+            print(f"\nResponse status: {response.status_code}")  # Debug print
+            #print(f"\nRaw API Response:\n{response.text}")  # Debug print
+            
+            if not response.ok:
+                return None, f"ERROR: API request failed with status {response.status_code}: {response.text}"
+                
+            data = response.json()
+            
+            # Print the structure of the response
+            print("\nResponse keys:", data.keys())
+            
+            if not data:
+                return None, "ERROR: Empty response from API"
+                
+            # Look for the track data - handle both possible response structures
+            track_data = None
+            if 'knownGene' in data:
+                track_data = data['knownGene']
+            elif isinstance(data, list):
+                track_data = data
+                
+            if not track_data:
+                return None, "No gene data found in response"
+            
+            # Filter for genes that overlap our region
+            overlapping_genes = []
+            for gene in track_data:
+                gene_start = gene.get('chromStart', 0)
+                gene_end = gene.get('chromEnd', 0)
+                
+                # Check if our region falls within the gene's coordinates
+                if gene_start <= end and gene_end >= start:
+                    overlapping_genes.append(gene)
+                    #print(f"\nFound overlapping gene: {gene}")  # Debug print
+            
+            if not overlapping_genes:
+                return None, "No overlapping genes found"
+                
+            return overlapping_genes, None
+            
+        except requests.Timeout:
+            return None, "ERROR: API request timed out"
+        except requests.RequestException as e:
+            return None, f"ERROR: API request failed: {str(e)}"
+        except json.JSONDecodeError as e:
+            return None, f"ERROR: Failed to parse API response: {str(e)}"
+        except Exception as e:
+            return None, f"ERROR: Unexpected error during API query: {str(e)}"
+
+    # Parse coordinates
+    loc, parse_error = parse_coords(cds)
+    if parse_error:
+        error_log.append(parse_error)
+        return None, None, error_log
+    
+    # Query API
+    genes, query_error = query_ucsc(loc['chr'], loc['start'], loc['end'])
+    if query_error:
+        error_log.append(query_error)
+        return None, None, error_log
+
+    if not genes:
+        error_log.append(f"WARNING: No genes found for coordinates {loc['chr']}:{loc['start']}-{loc['end']}")
+        return None, None, error_log
+
+    # Get the most relevant gene (the one that best contains our region)
+    best_gene = None
+    best_overlap = 0
+    region_length = loc['end'] - loc['start']
+    
+    for gene in genes:
+        gene_start = gene.get('chromStart', 0)
+        gene_end = gene.get('chromEnd', 0)
+        
+        # Calculate how much of our region is contained within this gene
+        overlap_start = max(gene_start, loc['start'])
+        overlap_end = min(gene_end, loc['end'])
+        overlap = max(0, overlap_end - overlap_start)
+        
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_gene = gene
+
+    if not best_gene:
+        error_log.append("WARNING: Could not determine best matching gene")
+        return None, None, error_log
+
+    # Extract gene information 
+    symbol = best_gene.get('geneName')
+    if symbol == 'none' or symbol.startswith('ENSG'):
+        # Try to find another gene with a proper symbol
+        for gene in genes:
+            potential_symbol = gene.get('geneName')
+            if potential_symbol != 'none' and not potential_symbol.startswith('ENSG'):
+                symbol = potential_symbol
+                break
+
+    name = get_gene_info(symbol) # Returns full human readable name
+
+    if symbol == 'Unknown':
+        error_log.append("WARNING: No symbol found in gene data")
+    if name == 'Unknown':
+        error_log.append("WARNING: No name found in gene data")
+
+    # Update cache
+    try:
+        cache[cds] = {'symbol': symbol, 'name': name}
         with open(cache_file, 'w') as f:
             json.dump(cache, f)
     except Exception as e:
         error_log.append(f"WARNING: Failed to update cache file: {str(e)}")
-    
-    cached_entry = cache[cds]
-    return (
-        cached_entry['symbol'],
-        cached_entry['name'],
-        cached_entry['chrom'],
-        cached_entry['start'],
-        cached_entry['end'],
-        error_log
-    )
+
+    return symbol, name, error_log
+
+
+
 
 def create_visualization(matrix_0, matrix_1, cds, result):
     # Retrieve gene annotation
-    gene_symbol, gene_name, gene_chrom, gene_start, gene_end, error_log = get_gene_annotation(cds)
+    gene_symbol, gene_name, error_log = get_gene_annotation(cds)
     if error_log:
         print(f"\nWarnings/Errors for CDS {cds}:")
         for msg in error_log:
@@ -618,14 +707,14 @@ def analyze_cds_parallel(args):
     valid_per_seq_group_1 = np.sum(~np.isnan(matrix_1), axis=1)
 
     # Set minimum required sequences per group
-    min_sequences_per_group = 1
+    min_sequences_per_group = 3
 
     if (n0 < min_sequences_per_group or 
         n1 < min_sequences_per_group or
-        np.nansum(~np.isnan(matrix_0)) < 1 or 
-        np.nansum(~np.isnan(matrix_1)) < 1 or
-        not all(valid_per_seq_group_0 >= 1) or
-        not all(valid_per_seq_group_1 >= 1)):
+        np.nansum(~np.isnan(matrix_0)) < 3 or 
+        np.nansum(~np.isnan(matrix_1)) < 3 or
+        not all(valid_per_seq_group_0 >= 5) or
+        not all(valid_per_seq_group_1 >= 5)):
     
         # Not enough sequences/valid comparisons
         result.update({
@@ -652,27 +741,23 @@ def analyze_cds_parallel(args):
 def parse_cds_coordinates(cds_name):
     """Extract chromosome and coordinates from CDS name."""
     try:
-        # If it's a path, keep only the final filename
-        if '/' in cds_name:
+        # Try different possible formats
+        if '/' in cds_name:  # If it's a path, take the last part
             cds_name = cds_name.split('/')[-1]
 
-        # Look for pattern: _chr_<chr>_start_<start>_end_<end>
-        m = re.search(r'_chr_(.*?)_start_(\d+)_end_(\d+)', cds_name)
-        if m:
-            chrom_part = m.group(1)  # e.g. "19"
-            start_str = m.group(2)   # e.g. "1000"
-            end_str = m.group(3)     # e.g. "2000"
-            chrom = 'chr' + chrom_part
-            start = int(start_str)
-            end = int(end_str)
+        if '_chr_' in cds_name:
+            left, right = cds_name.split('_chr_')
+            right = right.replace('_combined', '')
+            chrom = 'chr' + right
+            start = 0
+            end = 0
             return chrom, start, end
-
-        # As a fallback, if we have a colon-based pattern: "chr19:1000-2000"
-        if ':' in cds_name:
+        elif ':' in cds_name:
             chrom, coords = cds_name.split(':')
             start, end = map(int, coords.replace('-', '..').split('..'))
             return chrom, start, end
 
+        # If parsing fails
         print(f"Failed to parse: {cds_name}")
         return None, None, None
     except Exception as e:
@@ -1108,7 +1193,7 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     label_points_y = []
     for _, hit_row in significant_hits.iterrows():
         cds = hit_row['CDS']
-        gene_symbol, gene_name, _, _, _, error_log = get_gene_annotation(cds)
+        gene_symbol, gene_name, err_log = get_gene_annotation(cds)
         if gene_symbol and gene_symbol not in [None, 'Unknown']:
             label_txt = f"{gene_symbol}"
         else:
@@ -1140,7 +1225,7 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
         expand_text=(2,2),
         lim=200
     )
-
+    
     for txt, (x, y) in zip(text_objects, zip(label_points_x, label_points_y)):
         x_text, y_text = txt.get_position()
         ax.plot([x_text, x], [y_text, y], color='black', lw=0.5, zorder=3, alpha=0.5)
@@ -1154,7 +1239,7 @@ def main():
     print(f"Analysis started at {start_time}")
 
     # Read data
-    df = read_and_preprocess_data('prev_pairwise_results.csv')
+    df = read_and_preprocess_data('all_pairwise_results.csv')
 
     # Prepare arguments for parallel processing
     cds_list = df['CDS'].unique()
@@ -1174,14 +1259,17 @@ def main():
     results_df = pd.DataFrame([
         {
             'CDS': cds,
-            'chrom': parse_cds_coordinates(cds)[0],
-            'start': parse_cds_coordinates(cds)[1],
-            'end': parse_cds_coordinates(cds)[2],
             **{k: v for k, v in result.items()
                if k not in ['matrix_0', 'matrix_1', 'pairwise_comparisons']}
         }
         for cds, result in results.items()
     ])
+
+    # Parse coordinates from CDS and add to results_df
+    coords = results_df['CDS'].apply(parse_cds_coordinates)
+    results_df[['chrom', 'start', 'end']] = pd.DataFrame(coords.tolist(), index=results_df.index)
+    # Drop rows where parsing failed
+    results_df.dropna(subset=['chrom','start','end'], inplace=True)
 
     # Save final results
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
