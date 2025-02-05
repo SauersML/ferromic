@@ -1430,7 +1430,7 @@ pub fn process_vcf(
     let mut sample_names = Vec::new();
     let chr_length = {
         let fasta_reader = bio::io::fasta::IndexedReader::from_file(&reference_path)
-            .map_err(|e| VcfError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+            .map_err(|e| VcfError::Parse(e.to_string()))?;
         // Create an owned copy of the sequences
         let sequences = fasta_reader.index.sequences().to_vec();
         let seq_info = sequences.iter()
