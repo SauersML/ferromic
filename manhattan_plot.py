@@ -69,18 +69,46 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         c_max = chr_df['end'].max()
         chrom_ranges[c] = (c_min, c_max)
     
+    def transform_coordinate(L, A, B):
+        if L <= A:
+            return (L / A) * 0.2 if A > 0 else 0
+        elif L <= B:
+            return 0.2 + ((L - A) / (B - A)) * 0.6 if (B - A) > 0 else 0.2
+        else:
+            return 0.8 + ((L - B) / (1 - B)) * 0.2 if (1 - B) > 0 else 0.8
+
+    # For each chromosome, if an inversion exists, compute its normalized boundaries and the transformed (zoomed) boundaries.
+    chr_trans_info = {}
+    for c in unique_chroms:
+        c_inv = inv_df[inv_df['chr'] == c]
+        c_min, c_max = chrom_ranges[c]
+        if not c_inv.empty and c_max > c_min:
+            inv_row = c_inv.iloc[0]
+            A = (inv_row['region_start'] - c_min) / (c_max - c_min)
+            B = (inv_row['region_end'] - c_min) / (c_max - c_min)
+            A = max(0, min(1, A))
+            B = max(0, min(1, B))
+            if B < A:
+                A, B = B, A
+            chr_trans_info[c] = {
+                'A': A, 
+                'B': B,
+                'fA': transform_coordinate(A, A, B),
+                'fB': transform_coordinate(B, A, B)
+            }
     xs = []
     for _, row in results_df.iterrows():
         c = row['chrom']
-        if c not in chrom_ranges or pd.isnull(c):
-            xs.append(np.nan)
-            continue
         c_min, c_max = chrom_ranges[c]
         if c_max > c_min:
-            rel_pos = (row['start'] - c_min) / (c_max - c_min)
+            L = (row['start'] - c_min) / (c_max - c_min)
         else:
-            rel_pos = 0.5
-        xs.append(chrom_to_index[c] + rel_pos)
+            L = 0.5
+        if c in chr_trans_info:
+            fL = transform_coordinate(L, chr_trans_info[c]['A'], chr_trans_info[c]['B'])
+        else:
+            fL = L
+        xs.append(chrom_to_index[c] + fL)
     results_df['plot_x'] = xs
     
     eff = results_df['observed_effect_size']
@@ -243,30 +271,27 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     ax_bar.spines['right'].set_visible(False)
     ax_bar.spines['left'].set_visible(False)
 
-    # For each inversion, draw connecting lines from the lower linear axis (ax_bar) to the main plot x-axis (ax)
-    for _, inv in inv_df.iterrows():
-        inv_chr = inv['chr']
-        if inv_chr not in chrom_to_index:
-            continue
-        c_idx = chrom_to_index[inv_chr]
-        c_min, c_max = chrom_ranges[inv_chr]
-        if c_max > c_min:
-            linear_rel_start = (inv['region_start'] - c_min) / (c_max - c_min)
-            linear_rel_end = (inv['region_end'] - c_min) / (c_max - c_min)
-        else:
-            linear_rel_start = 0.4
-            linear_rel_end = 0.6
-        x_left = c_idx + linear_rel_start
-        x_right = c_idx + linear_rel_end
-        # Draw connection from the lower axis at y=0.5 to the main axis x-axis line at y=0
-        con_left = ConnectionPatch(xyA=(x_left, 0.5), xyB=(x_left, 0),
+    # For each chromosome with an inversion, draw connection lines from the lower linear axis (true base-pair space)
+    # to the main plot's zoomed-in inversion boundaries.
+    for c in chr_trans_info:
+        c_idx = chrom_to_index[c]
+        A = chr_trans_info[c]['A']  # Normalized inversion start (linear coordinate)
+        B = chr_trans_info[c]['B']  # Normalized inversion end (linear coordinate)
+        fA = chr_trans_info[c]['fA']  # Transformed inversion start (main plot coordinate)
+        fB = chr_trans_info[c]['fB']  # Transformed inversion end (main plot coordinate)
+        lower_left = c_idx + A
+        lower_right = c_idx + B
+        main_left = c_idx + fA
+        main_right = c_idx + fB
+        con_left = ConnectionPatch(xyA=(lower_left, 0.5), xyB=(main_left, 0),
                                     coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
                                     color="black", lw=0.5, linestyle="--")
         fig.add_artist(con_left)
-        con_right = ConnectionPatch(xyA=(x_right, 0.5), xyB=(x_right, 0),
+        con_right = ConnectionPatch(xyA=(lower_right, 0.5), xyB=(main_right, 0),
                                      coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
                                      color="black", lw=0.5, linestyle="--")
         fig.add_artist(con_right)
+
     
     plt.tight_layout()
     plt.savefig(os.path.join("plots", 'manhattan_plot.png'), dpi=300, bbox_inches='tight')
