@@ -654,14 +654,9 @@ fn make_sequences(
         return Ok(());
     }
 
+    // Sequences for each sample haplotype with the reference sequence
+    let transcript_ref_seq = reference_sequence.to_vec();
 
-    // Initialize sequences for each sample haplotype with the reference sequence
-    let transcript_ref_seq = read_reference_sequence(
-        reference_path,
-        chromosome,
-        cds_start,
-        cds_end
-    )?;
 
     let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
     for (sample_idx, hap_idx) in &haplotype_indices {
