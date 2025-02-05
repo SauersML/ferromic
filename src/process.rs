@@ -993,11 +993,7 @@ pub fn process_config_entries(
         // We simply hold all_transcripts here and filter later for each entry.
         let cds_regions = all_transcripts;
 
-        // Determine the range to process
-        let min_start = entries.iter().map(|e| e.start).min().unwrap_or(0);
-        let max_end = entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX);
-    
-        // Locate the appropriate VCF file
+        // Locate the VCF file once for this chromosome.
         let vcf_file = match find_vcf_file(vcf_folder, &chr) {
             Ok(file) => file,
             Err(e) => {
@@ -1005,40 +1001,49 @@ pub fn process_config_entries(
                 continue;
             }
         };
-    
-        println!(
-            "Processing VCF file for chromosome {} from {} to {}",
-            chr, min_start, max_end
-        );
-    
-        // Pass the mask and allow regions (clone the Arc)
-        let variants_data = match process_vcf(
-            &vcf_file,
-            &Path::new(&args.reference_path),
-            &chr,
-            min_start,
-            max_end,
-            min_gq,
-            mask.clone(),
-            allow.clone(),
-            Arc::clone(&seqinfo_storage),
-            Arc::clone(&position_allele_map),
-        ) {
-            Ok(data) => data,
-            Err(e) => {
-                eprintln!("Error processing VCF file for {}: {}", chr, e);
-                continue;
-            }
-        };
-    
-        let (
-            unfiltered_variants,
-            _filtered_variants,
-            sample_names,
-            _chr_length,
-            _missing_data_info,
-            _filtering_stats,
-        ) = variants_data;
+
+        // Process each entry's region individually.
+        for entry in &entries {
+            let local_cds = filter_and_log_transcripts(
+                cds_regions.clone(),
+                QueryRegion {
+                    start: entry.start,
+                    end: entry.end
+                }
+            );
+
+            println!(
+                "Processing VCF file for chromosome {} from {} to {}",
+                chr, entry.start, entry.end
+            );
+
+            let variants_data = match process_vcf(
+                &vcf_file,
+                &Path::new(&args.reference_path),
+                &chr,
+                entry.start,
+                entry.end,
+                min_gq,
+                mask.clone(),
+                allow.clone(),
+                Arc::clone(&seqinfo_storage),
+                Arc::clone(&position_allele_map),
+            ) {
+                Ok(data) => data,
+                Err(e) => {
+                    eprintln!("Error processing VCF file for {}: {}", chr, e);
+                    continue;
+                }
+            };
+
+            let (
+                unfiltered_variants,
+                _filtered_variants,
+                sample_names,
+                _chr_length,
+                _missing_data_info,
+                _filtering_stats,
+            ) = variants_data;
 
         println!("\n{}", "Filtering Statistics:".green().bold());
         println!("Total variants processed: {}", _filtering_stats.total_variants);
