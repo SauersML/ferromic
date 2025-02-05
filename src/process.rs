@@ -674,8 +674,8 @@ fn make_sequences(
 
     // Apply variants to sequences
     for variant in variants {
-        if variant.position >= region_start && variant.position <= region_end {
-            let pos_in_seq = (variant.position - region_start) as usize;
+        if variant.position >= cds_start && variant.position <= cds_end {
+            let pos_in_seq = (variant.position - cds_start) as usize;
             for (sample_idx, hap_idx) in &haplotype_indices {
                 if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
                     if let Some(allele) = alleles.get(*hap_idx) {
