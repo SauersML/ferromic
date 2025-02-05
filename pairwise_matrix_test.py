@@ -365,7 +365,7 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
 
 def create_visualization(matrix_0, matrix_1, cds, result):
     # Retrieve gene annotation
-    gene_symbol, gene_name, error_log = get_gene_annotation(cds)
+    gene_symbol, gene_name, gene_chrom, gene_start, gene_end, error_log = get_gene_annotation(cds)
     if error_log:
         print(f"\nWarnings/Errors for CDS {cds}:")
         for msg in error_log:
