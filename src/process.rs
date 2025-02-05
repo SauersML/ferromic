@@ -290,13 +290,14 @@ fn position_in_regions(pos: i64, regions: &[(i64, i64)]) -> bool {
 
 /*
 When the code calls something like:
-    let filename = format!(
-    "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
-    haplotype_group,
-    transcript_id,
-    chromosome,
-    cds_start,
-    cds_end
+        let filename = format!(
+            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
+            haplotype_group,
+            cds.transcript_id,
+            chromosome,
+            transcript_cds_start,
+            transcript_cds_end
+        );
 );
 it creates one .phy file per combination of haplotype_group (0 or 1), transcript_id, and chromosome. This file can contain sequences from many samples, as long as their config entries say those samples’ haplotypes belong to that group.
 
@@ -786,8 +787,8 @@ fn make_sequences(
             haplotype_group,
             cds.transcript_id,
             chromosome,
-            cds_start,
-            cds_end
+            transcript_cds_start,
+            transcript_cds_end
         );
         
         // Convert combined_cds_sequences to char sequences
@@ -847,12 +848,12 @@ fn make_sequences(
 
         // Write sequences to PHYLIP file
         let filename = format!(
-            "group_{}_{}_chr_{}_start_{}_end_{}.phy",
+            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
             haplotype_group,
             cds.transcript_id,
             chromosome,
-            cds_start,
-            cds_end
+            transcript_cds_start,
+            transcript_cds_end
         );
 
     
@@ -861,8 +862,8 @@ fn make_sequences(
             haplotype_group,
             cds.transcript_id,
             chromosome,
-            cds_start,
-            cds_end
+            transcript_cds_start,
+            transcript_cds_end
         );
 
         // Validate each haplotype's final coding sequence
