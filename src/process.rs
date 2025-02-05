@@ -966,7 +966,8 @@ pub fn process_config_entries(
         // Load the entire chromosome so no transcript CDS goes out of range.
         let chr_length = {
             println!("Processing chromosome: {}", chr);
-            let fasta_reader = bio::io::fasta::IndexedReader::from_file(&Path::new(&args.reference_path))?;
+            let fasta_reader = bio::io::fasta::IndexedReader::from_file(&Path::new(&args.reference_path))
+                .map_err(|e| VcfError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
             let sequences = fasta_reader.index.sequences();
             let seq_info = sequences
                 .iter()
