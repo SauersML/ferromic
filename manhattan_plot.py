@@ -98,7 +98,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     gs = fig.add_gridspec(2, 1, height_ratios=[9, 1], hspace=0.05)
     sns.set_style("ticks")
     ax = fig.add_subplot(gs[0])
-    ax_bar = fig.add_subplot(gs[1])
+    ax_bar = fig.add_subplot(gs[1], sharex=ax)
     
     recurrent_color = 'purple'
     single_color = 'green'
@@ -173,10 +173,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         new_ylim = max(new_ylim, bonf_threshold+1)
     ax.set_ylim(0, new_ylim)
     
-    ax.set_xticks(range(len(unique_chroms)+1), minor=False)
-    ax.set_xticks([i+0.5 for i in range(len(unique_chroms))], minor=True)
-    ax.set_xticklabels(['']*(len(unique_chroms)+1), minor=False)
-    ax.set_xticklabels(unique_chroms, rotation=45, ha='right', fontsize=14, fontweight='bold', minor=True)
+    ax.tick_params(labelbottom=False)
     
     ax.set_xlabel('Chromosome', fontsize=18)
     ax.set_ylabel('-log10(p-value)', fontsize=18)
@@ -241,8 +238,10 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         c_idx = chrom_to_index[c]
         # Draw a horizontal line representing the chromosome from its start to end in linear coords
         ax_bar.hlines(0.5, c_idx, c_idx+1, color='black', lw=2)
-        ax_bar.text(c_idx+0.5, 0.7, c, ha='center', va='bottom', fontsize=14, fontweight='bold')
-    # For each inversion, draw connecting lines from the linear bar to the main plot inversion span
+    ax_bar.set_xticks([i+0.5 for i in range(len(unique_chroms))])
+    ax_bar.set_xticklabels([c.replace("chr", "") for c in unique_chroms], fontsize=14, fontweight='bold')
+
+    # For each inversion, draw connecting lines from the lower linear axis (ax_bar) to the main plot x-axis (ax)
     for _, inv in inv_df.iterrows():
         inv_chr = inv['chr']
         if inv_chr not in chrom_to_index:
@@ -255,20 +254,16 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         else:
             linear_rel_start = 0.4
             linear_rel_end = 0.6
-        bar_inv_x_start = c_idx + linear_rel_start
-        bar_inv_x_end = c_idx + linear_rel_end
-        # Recalculate main plot inversion coordinates (as used in the main axes)
-        main_inv_x_start = c_idx + max(0, min(linear_rel_start, 1))
-        main_inv_x_end = c_idx + min(1, max(linear_rel_end, 0))
-        # Draw connection from left edge of inversion
-        con_left = ConnectionPatch(xyA=(bar_inv_x_start, 0.5), xyB=(main_inv_x_start, ax.get_ylim()[0]),
-                                   coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
-                                   color="black", lw=0.5, linestyle="--")
-        fig.add_artist(con_left)
-        # Draw connection from right edge of inversion
-        con_right = ConnectionPatch(xyA=(bar_inv_x_end, 0.5), xyB=(main_inv_x_end, ax.get_ylim()[0]),
+        x_left = c_idx + linear_rel_start
+        x_right = c_idx + linear_rel_end
+        # Draw connection from the lower axis at y=0.5 to the main axis x-axis line at y=0
+        con_left = ConnectionPatch(xyA=(x_left, 0.5), xyB=(x_left, 0),
                                     coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
                                     color="black", lw=0.5, linestyle="--")
+        fig.add_artist(con_left)
+        con_right = ConnectionPatch(xyA=(x_right, 0.5), xyB=(x_right, 0),
+                                     coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
+                                     color="black", lw=0.5, linestyle="--")
         fig.add_artist(con_right)
     
     plt.tight_layout()
