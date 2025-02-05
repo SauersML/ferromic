@@ -85,7 +85,7 @@ GLOBAL_COUNTERS = manager.dict({
 
 CACHE = None
 
-NUM_PARALLEL = 32
+NUM_PARALLEL = 128
 
 def print_eta(completed, total, start_time, eta_data):
     print("Calculating ETA for progress...")
