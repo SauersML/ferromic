@@ -618,7 +618,7 @@ fn make_sequences(
     sample_filter: &HashMap<String, (u8, u8)>,
     region_start: i64,
     region_end: i64,
-    reference_sequence: &[u8],
+    reference_path: &Path,
     cds_regions: &[TranscriptCDS],
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: &str,
@@ -655,10 +655,21 @@ fn make_sequences(
 
 
     // Initialize sequences for each sample haplotype with the reference sequence
+    let transcript_ref_seq = read_reference_sequence(
+        reference_path,
+        chromosome,
+        cds_start,
+        cds_end
+    )?;
+
     let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
     for (sample_idx, hap_idx) in &haplotype_indices {
-        let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
-        hap_sequences.insert(sample_name, reference_sequence.to_vec());
+        let sample_name = match *hap_idx {
+            0 => format!("{}_L", sample_names[*sample_idx]),
+            1 => format!("{}_R", sample_names[*sample_idx]),
+            _ => panic!("Unexpected hap_idx (not 0 or 1)!"),
+        };
+        hap_sequences.insert(sample_name, transcript_ref_seq.clone());
     }
 
     // Apply variants to sequences
