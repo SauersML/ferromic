@@ -175,7 +175,6 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     
     ax.tick_params(labelbottom=False)
     
-    ax.set_xlabel('Chromosome', fontsize=18)
     ax.set_ylabel('-log10(p-value)', fontsize=18)
     ax.set_title('Manhattan Plot of CDS Significance', fontsize=24, fontweight='bold', pad=20)
     
