@@ -292,10 +292,59 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         error_log.append(f"INFO: Found entry in cache for {cds}")
         return cache[cds]['symbol'], cache[cds]['name'], error_log
 
-    match = re.search(r'(ENST\d+\.\d+)', cds)
-    if not match:
-        error_log.append("ERROR: Could not find an ENST in this CDS name")
-        return None, None, error_log
+    if cds.startswith("chr"):
+        # Use the coordinates from the CDS name
+        chrom, start, end = parse_cds_coordinates(cds)
+        if chrom is None:
+            error_log.append("ERROR: Could not parse coordinates from CDS name")
+            return None, None, error_log
+        # (Option 1: Simple fallback) For now, simply use the coordinates as the gene symbol and name.
+        symbol = f"{chrom}:{start}-{end}"
+        name = f"Gene_{chrom}_{start}_{end}"
+        # Save to cache
+        cache[cds] = {
+            'symbol': symbol,
+            'name': name,
+            'chrom': chrom,
+            'start': start,
+            'end': end
+        }
+    else:
+        # Otherwise, try to find an ENST identifier as before
+        match = re.search(r'(ENST\d+\.\d+)', cds)
+        if not match:
+            error_log.append("ERROR: Could not find an ENST in this CDS name")
+            return None, None, error_log
+        transcript_id = match.group(1)
+        transcript_id = re.sub(r'\.\d+$', '', transcript_id)
+        ensembl_url = f"https://rest.ensembl.org/lookup/id/{transcript_id}?content-type=application/json"
+        try:
+            r = requests.get(ensembl_url, timeout=10)
+            if not r.ok:
+                error_log.append(f"ERROR: Ensembl request failed with status {r.status_code}: {r.text}")
+                return None, None, error_log
+            info = r.json()
+            chrom = f"chr{info['seq_region_name']}"
+            start = int(info['start'])
+            end   = int(info['end'])
+            symbol = transcript_id
+            name   = f"Transcript_{transcript_id}"
+            cache[cds] = {
+                'symbol': symbol,
+                'name': name,
+                'chrom': chrom,
+                'start': start,
+                'end': end
+            }
+        except Exception as ex:
+            error_log.append(f"ERROR: Failed to fetch from Ensembl: {str(ex)}")
+            return None, None, error_log
+
+
+
+
+
+    
     
     transcript_id = match.group(1)
     transcript_id = re.sub(r'\.\d+$', '', transcript_id)  # Remove suffix like ".8"
