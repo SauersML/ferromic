@@ -444,9 +444,8 @@ fn process_variants(
                 continue;
             }
 
-            // Convert from 1-based GTF start to 0-based index in reference... double-check
             let offset_0_based = seg_s.saturating_sub(1) as usize;
-            if off.checked_add(length).unwrap_or(usize::MAX) > reference_sequence.len() {
+            if offset_0_based.checked_add(length).unwrap_or(usize::MAX) > reference_sequence.len() {
                 eprintln!("Skipping out-of-bounds {}..{} for transcript {} on {}", seg_s, seg_e, tid, chromosome);
                 continue;
             }
@@ -457,7 +456,7 @@ fn process_variants(
                     _ => panic!("Unexpected hap index")
                 };
                 let vec_ref = &mut combined.get_mut(&nm).unwrap();
-                let mut chunk = reference_sequence[off..off+length].to_vec();
+                let mut chunk = reference_sequence[offset_0_based..offset_0_based+length].to_vec();
                 if strand == '-' {
                     chunk.reverse();
                     for b in chunk.iter_mut() {
