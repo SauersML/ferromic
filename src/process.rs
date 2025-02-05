@@ -981,8 +981,8 @@ pub fn process_config_entries(
         let ref_sequence = read_reference_sequence(
             &Path::new(&args.reference_path),
             &chr,
-            0,
-            chr_length - 1
+            1,
+            chr_length
         )?;
 
         // Parse GTF for the entire chromosome, ignoring user region in this step.
