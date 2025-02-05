@@ -989,13 +989,9 @@ pub fn process_config_entries(
             &chr
         )?;
 
-        // Build a QueryRegion from the config entries' min and max.
-        let query_min = entries.iter().map(|e| e.start).min().unwrap_or(0);
-        let query_max = entries.iter().map(|e| e.end).max().unwrap_or(i64::MAX);
-        let query_region = QueryRegion { start: query_min, end: query_max };
-    
-        // Filter transcripts by overlap and print logs.
-        let cds_regions = filter_and_log_transcripts(all_transcripts, query_region);
+        // Do not build a giant range over all entries.
+        // We simply hold all_transcripts here and filter later for each entry.
+        let cds_regions = all_transcripts;
 
         // Determine the range to process
         let min_start = entries.iter().map(|e| e.start).min().unwrap_or(0);
