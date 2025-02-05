@@ -339,39 +339,6 @@ def get_gene_annotation(cds, cache_file='gene_name_cache.json'):
         except Exception as ex:
             error_log.append(f"ERROR: Failed to fetch from Ensembl: {str(ex)}")
             return None, None, error_log
-
-
-
-
-
-    
-    
-    transcript_id = match.group(1)
-    transcript_id = re.sub(r'\.\d+$', '', transcript_id)  # Remove suffix like ".8"
-    ensembl_url = f"https://rest.ensembl.org/lookup/id/{transcript_id}?content-type=application/json"
-    try:
-        r = requests.get(ensembl_url, timeout=10)
-        if not r.ok:
-            error_log.append(f"ERROR: Ensembl request failed with status {r.status_code}: {r.text}")
-            return None, None, error_log
-        info = r.json()
-        chrom = f"chr{info['seq_region_name']}"
-        start = int(info['start'])
-        end   = int(info['end'])
-        
-        symbol = transcript_id
-        name   = f"Transcript_{transcript_id}"
-        
-        cache[cds] = {
-            'symbol': symbol,
-            'name': name,
-            'chrom': chrom,
-            'start': start,
-            'end': end
-        }
-    except Exception as ex:
-        error_log.append(f"ERROR: Failed to fetch from Ensembl: {str(ex)}")
-        return None, None, error_log
     
     try:
         cache[cds] = {
