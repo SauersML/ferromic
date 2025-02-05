@@ -1019,6 +1019,8 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     results_df['bonferroni_p_value'] = np.nan
     results_df.loc[valid_mask, 'bonferroni_p_value'] = results_df.loc[valid_mask, 'p_value'] * m
     results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
+    results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
+
 
     # Compute -log10(p)
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
@@ -1271,14 +1273,54 @@ def main():
     # Drop rows where parsing failed
     results_df.dropna(subset=['chrom','start','end'], inplace=True)
 
+    def chr_sort_key(ch):
+        base = ch.replace('chr', '')
+        try:
+            return (0, int(base))
+        except:
+            mapping = {'X': 23, 'Y': 24, 'M': 25}
+            return (1, mapping.get(base, 99))
+    unique_chroms = sorted(results_df['chrom'].dropna().unique(), key=chr_sort_key)
+    chrom_to_index = {c: i for i, c in enumerate(unique_chroms)}
+    chrom_ranges = {}
+    for c in unique_chroms:
+        chr_df = results_df[results_df['chrom'] == c]
+        c_min = chr_df['start'].min()
+        c_max = chr_df['end'].max()
+        chrom_ranges[c] = (c_min, c_max)
+    xs = []
+    for _, row in results_df.iterrows():
+        c = row['chrom']
+        if c not in chrom_ranges or pd.isnull(c):
+            xs.append(np.nan)
+            continue
+        c_min, c_max = chrom_ranges[c]
+        if c_max > c_min:
+            rel_pos = (row['start'] - c_min) / (c_max - c_min)
+        else:
+            rel_pos = 0.5
+        xs.append(chrom_to_index[c] + rel_pos)
+    results_df['plot_x'] = xs
+    
+
+
     # Save final results
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
+
+    # Save final results
+    results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
+
+    # Write special CSV for Manhattan plot with all required columns
+    manhattan_columns = ['CDS', 'p_value', 'observed_effect_size', 'chrom', 'start', 'end', 'bonferroni_p_value', 'neg_log_p', 'plot_x']
+    results_df[manhattan_columns].to_csv(RESULTS_DIR / 'manhattan_plot_data.csv', index=False)
+
 
     # Compute Bonferroni-corrected p-values
     valid_df = results_df[results_df['p_value'].notnull() & (results_df['p_value'] > 0)]
     total_valid_comparisons = len(valid_df)
     results_df['bonferroni_p_value'] = results_df['p_value'] * total_valid_comparisons
     results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
+    results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
 
     # Overall analysis
     print("\nBuilding clusters...")
