@@ -152,6 +152,9 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     cb = plt.colorbar(scatter, ax=ax, fraction=0.02, pad=0.02)
     cb.set_label('Z-scored Effect Size', fontsize=16)
     cb.ax.tick_params(labelsize=14)
+
+    cb.ax.text(0.5, 1.02, 'Higher dN/dS in inverted haplotypes', transform=cb.ax.transAxes, ha='center', va='bottom', fontsize=12)
+    cb.ax.text(0.5, -0.12, 'Higher dN/dS in non-inverted haplotypes', transform=cb.ax.transAxes, ha='center', va='top', fontsize=12)
     
     sig_threshold = -np.log10(0.05)
     ax.axhline(y=sig_threshold, color='red', linestyle='--', linewidth=2, zorder=3, label='p=0.05')
