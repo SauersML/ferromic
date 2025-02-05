@@ -83,15 +83,17 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         c_inv = inv_df[inv_df['chr'] == c]
         c_min, c_max = chrom_ranges[c]
         if not c_inv.empty and c_max > c_min:
-            inv_row = c_inv.iloc[0]
-            A = (inv_row['region_start'] - c_min) / (c_max - c_min)
-            B = (inv_row['region_end'] - c_min) / (c_max - c_min)
+            # Use all inversions for chromosome c to determine the full inversion span
+            norm_starts = (c_inv['region_start'] - c_min) / (c_max - c_min)
+            norm_ends = (c_inv['region_end'] - c_min) / (c_max - c_min)
+            A = norm_starts.min()
+            B = norm_ends.max()
             A = max(0, min(1, A))
             B = max(0, min(1, B))
             if B < A:
                 A, B = B, A
             chr_trans_info[c] = {
-                'A': A, 
+                'A': A,
                 'B': B,
                 'fA': transform_coordinate(A, A, B),
                 'fB': transform_coordinate(B, A, B)
