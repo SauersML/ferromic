@@ -1302,25 +1302,20 @@ def main():
         xs.append(chrom_to_index[c] + rel_pos)
     results_df['plot_x'] = xs
     
-
-
-    # Save final results
-    results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
-
-    # Save final results
-    results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
-
-    # Write special CSV for Manhattan plot with all required columns
-    manhattan_columns = ['CDS', 'p_value', 'observed_effect_size', 'chrom', 'start', 'end', 'bonferroni_p_value', 'neg_log_p', 'plot_x']
-    results_df[manhattan_columns].to_csv(RESULTS_DIR / 'manhattan_plot_data.csv', index=False)
-
-
-    # Compute Bonferroni-corrected p-values
+    # Compute Bonferroni-corrected p-values and -log10(p) values
     valid_df = results_df[results_df['p_value'].notnull() & (results_df['p_value'] > 0)]
     total_valid_comparisons = len(valid_df)
     results_df['bonferroni_p_value'] = results_df['p_value'] * total_valid_comparisons
     results_df['bonferroni_p_value'] = results_df['bonferroni_p_value'].clip(upper=1.0)
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
+    
+    # Save final results
+    results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
+    
+    # Write special CSV for Manhattan plot with all required columns
+    manhattan_columns = ['CDS', 'p_value', 'observed_effect_size', 'chrom', 'start', 'end', 'bonferroni_p_value', 'neg_log_p', 'plot_x']
+    results_df[manhattan_columns].to_csv(RESULTS_DIR / 'manhattan_plot_data.csv', index=False)
+
 
     # Overall analysis
     print("\nBuilding clusters...")
