@@ -755,8 +755,8 @@ fn make_sequences(
 
     // For each CDS, extract sequences and write to PHYLIP file
     for cds in cds_regions {
-        let cds_start = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
-        let cds_end = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
+        let transcript_cds_start = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
+        let transcript_cds_end   = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
 
         // Check overlap with region
         let mut combined_cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
@@ -764,8 +764,13 @@ fn make_sequences(
             combined_cds_sequences.insert(name.clone(), Vec::new());
         }
 
-        let cds_start = std::cmp::max(cds_start - 1, region_start - 1); // 0-based.... or just cds_start??? Double check this.
-        let cds_end = std::cmp::min(cds_end, region_end);
+        // Skip transcript if it does not intersect the query region at all
+        if transcript_cds_end < region_start || transcript_cds_start > region_end {
+            continue;
+        }
+        
+        let cds_start = transcript_cds_start; // Or 0-based... should it be -1?
+        let cds_end   = transcript_cds_end;
                 
         // After processing all segments, write one final .phy file
         let filename = format!(
