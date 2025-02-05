@@ -1108,7 +1108,7 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     label_points_y = []
     for _, hit_row in significant_hits.iterrows():
         cds = hit_row['CDS']
-        gene_symbol, gene_name, err_log = get_gene_annotation(cds)
+        gene_symbol, gene_name, _, _, _, error_log = get_gene_annotation(cds)
         if gene_symbol and gene_symbol not in [None, 'Unknown']:
             label_txt = f"{gene_symbol}"
         else:
