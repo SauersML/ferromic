@@ -259,43 +259,36 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax.plot([x_text, x], [y_text, y], color='black', lw=0.5, zorder=3, alpha=0.5)
     
     # Create a linear coordinate bar for each chromosome in the lower subplot (ax_bar)
-    ax_bar.set_xlim(ax.get_xlim())
+    # Set up the bottom axis with true, linear genomic coordinates.
+    ax_bar.set_xlim(min([chrom_ranges[c][0] for c in unique_chroms]), max([chrom_ranges[c][1] for c in unique_chroms]))
     ax_bar.set_ylim(0, 1)
     ax_bar.set_yticks([])
-    ax_bar.set_xlabel('Chromosome (Linear Coordinates)', fontsize=16)
+    ax_bar.set_xlabel('Chromosomes', fontsize=16)
+    # For each chromosome, plot dots at the left and right boundaries corresponding to the true genomic coordinates,
+    # and label the chromosome in the center.
     for c in unique_chroms:
-        c_idx = chrom_to_index[c]
-        # Draw a horizontal line representing the chromosome from its start to end in linear coords
-        ax_bar.hlines(0.5, c_idx, c_idx+1, color='black', lw=2)
-    xticks = []
-    xtick_labels = []
+        c_min, c_max = chrom_ranges[c]
+        ax_bar.plot(c_min, 0.5, 'ko', markersize=5)
+        ax_bar.plot(c_max, 0.5, 'ko', markersize=5)
+        ax_bar.text((c_min + c_max) / 2, 0.8, c, ha='center', va='bottom', fontsize=12, fontweight='bold')
+    # Remove any default x-ticks.
+    ax_bar.set_xticks([])
+
+
+    # For each chromosome, connect the top plot boundaries to the corresponding bottom dots.
+    # The top left boundary for a chromosome is at x = chrom_to_index[c] and the top right boundary is at x = chrom_to_index[c] + 1.
+    # These are connected to the true genomic boundaries on the bottom axis at x = c_min and x = c_max, respectively.
     for c in unique_chroms:
         c_idx = chrom_to_index[c]
         c_min, c_max = chrom_ranges[c]
-        xticks.extend([c_idx, c_idx+1])
-        xtick_labels.extend([f"{c_min:.0f}", f"{c_max:.0f}"])
-    ax_bar.set_xticks(xticks)
-    ax_bar.set_xticklabels(xtick_labels, fontsize=10)
-    ax_bar.spines['top'].set_visible(False)
-    ax_bar.spines['right'].set_visible(False)
-    ax_bar.spines['left'].set_visible(False)
-
-
-    # For each chromosome, connect the full displayed chromosome borders from the main plot to their actual linear coordinates on the lower axis.
-    for c in unique_chroms:
-        c_idx = chrom_to_index[c]
-        c_min, c_max = chrom_ranges[c]
-        # In the main plot, each chromosome is displayed over [c_idx, c_idx+1].
-        # On the lower axis, we map the true base pair coordinates such that c_idx corresponds to c_min and c_idx+1 to c_max.
-        # Draw connection lines at the left and right borders.
-        con_border_left = ConnectionPatch(xyA=(c_idx, 0.5), xyB=(c_idx, 0),
-                                          coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
-                                          color="black", lw=0.5, linestyle="--")
-        fig.add_artist(con_border_left)
-        con_border_right = ConnectionPatch(xyA=(c_idx+1, 0.5), xyB=(c_idx+1, 0),
-                                           coordsA="data", coordsB="data", axesA=ax_bar, axesB=ax,
-                                           color="black", lw=0.5, linestyle="--")
-        fig.add_artist(con_border_right)
+        con_left = ConnectionPatch(xyA=(c_idx, 0), xyB=(c_min, 0.5),
+                                    coordsA="data", coordsB="data", axesA=ax, axesB=ax_bar,
+                                    color="black", lw=0.5, linestyle="--")
+        fig.add_artist(con_left)
+        con_right = ConnectionPatch(xyA=(c_idx+1, 0), xyB=(c_max, 0.5),
+                                     coordsA="data", coordsB="data", axesA=ax, axesB=ax_bar,
+                                     color="black", lw=0.5, linestyle="--")
+        fig.add_artist(con_right)
 
     
     plt.tight_layout()
