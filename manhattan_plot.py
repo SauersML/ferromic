@@ -198,7 +198,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_top.set_xlim(-0.08,1.08)
         ax_top.set_ylim(0,YLIM_TOP)
         if i == 0:
-            ax_top.set_ylabel("-log10(p)", fontsize=19)
+            ax_top.set_ylabel("-log10(p)", fontsize=26)
         else:
             ax_top.set_yticks([])
             ax_top.set_ylabel("")
@@ -316,12 +316,12 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cb = fig.colorbar(sm, cax=ax_cb, orientation='vertical')
-    cb.set_label('Z-normed Effect Size', fontsize=20)
-    cb.ax.tick_params(labelsize=14)
-    cb.ax.text(0.0, 1.05, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=20)
-    cb.ax.text(0.0, -0.05, 'Higher dN/dS\nfor non-inverted', transform=cb.ax.transAxes, ha='left', va='top', fontsize=20)
+    cb.set_label('Z-normed Effect Size', fontsize=19)
+    cb.ax.tick_params(labelsize=20)
+    cb.ax.text(0.0, 1.15, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=20)
+    cb.ax.text(0.0, -0.15, 'Higher dN/dS\nfor non-inverted', transform=cb.ax.transAxes, ha='left', va='top', fontsize=20)
     pos = ax_cb.get_position()
-    ax_cb.set_position([pos.x0, pos.y0 + 0.1, pos.width, pos.height * 0.5])
+    ax_cb.set_position([pos.x0, pos.y0 + 0.1, pos.width, pos.height * 0.7])
 
 
     import matplotlib.patches as mpatches
