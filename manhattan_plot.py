@@ -165,7 +165,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     for spine in ['top','left','right','bottom']:
         ax_bottom.spines[spine].set_visible(False)
     ax_bottom.set_yticks([])
-    ax_bottom.set_xlabel("Chromosomes: Real Base-Pair Coordinates", fontsize=13)
+    ax_bottom.set_xlabel("Chromosome", fontsize=13)
     tick_positions = []
     for c in unique_chroms:
         tick_positions.append(offsets[c])
