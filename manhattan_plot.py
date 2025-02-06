@@ -315,10 +315,10 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cb = fig.colorbar(sm, cax=ax_cb, orientation='vertical')
-    cb.set_label('Z-normed Effect Size', fontsize=19)
+    cb.set_label('Z-normed Effect Size', fontsize=20)
     cb.ax.tick_params(labelsize=20)
-    cb.ax.text(0.0, 1.15, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=20)
-    cb.ax.text(0.0, -0.15, 'Higher dN/dS\nfor non-inverted', transform=cb.ax.transAxes, ha='left', va='top', fontsize=20)
+    cb.ax.text(0.0, 1.15, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=25)
+    cb.ax.text(0.0, -0.15, 'Higher dN/dS\nfor non-inverted', transform=cb.ax.transAxes, ha='left', va='top', fontsize=25)
     pos = ax_cb.get_position()
     ax_cb.set_position([pos.x0, pos.y0 + 0.1, pos.width, pos.height * 0.7])
 
