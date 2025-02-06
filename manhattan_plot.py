@@ -196,6 +196,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_top.xaxis.grid(False)
         for spine in ['top','right']:
             ax_top.spines[spine].set_visible(False)
+        ax_top.set_xticks([])
         # gather data for c
         cdata = results_df[(results_df['chrom']==c) & valid_mask].copy()
         if cdata.empty:
