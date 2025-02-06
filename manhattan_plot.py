@@ -282,15 +282,27 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
             axesA=ax_bottom, axesB=ax_top,
             color="red", lw=1, linestyle="--", zorder=10
         )
-        con_right= ConnectionPatch(
-            xyA=(bottom_right_x,0.5),
-            xyB=(right_rel,0),
+        con_right = ConnectionPatch(
+            xyA=(bottom_right_x, 0.5),
+            xyB=(right_rel, 0),
             coordsA="data", coordsB="data",
             axesA=ax_bottom, axesB=ax_top,
             color="red", lw=1, linestyle="--", zorder=10
         )
         fig.add_artist(con_left)
         fig.add_artist(con_right)
+        # Shade the region between the connection lines with a light gray polygon patch.
+        top_left_disp = ax_top.transData.transform((left_rel, 0))
+        top_right_disp = ax_top.transData.transform((right_rel, 0))
+        bottom_right_disp = ax_bottom.transData.transform((bottom_right_x, 0.5))
+        bottom_left_disp = ax_bottom.transData.transform((bottom_left_x, 0.5))
+        top_left_fig = fig.transFigure.inverted().transform(top_left_disp)
+        top_right_fig = fig.transFigure.inverted().transform(top_right_disp)
+        bottom_right_fig = fig.transFigure.inverted().transform(bottom_right_disp)
+        bottom_left_fig = fig.transFigure.inverted().transform(bottom_left_disp)
+        polygon_coords = [top_left_fig, top_right_fig, bottom_right_fig, bottom_left_fig]
+        polygon = mpatches.Polygon(polygon_coords, closed=True, facecolor='lightgray', edgecolor='none', alpha=0.5, transform=fig.transFigure, zorder=5)
+        fig.add_artist(polygon)
 
     # finalize
     plt.tight_layout()
