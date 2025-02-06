@@ -133,7 +133,8 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     
     # We'll define a top row for the subplots, a bottom row for the single axis
     from matplotlib.gridspec import GridSpec
-    gs = GridSpec(nrows=2, ncols=n_chroms, height_ratios=[5,1], figure=fig)
+    gs = GridSpec(nrows=2, ncols=n_chroms+1, width_ratios=[1]*n_chroms + [0.3], height_ratios=[5,1], figure=fig)
+
 
     # We'll create a subplot for each chromosome in row=0, col i => the top "zoomed" axis
     ax_subplots = []
@@ -141,9 +142,9 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_i = fig.add_subplot(gs[0, i])
         ax_subplots.append(ax_i)
 
-    # The single bottom axis spans row=1, all columns
-    ax_bottom = fig.add_subplot(gs[1, :])
-
+    # The single bottom axis spans row=1, columns 0 to n_chroms-1 (excluding the colorbar column)
+    ax_bottom = fig.add_subplot(gs[1, :n_chroms])
+    
     # *** Build the bottom axis for the real, linear coords ***
     # We'll place each chromosome side by side, offset-based
     # Then we can show how each region maps from the top subplot to the bottom bar
@@ -310,13 +311,15 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
 
     # Add color bar and explanatory text, and add color key for inversions, with title.
     from matplotlib.cm import ScalarMappable
+    ax_cb = fig.add_subplot(gs[:, n_chroms])
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
-    cb = fig.colorbar(sm, ax=ax_subplots, orientation='vertical', fraction=0.03, pad=0.1)
+    cb = fig.colorbar(sm, cax=ax_cb, orientation='vertical')
     cb.set_label('Z-normed Effect Size', fontsize=16)
     cb.ax.tick_params(labelsize=14)
     cb.ax.text(0.0, 1.05, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=10)
     cb.ax.text(0.0, -0.05, 'Higher dN/dS\nfor non-inverted', transform=cb.ax.transAxes, ha='left', va='top', fontsize=10)
+
     import matplotlib.patches as mpatches
     recurrent_patch = mpatches.Patch(color=recurrent_color, alpha=0.2, label='Recurrent inversion')
     single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
