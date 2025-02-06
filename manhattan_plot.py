@@ -263,7 +263,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         left_rel = normpos(used_min)
         right_rel= normpos(used_max)
         # top boundary dots
-        ax_top.scatter([left_rel,right_rel],[0,0], color='red', zorder=5, s=30)
+        ax_top.axvspan(left_rel, right_rel, facecolor='gray', alpha=0.2, zorder=1)
 
         # connect lines to the bottom axis
         # bottom coords => offset + used_min.. offset+ used_max
@@ -273,9 +273,6 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         used_max_clamp = max(0,min(real_len, used_max))
         bottom_left_x  = off+used_min_clamp
         bottom_right_x = off+used_max_clamp
-
-        # place red dots at bottom
-        ax_bottom.scatter([bottom_left_x,bottom_right_x],[0.5,0.5], color='red', zorder=5, s=30)
 
         # connect
         con_left = ConnectionPatch(
