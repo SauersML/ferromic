@@ -193,7 +193,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
 
     for i, c in enumerate(unique_chroms):
         ax_top = ax_subplots[i]
-        ax_top.set_xlim(-0.05,1.05)
+        ax_top.set_xlim(-0.08,1.08)
         ax_top.set_ylim(0,YLIM_TOP)
         if i == 0:
             ax_top.set_ylabel("-log10(p)", fontsize=9)
