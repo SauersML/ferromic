@@ -102,12 +102,12 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         print("No valid chromosomes found. Exiting.")
         return
 
-    # Determine c_min, c_max from data
+    # Determine c_min, c_max from valid data only
     chrom_ranges = {}
     for c in unique_chroms:
-        cdata = results_df[results_df['chrom'] == c]
+        cdata = results_df[(results_df['chrom'] == c) & valid_mask]
         if cdata.empty:
-            chrom_ranges[c] = (0,1)  # fallback
+            chrom_ranges[c] = (0, 1)  # fallback when no valid data is present
         else:
             c_min = cdata['start'].min()
             c_max = cdata['end'].max()
