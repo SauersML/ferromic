@@ -293,7 +293,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         fig.add_artist(con_left)
         fig.add_artist(con_right)
         # Draw multiple solid gray connection lines in between the red dashed connection lines.
-        n_lines = 20
+        n_lines = 100
         for i in range(1, n_lines):
             f = i / n_lines
             top_x = left_rel + f * (right_rel - left_rel)
@@ -303,7 +303,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
                 xyB=(top_x, 0),
                 coordsA="data", coordsB="data",
                 axesA=ax_bottom, axesB=ax_top,
-                color="gray", lw=3, linestyle="-", zorder=9
+                color="lightgray", lw=3, linestyle="-", zorder=9
             )
             fig.add_artist(con_mid)
 
