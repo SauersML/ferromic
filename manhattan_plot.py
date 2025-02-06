@@ -312,7 +312,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     from matplotlib.cm import ScalarMappable
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
-    cb = fig.colorbar(sm, ax=ax_subplots, fraction=0.02, pad=0.02)
+    ccb = fig.colorbar(sm, ax=ax_subplots, orientation='vertical', fraction=0.03, pad=0.1)
     cb.set_label('Z-normed Effect Size', fontsize=16)
     cb.ax.tick_params(labelsize=14)
     cb.ax.text(0.0, 1.05, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=10)
