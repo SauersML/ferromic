@@ -165,6 +165,13 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_bottom.spines[spine].set_visible(False)
     ax_bottom.set_yticks([])
     ax_bottom.set_xlabel("Chromosomes: Real Base-Pair Coordinates", fontsize=13)
+    tick_positions = []
+    for c in unique_chroms:
+        tick_positions.append(offsets[c])
+        tick_positions.append(offsets[c] + CHR_LENGTHS.get(c, 1))
+    tick_positions = sorted(set(tick_positions))
+    ax_bottom.set_xticks(tick_positions)
+    ax_bottom.set_xticklabels([])
 
     # Draw a line & label for each chromosome
     for c in unique_chroms:
@@ -175,7 +182,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_bottom.hlines(0.5, left_bar, right_bar, color='black', lw=2)
         # place label near the center
         mid_x = (left_bar + right_bar)*0.5
-        ax_bottom.text(mid_x, 0.55, c.replace("chr",""), ha='center', va='bottom', fontsize=9, fontweight='bold')
+        ax_bottom.text(mid_x, 0.45, c.replace("chr",""), ha='center', va='top', fontsize=9, fontweight='bold')
 
     # *** Now fill each chromosome top subplot with data ***
     # Then connect boundary dots to the bottom axis
