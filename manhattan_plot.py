@@ -292,23 +292,20 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         )
         fig.add_artist(con_left)
         fig.add_artist(con_right)
-        # Force drawing to update coordinate transforms.
-        fig.canvas.draw()
-        # Transform the connection endpoints to display coordinates.
-        top_left_disp = ax_top.transData.transform((left_rel, 0))
-        top_right_disp = ax_top.transData.transform((right_rel, 0))
-        bottom_right_disp = ax_bottom.transData.transform((bottom_right_x, 0.5))
-        bottom_left_disp = ax_bottom.transData.transform((bottom_left_x, 0.5))
-        # Convert display coordinates to figure coordinates.
-        top_left_fig = fig.transFigure.inverted().transform(top_left_disp)
-        top_right_fig = fig.transFigure.inverted().transform(top_right_disp)
-        bottom_right_fig = fig.transFigure.inverted().transform(bottom_right_disp)
-        bottom_left_fig = fig.transFigure.inverted().transform(bottom_left_disp)
-        # Construct the polygon vertices in clockwise order starting from the bottom-left.
-        polygon_coords = [bottom_left_fig, top_left_fig, top_right_fig, bottom_right_fig]
-        # Draw a light gray filled polygon covering the area between the connection lines.
-        polygon = mpatches.Polygon(polygon_coords, closed=True, facecolor='lightgray', edgecolor='none', alpha=0.5, transform=fig.transFigure, zorder=5)
-        fig.add_artist(polygon)
+        # Draw multiple solid gray connection lines in between the red dashed connection lines.
+        n_lines = 20
+        for i in range(1, n_lines):
+            f = i / n_lines
+            top_x = left_rel + f * (right_rel - left_rel)
+            bottom_x = bottom_left_x + f * (bottom_right_x - bottom_left_x)
+            con_mid = ConnectionPatch(
+                xyA=(bottom_x, 0.5),
+                xyB=(top_x, 0),
+                coordsA="data", coordsB="data",
+                axesA=ax_bottom, axesB=ax_top,
+                color="gray", lw=3, linestyle="-", zorder=9
+            )
+            fig.add_artist(con_mid)
 
     # finalize
     plt.tight_layout()
