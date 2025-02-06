@@ -187,8 +187,6 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_top = ax_subplots[i]
         ax_top.set_xlim(0,1)
         ax_top.set_ylim(0,YLIM_TOP)
-        ax_top.set_title(c, fontsize=10, fontweight='bold')
-        ax_top.set_xlabel("Relative Position", fontsize=8)
         if i==0:
             ax_top.set_ylabel("-log10(p)", fontsize=9)
         else:
