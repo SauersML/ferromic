@@ -254,10 +254,8 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
             right_rel=max(0, min(1,right_rel))
             t = invrow.get('0_single_1_recur',0)
             inv_color = recurrent_color if t==1 else single_color
-            if inv_size>0.5*(c_max_data-c_min_data):
-                ax_top.axvspan(left_rel, right_rel, color=inv_color, alpha=0.1, hatch='//', zorder=0)
-            else:
-                ax_top.axvspan(left_rel, right_rel, color=inv_color, alpha=0.2, zorder=0)
+            ax_top.axvspan(left_rel, right_rel, color=inv_color, alpha=0.2, zorder=0)
+
 
         # boundary
         used_min = cdata['start'].min()
@@ -328,9 +326,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     import matplotlib.patches as mpatches
     recurrent_patch = mpatches.Patch(color=recurrent_color, alpha=0.2, label='Recurrent inversion')
     single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
-    recurrent_large_patch = mpatches.Patch(facecolor=recurrent_color, hatch='//', edgecolor='black', alpha=0.1, label='Large recurrent inversion')
-    single_large_patch = mpatches.Patch(facecolor=single_color, hatch='//', edgecolor='black', alpha=0.1, label='Large single-event inversion')
-    ax_subplots[-1].legend(handles=[recurrent_patch, single_patch, recurrent_large_patch, single_large_patch], fontsize=30, frameon=True, loc='upper right', bbox_to_anchor=(1, 1.2))
+    ax_subplots[-1].legend(handles=[recurrent_patch, single_patch], fontsize=30, frameon=True, loc='upper right', bbox_to_anchor=(1, 1.2))
 
     # finalize
     plt.tight_layout()
