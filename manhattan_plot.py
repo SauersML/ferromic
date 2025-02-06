@@ -307,6 +307,24 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
             )
             fig.add_artist(con_mid)
 
+
+    # Add color bar and explanatory text, and add color key for inversions, with title.
+    from matplotlib.cm import ScalarMappable
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cb = fig.colorbar(sm, ax=ax_subplots, fraction=0.02, pad=0.02)
+    cb.set_label('Z-normed Effect Size', fontsize=16)
+    cb.ax.tick_params(labelsize=14)
+    cb.ax.text(0.0, 1.05, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=10)
+    cb.ax.text(0.0, -0.05, 'Higher dN/dS\nfor non-inverted', transform=cb.ax.transAxes, ha='left', va='top', fontsize=10)
+    import matplotlib.patches as mpatches
+    recurrent_patch = mpatches.Patch(color=recurrent_color, alpha=0.2, label='Recurrent inversion')
+    single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
+    recurrent_large_patch = mpatches.Patch(facecolor=recurrent_color, hatch='//', edgecolor='black', alpha=0.1, label='Large recurrent inversion')
+    single_large_patch = mpatches.Patch(facecolor=single_color, hatch='//', edgecolor='black', alpha=0.1, label='Large single-event inversion')
+    fig.legend(handles=[recurrent_patch, single_patch, recurrent_large_patch, single_large_patch], fontsize=12, frameon=True, loc='upper right')
+    fig.suptitle('Manhattan Plot of CDS Significance', fontsize=24, fontweight='bold', y=0.98)
+
     # finalize
     plt.tight_layout()
     out_fname = os.path.join(PLOTS_DIR, "manhattan_plot_subplots.png")
