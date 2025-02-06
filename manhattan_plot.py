@@ -235,7 +235,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
             c=eff_zchr,
             cmap=cmap,
             norm=norm,
-            s=100, alpha=0.7, linewidth=0, zorder=2
+            s=150, alpha=0.7, linewidth=0, zorder=2
         )
 
         # highlight inversions
