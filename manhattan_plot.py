@@ -192,7 +192,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
 
     for i, c in enumerate(unique_chroms):
         ax_top = ax_subplots[i]
-        ax_top.set_xlim(0,1)
+        ax_top.set_xlim(-0.05,1.05)
         ax_top.set_ylim(0,YLIM_TOP)
         if i == 0:
             ax_top.set_ylabel("-log10(p)", fontsize=9)
@@ -202,7 +202,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         # remove unneeded spines
         ax_top.yaxis.grid(True, which='major', color='lightgray', linestyle='--', lw=0.5)
         ax_top.xaxis.grid(False)
-        for spine in ['top','right']:
+        for spine in ['top','right','left']:
             ax_top.spines[spine].set_visible(False)
         ax_top.set_xticks([])
         # gather data for c
