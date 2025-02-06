@@ -330,7 +330,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
     recurrent_large_patch = mpatches.Patch(facecolor=recurrent_color, hatch='//', edgecolor='black', alpha=0.1, label='Large recurrent inversion')
     single_large_patch = mpatches.Patch(facecolor=single_color, hatch='//', edgecolor='black', alpha=0.1, label='Large single-event inversion')
-    ax_subplots[-1].legend(handles=[recurrent_patch, single_patch, recurrent_large_patch, single_large_patch], fontsize=22, frameon=True, loc='upper right', bbox_to_anchor=(1, 1.2))
+    ax_subplots[-1].legend(handles=[recurrent_patch, single_patch, recurrent_large_patch, single_large_patch], fontsize=30, frameon=True, loc='upper right', bbox_to_anchor=(1, 1.2))
 
     # finalize
     plt.tight_layout()
