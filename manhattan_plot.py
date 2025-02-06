@@ -165,7 +165,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     for spine in ['top','left','right','bottom']:
         ax_bottom.spines[spine].set_visible(False)
     ax_bottom.set_yticks([])
-    ax_bottom.set_xlabel("Chromosome", fontsize=18)
+    ax_bottom.set_xlabel("Chromosome", fontsize=28)
     tick_positions = []
     for c in unique_chroms:
         tick_positions.append(offsets[c])
@@ -173,7 +173,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     tick_positions = sorted(set(tick_positions))
     ax_bottom.set_xticks(tick_positions)
     ax_bottom.set_xticklabels([])
-    ax_bottom.tick_params(axis='x', which='both', length=15, width=2, labelsize=16)
+    ax_bottom.tick_params(axis='x', which='both', length=15, width=2, labelsize=20)
 
     # Draw a line & label for each chromosome
     for c in unique_chroms:
@@ -184,7 +184,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_bottom.hlines(0.5, left_bar, right_bar, color='black', lw=2)
         # place label near the center
         mid_x = (left_bar + right_bar)*0.5
-        ax_bottom.text(mid_x, 0.45, c.replace("chr",""), ha='center', va='top', fontsize=16, fontweight='bold')
+        ax_bottom.text(mid_x, 0.45, c.replace("chr",""), ha='center', va='top', fontsize=26, fontweight='bold')
 
 
     # *** Now fill each chromosome top subplot with data ***
@@ -198,7 +198,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_top.set_xlim(-0.08,1.08)
         ax_top.set_ylim(0,YLIM_TOP)
         if i == 0:
-            ax_top.set_ylabel("-log10(p)", fontsize=9)
+            ax_top.set_ylabel("-log10(p)", fontsize=19)
         else:
             ax_top.set_yticks([])
             ax_top.set_ylabel("")
@@ -211,7 +211,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         # gather data for c
         cdata = results_df[(results_df['chrom']==c) & valid_mask].copy()
         if cdata.empty:
-            ax_top.text(0.5, 0.5*YLIM_TOP, "No data", ha='center', va='center', fontsize=9)
+            ax_top.text(0.5, 0.5*YLIM_TOP, "No data", ha='center', va='center', fontsize=19)
             continue
         c_min_data, c_max_data = chrom_ranges[c]
         # Build the x for each row => normalized
@@ -316,10 +316,10 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cb = fig.colorbar(sm, cax=ax_cb, orientation='vertical')
-    cb.set_label('Z-normed Effect Size', fontsize=16)
+    cb.set_label('Z-normed Effect Size', fontsize=20)
     cb.ax.tick_params(labelsize=14)
-    cb.ax.text(0.0, 1.05, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=10)
-    cb.ax.text(0.0, -0.05, 'Higher dN/dS\nfor non-inverted', transform=cb.ax.transAxes, ha='left', va='top', fontsize=10)
+    cb.ax.text(0.0, 1.05, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=20)
+    cb.ax.text(0.0, -0.05, 'Higher dN/dS\nfor non-inverted', transform=cb.ax.transAxes, ha='left', va='top', fontsize=20)
     pos = ax_cb.get_position()
     ax_cb.set_position([pos.x0, pos.y0 + 0.1, pos.width, pos.height * 0.5])
 
@@ -329,7 +329,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
     recurrent_large_patch = mpatches.Patch(facecolor=recurrent_color, hatch='//', edgecolor='black', alpha=0.1, label='Large recurrent inversion')
     single_large_patch = mpatches.Patch(facecolor=single_color, hatch='//', edgecolor='black', alpha=0.1, label='Large single-event inversion')
-    ax_subplots[-1].legend(handles=[recurrent_patch, single_patch, recurrent_large_patch, single_large_patch], fontsize=12, frameon=True, loc='upper right', bbox_to_anchor=(1, 1.2))
+    ax_subplots[-1].legend(handles=[recurrent_patch, single_patch, recurrent_large_patch, single_large_patch], fontsize=22, frameon=True, loc='upper right', bbox_to_anchor=(1, 1.2))
 
     # finalize
     plt.tight_layout()
