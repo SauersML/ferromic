@@ -303,7 +303,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
                 xyB=(top_x, 0),
                 coordsA="data", coordsB="data",
                 axesA=ax_bottom, axesB=ax_top,
-                color="lightgray", lw=3, alpha=0.5, linestyle="-", zorder=9
+                color="lightgray", lw=3, alpha=0.1, linestyle="-", zorder=9
             )
             fig.add_artist(con_mid)
 
