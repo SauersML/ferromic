@@ -18,59 +18,84 @@ PLOTS_DIR = Path("plots")
 for directory in [RESULTS_DIR, PLOTS_DIR]:
     directory.mkdir(exist_ok=True)
 
+# Hard-coded chromosome lengths (e.g., hg38). We will lay out a single horizontal line at y=0.5 for all chromosomes,
+# subdivided by offsets. We do not label the basepair coordinates themselves, but we do reflect them in the positioning
+# of the boundary dots and the total segment length for each chromosome.
+CHR_LENGTHS = {
+    "chr1": 248956422,
+    "chr2": 242193529,
+    "chr3": 198295559,
+    "chr4": 190214555,
+    "chr5": 181538259,
+    "chr6": 170805979,
+    "chr7": 159345973,
+    "chr8": 145138636,
+    "chr9": 138394717,
+    "chr10": 133797422,
+    "chr11": 135086622,
+    "chr12": 133275309,
+    "chr13": 114364328,
+    "chr14": 107043718,
+    "chr15": 101991189,
+    "chr16": 90338345,
+    "chr17": 83257441,
+    "chr18": 80373285,
+    "chr19": 58617616,
+    "chr20": 64444167,
+    "chr21": 46709983,
+    "chr22": 50818468,
+    "chrX": 156040895
+}
+
 def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annotate=10):
-    # Read the main data for the Manhattan plot
+    # Read the main data
     results_df = pd.read_csv(data_file)
     
-    # Filter to valid p-values
-    valid_mask = results_df['p_value'].notnull() & (results_df['p_value'] > 0)
+    # Filter valid p-values
+    valid_mask = (results_df['p_value'].notnull()) & (results_df['p_value'] > 0)
     if valid_mask.sum() == 0:
         print("No valid p-values found. Cannot create plot.")
         return
 
-    # Determine the number of valid p-values and apply Bonferroni
+    # Bonferroni correction, -log10(p)
     valid_pvals = results_df.loc[valid_mask, 'p_value']
     m = len(valid_pvals)
     results_df['bonferroni_p_value'] = np.nan
     results_df.loc[valid_mask, 'bonferroni_p_value'] = (
         results_df.loc[valid_mask, 'p_value'] * m
     ).clip(upper=1.0)
-    
-    # Compute -log10(p)
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
-    
-    # Read inversion info
+
+    # Read inversions, filter by overlap
     inv_df = pd.read_csv(inv_file).dropna(subset=['chr','region_start','region_end'])
     
-    # Keep only inversions that overlap with valid rows in results_df
-    def overlaps(inv_row, cds_df):
+    def overlaps(inv_row, all_df):
         c = inv_row['chr']
         s = inv_row['region_start']
         e = inv_row['region_end']
-        overlap_subset = cds_df[
-            (cds_df['chrom'] == c)
-            & (cds_df['start'] <= e)
-            & (cds_df['end'] >= s)
-            & (cds_df['p_value'].notnull())
-            & (cds_df['p_value'] > 0)
+        subset = all_df[
+            (all_df['chrom'] == c)
+            & (all_df['start'] <= e)
+            & (all_df['end'] >= s)
+            & (all_df['p_value'].notnull())
+            & (all_df['p_value'] > 0)
         ]
-        return len(overlap_subset) > 0
-
+        return len(subset) > 0
     inv_df = inv_df[inv_df.apply(lambda row: overlaps(row, results_df), axis=1)]
     
-    # Sort chromosomes in a natural order
+    # Sort chromosomes in natural order
     def chr_sort_key(ch):
         base = ch.replace('chr','')
         try:
             return (0, int(base))
         except:
-            mapping = {'X': 23, 'Y': 24, 'M': 25}
-            return (1, mapping.get(base, 99))
+            mapping = {'X':23,'Y':24,'M':25}
+            return (1, mapping.get(base,99))
 
     unique_chroms = sorted(results_df['chrom'].dropna().unique(), key=chr_sort_key)
     chrom_to_index = {c: i for i, c in enumerate(unique_chroms)}
-    
-    # For each chromosome, find c_min and c_max
+
+    # For each chromosome, find the minimal and maximal coordinate used in the data
     chrom_ranges = {}
     for c in unique_chroms:
         subset = results_df[results_df['chrom'] == c]
@@ -78,8 +103,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         c_max = subset['end'].max()
         chrom_ranges[c] = (c_min, c_max)
 
-    # Build top-axis x-values: each chromosome is allocated [i, i+1]
-    # We place x = i + normalized_position_in_chrom
+    # Build the top-axis x-values: each chromosome is [i, i+1]
     top_xs = []
     for _, row in results_df.iterrows():
         c = row['chrom']
@@ -95,66 +119,60 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         top_xs.append(i + rel_pos)
     results_df['plot_x'] = top_xs
     
-    # Z-score the effect sizes
+    # Z-score effect sizes
     eff = results_df['observed_effect_size']
     eff_mean = eff.mean()
     eff_std = eff.std()
     if eff_std == 0 or np.isnan(eff_std):
         eff_std = 1.0
     eff_z = np.clip((eff - eff_mean) / eff_std, -1, 1)
-    
-    # Define a diverging colormap
-    cmap = LinearSegmentedColormap.from_list('custom_diverging', ['blue', 'gray', 'red'])
+
+    # Colormap
+    cmap = LinearSegmentedColormap.from_list('custom_diverging',['blue','gray','red'])
     norm = TwoSlopeNorm(vmin=-1, vcenter=0.0, vmax=1)
     
-    # Create figure with top (main) and bottom (real coords) subplots
-    fig = plt.figure(figsize=(20, 10))
-    gs = fig.add_gridspec(2, 1, height_ratios=[9, 1], hspace=0.05)
+    # Create figure with two subplots
+    fig = plt.figure(figsize=(20,10))
+    gs = fig.add_gridspec(2,1, height_ratios=[9,1], hspace=0.05)
     sns.set_style("ticks")
-    ax = fig.add_subplot(gs[0])     # top manhattan
-    ax_bar = fig.add_subplot(gs[1]) # bottom linear coords
-    
-    # Define colors for inversions
+    ax = fig.add_subplot(gs[0])     # top axis
+    ax_bar = fig.add_subplot(gs[1]) # bottom axis
+
+    # Colors for inversions
     recurrent_color = 'purple'
-    single_color = 'green'
-    
-    # Highlight inversion spans on the top axis
+    single_color    = 'green'
+
+    # Shade inversion regions on the top axis
     for _, inv_row in inv_df.iterrows():
         c = inv_row['chr']
         if c not in chrom_to_index:
             continue
         i = chrom_to_index[c]
         c_min, c_max = chrom_ranges[c]
-        chrom_size = c_max - c_min if c_max > c_min else 1
         inv_size = inv_row['region_end'] - inv_row['region_start']
-        
+        chrom_size = (c_max - c_min) if c_max>c_min else 1
         if chrom_size <= 0:
             continue
-        
-        rel_start = (inv_row['region_start'] - c_min) / chrom_size
-        rel_end = (inv_row['region_end'] - c_min) / chrom_size
+        rel_start = (inv_row['region_start'] - c_min)/chrom_size
+        rel_end   = (inv_row['region_end']   - c_min)/chrom_size
         rel_start = max(0, min(1, rel_start))
         rel_end   = max(0, min(1, rel_end))
+        left_x  = i + rel_start
+        right_x = i + rel_end
+        t = inv_row.get('0_single_1_recur', 0)
+        inv_color = recurrent_color if t==1 else single_color
         
-        start_x = i + rel_start
-        end_x   = i + rel_end
-        
-        typ = inv_row.get('0_single_1_recur', 0)
-        inv_color = recurrent_color if typ == 1 else single_color
-        
-        # Distinguish large from smaller inversions
-        if inv_size > 0.5 * chrom_size:
-            ax.axvspan(start_x, end_x, color=inv_color, alpha=0.1, hatch='//', zorder=0)
+        # Large vs. smaller inversion
+        if inv_size > 0.5*chrom_size:
+            ax.axvspan(left_x, right_x, color=inv_color, alpha=0.1, hatch='//', zorder=0)
         else:
-            ax.axvspan(start_x, end_x, color=inv_color, alpha=0.2, zorder=0)
+            ax.axvspan(left_x, right_x, color=inv_color, alpha=0.2, zorder=0)
 
     import matplotlib.patches as mpatches
-    recurrent_patch = mpatches.Patch(color=recurrent_color, alpha=0.2, label='Recurrent inversion')
-    single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
-    recurrent_large_patch = mpatches.Patch(facecolor=recurrent_color, hatch='//', edgecolor='black', alpha=0.1,
-                                           label='Large recurrent inversion')
-    single_large_patch = mpatches.Patch(facecolor=single_color, hatch='//', edgecolor='black', alpha=0.1,
-                                        label='Large single-event inversion')
+    recurrent_patch = mpatches.Patch(color=recurrent_color, alpha=0.2)
+    single_patch    = mpatches.Patch(color=single_color, alpha=0.2)
+    recurrent_large_patch = mpatches.Patch(facecolor=recurrent_color, hatch='//', edgecolor='black', alpha=0.1)
+    single_large_patch    = mpatches.Patch(facecolor=single_color,  hatch='//', edgecolor='black', alpha=0.1)
 
     # Temporary legend for inversions
     ax.legend(
@@ -162,21 +180,16 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         loc='upper left', fontsize=14, frameon=True
     )
     
-    # Scatter the data on the top axis
-    scatter = ax.scatter(
+    # Scatter main data
+    sc = ax.scatter(
         results_df['plot_x'],
         results_df['neg_log_p'],
-        c=eff_z,
-        cmap=cmap,
-        norm=norm,
-        s=50,
-        alpha=0.7,
-        linewidth=0,
-        zorder=2
+        c=eff_z, cmap=cmap, norm=norm,
+        s=50, alpha=0.7, linewidth=0, zorder=2
     )
     
     # Colorbar
-    cb = plt.colorbar(scatter, ax=ax, fraction=0.02, pad=0.02)
+    cb = plt.colorbar(sc, ax=ax, fraction=0.02, pad=0.02)
     cb.set_label('Z-scored Effect Size', fontsize=16)
     cb.ax.tick_params(labelsize=14)
     cb.ax.text(0.0, 1.05, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes,
@@ -185,167 +198,187 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
                ha='left', va='top', fontsize=10)
     
     # Significance lines
-    sig_threshold = -np.log10(0.05)
-    ax.axhline(sig_threshold, color='red', linestyle='--', linewidth=2, zorder=3, label='p=0.05')
-    if m > 0:
-        bonf_threshold = -np.log10(0.05 / m)
-        if np.isfinite(bonf_threshold) and bonf_threshold > 0:
-            ax.axhline(bonf_threshold, color='darkred', linestyle='--', linewidth=2, zorder=3,
+    sig_line = -np.log10(0.05)
+    ax.axhline(sig_line, color='red', linestyle='--', linewidth=2, zorder=3, label='p=0.05')
+    if m>0:
+        bonf_line = -np.log10(0.05 / m)
+        if np.isfinite(bonf_line) and bonf_line>0:
+            ax.axhline(bonf_line, color='darkred', linestyle='--', linewidth=2, zorder=3,
                        label='p=0.05 (Bonferroni)')
     
     # Adjust y-limits
-    ylim_current = ax.get_ylim()
-    new_ylim = max(ylim_current[1], sig_threshold + 1)
-    if m > 0 and np.isfinite(bonf_threshold):
-        new_ylim = max(new_ylim, bonf_threshold + 1)
-    ax.set_ylim(0, new_ylim)
-    
-    # Turn off x tick labels on the top axis
+    ylo, yhi = ax.get_ylim()
+    new_yhi = max(yhi, sig_line+1)
+    if m>0 and np.isfinite(bonf_line):
+        new_yhi = max(new_yhi, bonf_line+1)
+    ax.set_ylim(0, new_yhi)
+
+    # Turn off x tick labels on top axis
     ax.tick_params(labelbottom=False)
     ax.set_ylabel('-log10(p-value)', fontsize=18)
     ax.set_title('Manhattan Plot of CDS Significance', fontsize=24, fontweight='bold', pad=20)
     
-    # Combine legend handles
+    # Combine legends
     handles_auto, labels_auto = ax.get_legend_handles_labels()
     my_handles = [recurrent_patch, single_patch, recurrent_large_patch, single_large_patch]
-    my_labels = [
+    my_labels  = [
         "Recurrent inversion",
         "Single-event inversion",
         "Large recurrent inversion",
         "Large single-event inversion"
     ]
     all_handles = my_handles + handles_auto
-    all_labels = my_labels + labels_auto
+    all_labels  = my_labels  + labels_auto
     ax.legend(all_handles, all_labels, fontsize=14, frameon=True, loc='upper right')
     
+    # Grid on y-axis only
     ax.yaxis.grid(True, which='major', color='lightgray', linestyle='--', lw=0.5)
     ax.xaxis.grid(False)
     
     # Annotate top hits
-    from adjustText import adjust_text
-    sig_hits = results_df[valid_mask].sort_values('p_value').head(top_hits_to_annotate)
+    top_hits = results_df[valid_mask].sort_values('p_value').head(top_hits_to_annotate)
     text_objs = []
-    label_xs = []
-    label_ys = []
-    for _, row in sig_hits.iterrows():
-        symbol = row.get('gene_symbol', None)
-        if symbol and symbol not in [None, 'Unknown']:
-            tx = ax.text(
+    text_xs   = []
+    text_ys   = []
+    for _, row in top_hits.iterrows():
+        gsym = row.get('gene_symbol', None)
+        if gsym and gsym not in [None,'Unknown']:
+            txt = ax.text(
                 row['plot_x'],
                 row['neg_log_p'] + 1.0,
-                symbol,
+                gsym,
                 fontsize=12,
                 ha='center',
                 va='bottom',
                 color='black',
                 bbox=dict(facecolor='white', alpha=0.5, edgecolor='none')
             )
-            text_objs.append(tx)
-            label_xs.append(row['plot_x'])
-            label_ys.append(row['neg_log_p'])
+            text_objs.append(txt)
+            text_xs.append(row['plot_x'])
+            text_ys.append(row['neg_log_p'])
     
     adjust_text(
         text_objs,
-        x=label_xs,
-        y=label_ys,
+        x=text_xs, y=text_ys,
         ax=ax,
-        force_text=2.0,
-        force_points=2.0,
-        expand_points=(2, 2),
-        expand_text=(2, 2),
+        force_text=2.0, force_points=2.0,
+        expand_points=(2,2),
+        expand_text=(2,2),
         lim=200
     )
-    for tx, (lx, ly) in zip(text_objs, zip(label_xs, label_ys)):
-        x_text, y_text = tx.get_position()
-        ax.plot([x_text, lx], [y_text, ly], color='black', lw=0.5, zorder=3, alpha=0.5)
+    for txt,(xx,yy) in zip(text_objs, zip(text_xs,text_ys)):
+        xt,yt = txt.get_position()
+        ax.plot([xt, xx],[yt, yy], color='black', lw=0.5, zorder=3, alpha=0.5)
     
-    # --------------------------
-    # Bottom axis: real coords
-    # --------------------------
-    # We allocate a separate "section" for each chromosome in real base pairs,
-    # so that each chromosome is placed in its own range without overlapping 
-    # or mixing coords from other chromosomes.
+    # ---------------------------------------
+    # BOTTOM AXIS: Single horizontal line at y=0.5
+    # subdivided for each chromosome in proportion to their real lengths.
+    # We'll place the chromosomes side by side, from left to right, in sorted order,
+    # with no stacking. We do not label real base pairs, just the chromosome name.
+    # We'll place exactly two lines (four red dots) for each chromosome:
+    # top-left -> bottom-left, top-right -> bottom-right
+    # bottom-left, bottom-right are at the actual portion of the single horizontal line
+    # corresponding to c_min_used.. c_max_used in real base pairs, scaled by total length, etc.
+    # But we do not show base pair coords, just the chromosome label in the center of its segment.
+    # ---------------------------------------
     
-    # We'll create a cumulative offset. For chromosome c, we map [c_min, c_max] 
-    # to [current_offset, current_offset + (c_max - c_min)] on the bottom axis.
-    # Then we place two dots for c_min, c_max at that bottom range, 
-    # plus we connect them to the top axis edges (i, i+1).
-    
-    # Precompute the total length for each chromosome
-    # to know how wide each segment is.
-    chr_lengths = {}
-    for c in unique_chroms:
-        c_min, c_max = chrom_ranges[c]
-        if c_max > c_min:
-            chr_lengths[c] = c_max - c_min
-        else:
-            chr_lengths[c] = 1
-    
-    # We'll then define offsets: for chromosome i, offset is sum of all lengths before it.
-    chr_offset = {}
-    sum_len = 0
-    for c in unique_chroms:
-        chr_offset[c] = sum_len
-        sum_len += chr_lengths[c]
-    
-    # The bottom axis overall range is [0, sum_len].
-    ax_bar.set_xlim(0, sum_len)
-    ax_bar.set_ylim(0, 1)
+    # Clear spines, y ticks
+    for spn in ['top','left','right','bottom']:
+        ax_bar.spines[spn].set_visible(False)
     ax_bar.set_yticks([])
-    ax_bar.set_xlabel('Chromosome (Linear Coordinates, segmented by chromosome)', fontsize=16)
+    ax_bar.set_xlabel("Chromosomes (Real lengths, single horizontal line)", fontsize=16)
     
-    # For each chromosome c:
-    #   - we draw line from offset_c to offset_c + (c_max - c_min) at y=0.5
-    #   - place red dots at each end
-    #   - connect to top axis edges at (i,0) & (i+1,0)
-    #   - label with c_min and c_max near the bottom dots
+    # We'll compute offsets so that chromosome i starts exactly where chromosome i-1 ended,
+    # each scaled by the known CHR_LENGTHS. Then, for c we have offset_c.. offset_c + CHR_LENGTHS[c].
+    # We'll store them in a dictionary.
+    offsets = {}
+    cum_len = 0
     for c in unique_chroms:
-        i = chrom_to_index[c]
-        c_min, c_max = chrom_ranges[c]
-        c_len = chr_lengths[c]
-        offset = chr_offset[c]
+        # fallback length if not present
+        real_len = CHR_LENGTHS.get(c, 1)
+        offsets[c] = cum_len
+        cum_len += real_len
+    
+    # The bottom axis from x=0..x=cum_len
+    ax_bar.set_xlim(0, cum_len)
+    ax_bar.set_ylim(0, 1)
+    
+    # We'll place for each chromosome a horizontal line from offset.. offset+chr_len at y=0.5
+    # plus a text label for the chromosome near the center. Then, we place 2 boundary dots for the region used
+    # and connect them to top axis boundaries.
+    for c in unique_chroms:
+        real_len = CHR_LENGTHS.get(c, 1)
+        off = offsets[c]
+        left_x = off
+        right_x= off + real_len
         
-        # We define the bottom left and right in this segmented space
-        bottom_left  = offset
-        bottom_right = offset + c_len
+        # horizontal line for that chromosome's segment
+        ax_bar.hlines(0.5, left_x, right_x, color='black', lw=2)
         
-        # Draw a horizontal line for this chromosome from bottom_left to bottom_right at y=0.5
-        ax_bar.hlines(0.5, bottom_left, bottom_right, color='black', lw=2)
+        # place the chromosome label in the center
+        mid_x = (left_x + right_x)*0.5
+        ax_bar.text(mid_x, 0.55, c.replace("chr",""), ha='center', va='bottom', fontsize=12, fontweight='bold')
         
-        # Place red dots at these edges
+        # gather the minimal used region from the data c_min_used.. c_max_used
+        cdata = results_df[results_df['chrom'] == c]
+        if cdata.empty:
+            continue
+        used_min = cdata['start'].min()
+        used_max = cdata['end'].max()
+        
+        # clamp if beyond real length
+        # but we just do offset + used_min for the scaled position, and offset+ used_max
+        # actually, we want proportion of used_min, used_max within the entire chromosome length
+        # We'll define bottom_left = off + used_min, etc. This is if we treat the entire region as 0.. real_len in base pairs
+        # but used_min might be bigger than real_len for some reason, clamp if needed
+        actual_len = real_len
+        # ensure used_min.. used_max are within [0..actual_len]
+        used_min_clamped = max(0, min(actual_len, used_min))
+        used_max_clamped = max(0, min(actual_len, used_max))
+        
+        bottom_left  = off + used_min_clamped
+        bottom_right = off + used_max_clamped
+        
+        # place 2 red dots
         ax_bar.scatter([bottom_left, bottom_right], [0.5, 0.5], color='red', zorder=5)
         
-        # Label them with their real coordinate c_min, c_max
-        ax_bar.text(bottom_left, 0.55, f"{c_min}", ha='center', va='bottom', fontsize=9, rotation=45)
-        ax_bar.text(bottom_right, 0.55, f"{c_max}", ha='center', va='bottom', fontsize=9, rotation=45)
+        # top axis boundaries
+        i = chrom_to_index[c]
+        c_min_data, c_max_data = chrom_ranges[c]
+        if c_max_data > c_min_data:
+            left_norm  = (used_min_clamped - c_min_data)/(c_max_data - c_min_data)
+            right_norm = (used_max_clamped - c_min_data)/(c_max_data - c_min_data)
+            left_norm  = max(0, min(1,left_norm))
+            right_norm = max(0, min(1,right_norm))
+            top_left_x  = i + left_norm
+            top_right_x = i + right_norm
+        else:
+            top_left_x  = i + 0.4
+            top_right_x = i + 0.6
         
-        # The top axis edges: (i,0) and (i+1,0). We'll plot red dots there as well.
-        top_left  = (i, 0)
-        top_right = (i+1, 0)
-        ax.scatter([top_left[0], top_right[0]], [top_left[1], top_right[1]], color='red', zorder=5)
+        # place top boundary red dots
+        ax.scatter([top_left_x, top_right_x], [0,0], color='red', zorder=5)
         
-        # Connect left edge
+        # connect lines
         con_left = ConnectionPatch(
-            xyA=(bottom_left, 0.5),  # bottom axis
-            xyB=(top_left[0], top_left[1]),  # top axis
+            xyA=(bottom_left, 0.5), xyB=(top_left_x, 0),
             coordsA="data", coordsB="data",
             axesA=ax_bar, axesB=ax,
             color="red", lw=1, linestyle="--", zorder=10
         )
         fig.add_artist(con_left)
         
-        # Connect right edge
         con_right = ConnectionPatch(
-            xyA=(bottom_right, 0.5),
-            xyB=(top_right[0], top_right[1]),
+            xyA=(bottom_right, 0.5), xyB=(top_right_x, 0),
             coordsA="data", coordsB="data",
             axesA=ax_bar, axesB=ax,
             color="red", lw=1, linestyle="--", zorder=10
         )
         fig.add_artist(con_right)
     
+    # finalize
     plt.tight_layout()
-    plt.savefig(os.path.join("plots", "manhattan_plot.png"), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join("plots","manhattan_plot.png"), dpi=300, bbox_inches='tight')
     plt.show()
     plt.close()
 
@@ -354,5 +387,5 @@ def main():
     inv_file = 'inv_info.csv'
     create_manhattan_plot(data_file, inv_file=inv_file, top_hits_to_annotate=10)
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
