@@ -199,6 +199,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         ax_top.set_ylim(0,YLIM_TOP)
         if i == 0:
             ax_top.set_ylabel("-log10(p)", fontsize=26)
+            ax_top.tick_params(axis='y', labelsize=26)
         else:
             ax_top.set_yticks([])
             ax_top.set_ylabel("")
