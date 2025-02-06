@@ -172,6 +172,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
         tick_positions.append(offsets[c] + CHR_LENGTHS.get(c, 1))
     tick_positions = sorted(set(tick_positions))
     ax_bottom.set_xticks(tick_positions)
+    ax_bottom.set_xticklabels([])
     ax_bottom.set_xticklabels([str(tp) for tp in tick_positions], fontsize=16)
     ax_bottom.tick_params(axis='x', which='both', length=15, width=2, labelsize=16)
 
