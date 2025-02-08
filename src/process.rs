@@ -177,6 +177,36 @@ pub struct TranscriptCDS {
     pub segments: Vec<(i64, i64, char, i64)>,
 }
 
+/// Holds all the output columns for writing one row in the CSV.
+#[derive(Debug)]
+struct CsvRowData {
+    seqname: String,
+    region_start: i64,
+    region_end: i64,
+    seq_len_0: i64,
+    seq_len_1: i64,
+    seq_len_adj_0: i64,
+    seq_len_adj_1: i64,
+    seg_sites_0: usize,
+    seg_sites_1: usize,
+    w_theta_0: f64,
+    w_theta_1: f64,
+    pi_0: f64,
+    pi_1: f64,
+    seg_sites_0_f: usize,
+    seg_sites_1_f: usize,
+    w_theta_0_f: f64,
+    w_theta_1_f: f64,
+    pi_0_f: f64,
+    pi_1_f: f64,
+    n_hap_0_unf: usize,
+    n_hap_1_unf: usize,
+    n_hap_0_f: usize,
+    n_hap_1_f: usize,
+    inv_freq_no_filter: f64,
+    inv_freq_filter: f64,
+}
+
 // Custom error types
 #[derive(Debug)]
 pub enum VcfError {
@@ -902,6 +932,9 @@ fn make_sequences(
     Ok(())
 }
 
+/// Main refactored entry point.
+/// It calls several smaller helper functions, preserving overall logic
+/// but splitting up tasks for clarity and efficiency.
 pub fn process_config_entries(
     config_entries: &[ConfigEntry],
     vcf_folder: &str,
@@ -910,346 +943,441 @@ pub fn process_config_entries(
     mask: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
-) -> Result<(), VcfError> {
-    // Initialize shared SeqInfo storage
-    let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
-    
-    let mut writer = WriterBuilder::new()
-        .has_headers(true)
+) -> Result<(), VcfError> 
+{
+    // Create CSV writer and write the header once.
+    let mut writer = create_and_setup_csv_writer(output_file)?;
+    write_csv_header(&mut writer)?;
+
+    // Group config entries by chromosome for efficiency
+    let grouped = group_config_entries_by_chr(config_entries);
+
+    // We will process each chromosome in parallel (for speed),
+    //    then flatten the per-chromosome results in the order we get them.
+    //    If you need to preserve the exact order from `config_entries`, see below
+    //    for a stable ordering approach. For now, we assume order is not critical.
+    let all_results: Vec<_> = grouped
+        .into_par_iter()  // Parallel over chromosomes
+        .flat_map(|(chr, chr_entries)| {
+            match process_chromosome_entries(
+                &chr,
+                chr_entries,
+                vcf_folder,
+                min_gq,
+                &mask,
+                &allow,
+                args
+            ) {
+                Ok(list) => list,
+                Err(e) => {
+                    eprintln!("Error processing chromosome {}: {}", chr, e);
+                    Vec::new()
+                }
+            }
+        })
+        .collect();
+
+    // Write all rows to the CSV file
+    for row_data in all_results {
+        write_csv_row(&mut writer, &row_data)?;
+    }
+
+    writer.flush().map_err(|e| VcfError::Io(e.into()))?;
+    println!("Processing complete. Check the output file: {:?}", output_file);
+    Ok(())
+}
+
+/// Creates the CSV Writer and returns it.
+fn create_and_setup_csv_writer(output_file: &Path) -> Result<csv::Writer<BufWriter<File>>, VcfError> {
+    let writer = WriterBuilder::new()
+        .has_headers(false)
         .from_path(output_file)
         .map_err(|e| VcfError::Io(e.into()))?;
+    Ok(writer)
+}
 
-    // Write headers
-    writer
-        .write_record(&[
-            "chr",
-            "region_start",
-            "region_end",
-            "0_sequence_length",
-            "1_sequence_length",
-            "0_sequence_length_adjusted",
-            "1_sequence_length_adjusted",
-            "0_segregating_sites",
-            "1_segregating_sites",
-            "0_w_theta",
-            "1_w_theta",
-            "0_pi",
-            "1_pi",
-            "0_segregating_sites_filtered",
-            "1_segregating_sites_filtered",
-            "0_w_theta_filtered",
-            "1_w_theta_filtered",
-            "0_pi_filtered",
-            "1_pi_filtered",
-            "0_num_hap_no_filter",
-            "1_num_hap_no_filter",
-            "0_num_hap_filter",
-            "1_num_hap_filter",
-            "inversion_freq_no_filter",
-            "inversion_freq_filter",
-        ])
-        .map_err(|e| VcfError::Io(e.into()))?;
+/// Writes the CSV header row.
+fn write_csv_header<W: Write>(writer: &mut csv::Writer<W>) -> Result<(), VcfError> {
+    writer.write_record(&[
+        "chr",
+        "region_start",
+        "region_end",
+        "0_sequence_length",
+        "1_sequence_length",
+        "0_sequence_length_adjusted",
+        "1_sequence_length_adjusted",
+        "0_segregating_sites",
+        "1_segregating_sites",
+        "0_w_theta",
+        "1_w_theta",
+        "0_pi",
+        "1_pi",
+        "0_segregating_sites_filtered",
+        "1_segregating_sites_filtered",
+        "0_w_theta_filtered",
+        "1_w_theta_filtered",
+        "0_pi_filtered",
+        "1_pi_filtered",
+        "0_num_hap_no_filter",
+        "1_num_hap_no_filter",
+        "0_num_hap_filter",
+        "1_num_hap_filter",
+        "inversion_freq_no_filter",
+        "inversion_freq_filter",
+    ])
+    .map_err(|e| VcfError::Io(e.into()))?;
+    Ok(())
+}
 
-    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+/// Writes a single row of data to the CSV.
+fn write_csv_row<W: Write>(
+    writer: &mut csv::Writer<W>,
+    row: &CsvRowData
+) -> Result<(), VcfError> 
+{
+    writer.write_record(&[
+        &row.seqname,
+        &row.region_start.to_string(),
+        &row.region_end.to_string(),
+        &row.seq_len_0.to_string(),
+        &row.seq_len_1.to_string(),
+        &row.seq_len_adj_0.to_string(),
+        &row.seq_len_adj_1.to_string(),
+        &row.seg_sites_0.to_string(),
+        &row.seg_sites_1.to_string(),
+        &format!("{:.6}", row.w_theta_0),
+        &format!("{:.6}", row.w_theta_1),
+        &format!("{:.6}", row.pi_0),
+        &format!("{:.6}", row.pi_1),
+        &row.seg_sites_0_f.to_string(),
+        &row.seg_sites_1_f.to_string(),
+        &format!("{:.6}", row.w_theta_0_f),
+        &format!("{:.6}", row.w_theta_1_f),
+        &format!("{:.6}", row.pi_0_f),
+        &format!("{:.6}", row.pi_1_f),
+        &row.n_hap_0_unf.to_string(),
+        &row.n_hap_1_unf.to_string(),
+        &row.n_hap_0_f.to_string(),
+        &row.n_hap_1_f.to_string(),
+        &format!("{:.6}", row.inv_freq_no_filter),
+        &format!("{:.6}", row.inv_freq_filter),
+    ])
+    .map_err(|e| VcfError::Io(e.into()))?;
+    Ok(())
+}
 
-    // Organize regions by chromosome
-    let mut regions_per_chr: HashMap<String, Vec<&ConfigEntry>> = HashMap::new();
+/// Groups `ConfigEntry` objects by chromosome name.
+/// Returns a HashMap<chr_name, Vec<ConfigEntry>>.
+fn group_config_entries_by_chr(
+    config_entries: &[ConfigEntry]
+) -> HashMap<String, Vec<ConfigEntry>> 
+{
+    let mut regions_per_chr: HashMap<String, Vec<ConfigEntry>> = HashMap::new();
     for entry in config_entries {
         regions_per_chr
             .entry(entry.seqname.clone())
             .or_insert_with(Vec::new)
-            .push(entry);
+            .push(entry.clone());
+    }
+    regions_per_chr
+}
+
+/// Loads the reference sequence, transcripts, finds the VCF, then processes
+/// each config entry for that chromosome. Returns a Vec of row data for each entry.
+fn process_chromosome_entries(
+    chr: &str,
+    entries: Vec<ConfigEntry>,
+    vcf_folder: &str,
+    min_gq: u16,
+    mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    args: &Args
+) -> Result<Vec<CsvRowData>, VcfError> 
+{
+    println!("Processing chromosome: {}", chr);
+
+    // Load entire chromosome length from reference index
+    let chr_length = {
+        let fasta_reader = bio::io::fasta::IndexedReader::from_file(&args.reference_path)
+            .map_err(|e| VcfError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        let sequences = fasta_reader.index.sequences();
+        let seq_info = sequences
+            .iter()
+            .find(|seq| seq.name == chr || seq.name == format!("chr{}", chr))
+            .ok_or_else(|| VcfError::Io(std::io::Error::new(std::io::ErrorKind::Other,
+                format!("Chromosome {} not found in reference", chr)
+            )))?;
+        seq_info.len as i64
+    };
+
+    // Read the full reference sequence for that chromosome.
+    let ref_sequence = read_reference_sequence(
+        &args.reference_path.into(),
+        chr,
+        1,
+        chr_length
+    )?;
+
+    // Parse all transcripts for that chromosome from the GTF
+    let all_transcripts = parse_gtf_file(&args.gtf_path.into(), chr)?;
+    // We'll keep them in `cds_regions` for subsequent filtering
+    let cds_regions = all_transcripts;
+
+    // Locate the VCF file for this chromosome
+    let vcf_file = match find_vcf_file(vcf_folder, chr) {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("Error finding VCF file for {}: {:?}", chr, e);
+            return Ok(Vec::new());
+        }
+    };
+
+    // We'll store final rows from each entry in this vector
+    let mut rows = Vec::with_capacity(entries.len());
+
+    // For each config entry in this chromosome, do the work
+    //    (We could also parallelize here...)
+    for entry in entries {
+        match process_single_config_entry(
+            entry,
+            &vcf_file,
+            min_gq,
+            mask,
+            allow,
+            &ref_sequence,
+            &cds_regions,
+            chr,
+            args
+        ) {
+            Ok(Some(row_data)) => {
+                rows.push(row_data);
+            }
+            Ok(None) => {
+                // Something was skipped or no haplotypes found
+            }
+            Err(e) => {
+                eprintln!("Error processing entry on {}: {}", chr, e);
+            }
+        }
     }
 
+    Ok(rows)
+}
 
-    for (chr, entries) in regions_per_chr {
-        // Load the entire chromosome so no transcript CDS goes out of range.
-        let chr_length = {
-            println!("Processing chromosome: {}", chr);
-            let fasta_reader = bio::io::fasta::IndexedReader::from_file(&Path::new(&args.reference_path))
-                .map_err(|e| VcfError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-            let sequences = fasta_reader.index.sequences();
-            let seq_info = sequences
-                .iter()
-                .find(|seq| seq.name == chr || seq.name == format!("chr{}", chr))
-                .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?;
-            seq_info.len as i64
-        };
+/// Processes a single config entry’s region and sample sets for a given chromosome.
+///  - Filters transcripts to the region
+///  - Calls `process_vcf` to get unfiltered vs. filtered variants
+///  - Computes population-genetic stats for group 0/1 (unfiltered & filtered)
+///  - Returns one `CsvRowData` if successful, or None if e.g. no haplotypes matched
+fn process_single_config_entry(
+    entry: ConfigEntry,
+    vcf_file: &Path,
+    min_gq: u16,
+    mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    ref_sequence: &[u8],
+    cds_regions: &[TranscriptCDS],
+    chr: &str,
+    args: &Args
+) -> Result<Option<CsvRowData>, VcfError>
+{
+    println!("Processing entry: {}:{}-{}", entry.seqname, entry.start, entry.end);
 
-        let ref_sequence = read_reference_sequence(
-            &Path::new(&args.reference_path),
-            &chr,
-            1,
-            chr_length
-        )?;
+    // Filter transcripts to only those overlapping [start..end].
+    let local_cds = filter_and_log_transcripts( // This is not used... Fix!
+        cds_regions.to_vec(),
+        QueryRegion {
+            start: entry.start,
+            end: entry.end,
+        }
+    );
 
-        // Parse GTF for the entire chromosome, ignoring user region in this step.
-        let all_transcripts = parse_gtf_file(
-            &Path::new(&args.gtf_path),
-            &chr
-        )?;
+    // Load both unfiltered and filtered variant sets for [start..end]
+    //    process_vcf is called once per config entry region.
+    let seqinfo_storage = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
+    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
-        // Do not build a giant range over all entries.
-        // We simply hold all_transcripts here and filter later for each entry.
-        let cds_regions = all_transcripts;
-
-        // Locate the VCF file once for this chromosome.
-        let vcf_file = match find_vcf_file(vcf_folder, &chr) {
-            Ok(file) => file,
+    println!("Calling process_vcf for {} from {} to {}", chr, entry.start, entry.end);
+    let (unfiltered_variants, filtered_variants, sample_names, _chr_len, _missing_data_info, filtering_stats) 
+        = match process_vcf(
+            vcf_file,
+            &args.reference_path.into(),
+            chr,
+            entry.start,
+            entry.end,
+            min_gq,
+            mask.clone(),
+            allow.clone(),
+            seqinfo_storage.clone(),
+            position_allele_map.clone(),
+        ) {
+            Ok(data) => data,
             Err(e) => {
-                eprintln!("Error finding VCF file for {}: {:?}", chr, e);
-                continue;
+                eprintln!("Error processing VCF for {}: {}", chr, e);
+                return Ok(None);
             }
         };
 
-        // Process each entry's region individually.
-        for entry in &entries {
-            let local_cds = filter_and_log_transcripts(
-                cds_regions.clone(),
-                QueryRegion {
-                    start: entry.start,
-                    end: entry.end
-                }
-            );
+    // Print short summary of filtering
+    println!(
+        "Total variants: {}, Filtered: {} (some reasons: mask={}, allow={}, multi-allelic={}, low_GQ={}, missing={})",
+        filtering_stats.total_variants,
+        filtering_stats._filtered_variants,
+        filtering_stats.filtered_due_to_mask,
+        filtering_stats.filtered_due_to_allow,
+        filtering_stats.multi_allelic_variants,
+        filtering_stats.low_gq_variants,
+        filtering_stats.missing_data_variants,
+    );
 
-            println!(
-                "Processing VCF file for chromosome {} from {} to {}",
-                chr, entry.start, entry.end
-            );
+    // Basic length info: naive and adjusted
+    let sequence_length = entry.end - entry.start + 1;
+    let adjusted_sequence_length = calculate_adjusted_sequence_length(
+        entry.start,
+        entry.end,
+        allow.as_ref().and_then(|a| a.get(&chr.to_string())),
+        mask.as_ref().and_then(|m| m.get(&chr.to_string())),
+    );
 
-            let variants_data = match process_vcf(
-                &vcf_file,
-                &Path::new(&args.reference_path),
-                &chr,
-                entry.start,
-                entry.end,
-                min_gq,
-                mask.clone(),
-                allow.clone(),
-                Arc::clone(&seqinfo_storage),
-                Arc::clone(&position_allele_map),
-            ) {
-                Ok(data) => data,
-                Err(e) => {
-                    eprintln!("Error processing VCF file for {}: {}", chr, e);
-                    continue;
-                }
-            };
+    // Stats for unfiltered group 0
+    let region_variants_uf: Vec<_> = unfiltered_variants.iter()
+        .filter(|v| v.position >= entry.start && v.position <= entry.end)
+        .cloned()
+        .collect();
 
-            let (
-                unfiltered_variants,
-                _filtered_variants,
-                sample_names,
-                _chr_length,
-                _missing_data_info,
-                _filtering_stats,
-            ) = variants_data;
-
-        println!("\n{}", "Filtering Statistics:".green().bold());
-        println!("Total variants processed: {}", _filtering_stats.total_variants);
-        println!(
-            "Filtered variants: {} ({:.2}%)",
-            _filtering_stats._filtered_variants,
-            (_filtering_stats._filtered_variants as f64 / _filtering_stats.total_variants as f64)
-                * 100.0
-        );
-        println!("Filtered due to allow: {}", _filtering_stats.filtered_due_to_allow);
-        println!("Filtered due to mask: {}", _filtering_stats.filtered_due_to_mask);
-        println!("Multi-allelic variants: {}", _filtering_stats.multi_allelic_variants);
-        println!("Low GQ variants: {}", _filtering_stats.low_gq_variants);
-        println!("Missing data variants: {}", _filtering_stats.missing_data_variants);
-    
-        println!("\n{}", "Example Filtered Variants:".green().bold());
-        for (i, example) in _filtering_stats.filtered_examples.iter().enumerate().take(5) {
-            println!("Example {}: {}", i + 1, example);
+    let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf) = match process_variants(
+        &region_variants_uf,
+        &sample_names,
+        0,
+        &entry.samples_unfiltered,
+        entry.start,
+        entry.end,
+        None,
+        seqinfo_storage.clone(),
+        position_allele_map.clone(),
+        entry.seqname.clone(),
+        false,
+        ref_sequence,
+        &cds_regions,
+    )? {
+        Some(vals) => vals,
+        None => {
+            println!("No haplotypes found for group 0 in region {}-{}", entry.start, entry.end);
+            return Ok(None);
         }
-        if _filtering_stats.filtered_examples.len() > 5 {
-            println!(
-                "... and {} more.",
-                _filtering_stats.filtered_examples.len() - 5
-            );
+    };
+
+    // Stats for unfiltered group 1
+    let (num_segsites_1, w_theta_1, pi_1, n_hap_1_unf) = match process_variants(
+        &unfiltered_variants,
+        &sample_names,
+        1,
+        &entry.samples_unfiltered,
+        entry.start,
+        entry.end,
+        None,
+        seqinfo_storage.clone(),
+        position_allele_map.clone(),
+        entry.seqname.clone(),
+        false,
+        ref_sequence,
+        &cds_regions,
+    )? {
+        Some(vals) => vals,
+        None => {
+            println!("No haplotypes found for group 1 in region {}-{}", entry.start, entry.end);
+            return Ok(None);
         }
+    };
 
-        // Collect all config samples for this chromosome
-        let all_config_samples: HashSet<String> = entries
-            .iter()
-            .flat_map(|entry| {
-                entry
-                    .samples_unfiltered
-                    .keys()
-                    .cloned()
-                    .chain(entry.samples_filtered.keys().cloned())
-            })
-            .collect();
+    let inversion_freq_no_filter = calculate_inversion_allele_frequency(&entry.samples_unfiltered)
+        .unwrap_or(-1.0);
 
-        // Collect VCF sample names
-        let vcf_sample_set: HashSet<String> = sample_names
-            .iter()
-            .map(|s| extract_sample_id(s).to_string())
-            .collect();
-
-        // Find missing samples
-        let missing_samples: Vec<String> = all_config_samples
-            .difference(&vcf_sample_set)
-            .cloned()
-            .collect();
-
-        // Print warning if there are missing samples
-        if !missing_samples.is_empty() {
-            eprintln!(
-                "Warning: The following samples from config file are missing in VCF for chromosome {}: {:?}",
-                chr, missing_samples
-            );
+    // Stats for filtered group 0
+    let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f) = match process_variants(
+        &filtered_variants,
+        &sample_names,
+        0,
+        &entry.samples_filtered,
+        entry.start,
+        entry.end,
+        Some(adjusted_sequence_length),
+        seqinfo_storage.clone(),
+        position_allele_map.clone(),
+        entry.seqname.clone(),
+        true,
+        ref_sequence,
+        &cds_regions,
+    )? {
+        Some(vals) => vals,
+        None => {
+            println!("No haplotypes found for group 0 (filtered) in region {}-{}", entry.start, entry.end);
+            return Ok(None);
         }
+    };
 
-        for entry in entries {
-            println!("Processing entry: {}:{}-{}", entry.seqname, entry.start, entry.end);
-        
-            // Calculate stats for region
-            let sequence_length = entry.end - entry.start + 1;
-            let adjusted_sequence_length = calculate_adjusted_sequence_length(
-                entry.start,
-                entry.end,
-                allow.as_ref().and_then(|a| a.get(&chr)),
-                mask.as_ref().and_then(|m| m.get(&chr)),
-            );
-        
-            // Filter variants for stats pass
-            let region_variants: Vec<Variant> = unfiltered_variants.iter()
-                .filter(|v| v.position >= entry.start && v.position <= entry.end)
-                .cloned()
-                .collect();
-            println!("Found {} variants in region {}-{}", region_variants.len(), entry.start, entry.end);
-        
-            // Process haplotype_group=0 and haplotype_group=1 with region_variants for unfiltered
-            let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf) = match process_variants(
-                &region_variants,
-                &sample_names,
-                0,
-                &entry.samples_unfiltered,
-                entry.start,
-                entry.end,
-                None,
-                Arc::clone(&seqinfo_storage),
-                Arc::clone(&position_allele_map),
-                entry.seqname.clone(),
-                false,
-                &ref_sequence,
-                &cds_regions,
-            )? {
-                Some(vals) => vals,
-                None => {
-                    println!("No haplotypes found for group 0 in region {}-{}", entry.start, entry.end);
-                    continue;
-                }
-            };
-            let (num_segsites_1, w_theta_1, pi_1, n_hap_1_unf) = match process_variants(
-                &unfiltered_variants,
-                &sample_names,
-                1,
-                &entry.samples_unfiltered,
-                entry.start,
-                entry.end,
-                None,
-                Arc::clone(&seqinfo_storage),
-                Arc::clone(&position_allele_map),
-                entry.seqname.clone(),
-                false,
-                &ref_sequence,
-                &cds_regions,
-            )? {
-                Some(vals) => vals,
-                None => {
-                    println!("No haplotypes found for group 1 in region {}-{}", entry.start, entry.end);
-                    continue;
-                }
-            };
-            let inversion_freq_no_filter = calculate_inversion_allele_frequency(&entry.samples_unfiltered);
-        
-            // Filtered pass
-            let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f) = match process_variants(
-                &_filtered_variants,
-                &sample_names,
-                0,
-                &entry.samples_filtered,
-                entry.start,
-                entry.end,
-                Some(adjusted_sequence_length),
-                Arc::clone(&seqinfo_storage),
-                Arc::clone(&position_allele_map),
-                entry.seqname.clone(),
-                true,
-                &ref_sequence,
-                &cds_regions,
-            )? {
-                Some(vals) => vals,
-                None => {
-                    println!("No haplotypes found for group 0 (filtered) in region {}-{}", entry.start, entry.end);
-                    continue;
-                }
-            };
-            let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f) = match process_variants(
-                &_filtered_variants,
-                &sample_names,
-                1,
-                &entry.samples_filtered,
-                entry.start,
-                entry.end,
-                Some(adjusted_sequence_length),
-                Arc::clone(&seqinfo_storage),
-                Arc::clone(&position_allele_map),
-                entry.seqname.clone(),
-                true,
-                &ref_sequence,
-                &cds_regions,
-            )? {
-                Some(vals) => vals,
-                None => {
-                    println!("No haplotypes found for group 1 (filtered) in region {}-{}", entry.start, entry.end);
-                    continue;
-                }
-            };
-            let inversion_freq_filt = calculate_inversion_allele_frequency(&entry.samples_filtered);
-        
-            // Write CSV row
-            writer.write_record(&[
-                &entry.seqname,
-                &entry.start.to_string(),
-                &entry.end.to_string(),
-                &sequence_length.to_string(),
-                &sequence_length.to_string(),
-                &adjusted_sequence_length.to_string(),
-                &adjusted_sequence_length.to_string(),
-                &num_segsites_0.to_string(),
-                &num_segsites_1.to_string(),
-                &format!("{:.6}", w_theta_0),
-                &format!("{:.6}", w_theta_1),
-                &format!("{:.6}", pi_0),
-                &format!("{:.6}", pi_1),
-                &num_segsites_0_f.to_string(),
-                &num_segsites_1_f.to_string(),
-                &format!("{:.6}", w_theta_0_f),
-                &format!("{:.6}", w_theta_1_f),
-                &format!("{:.6}", pi_0_f),
-                &format!("{:.6}", pi_1_f),
-                &n_hap_0_unf.to_string(),
-                &n_hap_1_unf.to_string(),
-                &n_hap_0_f.to_string(),
-                &n_hap_1_f.to_string(),
-                &format!("{:.6}", inversion_freq_no_filter.unwrap_or(-1.0)),
-                &format!("{:.6}", inversion_freq_filt.unwrap_or(-1.0)),
-            ]).map_err(|e| VcfError::Io(e.into()))?;
-        
-            println!("Wrote stats for entry {}:{}-{}", entry.seqname, entry.start, entry.end);
-            writer.flush().map_err(|e| VcfError::Io(e.into()))?;
+    // Stats for filtered group 1
+    let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f) = match process_variants(
+        &filtered_variants,
+        &sample_names,
+        1,
+        &entry.samples_filtered,
+        entry.start,
+        entry.end,
+        Some(adjusted_sequence_length),
+        seqinfo_storage.clone(),
+        position_allele_map.clone(),
+        entry.seqname.clone(),
+        true,
+        ref_sequence,
+        &cds_regions,
+    )? {
+        Some(vals) => vals,
+        None => {
+            println!("No haplotypes found for group 1 (filtered) in region {}-{}", entry.start, entry.end);
+            return Ok(None);
         }
-    }
+    };
 
-    writer.flush().map_err(|e| VcfError::Io(e.into()))?;
-    // We finish process_config_entries as before.
-    println!("Processing complete. Check the output file: {:?}", output_file);
-    Ok(())
+    let inversion_freq_filt = calculate_inversion_allele_frequency(&entry.samples_filtered)
+        .unwrap_or(-1.0);
+
+    // Build final row data
+    let row_data = CsvRowData {
+        seqname: entry.seqname,
+        region_start: entry.start,
+        region_end: entry.end,
+        seq_len_0: sequence_length,
+        seq_len_1: sequence_length,
+        seq_len_adj_0: adjusted_sequence_length,
+        seq_len_adj_1: adjusted_sequence_length,
+        seg_sites_0: num_segsites_0,
+        seg_sites_1: num_segsites_1,
+        w_theta_0,
+        w_theta_1,
+        pi_0,
+        pi_1,
+        seg_sites_0_f: num_segsites_0_f,
+        seg_sites_1_f: num_segsites_1_f,
+        w_theta_0_f,
+        w_theta_1_f,
+        pi_0_f,
+        pi_1_f,
+        n_hap_0_unf,
+        n_hap_1_unf,
+        n_hap_0_f,
+        n_hap_1_f,
+        inv_freq_no_filter: inversion_freq_no_filter,
+        inv_freq_filter: inversion_freq_filt,
+    };
+
+    println!("Finished stats for region {}-{}.", entry.start, entry.end);
+
+    Ok(Some(row_data))
 }
+
+
+
 
 // This function filters the TranscriptCDS by QueryRegion overlap and prints stats 
 fn filter_and_log_transcripts(
