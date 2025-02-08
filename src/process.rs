@@ -1804,7 +1804,13 @@ pub struct CdsRegion {
 fn write_phylip_file(
     output_file: &str,
     hap_sequences: &HashMap<String, Vec<char>>,
+    progress_bar: &ProgressBar,
+    done_count: &Arc<AtomicUsize>,
+    total_count: usize,
+    chr_label: &str,
+    transcript_id: &str,
 ) -> Result<(), VcfError> {
+    // Open the file and wrap it for buffered writing
     let file = File::create(output_file).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
@@ -1813,12 +1819,10 @@ fn write_phylip_file(
     })?;
     let mut writer = BufWriter::new(file);
 
-    // Process and write each sequence
+    // Write each sequence (sample name + sequence data)
     for (sample_name, seq_chars) in hap_sequences {
         let padded_name = format!("{:<10}", sample_name);
         let sequence: String = seq_chars.iter().collect();
-        
-        // Write sequence to PHYLIP file
         writeln!(writer, "{}{}", padded_name, sequence).map_err(|e| {
             VcfError::Io(io::Error::new(
                 io::ErrorKind::Other,
@@ -1827,6 +1831,7 @@ fn write_phylip_file(
         })?;
     }
 
+    // Flush the writer
     writer.flush().map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
@@ -1834,10 +1839,27 @@ fn write_phylip_file(
         ))
     })?;
 
-    println!("PHYLIP file '{}' written successfully.", output_file);
+    // Increment the count of completed transcripts, then update progress bar
+    let new_done = done_count.fetch_add(1, Ordering::SeqCst) + 1;
+    let remaining = total_count.saturating_sub(new_done);
+    let msg = format!(
+        "Chr {} - transcript {} done. {}/{} completed, {} remaining",
+        chr_label,
+        transcript_id,
+        new_done,
+        total_count,
+        remaining
+    );
+    progress_bar.set_message(msg);
+    progress_bar.inc(1);
+
+    // If finished all
+    if new_done == total_count {
+        progress_bar.finish_with_message("All PHYLIP transcripts processed!");
+    }
+
     Ok(())
 }
-
 
 // Function to parse a variant line
 fn process_variant(
