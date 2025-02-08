@@ -987,12 +987,14 @@ pub fn process_config_entries(
     Ok(())
 }
 
-/// Creates the CSV Writer and returns it.
 fn create_and_setup_csv_writer(output_file: &Path) -> Result<csv::Writer<BufWriter<File>>, VcfError> {
+    // Create the file, wrap in BufWriter, then build the CSV writer from that.
+    let file = File::create(output_file)
+        .map_err(|e| VcfError::Io(e.into()))?;
+    let buf_writer = BufWriter::new(file);
     let writer = WriterBuilder::new()
         .has_headers(false)
-        .from_path(output_file)
-        .map_err(|e| VcfError::Io(e.into()))?;
+        .from_writer(buf_writer);
     Ok(writer)
 }
 
@@ -1112,7 +1114,7 @@ fn process_chromosome_entries(
 
     // Read the full reference sequence for that chromosome.
     let ref_sequence = read_reference_sequence(
-        &args.reference_path.into(),
+        Path::new(&args.reference_path),
         chr,
         1,
         chr_length
@@ -1201,7 +1203,7 @@ fn process_single_config_entry(
     let (unfiltered_variants, filtered_variants, sample_names, _chr_len, _missing_data_info, filtering_stats) 
         = match process_vcf(
             vcf_file,
-            &args.reference_path.into(),
+            Path::new(&args.reference_path),
             chr,
             entry.start,
             entry.end,
