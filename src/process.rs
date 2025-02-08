@@ -506,15 +506,6 @@ fn process_variants(
             segment_map.push((seg_s, seg_e, current_len));
             current_len += length;
         }
-    
-        // Create a progress bar for the transcript writing phase
-        let progress_bar = indicatif::ProgressBar::new(total_transcripts as u64);
-        progress_bar.set_style(
-            indicatif::ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
-                .expect("Failed to create progress bar template")
-                .progress_chars("=>-")
-        );
 
         // Inject variant alleles where applicable
         for variant in variants {
@@ -585,9 +576,6 @@ fn process_variants(
             tid
         )?;
     }
-
-    // Finish the progress bar after all transcripts
-    progress_bar.finish_with_message("All PHYLIP transcripts processed!");
 
     // Display stats pass seqinfo
     {
