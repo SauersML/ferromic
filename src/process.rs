@@ -850,12 +850,19 @@ fn make_sequences(
         // For each haplotype sequence, extract CDS sequence
         let mut cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
         for (sample_name, seq) in &hap_sequences {
-            let start_offset = (cds_start - region_start) as usize;
-            let end_offset = (cds_end - region_start) as usize; // No +1 needed for half-open intervals
+            // Use 1-based transcript coordinates minus 1 for 0-based array index.
+            // Do not clip for partial overlap: we want the entire transcript.
+            let start_offset = if cds_start < 1 { 
+                0 
+            } else { 
+                (cds_start - 1) as usize 
+            };
+            let end_offset = cds_end as usize;
 
+            // If the transcript extends beyond the reference length, skip it entirely.
             if end_offset > seq.len() {
                 eprintln!(
-                    "Warning: CDS end offset {} exceeds sequence length {} for sample {}. Skipping CDS.",
+                    "Warning: transcript end offset {} exceeds reference length {} for sample {}. Skipping entire transcript.",
                     end_offset, seq.len(), sample_name
                 );
                 continue;
