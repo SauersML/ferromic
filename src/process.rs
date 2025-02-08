@@ -811,24 +811,7 @@ fn make_sequences(
         let cds_start = transcript_cds_start; // Or 0-based... should it be -1?
         let cds_end   = transcript_cds_end;
                 
-        // After processing all segments, write one final .phy file
-        let filename = format!(
-            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
-            haplotype_group,
-            cds.transcript_id,
-            chromosome,
-            transcript_cds_start,
-            transcript_cds_end
-        );
-        
-        // Convert combined_cds_sequences to char sequences
-        let char_sequences: HashMap<String, Vec<char>> = combined_cds_sequences
-            .into_iter()
-            .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
-            .collect();
-        
-        write_phylip_file(&filename, &char_sequences)?;
-
+        // Prepare a map for the full transcript sequences
         let mut combined_sequences: HashMap<String, Vec<u8>> = HashMap::new();
 
         // After processing all segments into combined_sequences, compute final length:
@@ -884,16 +867,6 @@ fn make_sequences(
         }
 
         // Write sequences to PHYLIP file
-        let filename = format!(
-            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
-            haplotype_group,
-            cds.transcript_id,
-            chromosome,
-            transcript_cds_start,
-            transcript_cds_end
-        );
-
-    
         let filename = format!(
             "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
             haplotype_group,
