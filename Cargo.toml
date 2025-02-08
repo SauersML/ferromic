@@ -3,6 +3,14 @@ name = "ferromic"
 version = "0.1.0"
 edition = "2021"
 
+# This new [lib] section creates a library target.
+# The crate will be built as both an rlib (for Rust usage)
+# and a cdylib (if you plan to use it as a Python extension module later).
+[lib]
+name = "ferromic"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
 clap = { version = "4.3", features = ["derive"] }
 tokio = { version = "1.28", features = ["full"] }
