@@ -451,19 +451,6 @@ fn process_variants(
 
     // FULL CDS PASS: entire transcript
 
-    // Count how many transcripts are in cds_regions for progress tracking
-    let total_transcripts = cds_regions.len();
-    let done_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-
-    // Create a progress bar for the transcript writing phase
-    let progress_bar = indicatif::ProgressBar::new(total_transcripts as u64);
-    progress_bar.set_style(
-        indicatif::ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
-            .expect("Failed to create progress bar template")
-            .progress_chars("=>-")
-    );
-
     // Loop over all transcripts to build and write each PHYLIP file
     for cds in cds_regions {
         let tid = &cds.transcript_id;
@@ -519,11 +506,6 @@ fn process_variants(
             segment_map.push((seg_s, seg_e, current_len));
             current_len += length;
         }
-
-        
-        // Count how many transcripts are in cds_regions for progress tracking
-        let total_transcripts = cds_regions.len();
-        let done_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     
         // Create a progress bar for the transcript writing phase
         let progress_bar = indicatif::ProgressBar::new(total_transcripts as u64);
@@ -599,9 +581,6 @@ fn process_variants(
         write_phylip_file(
             &outphy,
             &final_map,
-            &progress_bar,
-            &done_count,
-            total_transcripts,
             &chromosome,
             tid
         )?;
@@ -838,19 +817,6 @@ fn make_sequences(
         );
     }
 
-    // Count how many transcripts are in cds_regions for progress tracking
-    let total_transcripts = cds_regions.len();
-    let done_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-
-    // Create a progress bar for the transcript writing phase
-    let progress_bar = indicatif::ProgressBar::new(total_transcripts as u64);
-    progress_bar.set_style(
-        indicatif::ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
-            .expect("Failed to create progress bar template")
-            .progress_chars("=>-")
-    );
-
 
     // For each CDS, extract sequences and write to PHYLIP file
     for cds in cds_regions {
@@ -969,9 +935,6 @@ fn make_sequences(
         write_phylip_file(
             &filename,
             &char_sequences,
-            &progress_bar,
-            &done_count,
-            total_transcripts,
             &chromosome,
             &cds.transcript_id
         )?;
@@ -1872,9 +1835,6 @@ pub struct CdsRegion {
 fn write_phylip_file(
     output_file: &str,
     hap_sequences: &HashMap<String, Vec<char>>,
-    progress_bar: &ProgressBar,
-    done_count: &Arc<std::sync::atomic::AtomicUsize>,
-    total_count: usize,
     chr_label: &str,
     transcript_id: &str,
 ) -> Result<(), VcfError> {
@@ -1903,23 +1863,6 @@ fn write_phylip_file(
             format!("Failed to flush PHYLIP file '{}': {:?}", output_file, e),
         ))
     })?;
-
-    let new_done = done_count.fetch_add(1, Ordering::SeqCst) + 1;
-    let remaining = total_count.saturating_sub(new_done);
-    let msg = format!(
-        "Chr {} - transcript {} done. {}/{} completed, {} remaining",
-        chr_label,
-        transcript_id,
-        new_done,
-        total_count,
-        remaining
-    );
-    progress_bar.set_message(msg);
-    progress_bar.inc(1);
-
-    if new_done == total_count {
-        progress_bar.finish_with_message("All PHYLIP transcripts processed!");
-    }
 
     Ok(())
 }
