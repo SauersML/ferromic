@@ -167,7 +167,7 @@ impl QueryRegion {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// Represents one transcript's coding sequence. It stores all CDS segments
 /// belonging to a single transcript (no introns).
 pub struct TranscriptCDS {
@@ -1121,7 +1121,7 @@ fn process_chromosome_entries(
     )?;
 
     // Parse all transcripts for that chromosome from the GTF
-    let all_transcripts = parse_gtf_file(&args.gtf_path.into(), chr)?;
+    let all_transcripts = parse_gtf_file(Path::new(&args.gtf_path), chr)?;
     // We'll keep them in `cds_regions` for subsequent filtering
     let cds_regions = all_transcripts;
 
