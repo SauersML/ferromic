@@ -370,14 +370,14 @@ fn process_variants(
     reference_sequence: &[u8],
     cds_regions: &[TranscriptCDS],
 ) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
-    // 1) Map sample names to indices
+    // Map sample names to indices
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
         vcf_sample_id_to_index.insert(sample_id, i);
     }
 
-    // 2) Collect haplotype indices for this group
+    // Collect haplotype indices for this group
     let mut haplotype_indices = Vec::new();
     for (sample_name, &(left_tsv, right_tsv)) in sample_filter {
         if let Some(&idx) = vcf_sample_id_to_index.get(sample_name.as_str()) {
@@ -394,7 +394,7 @@ fn process_variants(
         return Ok(None);
     }
 
-    // 3) STATS PASS: region-based
+    // STATS PASS: region-based
     let mut num_segsites = 0;
     let mut tot_pair_diff = 0;
     let n = haplotype_indices.len();
@@ -449,7 +449,22 @@ fn process_variants(
     let w_theta = calculate_watterson_theta(num_segsites, n, seq_len);
     let pi = calculate_pi(tot_pair_diff, n, seq_len);
 
-    // 4) FULL CDS PASS: entire transcript
+    // FULL CDS PASS: entire transcript
+
+    // Count how many transcripts are in cds_regions for progress tracking
+    let total_transcripts = cds_regions.len();
+    let done_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    // Create a progress bar for the transcript writing phase
+    let progress_bar = indicatif::ProgressBar::new(total_transcripts as u64);
+    progress_bar.set_style(
+        indicatif::ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
+            .expect("Failed to create progress bar template")
+            .progress_chars("=>-")
+    );
+
+    // Loop over all transcripts to build and write each PHYLIP file
     for cds in cds_regions {
         let tid = &cds.transcript_id;
         let cds_min = cds.segments.iter().map(|&(s,_,_,_)| s).min().unwrap();
@@ -474,7 +489,6 @@ fn process_variants(
                 eprintln!("Skipping negative start {} for transcript {} on {}", seg_s, tid, chromosome);
                 continue;
             }
-
             let offset_0_based = seg_s.saturating_sub(1) as usize;
             if offset_0_based.checked_add(length).unwrap_or(usize::MAX) > reference_sequence.len() {
                 eprintln!("Skipping out-of-bounds {}..{} for transcript {} on {}", seg_s, seg_e, tid, chromosome);
@@ -486,8 +500,8 @@ fn process_variants(
                     1 => format!("{}_R", sample_names[*sidx]),
                     _ => panic!("Unexpected hap index")
                 };
-                let vec_ref = &mut combined.get_mut(&nm).unwrap();
-                let mut chunk = reference_sequence[offset_0_based..offset_0_based+length].to_vec();
+                let vec_ref = combined.get_mut(&nm).expect("Missing sample entry in combined map");
+                let mut chunk = reference_sequence[offset_0_based..offset_0_based + length].to_vec();
                 if strand == '-' {
                     chunk.reverse();
                     for b in chunk.iter_mut() {
@@ -506,6 +520,7 @@ fn process_variants(
             current_len += length;
         }
 
+        // Inject variant alleles where applicable
         for variant in variants {
             if variant.position < cds_min || variant.position > cds_max {
                 continue;
@@ -542,27 +557,44 @@ fn process_variants(
             }
         }
 
+        // Check final lengths for consistency
         let lens: Vec<usize> = combined.values().map(|v| v.len()).collect();
         if lens.is_empty() {
             continue;
         }
-        let fl = lens[0];
-        if !lens.iter().all(|&x| x == fl) {
+        let first_len = lens[0];
+        if !lens.iter().all(|&x| x == first_len) {
             eprintln!("Transcript {} has differing lengths among haplotypes", tid);
             continue;
         }
 
+        // Convert to char-based sequences
         let mut final_map = HashMap::new();
         for (nm, data) in combined {
             let chars: Vec<char> = data.iter().map(|&b| b as char).collect();
             final_map.insert(nm, chars);
         }
+
+        // Build the PHYLIP file name
         let outphy = format!(
             "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
             haplotype_group, tid, chromosome, cds_min, cds_max
         );
-        write_phylip_file(&outphy, &final_map)?;
+
+        // Write the PHYLIP file with progress updates
+        write_phylip_file(
+            &outphy,
+            &final_map,
+            &progress_bar,
+            &done_count,
+            total_transcripts,
+            &chromosome,
+            tid
+        )?;
     }
+
+    // Finish the progress bar after all transcripts
+    progress_bar.finish_with_message("All PHYLIP transcripts processed!");
 
     // Display stats pass seqinfo
     {
@@ -906,7 +938,15 @@ fn make_sequences(
             .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
             .collect();
 
-        write_phylip_file(&filename, &char_sequences)?;
+        write_phylip_file(
+            &filename,
+            &char_sequences,
+            &progress_bar,
+            &done_count,
+            total_transcripts,
+            &chromosome,
+            &cds.transcript_id
+        )?;
     }
 
     Ok(())
@@ -1805,12 +1845,11 @@ fn write_phylip_file(
     output_file: &str,
     hap_sequences: &HashMap<String, Vec<char>>,
     progress_bar: &ProgressBar,
-    done_count: &Arc<AtomicUsize>,
+    done_count: &Arc<std::sync::atomic::AtomicUsize>,
     total_count: usize,
     chr_label: &str,
     transcript_id: &str,
 ) -> Result<(), VcfError> {
-    // Open the file and wrap it for buffered writing
     let file = File::create(output_file).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
@@ -1819,7 +1858,6 @@ fn write_phylip_file(
     })?;
     let mut writer = BufWriter::new(file);
 
-    // Write each sequence (sample name + sequence data)
     for (sample_name, seq_chars) in hap_sequences {
         let padded_name = format!("{:<10}", sample_name);
         let sequence: String = seq_chars.iter().collect();
@@ -1831,7 +1869,6 @@ fn write_phylip_file(
         })?;
     }
 
-    // Flush the writer
     writer.flush().map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
@@ -1839,7 +1876,6 @@ fn write_phylip_file(
         ))
     })?;
 
-    // Increment the count of completed transcripts, then update progress bar
     let new_done = done_count.fetch_add(1, Ordering::SeqCst) + 1;
     let remaining = total_count.saturating_sub(new_done);
     let msg = format!(
@@ -1853,13 +1889,13 @@ fn write_phylip_file(
     progress_bar.set_message(msg);
     progress_bar.inc(1);
 
-    // If finished all
     if new_done == total_count {
         progress_bar.finish_with_message("All PHYLIP transcripts processed!");
     }
 
     Ok(())
 }
+
 
 // Function to parse a variant line
 fn process_variant(
