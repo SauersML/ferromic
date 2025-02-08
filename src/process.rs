@@ -520,6 +520,20 @@ fn process_variants(
             current_len += length;
         }
 
+        
+        // Count how many transcripts are in cds_regions for progress tracking
+        let total_transcripts = cds_regions.len();
+        let done_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    
+        // Create a progress bar for the transcript writing phase
+        let progress_bar = indicatif::ProgressBar::new(total_transcripts as u64);
+        progress_bar.set_style(
+            indicatif::ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
+                .expect("Failed to create progress bar template")
+                .progress_chars("=>-")
+        );
+
         // Inject variant alleles where applicable
         for variant in variants {
             if variant.position < cds_min || variant.position > cds_max {
@@ -823,6 +837,20 @@ fn make_sequences(
             (length_modified as f64 / total_sequences as f64) * 100.0
         );
     }
+
+    // Count how many transcripts are in cds_regions for progress tracking
+    let total_transcripts = cds_regions.len();
+    let done_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    // Create a progress bar for the transcript writing phase
+    let progress_bar = indicatif::ProgressBar::new(total_transcripts as u64);
+    progress_bar.set_style(
+        indicatif::ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
+            .expect("Failed to create progress bar template")
+            .progress_chars("=>-")
+    );
+
 
     // For each CDS, extract sequences and write to PHYLIP file
     for cds in cds_regions {
