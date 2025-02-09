@@ -543,38 +543,6 @@ fn process_variants(
                 }
             }
         }
-
-        // Check final lengths for consistency
-        let lens: Vec<usize> = combined.values().map(|v| v.len()).collect();
-        if lens.is_empty() {
-            continue;
-        }
-        let first_len = lens[0];
-        if !lens.iter().all(|&x| x == first_len) {
-            eprintln!("Transcript {} has differing lengths among haplotypes", tid);
-            continue;
-        }
-
-        // Convert to char-based sequences
-        let mut final_map = HashMap::new();
-        for (nm, data) in combined {
-            let chars: Vec<char> = data.iter().map(|&b| b as char).collect();
-            final_map.insert(nm, chars);
-        }
-
-        // Build the PHYLIP file name
-        let outphy = format!(
-            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
-            haplotype_group, tid, chromosome, cds_min, cds_max
-        );
-
-        // Write the PHYLIP file with progress updates
-        write_phylip_file(
-            &outphy,
-            &final_map,
-            &chromosome,
-            tid
-        )?;
     }
 
     // Display stats pass seqinfo
