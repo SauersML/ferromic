@@ -37,6 +37,8 @@ use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
 use prettytable::{Table, row};
+use log::{info, error, warn};
+
 
 // Define command-line arguments using clap
 #[derive(Parser, Debug)]
@@ -624,7 +626,7 @@ pub fn validate_coding_sequence(seq: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn make_sequences(
+pub fn make_sequences(
     variants: &[Variant],
     sample_names: &[String],
     haplotype_group: u8,
@@ -636,267 +638,259 @@ fn make_sequences(
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: &str,
 ) -> Result<(), VcfError> {
-    // Map sample names to indices
-    let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
+    let vcf_sample_id_to_index = map_sample_names_to_indices(sample_names)?;
+
+    let haplotype_indices = get_haplotype_indices_for_group(
+        haplotype_group,
+        sample_filter,
+        &vcf_sample_id_to_index,
+    )?;
+
+    if haplotype_indices.is_empty() {
+        warn!("No haplotypes found for group {}.", haplotype_group);
+        return Ok(());
+    }
+
+    let hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence);
+
+    apply_variants_to_sequences(
+        variants,
+        &haplotype_indices,
+        region_start,
+        region_end,
+        reference_sequence,
+        position_allele_map.clone(),
+        &hap_sequences,
+    )?;
+
+    generate_batch_statistics(&hap_sequences)?;
+
+    process_and_write_cds(
+        haplotype_group,
+        cds_regions,
+        &hap_sequences,
+        chromosome,
+        region_start,
+        region_end,
+        reference_sequence,
+    )?;
+
+    Ok(())
+}
+
+fn map_sample_names_to_indices(sample_names: &[String]) -> Result<HashMap<&str, usize>, VcfError> {
+    let mut vcf_sample_id_to_index = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = extract_sample_id(name);
         vcf_sample_id_to_index.insert(sample_id, i);
     }
+    Ok(vcf_sample_id_to_index)
+}
 
-    // Collect haplotype indices for the specified group
+fn get_haplotype_indices_for_group(
+    haplotype_group: u8,
+    sample_filter: &HashMap<String, (u8, u8)>,
+    vcf_sample_id_to_index: &HashMap<&str, usize>,
+) -> Result<Vec<(usize, u8)>, VcfError> {
     let mut haplotype_indices = Vec::new();
-    for (sample_name, &(left_tsv, right_tsv)) in sample_filter.iter() {
-        if let Some(&i) = vcf_sample_id_to_index.get(sample_name.as_str()) {
-            if left_tsv == haplotype_group as u8 {
-                haplotype_indices.push((i, 0)); // Include left haplotype
+    for (sample_name, &(left_tsv, right_tsv)) in sample_filter {
+        if let Some(&idx) = vcf_sample_id_to_index.get(sample_name.as_str()) {
+            if left_tsv == haplotype_group {
+                haplotype_indices.push((idx, 0)); // Left haplotype
             }
-            if right_tsv == haplotype_group as u8 {
-                haplotype_indices.push((i, 1)); // Include right haplotype
+            if right_tsv == haplotype_group {
+                haplotype_indices.push((idx, 1)); // Right haplotype
             }
-        } else {
-            // Sample not found in VCF
         }
     }
+    Ok(haplotype_indices)
+}
 
-    if haplotype_indices.is_empty() {
-        println!(
-            "No haplotypes found for the specified group {}.",
-            haplotype_group
-        );
-        return Ok(());
-    }
-
-    // Sequences for each sample haplotype with the reference sequence
-    let transcript_ref_seq = reference_sequence.to_vec();
-
-
-    let mut hap_sequences: HashMap<String, Vec<u8>> = HashMap::new();
-    for (sample_idx, hap_idx) in &haplotype_indices {
+fn initialize_hap_sequences(
+    haplotype_indices: &[(usize, u8)],
+    sample_names: &[String],
+    reference_sequence: &[u8],
+) -> HashMap<String, Vec<u8>> {
+    let mut hap_sequences = HashMap::new();
+    for (sample_idx, hap_idx) in haplotype_indices {
         let sample_name = match *hap_idx {
             0 => format!("{}_L", sample_names[*sample_idx]),
             1 => format!("{}_R", sample_names[*sample_idx]),
-            _ => panic!("Unexpected hap_idx (not 0 or 1)!"),
+            _ => panic!("Unexpected haplotype index"),
         };
-        hap_sequences.insert(sample_name, transcript_ref_seq.clone());
+        hap_sequences.insert(sample_name, reference_sequence.to_vec());
     }
+    hap_sequences
+}
 
-    // Apply variants to sequences
+fn apply_variants_to_sequences(
+    variants: &[Variant],
+    haplotype_indices: &[(usize, u8)],
+    region_start: i64,
+    region_end: i64,
+    reference_sequence: &[u8],
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    hap_sequences: &HashMap<String, Vec<u8>>,
+) -> Result<(), VcfError> {
     for variant in variants {
-        // cds_start and cds_end are NOT in scope here
-        if variant.position >= region_start && variant.position <= region_end {
-            let pos_in_seq = (variant.position - region_start) as usize;
-            for (sample_idx, hap_idx) in &haplotype_indices {
-                if let Some(Some(alleles)) = variant.genotypes.get(*sample_idx) {
-                    if let Some(allele) = alleles.get(*hap_idx) {
-                        let sample_name = match *hap_idx { 0 => format!("{}_L", sample_names[*sample_idx]), 1 => format!("{}_R", sample_names[*sample_idx]), _ => panic!("Unexpected hap_idx (not 0 or 1)!"), };
-                        if let Some(seq) = hap_sequences.get_mut(&sample_name) {
-                            if pos_in_seq >= seq.len() {
-                                eprintln!(
-                                    "Warning: Position {} is out of bounds for sequence of length {}. Skipping variant.",
-                                    pos_in_seq, seq.len()
-                                );
-                                continue;
-                            }
-                            let map = position_allele_map.lock();
-                            if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
-                                seq[pos_in_seq] = if *allele == 0 {
-                                    ref_allele as u8
-                                } else {
-                                    alt_allele as u8
-                                };
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Print batch statistics before CDS processing
-    if hap_sequences.is_empty() {
-        eprintln!("No haplotype sequences generated. Cannot compute batch statistics.");
-    } else {
-        let total_sequences = hap_sequences.len();
-        let mut stop_codon_or_too_short = 0;
-        let mut skipped_sequences = 0;
-        let mut not_divisible_by_three = 0;
-        let mut mid_sequence_stop = 0;
-        let mut length_modified = 0;
-
-        let stop_codons = ["TAA", "TAG", "TGA"];
-
-        // Validate all sequences once before CDS processing
-        for (_sample_name, sequence) in &hap_sequences {
-            let sequence_str = String::from_utf8_lossy(sequence);
-
-            if sequence.len() < 3 || !sequence_str.starts_with("ATG") {
-                stop_codon_or_too_short += 1;
-                skipped_sequences += 1;
-                continue;
-            }
-
-            if sequence.len() % 3 != 0 {
-                not_divisible_by_three += 1;
-                length_modified += 1;
-            }
-
-            // Check for mid-sequence stop codons
-            for i in (0..sequence.len() - 2).step_by(3) {
-                let codon = &sequence_str[i..i + 3];
-                if stop_codons.contains(&codon) {
-                    mid_sequence_stop += 1;
-                    break;
-                }
-            }
+        if variant.position < region_start || variant.position > region_end {
+            continue; // Skip variants outside the region
         }
 
-        println!("\nBatch Statistics:");
-        println!(
-            "Percentage of sequences with stop codon or too short: {:.2}%",
-            (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
-        );
-        println!(
-            "Percentage of sequences skipped: {:.2}%",
-            (skipped_sequences as f64 / total_sequences as f64) * 100.0
-        );
-        println!(
-            "Percentage of sequences not divisible by three: {:.2}%",
-            (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
-        );
-        println!(
-            "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
-            (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
-        );
-        println!(
-            "Percentage of sequences with modified length: {:.2}%",
-            (length_modified as f64 / total_sequences as f64) * 100.0
-        );
-    }
-
-
-    // For each CDS, extract sequences and write to PHYLIP file
-    for cds in cds_regions {
-        let transcript_cds_start = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
-        let transcript_cds_end   = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
-
-        // Check overlap with region
-        let mut combined_cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
-        for (name, original_seq) in &hap_sequences {
-            combined_cds_sequences.insert(name.clone(), Vec::new());
-        }
-
-        // Skip transcript if it does not intersect the query region at all
-        if transcript_cds_end < region_start || transcript_cds_start > region_end {
-            continue;
-        }
-        
-        let cds_start = transcript_cds_start; // Or 0-based... should it be -1?
-        let cds_end   = transcript_cds_end;
-                
-        // Prepare a map for the full transcript sequences
-        let mut combined_sequences: HashMap<String, Vec<u8>> = HashMap::new();
-
-        // After processing all segments into combined_sequences, compute final length:
-        let full_seq_lengths: Vec<usize> = combined_sequences.values().map(|v| v.len()).collect();
-        if full_seq_lengths.is_empty() { continue; }
-        let final_length = full_seq_lengths[0];
-        // Check all are equal length
-        if !full_seq_lengths.iter().all(|&l| l == final_length) {
-            eprintln!("Error: Not all sequences are the same length after concatenation. Skipping.");
-            continue;
-        }
-
-        // Check if length is multiple of 3
-        if final_length % 3 != 0 {
-            eprintln!("Warning: Skipping because final length ({}) is not divisible by 3.", final_length);
-            continue;
-        }
-
-        // For each haplotype sequence, extract CDS sequence
-        let mut cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
-        for (sample_name, seq) in &hap_sequences {
-            // Use 1-based transcript coordinates minus 1 for 0-based array index.
-            // Do not clip for partial overlap: we want the entire transcript.
-            let start_offset = if cds_start < 1 { 
-                0 
-            } else { 
-                (cds_start - 1) as usize 
+        let pos_in_seq = (variant.position - region_start) as usize;
+        for &(sample_idx, hap_idx) in haplotype_indices {
+            let sample_name = match hap_idx {
+                0 => format!("{}_L", sample_names[sample_idx]),
+                1 => format!("{}_R", sample_names[sample_idx]),
+                _ => panic!("Unexpected haplotype index"),
             };
-            let end_offset = cds_end as usize;
 
-            // If the transcript extends beyond the reference length, skip it entirely.
-            if end_offset > seq.len() {
-                eprintln!(
-                    "Warning: transcript end offset {} exceeds reference length {} for sample {}. Skipping entire transcript.",
-                    end_offset, seq.len(), sample_name
-                );
-                continue;
+            if let Some(seq) = hap_sequences.get_mut(&sample_name) {
+                if pos_in_seq < seq.len() {
+                    let map = position_allele_map.lock();
+                    if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                        seq[pos_in_seq] = if variant.genotypes[sample_idx][hap_idx] == 0 {
+                            ref_allele as u8
+                        } else {
+                            alt_allele as u8
+                        };
+                    }
+                } else {
+                    warn!("Position {} is out of bounds for sequence {}", variant.position, sample_name);
+                }
             }
-
-            let cds_seq = seq[start_offset..end_offset].to_vec();
-            cds_sequences.insert(sample_name.clone(), cds_seq);
         }
+    }
+    Ok(())
+}
 
-        let cds_start = cds.segments.iter().map(|(s, _, _, _)| *s).min().unwrap();
-        let cds_end = cds.segments.iter().map(|(_, e, _, _)| *e).max().unwrap();
+fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Result<(), VcfError> {
+    let total_sequences = hap_sequences.len();
+    let mut stop_codon_or_too_short = 0;
+    let mut skipped_sequences = 0;
+    let mut not_divisible_by_three = 0;
+    let mut mid_sequence_stop = 0;
+    let mut length_modified = 0;
 
-        if cds_sequences.is_empty() {
-            eprintln!(
-                "No CDS sequences generated for CDS region {}-{}. Skipping PHYLIP file writing.",
-                cds_start, cds_end
-            );
+    let stop_codons = ["TAA", "TAG", "TGA"];
+
+    for (_sample_name, sequence) in hap_sequences {
+        let sequence_str = String::from_utf8_lossy(sequence);
+
+        if sequence.len() < 3 || !sequence_str.starts_with("ATG") {
+            stop_codon_or_too_short += 1;
+            skipped_sequences += 1;
             continue;
         }
 
-        // Write sequences to PHYLIP file
+        if sequence.len() % 3 != 0 {
+            not_divisible_by_three += 1;
+            length_modified += 1;
+        }
+
+        for i in (0..sequence.len() - 2).step_by(3) {
+            let codon = &sequence_str[i..i + 3];
+            if stop_codons.contains(&codon) {
+                mid_sequence_stop += 1;
+                break;
+            }
+        }
+    }
+
+    info!(
+        "Batch statistics: {} sequences processed.",
+        total_sequences
+    );
+    info!(
+        "Percentage of sequences with stop codon or too short: {:.2}%",
+        (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
+    );
+    info!(
+        "Percentage of sequences skipped: {:.2}%",
+        (skipped_sequences as f64 / total_sequences as f64) * 100.0
+    );
+    info!(
+        "Percentage of sequences not divisible by three: {:.2}%",
+        (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
+    );
+    info!(
+        "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
+        (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
+    );
+    info!(
+        "Percentage of sequences with modified length: {:.2}%",
+        (length_modified as f64 / total_sequences as f64) * 100.0
+    );
+
+    Ok(())
+}
+
+fn process_and_write_cds(
+    haplotype_group: u8,
+    cds_regions: &[TranscriptCDS],
+    hap_sequences: &HashMap<String, Vec<u8>>,
+    chromosome: &str,
+    region_start: i64,
+    region_end: i64,
+    reference_sequence: &[u8],
+) -> Result<(), VcfError> {
+    for cds in cds_regions {
+        let cds_min = cds.segments.iter().map(|&(s, _, _, _)| s).min().unwrap();
+        let cds_max = cds.segments.iter().map(|&(_, e, _, _)| e).max().unwrap();
+
+        if cds_max < region_start || cds_min > region_end {
+            continue; // Skip if the CDS region doesn't overlap the query region
+        }
+
+        let mut combined_cds_sequences: HashMap<String, Vec<u8>> = HashMap::new();
+        for (sample_name, _) in hap_sequences {
+            combined_cds_sequences.insert(sample_name.clone(), Vec::new());
+        }
+
+        for (sample_name, seq) in hap_sequences {
+            let cds_seq = extract_cds_sequence(seq, cds_min, cds_max);
+            combined_cds_sequences.insert(sample_name.clone(), cds_seq);
+        }
+
         let filename = format!(
             "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
             haplotype_group,
             cds.transcript_id,
             chromosome,
-            transcript_cds_start,
-            transcript_cds_end
+            cds_min,
+            cds_max
         );
-
-        // Validate each haplotype's final coding sequence
-        let mut valid_map = HashMap::new();
-        for (hap_name, seq_bytes) in combined_sequences {
-            match validate_coding_sequence(&seq_bytes) {
-                Ok(_) => {
-                    valid_map.insert(hap_name, seq_bytes);
-                }
-                Err(reason) => {
-                    eprintln!(
-                        "Skipping haplotype {} for transcript {} on chr {} due to: {}",
-                        hap_name, cds.transcript_id, chromosome, reason
-                    );
-                }
-            }
-        }
-
-        if valid_map.is_empty() {
-            eprintln!(
-                "No valid haplotypes remain for transcript {} on chr {}. Skipping PHYLIP file.",
-                cds.transcript_id, chromosome
-            );
-            continue;
-        }
-
-        // Convert valid_map to char sequences, then write .phy
-        let char_sequences: HashMap<String, Vec<char>> = valid_map
-            .into_iter()
-            .map(|(name, seq)| (name, seq.into_iter().map(|b| b as char).collect()))
-            .collect();
-
-        write_phylip_file(
-            &filename,
-            &char_sequences,
-            &chromosome,
-            &cds.transcript_id
-        )?;
+        write_phylip_file(&filename, &combined_cds_sequences)?;
     }
 
     Ok(())
+}
+
+fn extract_cds_sequence(seq: &[u8], cds_min: i64, cds_max: i64) -> Vec<u8> {
+    seq[(cds_min as usize)..(cds_max as usize)].to_vec()
+}
+
+fn write_phylip_file(
+    filename: &str,
+    hap_sequences: &HashMap<String, Vec<u8>>,
+) -> Result<(), VcfError> {
+    let file = File::create(filename).map_err(|e| VcfError::Io(e))?;
+    let mut writer = BufWriter::new(file);
+
+    for (sample_name, sequence) in hap_sequences {
+        let padded_name = format!("{:<10}", sample_name);
+        let sequence_str = String::from_utf8_lossy(sequence);
+        writeln!(writer, "{}{}", padded_name, sequence_str).map_err(|e| VcfError::Io(e))?;
+    }
+
+    writer.flush().map_err(|e| VcfError::Io(e))?;
+    info!("Successfully wrote PHYLIP file: {}", filename);
+
+    Ok(())
+}
+
+fn extract_sample_id(name: &str) -> &str {
+    name.rsplit('_').next().unwrap_or(name)
 }
 
 /// Main refactored entry point.
