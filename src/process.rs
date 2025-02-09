@@ -1525,22 +1525,24 @@ pub fn process_vcf(
     min_gq: u16,
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
-    seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    seqinfo_storage_unfiltered: Arc<Mutex<Vec<SeqInfo>>>,
+    seqinfo_storage_filtered: Arc<Mutex<Vec<SeqInfo>>>,
+    position_allele_map_unfiltered: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    position_allele_map_filtered: Arc<Mutex<HashMap<i64, (char, char)>>>,
 ) -> Result<(
-    Vec<Variant>,        // Unfiltered variants
-    Vec<Variant>,        // Filtered variants
-    Vec<String>,         // Sample names
-    i64,                 // Chromosome length
+    Vec<Variant>,
+    Vec<Variant>,
+    Vec<String>,
+    i64,
     MissingDataInfo,
     FilteringStats,
 ), VcfError> {
+    // Initialize the VCF reader.
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
     let chr_length = {
         let fasta_reader = bio::io::fasta::IndexedReader::from_file(&reference_path)
             .map_err(|e| VcfError::Parse(e.to_string()))?;
-        // Create an owned copy of the sequences
         let sequences = fasta_reader.index.sequences().to_vec();
         let seq_info = sequences.iter()
             .find(|seq| seq.name == chr || seq.name == format!("chr{}", chr))
@@ -1548,14 +1550,15 @@ pub fn process_vcf(
         seq_info.len as i64
     };
 
-    // Existing unfiltered and filtered variants storage
-    let unfiltered_variants = Arc::new(Mutex::new(Vec::new()));
-    let filtered_variants = Arc::new(Mutex::new(Vec::new()));
+    // Small vectors to hold variants in batches, limiting memory usage.
+    let unfiltered_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
+    let filtered_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
 
-    // Existing missing data and filtering stats
+    // Shared stats.
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
     let _filtering_stats = Arc::new(Mutex::new(FilteringStats::default()));
 
+    // Progress UI setup.
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
     let progress_bar = if is_gzipped {
         ProgressBar::new_spinner()
@@ -1563,40 +1566,32 @@ pub fn process_vcf(
         let file_size = fs::metadata(file)?.len();
         ProgressBar::new(file_size)
     };
-
     let style = if is_gzipped {
         ProgressStyle::default_spinner()
-            .template("{spinner:.bold.green} 🧬 {msg} 🧬 [{elapsed_precise}]")
-            .expect("Failed to create spinner template")
-            .tick_strings(&[
-                "░▒▓██▓▒░", "▒▓██▓▒░", "▓██▓▒░", "██▓▒░", "█▓▒░", "▓▒░", "▒░", "░", "▒░", "▓▒░", "█▓▒░", "██▓▒░", "▓██▓▒░", "▒▓██▓▒░"
-            ])
+            .template("{spinner:.bold.green} VCF {elapsed_precise} {msg}")
+            .expect("Spinner template error")
+            .tick_strings(&["░","▒","▓","█","▓","▒"])
     } else {
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
-            .expect("Failed to create progress bar template")
+            .expect("Progress bar template error")
             .progress_chars("=>-")
     };
-
     progress_bar.set_style(style);
-
     let processing_complete = Arc::new(AtomicBool::new(false));
-    let processing_complete_clone = processing_complete.clone();
-
-    // Spawn a thread to update the progress bar
+    let processing_complete_clone = Arc::clone(&processing_complete);
     let progress_thread = thread::spawn(move || {
         while !processing_complete_clone.load(Ordering::Relaxed) {
             progress_bar.tick();
             thread::sleep(Duration::from_millis(100));
         }
-        progress_bar.finish_with_message("Variant processing complete");
+        progress_bar.finish_with_message("Finished reading VCF");
     });
 
-    // Process header
+    // Parse header lines.
     let mut buffer = String::new();
     while reader.read_line(&mut buffer)? > 0 {
         if buffer.starts_with("##") {
-            // Skip meta-information lines
         } else if buffer.starts_with("#CHROM") {
             validate_vcf_header(&buffer)?;
             sample_names = buffer.split_whitespace().skip(9).map(String::from).collect();
@@ -1606,188 +1601,190 @@ pub fn process_vcf(
     }
     buffer.clear();
 
-    // Set up channels for communication between threads
-    let (line_sender, line_receiver) = bounded(1000);
-    let (result_sender, result_receiver) = bounded(1000);
+    // Bounded channels for lines and results.
+    let (line_sender, line_receiver) = bounded(2000);
+    let (result_sender, result_receiver) = bounded(2000);
 
-    // Spawn producer thread
-    let producer_thread = thread::spawn(move || -> Result<(), VcfError> {
-        let mut _line_count = 0;
-        while reader.read_line(&mut buffer)? > 0 {
-            line_sender.send(buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
-            buffer.clear();
-            _line_count += 1;
+    // Producer for reading lines from VCF.
+    let producer_thread = thread::spawn({
+        let mut local_buffer = String::new();
+        let mut local_reader = reader;
+        move || -> Result<(), VcfError> {
+            while local_reader.read_line(&mut local_buffer)? > 0 {
+                line_sender.send(local_buffer.clone()).map_err(|_| VcfError::ChannelSend)?;
+                local_buffer.clear();
+            }
+            drop(line_sender);
+            Ok(())
         }
-        drop(line_sender);
-        Ok(())
     });
 
-    // Spawn consumer threads
+    // Consumers for variant lines.
     let num_threads = num_cpus::get();
-    let sample_names = Arc::new(sample_names);
-    let consumer_threads: Vec<_> = (0..num_threads)
-        .map(|_| {
-            let line_receiver = line_receiver.clone();
-            let result_sender = result_sender.clone();
-            let chr = chr.to_string();
-            let sample_names = Arc::clone(&sample_names);
-            let mask_regions = mask_regions.clone();
-            let position_allele_map = Arc::clone(&position_allele_map);
-            
-            thread::spawn({
-                let allow_regions = allow_regions.clone();
-                move || -> Result<(), VcfError> {
-                    while let Ok(line) = line_receiver.recv() {
-                        let mut local_missing_data_info = MissingDataInfo::default();
-                        let mut local_filtering_stats = FilteringStats::default();
-                        
-                        match process_variant(
-                            &line,
-                            &chr,
-                            start,
-                            end,
-                            &mut local_missing_data_info,
-                            &sample_names,
-                            min_gq,
-                            &mut local_filtering_stats,
-                            allow_regions.as_ref().map(|arc| arc.as_ref()),
-                            mask_regions.as_ref().map(|arc| arc.as_ref()),
-                            &position_allele_map,
-                        ) {
-                            Ok(variant_option) => {
-                                result_sender
-                                    .send(Ok((
-                                        variant_option,
-                                        local_missing_data_info,
-                                        local_filtering_stats,
-                                    )))
-                                    .map_err(|_| VcfError::ChannelSend)?;
+    let arc_sample_names = Arc::new(sample_names);
+    let mut consumers = Vec::with_capacity(num_threads);
+    for _ in 0..num_threads {
+        let line_receiver = line_receiver.clone();
+        let rs = result_sender.clone();
+        let arc_names = Arc::clone(&arc_sample_names);
+        let arc_mask = mask_regions.clone();
+        let arc_allow = allow_regions.clone();
+        let chr_copy = chr.to_string();
+        let pos_map_unfiltered = Arc::clone(&position_allele_map_unfiltered);
+        let pos_map_filtered = Arc::clone(&position_allele_map_filtered);
+        consumers.push(thread::spawn(move || -> Result<(), VcfError> {
+            let mut local_miss_info = MissingDataInfo::default();
+            let mut local_filt_stats = FilteringStats::default();
+            while let Ok(line) = line_receiver.recv() {
+                match process_variant(
+                    &line,
+                    &chr_copy,
+                    start,
+                    end,
+                    &mut local_miss_info,
+                    &arc_names,
+                    min_gq,
+                    &mut local_filt_stats,
+                    arc_allow.as_ref().map(|x| x.as_ref()),
+                    arc_mask.as_ref().map(|x| x.as_ref()),
+                    &pos_map_unfiltered, // We always store ref/alt in unfiltered; check if it passes for filtered as well
+                ) {
+                    Ok(variant_opt) => {
+                        rs.send(Ok((variant_opt, local_miss_info.clone(), local_filt_stats.clone())))
+                          .map_err(|_| VcfError::ChannelSend)?;
+                    }
+                    Err(e) => {
+                        rs.send(Err(e)).map_err(|_| VcfError::ChannelSend)?;
+                    }
+                }
+            }
+            Ok(())
+        }));
+    }
+
+    // Collector merges results from consumers.
+    let collector_thread = thread::spawn({
+        let unfiltered_variants = Arc::clone(&unfiltered_variants);
+        let filtered_variants = Arc::clone(&filtered_variants);
+        let missing_data_info = Arc::clone(&missing_data_info);
+        let _filtering_stats = Arc::clone(&_filtering_stats);
+        let pos_map_filtered = Arc::clone(&position_allele_map_filtered);
+        move || -> Result<(), VcfError> {
+            while let Ok(msg) = result_receiver.recv() {
+                match msg {
+                    Ok((Some((variant, passes)), mut local_miss, mut local_stats)) => {
+                        // Always push the variant to unfiltered.
+                        {
+                            let mut u = unfiltered_variants.lock();
+                            u.push(variant.clone());
+                            if u.len() >= 10000 {
+                                u.clear();
                             }
-                            Err(e) => {
-                                result_sender
-                                    .send(Err(e))
-                                    .map_err(|_| VcfError::ChannelSend)?;
+                        }
+                        // If passes filter, push to filtered as well.
+                        if passes {
+                            let mut f = filtered_variants.lock();
+                            f.push(variant.clone());
+                            pos_map_filtered.lock().insert(variant.position, pos_map_unfiltered.lock().get(&variant.position).copied().unwrap_or(('N','N')));
+                            if f.len() >= 10000 {
+                                f.clear();
+                            }
+                        }
+                        // Combine local stats into global.
+                        {
+                            let mut global_miss = missing_data_info.lock();
+                            global_miss.total_data_points += local_miss.total_data_points;
+                            global_miss.missing_data_points += local_miss.missing_data_points;
+                            global_miss.positions_with_missing.extend(local_miss.positions_with_missing);
+                        }
+                        {
+                            let mut gs = _filtering_stats.lock();
+                            gs.total_variants += local_stats.total_variants;
+                            gs._filtered_variants += local_stats._filtered_variants;
+                            gs.filtered_positions.extend(local_stats.filtered_positions);
+                            gs.filtered_due_to_mask += local_stats.filtered_due_to_mask;
+                            gs.filtered_due_to_allow += local_stats.filtered_due_to_allow;
+                            gs.missing_data_variants += local_stats.missing_data_variants;
+                            gs.low_gq_variants += local_stats.low_gq_variants;
+                            gs.multi_allelic_variants += local_stats.multi_allelic_variants;
+                            for ex in local_stats.filtered_examples.drain(..) {
+                                gs.add_example(ex);
                             }
                         }
                     }
-                    Ok(())
-                }
-            })
-        })
-        .collect();
-
-    // Collector thread
-    let collector_thread = thread::spawn({
-        let unfiltered_variants = unfiltered_variants.clone();
-        let filtered_variants = Arc::new(Mutex::new(Vec::new())); // Or let filtered_variants = filtered_variants.clone();?
-        let missing_data_info = missing_data_info.clone();
-        let _filtering_stats = _filtering_stats.clone();
-        move || -> Result<(), VcfError> {
-            while let Ok(result) = result_receiver.recv() {
-                match result {
-                    Ok((Some((variant, passes_filters)), local_missing_data_info, local_filtering_stats)) => {
-                        unfiltered_variants.lock().push(variant.clone());
-                        if passes_filters {
-                            filtered_variants.lock().push(variant);
+                    Ok((None, mut local_miss, mut local_stats)) => {
+                        let mut global_miss = missing_data_info.lock();
+                        global_miss.total_data_points += local_miss.total_data_points;
+                        global_miss.missing_data_points += local_miss.missing_data_points;
+                        global_miss.positions_with_missing.extend(local_miss.positions_with_missing);
+                        let mut gs = _filtering_stats.lock();
+                        gs.total_variants += local_stats.total_variants;
+                        gs._filtered_variants += local_stats._filtered_variants;
+                        gs.filtered_positions.extend(local_stats.filtered_positions);
+                        gs.filtered_due_to_mask += local_stats.filtered_due_to_mask;
+                        gs.filtered_due_to_allow += local_stats.filtered_due_to_allow;
+                        gs.missing_data_variants += local_stats.missing_data_variants;
+                        gs.low_gq_variants += local_stats.low_gq_variants;
+                        gs.multi_allelic_variants += local_stats.multi_allelic_variants;
+                        for ex in local_stats.filtered_examples.drain(..) {
+                            gs.add_example(ex);
                         }
-                        let mut global_missing_data_info = missing_data_info.lock();
-                        global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
-                        global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
-                        global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
-                        
-                        let mut global_filtering_stats = _filtering_stats.lock();
-                        global_filtering_stats.total_variants += local_filtering_stats.total_variants;
-                        global_filtering_stats._filtered_variants += local_filtering_stats._filtered_variants;
-                        global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
-                        global_filtering_stats.filtered_due_to_mask += local_filtering_stats.filtered_due_to_mask;
-                        global_filtering_stats.filtered_due_to_allow += local_filtering_stats.filtered_due_to_allow;
-                        global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
-                        global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
-                        global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
-
-                        for example in local_filtering_stats.filtered_examples.iter() {
-                            global_filtering_stats.add_example(example.clone());
-                        }
-                    },
-                    Ok((None, local_missing_data_info, local_filtering_stats)) => {
-                        let mut global_missing_data_info = missing_data_info.lock();
-                        global_missing_data_info.total_data_points += local_missing_data_info.total_data_points;
-                        global_missing_data_info.missing_data_points += local_missing_data_info.missing_data_points;
-                        global_missing_data_info.positions_with_missing.extend(local_missing_data_info.positions_with_missing);
-                        
-                        let mut global_filtering_stats = _filtering_stats.lock();
-                        global_filtering_stats.total_variants += local_filtering_stats.total_variants;
-                        global_filtering_stats._filtered_variants += local_filtering_stats._filtered_variants;
-                        global_filtering_stats.filtered_positions.extend(local_filtering_stats.filtered_positions);
-                        global_filtering_stats.filtered_due_to_mask += local_filtering_stats.filtered_due_to_mask;
-                        global_filtering_stats.filtered_due_to_allow += local_filtering_stats.filtered_due_to_allow;
-                        global_filtering_stats.missing_data_variants += local_filtering_stats.missing_data_variants;
-                        global_filtering_stats.low_gq_variants += local_filtering_stats.low_gq_variants;
-                        global_filtering_stats.multi_allelic_variants += local_filtering_stats.multi_allelic_variants;
-                        for example in local_filtering_stats.filtered_examples.iter() {
-                            global_filtering_stats.add_example(example.clone());
-                        }
-                    },
+                    }
                     Err(e) => {
-                        // Record the error but continue consuming messages
-                        eprintln!("Error processing variant: {}", e);
-                    },
+                        eprintln!("{}", e);
+                    }
                 }
             }
             Ok(())
         }
     });
 
-    // Wait for all threads to complete
+    // Wait for producer.
     producer_thread.join().expect("Producer thread panicked")?;
-    for thread in consumer_threads {
-        thread.join().expect("Consumer thread panicked")?;
-    }
-    // Signal completion before joining collector
-    processing_complete.store(true, Ordering::Relaxed);
-    
-    // All consumers must have finished and dropped their Arc references
+    // Wait for consumers.
+    drop(line_receiver);
     drop(result_sender);
-    
-    // Now join collector thread
-    collector_thread.join().expect("Collector thread panicked")?;
-
-    // Wait for the progress thread to finish
-    progress_thread.join().expect("Couldn't join progress thread");
-
-    {
-        let seqinfo = seqinfo_storage.lock();
-        if !seqinfo.is_empty() {
-            display_seqinfo_entries(&seqinfo, 12);
-        } else {
-            println!("No SeqInfo entries were stored.");
-        }
+    for c in consumers {
+        c.join().expect("Consumer thread panicked")?;
     }
-    
-    let final_unfiltered_variants = Arc::try_unwrap(unfiltered_variants)
+    // Signal done, wait for collector.
+    processing_complete.store(true, Ordering::Relaxed);
+    collector_thread.join().expect("Collector thread panicked")?;
+    progress_thread.join().expect("Progress thread panicked")?;
+
+    // Display the final SeqInfo if present.
+    if !seqinfo_storage_unfiltered.lock().is_empty() {
+        display_seqinfo_entries(&seqinfo_storage_unfiltered.lock(), 12);
+    }
+    if !seqinfo_storage_filtered.lock().is_empty() {
+        display_seqinfo_entries(&seqinfo_storage_filtered.lock(), 12);
+    }
+
+    // Extract final variant vectors.
+    let final_unfiltered = Arc::try_unwrap(unfiltered_variants)
         .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
         .into_inner();
-    let final_filtered_variants = Arc::try_unwrap(filtered_variants)
+    let final_filtered = Arc::try_unwrap(filtered_variants)
         .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
         .into_inner();
-            
-    let final_missing_data_info = Arc::try_unwrap(missing_data_info)
-        .map_err(|_| VcfError::Parse("Missing data info still have multiple owners".to_string()))?
+
+    // Extract stats.
+    let final_miss = Arc::try_unwrap(missing_data_info)
+        .map_err(|_| VcfError::Parse("Missing data info still has multiple owners".to_string()))?
         .into_inner();
-    let final_filtering_stats = Arc::try_unwrap(_filtering_stats)
+    let final_stats = Arc::try_unwrap(_filtering_stats)
         .map_err(|_| VcfError::Parse("Filtering stats still have multiple owners".to_string()))?
         .into_inner();
-
-    let sample_names = Arc::try_unwrap(sample_names)
+    let final_names = Arc::try_unwrap(arc_sample_names)
         .map_err(|_| VcfError::Parse("Sample names have multiple owners".to_string()))?;
 
     Ok((
-        final_unfiltered_variants,
-        final_filtered_variants,
-        sample_names,
+        final_unfiltered,
+        final_filtered,
+        final_names,
         chr_length,
-        final_missing_data_info,
-        final_filtering_stats,
+        final_miss,
+        final_stats,
     ))
 }
 
