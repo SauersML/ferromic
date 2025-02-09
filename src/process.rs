@@ -1165,6 +1165,12 @@ fn process_single_config_entry(
     let seqinfo_storage = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
     let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
+    // POSSIBLE BUG (just an idea): This map is shared between all calls to process_variants within this
+    // function.  The calls with is_filtered_set = false overwrite the data
+    // written by the calls with is_filtered_set = true.  This leads to incorrect
+    // results because the final state of the map reflects only the unfiltered variants.
+    // The fix is to create separate maps for filtered and unfiltered processing.
+
     println!("Calling process_vcf for {} from {} to {}", chr, entry.start, entry.end);
     let (unfiltered_variants, filtered_variants, sample_names, _chr_len, _missing_data_info, filtering_stats) 
         = match process_vcf(
