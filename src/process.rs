@@ -651,7 +651,7 @@ pub fn make_sequences(
         return Ok(());
     }
 
-    let hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, chr_label, transcript_id);
+    let hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds.transcript_id);
 
     apply_variants_to_sequences(
         variants,
