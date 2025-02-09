@@ -875,12 +875,12 @@ fn process_and_write_cds(
         }
 
         let filename = format!(
-            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
+            "phy/group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
             haplotype_group,
             cds.transcript_id,
             chromosome,
-            cds_min,
-            cds_max
+            transcript_cds_start,
+            transcript_cds_end
         );
         let combined_cds_sequences_char: HashMap<String, Vec<char>> = combined_cds_sequences
             .into_iter()
