@@ -674,7 +674,7 @@ pub fn make_sequences(
 
     generate_batch_statistics(&hap_sequences_u8)?;
 
-    process_and_write_cds(
+    prepare_to_write_cds(
         haplotype_group,
         cds_regions,
         &hap_sequences_u8,
@@ -850,7 +850,7 @@ fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Result
     Ok(())
 }
 
-fn process_and_write_cds(
+fn prepare_to_write_cds(
     haplotype_group: u8,
     cds_regions: &[TranscriptCDS],
     hap_sequences: &HashMap<String, Vec<u8>>,
@@ -889,7 +889,7 @@ fn process_and_write_cds(
             .into_iter()
             .map(|(k, v)| (k, v.into_iter().map(|b| b as char).collect()))
             .collect();
-    
+
         write_phylip_file(&filename, &combined_cds_sequences_char, &chromosome, &cds.transcript_id)?;
     }
 
