@@ -755,7 +755,7 @@ fn apply_variants_to_sequences(
 
         let pos_in_seq = (variant.position - region_start) as usize;
         for &(sample_idx, hap_idx) in haplotype_indices {
-            let sample_name = format!("{}_{}", sample_names.get(sample_idx).unwrap_or(&"UNKNOWN".to_string()), if hap_idx == 0 { "L" } else { "R" });
+            let sample_name = format!("{}_{}", sample_names[sample_idx], if hap_idx == 0 { "L" } else { "R" });
                         
             if let Some(seq) = hap_sequences.get_mut(&sample_name) {
                 if let Some(seq_vec) = seq_vec {
