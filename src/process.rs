@@ -710,16 +710,27 @@ fn initialize_hap_sequences(
     haplotype_indices: &[(usize, u8)],
     sample_names: &[String],
     reference_sequence: &[u8],
-) -> HashMap<String, Vec<u8>> {
+    chr_label: &str,
+    transcript_id: &str,
+) -> HashMap<String, Vec<char>> {
     let mut hap_sequences = HashMap::new();
+    
     for (sample_idx, hap_idx) in haplotype_indices {
-        let sample_name = match *hap_idx {
-            0 => format!("{}_L", sample_names[*sample_idx]),
-            1 => format!("{}_R", sample_names[*sample_idx]),
+        let sample_name = format!("{}_{}_{}", sample_names[*sample_idx], chr_label, transcript_id);
+        
+        let haplotype_suffix = match *hap_idx {
+            0 => "L", // Left haplotype
+            1 => "R", // Right haplotype
             _ => panic!("Unexpected haplotype index"),
         };
-        hap_sequences.insert(sample_name, reference_sequence.to_vec());
+        
+        let full_sample_name = format!("{}_{haplotype_suffix}", sample_name);
+        
+        let sequence_chars: Vec<char> = reference_sequence.iter().map(|&b| b as char).collect();
+        
+        hap_sequences.insert(full_sample_name, sequence_chars);
     }
+    
     hap_sequences
 }
 
