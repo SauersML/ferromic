@@ -655,7 +655,7 @@ pub fn make_sequences(
 
     let hap_sequences_u8: HashMap<String, Vec<u8>> = hap_sequences
         .iter()
-        .map(|(k, v)| (k.clone(), v.into_iter().map(|c| c as u8).collect()))
+        .map(|(k, v)| (k.clone(), v.into_iter().map(|c| *c as u8).collect()))
         .collect();
     
     apply_variants_to_sequences(
