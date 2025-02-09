@@ -722,6 +722,12 @@ fn initialize_hap_sequences(
     chr_label: &str,
     transcript_id: &str,
 ) -> HashMap<String, Vec<u8>> {
+    // Check if CDS regions are empty. If so, return an empty HashMap to prevent index out of bounds.
+    if cds_regions.is_empty() {
+        warn!("CDS regions are empty, returning empty haplotype sequences.");
+        return HashMap::new(); 
+    }
+
     let mut hap_sequences = HashMap::new();
     
     for (sample_idx, hap_idx) in haplotype_indices {
