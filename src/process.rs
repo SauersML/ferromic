@@ -651,8 +651,13 @@ pub fn make_sequences(
         return Ok(());
     }
 
-    let hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds.transcript_id);
+    let hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds_regions[0].transcript_id);
 
+    let hap_sequences_u8: HashMap<String, Vec<u8>> = hap_sequences
+        .iter()
+        .map(|(k, v)| (k.clone(), v.iter().map(|&c| c as u8).collect()))
+        .collect();
+    
     apply_variants_to_sequences(
         variants,
         &haplotype_indices,
@@ -660,15 +665,15 @@ pub fn make_sequences(
         region_end,
         reference_sequence,
         position_allele_map.clone(),
-        &hap_sequences,
+        &hap_sequences_u8,
     )?;
 
-    generate_batch_statistics(&hap_sequences)?;
+    generate_batch_statistics(&hap_sequences_u8)?;
 
     process_and_write_cds(
         haplotype_group,
         cds_regions,
-        &hap_sequences,
+        &hap_sequences_u8,
         chromosome,
         region_start,
         region_end,
@@ -681,7 +686,7 @@ pub fn make_sequences(
 fn map_sample_names_to_indices(sample_names: &[String]) -> Result<HashMap<&str, usize>, VcfError> {
     let mut vcf_sample_id_to_index = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
-        let sample_id = extract_sample_id(name);
+        let sample_id = name.rsplit('_').next().unwrap_or(name);
         vcf_sample_id_to_index.insert(sample_id, i);
     }
     Ok(vcf_sample_id_to_index)
@@ -750,16 +755,13 @@ fn apply_variants_to_sequences(
 
         let pos_in_seq = (variant.position - region_start) as usize;
         for &(sample_idx, hap_idx) in haplotype_indices {
-            let sample_name = match hap_idx {
-                0 => format!("{}_L", sample_names[sample_idx]),
-                1 => format!("{}_R", sample_names[sample_idx]),
-                _ => panic!("Unexpected haplotype index"),
-            };
-
+            let sample_name = format!("{}_{}", sample_names[sample_idx], if hap_idx == 0 { "L" } else { "R" });
+            
             if let Some(seq) = hap_sequences.get_mut(&sample_name) {
                 if pos_in_seq < seq.len() {
                     let map = position_allele_map.lock();
                     if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                        // Convert the character to byte (u8) and update the sequence
                         seq[pos_in_seq] = if variant.genotypes[sample_idx][hap_idx] == 0 {
                             ref_allele as u8
                         } else {
@@ -871,7 +873,12 @@ fn process_and_write_cds(
             cds_min,
             cds_max
         );
-        write_phylip_file(&filename, &combined_cds_sequences, &chromosome, &cds.transcript_id)?;
+        let combined_cds_sequences_char: HashMap<String, Vec<char>> = combined_cds_sequences
+            .into_iter()
+            .map(|(k, v)| (k, v.into_iter().map(|b| b as char).collect()))
+            .collect();
+    
+        write_phylip_file(&filename, &combined_cds_sequences_char, &chromosome, &cds.transcript_id)?;
     }
 
     Ok(())
