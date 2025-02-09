@@ -560,7 +560,7 @@ fn process_variants(
 
     println!("Finishing up the variant region... is_filtered_set = {:?}", is_filtered_set);
 
-    if is_filtered_set {
+    if !is_filtered_set { // Delete ! later: we want only on filtered set
         println!("Calling make_sequences with filtered set...");
         make_sequences(
             variants,
