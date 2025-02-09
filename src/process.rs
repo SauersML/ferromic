@@ -659,6 +659,11 @@ pub fn make_sequences(
 
     let mut hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds_regions[0].transcript_id, region_start, region_end);
 
+    if hap_sequences.is_empty() {
+        warn!("No sequences initialized for group {}. Skipping variant application.", haplotype_group);
+        return Ok(());
+    }
+    
     let hap_sequences_u8: HashMap<String, Vec<u8>> = hap_sequences
         .iter()
         .map(|(k, v)| (k.clone(), v.into_iter().map(|c| *c as u8).collect()))
