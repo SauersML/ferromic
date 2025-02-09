@@ -372,7 +372,6 @@ fn process_variants(
     reference_sequence: &[u8],
     cds_regions: &[TranscriptCDS],
 ) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
-    println!("Processing variants in {:?}", cds_regions);
     // Map sample names to indices
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
@@ -559,7 +558,10 @@ fn process_variants(
     }
     seqinfo_storage.lock().clear();
 
+    println!("Finishing up the variant region... is_filtered_set = {:?}" is_filtered_set);
+
     if is_filtered_set {
+        println!("Calling make_sequences with filtered set...");
         make_sequences(
             variants,
             sample_names,
