@@ -857,7 +857,7 @@ fn process_and_write_cds(
     reference_sequence: &[u8],
 ) -> Result<(), VcfError> {
     for cds in cds_regions {
-        println!("Processing {}", cds);
+        println!("Processing {:?}", cds);
         let cds_min = cds.segments.iter().map(|&(s, _, _, _)| s).min().unwrap();
         let cds_max = cds.segments.iter().map(|&(_, e, _, _)| e).max().unwrap();
 
