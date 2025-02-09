@@ -651,7 +651,7 @@ pub fn make_sequences(
         return Ok(());
     }
 
-    let hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence);
+    let hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, chr_label, transcript_id);
 
     apply_variants_to_sequences(
         variants,
@@ -860,7 +860,7 @@ fn process_and_write_cds(
             cds_min,
             cds_max
         );
-        write_phylip_file(&filename, &combined_cds_sequences)?;
+        write_phylip_file(&filename, &combined_cds_sequences, &chromosome, &cds.transcript_id)?;
     }
 
     Ok(())
