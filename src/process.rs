@@ -879,8 +879,8 @@ fn process_and_write_cds(
             haplotype_group,
             cds.transcript_id,
             chromosome,
-            transcript_cds_start,
-            transcript_cds_end
+            cds_min,
+            cds_max,
         );
         let combined_cds_sequences_char: HashMap<String, Vec<char>> = combined_cds_sequences
             .into_iter()
