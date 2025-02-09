@@ -1790,6 +1790,7 @@ fn write_phylip_file(
     chr_label: &str,
     transcript_id: &str,
 ) -> Result<(), VcfError> {
+    println!("Writing {}", output_file);
     let file = File::create(output_file).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
