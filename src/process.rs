@@ -653,10 +653,7 @@ pub fn make_sequences(
 
     let hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds_regions[0].transcript_id);
 
-    let hap_sequences_u8: HashMap<String, Vec<u8>> = hap_sequences
-        .iter()
-        .map(|(k, v)| (k.clone(), v.iter().map(|&c| c as u8).collect()))
-        .collect();
+    let hap_sequences_u8: HashMap<String, Vec<u8>> = hap_sequences.clone();
     
     apply_variants_to_sequences(
         variants,
