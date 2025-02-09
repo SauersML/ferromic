@@ -364,6 +364,8 @@ fn process_variants(
     sample_filter: &HashMap<String, (u8, u8)>,
     region_start: i64,
     region_end: i64,
+    extended_start: i64,
+    extended_end: i64,
     adjusted_sequence_length: Option<i64>,
     seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
@@ -562,18 +564,19 @@ fn process_variants(
 
     if !is_filtered_set { // Delete ! later: we want only on filtered set
         println!("Calling make_sequences with filtered set...");
-        make_sequences(
-            variants,
-            sample_names,
-            haplotype_group,
-            sample_filter,
-            region_start,
-            region_end,
-            reference_sequence,
-            cds_regions,
-            position_allele_map.clone(),
-            &chromosome,
-        )?;
+       // Call make_sequences with EXTENDED region
+       make_sequences(
+           variants,
+           sample_names,
+           haplotype_group,
+           sample_filter,
+           extended_start, // EXTENDED START
+           extended_end,   // EXTENDED END
+           reference_sequence,
+           cds_regions,
+           position_allele_map.clone(),
+           &chromosome,
+       )?;
     }
 
     Ok(Some((num_segsites, w_theta, pi, n)))
@@ -654,7 +657,7 @@ pub fn make_sequences(
         return Ok(());
     }
 
-    let mut hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds_regions[0].transcript_id);
+    let mut hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds_regions[0].transcript_id, region_start, region_end);
 
     let hap_sequences_u8: HashMap<String, Vec<u8>> = hap_sequences
         .iter()
@@ -721,61 +724,116 @@ fn initialize_hap_sequences(
     reference_sequence: &[u8],
     chr_label: &str,
     transcript_id: &str,
+    region_start: i64,
+    region_end: i64,
 ) -> HashMap<String, Vec<u8>> {
-    // Check if CDS regions are empty. If so, return an empty HashMap to prevent index out of bounds.
-    if cds_regions.is_empty() {
-        warn!("CDS regions are empty, returning empty haplotype sequences.");
-        return HashMap::new(); 
+
+    // 1-based
+    let start_index = (region_start -1) as usize;
+    // 1-based
+    let end_index = region_end as usize;
+
+    // Prevent empty sequences
+    if start_index >= reference_sequence.len() || end_index > reference_sequence.len() || start_index > end_index {
+        // Handle invalid regions (log, return empty, or panic, based on preference)
+        warn!("Invalid region: start={}, end={}, reference length={}", region_start, region_end, reference_sequence.len());
+        return HashMap::new();
     }
 
+    // Create a slice of the reference_sequence that corresponds to the region
+    // This is now the segment of the sequence that will be used to initialize the haplotypes
+    let region_sequence = &reference_sequence[start_index..end_index];
+
     let mut hap_sequences = HashMap::new();
-    
+
     for (sample_idx, hap_idx) in haplotype_indices {
-        let sample_name = format!("{}_{}_{}", sample_names[*sample_idx], chr_label, transcript_id);
-        
+         let sample_name = format!("{}_{}_{}", sample_names[*sample_idx], chr_label, transcript_id);
+
         let haplotype_suffix = match *hap_idx {
             0 => "L", // Left haplotype
             1 => "R", // Right haplotype
             _ => panic!("Unexpected haplotype index"),
         };
-        
+
         let full_sample_name = format!("{}_{haplotype_suffix}", sample_name);
-        
-        let sequence_u8: Vec<u8> = reference_sequence.iter().map(|&b| b).collect();
+
+        // Initialize with the region_sequence, NOT the entire reference_sequence.
+        // This means that the length of each sequence is now the length of the region, and not the whole chromosome.
+        let sequence_u8: Vec<u8> = region_sequence.iter().map(|&b| b).collect();
         hap_sequences.insert(full_sample_name, sequence_u8);
     }
-    
+
     hap_sequences
 }
+
 
 fn apply_variants_to_sequences(
     variants: &[Variant],
     haplotype_indices: &[(usize, u8)],
     region_start: i64,
     region_end: i64,
-    reference_sequence: &[u8],
+    reference_sequence: &[u8], // This is the ENTIRE chromosome sequence
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     hap_sequences: &mut HashMap<String, Vec<u8>>,
     sample_names: &[String],
 ) -> Result<(), VcfError> {
+    // The reference sequence passed to make_sequences is the ENTIRE chromosome.
+    // We need to use the slice of the reference that corresponds to [region_start..region_end].
+
+    //1-based coordinates for region_start and region_end.
+    let reference_slice_start = (region_start - 1) as usize;
+    //1-based coordinates for region_start and region_end.
+    let reference_slice_end = region_end as usize;
+
+    // Check bounds: Prevent potential panics if region_start/end are invalid
+    if reference_slice_start >= reference_sequence.len() || reference_slice_end > reference_sequence.len() || reference_slice_start > reference_slice_end{
+        return Err(VcfError::Parse(format!(
+            "Invalid region boundaries: start={}, end={}, reference length={}",
+            region_start, region_end, reference_sequence.len()
+        )));
+    }
+
+    // Use a slice of the reference sequence.  This slice now corresponds
+    // exactly to the region defined by region_start and region_end.
+    let reference_slice = &reference_sequence[reference_slice_start..reference_slice_end];
+    // Now, if region_start is 1001 and region_end is 2000,
+    // reference_slice corresponds to &reference_sequence[1000..2000] (1000 elements)
+
     for variant in variants {
         if variant.position < region_start || variant.position > region_end {
             continue; // Skip variants outside the region
         }
-
+        
+        // Calculate the position relative to the reference slice,
+        // NOT relative to the entire chromosome.
+        // Stores the index within the reference slice.
         let pos_in_seq = (variant.position - region_start) as usize;
+
+
+        // Iterate through the haplotypes for the current group
         for &(sample_idx, hap_idx) in haplotype_indices {
             let sample_name = format!("{}_{}", &sample_names[sample_idx], if hap_idx == 0 { "L" } else { "R" });
                         
+            // Get the mutable sequence vector for the current sample and haplotype
             if let Some(seq_vec) = hap_sequences.get_mut(&sample_name) {
+                // Check if the calculated position is within the bounds of the sequence vector
+                // The length of seq_vec is the length of the region of interest.
+                // The length of pos_in_seq is also relative to the beginning of the region of interest,
+                // Because we subtracted the region_start value from it above.
                 if pos_in_seq < seq_vec.len() {
+                    // Lock the position_allele_map to get the reference and alternate alleles at this position
                     let map = position_allele_map.lock();
+                    
+                    // Get the reference and alternate alleles from the map, if available
                     if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                        
                         // Determine the allele to use based on the genotype
                         let allele_to_use = if let Some(genotype) = variant.genotypes[sample_idx].as_ref() {
                             if genotype[hap_idx as usize] == 0 {
+                                // If the genotype is 0 (reference allele), use the reference allele
                                 ref_allele as u8
                             } else {
+                                // If the genotype is 1 (alternate allele), use the alternate allele
                                 alt_allele as u8
                             }
                         } else {
@@ -783,10 +841,11 @@ fn apply_variants_to_sequences(
                             ref_allele as u8
                         };
                         
-                        // Update the sequence at the given position
+                        // Update the sequence at the calculated position with the determined allele
                         seq_vec[pos_in_seq] = allele_to_use;
                     }
                 } else {
+                    // If the position is out of bounds, log a warning
                     warn!("Position {} is out of bounds for sequence {}", variant.position, sample_name);
                 }
             }
@@ -794,6 +853,7 @@ fn apply_variants_to_sequences(
     }
     Ok(())
 }
+
 
 fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Result<(), VcfError> {
     let total_sequences = hap_sequences.len();
@@ -1143,7 +1203,7 @@ fn process_chromosome_entries(
     Ok(rows)
 }
 
-/// Processes a single config entry’s region and sample sets for a given chromosome.
+/// Processes a single config entry's region and sample sets for a given chromosome.
 ///  - Filters transcripts to the region
 ///  - Calls `process_vcf` to get unfiltered vs. filtered variants
 ///  - Computes population-genetic stats for group 0/1 (unfiltered & filtered)
@@ -1157,55 +1217,62 @@ fn process_single_config_entry(
     ref_sequence: &[u8],
     cds_regions: &[TranscriptCDS],
     chr: &str,
-    args: &Args
-) -> Result<Option<CsvRowData>, VcfError>
-{
+    args: &Args,
+) -> Result<Option<CsvRowData>, VcfError> {
     println!("Processing entry: {}:{}-{}", entry.seqname, entry.start, entry.end);
 
     // Filter transcripts to only those overlapping [start..end].
-    let local_cds = filter_and_log_transcripts( // This is not used... Fix!
+    let local_cds = filter_and_log_transcripts(
         cds_regions.to_vec(),
         QueryRegion {
             start: entry.start,
             end: entry.end,
-        }
+        },
     );
 
+    // Calculate EXTENDED region boundaries
+    let chr_length = ref_sequence.len() as i64;
+    let extended_start = (entry.start - 3_000_000).max(1);  // Don't go below 1
+    let extended_end = (entry.end + 3_000_000).min(chr_length); // Don't exceed chr_length
+
     // Load both unfiltered and filtered variant sets for [start..end]
-    //    process_vcf is called once per config entry region.
+    // process_vcf is called once per config entry region.
     let seqinfo_storage_unfiltered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
     let position_allele_map_unfiltered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
     let seqinfo_storage_filtered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
     let position_allele_map_filtered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
-    // POSSIBLE BUG (just an idea): This map is shared between all calls to process_variants within this
-    // function.  The calls with is_filtered_set = false overwrite the data
-    // written by the calls with is_filtered_set = true.  This leads to incorrect
-    // results because the final state of the map reflects only the unfiltered variants.
-    // The fix is to create separate maps for filtered and unfiltered processing.
-
-    println!("Calling process_vcf for {} from {} to {}", chr, entry.start, entry.end);
-    let (unfiltered_variants, filtered_variants, sample_names, _chr_len, _missing_data_info, filtering_stats)
-        = match process_vcf(
-            vcf_file,
-            Path::new(&args.reference_path),
-            chr,
-            entry.start,
-            entry.end,
-            min_gq,
-            mask.clone(),
-            allow.clone(),
-            seqinfo_storage_unfiltered.clone(),
-            seqinfo_storage_filtered.clone(),
-            position_allele_map_unfiltered.clone(),
-            position_allele_map_filtered.clone(),
-        ) {
-            Ok(data) => data,
-            Err(e) => {
-                eprintln!("Error processing VCF for {}: {}", chr, e);
-                return Ok(None);
-            }
-        };
+    println!(
+        "Calling process_vcf for {} from {} to {} (extended: {}-{})",
+        chr, entry.start, entry.end, extended_start, extended_end
+    );
+    let (
+        unfiltered_variants,
+        filtered_variants,
+        sample_names,
+        _chr_len,
+        _missing_data_info,
+        filtering_stats,
+    ) = match process_vcf(
+        vcf_file,
+        Path::new(&args.reference_path),
+        chr,
+        extended_start, // Extended start
+        extended_end,   // Extended end
+        min_gq,
+        mask.clone(),
+        allow.clone(),
+        seqinfo_storage_unfiltered.clone(),
+        seqinfo_storage_filtered.clone(),
+        position_allele_map_unfiltered.clone(), // Unfiltered map
+        position_allele_map_filtered.clone(),   // Filtered map
+    ) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Error processing VCF for {}: {}", chr, e);
+            return Ok(None);
+        }
+    };
 
     // Print short summary of filtering
     println!(
@@ -1228,17 +1295,19 @@ fn process_single_config_entry(
         mask.as_ref().and_then(|m| m.get(&chr.to_string())),
     );
 
-    // Stats for filtered group 0
+   // Stats for filtered group 0
     let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f) = match process_variants(
         &filtered_variants,
         &sample_names,
-        0,
+        0, // Haplotype group
         &entry.samples_filtered,
-        entry.start,
-        entry.end,
+        entry.start,       // Original start for statistics
+        entry.end,         // Original end for statistics
+        extended_start,
+        extended_end,
         Some(adjusted_sequence_length),
         seqinfo_storage_filtered.clone(),
-        position_allele_map_filtered.clone(),
+        position_allele_map_filtered.clone(),  // Use FILTERED map
         entry.seqname.clone(),
         true, // Filtered
         ref_sequence,
@@ -1255,13 +1324,15 @@ fn process_single_config_entry(
     let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f) = match process_variants(
         &filtered_variants,
         &sample_names,
-        1,
+        1, // Haplotype group
         &entry.samples_filtered,
-        entry.start,
-        entry.end,
+        entry.start,       // Original start for statistics
+        entry.end,         // Original end for statistics
+        extended_start,    // Use EXTENDED region for sequence generation
+        extended_end,      // Use EXTENDED region for sequence generation
         Some(adjusted_sequence_length),
         seqinfo_storage_filtered.clone(),
-        position_allele_map_filtered.clone(),
+        position_allele_map_filtered.clone(),  // Use FILTERED map
         entry.seqname.clone(),
         true, // Filtered
         ref_sequence,
@@ -1279,20 +1350,23 @@ fn process_single_config_entry(
 
     // Stats for unfiltered group 0
     let region_variants_unfiltered: Vec<_> = unfiltered_variants.iter()
-        .filter(|v| v.position >= entry.start && v.position <= entry.end)
+        .filter(|v| v.position >= entry.start && v.position <= entry.end) // ORIGINAL region
         .cloned()
         .collect();
 
+
     let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf) = match process_variants(
-        &region_variants_unfiltered,
+        ®ion_variants_unfiltered, // Use the region-filtered variants
         &sample_names,
-        0,
+        0, //Haplotype group
         &entry.samples_unfiltered,
-        entry.start,
-        entry.end,
+        entry.start,       // Original start for statistics
+        entry.end,         // Original end for statistics
+        extended_start, // extended start for sequence generation
+        extended_end,   // extended end for sequence generation
         None,
         seqinfo_storage_unfiltered.clone(),
-        position_allele_map_unfiltered.clone(),
+        position_allele_map_unfiltered.clone(), // Use UNFILTERED map
         entry.seqname.clone(),
         false, // Not filtered
         ref_sequence,
@@ -1307,15 +1381,17 @@ fn process_single_config_entry(
 
     // Stats for unfiltered group 1
     let (num_segsites_1, w_theta_1, pi_1, n_hap_1_unf) = match process_variants(
-        &unfiltered_variants,
+        &unfiltered_variants,  // Use all unfiltered variants
         &sample_names,
-        1,
+        1, //Haplotype Group
         &entry.samples_unfiltered,
-        entry.start,
-        entry.end,
+        entry.start,       // Original start for statistics
+        entry.end,         // Original end for statistics
+        extended_start,
+        extended_end,
         None,
         seqinfo_storage_unfiltered.clone(),
-        position_allele_map_unfiltered.clone(),
+        position_allele_map_unfiltered.clone(), // Use UNFILTERED map
         entry.seqname.clone(),
         false, // Not filtered
         ref_sequence,
@@ -1327,9 +1403,8 @@ fn process_single_config_entry(
             return Ok(None);
         }
     };
-
     let inversion_freq_no_filter = calculate_inversion_allele_frequency(&entry.samples_unfiltered)
-        .unwrap_or(-1.0);
+    .unwrap_or(-1.0);
 
     // Build final row data
     let row_data = CsvRowData {
@@ -1359,7 +1434,6 @@ fn process_single_config_entry(
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
     };
-
     println!("Finished stats for region {}-{}.", entry.start, entry.end);
 
     Ok(Some(row_data))
