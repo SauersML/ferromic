@@ -104,7 +104,7 @@ struct RegionStats {
     pi: f64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FilteringStats {
     pub total_variants: usize,
     pub _filtered_variants: usize,
@@ -1231,8 +1231,8 @@ fn process_single_config_entry(
         entry.start,
         entry.end,
         Some(adjusted_sequence_length),
-        seqinfo_storage.clone(),
-        position_allele_map.clone(),
+        seqinfo_storage_filtered.clone(),
+        position_allele_map_filtered.clone(),
         entry.seqname.clone(),
         true, // Filtered
         ref_sequence,
@@ -1254,8 +1254,8 @@ fn process_single_config_entry(
         entry.start,
         entry.end,
         Some(adjusted_sequence_length),
-        seqinfo_storage.clone(),
-        position_allele_map.clone(),
+        seqinfo_storage_filtered.clone(),
+        position_allele_map_filtered.clone(),
         entry.seqname.clone(),
         true, // Filtered
         ref_sequence,
@@ -1285,8 +1285,8 @@ fn process_single_config_entry(
         entry.start,
         entry.end,
         None,
-        seqinfo_storage.clone(),
-        position_allele_map.clone(),
+        seqinfo_storage_unfiltered.clone(),
+        position_allele_map_unfiltered.clone(),
         entry.seqname.clone(),
         false, // Not filtered
         ref_sequence,
@@ -1308,8 +1308,8 @@ fn process_single_config_entry(
         entry.start,
         entry.end,
         None,
-        seqinfo_storage.clone(),
-        position_allele_map.clone(),
+        seqinfo_storage_unfiltered.clone(),
+        position_allele_map_unfiltered.clone(),
         entry.seqname.clone(),
         false, // Not filtered
         ref_sequence,
@@ -1750,7 +1750,7 @@ pub fn process_vcf(
     // Signal done, wait for collector.
     processing_complete.store(true, Ordering::Relaxed);
     collector_thread.join().expect("Collector thread panicked")?;
-    progress_thread.join().expect("Progress thread panicked")?;
+    progress_thread.join().expect("Progress thread panicked");
 
     // Display the final SeqInfo if present.
     if !seqinfo_storage_unfiltered.lock().is_empty() {
