@@ -117,9 +117,12 @@ fn main() -> Result<(), VcfError> {
         );
 
         // Initialize shared SeqInfo storage
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
+        let seqinfo_storage_unfiltered = Arc::new(Mutex::new(Vec::new()));
+        let seqinfo_storage_filtered = Arc::new(Mutex::new(Vec::new()));
 
-        let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+        // Initialize shared allele map storage for unfiltered and filtered data.
+        let position_allele_map_unfiltered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+        let position_allele_map_filtered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
         // Process the VCF file
         let (
@@ -138,12 +141,14 @@ fn main() -> Result<(), VcfError> {
             args.min_gq,
             mask_regions.clone(),
             allow_regions.clone(),
-            Arc::clone(&seqinfo_storage), // Pass the storage
-            Arc::clone(&position_allele_map),
+            seqinfo_storage_unfiltered.clone(),  // Pass unfiltered SeqInfo storage
+            seqinfo_storage_filtered.clone(),    // Pass filtered SeqInfo storage
+            position_allele_map_unfiltered.clone(), // Pass unfiltered allele map
+            position_allele_map_filtered.clone(),   // Pass filtered allele map
         )?;
-        
+
         {
-            let seqinfo = seqinfo_storage.lock();
+            let seqinfo = seqinfo_storage_unfiltered.lock(); // Access the unfiltered SeqInfo
             if !seqinfo.is_empty() {
                 display_seqinfo_entries(&seqinfo, 12);
             } else {
