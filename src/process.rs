@@ -655,7 +655,7 @@ pub fn make_sequences(
 
     let hap_sequences_u8: HashMap<String, Vec<u8>> = hap_sequences
         .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
+        .map(|(k, v)| (k.clone(), v.into_iter().map(|c| c as u8).collect()))
         .collect();
     
     apply_variants_to_sequences(
@@ -718,7 +718,7 @@ fn initialize_hap_sequences(
     reference_sequence: &[u8],
     chr_label: &str,
     transcript_id: &str,
-) -> HashMap<String, Vec<char>> {
+) -> HashMap<String, Vec<u8>> {
     let mut hap_sequences = HashMap::new();
     
     for (sample_idx, hap_idx) in haplotype_indices {
