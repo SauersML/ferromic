@@ -1356,7 +1356,7 @@ fn process_single_config_entry(
 
 
     let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf) = match process_variants(
-        region_variants_unfiltered, // Use the region-filtered variants
+        &region_variants_unfiltered, // Use the region-filtered variants
         &sample_names,
         0, //Haplotype group
         &entry.samples_unfiltered,
