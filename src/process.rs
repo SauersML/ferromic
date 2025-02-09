@@ -1227,7 +1227,7 @@ fn process_single_config_entry(
         entry.seqname.clone(),
         true, // Filtered
         ref_sequence,
-        &cds_regions,
+        &local_cds,
     )? {
         Some(vals) => vals,
         None => {
@@ -1250,7 +1250,7 @@ fn process_single_config_entry(
         entry.seqname.clone(),
         true, // Filtered
         ref_sequence,
-        &cds_regions,
+        &local_cds,
     )? {
         Some(vals) => vals,
         None => {
@@ -1281,7 +1281,7 @@ fn process_single_config_entry(
         entry.seqname.clone(),
         false, // Not filtered
         ref_sequence,
-        &cds_regions,
+        &local_cds,
     )? {
         Some(vals) => vals,
         None => {
@@ -1304,7 +1304,7 @@ fn process_single_config_entry(
         entry.seqname.clone(),
         false, // Not filtered
         ref_sequence,
-        &cds_regions,
+        &local_cds,
     )? {
         Some(vals) => vals,
         None => {
