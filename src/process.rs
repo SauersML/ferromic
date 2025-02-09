@@ -638,6 +638,7 @@ pub fn make_sequences(
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: &str,
 ) -> Result<(), VcfError> {
+    println!("Making sequences for {}", cds_regions)
     let vcf_sample_id_to_index = map_sample_names_to_indices(sample_names)?;
 
     let haplotype_indices = get_haplotype_indices_for_group(
@@ -657,7 +658,7 @@ pub fn make_sequences(
         .iter()
         .map(|(k, v)| (k.clone(), v.into_iter().map(|c| *c as u8).collect()))
         .collect();
-    
+
     apply_variants_to_sequences(
         variants,
         &haplotype_indices,
