@@ -755,35 +755,33 @@ fn apply_variants_to_sequences(
 
         let pos_in_seq = (variant.position - region_start) as usize;
         for &(sample_idx, hap_idx) in haplotype_indices {
-            let sample_name = format!("{}_{}", &sample_names[sample_idx], if hap_idx == 0 { "L" } else { "R" });
-            
+            let sample_name = format!("{}_{}", sample_names.get(sample_idx).unwrap_or(&"UNKNOWN".to_string()), if hap_idx == 0 { "L" } else { "R" });
+                        
             if let Some(seq) = hap_sequences.get_mut(&sample_name) {
-                if pos_in_seq < seq.len() {
-                    let map = position_allele_map.lock();
-                    if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
-                        // Update the sequence if the position is valid
-                        if let Some(seq_vec) = hap_sequences.get_mut(&sample_name) {
-                            if pos_in_seq < seq_vec.len() {
-                                // Determine the allele to use based on the genotype
-                                let allele_to_use = if variant.genotypes[sample_idx][hap_idx] == 0 {
+                if let Some(seq_vec) = seq {
+                    if pos_in_seq < seq_vec.len() {
+                        let map = position_allele_map.lock();
+                        if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
+                            // Determine the allele to use based on the genotype
+                            let allele_to_use = if let Some(genotype) = variant.genotypes[sample_idx].as_ref() {
+                                if genotype[hap_idx] == 0 {
                                     ref_allele as u8
                                 } else {
                                     alt_allele as u8
-                                };
-    
-                                // Update the sequence at the given position
-                                seq_vec[pos_in_seq] = allele_to_use;
+                                }
                             } else {
-                                // Handle out-of-bounds positions
-                                warn!("Position {} is out of bounds for sequence {}", variant.position, sample_name);
-                            }
-                        } else {
-                            // Handle missing sequence
-                            warn!("No sequence found for sample {}", sample_name);
+                                // If genotype is missing, use reference allele
+                                ref_allele as u8
+                            };
+                            
+                            // Update the sequence at the given position
+                            seq_vec[pos_in_seq] = allele_to_use;
                         }
+                    } else {
+                        warn!("Position {} is out of bounds for sequence {}", variant.position, sample_name);
                     }
                 } else {
-                    warn!("Position {} is out of bounds for sequence {}", variant.position, sample_name);
+                    warn!("No sequence found for sample {}", sample_name);
                 }
             }
         }
