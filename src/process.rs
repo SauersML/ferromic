@@ -665,8 +665,9 @@ pub fn make_sequences(
         region_end,
         reference_sequence,
         position_allele_map.clone(),
-        &hap_sequences_u8,
-    )?;
+        &hap_sequences,
+        &sample_names,
+    )
 
     generate_batch_statistics(&hap_sequences_u8)?;
 
@@ -747,6 +748,7 @@ fn apply_variants_to_sequences(
     reference_sequence: &[u8],
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     hap_sequences: &HashMap<String, Vec<u8>>,
+    sample_names: &[String],
 ) -> Result<(), VcfError> {
     for variant in variants {
         if variant.position < region_start || variant.position > region_end {
@@ -755,16 +757,16 @@ fn apply_variants_to_sequences(
 
         let pos_in_seq = (variant.position - region_start) as usize;
         for &(sample_idx, hap_idx) in haplotype_indices {
-            let sample_name = format!("{}_{}", sample_names[sample_idx], if hap_idx == 0 { "L" } else { "R" });
+            let sample_name = format!("{}_{}", &sample_names[sample_idx], if hap_idx == 0 { "L" } else { "R" });
                         
             if let Some(seq) = hap_sequences.get_mut(&sample_name) {
-                if let Some(seq_vec) = seq_vec {
+                if let Some(seq_vec) = hap_sequences.get_mut(&sample_name) {
                     if pos_in_seq < seq_vec.len() {
                         let map = position_allele_map.lock();
                         if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
                             // Determine the allele to use based on the genotype
                             let allele_to_use = if let Some(genotype) = variant.genotypes[sample_idx].as_ref() {
-                                if genotype[hap_idx] == 0 {
+                                if genotype[hap_idx as usize] == 0 {
                                     ref_allele as u8
                                 } else {
                                     alt_allele as u8
