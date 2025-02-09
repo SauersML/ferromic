@@ -656,14 +656,21 @@ pub fn make_sequences(
         warn!("No haplotypes found for group {}.", haplotype_group);
         return Ok(());
     }
-
+    
+    // Check if cds_regions is empty. If so, return early to avoid index out of bounds.
+    if cds_regions.is_empty() {
+        warn!("No CDS regions available for transcript. Skipping sequence generation.");
+        return Ok(());
+    }
+    
     let mut hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds_regions[0].transcript_id, region_start, region_end);
-
+    
+    // Check if hap_sequences is empty after initialization.
     if hap_sequences.is_empty() {
         warn!("No sequences initialized for group {}. Skipping variant application.", haplotype_group);
         return Ok(());
     }
-    
+
     let hap_sequences_u8: HashMap<String, Vec<u8>> = hap_sequences
         .iter()
         .map(|(k, v)| (k.clone(), v.into_iter().map(|c| *c as u8).collect()))
