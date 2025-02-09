@@ -1209,60 +1209,6 @@ fn process_single_config_entry(
         mask.as_ref().and_then(|m| m.get(&chr.to_string())),
     );
 
-    // Stats for unfiltered group 0
-    let region_variants_uf: Vec<_> = unfiltered_variants.iter()
-        .filter(|v| v.position >= entry.start && v.position <= entry.end)
-        .cloned()
-        .collect();
-
-    let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf) = match process_variants(
-        &region_variants_uf,
-        &sample_names,
-        0,
-        &entry.samples_unfiltered,
-        entry.start,
-        entry.end,
-        None,
-        seqinfo_storage.clone(),
-        position_allele_map.clone(),
-        entry.seqname.clone(),
-        false,
-        ref_sequence,
-        &cds_regions,
-    )? {
-        Some(vals) => vals,
-        None => {
-            println!("No haplotypes found for group 0 in region {}-{}", entry.start, entry.end);
-            return Ok(None);
-        }
-    };
-
-    // Stats for unfiltered group 1
-    let (num_segsites_1, w_theta_1, pi_1, n_hap_1_unf) = match process_variants(
-        &unfiltered_variants,
-        &sample_names,
-        1,
-        &entry.samples_unfiltered,
-        entry.start,
-        entry.end,
-        None,
-        seqinfo_storage.clone(),
-        position_allele_map.clone(),
-        entry.seqname.clone(),
-        false,
-        ref_sequence,
-        &cds_regions,
-    )? {
-        Some(vals) => vals,
-        None => {
-            println!("No haplotypes found for group 1 in region {}-{}", entry.start, entry.end);
-            return Ok(None);
-        }
-    };
-
-    let inversion_freq_no_filter = calculate_inversion_allele_frequency(&entry.samples_unfiltered)
-        .unwrap_or(-1.0);
-
     // Stats for filtered group 0
     let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f) = match process_variants(
         &filtered_variants,
@@ -1275,7 +1221,7 @@ fn process_single_config_entry(
         seqinfo_storage.clone(),
         position_allele_map.clone(),
         entry.seqname.clone(),
-        true,
+        true, // Filtered
         ref_sequence,
         &cds_regions,
     )? {
@@ -1298,7 +1244,7 @@ fn process_single_config_entry(
         seqinfo_storage.clone(),
         position_allele_map.clone(),
         entry.seqname.clone(),
-        true,
+        true, // Filtered
         ref_sequence,
         &cds_regions,
     )? {
@@ -1310,6 +1256,60 @@ fn process_single_config_entry(
     };
 
     let inversion_freq_filt = calculate_inversion_allele_frequency(&entry.samples_filtered)
+        .unwrap_or(-1.0);
+
+    // Stats for unfiltered group 0
+    let region_variants_unfiltered: Vec<_> = unfiltered_variants.iter()
+        .filter(|v| v.position >= entry.start && v.position <= entry.end)
+        .cloned()
+        .collect();
+
+    let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf) = match process_variants(
+        &region_variants_unfiltered,
+        &sample_names,
+        0,
+        &entry.samples_unfiltered,
+        entry.start,
+        entry.end,
+        None,
+        seqinfo_storage.clone(),
+        position_allele_map.clone(),
+        entry.seqname.clone(),
+        false, // Not filtered
+        ref_sequence,
+        &cds_regions,
+    )? {
+        Some(vals) => vals,
+        None => {
+            println!("No haplotypes found for group 0 in region {}-{}", entry.start, entry.end);
+            return Ok(None);
+        }
+    };
+
+    // Stats for unfiltered group 1
+    let (num_segsites_1, w_theta_1, pi_1, n_hap_1_unf) = match process_variants(
+        &unfiltered_variants,
+        &sample_names,
+        1,
+        &entry.samples_unfiltered,
+        entry.start,
+        entry.end,
+        None,
+        seqinfo_storage.clone(),
+        position_allele_map.clone(),
+        entry.seqname.clone(),
+        false, // Not filtered
+        ref_sequence,
+        &cds_regions,
+    )? {
+        Some(vals) => vals,
+        None => {
+            println!("No haplotypes found for group 1 in region {}-{}", entry.start, entry.end);
+            return Ok(None);
+        }
+    };
+
+    let inversion_freq_no_filter = calculate_inversion_allele_frequency(&entry.samples_unfiltered)
         .unwrap_or(-1.0);
 
     // Build final row data
