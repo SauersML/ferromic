@@ -558,7 +558,7 @@ fn process_variants(
     }
     seqinfo_storage.lock().clear();
 
-    println!("Finishing up the variant region... is_filtered_set = {:?}" is_filtered_set);
+    println!("Finishing up the variant region... is_filtered_set = {:?}", is_filtered_set);
 
     if is_filtered_set {
         println!("Calling make_sequences with filtered set...");
