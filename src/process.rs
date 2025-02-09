@@ -875,7 +875,7 @@ fn process_and_write_cds(
         }
 
         let filename = format!(
-            "phy/group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
+            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
             haplotype_group,
             cds.transcript_id,
             chromosome,
