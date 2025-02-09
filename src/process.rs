@@ -1685,7 +1685,7 @@ pub fn process_vcf(
                         if passes {
                             let mut f = filtered_variants.lock();
                             f.push(variant.clone());
-                            pos_map_filtered.lock().insert(variant.position, pos_map_unfiltered.lock().get(&variant.position).copied().unwrap_or(('N','N')));
+                            position_allele_map_filtered.lock().insert(variant.position, position_allele_map_unfiltered.lock().get(&variant.position).copied().unwrap_or(('N','N')));
                             if f.len() >= 10000 {
                                 f.clear();
                             }
