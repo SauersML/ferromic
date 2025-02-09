@@ -897,8 +897,13 @@ fn prepare_to_write_cds(
 }
 
 fn extract_cds_sequence(seq: &[u8], cds_min: i64, cds_max: i64) -> Vec<u8> {
-    seq[(cds_min as usize)..(cds_max as usize)].to_vec()
+    let seq_len = seq.len() as i64;
+    if cds_min < 0 || cds_max <= cds_min || cds_max > seq_len {
+        return Vec::new();
+    }
+    seq[cds_min as usize..cds_max as usize].to_vec()
 }
+
 
 
 pub fn process_config_entries(
@@ -1162,8 +1167,10 @@ fn process_single_config_entry(
 
     // Load both unfiltered and filtered variant sets for [start..end]
     //    process_vcf is called once per config entry region.
-    let seqinfo_storage = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
-    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+    let seqinfo_storage_unfiltered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
+    let position_allele_map_unfiltered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+    let seqinfo_storage_filtered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
+    let position_allele_map_filtered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
     // POSSIBLE BUG (just an idea): This map is shared between all calls to process_variants within this
     // function.  The calls with is_filtered_set = false overwrite the data
@@ -1172,7 +1179,7 @@ fn process_single_config_entry(
     // The fix is to create separate maps for filtered and unfiltered processing.
 
     println!("Calling process_vcf for {} from {} to {}", chr, entry.start, entry.end);
-    let (unfiltered_variants, filtered_variants, sample_names, _chr_len, _missing_data_info, filtering_stats) 
+    let (unfiltered_variants, filtered_variants, sample_names, _chr_len, _missing_data_info, filtering_stats)
         = match process_vcf(
             vcf_file,
             Path::new(&args.reference_path),
@@ -1182,8 +1189,10 @@ fn process_single_config_entry(
             min_gq,
             mask.clone(),
             allow.clone(),
-            seqinfo_storage.clone(),
-            position_allele_map.clone(),
+            seqinfo_storage_unfiltered.clone(),
+            seqinfo_storage_filtered.clone(),
+            position_allele_map_unfiltered.clone(),
+            position_allele_map_filtered.clone(),
         ) {
             Ok(data) => data,
             Err(e) => {
