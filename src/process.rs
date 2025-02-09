@@ -375,7 +375,7 @@ fn process_variants(
     // Map sample names to indices
     let mut vcf_sample_id_to_index: HashMap<&str, usize> = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
-        let sample_id = extract_sample_id(name);
+        let sample_id = name.rsplit('_').next().unwrap_or(name);
         vcf_sample_id_to_index.insert(sample_id, i);
     }
 
@@ -870,32 +870,7 @@ fn extract_cds_sequence(seq: &[u8], cds_min: i64, cds_max: i64) -> Vec<u8> {
     seq[(cds_min as usize)..(cds_max as usize)].to_vec()
 }
 
-fn write_phylip_file(
-    filename: &str,
-    hap_sequences: &HashMap<String, Vec<u8>>,
-) -> Result<(), VcfError> {
-    let file = File::create(filename).map_err(|e| VcfError::Io(e))?;
-    let mut writer = BufWriter::new(file);
 
-    for (sample_name, sequence) in hap_sequences {
-        let padded_name = format!("{:<10}", sample_name);
-        let sequence_str = String::from_utf8_lossy(sequence);
-        writeln!(writer, "{}{}", padded_name, sequence_str).map_err(|e| VcfError::Io(e))?;
-    }
-
-    writer.flush().map_err(|e| VcfError::Io(e))?;
-    info!("Successfully wrote PHYLIP file: {}", filename);
-
-    Ok(())
-}
-
-fn extract_sample_id(name: &str) -> &str {
-    name.rsplit('_').next().unwrap_or(name)
-}
-
-/// Main refactored entry point.
-/// It calls several smaller helper functions, preserving overall logic
-/// but splitting up tasks for clarity and efficiency.
 pub fn process_config_entries(
     config_entries: &[ConfigEntry],
     vcf_folder: &str,
@@ -2037,8 +2012,4 @@ fn process_variant(
     
     // Return the parsed variant and whether it passes filters
     Ok(Some((variant, passes_filters)))
-}
-
-fn extract_sample_id(name: &str) -> &str {
-    name.rsplit('_').next().unwrap_or(name)
 }
