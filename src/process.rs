@@ -758,7 +758,7 @@ fn apply_variants_to_sequences(
             let sample_name = format!("{}_{}", sample_names.get(sample_idx).unwrap_or(&"UNKNOWN".to_string()), if hap_idx == 0 { "L" } else { "R" });
                         
             if let Some(seq) = hap_sequences.get_mut(&sample_name) {
-                if let Some(seq_vec) = seq {
+                if let Some(seq_vec) = seq_vec {
                     if pos_in_seq < seq_vec.len() {
                         let map = position_allele_map.lock();
                         if let Some(&(ref_allele, alt_allele)) = map.get(&variant.position) {
