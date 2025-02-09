@@ -651,7 +651,7 @@ pub fn make_sequences(
         return Ok(());
     }
 
-    let hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds_regions[0].transcript_id);
+    let mut hap_sequences = initialize_hap_sequences(&haplotype_indices, sample_names, reference_sequence, &chromosome, &cds_regions[0].transcript_id);
 
     let hap_sequences_u8: HashMap<String, Vec<u8>> = hap_sequences
         .iter()
@@ -665,7 +665,7 @@ pub fn make_sequences(
         region_end,
         reference_sequence,
         position_allele_map.clone(),
-        &hap_sequences,
+        &mut hap_sequences,
         &sample_names,
     )?;
 
@@ -732,9 +732,8 @@ fn initialize_hap_sequences(
         
         let full_sample_name = format!("{}_{haplotype_suffix}", sample_name);
         
-        let sequence_chars: Vec<char> = reference_sequence.iter().map(|&b| b as char).collect();
-        
-        hap_sequences.insert(full_sample_name, sequence_chars);
+        let sequence_u8: Vec<u8> = reference_sequence.iter().map(|&b| b).collect();
+        hap_sequences.insert(full_sample_name, sequence_u8);
     }
     
     hap_sequences
