@@ -667,7 +667,7 @@ pub fn make_sequences(
         position_allele_map.clone(),
         &hap_sequences,
         &sample_names,
-    )
+    )?;
 
     generate_batch_statistics(&hap_sequences_u8)?;
 
