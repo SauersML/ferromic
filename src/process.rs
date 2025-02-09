@@ -1662,7 +1662,7 @@ pub fn process_vcf(
         ProgressStyle::default_spinner()
             .template("{spinner:.bold.green} VCF {elapsed_precise} {msg}")
             .expect("Spinner template error")
-            .tick_strings(&["░","▒","▓","█","▓","▒"])
+            .tick_strings(&["░░","▒▒","▓▓","██","▓▓","▒▒"])
     } else {
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
