@@ -1769,9 +1769,6 @@ pub fn process_vcf(
                         {
                             let mut u = unfiltered_variants.lock();
                             u.push(variant.clone());
-                            if u.len() >= 10000 {
-                                u.clear();
-                            }
                         }
                         // If passes filter, push to filtered as well.
                         if passes {
