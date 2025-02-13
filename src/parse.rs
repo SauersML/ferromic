@@ -393,7 +393,7 @@ pub fn read_reference_sequence(
     }
 
     // Calculate region length and allocate buffer
-    let region_length = (adjusted_end - (start as u64) + 1) as usize;
+    let region_length = ((adjusted_end + 1) - (start as u64)) as usize;
     let mut sequence = Vec::with_capacity(region_length);
 
     // Fetch and read the sequence with proper error handling
