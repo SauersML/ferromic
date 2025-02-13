@@ -51,7 +51,7 @@ fn main() -> Result<(), VcfError> {
 
     // Parse the allow file (include regions)
     let allow_regions = if let Some(allow_file) = args.allow_file.as_ref() {
-        println!("Mask file provided: {}", allow_file);
+        println!("Allow file provided: {}", allow_file);
         let parsed_allow = parse_regions_file(Path::new(allow_file))?;
         println!("Parsed Allow Regions: {:?}", parsed_allow);
         Some(Arc::new(parsed_allow))
