@@ -111,11 +111,6 @@ fn main() -> Result<(), VcfError> {
         )?;
         
 
-        println!(
-            "{}",
-            format!("Processing VCF file: {}", vcf_file.display()).cyan()
-        );
-
         // Initialize shared SeqInfo storage
         let seqinfo_storage_unfiltered = Arc::new(Mutex::new(Vec::new()));
         let seqinfo_storage_filtered = Arc::new(Mutex::new(Vec::new()));
