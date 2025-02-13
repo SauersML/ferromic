@@ -68,6 +68,7 @@ pub fn parse_regions_file(
             // Other files are one-based, inclusive intervals [start-1, end)
             (start - 1, end)
         };
+        // We consistently store intervals in 0-based half-open format to maintain uniform region logic
 
         regions.entry(chr.clone()).or_default().push((start, end));
     }
