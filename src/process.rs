@@ -741,9 +741,14 @@ fn initialize_hap_sequences(
 ) -> HashMap<String, Vec<u8>> {
 
     // 1-based
-    let start_index = (region_start -1) as usize;
-    // 1-based
-    let end_index = region_end as usize;
+    let start_index = (region_start - 1) as usize;
+    let mut end_index = region_end as usize;
+    if end_index > reference_sequence.len() {
+        end_index = reference_sequence.len();
+    }
+    if end_index < reference_sequence.len() {
+        end_index += 1;
+    }
 
     // Prevent empty sequences
     if start_index >= reference_sequence.len() || end_index > reference_sequence.len() || start_index > end_index {
@@ -792,10 +797,15 @@ fn apply_variants_to_sequences(
     // The reference sequence passed to make_sequences is the ENTIRE chromosome.
     // We need to use the slice of the reference that corresponds to [region_start..region_end].
 
-    //1-based coordinates for region_start and region_end.
+    // 1-based coordinates for region_start and region_end.
     let reference_slice_start = (region_start - 1) as usize;
-    //1-based coordinates for region_start and region_end.
-    let reference_slice_end = region_end as usize;
+    let mut reference_slice_end = region_end as usize;
+    if reference_slice_end > reference_sequence.len() {
+        reference_slice_end = reference_sequence.len();
+    }
+    if reference_slice_end < reference_sequence.len() {
+        reference_slice_end += 1;
+    }
 
     // Check bounds: Prevent potential panics if region_start/end are invalid
     if reference_slice_start >= reference_sequence.len() || reference_slice_end > reference_sequence.len() || reference_slice_start > reference_slice_end{
