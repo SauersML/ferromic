@@ -398,10 +398,10 @@ pub fn read_reference_sequence(
 
     // Fetch and read the sequence with proper error handling
     // Pass adjusted_end as u64 to fetch the correct number of bases
-    reader.fetch(actual_chr_name, (start - 1) as u64, adjusted_end as u64)
+    reader.fetch(actual_chr_name, (start - 1) as u64, (adjusted_end + 1) as u64)
         .map_err(|e| VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
-            format!("Failed to fetch region {}:{}-{}: {}", actual_chr_name, start, adjusted_end, e)
+            format!("Failed to fetch region {}:{}-{}: {}", actual_chr_name, start, adjusted_end + 1, e)
         )))?;
 
     reader.read(&mut sequence)
