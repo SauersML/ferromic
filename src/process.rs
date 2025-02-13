@@ -384,12 +384,17 @@ fn process_variants(
     // Collect haplotype indices for this group
     let mut haplotype_indices = Vec::new();
     for (sample_name, &(left_tsv, right_tsv)) in sample_filter {
-        if let Some(&idx) = vcf_sample_id_to_index.get(sample_name.as_str()) {
-            if left_tsv == haplotype_group {
-                haplotype_indices.push((idx, 0));
+        match vcf_sample_id_to_index.get(sample_name.as_str()) {
+            Some(&idx) => {
+                if left_tsv == haplotype_group {
+                    haplotype_indices.push((idx, 0));
+                }
+                if right_tsv == haplotype_group {
+                    haplotype_indices.push((idx, 1));
+                }
             }
-            if right_tsv == haplotype_group {
-                haplotype_indices.push((idx, 1));
+            None => {
+                return Err(VcfError::Parse(format!("Sample '{}' from config not found in VCF", sample_name)));
             }
         }
     }
@@ -718,12 +723,17 @@ fn get_haplotype_indices_for_group(
 ) -> Result<Vec<(usize, u8)>, VcfError> {
     let mut haplotype_indices = Vec::new();
     for (sample_name, &(left_tsv, right_tsv)) in sample_filter {
-        if let Some(&idx) = vcf_sample_id_to_index.get(sample_name.as_str()) {
-            if left_tsv == haplotype_group {
-                haplotype_indices.push((idx, 0)); // Left haplotype
+        match vcf_sample_id_to_index.get(sample_name.as_str()) {
+            Some(&idx) => {
+                if left_tsv == haplotype_group {
+                    haplotype_indices.push((idx, 0));
+                }
+                if right_tsv == haplotype_group {
+                    haplotype_indices.push((idx, 1));
+                }
             }
-            if right_tsv == haplotype_group {
-                haplotype_indices.push((idx, 1)); // Right haplotype
+            None => {
+                return Err(VcfError::Parse(format!("Sample '{}' from config not found in VCF", sample_name)));
             }
         }
     }
