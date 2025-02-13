@@ -1775,9 +1775,6 @@ pub fn process_vcf(
                             let mut f = filtered_variants.lock();
                             f.push(variant.clone());
                             position_allele_map_filtered.lock().insert(variant.position, position_allele_map_unfiltered.lock().get(&variant.position).copied().unwrap_or(('N','N')));
-                            if f.len() >= 10000 {
-                                f.clear();
-                            }
                         }
                         // Combine local stats into global.
                         {
