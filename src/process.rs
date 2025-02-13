@@ -2023,8 +2023,9 @@ fn process_variant(
     let is_multiallelic = alt_alleles.len() > 1;
     if is_multiallelic {
         _filtering_stats.multi_allelic_variants += 1;
-        eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not fully supported.", pos).yellow());
+        eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. Skipping.", pos).yellow());
         _filtering_stats.add_example(format!("{}: Filtered due to multi-allelic variant", line.trim()));
+        return Ok(None);
     }
 
     // Parse the FORMAT field to get the indices of the subfields
