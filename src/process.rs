@@ -65,6 +65,7 @@ pub struct Args {
     #[arg(long = "reference")]
     pub reference_path: String,
 
+    // GTF or GFF
     #[arg(long = "gtf")]
     pub gtf_path: String,
 }
