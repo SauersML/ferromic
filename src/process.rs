@@ -71,7 +71,7 @@ pub struct Args {
 }
 
 /// ZeroBasedHalfOpen represents a half-open interval [start..end).
-/// This struct is used for slicing references safely.
+/// This struct is also used for slicing references safely.
 #[derive(Debug, Clone, Copy)]
 pub struct ZeroBasedHalfOpen {
     pub start: usize,
