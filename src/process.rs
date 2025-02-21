@@ -123,7 +123,7 @@ impl ZeroBasedHalfOpen {
         }
     }
 
-    /// Returns true if the given position (zero-based) is inside [start..end).
+    /// Returns true if the position (zero-based) is inside [start..end).
     pub fn contains(&self, pos: i64) -> bool {
         let p = pos as usize;
         p >= self.start && p < self.end
