@@ -1,0 +1,21 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Python virtual environments and caches
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+*.egg-info/
+.venv/
+
+# Miscellaneous
+*.log
+*.tmp
+*.phy
+*.swp
+.DS_Store
