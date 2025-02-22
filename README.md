@@ -128,7 +128,7 @@ chr1	88113	190752
     ```
     chr,region_start,region_end,0_sequence_length,1_sequence_length,0_sequence_length_adjusted,1_sequence_length_adjusted,0_segregating_sites,1_segregating_sites,0_w_theta,1_w_theta,0_pi,1_pi,0_segregating_sites_filtered,1_segregating_sites_filtered,0_w_theta_filtered,1_w_theta_filtered,0_pi_filtered,1_pi_filtered,0_num_hap_no_filter,1_num_hap_no_filter,0_num_hap_filter,1_num_hap_filter,inversion_freq_no_filter,inversion_freq_filter
     ```
-    
+
 - **Column Descriptions**:
     - `chr`: Chromosome name.
     - `region_start`: Start position of the region.
@@ -155,7 +155,7 @@ chr1	88113	190752
     - `1_num_hap_filter`: Number of haplotypes for group `1`.
     - `inversion_freq_no_filter`: Allele frequency of inversion (1) before filtering.
     - `inversion_freq_filter`: Allele frequency of inversion (1).
-    
+
 - **Special Values**:
     - `θ = 0`: No segregating sites; no genetic variation observed.
     - `θ = Infinity (inf)`: Insufficient haplotypes or zero-length region; metrics undefined.
@@ -192,11 +192,11 @@ chr1	88113	190752
 ## Common Warnings and Errors ⚠️
 
 - **Missing Samples**: If certain samples defined in the configuration file are not found in the VCF, a warning is displayed with the missing samples.
-  
+
 - **Invalid Genotypes**: Genotypes not conforming to the expected formats (`0|0`, `0|1`, `1|0`, `1|1`) will be considered missing data. The number and percentage of invalid genotypes encountered will be shown.
-  
+
 - **Multi-allelic Sites**: Multi-allelic variants are not supported.
-  
+
 - **No Variants Found**: If no variants are found within the specified region or all variants are filtered out, a warning will be printed.
 
 ---
@@ -226,5 +226,3 @@ cargo run --release --bin vcf_stats_calculator \
     --min_gq 30 \
     --mask_file ../masks/hardmask.hg38.v4_acroANDsdOnly.over99.bed
 ```
- 
- 
