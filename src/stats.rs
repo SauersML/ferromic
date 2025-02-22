@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use crate::process::Variant;
 use rayon::iter::IntoParallelIterator;
 use rayon::prelude::*;
-use crate::process::Variant;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 { // Not used
+fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 {
+    // Not used
     let mut total = 0;
     for &(start, end) in mask {
         let overlap_start = std::cmp::max(region_start, start);
@@ -50,7 +51,7 @@ pub fn calculate_adjusted_sequence_length(
 
 fn subtract_regions(
     intervals: &Vec<(i64, i64)>,
-    masks: Option<&Vec<(i64, i64)>>
+    masks: Option<&Vec<(i64, i64)>>,
 ) -> Vec<(i64, i64)> {
     if masks.is_none() {
         return intervals.clone();
@@ -118,11 +119,7 @@ pub fn count_segregating_sites(variants: &[Variant]) -> usize {
     variants
         .par_iter()
         .filter(|v| {
-            let alleles: HashSet<_> = v.genotypes
-                .iter()
-                .flatten()
-                .flatten()
-                .collect();
+            let alleles: HashSet<_> = v.genotypes.iter().flatten().flatten().collect();
             alleles.len() > 1
         })
         .count()
@@ -134,28 +131,34 @@ pub fn calculate_pairwise_differences(
 ) -> Vec<((usize, usize), usize, Vec<i64>)> {
     let variants = Arc::new(variants);
     // Iterate over all sample indices from 0 to n - 1
-    (0..n).into_par_iter().flat_map(|i| {
-        let variants = Arc::clone(&variants);
-        // For each i, iterate over j from i + 1 to n - 1
-        (i+1..n).into_par_iter().map(move |j| {
-            let mut diff_count = 0;
-            let mut diff_positions = Vec::new();
-            // For each variant, compare genotypes of samples i and j
-            for v in variants.iter() {
-                if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
-                    if gi != gj {
-                        diff_count += 1;
-                        diff_positions.push(v.position);
+    (0..n)
+        .into_par_iter()
+        .flat_map(|i| {
+            let variants = Arc::clone(&variants);
+            // For each i, iterate over j from i + 1 to n - 1
+            (i + 1..n)
+                .into_par_iter()
+                .map(move |j| {
+                    let mut diff_count = 0;
+                    let mut diff_positions = Vec::new();
+                    // For each variant, compare genotypes of samples i and j
+                    for v in variants.iter() {
+                        if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
+                            if gi != gj {
+                                diff_count += 1;
+                                diff_positions.push(v.position);
+                            }
+                        } else {
+                            // Skip if either genotype is missing
+                            continue;
+                        }
                     }
-                } else {
-                    // Skip if either genotype is missing
-                    continue;
-                }
-            }
-            // Return the pair of sample indices, difference count, and positions
-            ((i, j), diff_count, diff_positions)
-        }).collect::<Vec<_>>()
-    }).collect()
+                    // Return the pair of sample indices, difference count, and positions
+                    ((i, j), diff_count, diff_positions)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 pub fn harmonic(n: usize) -> f64 {
@@ -167,7 +170,7 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
     if n <= 1 || seq_length == 0 {
         return f64::INFINITY; // Return infinity if only 1 or fewer haplotypes or if sequence length is zero
     }
-    
+
     let harmonic_value = harmonic(n - 1);
     if harmonic_value == 0.0 {
         return f64::INFINITY; // Return infinity to avoid division by zero
