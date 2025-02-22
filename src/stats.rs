@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 {
-    // Not used
+    // Not used... for now
     let mut total = 0;
     for &(start, end) in mask {
         let overlap_start = std::cmp::max(region_start, start);
