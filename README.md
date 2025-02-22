@@ -168,7 +168,7 @@ chr1	88113	190752
 
 ### Genotype Quality (GQ) Filtering
 
-- **Purpose**: Exclude variants with low genotype quality.
+- **Purpose**: Excludes variants with low genotype quality.
 - **Mechanism**:
     - If any sample within a variant has a GQ score below the specified `--min_gq` threshold, the entire variant is excluded from **filtered** (but not unfiltered) analyses.
     - Variants passing the GQ filter are included in both **unfiltered** and **filtered** analyses.
