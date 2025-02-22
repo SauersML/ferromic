@@ -226,3 +226,5 @@ cargo run --release --bin vcf_stats_calculator \
     --min_gq 30 \
     --mask_file ../masks/hardmask.hg38.v4_acroANDsdOnly.over99.bed
 ```
+ 
+ 
