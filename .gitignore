@@ -18,4 +18,8 @@ env/
 *.tmp
 *.phy
 *.swp
+*.csv
+*.tsv
+*.vcf
+*.bed
 .DS_Store
