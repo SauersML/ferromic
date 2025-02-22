@@ -1,33 +1,21 @@
 use ferromic::process::{
-    process_config_entries,
-    process_vcf,
-    display_seqinfo_entries,
-    VcfError,
-    Args,
+    display_seqinfo_entries, process_config_entries, process_vcf, Args, VcfError,
 };
 
-use ferromic::parse::{
-    parse_regions_file,
-    parse_config_file,
-    parse_region,
-    find_vcf_file,
-};
+use ferromic::parse::{find_vcf_file, parse_config_file, parse_region, parse_regions_file};
 
 use ferromic::stats::{
+    calculate_pairwise_differences, calculate_pi, calculate_watterson_theta,
     count_segregating_sites,
-    calculate_pairwise_differences,
-    calculate_watterson_theta,
-    calculate_pi,
 };
 
-use std::sync::Arc;
+use clap::Parser;
+use colored::Colorize;
 use parking_lot::Mutex;
+use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
 use std::path::Path;
-use colored::Colorize;
-use clap::Parser;
-use rayon::ThreadPoolBuilder;
-
+use std::sync::Arc;
 
 fn main() -> Result<(), VcfError> {
     let args = Args::parse();
@@ -101,8 +89,10 @@ fn main() -> Result<(), VcfError> {
         let seqinfo_storage_filtered = Arc::new(Mutex::new(Vec::new()));
 
         // Initialize shared allele map storage for unfiltered and filtered data.
-        let position_allele_map_unfiltered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
-        let position_allele_map_filtered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+        let position_allele_map_unfiltered =
+            Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+        let position_allele_map_filtered =
+            Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
         // Process the VCF file
         let (
@@ -121,10 +111,10 @@ fn main() -> Result<(), VcfError> {
             args.min_gq,
             mask_regions.clone(),
             allow_regions.clone(),
-            seqinfo_storage_unfiltered.clone(),  // Pass unfiltered SeqInfo storage
-            seqinfo_storage_filtered.clone(),    // Pass filtered SeqInfo storage
+            seqinfo_storage_unfiltered.clone(), // Pass unfiltered SeqInfo storage
+            seqinfo_storage_filtered.clone(),   // Pass filtered SeqInfo storage
             position_allele_map_unfiltered.clone(), // Pass unfiltered allele map
-            position_allele_map_filtered.clone(),   // Pass filtered allele map
+            position_allele_map_filtered.clone(), // Pass filtered allele map
         )?;
 
         {
@@ -149,11 +139,7 @@ fn main() -> Result<(), VcfError> {
         };
 
         if end == i64::MAX
-            && unfiltered_variants
-                .last()
-                .map(|v| v.position)
-                .unwrap_or(0)
-                < chr_length
+            && unfiltered_variants.last().map(|v| v.position).unwrap_or(0) < chr_length
         {
             println!("{}", "Warning: The sequence length may be underestimated. Consider using the --region parameter for more accurate results.".yellow());
         }
@@ -214,21 +200,28 @@ fn main() -> Result<(), VcfError> {
             (_filtering_stats._filtered_variants as f64 / _filtering_stats.total_variants as f64)
                 * 100.0
         );
-        println!("Multi-allelic variants: {}", _filtering_stats.multi_allelic_variants);
+        println!(
+            "Multi-allelic variants: {}",
+            _filtering_stats.multi_allelic_variants
+        );
         println!("Low GQ variants: {}", _filtering_stats.low_gq_variants);
         println!(
             "Missing data variants: {}",
             _filtering_stats.missing_data_variants
         );
 
-        let missing_data_percentage =
-            (missing_data_info.missing_data_points as f64 / missing_data_info.total_data_points as f64) * 100.0;
+        let missing_data_percentage = (missing_data_info.missing_data_points as f64
+            / missing_data_info.total_data_points as f64)
+            * 100.0;
         println!("\n{}", "Missing Data Information:".yellow().bold());
         println!(
             "Number of missing data points: {}",
             missing_data_info.missing_data_points
         );
-        println!("Percentage of missing data: {:.2}%", missing_data_percentage);
+        println!(
+            "Percentage of missing data: {:.2}%",
+            missing_data_percentage
+        );
         println!(
             "Number of positions with missing data: {}",
             missing_data_info.positions_with_missing.len()
