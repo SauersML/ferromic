@@ -4,10 +4,7 @@ use ferromic::process::{
 
 use ferromic::parse::{find_vcf_file, parse_config_file, parse_region, parse_regions_file};
 
-use ferromic::stats::{
-    calculate_pairwise_differences, calculate_pi, calculate_watterson_theta,
-    count_segregating_sites,
-};
+use ferromic::stats::{calculate_pi, calculate_watterson_theta, count_segregating_sites};
 
 use clap::Parser;
 use colored::Colorize;
@@ -183,13 +180,10 @@ fn main() -> Result<(), VcfError> {
             ));
         }
 
-        let pairwise_diffs = calculate_pairwise_differences(&unfiltered_variants, n); // Also need filtered here?
-        let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
-
         let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
 
         // Needs to work with both filtered and unfiltered
-        let pi = calculate_pi(tot_pair_diff, n, seq_length);
+        let pi = calculate_pi(&unfiltered_variants, n, seq_length);
 
         println!("\n{}", "Results:".green().bold());
         println!("\nSequence Length:{}", seq_length);
