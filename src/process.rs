@@ -997,7 +997,13 @@ fn prepare_to_write_cds(
 
         for (sample_name, seq) in hap_sequences {
             let mut spliced_sequence = Vec::new();
+            // A CDS entirely outside the query region but inside the extended region does not get written out to a .phy file.
+            // If a CDS partially overlaps the query region, its entire transcript sequence
+            // (including segments outside the query region but within the extended region) will be written out
             for &(seg_s, seg_e, strand, _frame) in &cds.segments {
+                // If the entire CDS segment is within the extended region, then the segment is included in full.
+                // If only part overlaps, only that partial segment is included. This should NEVER happen in humans, because the largest gene is smaller than the extended region.
+                // If the segment lies wholly beyond the extended region (or the normal region), it is dropped entirely.
                 let seg_interval = ZeroBasedHalfOpen::from_1based_inclusive(seg_s, seg_e);
                 if let Some(overlap) = seg_interval.intersect(&hap_region) {
                     if overlap.end <= seq.len() {
@@ -1347,10 +1353,10 @@ fn process_single_config_entry(
         min_gq,
         mask.clone(),
         allow.clone(),
-        seqinfo_storage_filtered.clone(),
         seqinfo_storage_unfiltered.clone(),
-        position_allele_map_filtered.clone(),
+        seqinfo_storage_filtered.clone(),
         position_allele_map_unfiltered.clone(),
+        position_allele_map_filtered.clone(),
     ) {
         Ok(data) => data,
         Err(e) => {
@@ -1968,6 +1974,7 @@ pub fn process_vcf(
                 line_sender
                     .send(local_buffer.clone())
                     .map_err(|_| VcfError::ChannelSend)?;
+                progress_bar.inc(local_buffer.len() as u64);
                 local_buffer.clear();
             }
             drop(line_sender);
@@ -2031,12 +2038,10 @@ pub fn process_vcf(
             while let Ok(msg) = result_receiver.recv() {
                 match msg {
                     Ok((Some((variant, passes)), local_miss, mut local_stats)) => {
-                        // Always push the variant to unfiltered.
                         {
                             let mut u = unfiltered_variants.lock();
                             u.push(variant.clone());
                         }
-                        // If passes filter, push to filtered as well.
                         if passes {
                             let mut f = filtered_variants.lock();
                             f.push(variant.clone());
@@ -2049,7 +2054,47 @@ pub fn process_vcf(
                                     .unwrap_or(('N', 'N')),
                             );
                         }
-                        // Combine local stats into global.
+
+                        // Write SeqInfo for unfiltered
+                        {
+                            let mut storage = seqinfo_storage_unfiltered.lock();
+                            for (sample_idx, genotype_opt) in variant.genotypes.iter().enumerate() {
+                                if let Some(gdata) = genotype_opt {
+                                    for (hap_side, allele_value) in gdata.iter().enumerate() {
+                                        storage.push(SeqInfo {
+                                            sample_index: sample_idx,
+                                            haplotype_group: *allele_value,
+                                            vcf_allele: Some(*allele_value),
+                                            nucleotide: None,
+                                            chromosome: chr.to_string(),
+                                            position: variant.position,
+                                            filtered: false,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        // Write SeqInfo for filtered
+                        if passes {
+                            let mut storage = seqinfo_storage_filtered.lock();
+                            for (sample_idx, genotype_opt) in variant.genotypes.iter().enumerate() {
+                                if let Some(gdata) = genotype_opt {
+                                    for (hap_side, allele_value) in gdata.iter().enumerate() {
+                                        storage.push(SeqInfo {
+                                            sample_index: sample_idx,
+                                            haplotype_group: *allele_value,
+                                            vcf_allele: Some(*allele_value),
+                                            nucleotide: None,
+                                            chromosome: chr.to_string(),
+                                            position: variant.position,
+                                            filtered: true,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
                         {
                             let mut global_miss = missing_data_info.lock();
                             global_miss.total_data_points += local_miss.total_data_points;
@@ -2073,6 +2118,7 @@ pub fn process_vcf(
                             }
                         }
                     }
+
                     Ok((None, local_miss, mut local_stats)) => {
                         let mut global_miss = missing_data_info.lock();
                         global_miss.total_data_points += local_miss.total_data_points;
@@ -2318,6 +2364,15 @@ fn process_variant(
         eprintln!("{}", format!("Warning: Multi-allelic site detected at position {}, which is not supported. Skipping.", pos).yellow());
         _filtering_stats.add_example(format!(
             "{}: Filtered due to multi-allelic variant",
+            line.trim()
+        ));
+        return Ok(None);
+    }
+    if alt_alleles[0].len() > 1 {
+        _filtering_stats.multi_allelic_variants += 1;
+        eprintln!("{}", format!("Warning: Multi-nucleotide ALT detected at position {}, which is not supported. Skipping.", pos).yellow());
+        _filtering_stats.add_example(format!(
+            "{}: Filtered due to multi-nucleotide alt allele",
             line.trim()
         ));
         return Ok(None);
