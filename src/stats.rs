@@ -194,45 +194,57 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
 /// This function computes Pi as the average pairwise difference per site across all sample pairs,
 /// using the number of differences and comparable sites per pair to handle missing genotypes.
 ///
-/// # Arguments
-/// * `variants` - A slice of Variant structs containing genotype data for all samples.
-/// * `number_of_samples` - The total number of samples to compare.
-/// * `sequence_length` - The length of the sequence (kept for compatibility, unused in calculation).
-///
 /// # Returns
 /// The nucleotide diversity (Pi) as a float, or special values for edge cases:
 /// * `f64::INFINITY` if too few samples (n <= 1).
 /// * `f64::NAN` if no valid pair comparisons are possible.
 /// * `0.0` if no comparable sites exist between any pair.
-pub fn calculate_pi(variants: &[Variant], number_of_samples: usize, _sequence_length: i64) -> f64 {
-    // Handle edge case: too few samples to form pairs
-    if number_of_samples <= 1 {
+pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, u8)]) -> f64 {
+    if haplotypes_in_group.len() <= 1 {
         return f64::INFINITY;
     }
 
-    // Calculate total possible pairs (n * (n-1) / 2)
-    let total_possible_pairs = number_of_samples * (number_of_samples - 1) / 2;
+    let total_possible_pairs = haplotypes_in_group.len() * (haplotypes_in_group.len() - 1) / 2;
     if total_possible_pairs == 0 {
-        return f64::NAN; // Shouldn't happen with n > 1, but guarded
+        return f64::NAN;
     }
 
-    // Get pairwise differences and comparable sites for all pairs
-    let pairwise_differences = calculate_pairwise_differences(variants, number_of_samples);
+    let mut difference_sum = 0.0;
+    for i in 0..haplotypes_in_group.len() {
+        for j in (i + 1)..haplotypes_in_group.len() {
+            let (sample_i, side_i) = haplotypes_in_group[i];
+            let (sample_j, side_j) = haplotypes_in_group[j];
 
-    // Sum the per-pair differences per site (d_ij / l_ij)
-    let total_pairwise_differences_per_site: f64 = pairwise_differences
-        .iter()
-        .map(|&(_, difference_count, comparable_site_count)| {
-            if comparable_site_count > 0 {
-                difference_count as f64 / comparable_site_count as f64
-            } else {
-                0.0 // No comparable sites for this pair
+            let mut diff_count = 0;
+            let mut comparable_sites = 0;
+
+            for var in variants {
+                if let Some(gt_i) = var.genotypes.get(sample_i) {
+                    if let Some(gt_j) = var.genotypes.get(sample_j) {
+                        if let Some(alleles_i) = gt_i {
+                            if let Some(alleles_j) = gt_j {
+                                if let (Some(&a_i), Some(&a_j)) = (
+                                    alleles_i.get(side_i as usize),
+                                    alleles_j.get(side_j as usize),
+                                ) {
+                                    comparable_sites += 1;
+                                    if a_i != a_j {
+                                        diff_count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-        })
-        .sum();
 
-    // Compute Pi as the average pairwise difference per site
-    (2.0 / total_possible_pairs as f64) * total_pairwise_differences_per_site
+            if comparable_sites > 0 {
+                difference_sum += diff_count as f64 / comparable_sites as f64;
+            }
+        }
+    }
+
+    difference_sum / total_possible_pairs as f64
 }
 
 #[cfg(test)]

@@ -180,10 +180,15 @@ fn main() -> Result<(), VcfError> {
             ));
         }
 
-        let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
-
         // Needs to work with both filtered and unfiltered
-        let pi = calculate_pi(&unfiltered_variants, n, seq_length);
+        let group_haps: Vec<(usize, u8)> = sample_names
+            .iter()
+            .enumerate()
+            .flat_map(|(i, _)| vec![(i, 0), (i, 1)])
+            .collect();
+        let pi = calculate_pi(&unfiltered_variants, &group_haps);
+
+        let w_theta = calculate_watterson_theta(num_segsites, sample_names.len() * 2, seq_length);
 
         println!("\n{}", "Results:".green().bold());
         println!("\nSequence Length:{}", seq_length);

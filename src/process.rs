@@ -574,7 +574,7 @@ fn process_variants(
         for &(mapped_index, side) in &group_haps {
             if let Some(some_genotypes) = current_variant.genotypes.get(mapped_index) {
                 if let Some(genotype_vec) = some_genotypes {
-                    if let Some(&val) = genotype_vec.get(side) {
+                    if let Some(&val) = genotype_vec.get(side as usize) {
                         let locked_map = position_allele_map.lock();
                         if locked_map.get(&current_variant.position).is_some() {
                             allele_values.push(val);
@@ -590,7 +590,7 @@ fn process_variants(
     }
     let final_length = adjusted_sequence_length.unwrap_or(region_end - region_start + 1);
     let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, final_length);
-    let final_pi = calculate_pi(variants, region_hap_count, final_length);
+    let final_pi = calculate_pi(variants, &group_haps);
 
     for transcript in cds_regions {
         let mut assembled: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1328,6 +1328,10 @@ fn process_single_config_entry(
         "Calling process_vcf for {} from {} to {} (extended: {}-{})",
         chr, entry.interval.start, entry.interval.end, extended_region.start, extended_region.end
     );
+
+    let ext_start_1_based = extended_region.start as i64 + 1; // FIX LATER
+    let ext_end_1_based = extended_region.end as i64;
+
     let (
         unfiltered_variants,
         filtered_variants,
@@ -1339,8 +1343,8 @@ fn process_single_config_entry(
         vcf_file,
         Path::new(&args.reference_path),
         chr.to_string(),
-        extended_region.start as i64,
-        extended_region.end as i64,
+        ext_start_1_based,
+        ext_end_1_based,
         min_gq,
         mask.clone(),
         allow.clone(),

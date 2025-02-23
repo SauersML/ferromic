@@ -16,7 +16,7 @@ fn get_theta(py: Python, seg_sites: usize, n: usize, seq_length: i64) -> PyResul
 // Wrapper for `calculate_pi`
 // Expects variants as a list of [position: i64, genotypes: list of optional lists of u8]
 #[pyfunction]
-fn get_pi(py: Python, variants: &PyList, n: usize, seq_length: i64) -> PyResult<f64> {
+fn get_pi(py: Python, variants: &PyList, n: usize) -> PyResult<f64> {
     let rust_variants: Vec<Variant> = variants
         .iter()
         .map(|item| {
@@ -28,7 +28,10 @@ fn get_pi(py: Python, variants: &PyList, n: usize, seq_length: i64) -> PyResult<
         })
         .collect::<PyResult<Vec<Variant>>>()?;
 
-    py.allow_threads(|| Ok(stats::calculate_pi(&rust_variants, n, seq_length)))
+    py.allow_threads(|| {
+        let hap_group: Vec<(usize, u8)> = (0..n).map(|i| (i, 0)).collect();
+        Ok(stats::calculate_pi(&rust_variants, &hap_group))
+    })
 }
 
 #[pymodule]
