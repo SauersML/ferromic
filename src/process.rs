@@ -246,8 +246,7 @@ impl CdsSeq {
 #[derive(Debug, Clone)]
 pub struct ConfigEntry {
     pub seqname: String,
-    pub start: i64,
-    pub end: i64,
+    pub interval: ZeroBasedHalfOpen,
     pub samples_unfiltered: HashMap<String, (u8, u8)>,
     pub samples_filtered: HashMap<String, (u8, u8)>,
 }
@@ -2310,7 +2309,8 @@ fn process_variant(
                                           // Only variants within the range get passed the collector which increments statistics.
                                           // For variants outside the range, the consumer thread does not send any result to the collector.
                                           // If this line is moved above the early return return Ok(None) in the range check, then it would increment all variants, not just those in the regions
-                                          // This would mean that the maximum number of variants filtered could be below the maximum number of variants, in the case that there are variants outside of the ranges (which would not even get far enough to need to be filtered, but would be included in the total).
+                                          // This would mean that the maximum number of variants filtered could be below the maximum number of variants,
+                                          // in the case that there are variants outside of the ranges (which would not even get far enough to need to be filtered, but would be included in the total).
 
     let adjusted_pos = pos - 1; // Adjust VCF position (one-based) to zero-based
 
