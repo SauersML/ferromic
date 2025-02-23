@@ -1933,7 +1933,8 @@ pub fn process_vcf(
     progress_bar.set_style(style);
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = Arc::clone(&processing_complete);
-    let progress_thread = thread::spawn(|| {
+    // Spawn a thread to update the progress bar until processing is complete
+    let progress_thread = thread::spawn(move || {
         while !processing_complete_clone.load(Ordering::Relaxed) {
             progress_bar.tick();
             thread::sleep(Duration::from_millis(100));
