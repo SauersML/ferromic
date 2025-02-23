@@ -606,7 +606,7 @@ fn process_variants(
         let mut offset_map = Vec::new();
         let mut accumulated_length = 0;
         for &(seg_start, seg_end, seg_strand, _frame) in &transcript.segments {
-            let seg_len = seg_end.saturating_sub(seg_start).saturating_add(1) as usize;
+            let mut seg_len = seg_end.saturating_sub(seg_start).saturating_add(1) as usize;
             if seg_start < 0 {
                 eprintln!(
                     "Skipping negative start {} for transcript {} on {}",
@@ -617,21 +617,32 @@ fn process_variants(
             let base_idx = {
                 let offset = seg_start as i64 - (extended_region.start as i64);
                 if offset < 0 {
+                    let overlap = seg_len.saturating_sub((-offset) as usize);
+                    if overlap == 0 {
+                        eprintln!(
+                            "Skipping partial out-of-bounds {}..{} for transcript {} on {}",
+                            seg_start, seg_end, transcript.transcript_id, chromosome
+                        );
+                        continue;
+                    }
+                    seg_len = overlap;
+                }
+
+                offset as usize
+            };
+            let end_idx = base_idx + seg_len;
+            if end_idx > reference_sequence.len() {
+                let overlap2 = reference_sequence.len().saturating_sub(base_idx);
+                if overlap2 == 0 {
                     eprintln!(
-                        "Skipping out-of-bounds {}..{} for transcript {} on {}",
+                        "Skipping partial out-of-bounds {}..{} for transcript {} on {}",
                         seg_start, seg_end, transcript.transcript_id, chromosome
                     );
                     continue;
                 }
-                offset as usize
-            };
-            if base_idx.checked_add(seg_len).unwrap_or(usize::MAX) > reference_sequence.len() {
-                eprintln!(
-                    "Skipping out-of-bounds {}..{} for transcript {} on {}",
-                    seg_start, seg_end, transcript.transcript_id, chromosome
-                );
-                continue;
+                seg_len = overlap2;
             }
+
             for (mapped_index, side) in &group_haps {
                 let label = match *side {
                     0 => format!("{}_L", sample_names[*mapped_index]),
