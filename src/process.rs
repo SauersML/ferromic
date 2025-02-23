@@ -1913,12 +1913,12 @@ pub fn process_vcf(
 
     // Progress UI setup.
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
-    let progress_bar = if is_gzipped {
+    let progress_bar = Arc::new(if is_gzipped {
         ProgressBar::new_spinner()
     } else {
         let file_size = fs::metadata(file)?.len();
         ProgressBar::new(file_size)
-    };
+    });
     let style = if is_gzipped {
         ProgressStyle::default_spinner()
             .template("{spinner:.bold.green} VCF {elapsed_precise} {msg}")
@@ -1933,13 +1933,13 @@ pub fn process_vcf(
     progress_bar.set_style(style);
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = Arc::clone(&processing_complete);
-    // Spawn a thread to update the progress bar until processing is complete
+    let progress_bar_clone = Arc::clone(&progress_bar); // Clone Arc for progress thread
     let progress_thread = thread::spawn(move || {
         while !processing_complete_clone.load(Ordering::Relaxed) {
-            progress_bar.tick();
+            progress_bar_clone.tick();
             thread::sleep(Duration::from_millis(100));
         }
-        progress_bar.finish_with_message("Finished reading VCF");
+        progress_bar_clone.finish_with_message("Finished reading VCF");
     });
 
     // Parse header lines.
@@ -2054,44 +2054,14 @@ pub fn process_vcf(
                         }
 
                         // Write SeqInfo for unfiltered
-                        {
-                            let mut storage = seqinfo_storage_unfiltered.lock();
-                            for (sample_idx, genotype_opt) in variant.genotypes.iter().enumerate() {
-                                if let Some(gdata) = genotype_opt {
-                                    for (hap_side, allele_value) in gdata.iter().enumerate() {
-                                        storage.push(SeqInfo {
-                                            sample_index: sample_idx,
-                                            haplotype_group: *allele_value,
-                                            vcf_allele: Some(*allele_value),
-                                            nucleotide: None,
-                                            chromosome: chr.to_string(),
-                                            position: variant.position,
-                                            filtered: false,
-                                        });
-                                    }
-                                }
-                            }
-                        }
+                        // ???
+                        //
+                        // TODO
 
                         // Write SeqInfo for filtered
-                        if passes {
-                            let mut storage = seqinfo_storage_filtered.lock();
-                            for (sample_idx, genotype_opt) in variant.genotypes.iter().enumerate() {
-                                if let Some(gdata) = genotype_opt {
-                                    for (hap_side, allele_value) in gdata.iter().enumerate() {
-                                        storage.push(SeqInfo {
-                                            sample_index: sample_idx,
-                                            haplotype_group: *allele_value,
-                                            vcf_allele: Some(*allele_value),
-                                            nucleotide: None,
-                                            chromosome: chr.to_string(),
-                                            position: variant.position,
-                                            filtered: true,
-                                        });
-                                    }
-                                }
-                            }
-                        }
+                        // ???
+                        //
+                        // TODO
 
                         {
                             let mut global_miss = missing_data_info.lock();
