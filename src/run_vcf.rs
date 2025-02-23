@@ -187,6 +187,8 @@ fn main() -> Result<(), VcfError> {
         let tot_pair_diff: usize = pairwise_diffs.iter().map(|&(_, count, _)| count).sum();
 
         let w_theta = calculate_watterson_theta(num_segsites, n, seq_length);
+
+        // Needs to work with both filtered and unfiltered
         let pi = calculate_pi(tot_pair_diff, n, seq_length);
 
         println!("\n{}", "Results:".green().bold());
