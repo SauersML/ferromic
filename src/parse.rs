@@ -1,4 +1,4 @@
-use crate::process::{ConfigEntry, TranscriptCDS, VcfError};
+use crate::process::{ConfigEntry, TranscriptCDS, VcfError, ZeroBasedHalfOpen};
 
 use colored::Colorize;
 use flate2::read::MultiGzDecoder;
@@ -123,18 +123,17 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
             .trim()
             .trim_start_matches("chr")
             .to_string();
-        let raw_start: i64 = record
+        let start_pos: i64 = record
             .get(1)
             .ok_or(VcfError::Parse("Missing start".to_string()))?
             .parse()
             .map_err(|_| VcfError::Parse("Invalid start".to_string()))?;
-        let raw_end: i64 = record
+        let end_pos: i64 = record
             .get(2)
             .ok_or(VcfError::Parse("Missing end".to_string()))?
             .parse()
             .map_err(|_| VcfError::Parse("Invalid end".to_string()))?;
-
-        let interval = ZeroBasedHalfOpen::from_1based_inclusive(raw_start, raw_end);
+        let interval = ZeroBasedHalfOpen::from_1based_inclusive(start_pos, end_pos);
 
         let mut samples_unfiltered = HashMap::new();
         let mut samples_filtered = HashMap::new();
@@ -186,7 +185,7 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
         if samples_unfiltered.is_empty() {
             println!(
                 "Warning: No valid genotypes found for region {}:{}-{}",
-                seqname, start, end
+                seqname, raw_start, raw_end
             );
             continue;
         }

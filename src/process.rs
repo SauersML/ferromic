@@ -1308,23 +1308,23 @@ fn process_single_config_entry(
 ) -> Result<Option<CsvRowData>, VcfError> {
     println!(
         "Processing entry: {}:{}-{}",
-        entry.seqname, entry.start, entry.end
+        entry.seqname, entry.interval.start, entry.interval.end
     );
 
     // Filter transcripts to only those overlapping [start..end].
     let local_cds = filter_and_log_transcripts(
         cds_regions.to_vec(),
         QueryRegion {
-            start: entry.start,
-            end: entry.end,
+            start: entry.interval.start as i64,
+            end: entry.interval.end as i64,
         },
     );
 
     // Calculate EXTENDED region boundaries
     let chr_length = ref_sequence.len() as i64;
     let extended_region = ZeroBasedHalfOpen::from_1based_inclusive(
-        (entry.start - 3_000_000).max(1),
-        (entry.end + 3_000_000).min(chr_length),
+        (entry.interval.start as i64 - 3_000_000).max(0),
+        ((entry.interval.end as i64) + 3_000_000).min(chr_length),
     );
 
     let seqinfo_storage_unfiltered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
@@ -1334,7 +1334,7 @@ fn process_single_config_entry(
 
     println!(
         "Calling process_vcf for {} from {} to {} (extended: {}-{})",
-        chr, entry.start, entry.end, extended_region.start, extended_region.end
+        chr, entry.interval.start, entry.interval.end, extended_region.start, extended_region.end
     );
     let (
         unfiltered_variants,
@@ -1346,7 +1346,7 @@ fn process_single_config_entry(
     ) = match process_vcf(
         vcf_file,
         Path::new(&args.reference_path),
-        chr,
+        chr.to_string(),
         extended_region.start as i64,
         extended_region.end as i64,
         min_gq,
@@ -1377,10 +1377,10 @@ fn process_single_config_entry(
     );
 
     // Basic length info: naive and adjusted
-    let sequence_length = entry.end - entry.start + 1;
+    let sequence_length = (entry.interval.end - entry.interval.start) as i64;
     let adjusted_sequence_length = calculate_adjusted_sequence_length(
-        entry.start,
-        entry.end,
+        entry.interval.start as i64,
+        entry.interval.end as i64,
         allow.as_ref().and_then(|a| a.get(&chr.to_string())),
         mask.as_ref().and_then(|m| m.get(&chr.to_string())),
     );
@@ -1406,7 +1406,7 @@ fn process_single_config_entry(
         None => {
             println!(
                 "No haplotypes found for group 0 (filtered) in region {}-{}",
-                entry.start, entry.end
+                entry.interval.start as i64, entry.interval.end as i64
             );
             return Ok(None);
         }
@@ -1433,7 +1433,7 @@ fn process_single_config_entry(
         None => {
             println!(
                 "No haplotypes found for group 1 (filtered) in region {}-{}",
-                entry.start, entry.end
+                entry.interval.start as i64, entry.interval.end as i64
             );
             return Ok(None);
         }
@@ -1445,7 +1445,10 @@ fn process_single_config_entry(
     // Stats for unfiltered group 0
     let region_variants_unfiltered: Vec<_> = unfiltered_variants
         .iter()
-        .filter(|v| v.position >= entry.start && v.position <= entry.end) // ORIGINAL region
+        .filter(|v| {
+            (v.position as usize) >= entry.interval.start
+                && (v.position as usize) < entry.interval.end
+        }) // ORIGINAL region
         .cloned()
         .collect();
 
@@ -1469,7 +1472,7 @@ fn process_single_config_entry(
         None => {
             println!(
                 "No haplotypes found for group 0 in region {}-{}",
-                entry.start, entry.end
+                entry.interval.start as i64, entry.interval.end as i64
             );
             return Ok(None);
         }
@@ -1496,7 +1499,7 @@ fn process_single_config_entry(
         None => {
             println!(
                 "No haplotypes found for group 1 in region {}-{}",
-                entry.start, entry.end
+                entry.interval.start as i64, entry.interval.end as i64
             );
             return Ok(None);
         }
@@ -1533,7 +1536,10 @@ fn process_single_config_entry(
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
     };
-    println!("Finished stats for region {}-{}.", entry.start, entry.end);
+    println!(
+        "Finished stats for region {}-{}.",
+        entry.interval.start, entry.interval.end
+    );
 
     Ok(Some(row_data))
 }
@@ -1870,7 +1876,7 @@ fn filter_and_log_transcripts(
 pub fn process_vcf(
     file: &Path,
     reference_path: &Path,
-    chr: &str,
+    chr: String,
     start: i64,
     end: i64,
     min_gq: u16,
@@ -1935,7 +1941,7 @@ pub fn process_vcf(
     progress_bar.set_style(style);
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = Arc::clone(&processing_complete);
-    let progress_thread = thread::spawn(move || {
+    let progress_thread = thread::spawn(|| {
         while !processing_complete_clone.load(Ordering::Relaxed) {
             progress_bar.tick();
             thread::sleep(Duration::from_millis(100));

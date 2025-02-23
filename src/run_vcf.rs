@@ -105,7 +105,7 @@ fn main() -> Result<(), VcfError> {
         ) = process_vcf(
             &vcf_file,
             &Path::new(&args.reference_path),
-            &chr,
+            chr.to_string(),
             start,
             end,
             args.min_gq,
