@@ -562,7 +562,6 @@ fn process_variants(
     }
 
     let mut region_segsites = 0;
-    let mut total_pairwise_diff = 0;
     let region_hap_count = group_haps.len();
     if variants.is_empty() {
         return Ok(Some((0, 0.0, 0.0, region_hap_count)));
@@ -588,17 +587,10 @@ fn process_variants(
         if distinct_alleles.len() > 1 {
             region_segsites += 1;
         }
-        for i in 0..allele_values.len() {
-            for j in (i + 1)..allele_values.len() {
-                if allele_values[i] != allele_values[j] {
-                    total_pairwise_diff += 1;
-                }
-            }
-        }
     }
     let final_length = adjusted_sequence_length.unwrap_or(region_end - region_start + 1);
     let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, final_length);
-    let final_pi = calculate_pi(total_pairwise_diff, region_hap_count, final_length);
+    let final_pi = calculate_pi(variants, region_hap_count, final_length);
 
     for transcript in cds_regions {
         let mut assembled: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1391,8 +1383,8 @@ fn process_single_config_entry(
         &sample_names,
         0, // Haplotype group
         &entry.samples_filtered,
-        entry.start, // Original start for statistics
-        entry.end,   // Original end for statistics
+        entry.interval.start as i64, // Original start for statistics
+        entry.interval.end as i64,   // Original end for statistics
         extended_region,
         Some(adjusted_sequence_length),
         seqinfo_storage_filtered.clone(),
@@ -1418,8 +1410,8 @@ fn process_single_config_entry(
         &sample_names,
         1, // Haplotype group
         &entry.samples_filtered,
-        entry.start, // Original start for statistics
-        entry.end,   // Original end for statistics
+        entry.interval.start as i64, // Original start for statistics
+        entry.interval.end as i64,   // Original end for statistics
         extended_region,
         Some(adjusted_sequence_length),
         seqinfo_storage_filtered.clone(),
@@ -1457,8 +1449,8 @@ fn process_single_config_entry(
         &sample_names,
         0, //Haplotype group
         &entry.samples_unfiltered,
-        entry.start, // Original start for statistics
-        entry.end,   // Original end for statistics
+        entry.interval.start as i64, // Original start for statistics
+        entry.interval.end as i64,   // Original end for statistics
         extended_region,
         None,
         seqinfo_storage_unfiltered.clone(),
@@ -1484,8 +1476,8 @@ fn process_single_config_entry(
         &sample_names,
         1, //Haplotype Group
         &entry.samples_unfiltered,
-        entry.start, // Original start for statistics
-        entry.end,   // Original end for statistics
+        entry.interval.start as i64, // Original start for statistics
+        entry.interval.end as i64,   // Original end for statistics
         extended_region,
         None,
         seqinfo_storage_unfiltered.clone(),
@@ -1511,8 +1503,8 @@ fn process_single_config_entry(
     // Build final row data
     let row_data = CsvRowData {
         seqname: entry.seqname,
-        region_start: entry.start,
-        region_end: entry.end,
+        region_start: entry.interval.start as i64,
+        region_end: entry.interval.end as i64,
         seq_len_0: sequence_length,
         seq_len_1: sequence_length,
         seq_len_adj_0: adjusted_sequence_length,
