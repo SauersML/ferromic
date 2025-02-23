@@ -125,36 +125,62 @@ pub fn count_segregating_sites(variants: &[Variant]) -> usize {
         .count()
 }
 
+/// Calculates pairwise differences and comparable sites between all sample pairs.
+///
+/// This function computes, for each pair of samples (sample_idx_i, sample_idx_j), the number of differences
+/// in their genotypes and the number of sites where both have data, handling partial missingness.
+///
+/// # Arguments
+/// * `variants` - A slice of Variant structs containing genotype data for all samples.
+/// * `number_of_samples` - The total number of samples to compare.
+///
+/// # Returns
+/// A vector of tuples, each containing:
+/// * `(sample_idx_i, sample_idx_j)` - Indices of the sample pair.
+/// * `difference_count` - Number of sites where genotypes differ (d_ij).
+/// * `comparable_site_count` - Number of sites where both samples have genotypes (l_ij).
 pub fn calculate_pairwise_differences(
     variants: &[Variant],
-    n: usize,
-) -> Vec<((usize, usize), usize, Vec<i64>)> {
-    let variants = Arc::new(variants);
-    // Iterate over all sample indices from 0 to n - 1
-    (0..n)
+    number_of_samples: usize,
+) -> Vec<((usize, usize), usize, usize)> {
+    // Wrap variants in an Arc for thread-safe sharing across parallel tasks
+    let variants_shared = Arc::new(variants);
+
+    // Parallel iteration over all first sample indices (0 to n-1)
+    (0..number_of_samples)
         .into_par_iter()
-        .flat_map(|i| {
-            let variants = Arc::clone(&variants);
-            // For each i, iterate over j from i + 1 to n - 1
-            (i + 1..n)
+        .flat_map(|sample_idx_i| {
+            // Clone the Arc for each thread to access variants
+            let variants_local = Arc::clone(&variants_shared);
+            // Parallel iteration over second sample indices (i+1 to n-1) to avoid duplicate pairs
+            (sample_idx_i + 1..number_of_samples)
                 .into_par_iter()
-                .map(move |j| {
-                    let mut diff_count = 0;
-                    let mut diff_positions = Vec::new();
-                    // For each variant, compare genotypes of samples i and j
-                    for v in variants.iter() {
-                        if let (Some(gi), Some(gj)) = (&v.genotypes[i], &v.genotypes[j]) {
-                            if gi != gj {
-                                diff_count += 1;
-                                diff_positions.push(v.position);
+                .map(move |sample_idx_j| {
+                    let mut difference_count = 0; // Count of genotype differences (d_ij)
+                    let mut comparable_site_count = 0; // Count of sites with data for both samples (l_ij)
+
+                    // Iterate over all variants to compare genotypes between the pair
+                    for variant in variants_local.iter() {
+                        if let (Some(genotype_i), Some(genotype_j)) = (
+                            &variant.genotypes[sample_idx_i],
+                            &variant.genotypes[sample_idx_j],
+                        ) {
+                            // Both samples have genotype data at this variant
+                            comparable_site_count += 1;
+                            if genotype_i != genotype_j {
+                                // Genotypes differ; assumes haploid data (Vec<u8> with one allele)
+                                difference_count += 1;
                             }
-                        } else {
-                            // Skip if either genotype is missing
-                            continue;
                         }
+                        // Skip if either genotype is missing (None)
                     }
-                    // Return the pair of sample indices, difference count, and positions
-                    ((i, j), diff_count, diff_positions)
+
+                    // Return the pair's indices, differences, and comparable sites
+                    (
+                        (sample_idx_i, sample_idx_j),
+                        difference_count,
+                        comparable_site_count,
+                    )
                 })
                 .collect::<Vec<_>>()
         })
@@ -178,16 +204,50 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
     seg_sites as f64 / harmonic_value / seq_length as f64
 }
 
-pub fn calculate_pi(tot_pair_diff: usize, n: usize, seq_length: i64) -> f64 {
-    // Handle edge cases
-    if n <= 1 || seq_length == 0 {
-        return f64::INFINITY; // Return infinity if only 1 or fewer haplotypes or if sequence length is zero
+/// Calculates nucleotide diversity (Pi) from variant data, accounting for partial missing data.
+///
+/// This function computes Pi as the average pairwise difference per site across all sample pairs,
+/// using the number of differences and comparable sites per pair to handle missing genotypes.
+///
+/// # Arguments
+/// * `variants` - A slice of Variant structs containing genotype data for all samples.
+/// * `number_of_samples` - The total number of samples to compare.
+/// * `sequence_length` - The length of the sequence (kept for compatibility, unused in calculation).
+///
+/// # Returns
+/// The nucleotide diversity (Pi) as a float, or special values for edge cases:
+/// * `f64::INFINITY` if too few samples (n <= 1).
+/// * `f64::NAN` if no valid pair comparisons are possible.
+/// * `0.0` if no comparable sites exist between any pair.
+pub fn calculate_pi(variants: &[Variant], number_of_samples: usize, _sequence_length: i64) -> f64 {
+    // Handle edge case: too few samples to form pairs
+    if number_of_samples <= 1 {
+        return f64::INFINITY;
     }
-    let num_comparisons = n * (n - 1) / 2;
-    if num_comparisons == 0 {
-        return f64::NAN; // Return NaN if there's somehow no valid pairwise comparison
+
+    // Calculate total possible pairs (n * (n-1) / 2)
+    let total_possible_pairs = number_of_samples * (number_of_samples - 1) / 2;
+    if total_possible_pairs == 0 {
+        return f64::NAN; // Shouldn't happen with n > 1, but guarded
     }
-    tot_pair_diff as f64 / num_comparisons as f64 / seq_length as f64
+
+    // Get pairwise differences and comparable sites for all pairs
+    let pairwise_differences = calculate_pairwise_differences(variants, number_of_samples);
+
+    // Sum the per-pair differences per site (d_ij / l_ij)
+    let total_pairwise_differences_per_site: f64 = pairwise_differences
+        .iter()
+        .map(|&(_, difference_count, comparable_site_count)| {
+            if comparable_site_count > 0 {
+                difference_count as f64 / comparable_site_count as f64
+            } else {
+                0.0 // No comparable sites for this pair
+            }
+        })
+        .sum();
+
+    // Compute Pi as the average pairwise difference per site
+    (2.0 / total_possible_pairs as f64) * total_pairwise_differences_per_site
 }
 
 #[cfg(test)]

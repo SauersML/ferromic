@@ -123,16 +123,18 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
             .trim()
             .trim_start_matches("chr")
             .to_string();
-        let start: i64 = record
+        let raw_start: i64 = record
             .get(1)
             .ok_or(VcfError::Parse("Missing start".to_string()))?
             .parse()
             .map_err(|_| VcfError::Parse("Invalid start".to_string()))?;
-        let end: i64 = record
+        let raw_end: i64 = record
             .get(2)
             .ok_or(VcfError::Parse("Missing end".to_string()))?
             .parse()
             .map_err(|_| VcfError::Parse("Invalid end".to_string()))?;
+
+        let interval = ZeroBasedHalfOpen::from_1based_inclusive(raw_start, raw_end);
 
         let mut samples_unfiltered = HashMap::new();
         let mut samples_filtered = HashMap::new();
@@ -191,8 +193,7 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
         entries.push(ConfigEntry {
             seqname,
-            start,
-            end,
+            interval,
             samples_unfiltered,
             samples_filtered,
         });
@@ -605,6 +606,14 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptCDS>, 
 
     for (tid, mut segments) in transcript_map {
         segments.sort_by_key(|&(s, _, _, _)| s);
+
+        if !segments.is_empty() {
+            let strand = segments[0].2;
+            if strand == '-' {
+                segments.reverse();
+            }
+        }
+
         transcripts_vec.push(TranscriptCDS {
             transcript_id: tid,
             segments,
