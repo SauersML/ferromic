@@ -50,7 +50,7 @@ pub struct Args {
     #[arg(short, long = "output_file")]
     pub output_file: Option<String>,
 
-    // Minimum genotype quality
+    // Minimum genotype quality (variants for all samples will be filtered if one sample has a variant under the quality threshold)
     #[arg(long = "min_gq", default_value = "30")]
     pub min_gq: u16,
 
@@ -2402,6 +2402,8 @@ fn process_variant(
         _filtering_stats._filtered_variants += 1;
         _filtering_stats.filtered_positions.insert(pos);
         _filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
+
+        // We skip for ALL samples, not just the sample with low GQ.
 
         let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
         let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
