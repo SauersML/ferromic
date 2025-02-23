@@ -207,25 +207,26 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     Ok(entries)
 }
 
-pub fn parse_region(region: &str) -> Result<(i64, i64), VcfError> {
+pub fn parse_region(region: &str) -> Result<ZeroBasedHalfOpen, VcfError> {
     let parts: Vec<&str> = region.split('-').collect();
     if parts.len() != 2 {
         return Err(VcfError::InvalidRegion(
             "Invalid region format. Use start-end".to_string(),
         ));
     }
-    let start: i64 = parts[0]
+    let start_1based: i64 = parts[0]
         .parse()
         .map_err(|_| VcfError::InvalidRegion("Invalid start position".to_string()))?;
-    let end: i64 = parts[1]
+    let end_1based: i64 = parts[1]
         .parse()
         .map_err(|_| VcfError::InvalidRegion("Invalid end position".to_string()))?;
-    if start >= end {
+    if start_1based >= end_1based {
         return Err(VcfError::InvalidRegion(
             "Start position must be less than end position".to_string(),
         ));
     }
-    Ok((start, end))
+    let interval = ZeroBasedHalfOpen::from_1based_inclusive(start_1based, end_1based);
+    Ok(interval)
 }
 
 pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
