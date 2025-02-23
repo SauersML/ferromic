@@ -185,7 +185,7 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
         if samples_unfiltered.is_empty() {
             println!(
                 "Warning: No valid genotypes found for region {}:{}-{}",
-                seqname, raw_start, raw_end
+                seqname, start_pos, end_pos
             );
             continue;
         }
