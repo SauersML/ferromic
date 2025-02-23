@@ -30,7 +30,21 @@ fn main() -> Result<(), VcfError> {
     // Parse the mask file (exclude regions)
     let mask_regions = if let Some(mask_file) = args.mask_file.as_ref() {
         println!("Mask file provided: {}", mask_file);
-        Some(Arc::new(parse_regions_file(Path::new(mask_file))?))
+        // Convert ZeroBasedHalfOpen to (i64, i64) tuples for compatibility with process_config_entries
+        Some(Arc::new(
+            parse_regions_file(Path::new(mask_file))?
+                .into_iter()
+                .map(|(chr, regions)| {
+                    (
+                        chr,
+                        regions
+                            .into_iter()
+                            .map(|r| (r.start as i64, r.end as i64))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        ))
     } else {
         None
     };
@@ -40,11 +54,24 @@ fn main() -> Result<(), VcfError> {
         println!("Allow file provided: {}", allow_file);
         let parsed_allow = parse_regions_file(Path::new(allow_file))?;
         println!("Parsed Allow Regions: {:?}", parsed_allow);
-        Some(Arc::new(parsed_allow))
+        // Convert ZeroBasedHalfOpen to (i64, i64) tuples for compatibility with process_config_entries
+        Some(Arc::new(
+            parsed_allow
+                .into_iter()
+                .map(|(chr, regions)| {
+                    (
+                        chr,
+                        regions
+                            .into_iter()
+                            .map(|r| (r.start as i64, r.end as i64))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        ))
     } else {
         None
     };
-
     println!("{}", "Starting VCF diversity analysis...".green());
 
     if let Some(config_file) = args.config_file.as_ref() {
@@ -72,7 +99,9 @@ fn main() -> Result<(), VcfError> {
         println!("Chromosome provided: {}", chr);
         let (start, end) = if let Some(region) = args.region.as_ref() {
             println!("Region provided: {}", region);
-            parse_region(region)?
+            // Extract i64 start and end from ZeroBasedHalfOpen for process_vcf compatibility
+            let region = parse_region(region)?;
+            (region.start as i64, region.end as i64)
         } else {
             println!("No region provided, using default region covering most of the chromosome.");
             (1, i64::MAX)
