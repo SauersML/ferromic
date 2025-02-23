@@ -4,21 +4,6 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-fn calculate_masked_length(region_start: i64, region_end: i64, mask: &[(i64, i64)]) -> i64 {
-    // Not used... for now
-    let mut total = 0;
-    for &(start, end) in mask {
-        let overlap_start = std::cmp::max(region_start, start);
-        let overlap_end = std::cmp::min(region_end, end);
-        if overlap_start <= overlap_end {
-            total += overlap_end - overlap_start;
-        } else if end > region_end {
-            break; // No further overlaps possible
-        }
-    }
-    total
-}
-
 pub fn calculate_adjusted_sequence_length(
     region_start: i64,
     region_end: i64,
