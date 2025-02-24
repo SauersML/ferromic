@@ -652,22 +652,32 @@ def create_visualization(matrix_0, matrix_1, cds, result):
 
 
 
-
-
 def analyze_cds_parallel(args):
     """Analyze a single CDS"""
     df_cds, cds = args
 
+    print(f"\n=== Starting analysis for CDS: {cds} ===")
+    
     # Check cache first
+    print(f"Checking cache for CDS: {cds}")
     cached_result = load_cached_result(cds)
     if cached_result is not None:
+        print(f"Found cached result for {cds}. Skipping computation.")
+        print(f"Cached result keys: {cached_result.keys()}")
         return cds, cached_result
+    else:
+        print(f"No cached result found for {cds}. Proceeding with analysis.")
 
     # Create pairwise dictionary
+    print(f"Creating pairwise dictionary for {cds}")
     pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega']
                      for _, row in df_cds.iterrows()}
+    print(f"Number of pairwise comparisons: {len(pairwise_dict)}")
+    print(f"Sample pairwise keys: {list(pairwise_dict.keys())[:5]}")
+    print(f"Sample omega values: {list(pairwise_dict.values())[:5]}")
 
     # Collect all unique sequences from both 'Seq1' and 'Seq2' columns
+    print(f"Collecting unique sequences for {cds}")
     all_seqs = pd.concat([df_cds['Seq1'], df_cds['Seq2']]).unique()
     sequences_0 = np.array([seq for seq in all_seqs if not seq.endswith('1')])
     sequences_1 = np.array([seq for seq in all_seqs if seq.endswith('1')])
@@ -675,9 +685,15 @@ def analyze_cds_parallel(args):
 
     n0 = len(sequences_0)
     n1 = len(sequences_1)
+    print(f"Total unique sequences: {len(all_seqs)}")
+    print(f"Direct sequences (Group 0): {n0} - Sample: {sequences_0[:3]}")
+    print(f"Inverted sequences (Group 1): {n1} - Sample: {sequences_1[:3]}")
 
     # Generate matrices for visualization (do this first)
+    print(f"Generating matrices for {cds}")
     matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
+    print(f"Matrix_0 shape: {matrix_0.shape if matrix_0 is not None else 'None'}")
+    print(f"Matrix_1 shape: {matrix_1.shape if matrix_1 is not None else 'None'}")
 
     # Initialize base result dictionary with matrices
     result = {
@@ -685,10 +701,14 @@ def analyze_cds_parallel(args):
         'matrix_1': matrix_1,
         'pairwise_comparisons': set(pairwise_dict.keys())
     }
-
+    print(f"Initialized result dictionary with {len(result['pairwise_comparisons'])} comparisons")
 
     # If either matrix is None, it means one group had no sequences.
     if matrix_0 is None or matrix_1 is None:
+        print(f"WARNING: One or both matrices are None for {cds}")
+        print(f"Matrix_0 is {'None' if matrix_0 is None else 'valid'}")
+        print(f"Matrix_1 is {'None' if matrix_1 is None else 'valid'}")
+        print(f"Reason: Likely due to n0={n0} or n1={n1} being zero")
         # Not enough data to proceed
         result.update({
             'observed_effect_size': np.nan,
@@ -699,15 +719,22 @@ def analyze_cds_parallel(args):
             'num_comp_group_1': 0,
             'std_err': np.nan
         })
+        print(f"Updated result with NaN values due to insufficient data")
         # Return early
         save_cached_result(cds, result)
+        print(f"Saved result to cache and returning early for {cds}")
         return cds, result
     
     valid_per_seq_group_0 = np.sum(~np.isnan(matrix_0), axis=1)
     valid_per_seq_group_1 = np.sum(~np.isnan(matrix_1), axis=1)
+    print(f"Valid comparisons per sequence in Group 0: {valid_per_seq_group_0}")
+    print(f"Valid comparisons per sequence in Group 1: {valid_per_seq_group_1}")
+    print(f"Total valid comparisons in Matrix_0: {np.nansum(~np.isnan(matrix_0))}")
+    print(f"Total valid comparisons in Matrix_1: {np.nansum(~np.isnan(matrix_1))}")
 
     # Set minimum required sequences per group
     min_sequences_per_group = 3
+    print(f"Minimum sequences per group required: {min_sequences_per_group}")
 
     if (n0 < min_sequences_per_group or 
         n1 < min_sequences_per_group or
@@ -715,7 +742,13 @@ def analyze_cds_parallel(args):
         np.nansum(~np.isnan(matrix_1)) < 3 or
         not all(valid_per_seq_group_0 >= 5) or
         not all(valid_per_seq_group_1 >= 5)):
-    
+        print(f"WARNING: CDS {cds} failed minimum requirements:")
+        print(f"  - n0={n0} < {min_sequences_per_group}: {n0 < min_sequences_per_group}")
+        print(f"  - n1={n1} < {min_sequences_per_group}: {n1 < min_sequences_per_group}")
+        print(f"  - Matrix_0 valid comparisons={np.nansum(~np.isnan(matrix_0))} < 3: {np.nansum(~np.isnan(matrix_0)) < 3}")
+        print(f"  - Matrix_1 valid comparisons={np.nansum(~np.isnan(matrix_1))} < 3: {np.nansum(~np.isnan(matrix_1)) < 3}")
+        print(f"  - All Group 0 seqs >= 5 valid: {all(valid_per_seq_group_0 >= 5)} (Min: {min(valid_per_seq_group_0) if len(valid_per_seq_group_0) > 0 else 'N/A'})")
+        print(f"  - All Group 1 seqs >= 5 valid: {all(valid_per_seq_group_1 >= 5)} (Min: {min(valid_per_seq_group_1) if len(valid_per_seq_group_1) > 0 else 'N/A'})")
         # Not enough sequences/valid comparisons
         result.update({
             'observed_effect_size': np.nan,
@@ -726,16 +759,27 @@ def analyze_cds_parallel(args):
             'num_comp_group_1': 0,
             'std_err': np.nan
         })
+        print(f"Result updated with NaN values due to failing checks")
     else:
+        print(f"CDS {cds} passed all minimum requirements. Proceeding with statistical analysis.")
         # Proceed with analysis
         worker_result = analysis_worker((
             all_sequences, n0, pairwise_dict,
             sequences_0, sequences_1
         ))
+        print(f"Analysis worker completed for {cds}")
+        print(f"Worker result: {worker_result}")
         result.update(worker_result)
     
     save_cached_result(cds, result)
+    print(f"Saved result to cache for {cds}")
+    print(f"Final result keys: {result.keys()}")
+    print(f"Returning analysis for {cds}")
     return cds, result
+
+
+
+
 
 
 def parse_cds_coordinates(cds_name):
