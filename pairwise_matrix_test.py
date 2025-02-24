@@ -676,18 +676,36 @@ def analyze_cds_parallel(args):
     print(f"Sample pairwise keys: {list(pairwise_dict.keys())[:5]}")
     print(f"Sample omega values: {list(pairwise_dict.values())[:5]}")
 
-    # Collect all unique sequences from both 'Seq1' and 'Seq2' columns
+    # Collect all unique sequences and assign groups based on Group1 and Group2 columns
     print(f"Collecting unique sequences for {cds}")
     all_seqs = pd.concat([df_cds['Seq1'], df_cds['Seq2']]).unique()
-    sequences_0 = np.array([seq for seq in all_seqs if not seq.endswith('1')])
-    sequences_1 = np.array([seq for seq in all_seqs if seq.endswith('1')])
+    
+    # Map each sequence to its group based on the first occurrence in df_cds
+    seq_to_group = {}
+    for seq in all_seqs:
+        # Check Seq1 first
+        seq1_matches = df_cds[df_cds['Seq1'] == seq]
+        if not seq1_matches.empty:
+            seq_to_group[seq] = seq1_matches['Group1'].iloc[0]
+        # If not in Seq1, check Seq2
+        else:
+            seq2_matches = df_cds[df_cds['Seq2'] == seq]
+            if not seq2_matches.empty:
+                seq_to_group[seq] = seq2_matches['Group2'].iloc[0]
+            else:
+                # Shouldn't happen with valid data, but handle gracefully
+                print(f"WARNING: Sequence {seq} not found in Seq1 or Seq2 for {cds}")
+                seq_to_group[seq] = 0  # Default to Group 0 if no group found
+    
+    sequences_0 = np.array([seq for seq in all_seqs if seq_to_group[seq] == 0])
+    sequences_1 = np.array([seq for seq in all_seqs if seq_to_group[seq] == 1])
     all_sequences = np.concatenate([sequences_0, sequences_1])
 
     n0 = len(sequences_0)
     n1 = len(sequences_1)
     print(f"Total unique sequences: {len(all_seqs)}")
-    print(f"Direct sequences (Group 0): {n0} - Sample: {sequences_0[:3]}")
-    print(f"Inverted sequences (Group 1): {n1} - Sample: {sequences_1[:3]}")
+    print(f"Direct sequences (Group 0): {n0} - Sample: {sequences_0[:3] if n0 > 0 else 'None'}")
+    print(f"Inverted sequences (Group 1): {n1} - Sample: {sequences_1[:3] if n1 > 0 else 'None'}")
 
     # Generate matrices for visualization (do this first)
     print(f"Generating matrices for {cds}")
@@ -776,8 +794,6 @@ def analyze_cds_parallel(args):
     print(f"Final result keys: {result.keys()}")
     print(f"Returning analysis for {cds}")
     return cds, result
-
-
 
 
 
