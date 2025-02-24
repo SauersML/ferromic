@@ -84,17 +84,29 @@ impl ZeroBasedHalfOpen {
     /// thus converting [start_inclusive..end_inclusive] (inclusive) to [start..end) half-open.
     /// Panics if start_inclusive > end_inclusive or if start_inclusive <= 0.
     pub fn from_1based_inclusive(start_inclusive: i64, end_inclusive: i64) -> Self {
-        if start_inclusive <= 0 {
-            panic!("Start must be positive for 1-based inclusive region.");
+        // Converts a 1-based inclusive region to a zero-based half-open interval,
+        // clamping any start < 1 up to 1, and making sure end >= start.
+        // Adjusted start value, clamped to at least 1
+        let mut adjusted_start = start_inclusive;
+        if adjusted_start < 1 {
+            adjusted_start = 1;
         }
-        if end_inclusive < start_inclusive {
-            panic!("End must be >= start for 1-based inclusive region.");
+
+        // Adjusted end value, ensured to be at least as large as the start
+        let mut adjusted_end = end_inclusive;
+        if adjusted_end < adjusted_start {
+            adjusted_end = adjusted_start;
         }
-        let start_zb = (start_inclusive - 1) as usize;
-        let end_zb = end_inclusive as usize;
+
+        // Zero-based start index (shifted from 1-based by subtracting 1)
+        let zero_based_start = (adjusted_start - 1) as usize;
+        // Zero-based end index (exclusive, no adjustment beyond casting)
+        let zero_based_end = adjusted_end as usize;
+
+        // Return the zero-based half-open interval
         ZeroBasedHalfOpen {
-            start: start_zb,
-            end: end_zb,
+            start: zero_based_start,
+            end: zero_based_end,
         }
     }
 
@@ -1340,7 +1352,7 @@ fn process_single_config_entry(
         chr, entry.interval.start, entry.interval.end, extended_region.start, extended_region.end
     );
 
-    let ext_start_1_based = extended_region.start as i64 + 1; // FIX LATER
+    let ext_start_1_based = extended_region.start as i64;
     let ext_end_1_based = extended_region.end as i64;
 
     let (
@@ -1616,8 +1628,11 @@ fn filter_and_log_transcripts(
         }
 
         // Iterate all transcripts, decide if they overlap query region, do the logging
+        let transcript_coding_start_zb = transcript_coding_start - 1;
+        let transcript_coding_end_zb = transcript_coding_end - 1;
         let overlaps_query =
-            (transcript_coding_end >= query.start) && (transcript_coding_start <= query.end);
+            (transcript_coding_end_zb >= query.start) && (transcript_coding_start_zb <= query.end);
+
         if !overlaps_query {
             continue;
         }
