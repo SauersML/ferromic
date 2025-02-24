@@ -1020,8 +1020,11 @@ fn prepare_to_write_cds(
                 // If the segment lies wholly beyond the extended region (or the normal region), it is dropped entirely.
                 let seg_interval = ZeroBasedHalfOpen::from_1based_inclusive(seg_s, seg_e);
                 if let Some(overlap) = seg_interval.intersect(&hap_region) {
-                    if overlap.end <= seq.len() {
-                        let mut piece = overlap.slice(seq).to_vec();
+                    let offset_start = overlap.start.saturating_sub(hap_region.start);
+                    let offset_end = overlap.end.saturating_sub(hap_region.start);
+                    let clipped_end = offset_end.min(seq.len());
+                    if clipped_end > offset_start {
+                        let mut piece = seq[offset_start..clipped_end].to_vec();
                         if strand == '-' {
                             piece.reverse();
                             for base in piece.iter_mut() {
