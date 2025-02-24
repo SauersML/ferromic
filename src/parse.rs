@@ -317,24 +317,8 @@ pub fn validate_vcf_header(header: &str) -> Result<(), VcfError> {
 pub fn read_reference_sequence(
     fasta_path: &Path,
     chr: &str,
-    start: i64,
-    end: i64,
+    region: ZeroBasedHalfOpen,
 ) -> Result<Vec<u8>, VcfError> {
-    // Input validation
-    if start < 0 || end < 0 {
-        return Err(VcfError::Parse(format!(
-            "Invalid coordinates: start ({}) and end ({}) must be non-negative",
-            start, end
-        )));
-    }
-
-    if start > end {
-        return Err(VcfError::Parse(format!(
-            "Invalid coordinates: start ({}) must be less than or equal to end ({})",
-            start, end
-        )));
-    }
-
     // Create reader for the FASTA file and its index
     let mut reader = bio::io::fasta::IndexedReader::from_file(&fasta_path).map_err(|e| {
         VcfError::Io(io::Error::new(
@@ -350,7 +334,7 @@ pub fn read_reference_sequence(
         chr.to_string()
     };
 
-    // Get sequences and find our chromosome
+    // Find chromosome
     let sequences = reader.index.sequences();
     let seq_info = sequences
         .iter()
@@ -363,37 +347,26 @@ pub fn read_reference_sequence(
         })?;
 
     let seq_length = seq_info.len;
-    let actual_chr_name = seq_info.name.as_str(); // Get a reference to the name
+    let actual_chr_name = seq_info.name.as_str();
 
-    // Validate start position
-    if start as u64 >= seq_length {
-        return Err(VcfError::Parse(format!(
-            "Start position {} exceeds sequence length {} for chromosome {}",
-            start, seq_length, actual_chr_name
-        )));
-    }
+    // Clamp the requested end to the chromosome length
+    let clamped_end = std::cmp::min(region.end as u64, seq_length);
+    let clamped_start = std::cmp::min(region.start as u64, clamped_end);
 
-    // clamp the end to seq_length so we do not lose the last base
-    let adjusted_end = std::cmp::min(end as u64, seq_length); // safe to clamp to seq_length
-
-    // Then region length is:
-    let region_length = (adjusted_end as i64 - (start - 1)) as usize;
+    // The region length in zero-based coords
+    let region_length = (clamped_end - clamped_start) as usize;
 
     let mut sequence = Vec::with_capacity(region_length);
 
-    // Fetch and read the sequence with proper error handling
-    // Pass adjusted_end to fetch the correct number of bases
+    // Fetch region from the reference
     reader
-        .fetch(actual_chr_name, (start - 1) as u64, adjusted_end)
-        .map_err(|e| {
+        .fetch(actual_chr_name, clamped_start, clamped_end)
+        .map_err(|_| {
             VcfError::Io(io::Error::new(
                 io::ErrorKind::Other,
                 format!(
-                    "Failed to fetch region {}:{}-{}: {}",
-                    actual_chr_name,
-                    start,
-                    adjusted_end + 1,
-                    e
+                    "Failed to fetch region {}:{}-{}",
+                    actual_chr_name, clamped_start, clamped_end
                 ),
             ))
         })?;
@@ -403,30 +376,28 @@ pub fn read_reference_sequence(
             io::ErrorKind::Other,
             format!(
                 "Failed to read sequence for region {}:{}-{}: {}",
-                actual_chr_name, start, adjusted_end, e
+                actual_chr_name, clamped_start, clamped_end, e
             ),
         ))
     })?;
 
-    // Verify sequence length
     if sequence.len() != region_length {
         return Err(VcfError::Parse(format!(
             "Expected sequence length {} but got {} for region {}:{}-{}",
             region_length,
             sequence.len(),
             actual_chr_name,
-            start,
-            adjusted_end
+            clamped_start,
+            clamped_end
         )));
     }
 
-    // Verify sequence content
     let invalid_chars: Vec<(usize, u8)> = sequence
         .iter()
         .enumerate()
         .filter(|(_, &b)| !matches!(b.to_ascii_uppercase(), b'A' | b'C' | b'G' | b'T' | b'N'))
-        .take(10) // Show first 10 invalid chars
-        .map(|(i, &b)| (i, b)) // Dereference here
+        .take(10)
+        .map(|(i, &b)| (i, b))
         .collect();
 
     if !invalid_chars.is_empty() {
@@ -441,7 +412,7 @@ pub fn read_reference_sequence(
         }
         return Err(VcfError::Parse(format!(
             "Invalid nucleotides found in sequence for region {}:{}-{}",
-            actual_chr_name, start, adjusted_end
+            actual_chr_name, clamped_start, clamped_end
         )));
     }
 

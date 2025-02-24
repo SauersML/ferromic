@@ -1256,8 +1256,13 @@ fn process_chromosome_entries(
     };
 
     // Read the full reference sequence for that chromosome.
-    let ref_sequence =
-        read_reference_sequence(Path::new(&args.reference_path), chr, 1, chr_length)?;
+    let ref_sequence = {
+        let entire_chrom = ZeroBasedHalfOpen {
+            start: 0,
+            end: chr_length as usize,
+        };
+        read_reference_sequence(Path::new(&args.reference_path), chr, entire_chrom)?
+    };
 
     // Parse all transcripts for that chromosome from the GTF
     let all_transcripts = parse_gtf_file(Path::new(&args.gtf_path), chr)?;
@@ -1352,9 +1357,6 @@ fn process_single_config_entry(
         chr, entry.interval.start, entry.interval.end, extended_region.start, extended_region.end
     );
 
-    let ext_start_1_based = extended_region.start as i64;
-    let ext_end_1_based = extended_region.end as i64;
-
     let (
         unfiltered_variants,
         filtered_variants,
@@ -1366,8 +1368,7 @@ fn process_single_config_entry(
         vcf_file,
         Path::new(&args.reference_path),
         chr.to_string(),
-        ext_start_1_based,
-        ext_end_1_based,
+        extended_region,
         min_gq,
         mask.clone(),
         allow.clone(),
@@ -1899,8 +1900,7 @@ pub fn process_vcf(
     file: &Path,
     reference_path: &Path,
     chr: String,
-    start: i64,
-    end: i64,
+    region: ZeroBasedHalfOpen,
     min_gq: u16,
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
@@ -2026,18 +2026,23 @@ pub fn process_vcf(
             let mut local_miss_info = MissingDataInfo::default();
             let mut local_filt_stats = FilteringStats::default();
             while let Ok(line) = line_receiver.recv() {
+                // Construct a ZeroBasedHalfOpen region for the consumer thread
+                let consumer_region = ZeroBasedHalfOpen {
+                    start: region.start,
+                    end: region.end,
+                };
+
                 match process_variant(
                     &line,
                     &chr_copy,
-                    start,
-                    end,
+                    consumer_region,
                     &mut local_miss_info,
                     &arc_names,
                     min_gq,
                     &mut local_filt_stats,
                     arc_allow.as_ref().map(|x| x.as_ref()),
                     arc_mask.as_ref().map(|x| x.as_ref()),
-                    &pos_map_unfiltered, // We always store ref/alt in unfiltered; check if it passes for filtered as well
+                    &pos_map_unfiltered,
                 ) {
                     Ok(variant_opt) => {
                         rs.send(Ok((
@@ -2270,8 +2275,7 @@ fn write_phylip_file(
 fn process_variant(
     line: &str,
     chr: &str,
-    start: i64,
-    end: i64,
+    region: ZeroBasedHalfOpen,
     missing_data_info: &mut MissingDataInfo,
     sample_names: &[String],
     min_gq: u16,
@@ -2300,16 +2304,17 @@ fn process_variant(
     let pos: i64 = fields[1]
         .parse()
         .map_err(|_| VcfError::Parse("Invalid position".to_string()))?;
-    if pos < start || pos > end {
+    if !region.contains(pos) {
         return Ok(None);
     }
 
     _filtering_stats.total_variants += 1; // DO NOT MOVE THIS LINE ABOVE THE CHECK FOR WITHIN RANGE
-                                          // Only variants within the range get passed the collector which increments statistics.
-                                          // For variants outside the range, the consumer thread does not send any result to the collector.
-                                          // If this line is moved above the early return return Ok(None) in the range check, then it would increment all variants, not just those in the regions
-                                          // This would mean that the maximum number of variants filtered could be below the maximum number of variants,
-                                          // in the case that there are variants outside of the ranges (which would not even get far enough to need to be filtered, but would be included in the total).
+
+    // Only variants within the range get passed the collector which increments statistics.
+    // For variants outside the range, the consumer thread does not send any result to the collector.
+    // If this line is moved above the early return return Ok(None) in the range check, then it would increment all variants, not just those in the regions
+    // This would mean that the maximum number of variants filtered could be below the maximum number of variants,
+    // in the case that there are variants outside of the ranges (which would not even get far enough to need to be filtered, but would be included in the total).
 
     let adjusted_pos = pos - 1; // Adjust VCF position (one-based) to zero-based
 

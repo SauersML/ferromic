@@ -1,5 +1,5 @@
 use ferromic::process::{
-    display_seqinfo_entries, process_config_entries, process_vcf, Args, VcfError,
+    display_seqinfo_entries, process_config_entries, process_vcf, Args, VcfError, ZeroBasedHalfOpen,
 };
 
 use ferromic::parse::{find_vcf_file, parse_config_file, parse_region, parse_regions_file};
@@ -132,8 +132,7 @@ fn main() -> Result<(), VcfError> {
             &vcf_file,
             &Path::new(&args.reference_path),
             chr.to_string(),
-            start,
-            end,
+            ZeroBasedHalfOpen::from_1based_inclusive(start, end),
             args.min_gq,
             mask_regions.clone(),
             allow_regions.clone(),
