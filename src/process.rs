@@ -2326,47 +2326,59 @@ fn process_variant(
     }
 
     // parse a 1-based VCF position
-    let vcf_position_1b = VcfPos::new(
+    let one_based_vcf_position = VcfPos::new(
         fields[1]
             .parse()
             .map_err(|_| VcfError::Parse("Invalid position".to_string()))?,
     )?;
 
     // call region.contains using zero-based
-    if !region.contains(vcf_position_1b.zero_based()) {
+    if !region.contains(one_based_vcf_position.zero_based()) {
         return Ok(None);
     }
 
-    _filtering_stats.total_variants += 1;
+    _filtering_stats.total_variants += 1; // DO NOT MOVE THIS LINE ABOVE THE CHECK FOR WITHIN RANGE
 
+    // Only variants within the range get passed the collector which increments statistics.
+    // For variants outside the range, the consumer thread does not send any result to the collector.
+    // If this line is moved above the early return return Ok(None) in the range check, then it would increment all variants, not just those in the regions
+    // This would mean that the maximum number of variants filtered could be below the maximum number of variants,
+    // in the case that there are variants outside of the ranges (which would not even get far enough to need to be filtered, but would be included in the total).
+    //
     // Only variants within the range get counted toward totals.
     // For variants outside the range, we return early.
 
-    let pos_zero = vcf_position_1b.zero_based(); // Zero-based coordinate
+    let zero_based_position = one_based_vcf_position.zero_based(); // Zero-based coordinate
 
     // Check allow regions
     if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
-        if !position_in_regions(pos_zero, allow_regions_chr) {
+        if !position_in_regions(zero_based_position, allow_regions_chr) {
             _filtering_stats._filtered_variants += 1;
             _filtering_stats.filtered_due_to_allow += 1;
-            _filtering_stats.filtered_positions.insert(pos_zero);
+            _filtering_stats
+                .filtered_positions
+                .insert(zero_based_position);
             _filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
             return Ok(None);
         }
     } else if allow_regions.is_some() {
         _filtering_stats._filtered_variants += 1;
         _filtering_stats.filtered_due_to_allow += 1;
-        _filtering_stats.filtered_positions.insert(pos_zero);
+        _filtering_stats
+            .filtered_positions
+            .insert(zero_based_position);
         _filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
         return Ok(None);
     }
 
     // Check mask regions
     if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
-        if position_in_regions(pos_zero, mask_regions_chr) {
+        if position_in_regions(zero_based_position, mask_regions_chr) {
             _filtering_stats._filtered_variants += 1;
             _filtering_stats.filtered_due_to_mask += 1;
-            _filtering_stats.filtered_positions.insert(pos_zero);
+            _filtering_stats
+                .filtered_positions
+                .insert(zero_based_position);
             _filtering_stats.add_example(format!("{}: Filtered due to mask", line.trim()));
             return Ok(None);
         }
@@ -2379,7 +2391,7 @@ fn process_variant(
         let alt_allele = fields[4].chars().next().unwrap_or('N');
         position_allele_map
             .lock()
-            .insert(pos_zero, (ref_allele, alt_allele));
+            .insert(zero_based_position, (ref_allele, alt_allele));
     }
 
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
@@ -2390,7 +2402,7 @@ fn process_variant(
             "{}",
             format!(
                 "Warning: Multi-allelic site detected at position {}, which is not supported. Skipping.",
-                vcf_position_1b.0
+                one_based_vcf_position.0
             ).yellow()
         );
         _filtering_stats.add_example(format!(
@@ -2405,7 +2417,7 @@ fn process_variant(
             "{}",
             format!(
                 "Warning: Multi-nucleotide ALT detected at position {}, which is not supported. Skipping.",
-                vcf_position_1b.0
+                one_based_vcf_position.0
             ).yellow()
         );
         _filtering_stats.add_example(format!(
@@ -2429,7 +2441,9 @@ fn process_variant(
             let alleles_str = gt.split(':').next().unwrap_or(".");
             if alleles_str == "." || alleles_str == "./." || alleles_str == ".|." {
                 missing_data_info.missing_data_points += 1;
-                missing_data_info.positions_with_missing.insert(pos_zero);
+                missing_data_info
+                    .positions_with_missing
+                    .insert(zero_based_position);
                 return None;
             }
             let alleles = alleles_str
@@ -2438,7 +2452,9 @@ fn process_variant(
                 .collect::<Option<Vec<u8>>>();
             if alleles.is_none() {
                 missing_data_info.missing_data_points += 1;
-                missing_data_info.positions_with_missing.insert(pos_zero);
+                missing_data_info
+                    .positions_with_missing
+                    .insert(zero_based_position);
             }
             alleles
         })
@@ -2451,10 +2467,14 @@ fn process_variant(
         if gq_index >= gt_subfields.len() {
             return Err(VcfError::Parse(format!(
                 "GQ value missing in sample genotype field at chr{}:{}",
-                chr, vcf_position_1b.0
+                chr, one_based_vcf_position.0
             )));
         }
         let gq_str = gt_subfields[gq_index];
+
+        // Attempt to parse GQ value as u16
+        // Parse GQ value, treating '.' or empty string as 0
+        // If you have no GQ, we treat as GQ=0 → (probably) filtered out.
         let gq_value: u16 = match gq_str {
             "." | "" => 0,
             _ => match gq_str.parse() {
@@ -2462,12 +2482,13 @@ fn process_variant(
                 Err(_) => {
                     eprintln!(
                         "Missing GQ value '{}' at {}:{}. Treating as 0.",
-                        gq_str, chr, vcf_position_1b.0
+                        gq_str, chr, one_based_vcf_position.0
                     );
                     0
                 }
             },
         };
+        // Check if GQ value is below the minimum threshold
         if gq_value < min_gq {
             sample_has_low_gq = true;
             _num_samples_below_gq += 1;
@@ -2475,15 +2496,18 @@ fn process_variant(
     }
 
     if sample_has_low_gq {
+        // Skip this variant
         _filtering_stats.low_gq_variants += 1;
         _filtering_stats._filtered_variants += 1;
-        _filtering_stats.filtered_positions.insert(pos_zero);
+        _filtering_stats
+            .filtered_positions
+            .insert(zero_based_position);
         _filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
 
         let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
         let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
         let variant = Variant {
-            position: pos_zero,
+            position: zero_based_position,
             genotypes: genotypes.clone(),
         };
         return Ok(Some((variant, passes_filters)));
@@ -2497,9 +2521,12 @@ fn process_variant(
     let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
     let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
 
+    // Update filtering stats if variant is filtered out
     if !passes_filters {
         _filtering_stats._filtered_variants += 1;
-        _filtering_stats.filtered_positions.insert(pos_zero);
+        _filtering_stats
+            .filtered_positions
+            .insert(zero_based_position);
 
         if sample_has_low_gq {
             _filtering_stats.low_gq_variants += 1;
@@ -2519,8 +2546,10 @@ fn process_variant(
     }
 
     let variant = Variant {
-        position: pos_zero,
+        position: zero_based_position,
         genotypes: genotypes.clone(),
     };
+
+    // Return the parsed variant and whether it passes filters
     Ok(Some((variant, passes_filters)))
 }
