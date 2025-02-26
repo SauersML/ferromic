@@ -4,6 +4,13 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+#[derive(Debug)]
+pub struct SiteDiversity {
+    pub position: i64,
+    pub pi: f64,
+    pub watterson_theta: f64,
+}
+
 pub fn calculate_adjusted_sequence_length(
     region_start: i64,
     region_end: i64,
@@ -245,6 +252,77 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, u8)]) -
     }
 
     difference_sum / total_possible_pairs as f64
+}
+
+pub fn calculate_per_site(
+    variants: &[Variant],
+    haplotypes_in_group: &[(usize, u8)],
+    region_start: i64,
+    region_end: i64,
+) -> Vec<SiteDiversity> {
+    let max_haps = haplotypes_in_group.len();
+    let mut site_diversities = Vec::with_capacity(variants.len());
+    if max_haps < 2 {
+        return site_diversities;
+    }
+
+    for var in variants {
+        if var.position < region_start || var.position > region_end {
+            continue;
+        }
+
+        let mut allele_counts = HashMap::new();
+        let mut total_called = 0;
+        for &(sample_index, side) in haplotypes_in_group {
+            if let Some(gt_opt) = var.genotypes.get(sample_index) {
+                if let Some(gt) = gt_opt {
+                    if let Some(&allele) = gt.get(side as usize) {
+                        allele_counts
+                            .entry(allele)
+                            .and_modify(|count| *count += 1)
+                            .or_insert(1);
+                        total_called += 1;
+                    }
+                }
+            }
+        }
+
+        if total_called < 2 {
+            site_diversities.push(SiteDiversity {
+                position: var.position,
+                pi: 0.0,
+                watterson_theta: 0.0,
+            });
+            continue;
+        }
+
+        let mut freq_sq_sum = 0.0;
+        for count in allele_counts.values() {
+            let freq = *count as f64 / total_called as f64;
+            freq_sq_sum += freq * freq;
+        }
+        let pi_value = (total_called as f64 / (total_called as f64 - 1.0)) * (1.0 - freq_sq_sum);
+
+        let distinct_alleles = allele_counts.len();
+        let watterson_value = if distinct_alleles > 1 {
+            let denom = harmonic(total_called - 1);
+            if denom == 0.0 {
+                0.0
+            } else {
+                1.0 / denom
+            }
+        } else {
+            0.0
+        };
+
+        site_diversities.push(SiteDiversity {
+            position: var.position,
+            pi: pi_value,
+            watterson_theta: watterson_value,
+        });
+    }
+
+    site_diversities
 }
 
 #[cfg(test)]

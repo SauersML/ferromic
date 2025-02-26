@@ -1,6 +1,6 @@
 use crate::stats::{
-    calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_pi,
-    calculate_watterson_theta,
+    calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site,
+    calculate_pi, calculate_watterson_theta, SiteDiversity,
 };
 
 use crate::parse::{
@@ -16,7 +16,7 @@ use log::{info, warn};
 use parking_lot::Mutex;
 use prettytable::{row, Table};
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead};
 use std::io::{BufWriter, Write};
@@ -360,7 +360,7 @@ pub struct TranscriptCDS {
 }
 
 /// Holds all the output columns for writing one row in the CSV.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CsvRowData {
     seqname: String,
     region_start: i64,
@@ -430,6 +430,12 @@ impl std::fmt::Display for VcfError {
 impl From<io::Error> for VcfError {
     fn from(err: io::Error) -> VcfError {
         VcfError::Io(err)
+    }
+}
+
+impl From<csv::Error> for VcfError {
+    fn from(e: csv::Error) -> Self {
+        VcfError::Parse(format!("CSV error: {}", e))
     }
 }
 
@@ -531,8 +537,8 @@ where padded_name = format!("{:<10}", sample_name).
 
 Now, the final sample_name is constructed with “_L” or “_R” to distinguish the left or right haplotype. Specifically, for (sample_idx, hap_idx) in haplotype_indices, the code does something like:
     sample_name = match *hap_idx {
-        0 => format!("{}_L", sample_names[*sample_idx]),
-        1 => format!("{}_R", sample_names[*sample_idx]),
+        0 => format!("{}_L", sample_names[*mapped_index]),
+        1 => format!("{}_R", sample_names[*mapped_index]),
         _ => panic!("Unexpected hap_idx"),
     };
 and hap_sequences.insert(sample_name, reference_sequence);
@@ -563,7 +569,7 @@ fn process_variants(
     is_filtered_set: bool,
     reference_sequence: &[u8],
     cds_regions: &[TranscriptCDS],
-) -> Result<Option<(usize, f64, f64, usize)>, VcfError> {
+) -> Result<Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>, VcfError> {
     let mut index_map = HashMap::new();
     for (sample_index, name) in sample_names.iter().enumerate() {
         let trimmed_id = name.rsplit('_').next().unwrap_or(name);
@@ -597,7 +603,7 @@ fn process_variants(
     let mut region_segsites = 0;
     let region_hap_count = group_haps.len();
     if variants.is_empty() {
-        return Ok(Some((0, 0.0, 0.0, region_hap_count)));
+        return Ok(Some((0, 0.0, 0.0, region_hap_count, Vec::new())));
     }
     for current_variant in variants {
         if current_variant.position < region_start || current_variant.position > region_end {
@@ -733,11 +739,20 @@ fn process_variants(
         )?;
     }
 
+    let site_diversities = calculate_per_site(variants, &group_haps, region_start, region_end);
+    println!(
+        "Computed per-site diversity for group {}: found {} sites in region {}",
+        haplotype_group,
+        site_diversities.len(),
+        chromosome
+    );
+
     Ok(Some((
         region_segsites,
         final_theta,
         final_pi,
         region_hap_count,
+        site_diversities,
     )))
 }
 
@@ -1113,10 +1128,8 @@ pub fn process_config_entries(
 
     // We will process each chromosome in parallel (for speed),
     //    then flatten the per-chromosome results in the order we get them.
-    //    If you need to preserve the exact order from `config_entries`, see below
-    //    for a stable ordering approach. For now, we assume order is not critical.
-    let all_results: Vec<_> = grouped
-        .into_par_iter() // Parallel over chromosomes
+    let all_pairs: Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)> = grouped
+        .into_par_iter()
         .flat_map(|(chr, chr_entries)| {
             match process_chromosome_entries(
                 &chr,
@@ -1136,10 +1149,132 @@ pub fn process_config_entries(
         })
         .collect();
 
+    let all_results: Vec<CsvRowData> = all_pairs
+        .iter()
+        .map(|(csv_row, _sites)| csv_row.clone())
+        .collect();
+
     // Write all rows to the CSV file
     for row_data in all_results {
         write_csv_row(&mut writer, &row_data)?;
     }
+
+    // Now write per-site statistics in wide format to a single CSV file.
+    // Each row is a relative_position (1-based), and each set of columns corresponds to
+    // (unfiltered_pi_, unfiltered_theta_, filtered_pi_, filtered_theta_) for a region+group.
+
+    // A structure to store columns for each region+group+filter combination.
+    // Each column is keyed by a unique name (e.g., "filtered_pi_chr_2_start_3403_end_9934_group_0"),
+    // and for each relative_position, we store the (f64) value. We also store the maximum
+    // relative_position encountered, so we know how many rows to write.
+    let mut all_columns: HashMap<String, BTreeMap<usize, f64>> = HashMap::new();
+    let mut max_position = 0_usize;
+
+    // A small helper function to build the column name.
+    // prefix is one of: "filtered_pi_", "filtered_theta_", "unfiltered_pi_", or "unfiltered_theta_"
+    // region_tag is "chr_{chr}_start_{start}_end_{end}_group_{g}"
+    fn build_col_name(prefix: &str, row: &CsvRowData, group_id: u8) -> String {
+        format!(
+            "{}chr_{}_start_{}_end_{}_group_{}",
+            prefix, row.seqname, row.region_start, row.region_end, group_id
+        )
+    }
+
+    // Populate our all_columns map with the data from each region–group combo.
+    for (csv_row, per_site_vec) in &all_pairs {
+        // We'll produce 4 columns for each region+group combo:
+        //   unfiltered_pi_ + region_tag
+        //   unfiltered_theta_ + region_tag
+        //   filtered_pi_ + region_tag
+        //   filtered_theta_ + region_tag
+
+        // We want to fill these columns for each entry in per_site_vec:
+        // If is_filtered=false, we fill the "unfiltered_pi_" and "unfiltered_theta_" columns.
+        // If is_filtered=true, we fill "filtered_pi_" and "filtered_theta_" columns.
+        // The relative position is (pos - region_start + 1).
+
+        for &(pos, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
+            let rel_pos = ((pos - csv_row.region_start) + 1) as usize;
+            if rel_pos > max_position {
+                max_position = rel_pos;
+            }
+            // Decide which prefix to use
+            if is_filtered {
+                let pi_col = build_col_name("filtered_pi_", csv_row, group_id);
+                let theta_col = build_col_name("filtered_theta_", csv_row, group_id);
+
+                all_columns
+                    .entry(pi_col)
+                    .or_insert_with(BTreeMap::new)
+                    .insert(rel_pos as usize, pi_val);
+                all_columns
+                    .entry(theta_col)
+                    .or_insert_with(BTreeMap::new)
+                    .insert(rel_pos as usize, theta_val);
+            } else {
+                let pi_col = build_col_name("unfiltered_pi_", csv_row, group_id);
+                let theta_col = build_col_name("unfiltered_theta_", csv_row, group_id);
+
+                all_columns
+                    .entry(pi_col)
+                    .or_insert_with(BTreeMap::new)
+                    .insert(rel_pos as usize, pi_val);
+                all_columns
+                    .entry(theta_col)
+                    .or_insert_with(BTreeMap::new)
+                    .insert(rel_pos as usize, theta_val);
+            }
+        }
+    }
+
+    // Now we have, for each column, a map from relative_position -> value.
+    // We will write a CSV with "relative_position" as the first column,
+    // and one column for each entry in all_columns (in sorted order of column names).
+
+    // Sort the column names so the output order is stable.
+    let mut col_names: Vec<String> = all_columns.keys().cloned().collect();
+    col_names.sort();
+
+    // Create the per_site_output.csv file for wide-format output.
+    let per_site_path = std::path::Path::new("per_site_output.csv");
+    let per_site_file = File::create(per_site_path)?;
+    let mut per_site_writer = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(BufWriter::new(per_site_file));
+
+    // Write the header row: first is "relative_position", then each column name.
+    {
+        let mut header_row = Vec::new();
+        header_row.push("relative_position".to_string());
+        header_row.extend(col_names.iter().cloned());
+        per_site_writer.write_record(header_row)?;
+    }
+
+    // For each row index from 1..=max_position, write out the row.
+    // If a particular column has no entry for that position, write empty "".
+    for pos_idx in 1..=max_position {
+        let mut record = Vec::new();
+        // The first column is the relative_position as a string
+        record.push(pos_idx.to_string());
+
+        // Then for each column, see if we have a value for pos_idx
+        for col_name in &col_names {
+            if let Some(map_for_col) = all_columns.get(col_name) {
+                if let Some(val) = map_for_col.get(&pos_idx) {
+                    record.push(format!("{:.6}", val));
+                } else {
+                    record.push("".to_string());
+                }
+            } else {
+                record.push("".to_string());
+            }
+        }
+        per_site_writer.write_record(&record)?;
+    }
+
+    per_site_writer.flush()?;
+
+    println!("Wrote wide-format per-site stats to per_site_output.csv");
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
     println!(
@@ -1254,7 +1389,7 @@ fn process_chromosome_entries(
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
-) -> Result<Vec<CsvRowData>, VcfError> {
+) -> Result<Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)>, VcfError> {
     println!("Processing chromosome: {}", chr);
 
     // Load entire chromosome length from reference index
@@ -1349,7 +1484,7 @@ fn process_single_config_entry(
     cds_regions: &[TranscriptCDS],
     chr: &str,
     args: &Args,
-) -> Result<Option<CsvRowData>, VcfError> {
+) -> Result<Option<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)>, VcfError> {
     println!(
         "Processing entry: {}:{}-{}",
         entry.seqname, entry.interval.start, entry.interval.end
@@ -1430,19 +1565,19 @@ fn process_single_config_entry(
     );
 
     // Stats for filtered group 0
-    let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f) = match process_variants(
+    let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f, site_divs_0_f) = match process_variants(
         &filtered_variants,
         &sample_names,
-        0, // Haplotype group
+        0,
         &entry.samples_filtered,
-        entry.interval.start as i64, // Original start for statistics
-        entry.interval.end as i64,   // Original end for statistics
+        entry.interval.start as i64,
+        entry.interval.end as i64,
         extended_region,
         Some(adjusted_sequence_length),
         seqinfo_storage_filtered.clone(),
         position_allele_map_filtered.clone(),
         entry.seqname.clone(),
-        true, // Filtered
+        true,
         ref_sequence,
         &local_cds,
     )? {
@@ -1457,19 +1592,19 @@ fn process_single_config_entry(
     };
 
     // Stats for filtered group 1
-    let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f) = match process_variants(
+    let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f, site_divs_1_f) = match process_variants(
         &filtered_variants,
         &sample_names,
-        1, // Haplotype group
+        1,
         &entry.samples_filtered,
-        entry.interval.start as i64, // Original start for statistics
-        entry.interval.end as i64,   // Original end for statistics
+        entry.interval.start as i64,
+        entry.interval.end as i64,
         extended_region,
         Some(adjusted_sequence_length),
         seqinfo_storage_filtered.clone(),
         position_allele_map_filtered.clone(),
         entry.seqname.clone(),
-        true, // Filtered
+        true,
         ref_sequence,
         &local_cds,
     )? {
@@ -1496,19 +1631,19 @@ fn process_single_config_entry(
         .cloned()
         .collect();
 
-    let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf) = match process_variants(
-        &region_variants_unfiltered, // Use the region-filtered variants
+    let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf, site_divs_0_unf) = match process_variants(
+        &region_variants_unfiltered,
         &sample_names,
-        0, //Haplotype group
+        0,
         &entry.samples_unfiltered,
-        entry.interval.start as i64, // Original start for statistics
-        entry.interval.end as i64,   // Original end for statistics
+        entry.interval.start as i64,
+        entry.interval.end as i64,
         extended_region,
         None,
         seqinfo_storage_unfiltered.clone(),
         position_allele_map_unfiltered.clone(),
         entry.seqname.clone(),
-        false, // Not filtered
+        false,
         ref_sequence,
         &local_cds,
     )? {
@@ -1523,19 +1658,19 @@ fn process_single_config_entry(
     };
 
     // Stats for unfiltered group 1
-    let (num_segsites_1, w_theta_1, pi_1, n_hap_1_unf) = match process_variants(
+    let (num_segsites_1, w_theta_1, pi_1, n_hap_1_unf, site_divs_1_unf) = match process_variants(
         &region_variants_unfiltered,
         &sample_names,
-        1, //Haplotype Group
+        1,
         &entry.samples_unfiltered,
-        entry.interval.start as i64, // Original start for statistics
-        entry.interval.end as i64,   // Original end for statistics
+        entry.interval.start as i64,
+        entry.interval.end as i64,
         extended_region,
         None,
         seqinfo_storage_unfiltered.clone(),
         position_allele_map_unfiltered.clone(),
         entry.seqname.clone(),
-        false, // Not filtered
+        false,
         ref_sequence,
         &local_cds,
     )? {
@@ -1585,7 +1720,21 @@ fn process_single_config_entry(
         entry.interval.start, entry.interval.end
     );
 
-    Ok(Some(row_data))
+    let mut per_site_records = Vec::new();
+    for sd in site_divs_0_unf {
+        per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 0, false));
+    }
+    for sd in site_divs_1_unf {
+        per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 1, false));
+    }
+    for sd in site_divs_0_f {
+        per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 0, true));
+    }
+    for sd in site_divs_1_f {
+        per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 1, true));
+    }
+
+    Ok(Some((row_data, per_site_records)))
 }
 
 // This function filters the TranscriptCDS by QueryRegion overlap and prints stats
