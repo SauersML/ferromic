@@ -153,14 +153,20 @@ fn main() -> Result<(), VcfError> {
         println!("{}", "Calculating diversity statistics...".blue());
 
         let seq_length = if end == i64::MAX {
-            unfiltered_variants
+            // Use the last variant position if available, otherwise fall back to chr_length
+            let last_pos = unfiltered_variants
                 .last()
                 .map(|v| v.position)
                 .unwrap_or(0)
-                .max(chr_length)
-                - (start - 1)
+                .max(chr_length);
+                
+            // Create a ZeroBasedHalfOpen interval and use its len() method
+            let actual_region = ZeroBasedHalfOpen::from_1based_inclusive(start, last_pos as i64);
+            actual_region.len() as i64
         } else {
-            end - (start - 1)
+            // Create a ZeroBasedHalfOpen interval from the specified boundaries and use its len() method
+            let specified_region = ZeroBasedHalfOpen::from_1based_inclusive(start, end);
+            specified_region.len() as i64
         };
 
         if end == i64::MAX
