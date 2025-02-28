@@ -265,61 +265,68 @@ pub fn calculate_per_site(
     if max_haps < 2 {
         return site_diversities;
     }
+    // Convert variants to a HashMap for O(1) access by position (0-based)
+    let variant_map: HashMap<i64, &Variant> = variants.iter().map(|v| (v.position, v)).collect();
 
-    for var in variants {
-        if var.position < region_start || var.position > region_end {
-            continue;
-        }
+    // Iterate over each position in the region (inclusive 0-based start to end)
+    for pos in region_start..=region_end {
+        if let Some(var) = variant_map.get(&pos) {
+            // Variant exists at this position; calculate diversity metrics
+            let mut allele_counts = HashMap::new();
+            let mut total_called = 0;
 
-        let mut allele_counts = HashMap::new();
-        let mut total_called = 0;
-        for &(sample_index, side) in haplotypes_in_group {
-            if let Some(gt_opt) = var.genotypes.get(sample_index) {
-                if let Some(gt) = gt_opt {
-                    if let Some(&allele) = gt.get(side as usize) {
-                        allele_counts
-                            .entry(allele)
-                            .and_modify(|count| *count += 1)
-                            .or_insert(1);
-                        total_called += 1;
+            for &(sample_index, side) in haplotypes_in_group {
+                if let Some(gt_opt) = var.genotypes.get(sample_index) {
+                    if let Some(gt) = gt_opt {
+                        if let Some(&allele) = gt.get(side as usize) {
+                            allele_counts
+                                .entry(allele)
+                                .and_modify(|count| *count += 1)
+                                .or_insert(1);
+                            total_called += 1;
+                        }
                     }
                 }
             }
-        }
 
-        if total_called < 2 {
-            site_diversities.push(SiteDiversity {
-                position: var.position,
-                pi: 0.0,
-                watterson_theta: 0.0,
-            });
-            continue;
-        }
-
-        let mut freq_sq_sum = 0.0;
-        for count in allele_counts.values() {
-            let freq = *count as f64 / total_called as f64;
-            freq_sq_sum += freq * freq;
-        }
-        let pi_value = (total_called as f64 / (total_called as f64 - 1.0)) * (1.0 - freq_sq_sum);
-
-        let distinct_alleles = allele_counts.len();
-        let watterson_value = if distinct_alleles > 1 {
-            let denom = harmonic(total_called - 1);
-            if denom == 0.0 {
-                0.0
+            let (pi_value, watterson_value) = if total_called < 2 {
+                (0.0, 0.0) // Insufficient haplotypes called at this site
             } else {
-                1.0 / denom
-            }
-        } else {
-            0.0
-        };
+                let mut freq_sq_sum = 0.0;
+                for count in allele_counts.values() {
+                    let freq = *count as f64 / total_called as f64;
+                    freq_sq_sum += freq * freq;
+                }
+                let pi_value =
+                    (total_called as f64 / (total_called as f64 - 1.0)) * (1.0 - freq_sq_sum);
 
-        site_diversities.push(SiteDiversity {
-            position: var.position,
-            pi: pi_value,
-            watterson_theta: watterson_value,
-        });
+                let distinct_alleles = allele_counts.len();
+                let watterson_value = if distinct_alleles > 1 {
+                    let denom = harmonic(total_called - 1);
+                    if denom == 0.0 {
+                        0.0
+                    } else {
+                        1.0 / denom
+                    }
+                } else {
+                    0.0
+                };
+                (pi_value, watterson_value)
+            };
+
+            site_diversities.push(SiteDiversity {
+                position: pos,
+                pi: pi_value,
+                watterson_theta: watterson_value,
+            });
+        } else {
+            // No variant at this position (monomorphic site)
+            site_diversities.push(SiteDiversity {
+                position: pos,
+                pi: 0.0,              // Monomorphic sites have zero nucleotide diversity
+                watterson_theta: 0.0, // Monomorphic sites have zero Watterson's theta
+            });
+        }
     }
 
     site_diversities
