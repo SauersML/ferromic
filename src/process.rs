@@ -141,6 +141,27 @@ impl ZeroBasedHalfOpen {
         let p = pos as usize;
         p >= self.start && p < self.end
     }
+
+    /// Returns the 1-based inclusive start coordinate.
+    pub fn start_1based_inclusive(&self) -> i64 {
+        (self.start as i64) + 1
+    }
+
+    /// Returns the 1-based inclusive end coordinate.
+    pub fn end_1based_inclusive(&self) -> i64 {
+        self.end as i64
+    }
+
+    /// Returns the 1-based relative position of a 0-based position within [start, end).
+    /// Returns None if the position is outside the interval.
+    pub fn relative_position_1based(&self, pos: i64) -> Option<usize> {
+        let p = pos as usize;
+        if p >= self.start && p < self.end {
+            Some(p - self.start + 1)
+        } else {
+            None
+        }
+    }
 }
 
 /// A 1-based VCF position. Guaranteed >= 1, no runtime overhead.
@@ -627,7 +648,12 @@ fn process_variants(
             region_segsites += 1;
         }
     }
-    let final_length = adjusted_sequence_length.unwrap_or(region_end - region_start + 1);
+    // Define the region as a ZeroBasedHalfOpen interval for length calculation
+    let region = ZeroBasedHalfOpen {
+        start: region_start as usize,
+        end: region_end as usize,
+    };
+    let final_length = adjusted_sequence_length.unwrap_or(region.len() as i64);
     let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, final_length);
     let final_pi = calculate_pi(variants, &group_haps);
 
@@ -1194,35 +1220,46 @@ pub fn process_config_entries(
         // The relative position is (pos - region_start + 1).
 
         for &(pos, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
-            let rel_pos = ((pos - csv_row.region_start) + 1) as usize;
-            if rel_pos > max_position {
-                max_position = rel_pos;
-            }
-            // Decide which prefix to use
-            if is_filtered {
-                let pi_col = build_col_name("filtered_pi_", csv_row, group_id);
-                let theta_col = build_col_name("filtered_theta_", csv_row, group_id);
+            // Compute 1-based relative position using ZeroBasedHalfOpen
+            let region = ZeroBasedHalfOpen {
+                start: csv_row.region_start as usize,
+                end: csv_row.region_end as usize,
+            };
+            if let Some(rel_pos) = region.relative_position_1based(pos) {
+                if rel_pos > max_position {
+                    max_position = rel_pos;
+                }
+                // Decide which prefix to use
+                if is_filtered {
+                    let pi_col = build_col_name("filtered_pi_", csv_row, group_id);
+                    let theta_col = build_col_name("filtered_theta_", csv_row, group_id);
 
-                all_columns
-                    .entry(pi_col)
-                    .or_insert_with(BTreeMap::new)
-                    .insert(rel_pos as usize, pi_val);
-                all_columns
-                    .entry(theta_col)
-                    .or_insert_with(BTreeMap::new)
-                    .insert(rel_pos as usize, theta_val);
+                    all_columns
+                        .entry(pi_col)
+                        .or_insert_with(BTreeMap::new)
+                        .insert(rel_pos as usize, pi_val);
+                    all_columns
+                        .entry(theta_col)
+                        .or_insert_with(BTreeMap::new)
+                        .insert(rel_pos as usize, theta_val);
+                } else {
+                    let pi_col = build_col_name("unfiltered_pi_", csv_row, group_id);
+                    let theta_col = build_col_name("unfiltered_theta_", csv_row, group_id);
+
+                    all_columns
+                        .entry(pi_col)
+                        .or_insert_with(BTreeMap::new)
+                        .insert(rel_pos as usize, pi_val);
+                    all_columns
+                        .entry(theta_col)
+                        .or_insert_with(BTreeMap::new)
+                        .insert(rel_pos as usize, theta_val);
+                }
             } else {
-                let pi_col = build_col_name("unfiltered_pi_", csv_row, group_id);
-                let theta_col = build_col_name("unfiltered_theta_", csv_row, group_id);
-
-                all_columns
-                    .entry(pi_col)
-                    .or_insert_with(BTreeMap::new)
-                    .insert(rel_pos as usize, pi_val);
-                all_columns
-                    .entry(theta_col)
-                    .or_insert_with(BTreeMap::new)
-                    .insert(rel_pos as usize, theta_val);
+                eprintln!(
+                    "Warning: Position {} is outside region {}-{}",
+                    pos, csv_row.region_start, csv_row.region_end
+                );
             }
         }
     }
@@ -1624,10 +1661,8 @@ fn process_single_config_entry(
     // Stats for unfiltered group 0
     let region_variants_unfiltered: Vec<_> = unfiltered_variants
         .iter()
-        .filter(|v| {
-            (v.position as usize) >= entry.interval.start
-                && (v.position as usize) < entry.interval.end
-        }) // ORIGINAL region
+        // Filter variants within the 0-based half-open interval [start, end)
+        .filter(|v| entry.interval.contains(v.position))
         .cloned()
         .collect();
 
