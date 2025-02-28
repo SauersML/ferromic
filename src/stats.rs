@@ -17,27 +17,41 @@ pub fn calculate_adjusted_sequence_length(
     allow_regions_chr: Option<&Vec<(i64, i64)>>,
     mask_regions_chr: Option<&Vec<(i64, i64)>>,
 ) -> i64 {
+    // Convert the input region to a ZeroBasedHalfOpen
+    let region = crate::process::ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end);
+    
     let mut allowed_intervals = Vec::new();
     if let Some(allow_regions) = allow_regions_chr {
         // Intersect the entry region with the allow regions
         for &(start, end) in allow_regions {
-            let overlap_start = std::cmp::max(region_start, start);
-            let overlap_end = std::cmp::min(region_end, end);
-            if overlap_start <= overlap_end {
-                allowed_intervals.push((overlap_start, overlap_end));
+            // Convert the allow region to ZeroBasedHalfOpen
+            let allow_region = crate::process::ZeroBasedHalfOpen::from_1based_inclusive(start, end);
+            
+            // Use the intersect method to find overlap
+            if let Some(overlap) = region.intersect(&allow_region) {
+                allowed_intervals.push((
+                    overlap.start_1based_inclusive(),
+                    overlap.end_1based_inclusive()
+                ));
             }
         }
     } else {
         // If no allow regions, the entire entry region is allowed
         allowed_intervals.push((region_start, region_end));
     }
+    
     // Subtract the masked regions from the allowed intervals
     let unmasked_intervals = subtract_regions(&allowed_intervals, mask_regions_chr);
-    // Calculate the total length of unmasked intervals
+    
+    // Calculate the total length using ZeroBasedHalfOpen
     let adjusted_length: i64 = unmasked_intervals
         .iter()
-        .map(|&(start, end)| end - start)
+        .map(|&(start, end)| {
+            let interval = crate::process::ZeroBasedHalfOpen::from_1based_inclusive(start, end);
+            interval.len() as i64
+        })
         .sum();
+        
     adjusted_length
 }
 
@@ -261,15 +275,29 @@ pub fn calculate_per_site(
     region_end: i64,
 ) -> Vec<SiteDiversity> {
     let max_haps = haplotypes_in_group.len();
-    let mut site_diversities = Vec::with_capacity(variants.len());
+    
+    // Create a proper ZeroBasedHalfOpen for the region
+    let region = crate::process::ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end);
+    let mut site_diversities = Vec::with_capacity(region.len());
+    
     if max_haps < 2 {
         return site_diversities;
     }
+    
     // Convert variants to a HashMap for O(1) access by position (0-based)
     let variant_map: HashMap<i64, &Variant> = variants.iter().map(|v| (v.position, v)).collect();
 
     // Iterate over each position in the region (inclusive 0-based start to end)
-    for pos in region_start..=region_end {
+    // Using region.start_1based_inclusive() and region.end_1based_inclusive() for correct boundaries
+    let start_pos = region_start;
+    let end_pos = region_end;
+    
+    for pos in start_pos..=end_pos {
+        // Check if position is within our region using the struct's contains method
+        if !region.contains(pos) {
+            continue;
+        }
+        
         if let Some(var) = variant_map.get(&pos) {
             // Variant exists at this position; calculate diversity metrics
             let mut allele_counts = HashMap::new();

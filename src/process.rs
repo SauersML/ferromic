@@ -521,18 +521,36 @@ pub fn display_seqinfo_entries(seqinfo: &[SeqInfo], limit: usize) {
 fn position_in_regions(pos: i64, regions: &[(i64, i64)]) -> bool {
     // pos is zero-based
     // regions are sorted by start position
+    
+    // Create a ZeroBasedHalfOpen for the position (as a point)
+    let position_interval = ZeroBasedHalfOpen {
+        start: pos as usize,
+        end: (pos + 1) as usize, // Make it a point interval [pos, pos+1)
+    };
+    
+    // Binary search through regions
     let mut left = 0;
     let mut right = regions.len();
 
     while left < right {
         let mid = (left + right) / 2;
         let (start, end) = regions[mid];
-        if pos < start {
-            right = mid;
-        } else if pos >= end {
+        
+        // Convert region to ZeroBasedHalfOpen
+        let region_interval = ZeroBasedHalfOpen {
+            start: start as usize,
+            end: end as usize,
+        };
+        
+        // Use intersect to check for overlap
+        if position_interval.start >= region_interval.end {
+            // Position is beyond this region, look to the right
             left = mid + 1;
+        } else if position_interval.end <= region_interval.start {
+            // Position is before this region, look to the left
+            right = mid;
         } else {
-            // pos in [start, end)
+            // Overlap exists, position is in region
             return true;
         }
     }
@@ -1789,6 +1807,12 @@ fn filter_and_log_transcripts(
         .expect("Failed to open transcript_overlap.log");
     let mut log_file = BufWriter::new(log_file);
 
+    // Create a ZeroBasedHalfOpen for the query region
+    let query_interval = ZeroBasedHalfOpen {
+        start: query.start as usize,
+        end: (query.end + 1) as usize, // Convert inclusive end to exclusive end
+    };
+    
     writeln!(log_file, "Query region: {} to {}", query.start, query.end)
         .expect("Failed to write to transcript_overlap.log");
 
@@ -1836,11 +1860,14 @@ fn filter_and_log_transcripts(
             continue;
         }
 
-        // Iterate all transcripts, decide if they overlap query region, do the logging
-        let transcript_coding_start_zb = transcript_coding_start - 1;
-        let transcript_coding_end_zb = transcript_coding_end - 1;
-        let overlaps_query =
-            (transcript_coding_end_zb >= query.start) && (transcript_coding_start_zb <= query.end);
+        // Create a ZeroBasedHalfOpen for the transcript
+        let transcript_interval = ZeroBasedHalfOpen::from_1based_inclusive(
+            transcript_coding_start, 
+            transcript_coding_end
+        );
+        
+        // Check for overlap using the intersect method
+        let overlaps_query = transcript_interval.intersect(&query_interval).is_some();
 
         if !overlaps_query {
             continue;
@@ -2557,7 +2584,22 @@ fn process_variant(
 
     // Check mask regions
     if let Some(mask_regions_chr) = mask_regions.and_then(|mr| mr.get(vcf_chr)) {
-        if position_in_regions(zero_based_position, mask_regions_chr) {
+        // Create a ZeroBasedHalfOpen point interval for the position
+        let position_interval = ZeroBasedHalfOpen {
+            start: zero_based_position as usize,
+            end: (zero_based_position + 1) as usize,
+        };
+        
+        // Check if position is masked using the ZeroBasedHalfOpen type
+        let is_masked = mask_regions_chr.iter().any(|&(start, end)| {
+            let mask_interval = ZeroBasedHalfOpen {
+                start: start as usize,
+                end: end as usize,
+            };
+            position_interval.intersect(&mask_interval).is_some()
+        });
+        
+        if is_masked {
             _filtering_stats._filtered_variants += 1;
             _filtering_stats.filtered_due_to_mask += 1;
             _filtering_stats
@@ -2567,6 +2609,15 @@ fn process_variant(
             return Ok(None);
         }
     } else if mask_regions.is_some() {
+        // Chromosome not found in mask regions, but mask was provided
+        // This is a warning condition - the chromosome exists in the VCF but not in the mask
+        eprintln!(
+            "{}",
+            format!(
+                "Warning: Chromosome {} not found in mask file. No positions will be masked for this chromosome.",
+                vcf_chr
+            ).yellow()
+        );
     }
 
     // Store reference and alternate alleles
