@@ -1839,128 +1839,173 @@ fn process_single_config_entry(
         mask.as_ref().and_then(|m| m.get(&chr.to_string())),
     );
 
-    // Stats for filtered group 0
-    let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f, site_divs_0_f) = match process_variants(
+    // Pull out just the unfiltered variants in [start..end) (not the extended region!)
+    let region_variants_unfiltered: Vec<_> = unfiltered_variants
+        .iter()
+        .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
+        .cloned()
+        .collect();
+
+    /// A tiny helper struct for returning the group stats.
+    struct GroupStats {
+        num_segsites: usize,
+        w_theta: f64,
+        pi: f64,
+        n_hap: usize,
+        site_divs: Vec<SiteDiversity>,
+    }
+
+    /// Inner helper for the repeated logic of calling `process_variants`.
+    ///  - Prints "No haplotypes found" if it returns None, and returns Ok(None) up the chain.
+    ///  - Otherwise, returns a struct with the relevant stats.
+    ///
+    ///   - `group_id`: 0 or 1
+    ///   - `is_filtered`: boolean
+    ///   - `variants`: either `filtered_variants` or the region slice for unfiltered
+    ///   - `maybe_adjusted_len`: `Some(adjusted_sequence_length)` or `None`
+    fn compute_group_stats(
+        group_id: u8,
+        is_filtered: bool,
+        variants: &[Variant],
+        sample_filter: &HashMap<String, (u8, u8)>,
+        region_bounds: (i64, i64),
+        extended_region: ZeroBasedHalfOpen,
+        maybe_adjusted_len: Option<i64>,
+        seqinfo: Arc<Mutex<Vec<SeqInfo>>>,
+        pos_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+        seqname: String,
+        ref_seq: &[u8],
+        cds: &[TranscriptCDS],
+        sample_names: &[String],
+    ) -> Result<Option<GroupStats>, VcfError> {
+        let (start, end) = region_bounds;
+        let result = process_variants(
+            variants,
+            sample_names,
+            group_id,
+            sample_filter,
+            start,
+            end,
+            extended_region,
+            maybe_adjusted_len,
+            seqinfo,
+            pos_map,
+            seqname.clone(),
+            is_filtered,
+            ref_seq,
+            cds,
+        )?;
+
+        // Handle the "no haplotypes" scenario
+        if let Some((num_segsites, w_theta, pi, n_hap, site_divs)) = result {
+            Ok(Some(GroupStats {
+                num_segsites,
+                w_theta,
+                pi,
+                n_hap,
+                site_divs,
+            }))
+        } else {
+            println!(
+                "No haplotypes found for group {} ({}) in region {}-{}",
+                group_id,
+                if is_filtered { "filtered" } else { "unfiltered" },
+                start,
+                end
+            );
+            Ok(None)
+        }
+    }
+
+    // --- Compute Stats for Each of the Four Combinations ---
+
+    // Filtered, group 0
+    let stats_0_f = match compute_group_stats(
+        0, /*group_id*/
+        true, /*filtered*/
         &filtered_variants,
-        &sample_names,
-        0,
         &entry.samples_filtered,
-        entry.interval.start as i64,
-        entry.interval.end as i64,
+        (entry.interval.start as i64, entry.interval.end as i64),
         extended_region,
         Some(adjusted_sequence_length),
         seqinfo_storage_filtered.clone(),
         position_allele_map_filtered.clone(),
         entry.seqname.clone(),
-        true,
         ref_sequence,
         &local_cds,
+        &sample_names,
     )? {
-        Some(vals) => vals,
-        None => {
-            println!(
-                "No haplotypes found for group 0 (filtered) in region {}-{}",
-                entry.interval.start as i64, entry.interval.end as i64
-            );
-            return Ok(None);
-        }
+        Some(x) => x,
+        None => return Ok(None),
     };
 
-    // Stats for filtered group 1
-    let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f, site_divs_1_f) = match process_variants(
-        &filtered_variants,
-        &sample_names,
+    // Filtered, group 1
+    let stats_1_f = match compute_group_stats(
         1,
+        true,
+        &filtered_variants,
         &entry.samples_filtered,
-        entry.interval.start as i64,
-        entry.interval.end as i64,
+        (entry.interval.start as i64, entry.interval.end as i64),
         extended_region,
         Some(adjusted_sequence_length),
         seqinfo_storage_filtered.clone(),
         position_allele_map_filtered.clone(),
         entry.seqname.clone(),
-        true,
         ref_sequence,
         &local_cds,
+        &sample_names,
     )? {
-        Some(vals) => vals,
-        None => {
-            println!(
-                "No haplotypes found for group 1 (filtered) in region {}-{}",
-                entry.interval.start as i64, entry.interval.end as i64
-            );
-            return Ok(None);
-        }
+        Some(x) => x,
+        None => return Ok(None),
     };
 
     let inversion_freq_filt =
         calculate_inversion_allele_frequency(&entry.samples_filtered).unwrap_or(-1.0);
 
-    // Stats for unfiltered group 0
-    let region_variants_unfiltered: Vec<_> = unfiltered_variants
-        .iter()
-        // Filter variants within the 0-based half-open interval [start, end)
-        .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
-        .cloned()
-        .collect();
-
-    let (num_segsites_0, w_theta_0, pi_0, n_hap_0_unf, site_divs_0_unf) = match process_variants(
-        &region_variants_unfiltered,
-        &sample_names,
+    // Unfiltered, group 0
+    let stats_0_u = match compute_group_stats(
         0,
+        false,
+        &region_variants_unfiltered,
         &entry.samples_unfiltered,
-        entry.interval.start as i64,
-        entry.interval.end as i64,
+        (entry.interval.start as i64, entry.interval.end as i64),
         extended_region,
         None,
         seqinfo_storage_unfiltered.clone(),
         position_allele_map_unfiltered.clone(),
         entry.seqname.clone(),
-        false,
         ref_sequence,
         &local_cds,
+        &sample_names,
     )? {
-        Some(vals) => vals,
-        None => {
-            println!(
-                "No haplotypes found for group 0 in region {}-{}",
-                entry.interval.start as i64, entry.interval.end as i64
-            );
-            return Ok(None);
-        }
+        Some(x) => x,
+        None => return Ok(None),
     };
 
-    // Stats for unfiltered group 1
-    let (num_segsites_1, w_theta_1, pi_1, n_hap_1_unf, site_divs_1_unf) = match process_variants(
-        &region_variants_unfiltered,
-        &sample_names,
+    // Unfiltered, group 1
+    let stats_1_u = match compute_group_stats(
         1,
+        false,
+        &region_variants_unfiltered,
         &entry.samples_unfiltered,
-        entry.interval.start as i64,
-        entry.interval.end as i64,
+        (entry.interval.start as i64, entry.interval.end as i64),
         extended_region,
         None,
         seqinfo_storage_unfiltered.clone(),
         position_allele_map_unfiltered.clone(),
         entry.seqname.clone(),
-        false,
         ref_sequence,
         &local_cds,
+        &sample_names,
     )? {
-        Some(vals) => vals,
-        None => {
-            println!(
-                "No haplotypes found for group 1 in region {}-{}",
-                entry.interval.start as i64, entry.interval.end as i64
-            );
-            return Ok(None);
-        }
+        Some(x) => x,
+        None => return Ok(None),
     };
 
     let inversion_freq_no_filter =
         calculate_inversion_allele_frequency(&entry.samples_unfiltered).unwrap_or(-1.0);
 
-    // Build final row data
+    // --- Build Final CsvRowData ---
     let row_data = CsvRowData {
         seqname: entry.seqname,
         region_start: entry.interval.start as i64,
@@ -1969,41 +2014,48 @@ fn process_single_config_entry(
         seq_len_1: sequence_length,
         seq_len_adj_0: adjusted_sequence_length,
         seq_len_adj_1: adjusted_sequence_length,
-        seg_sites_0: num_segsites_0,
-        seg_sites_1: num_segsites_1,
-        w_theta_0,
-        w_theta_1,
-        pi_0,
-        pi_1,
-        seg_sites_0_f: num_segsites_0_f,
-        seg_sites_1_f: num_segsites_1_f,
-        w_theta_0_f,
-        w_theta_1_f,
-        pi_0_f,
-        pi_1_f,
-        n_hap_0_unf,
-        n_hap_1_unf,
-        n_hap_0_f,
-        n_hap_1_f,
+        seg_sites_0: stats_0_u.num_segsites,
+        seg_sites_1: stats_1_u.num_segsites,
+        w_theta_0: stats_0_u.w_theta,
+        w_theta_1: stats_1_u.w_theta,
+        pi_0: stats_0_u.pi,
+        pi_1: stats_1_u.pi,
+        seg_sites_0_f: stats_0_f.num_segsites,
+        seg_sites_1_f: stats_1_f.num_segsites,
+        w_theta_0_f: stats_0_f.w_theta,
+        w_theta_1_f: stats_1_f.w_theta,
+        pi_0_f: stats_0_f.pi,
+        pi_1_f: stats_1_f.pi,
+        n_hap_0_unf: stats_0_u.n_hap,
+        n_hap_1_unf: stats_1_u.n_hap,
+        n_hap_0_f: stats_0_f.n_hap,
+        n_hap_1_f: stats_1_f.n_hap,
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
     };
+
     println!(
         "Finished stats for region {}-{}.",
         entry.interval.start, entry.interval.end
     );
 
+    // --- Gather per-site records from each group’s site_divs ---
     let mut per_site_records = Vec::new();
-    for sd in site_divs_0_unf {
+
+    // Unfiltered 0
+    for sd in stats_0_u.site_divs {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 0, false));
     }
-    for sd in site_divs_1_unf {
+    // Unfiltered 1
+    for sd in stats_1_u.site_divs {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 1, false));
     }
-    for sd in site_divs_0_f {
+    // Filtered 0
+    for sd in stats_0_f.site_divs {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 0, true));
     }
-    for sd in site_divs_1_f {
+    // Filtered 1
+    for sd in stats_1_f.site_divs {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 1, true));
     }
 
