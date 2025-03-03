@@ -1841,7 +1841,7 @@ fn filter_and_log_transcripts(
         let transcript_coding_start = tcds
             .segments
             .iter()
-            .map(|&(s, _, _, _)| s)
+            .map(|seg| seg.start as i64)
             .min()
             .unwrap_or(0);
         let transcript_coding_end = tcds
@@ -1890,7 +1890,12 @@ fn filter_and_log_transcripts(
             stats.multi_cds_transcripts += 1;
         }
 
-        let has_gaps = tcds.segments.windows(2).any(|w| w[1].0 - w[0].1 > 1);
+        let has_gaps = tcds.segments.windows(2).any(|w| {
+            let prev_end = w[0].end as i64;
+            let next_start = w[1].start as i64;
+            next_start - prev_end > 1
+        });
+
         if has_gaps {
             stats.transcripts_with_gaps += 1;
         }
