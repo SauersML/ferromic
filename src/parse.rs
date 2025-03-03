@@ -584,9 +584,23 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptCDS>, 
             }
         }
 
+        let strand_char = if segments.is_empty() { '.' } else { segments[0].2 };
+        let mut frames_vec: Vec<i64> = segments.iter().map(|&(_s, _e, _str, f)| f).collect();
+        let mut seg_intervals: Vec<ZeroBasedHalfOpen> = segments
+            .iter()
+            .map(|&(s, e, _, _)| ZeroBasedHalfOpen::from_1based_inclusive(s, e))
+            .collect();
+
+        if strand_char == '-' {
+            seg_intervals.reverse();
+            frames_vec.reverse();
+        }
+
         transcripts_vec.push(TranscriptCDS {
             transcript_id: tid,
-            segments,
+            strand: strand_char,
+            frames: frames_vec,
+            segments: seg_intervals,
         });
     }
 
