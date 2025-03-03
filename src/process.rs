@@ -1342,7 +1342,7 @@ pub fn process_config_entries(
     // The site records contain (position, pi, watterson_theta, group_id, is_filtered).
     // We do this for each region row in all_pairs.
 
-    let mut all_fasta_data: Vec<(String, String)> = Vec::new();
+    let all_fasta_data: Vec<(String, String)> = Vec::new();
 
     for (csv_row, per_site_vec) in &all_pairs {
         // For the region length we do (row.region_end - row.region_start + 1).
@@ -1368,7 +1368,7 @@ pub fn process_config_entries(
         // But we do not do manual +1 or -1 in code, we rely on the types for clarity. The site_diversities
         // already stores position as 1-based inclusive from the final assignment. We just compute index carefully.
 
-        for &(pos_1based, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
+        for &(pos_1based, pi_val, theta_val, is_filtered) in per_site_vec {
             let offset = pos_1based - csv_row.region_start;
             if offset < 1 {
                 continue;
