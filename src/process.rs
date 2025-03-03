@@ -2655,12 +2655,9 @@ fn write_phylip_file(
     hap_sequences: &HashMap<String, Vec<char>>,
     transcript_id: &str,
 ) -> Result<(), VcfError> {
+    // Acquire or create the TempDir in a single scope.
     let temp_output_file = {
-        {
-            let mut guard = TEMP_DIR.lock().unwrap();
-            *guard = Some(temp_dir);
-        }
-
+        let mut guard = TEMP_DIR.lock().unwrap();
         if guard.is_none() {
             *guard = Some(create_temp_dir().expect("Failed to create temporary directory"));
         }
