@@ -294,7 +294,7 @@ pub fn calculate_per_site(
     
     for pos in start_pos..=end_pos {
         // Check if position is within our region using the struct's contains method
-        if !region.contains(pos) {
+        if !region.contains(ZeroBasedPosition(pos)) {
             continue;
         }
         
