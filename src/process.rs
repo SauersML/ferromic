@@ -26,7 +26,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 use std::collections::HashMap as Map2;
-use std::path::PathBuf;
 use tempfile::TempDir;
 use once_cell::sync::Lazy;
 
@@ -232,10 +231,11 @@ impl CdsSeq {
         let now = SystemTime::now();
         let log_file_path = {
             let mut temp_dir_lock = TEMP_DIR.lock().unwrap();
-            if temp_dir_lock.is_none() {
-                *temp_dir_lock = Some(create_temp_dir().expect("Failed to create temporary directory"));
+            let mut guard = TEMP_DIR.lock().unwrap();
+            if guard.is_none() {
+                *guard = Some(create_temp_dir().expect("Failed to create temporary directory"));
             }
-            temp_dir_lock.as_ref().unwrap().path().join("cds_validation.log")
+            guard.as_ref().unwrap().path().join("cds_validation.log")
         };
 
         let mut log_file = OpenOptions::new()
@@ -1212,7 +1212,11 @@ pub fn process_config_entries(
     args: &Args,
 ) -> Result<(), VcfError> {
     let temp_dir = create_temp_dir()?;
-    *TEMP_DIR.lock().unwrap() = Some(temp_dir);
+    {
+        let mut guard = TEMP_DIR.lock().unwrap();
+        *guard = Some(temp_dir);
+    }
+
     // Create CSV writer and write the header once in the temporary directory
     let temp_output_file = temp_dir.path().join(output_file.file_name().unwrap());
     let mut writer = create_and_setup_csv_writer(&temp_output_file)?;
@@ -1992,7 +1996,10 @@ fn filter_and_log_transcripts(
     // Open or create a log file once per call in the temporary directory
     let log_file_path = {
         let temp_dir = TEMP_DIR.lock().unwrap();
-        temp_dir.as_ref().expect("Temporary directory not set").path().join("transcript_overlap.log")
+        {
+            let guard = TEMP_DIR.lock().unwrap();
+            guard.as_ref().expect("Temporary directory not set").path().join("transcript")
+        }
     };
         
     let log_file = OpenOptions::new()
@@ -2651,10 +2658,11 @@ fn write_phylip_file(
 ) -> Result<(), VcfError> {
     let temp_output_file = {
         let mut temp_dir_lock = TEMP_DIR.lock().unwrap();
-        if temp_dir_lock.is_none() {
-            *temp_dir_lock = Some(create_temp_dir().expect("Failed to create temporary directory"));
+        let mut guard = TEMP_DIR.lock().unwrap();
+        if guard.is_none() {
+            *guard = Some(create_temp_dir().expect("Failed to create temporary directory"));
         }
-        temp_dir_lock.as_ref().unwrap().path().join(output_file)
+        guard.as_ref().unwrap().path().join(output_file)
     };
 
     println!("Writing {} for transcript {}", temp_output_file.display(), transcript_id);
