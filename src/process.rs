@@ -1241,7 +1241,7 @@ pub fn process_config_entries(
                 start: csv_row.region_start as usize,
                 end: csv_row.region_end as usize,
             };
-            if let Some(rel_pos) = region.relative_position_1based(pos as i64) {
+            if let Some(rel_pos) = region.relative_position_1based(pos) {
                 if rel_pos > max_position {
                     max_position = rel_pos;
                 }
@@ -2545,7 +2545,7 @@ fn process_variant(
     )?;
 
     // call region.contains using zero-based
-    if !region.contains(one_based_vcf_position.zero_based()) {
+    if !region.contains(ZeroBasedPosition(one_based_vcf_position.zero_based())) {
         return Ok(None);
     }
 
