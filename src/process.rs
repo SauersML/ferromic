@@ -1353,7 +1353,7 @@ pub fn process_config_entries(
     let temp_fasta_path = {
         let locked_opt = TEMP_DIR.lock();
         if let Some(dir) = locked_opt.as_ref() {
-            dir.path().join("per_site_output.fasta")
+            dir.path().join("per_site_output.falsta")
         } else {
             return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
         }
@@ -1511,7 +1511,7 @@ pub fn process_config_entries(
     fasta_writer.flush()?;
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
-    println!("Wrote FASTA-style per-site data to per_site_output.fasta");
+    println!("Wrote FASTA-style per-site data to per_site_output.falsta");
     println!(
         "Processing complete. Check the output file: {:?}",
         output_file
@@ -1534,9 +1534,9 @@ pub fn process_config_entries(
     std::fs::copy(&temp_csv, output_file)?;
     
     // Copy FASTA file
-    let temp_fasta = temp_dir_path.join("per_site_output.fasta");
+    let temp_fasta = temp_dir_path.join("per_site_output.falsta");
     if temp_fasta.exists() {
-        std::fs::copy(&temp_fasta, std::path::Path::new("per_site_output.fasta"))?;
+        std::fs::copy(&temp_fasta, std::path::Path::new("per_site_output.falsta"))?;
     }
     
     // Copy PHYLIP files
