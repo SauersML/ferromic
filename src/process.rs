@@ -26,18 +26,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 use std::collections::HashMap as Map2;
-use std::env;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use std::cell::RefCell;
 
 thread_local! {
     static TEMP_DIR: RefCell<Option<PathBuf>> = RefCell::new(None);
-}
-
-struct Context {
-    args: Args,
-    temp_dir: TempDir,
 }
 
 fn create_temp_dir() -> Result<TempDir, VcfError> {
