@@ -237,11 +237,15 @@ impl CdsSeq {
     /// A log file named cds_validation.log is appended with the validation result.
     pub fn new(seq: Vec<u8>) -> Result<Self, String> {
         let now = SystemTime::now();
+        let log_file_path = TEMP_DIR.with(|td| {
+            let temp_dir = td.borrow().as_ref().expect("Temporary directory not set");
+            temp_dir.join("cds_validation.log")
+        });
         let mut log_file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open("cds_validation.log")
-            .map_err(|e| format!("Failed to open cds_validation.log: {}", e))?;
+            .open(&log_file_path)
+            .map_err(|e| format!("Failed to open {}: {}", log_file_path.display(), e))?;
 
         if seq.is_empty() {
             writeln!(log_file, "{:?} Invalid CDS: empty sequence", now)
@@ -1496,6 +1500,35 @@ pub fn process_config_entries(
         "Processing complete. Check the output file: {:?}",
         output_file
     );
+    // Copy files from temporary directory to final destinations
+    let temp_dir_path = temp_dir.path();
+    // Copy CSV file
+    let temp_csv = temp_dir_path.join(output_file.file_name().unwrap());
+    if let Some(parent) = output_file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(&temp_csv, output_file)?;
+    // Copy FASTA file
+    let temp_fasta = temp_dir_path.join("per_site_output.fasta");
+    if temp_fasta.exists() {
+        std::fs::copy(&temp_fasta, std::path::Path::new("per_site_output.fasta"))?;
+    }
+    // Copy PHYLIP files
+    for entry in std::fs::read_dir(temp_dir_path)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("phy") {
+            let file_name = path.file_name().unwrap();
+            std::fs::copy(&path, std::path::Path::new(".").join(file_name))?;
+        }
+    }
+    // Copy log files
+    for log_file in ["cds_validation.log", "transcript_overlap.log"] {
+        let temp_log = temp_dir_path.join(log_file);
+        if temp_log.exists() {
+            std::fs::copy(&temp_log, std::path::Path::new(".").join(log_file))?;
+        }
+    }
     Ok(())
 }
 
@@ -1959,12 +1992,16 @@ fn filter_and_log_transcripts(
     use std::fs::OpenOptions;
     use std::io::{BufWriter, Write};
 
-    // Open or create a log file once per call
+    // Open or create a log file once per call in the temporary directory
+    let log_file_path = TEMP_DIR.with(|td| {
+        let temp_dir = td.borrow().as_ref().expect("Temporary directory not set");
+        temp_dir.join("transcript_overlap.log")
+    });
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("transcript_overlap.log")
-        .expect("Failed to open transcript_overlap.log");
+        .open(&log_file_path)
+        .expect("Failed to open transcript_overlap.log in temporary directory");
     let mut log_file = BufWriter::new(log_file);
 
     // Create a ZeroBasedHalfOpen for the query region
@@ -2614,11 +2651,15 @@ fn write_phylip_file(
     hap_sequences: &HashMap<String, Vec<char>>,
     transcript_id: &str,
 ) -> Result<(), VcfError> {
-    println!("Writing {} for transcript {}", output_file, transcript_id);
-    let file = File::create(output_file).map_err(|e| {
+    let temp_output_file = TEMP_DIR.with(|td| {
+        let temp_dir = td.borrow().as_ref().expect("Temporary directory not set");
+        temp_dir.join(output_file)
+    });
+    println!("Writing {} for transcript {}", temp_output_file.display(), transcript_id);
+    let file = File::create(&temp_output_file).map_err(|e| {
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
-            format!("Failed to create PHYLIP file '{}': {:?}", output_file, e),
+            format!("Failed to create PHYLIP file '{}': {:?}", temp_output_file.display(), e),
         ))
     })?;
     let mut writer = BufWriter::new(file);
