@@ -84,7 +84,7 @@ pub struct ZeroBasedHalfOpen {
 
 impl ZeroBasedHalfOpen {
     /// Creates a new half-open interval from 1-based inclusive coordinates.
-    /// This method is preserved for legacy conversions from GTF/other 1-based data.
+    /// This is for data that uses 1-based inclusive.
     pub fn from_1based_inclusive(start_inclusive: i64, end_inclusive: i64) -> Self {
         let mut adjusted_start = start_inclusive;
         if adjusted_start < 1 {
@@ -101,7 +101,7 @@ impl ZeroBasedHalfOpen {
     }
 
     /// Creates a new half-open interval from 0-based inclusive coordinates.
-    /// This internally converts [start..end] inclusive into [start..end+1) half-open.
+    /// This converts [start..end] inclusive into [start..end+1) half-open.
     pub fn from_0based_inclusive(start_inclusive: i64, end_inclusive: i64) -> Self {
         ZeroBasedHalfOpen {
             start: start_inclusive.max(0) as usize,
@@ -109,8 +109,7 @@ impl ZeroBasedHalfOpen {
         }
     }
 
-    /// Creates a zero-length half-open interval representing a single position p.
-    /// This is [p..p+1).
+    /// Creates a zero-length half-open interval representing a single position p (0-based).
     pub fn from_0based_point(p: i64) -> Self {
         let start = p.max(0) as usize;
         ZeroBasedHalfOpen {
@@ -134,7 +133,7 @@ impl ZeroBasedHalfOpen {
         &seq[self.start..self.end]
     }
 
-    /// Returns Some(overlap) if this interval intersects with `other`, or None if they do not overlap.
+    /// Returns Some(overlap) if this interval intersects with `other`, or None if no overlap.
     pub fn intersect(&self, other: &ZeroBasedHalfOpen) -> Option<ZeroBasedHalfOpen> {
         let start = self.start.max(other.start);
         let end = self.end.min(other.end);
@@ -145,10 +144,30 @@ impl ZeroBasedHalfOpen {
         }
     }
 
-    /// Returns true if the given ZeroBasedPosition is inside [start..end).
+    /// Returns true if `pos` is in [start..end).
     pub fn contains(&self, pos: ZeroBasedPosition) -> bool {
         let p = pos.0 as usize;
         p >= self.start && p < self.end
+    }
+
+    /// Returns the 1-based inclusive start coordinate of this interval.
+    pub fn start_1based_inclusive(&self) -> i64 {
+        self.start as i64 + 1
+    }
+
+    /// Returns the 1-based inclusive end coordinate of this interval.
+    pub fn end_1based_inclusive(&self) -> i64 {
+        self.end as i64
+    }
+
+    /// Returns 1-based position of `pos` if inside [start..end), else None.
+    pub fn relative_position_1based(&self, pos: i64) -> Option<usize> {
+        let p = pos as usize;
+        if p >= self.start && p < self.end {
+            Some(p - self.start + 1)
+        } else {
+            None
+        }
     }
 }
 
