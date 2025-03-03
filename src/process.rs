@@ -1847,7 +1847,7 @@ fn filter_and_log_transcripts(
         let transcript_coding_end = tcds
             .segments
             .iter()
-            .map(|&(_, e, _, _)| e)
+            .map(|seg| seg.end as i64)
             .max()
             .unwrap_or(-1);
 
@@ -1868,7 +1868,7 @@ fn filter_and_log_transcripts(
             continue;
         }
 
-        tcds.segments.sort_by_key(|&(s, _, _, _)| s);
+        tcds.segments.sort_by_key(|seg| seg.start);
 
         println!("\nProcessing transcript: {}", tcds.transcript_id);
         writeln!(log_file, "\nProcessing transcript: {}", tcds.transcript_id)
