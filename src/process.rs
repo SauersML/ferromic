@@ -350,7 +350,6 @@ pub struct Variant {
     pub genotypes: Vec<Option<Vec<u8>>>,
 }
 
-// IN PROGRESS
 #[derive(Debug, Clone)]
 pub struct SeqInfo {
     pub sample_index: usize,    // The index of the sample this allele belongs to
