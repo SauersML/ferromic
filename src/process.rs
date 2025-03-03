@@ -1210,8 +1210,11 @@ pub fn process_config_entries(
     allow: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
 ) -> Result<(), VcfError> {
-    // Create CSV writer and write the header once.
-    let mut writer = create_and_setup_csv_writer(output_file)?;
+    let temp_dir = create_temp_dir()?;
+    TEMP_DIR.with(|td| *td.borrow_mut() = Some(temp_dir.path().to_path_buf()));
+    // Create CSV writer and write the header once in the temporary directory
+    let temp_output_file = temp_dir.path().join(output_file.file_name().unwrap());
+    let mut writer = create_and_setup_csv_writer(&temp_output_file)?;
     write_csv_header(&mut writer)?;
 
     // Group config entries by chromosome for efficiency
