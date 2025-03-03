@@ -230,12 +230,11 @@ impl CdsSeq {
     pub fn new(seq: Vec<u8>) -> Result<Self, String> {
         let now = SystemTime::now();
         let log_file_path = {
-            let mut temp_dir_lock = TEMP_DIR.lock().unwrap();
             let mut guard = TEMP_DIR.lock().unwrap();
             if guard.is_none() {
                 *guard = Some(create_temp_dir().expect("Failed to create temporary directory"));
             }
-            guard.as_ref().unwrap().path().join("cds_validation.log")
+            guard.as_ref().expect("Temporary directory not set").path().join("cds_validation.log")
         };
 
         let mut log_file = OpenOptions::new()
@@ -2657,12 +2656,15 @@ fn write_phylip_file(
     transcript_id: &str,
 ) -> Result<(), VcfError> {
     let temp_output_file = {
-        let mut temp_dir_lock = TEMP_DIR.lock().unwrap();
-        let mut guard = TEMP_DIR.lock().unwrap();
+        {
+            let mut guard = TEMP_DIR.lock().unwrap();
+            *guard = Some(temp_dir);
+        }
+
         if guard.is_none() {
             *guard = Some(create_temp_dir().expect("Failed to create temporary directory"));
         }
-        guard.as_ref().unwrap().path().join(output_file)
+        guard.as_ref().expect("Temporary directory not set").path().join(output_file)
     };
 
     println!("Writing {} for transcript {}", temp_output_file.display(), transcript_id);
