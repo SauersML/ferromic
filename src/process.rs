@@ -1337,8 +1337,8 @@ pub fn process_config_entries(
     // corresponding to each position in the region. If a value is zero, we store it as an integer '0'.
     // Otherwise, we format as a float with six decimals.
 
-    let fasta_path = std::path::Path::new("per_site_output.fasta");
-    let fasta_file = File::create(fasta_path)?;
+    let temp_fasta_path = temp_dir.path().join("per_site_output.fasta");
+    let fasta_file = File::create(&temp_fasta_path)?;
     let mut fasta_writer = BufWriter::new(fasta_file);
 
     // We will map each distinct (prefix, row.seqname, row.region_start, row.region_end, group_id)
