@@ -75,6 +75,13 @@ pub struct Args {
 #[derive(Debug, Clone, Copy)]
 pub struct ZeroBasedPosition(pub i64);
 
+impl ZeroBasedPosition {
+    /// Converts the zero-based coordinate into a 1-based inclusive coordinate.
+    pub fn to_one_based(self) -> i64 {
+        self.0 + 1
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ZeroBasedHalfOpen {
     pub start: usize,
