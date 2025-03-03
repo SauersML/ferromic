@@ -237,9 +237,11 @@ impl CdsSeq {
     pub fn new(seq: Vec<u8>) -> Result<Self, String> {
         let now = SystemTime::now();
         let log_file_path = TEMP_DIR.with(|td| {
-            let temp_dir = td.borrow().as_ref().expect("Temporary directory not set");
+            let binding = td.borrow();
+            let temp_dir = binding.as_ref().expect("Temporary directory not set");
             temp_dir.join("cds_validation.log")
         });
+
         let mut log_file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -1993,9 +1995,12 @@ fn filter_and_log_transcripts(
 
     // Open or create a log file once per call in the temporary directory
     let log_file_path = TEMP_DIR.with(|td| {
-        let temp_dir = td.borrow().as_ref().expect("Temporary directory not set");
+        let binding = td.borrow();
+        let temp_dir = binding.as_ref().expect("Temporary directory not set");
         temp_dir.join("transcript_overlap.log")
     });
+    
+        
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -2651,9 +2656,11 @@ fn write_phylip_file(
     transcript_id: &str,
 ) -> Result<(), VcfError> {
     let temp_output_file = TEMP_DIR.with(|td| {
-        let temp_dir = td.borrow().as_ref().expect("Temporary directory not set");
+        let binding = td.borrow();
+        let temp_dir = binding.as_ref().expect("Temporary directory not set");
         temp_dir.join(output_file)
     });
+
     println!("Writing {} for transcript {}", temp_output_file.display(), transcript_id);
     let file = File::create(&temp_output_file).map_err(|e| {
         VcfError::Io(io::Error::new(
