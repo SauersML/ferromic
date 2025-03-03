@@ -678,8 +678,12 @@ fn process_variants(
 
         let mut offset_map = Vec::new();
         let mut accumulated_length = 0;
-        for &(seg_start, seg_end, seg_strand, _frame) in &transcript.segments {
+        for (i, seg) in transcript.segments.iter().enumerate() {
+            let seg_start = seg.start as i64;
+            let seg_end = seg.end as i64;
+            let seg_strand = transcript.strand;
             let mut seg_len = seg_end.saturating_sub(seg_start).saturating_add(1) as usize;
+
             if seg_start < 0 {
                 eprintln!(
                     "Skipping negative start {} for transcript {} on {}",
@@ -945,7 +949,7 @@ fn apply_variants_to_transcripts(
     // The reference sequence passed to make_sequences is the entire chromosome.
     // We rely on ZeroBasedHalfOpen externally, so we do not manually slice here.
     for variant in variants {
-        if !extended_region.contains(variant.position) {
+        if !extended_region.contains(ZeroBasedPosition(variant.position)) {
             continue;
         }
 
@@ -1084,7 +1088,11 @@ fn prepare_to_write_cds(
             // A CDS entirely outside the query region but inside the extended region does not get written out to a .phy file.
             // If a CDS partially overlaps the query region, its entire transcript sequence
             // (including segments outside the query region but within the extended region) will be written out
-            for &(seg_s, seg_e, strand, _frame) in &cds.segments {
+            for (i, seg) in cds.segments.iter().enumerate() {
+                let seg_s = seg.start as i64;
+                let seg_e = seg.end as i64;
+                let strand = cds.strand;
+                let _frame = cds.frames.get(i).copied().unwrap_or(0);
                 // If the entire CDS segment is within the extended region, then the segment is included in full.
                 // If only part overlaps, only that partial segment is included. This should NEVER happen in humans, because the largest gene is smaller than the extended region.
                 // If the segment lies wholly beyond the extended region (or the normal region), it is dropped entirely.
@@ -1233,7 +1241,7 @@ pub fn process_config_entries(
                 start: csv_row.region_start as usize,
                 end: csv_row.region_end as usize,
             };
-            if let Some(rel_pos) = region.relative_position_1based(pos) {
+            if let Some(rel_pos) = region.relative_position_1based(pos as i64) {
                 if rel_pos > max_position {
                     max_position = rel_pos;
                 }
@@ -1670,7 +1678,7 @@ fn process_single_config_entry(
     let region_variants_unfiltered: Vec<_> = unfiltered_variants
         .iter()
         // Filter variants within the 0-based half-open interval [start, end)
-        .filter(|v| entry.interval.contains(v.position))
+        .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
         .cloned()
         .collect();
 
@@ -2525,7 +2533,7 @@ fn process_variant(
     }
 
     // parse a 1-based VCF position
-    let one_based_vcf_position = VcfPos::new(
+    let one_based_vcf_position = OneBasedPosition::new(
         fields[1]
             .parse()
             .map_err(|_| VcfError::Parse("Invalid position".to_string()))?,
