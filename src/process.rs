@@ -30,6 +30,11 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
+use std::cell::RefCell;
+
+thread_local! {
+    static TEMP_DIR: RefCell<Option<PathBuf>> = RefCell::new(None);
+}
 
 struct Context {
     args: Args,
@@ -37,7 +42,7 @@ struct Context {
 }
 
 fn create_temp_dir() -> Result<TempDir, VcfError> {
-    let ramdisk_path = env::var("RAMDISK_PATH").unwrap_or_else(|_| "/dev/shm".to_string());
+    let ramdisk_path = std::env::var("RAMDISK_PATH").unwrap_or_else(|_| "/dev/shm".to_string());
     let temp_dir = match TempDir::new_in(&ramdisk_path) {
         Ok(dir) => dir,
         Err(_) => TempDir::new().map_err(|e| VcfError::Io(e))?,
