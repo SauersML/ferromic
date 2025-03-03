@@ -27,7 +27,6 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 use std::collections::HashMap as Map2;
 use std::env;
-use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use std::cell::RefCell;
