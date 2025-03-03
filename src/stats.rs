@@ -318,7 +318,7 @@ pub fn calculate_per_site(
             }
 
             let (pi_value, watterson_value) = if total_called < 2 {
-                (0.0, 0.0) // Insufficient haplotypes called at this site
+                (0.0, 0.0)
             } else {
                 let mut freq_sq_sum = 0.0;
                 for count in allele_counts.values() {
@@ -343,16 +343,16 @@ pub fn calculate_per_site(
             };
 
             site_diversities.push(SiteDiversity {
-                position: pos,
+                position: ZeroBasedPosition(pos).to_one_based(),
                 pi: pi_value,
                 watterson_theta: watterson_value,
             });
         } else {
             // No variant at this position (monomorphic site)
             site_diversities.push(SiteDiversity {
-                position: pos,
-                pi: 0.0,              // Monomorphic sites have zero nucleotide diversity
-                watterson_theta: 0.0, // Monomorphic sites have zero Watterson's theta
+                position: ZeroBasedPosition(pos).to_one_based(),
+                pi: 0.0,
+                watterson_theta: 0.0,
             });
         }
     }
