@@ -28,11 +28,11 @@ use std::time::{Duration, SystemTime};
 use std::collections::HashMap as Map2;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use std::cell::RefCell;
+use once_cell::sync::Lazy;
 
-thread_local! {
-    static TEMP_DIR: RefCell<Option<PathBuf>> = RefCell::new(None);
-}
+static TEMP_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| {
+    Mutex::new(None)
+});
 
 fn create_temp_dir() -> Result<TempDir, VcfError> {
     let ramdisk_path = std::env::var("RAMDISK_PATH").unwrap_or_else(|_| "/dev/shm".to_string());
@@ -230,11 +230,13 @@ impl CdsSeq {
     /// A log file named cds_validation.log is appended with the validation result.
     pub fn new(seq: Vec<u8>) -> Result<Self, String> {
         let now = SystemTime::now();
-        let log_file_path = TEMP_DIR.with(|td| {
-            let binding = td.borrow();
-            let temp_dir = binding.as_ref().expect("Temporary directory not set");
-            temp_dir.join("cds_validation.log")
-        });
+        let log_file_path = {
+            let mut temp_dir_lock = TEMP_DIR.lock().unwrap();
+            if temp_dir_lock.is_none() {
+                *temp_dir_lock = Some(create_temp_dir().expect("Failed to create temporary directory").path().to_path_buf());
+            }
+            temp_dir_lock.as_ref().unwrap().join("cds_validation.log")
+        };
 
         let mut log_file = OpenOptions::new()
             .create(true)
@@ -1210,7 +1212,7 @@ pub fn process_config_entries(
     args: &Args,
 ) -> Result<(), VcfError> {
     let temp_dir = create_temp_dir()?;
-    TEMP_DIR.with(|td| *td.borrow_mut() = Some(temp_dir.path().to_path_buf()));
+    *TEMP_DIR.lock().unwrap() = Some(temp_dir.path().to_path_buf());
     // Create CSV writer and write the header once in the temporary directory
     let temp_output_file = temp_dir.path().join(output_file.file_name().unwrap());
     let mut writer = create_and_setup_csv_writer(&temp_output_file)?;
@@ -1988,12 +1990,10 @@ fn filter_and_log_transcripts(
     use std::io::{BufWriter, Write};
 
     // Open or create a log file once per call in the temporary directory
-    let log_file_path = TEMP_DIR.with(|td| {
-        let binding = td.borrow();
-        let temp_dir = binding.as_ref().expect("Temporary directory not set");
-        temp_dir.join("transcript_overlap.log")
-    });
-    
+    let log_file_path = {
+        let temp_dir = TEMP_DIR.lock().unwrap();
+        temp_dir.as_ref().expect("Temporary directory not set").join("transcript_overlap.log")
+    };
         
     let log_file = OpenOptions::new()
         .create(true)
@@ -2649,11 +2649,13 @@ fn write_phylip_file(
     hap_sequences: &HashMap<String, Vec<char>>,
     transcript_id: &str,
 ) -> Result<(), VcfError> {
-    let temp_output_file = TEMP_DIR.with(|td| {
-        let binding = td.borrow();
-        let temp_dir = binding.as_ref().expect("Temporary directory not set");
-        temp_dir.join(output_file)
-    });
+    let temp_output_file = {
+        let mut temp_dir_lock = TEMP_DIR.lock().unwrap();
+        if temp_dir_lock.is_none() {
+            *temp_dir_lock = Some(create_temp_dir().expect("Failed to create temporary directory").path().to_path_buf());
+        }
+        temp_dir_lock.as_ref().unwrap().join(output_file)
+    };
 
     println!("Writing {} for transcript {}", temp_output_file.display(), transcript_id);
     let file = File::create(&temp_output_file).map_err(|e| {
