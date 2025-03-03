@@ -1765,7 +1765,6 @@ fn process_single_config_entry(
         entry.seqname, entry.interval.start, entry.interval.end
     );
 
-    // Filter transcripts to only those overlapping [start..end].
     let local_cds = filter_and_log_transcripts(
         cds_regions.to_vec(),
         QueryRegion {
@@ -1774,7 +1773,6 @@ fn process_single_config_entry(
         },
     );
 
-    // Calculate EXTENDED region boundaries
     let chr_length = ref_sequence.len() as i64;
     let extended_region = ZeroBasedHalfOpen::from_1based_inclusive(
         (entry.interval.start as i64 - 3_000_000).max(0),
@@ -1818,7 +1816,6 @@ fn process_single_config_entry(
         }
     };
 
-    // Print short summary of filtering
     println!(
         "Total variants: {}, Filtered: {} (some reasons: mask={}, allow={}, multi-allelic={}, low_GQ={}, missing={})",
         filtering_stats.total_variants,
@@ -1830,7 +1827,6 @@ fn process_single_config_entry(
         filtering_stats.missing_data_variants,
     );
 
-    // Basic length info: naive and adjusted
     let sequence_length = (entry.interval.end - entry.interval.start) as i64;
     let adjusted_sequence_length = calculate_adjusted_sequence_length(
         entry.interval.start as i64,
@@ -1839,173 +1835,117 @@ fn process_single_config_entry(
         mask.as_ref().and_then(|m| m.get(&chr.to_string())),
     );
 
-    // Pull out just the unfiltered variants in [start..end) (not the extended region!)
     let region_variants_unfiltered: Vec<_> = unfiltered_variants
         .iter()
         .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
         .cloned()
         .collect();
 
-    /// A tiny helper struct for returning the group stats.
-    struct GroupStats {
-        num_segsites: usize,
-        w_theta: f64,
-        pi: f64,
-        n_hap: usize,
-        site_divs: Vec<SiteDiversity>,
-    }
-
-    /// Inner helper for the repeated logic of calling `process_variants`.
-    ///  - Prints "No haplotypes found" if it returns None, and returns Ok(None) up the chain.
-    ///  - Otherwise, returns a struct with the relevant stats.
-    ///
-    ///   - `group_id`: 0 or 1
-    ///   - `is_filtered`: boolean
-    ///   - `variants`: either `filtered_variants` or the region slice for unfiltered
-    ///   - `maybe_adjusted_len`: `Some(adjusted_sequence_length)` or `None`
-    fn compute_group_stats(
+    #[derive(Clone)]
+    struct VariantInvocation<'a> {
         group_id: u8,
         is_filtered: bool,
-        variants: &[Variant],
-        sample_filter: &HashMap<String, (u8, u8)>,
-        region_bounds: (i64, i64),
-        extended_region: ZeroBasedHalfOpen,
+        variants: &'a [Variant],
+        sample_filter: &'a HashMap<String, (u8, u8)>,
         maybe_adjusted_len: Option<i64>,
-        seqinfo: Arc<Mutex<Vec<SeqInfo>>>,
-        pos_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
-        seqname: String,
-        ref_seq: &[u8],
-        cds: &[TranscriptCDS],
-        sample_names: &[String],
-    ) -> Result<Option<GroupStats>, VcfError> {
-        let (start, end) = region_bounds;
-        let result = process_variants(
-            variants,
-            sample_names,
-            group_id,
-            sample_filter,
-            start,
-            end,
+        seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
+        position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    }
+
+    let invocations = [
+        VariantInvocation {
+            group_id: 0,
+            is_filtered: true,
+            variants: &filtered_variants,
+            sample_filter: &entry.samples_filtered,
+            maybe_adjusted_len: Some(adjusted_sequence_length),
+            seqinfo_storage: seqinfo_storage_filtered.clone(),
+            position_allele_map: position_allele_map_filtered.clone(),
+        },
+        VariantInvocation {
+            group_id: 1,
+            is_filtered: true,
+            variants: &filtered_variants,
+            sample_filter: &entry.samples_filtered,
+            maybe_adjusted_len: Some(adjusted_sequence_length),
+            seqinfo_storage: seqinfo_storage_filtered.clone(),
+            position_allele_map: position_allele_map_filtered.clone(),
+        },
+        VariantInvocation {
+            group_id: 0,
+            is_filtered: false,
+            variants: &region_variants_unfiltered,
+            sample_filter: &entry.samples_unfiltered,
+            maybe_adjusted_len: None,
+            seqinfo_storage: seqinfo_storage_unfiltered.clone(),
+            position_allele_map: position_allele_map_unfiltered.clone(),
+        },
+        VariantInvocation {
+            group_id: 1,
+            is_filtered: false,
+            variants: &region_variants_unfiltered,
+            sample_filter: &entry.samples_unfiltered,
+            maybe_adjusted_len: None,
+            seqinfo_storage: seqinfo_storage_unfiltered.clone(),
+            position_allele_map: position_allele_map_unfiltered.clone(),
+        },
+    ];
+
+    let mut results: [Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>; 4] =
+        [None, None, None, None];
+
+    for (i, call) in invocations.iter().enumerate() {
+        let region_start = entry.interval.start as i64;
+        let region_end = entry.interval.end as i64;
+        let stats_opt = process_variants(
+            call.variants,
+            &sample_names,
+            call.group_id,
+            call.sample_filter,
+            region_start,
+            region_end,
             extended_region,
-            maybe_adjusted_len,
-            seqinfo,
-            pos_map,
-            seqname.clone(),
-            is_filtered,
-            ref_seq,
-            cds,
+            call.maybe_adjusted_len,
+            call.seqinfo_storage.clone(),
+            call.position_allele_map.clone(),
+            entry.seqname.clone(),
+            call.is_filtered,
+            ref_sequence,
+            &local_cds,
         )?;
 
-        // Handle the "no haplotypes" scenario
-        if let Some((num_segsites, w_theta, pi, n_hap, site_divs)) = result {
-            Ok(Some(GroupStats {
-                num_segsites,
-                w_theta,
-                pi,
-                n_hap,
-                site_divs,
-            }))
+        if let Some(x) = stats_opt {
+            results[i] = Some(x);
         } else {
+            let label = match (call.group_id, call.is_filtered) {
+                (0, true) => "filtered group 0",
+                (1, true) => "filtered group 1",
+                (0, false) => "unfiltered group 0",
+                (1, false) => "unfiltered group 1",
+                _ => "unknown scenario",
+            };
             println!(
-                "No haplotypes found for group {} ({}) in region {}-{}",
-                group_id,
-                if is_filtered { "filtered" } else { "unfiltered" },
-                start,
-                end
+                "No haplotypes found for {} in region {}-{}",
+                label, region_start, region_end
             );
-            Ok(None)
+            return Ok(None);
         }
     }
 
-    // --- Compute Stats for Each of the Four Combinations ---
-
-    // Filtered, group 0
-    let stats_0_f = match compute_group_stats(
-        0, /*group_id*/
-        true, /*filtered*/
-        &filtered_variants,
-        &entry.samples_filtered,
-        (entry.interval.start as i64, entry.interval.end as i64),
-        extended_region,
-        Some(adjusted_sequence_length),
-        seqinfo_storage_filtered.clone(),
-        position_allele_map_filtered.clone(),
-        entry.seqname.clone(),
-        ref_sequence,
-        &local_cds,
-        &sample_names,
-    )? {
-        Some(x) => x,
-        None => return Ok(None),
-    };
-
-    // Filtered, group 1
-    let stats_1_f = match compute_group_stats(
-        1,
-        true,
-        &filtered_variants,
-        &entry.samples_filtered,
-        (entry.interval.start as i64, entry.interval.end as i64),
-        extended_region,
-        Some(adjusted_sequence_length),
-        seqinfo_storage_filtered.clone(),
-        position_allele_map_filtered.clone(),
-        entry.seqname.clone(),
-        ref_sequence,
-        &local_cds,
-        &sample_names,
-    )? {
-        Some(x) => x,
-        None => return Ok(None),
-    };
+    let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f, site_divs_0_f) =
+        results[0].take().unwrap();
+    let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f, site_divs_1_f) =
+        results[1].take().unwrap();
+    let (num_segsites_0_u, w_theta_0_u, pi_0_u, n_hap_0_u, site_divs_0_u) =
+        results[2].take().unwrap();
+    let (num_segsites_1_u, w_theta_1_u, pi_1_u, n_hap_1_u, site_divs_1_u) =
+        results[3].take().unwrap();
 
     let inversion_freq_filt =
         calculate_inversion_allele_frequency(&entry.samples_filtered).unwrap_or(-1.0);
-
-    // Unfiltered, group 0
-    let stats_0_u = match compute_group_stats(
-        0,
-        false,
-        &region_variants_unfiltered,
-        &entry.samples_unfiltered,
-        (entry.interval.start as i64, entry.interval.end as i64),
-        extended_region,
-        None,
-        seqinfo_storage_unfiltered.clone(),
-        position_allele_map_unfiltered.clone(),
-        entry.seqname.clone(),
-        ref_sequence,
-        &local_cds,
-        &sample_names,
-    )? {
-        Some(x) => x,
-        None => return Ok(None),
-    };
-
-    // Unfiltered, group 1
-    let stats_1_u = match compute_group_stats(
-        1,
-        false,
-        &region_variants_unfiltered,
-        &entry.samples_unfiltered,
-        (entry.interval.start as i64, entry.interval.end as i64),
-        extended_region,
-        None,
-        seqinfo_storage_unfiltered.clone(),
-        position_allele_map_unfiltered.clone(),
-        entry.seqname.clone(),
-        ref_sequence,
-        &local_cds,
-        &sample_names,
-    )? {
-        Some(x) => x,
-        None => return Ok(None),
-    };
-
     let inversion_freq_no_filter =
         calculate_inversion_allele_frequency(&entry.samples_unfiltered).unwrap_or(-1.0);
 
-    // --- Build Final CsvRowData ---
     let row_data = CsvRowData {
         seqname: entry.seqname,
         region_start: entry.interval.start as i64,
@@ -2014,22 +1954,22 @@ fn process_single_config_entry(
         seq_len_1: sequence_length,
         seq_len_adj_0: adjusted_sequence_length,
         seq_len_adj_1: adjusted_sequence_length,
-        seg_sites_0: stats_0_u.num_segsites,
-        seg_sites_1: stats_1_u.num_segsites,
-        w_theta_0: stats_0_u.w_theta,
-        w_theta_1: stats_1_u.w_theta,
-        pi_0: stats_0_u.pi,
-        pi_1: stats_1_u.pi,
-        seg_sites_0_f: stats_0_f.num_segsites,
-        seg_sites_1_f: stats_1_f.num_segsites,
-        w_theta_0_f: stats_0_f.w_theta,
-        w_theta_1_f: stats_1_f.w_theta,
-        pi_0_f: stats_0_f.pi,
-        pi_1_f: stats_1_f.pi,
-        n_hap_0_unf: stats_0_u.n_hap,
-        n_hap_1_unf: stats_1_u.n_hap,
-        n_hap_0_f: stats_0_f.n_hap,
-        n_hap_1_f: stats_1_f.n_hap,
+        seg_sites_0: num_segsites_0_u,
+        seg_sites_1: num_segsites_1_u,
+        w_theta_0: w_theta_0_u,
+        w_theta_1: w_theta_1_u,
+        pi_0: pi_0_u,
+        pi_1: pi_1_u,
+        seg_sites_0_f: num_segsites_0_f,
+        seg_sites_1_f: num_segsites_1_f,
+        w_theta_0_f,
+        w_theta_1_f,
+        pi_0_f,
+        pi_1_f,
+        n_hap_0_unf: n_hap_0_u,
+        n_hap_1_unf: n_hap_1_u,
+        n_hap_0_f,
+        n_hap_1_f,
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
     };
@@ -2039,23 +1979,17 @@ fn process_single_config_entry(
         entry.interval.start, entry.interval.end
     );
 
-    // --- Gather per-site records from each group’s site_divs ---
     let mut per_site_records = Vec::new();
-
-    // Unfiltered 0
-    for sd in stats_0_u.site_divs {
+    for sd in site_divs_0_u {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 0, false));
     }
-    // Unfiltered 1
-    for sd in stats_1_u.site_divs {
+    for sd in site_divs_1_u {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 1, false));
     }
-    // Filtered 0
-    for sd in stats_0_f.site_divs {
+    for sd in site_divs_0_f {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 0, true));
     }
-    // Filtered 1
-    for sd in stats_1_f.site_divs {
+    for sd in site_divs_1_f {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 1, true));
     }
 
