@@ -230,11 +230,11 @@ impl CdsSeq {
     pub fn new(seq: Vec<u8>) -> Result<Self, String> {
         let now = SystemTime::now();
         let log_file_path = {
-            let mut guard = TEMP_DIR.lock().unwrap();
-            if guard.is_none() {
-                *guard = Some(create_temp_dir().expect("Failed to create temporary directory"));
+            let mut locked_opt = TEMP_DIR.lock().unwrap();
+            if locked_opt.is_none() {
+                *locked_opt = Some(create_temp_dir().expect("Failed to create temporary directory"));
             }
-            guard.as_ref().expect("Temporary directory not set").path().join("cds_validation.log")
+            locked_opt.as_ref().expect("Temporary directory not set").path().join("cds_validation.log")
         };
 
         let mut log_file = OpenOptions::new()
@@ -1213,7 +1213,10 @@ pub fn process_config_entries(
     let temp_dir = create_temp_dir()?;
     {
         let mut guard = TEMP_DIR.lock().unwrap();
-        *guard = Some(temp_dir);
+        {
+            let mut locked_opt = TEMP_DIR.lock().unwrap();
+            *locked_opt = Some(temp_dir);
+        }
     }
 
     // Create CSV writer and write the header once in the temporary directory
@@ -1997,7 +2000,10 @@ fn filter_and_log_transcripts(
         let temp_dir = TEMP_DIR.lock().unwrap();
         {
             let guard = TEMP_DIR.lock().unwrap();
-            guard.as_ref().expect("Temporary directory not set").path().join("transcript")
+            {
+                let locked_opt = TEMP_DIR.lock().unwrap();
+                locked_opt.as_ref().expect("Temporary directory not set").path().join("transcript")
+            }
         }
     };
         
@@ -2658,10 +2664,13 @@ fn write_phylip_file(
     // Acquire or create the TempDir in a single scope.
     let temp_output_file = {
         let mut guard = TEMP_DIR.lock().unwrap();
-        if guard.is_none() {
-            *guard = Some(create_temp_dir().expect("Failed to create temporary directory"));
+        {
+            let mut locked_opt = TEMP_DIR.lock().unwrap();
+            if locked_opt.is_none() {
+                *locked_opt = Some(create_temp_dir().expect("Failed to create temporary directory"));
+            }
+            locked_opt.as_ref().expect("Temporary directory not set").path().join(output_file)
         }
-        guard.as_ref().expect("Temporary directory not set").path().join(output_file)
     };
 
     println!("Writing {} for transcript {}", temp_output_file.display(), transcript_id);
