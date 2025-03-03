@@ -1350,25 +1350,24 @@ pub fn process_config_entries(
 
         // We store 4 possible keys: "unfiltered_pi", "unfiltered_theta", "filtered_pi", "filtered_theta".
         // Each key maps to a vector of the same length as region_len, initially None.
+        let mut group_ids = Vec::new();
+        for &(_, _, _, group_id, _) in per_site_vec {
+            if !group_ids.contains(&group_id) {
+                group_ids.push(group_id);
+            }
+        }
         let mut records_map: Map2<String, Vec<Option<f64>>> = Map2::new();
-
-        let combos = [
-            "unfiltered_pi_",
-            "unfiltered_theta_",
-            "filtered_pi_",
-            "filtered_theta_",
-        ];
-        for combo_key in combos.iter() {
-            records_map.insert(combo_key.to_string(), vec![None; region_len]);
+        for &grp in group_ids.iter() {
+            records_map.insert(format!("unfiltered_pi_group_{}", grp), vec![None; region_len]);
+            records_map.insert(format!("unfiltered_theta_group_{}", grp), vec![None; region_len]);
+            records_map.insert(format!("filtered_pi_group_{}", grp), vec![None; region_len]);
+            records_map.insert(format!("filtered_theta_group_{}", grp), vec![None; region_len]);
         }
 
-        // Fill in data from per_site_vec.
-        // The position here is 1-based within the region, so relative_position = pos - row.region_start.
-        // If pos - row.region_start is zero-based, we do index = (pos - row.region_start - 1) in 0-based array.
-        // But we do not do manual +1 or -1 in code, we rely on the types for clarity. The site_diversities
-        // already stores position as 1-based inclusive from the final assignment. We just compute index carefully.
 
-        for &(pos_1based, pi_val, theta_val, is_filtered) in per_site_vec {
+        // Fill in data from per_site_vec.
+
+        for &(pos_1based, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
             let offset = pos_1based - csv_row.region_start;
             if offset < 1 {
                 continue;
@@ -1378,9 +1377,8 @@ pub fn process_config_entries(
                 continue;
             }
             let key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
-            // We update pi:
             {
-                let combo_key = format!("{}pi_", key_prefix);
+                let combo_key = format!("{}pi_group_{}", key_prefix, group_id);
                 if let Some(vec_ref) = records_map.get_mut(&combo_key) {
                     if pi_val == 0.0 {
                         vec_ref[idx_0based] = Some(0.0);
@@ -1389,9 +1387,8 @@ pub fn process_config_entries(
                     }
                 }
             }
-            // We update theta:
             {
-                let combo_key = format!("{}theta_", key_prefix);
+                let combo_key = format!("{}theta_group_{}", key_prefix, group_id);
                 if let Some(vec_ref) = records_map.get_mut(&combo_key) {
                     if theta_val == 0.0 {
                         vec_ref[idx_0based] = Some(0.0);
