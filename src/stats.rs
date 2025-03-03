@@ -1,4 +1,4 @@
-use crate::process::Variant;
+use crate::process::{Variant, ZeroBasedPosition};
 use rayon::iter::IntoParallelIterator;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
