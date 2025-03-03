@@ -230,11 +230,15 @@ impl CdsSeq {
     pub fn new(seq: Vec<u8>) -> Result<Self, String> {
         let now = SystemTime::now();
         let log_file_path = {
-            let mut locked_opt = TEMP_DIR.lock().unwrap();
+            let mut locked_opt = TEMP_DIR.lock();
             if locked_opt.is_none() {
                 *locked_opt = Some(create_temp_dir().expect("Failed to create temporary directory"));
             }
-            locked_opt.as_ref().expect("Temporary directory not set").path().join("cds_validation.log")
+            if let Some(dir) = locked_opt.as_ref() {
+                dir.path().join("cds_validation.log")
+            } else {
+                return Err("Failed to access temporary directory".to_string());
+            }
         };
 
         let mut log_file = OpenOptions::new()
@@ -1210,17 +1214,19 @@ pub fn process_config_entries(
     allow: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
 ) -> Result<(), VcfError> {
-    let temp_dir = create_temp_dir()?;
-    {
-        let mut guard = TEMP_DIR.lock().unwrap();
-        {
-            let mut locked_opt = TEMP_DIR.lock().unwrap();
-            *locked_opt = Some(temp_dir);
-        }
-    }
+    // Create a temp directory and save it to TEMP_DIR
+    let temp_dir_path = {
+        let temp_dir = create_temp_dir()?;
+        let temp_path = temp_dir.path().to_path_buf();
+        
+        let mut locked_opt = TEMP_DIR.lock();
+        *locked_opt = Some(temp_dir);
+        
+        temp_path
+    };
 
     // Create CSV writer and write the header once in the temporary directory
-    let temp_output_file = temp_dir.path().join(output_file.file_name().unwrap());
+    let temp_output_file = temp_dir_path.join(output_file.file_name().unwrap());
     let mut writer = create_and_setup_csv_writer(&temp_output_file)?;
     write_csv_header(&mut writer)?;
 
@@ -1344,7 +1350,14 @@ pub fn process_config_entries(
     // corresponding to each position in the region. If a value is zero, we store it as an integer '0'.
     // Otherwise, we format as a float with six decimals.
 
-    let temp_fasta_path = temp_dir.path().join("per_site_output.fasta");
+    let temp_fasta_path = {
+        let locked_opt = TEMP_DIR.lock();
+        if let Some(dir) = locked_opt.as_ref() {
+            dir.path().join("per_site_output.fasta")
+        } else {
+            return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
+        }
+    };
     let fasta_file = File::create(&temp_fasta_path)?;
     let mut fasta_writer = BufWriter::new(fasta_file);
 
@@ -1504,20 +1517,30 @@ pub fn process_config_entries(
         output_file
     );
     // Copy files from temporary directory to final destinations
-    let temp_dir_path = temp_dir.path();
+    let temp_dir_path = {
+        let locked_opt = TEMP_DIR.lock();
+        if let Some(dir) = locked_opt.as_ref() {
+            dir.path().to_path_buf()
+        } else {
+            return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
+        }
+    };
+    
     // Copy CSV file
     let temp_csv = temp_dir_path.join(output_file.file_name().unwrap());
     if let Some(parent) = output_file.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::copy(&temp_csv, output_file)?;
+    
     // Copy FASTA file
     let temp_fasta = temp_dir_path.join("per_site_output.fasta");
     if temp_fasta.exists() {
         std::fs::copy(&temp_fasta, std::path::Path::new("per_site_output.fasta"))?;
     }
+    
     // Copy PHYLIP files
-    for entry in std::fs::read_dir(temp_dir_path)? {
+    for entry in std::fs::read_dir(&temp_dir_path)? {
         let entry = entry?;
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) == Some("phy") {
@@ -1525,6 +1548,7 @@ pub fn process_config_entries(
             std::fs::copy(&path, std::path::Path::new(".").join(file_name))?;
         }
     }
+    
     // Copy log files
     for log_file in ["cds_validation.log", "transcript_overlap.log"] {
         let temp_log = temp_dir_path.join(log_file);
@@ -1997,13 +2021,11 @@ fn filter_and_log_transcripts(
 
     // Open or create a log file once per call in the temporary directory
     let log_file_path = {
-        let temp_dir = TEMP_DIR.lock().unwrap();
-        {
-            let guard = TEMP_DIR.lock().unwrap();
-            {
-                let locked_opt = TEMP_DIR.lock().unwrap();
-                locked_opt.as_ref().expect("Temporary directory not set").path().join("transcript")
-            }
+        let locked_opt = TEMP_DIR.lock();
+        if let Some(dir) = locked_opt.as_ref() {
+            dir.path().join("transcript_overlap.log")
+        } else {
+            return Vec::new(); // Return empty vector if temp dir not available
         }
     };
         
@@ -2663,13 +2685,14 @@ fn write_phylip_file(
 ) -> Result<(), VcfError> {
     // Acquire or create the TempDir in a single scope.
     let temp_output_file = {
-        let mut guard = TEMP_DIR.lock().unwrap();
-        {
-            let mut locked_opt = TEMP_DIR.lock().unwrap();
-            if locked_opt.is_none() {
-                *locked_opt = Some(create_temp_dir().expect("Failed to create temporary directory"));
-            }
-            locked_opt.as_ref().expect("Temporary directory not set").path().join(output_file)
+        let mut locked_opt = TEMP_DIR.lock();
+        if locked_opt.is_none() {
+            *locked_opt = Some(create_temp_dir().expect("Failed to create temporary directory"));
+        }
+        if let Some(dir) = locked_opt.as_ref() {
+            dir.path().join(output_file)
+        } else {
+            return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
         }
     };
 
