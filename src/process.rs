@@ -1377,7 +1377,7 @@ pub fn process_config_entries(
             if idx_0based >= region_len {
                 continue;
             }
-            let mut key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
+            let key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
             // We update pi:
             {
                 let combo_key = format!("{}pi_", key_prefix);
