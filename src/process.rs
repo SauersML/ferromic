@@ -697,7 +697,7 @@ fn process_variants(
 
         let mut offset_map = Vec::new();
         let mut accumulated_length = 0;
-        for (i, seg) in transcript.segments.iter().enumerate() {
+        for seg in transcript.segments.iter() {
             let seg_start = seg.start as i64;
             let seg_end = seg.end as i64;
             let seg_strand = transcript.strand;
