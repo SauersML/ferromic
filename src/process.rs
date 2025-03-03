@@ -73,44 +73,53 @@ pub struct Args {
 /// ZeroBasedHalfOpen represents a half-open interval [start..end).
 /// This struct is also used for slicing references safely.
 #[derive(Debug, Clone, Copy)]
+pub struct ZeroBasedPosition(pub i64);
+
+#[derive(Debug, Clone, Copy)]
 pub struct ZeroBasedHalfOpen {
     pub start: usize,
     pub end: usize,
 }
 
+
 impl ZeroBasedHalfOpen {
     /// Creates a new half-open interval from 1-based inclusive coordinates.
-    /// It subtracts 1 from start_inclusive and does not subtract 1 from end_inclusive,
-    /// thus converting [start_inclusive..end_inclusive] (inclusive) to [start..end) half-open.
-    /// Panics if start_inclusive > end_inclusive or if start_inclusive <= 0.
+    /// This method is preserved for legacy conversions from GTF/other 1-based data.
     pub fn from_1based_inclusive(start_inclusive: i64, end_inclusive: i64) -> Self {
-        // Converts a 1-based inclusive region to a zero-based half-open interval,
-        // clamping any start < 1 up to 1, and making sure end >= start.
-        // Adjusted start value, clamped to at least 1
         let mut adjusted_start = start_inclusive;
         if adjusted_start < 1 {
             adjusted_start = 1;
         }
-
-        // Adjusted end value, ensured to be at least as large as the start
         let mut adjusted_end = end_inclusive;
         if adjusted_end < adjusted_start {
             adjusted_end = adjusted_start;
         }
-
-        // Zero-based start index (shifted from 1-based by subtracting 1)
-        let zero_based_start = (adjusted_start - 1) as usize;
-        // Zero-based end index (exclusive, no adjustment beyond casting)
-        let zero_based_end = adjusted_end as usize;
-
-        // Return the zero-based half-open interval
         ZeroBasedHalfOpen {
-            start: zero_based_start,
-            end: zero_based_end,
+            start: (adjusted_start - 1) as usize,
+            end: adjusted_end as usize,
         }
     }
 
-    /// Returns the length of the interval.
+    /// Creates a new half-open interval from 0-based inclusive coordinates.
+    /// This internally converts [start..end] inclusive into [start..end+1) half-open.
+    pub fn from_0based_inclusive(start_inclusive: i64, end_inclusive: i64) -> Self {
+        ZeroBasedHalfOpen {
+            start: start_inclusive.max(0) as usize,
+            end: (end_inclusive + 1).max(start_inclusive + 1) as usize,
+        }
+    }
+
+    /// Creates a zero-length half-open interval representing a single position p.
+    /// This is [p..p+1).
+    pub fn from_0based_point(p: i64) -> Self {
+        let start = p.max(0) as usize;
+        ZeroBasedHalfOpen {
+            start,
+            end: start + 1,
+        }
+    }
+
+    /// Returns the length of this half-open interval.
     pub fn len(&self) -> usize {
         if self.end > self.start {
             self.end - self.start
@@ -125,7 +134,7 @@ impl ZeroBasedHalfOpen {
         &seq[self.start..self.end]
     }
 
-    /// Returns Some(overlap) if this interval intersects with other, or None if they do not overlap.
+    /// Returns Some(overlap) if this interval intersects with `other`, or None if they do not overlap.
     pub fn intersect(&self, other: &ZeroBasedHalfOpen) -> Option<ZeroBasedHalfOpen> {
         let start = self.start.max(other.start);
         let end = self.end.min(other.end);
@@ -136,39 +145,20 @@ impl ZeroBasedHalfOpen {
         }
     }
 
-    /// Returns true if the position (zero-based) is inside [start..end).
-    pub fn contains(&self, pos: i64) -> bool {
-        let p = pos as usize;
+    /// Returns true if the given ZeroBasedPosition is inside [start..end).
+    pub fn contains(&self, pos: ZeroBasedPosition) -> bool {
+        let p = pos.0 as usize;
         p >= self.start && p < self.end
-    }
-
-    /// Returns the 1-based inclusive start coordinate.
-    pub fn start_1based_inclusive(&self) -> i64 {
-        (self.start as i64) + 1
-    }
-
-    /// Returns the 1-based inclusive end coordinate.
-    pub fn end_1based_inclusive(&self) -> i64 {
-        self.end as i64
-    }
-
-    /// Returns the 1-based relative position of a 0-based position within [start, end).
-    /// Returns None if the position is outside the interval.
-    pub fn relative_position_1based(&self, pos: i64) -> Option<usize> {
-        let p = pos as usize;
-        if p >= self.start && p < self.end {
-            Some(p - self.start + 1)
-        } else {
-            None
-        }
     }
 }
 
+
+
 /// A 1-based VCF position. Guaranteed >= 1, no runtime overhead.
 #[derive(Debug, Clone, Copy)]
-pub struct VcfPos(i64);
+pub struct OneBasedPosition(i64);
 
-impl VcfPos {
+impl OneBasedPosition {
     /// Creates a new 1-based position, returning an error if `val < 1`.
     pub fn new(val: i64) -> Result<Self, VcfError> {
         if val < 1 {
@@ -180,7 +170,6 @@ impl VcfPos {
 
     /// Converts to zero-based i64. This is where we do `-1`.
     pub fn zero_based(self) -> i64 {
-        // we already know self.0 >= 1, so (self.0 - 1) >= 0
         self.0 - 1
     }
 }
@@ -370,14 +359,18 @@ impl QueryRegion {
     }
 }
 
-#[derive(Debug, Clone)]
 /// Represents one transcript's coding sequence. It stores all CDS segments
 /// belonging to a single transcript (no introns).
+#[derive(Debug, Clone)]
 pub struct TranscriptCDS {
     /// The transcript identifier from the GTF
     pub transcript_id: String,
-    /// A list of CDS segments: (start, end, strand_char, frame)
-    pub segments: Vec<(i64, i64, char, i64)>,
+    /// The strand for the transcript
+    pub strand: char,
+    /// A list of frames, one per CDS segment
+    pub frames: Vec<i64>,
+    /// A list of CDS segments in 0-based half-open intervals
+    pub segments: Vec<ZeroBasedHalfOpen>,
 }
 
 /// Holds all the output columns for writing one row in the CSV.
@@ -523,10 +516,7 @@ fn position_in_regions(pos: i64, regions: &[(i64, i64)]) -> bool {
     // regions are sorted by start position
     
     // Create a ZeroBasedHalfOpen for the position (as a point)
-    let position_interval = ZeroBasedHalfOpen {
-        start: pos as usize,
-        end: (pos + 1) as usize, // Make it a point interval [pos, pos+1)
-    };
+    let position_interval = ZeroBasedHalfOpen::from_0based_point(pos);
     
     // Binary search through regions
     let mut left = 0;
@@ -1808,10 +1798,7 @@ fn filter_and_log_transcripts(
     let mut log_file = BufWriter::new(log_file);
 
     // Create a ZeroBasedHalfOpen for the query region
-    let query_interval = ZeroBasedHalfOpen {
-        start: query.start as usize,
-        end: (query.end + 1) as usize, // Convert inclusive end to exclusive end
-    };
+        let query_interval = ZeroBasedHalfOpen::from_0based_inclusive(query.start, query.end);
     
     writeln!(log_file, "Query region: {} to {}", query.start, query.end)
         .expect("Failed to write to transcript_overlap.log");
@@ -1901,13 +1888,14 @@ fn filter_and_log_transcripts(
         }
 
         let mut coding_segments = Vec::new();
-        for (i, &(start, end, _, frame)) in tcds.segments.iter().enumerate() {
-            let segment_length = end - start + 1;
+        for (i, seg) in tcds.segments.iter().enumerate() {
+            let segment_length = seg.len() as i64;
+            let frame = tcds.frames.get(i).copied().unwrap_or(0);
             println!(
                 "  Segment {}: {}-{} (length: {}, frame: {})",
                 i + 1,
-                start,
-                end,
+                seg.start,
+                seg.end,
                 segment_length,
                 frame
             );
@@ -1915,16 +1903,16 @@ fn filter_and_log_transcripts(
                 log_file,
                 "  Segment {}: {}-{} (length: {}, frame: {})",
                 i + 1,
-                start,
-                end,
+                seg.start,
+                seg.end,
                 segment_length,
                 frame
             )
             .expect("Failed to write to transcript_overlap.log");
-            coding_segments.push((start, end));
+            coding_segments.push((seg.start as i64, seg.end as i64));
         }
 
-        let total_coding_length: i64 = tcds.segments.iter().map(|&(s, e, _, _)| e - s + 1).sum();
+        let total_coding_length: i64 = tcds.segments.iter().map(|seg| seg.len() as i64).sum();
         stats.total_coding_length += total_coding_length;
 
         match stats.shortest_transcript_length {
@@ -1973,7 +1961,7 @@ fn filter_and_log_transcripts(
                 "    Individual segment lengths: {:?}",
                 tcds.segments
                     .iter()
-                    .map(|&(s, e, _, _)| e - s + 1)
+                    .map(|seg| seg.len())
                     .collect::<Vec<_>>()
             );
             writeln!(
@@ -1981,15 +1969,15 @@ fn filter_and_log_transcripts(
                 "    Individual segment lengths: {:?}",
                 tcds.segments
                     .iter()
-                    .map(|&(s, e, _, _)| e - s + 1)
+                    .map(|seg| seg.len())
                     .collect::<Vec<_>>()
             )
             .expect("Failed to write to transcript_overlap.log");
         }
 
-        let min_start = tcds.segments.iter().map(|&(s, _, _, _)| s).min().unwrap();
-        let max_end = tcds.segments.iter().map(|&(_, e, _, _)| e).max().unwrap();
-        let transcript_span = max_end - min_start + 1;
+        let min_start = tcds.segments.iter().map(|seg| seg.start as i64).min().unwrap();
+        let max_end = tcds.segments.iter().map(|seg| seg.end as i64).max().unwrap();
+        let transcript_span = max_end - min_start;
 
         println!("  CDS region: {}-{}", min_start, max_end);
         writeln!(log_file, "  CDS region: {}-{}", min_start, max_end)
