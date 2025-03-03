@@ -1323,25 +1323,30 @@ pub fn process_config_entries(
     }
 
     // For each row index from 1..=max_position, write out the row.
-    // If a particular column has no entry for that position, write empty "".
+    // If all columns are blank, skip writing that row entirely.
     for pos_idx in 1..=max_position {
         let mut record = Vec::new();
         // The first column is the relative_position as a string
         record.push(pos_idx.to_string());
+        let mut any_nonempty = false;
 
         // Then for each column, see if we have a value for pos_idx
         for col_name in &col_names {
             if let Some(map_for_col) = all_columns.get(col_name) {
                 if let Some(val) = map_for_col.get(&pos_idx) {
                     record.push(format!("{:.6}", val));
+                    any_nonempty = true;
                 } else {
-                    record.push("".to_string());
+                    record.push(String::new());
                 }
             } else {
-                record.push("".to_string());
+                record.push(String::new());
             }
         }
-        per_site_writer.write_record(&record)?;
+
+        if any_nonempty {
+            per_site_writer.write_record(&record)?;
+        }
     }
 
     per_site_writer.flush()?;
