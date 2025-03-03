@@ -26,6 +26,24 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 use std::collections::HashMap as Map2;
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+use tempfile::TempDir;
+
+struct Context {
+    args: Args,
+    temp_dir: TempDir,
+}
+
+fn create_temp_dir() -> Result<TempDir, VcfError> {
+    let ramdisk_path = env::var("RAMDISK_PATH").unwrap_or_else(|_| "/dev/shm".to_string());
+    let temp_dir = match TempDir::new_in(&ramdisk_path) {
+        Ok(dir) => dir,
+        Err(_) => TempDir::new().map_err(|e| VcfError::Io(e))?,
+    };
+    Ok(temp_dir)
+}
 
 // Define command-line arguments using clap
 #[derive(Parser, Debug)]
