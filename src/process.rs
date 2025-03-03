@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
+use std::collections::HashMap as Map2;
 
 // Define command-line arguments using clap
 #[derive(Parser, Debug)]
@@ -1195,7 +1196,7 @@ pub fn process_config_entries(
     let grouped = group_config_entries_by_chr(config_entries);
 
     // We will process each chromosome in parallel (for speed),
-    //    then flatten the per-chromosome results in the order we get them.
+    // then flatten the per-chromosome results in the order we get them.
     let all_pairs: Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)> = grouped
         .into_par_iter()
         .flat_map(|(chr, chr_entries)| {
@@ -1306,61 +1307,171 @@ pub fn process_config_entries(
         }
     }
 
-    // Now we have, for each column, a map from relative_position -> value.
-    // We will write a CSV with "relative_position" as the first column,
-    // and one column for each entry in all_columns (in sorted order of column names).
+    // Now we generate a FASTA-style file, one record per combination of prefix, region, and group.
+    // Each record has one header line beginning with '>', and then one line of comma-separated values
+    // corresponding to each position in the region. If a value is zero, we store it as an integer '0'.
+    // Otherwise, we format as a float with six decimals.
 
-    // Sort the column names so the output order is stable.
-    let mut col_names: Vec<String> = all_columns.keys().cloned().collect();
-    col_names.sort();
+    let fasta_path = std::path::Path::new("per_site_output.fasta");
+    let fasta_file = File::create(fasta_path)?;
+    let mut fasta_writer = BufWriter::new(fasta_file);
 
-    // Create the per_site_output.csv file for wide-format output.
-    let per_site_path = std::path::Path::new("per_site_output.csv");
-    let per_site_file = File::create(per_site_path)?;
-    let mut per_site_writer = csv::WriterBuilder::new()
-        .has_headers(false)
-        .from_writer(BufWriter::new(per_site_file));
+    // We will map each distinct (prefix, row.seqname, row.region_start, row.region_end, group_id)
+    // to a vector of values for positions from row.region_start..=row.region_end.
+    // The positions are stored 1-based, but we have them in the per_site_vec as 1-based positions already.
 
-    // Write the header row: first is "relative_position", then each column name.
-    {
-        let mut header_row = Vec::new();
-        header_row.push("relative_position".to_string());
-        header_row.extend(col_names.iter().cloned());
-        per_site_writer.write_record(header_row)?;
+    // We define a helper to build the full FASTA-style header.
+    fn build_fasta_header(prefix: &str, row: &CsvRowData, group_id: u8) -> String {
+        let mut header = String::new();
+        header.push('>');
+        header.push_str(prefix);
+        header.push_str("chr_");
+        header.push_str(&row.seqname);
+        header.push_str("_start_");
+        header.push_str(&row.region_start.to_string());
+        header.push_str("_end_");
+        header.push_str(&row.region_end.to_string());
+        header.push_str("_group_");
+        header.push_str(&group_id.to_string());
+        header
     }
 
-    // For each row index from 1..=max_position, write out the row.
-    // If all columns are blank, skip writing that row entirely.
-    for pos_idx in 1..=max_position {
-        let mut record = Vec::new();
-        // The first column is the relative_position as a string
-        record.push(pos_idx.to_string());
-        let mut any_nonempty = false;
+    // We will create a nested map:
+    // outer key: a String for the FASTA header
+    // inner value: a Vec<Option<f64>> with length = region_length, storing pi or theta or None if missing
+    // Because each row is a single region, but we may have up to 4 combos (filtered/unfiltered × pi/theta × group).
+    // The site records contain (position, pi, watterson_theta, group_id, is_filtered).
+    // We do this for each region row in all_pairs.
 
-        // Then for each column, see if we have a value for pos_idx
-        for col_name in &col_names {
-            if let Some(map_for_col) = all_columns.get(col_name) {
-                if let Some(val) = map_for_col.get(&pos_idx) {
-                    record.push(format!("{:.6}", val));
-                    any_nonempty = true;
-                } else {
-                    record.push(String::new());
+    let mut all_fasta_data = Vec::new();
+
+    for (csv_row, per_site_vec) in &all_pairs {
+        // For the region length we do (row.region_end - row.region_start + 1).
+        let region_len = (csv_row.region_end - csv_row.region_start + 1) as usize;
+
+        // We store 4 possible keys: "unfiltered_pi", "unfiltered_theta", "filtered_pi", "filtered_theta".
+        // Each key maps to a vector of the same length as region_len, initially None.
+        let mut records_map: Map2<String, Vec<Option<f64>>> = Map2::new();
+
+        let combos = [
+            "unfiltered_pi_",
+            "unfiltered_theta_",
+            "filtered_pi_",
+            "filtered_theta_",
+        ];
+        for combo_key in combos.iter() {
+            records_map.insert(combo_key.to_string(), vec![None; region_len]);
+        }
+
+        // Fill in data from per_site_vec.
+        // The position here is 1-based within the region, so relative_position = pos - row.region_start.
+        // If pos - row.region_start is zero-based, we do index = (pos - row.region_start - 1) in 0-based array.
+        // But we do not do manual +1 or -1 in code, we rely on the types for clarity. The site_diversities
+        // already stores position as 1-based inclusive from the final assignment. We just compute index carefully.
+
+        for &(pos_1based, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
+            let offset = pos_1based - csv_row.region_start;
+            if offset < 1 {
+                continue;
+            }
+            let idx_0based = (offset - 1) as usize;
+            if idx_0based >= region_len {
+                continue;
+            }
+            let mut key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
+            // We update pi:
+            {
+                let combo_key = format!("{}pi_", key_prefix);
+                if let Some(vec_ref) = records_map.get_mut(&combo_key) {
+                    if pi_val == 0.0 {
+                        vec_ref[idx_0based] = Some(0.0);
+                    } else {
+                        vec_ref[idx_0based] = Some(pi_val);
+                    }
                 }
-            } else {
-                record.push(String::new());
+            }
+            // We update theta:
+            {
+                let combo_key = format!("{}theta_", key_prefix);
+                if let Some(vec_ref) = records_map.get_mut(&combo_key) {
+                    if theta_val == 0.0 {
+                        vec_ref[idx_0based] = Some(0.0);
+                    } else {
+                        vec_ref[idx_0based] = Some(theta_val);
+                    }
+                }
             }
         }
 
-        if any_nonempty {
-            per_site_writer.write_record(&record)?;
+        // We'll find all distinct group_ids in per_site_vec. Then we produce separate FASTA blocks for each group.
+        let mut group_ids_found = HashSet::new();
+        for &(_, _, _, grp, _) in per_site_vec {
+            group_ids_found.insert(grp);
+        }
+
+        for grp in group_ids_found {
+            // We produce four lines, one for unfiltered_pi_, unfiltered_theta_, filtered_pi_, filtered_theta_.
+            // We see if there's at least one non-None in each vector. If so, we output it.
+
+            let possible_keys = [
+                "unfiltered_pi_",
+                "unfiltered_theta_",
+                "filtered_pi_",
+                "filtered_theta_",
+            ];
+
+            for key_base in possible_keys.iter() {
+                // We'll read from records_map. For the final string, we build the FASTA header:
+                // e.g. >unfiltered_pi_chr_14_start_244000_end_248905_group_1
+                // Then below it, we produce region_len comma separated values. We skip if the data is all None.
+
+                let full_key = key_base.to_string();
+                if let Some(vec_ref) = records_map.get(&full_key) {
+                    let mut any_data = false;
+                    for val_opt in vec_ref.iter() {
+                        if val_opt.is_some() {
+                            any_data = true;
+                            break;
+                        }
+                    }
+                    if !any_data {
+                        continue;
+                    }
+
+                    let header = build_fasta_header(key_base, csv_row, grp);
+                    writeln!(fasta_writer, "{}", header)?;
+
+                    // Now build the single line of comma-separated numeric data.
+                    // We'll store 0 as "0". 
+                    // If Some(0.0), that's "0". Otherwise format with six decimals.
+
+                    let mut line_values = Vec::with_capacity(region_len);
+                    for val_opt in vec_ref.iter() {
+                        match val_opt {
+                            Some(x) => {
+                                if *x == 0.0 {
+                                    line_values.push("0".to_string());
+                                } else {
+                                    line_values.push(format!("{:.6}", x));
+                                }
+                            }
+                            None => {
+                                // Represent missing data as "NA". Should never happen.
+                                line_values.push("NA".to_string());
+                            }
+                        }
+                    }
+                    let joined = line_values.join(",");
+                    writeln!(fasta_writer, "{}", joined)?;
+                }
+            }
         }
     }
 
-    per_site_writer.flush()?;
-
-    println!("Wrote wide-format per-site stats to per_site_output.csv");
+    fasta_writer.flush()?;
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
+    println!("Wrote FASTA-style per-site data to per_site_output.fasta");
     println!(
         "Processing complete. Check the output file: {:?}",
         output_file
