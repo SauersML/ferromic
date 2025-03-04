@@ -233,8 +233,8 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     let mut difference_sum = 0.0;
     for i in 0..haplotypes_in_group.len() {
         for j in (i + 1)..haplotypes_in_group.len() {
-            let (sample_i, side_i) = haplotypes_in_group[i];
-            let (sample_j, side_j) = haplotypes_in_group[j];
+            let &(sample_i, side_i) = haplotypes_in_group[i];
+            let &(sample_j, side_j) = haplotypes_in_group[j];
 
             let mut diff_count = 0;
             let mut comparable_sites = 0;
