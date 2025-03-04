@@ -1,5 +1,6 @@
 use ferromic::process::{
     display_seqinfo_entries, process_config_entries, process_vcf, Args, VcfError, ZeroBasedHalfOpen,
+    HaplotypeSide,
 };
 
 use ferromic::parse::{find_vcf_file, parse_config_file, parse_region, parse_regions_file};
@@ -186,10 +187,10 @@ fn main() -> Result<(), VcfError> {
         }
 
         // Needs to work with both filtered and unfiltered
-        let group_haps: Vec<(usize, u8)> = sample_names
+        let group_haps: Vec<(usize, HaplotypeSide)> = sample_names
             .iter()
             .enumerate()
-            .flat_map(|(i, _)| vec![(i, 0), (i, 1)])
+            .flat_map(|(i, _)| vec![(i, HaplotypeSide::Left), (i, HaplotypeSide::Right)])
             .collect();
         let pi = calculate_pi(&unfiltered_variants, &group_haps);
 
