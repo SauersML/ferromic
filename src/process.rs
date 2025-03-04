@@ -18,7 +18,6 @@ use colored::*;
 use crossbeam_channel::bounded;
 use csv::WriterBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::warn;
 use parking_lot::Mutex;
 use prettytable::{row, Table};
 use rayon::prelude::*;
