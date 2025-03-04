@@ -1,4 +1,4 @@
-use crate::process::{Variant, ZeroBasedPosition};
+use crate::process::{Variant, ZeroBasedPosition, HaplotypeSide};
 use rayon::iter::IntoParallelIterator;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
