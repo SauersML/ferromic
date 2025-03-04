@@ -1,47 +1,32 @@
-use crate::process::Variant;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
 use pyo3::wrap_pyfunction;
+use crate::stats::*;
 
-pub mod parse;
-pub mod process;
-pub mod stats;
-
-// Wrapper for `calculate_watterson_theta`
 #[pyfunction]
-fn get_theta(py: Python, seg_sites: usize, n: usize, seq_length: i64) -> PyResult<f64> {
-    py.allow_threads(|| Ok(stats::calculate_watterson_theta(seg_sites, n, seq_length)))
+fn get_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
+    calculate_watterson_theta(seg_sites, n, seq_length)
 }
 
-// Wrapper for `calculate_pi`
-// Expects variants as a list of [position: i64, genotypes: list of optional lists of u8]
 #[pyfunction]
-fn get_pi(py: Python, variants: &PyList, n: usize) -> PyResult<f64> {
-    let rust_variants: Vec<Variant> = variants
-        .iter()
-        .map(|item| {
-            let tuple = item.extract::<(i64, Vec<Option<Vec<u8>>>)>()?;
-            Ok(Variant {
-                position: tuple.0,
-                genotypes: tuple.1,
-            })
-        })
-        .collect::<PyResult<Vec<Variant>>>()?;
+fn count_segregating_sites(variants: Vec<Variant>) -> usize {
+    count_segregating_sites(&variants)
+}
 
-    py.allow_threads(|| {
-        let hap_group: Vec<(usize, u8)> = (0..n).map(|i| (i, 0)).collect();
-        Ok(stats::calculate_pi(&rust_variants, &hap_group))
-    })
+#[pyfunction]
+fn calculate_pi(variants: Vec<Variant>, haplotypes: Vec<(usize, HaplotypeSide)>) -> f64 {
+    calculate_pi(&variants, &haplotypes)
+}
+
+#[pyfunction]
+fn adjusted_sequence_length(region_start: i64, region_end: i64, allow_regions: Option<Vec<(i64, i64)>>, mask_regions: Option<Vec<(i64, i64)>>) -> i64 {
+    calculate_adjusted_sequence_length(region_start, region_end, allow_regions.as_ref(), mask_regions.as_ref())
 }
 
 #[pymodule]
-fn ferromic(py: Python, m: &PyModule) -> PyResult<()> {
+fn ferromic(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_theta, m)?)?;
-    m.add_function(wrap_pyfunction!(get_pi, m)?)?;
-
-    // Use `py` to check Python version, ensuring it's utilized
-    let version = py.version();
-    println!("Initialized ferromic with Python version: {}", version);
-
+    m.add_function(wrap_pyfunction!(count_segregating_sites, m)?)?;
+    m.add_function(wrap_pyfunction!(calculate_pi, m)?)?;
+    m.add_function(wrap_pyfunction!(adjusted_sequence_length, m)?)?;
     Ok(())
 }
