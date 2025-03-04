@@ -7,6 +7,11 @@ use crate::parse::{
     find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header,
 };
 
+use crate::process::{
+    ZeroBasedHalfOpen, ZeroBasedPosition, VcfError, Variant, HaplotypeSide, QueryRegion, TEMP_DIR,
+    create_temp_dir, map_sample_names_to_indices, get_haplotype_indices_for_group
+};
+
 use clap::Parser;
 use colored::*;
 use crossbeam_channel::bounded;
@@ -237,7 +242,7 @@ pub fn make_sequences(
     Ok(())
 }
 
-fn initialize_hap_sequences(
+pub fn initialize_hap_sequences(
     haplotype_indices: &[(usize, HaplotypeSide)],
     sample_names: &[String],
     reference_sequence: &[u8],
@@ -279,7 +284,7 @@ fn initialize_hap_sequences(
     hap_sequences
 }
 
-fn apply_variants_to_transcripts(
+pub fn apply_variants_to_transcripts(
     variants: &[Variant],
     haplotype_indices: &[(usize, HaplotypeSide)],
     extended_region: ZeroBasedHalfOpen,
@@ -351,7 +356,7 @@ fn apply_variants_to_transcripts(
     Ok(())
 }
 
-fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Result<(), VcfError> {
+pub fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Result<(), VcfError> {
     let total_sequences = hap_sequences.len();
     let mut stop_codon_or_too_short = 0;
     let mut skipped_sequences = 0;
@@ -409,7 +414,7 @@ fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Result
     Ok(())
 }
 
-fn prepare_to_write_cds(
+pub fn prepare_to_write_cds(
     haplotype_group: u8,
     cds_regions: &[TranscriptCDS],
     hap_sequences: &HashMap<String, Vec<u8>>,
@@ -497,7 +502,7 @@ fn prepare_to_write_cds(
 }
 
 // This function filters the TranscriptCDS by QueryRegion overlap and prints stats
-fn filter_and_log_transcripts(
+pub fn filter_and_log_transcripts(
     transcripts: Vec<TranscriptCDS>,
     query: QueryRegion,
 ) -> Vec<TranscriptCDS> {
@@ -856,7 +861,7 @@ pub struct CdsRegion {
 }
 
 // Write sequences to PHYLIP file
-fn write_phylip_file(
+pub fn write_phylip_file(
     output_file: &str,
     hap_sequences: &HashMap<String, Vec<char>>,
     transcript_id: &str,
