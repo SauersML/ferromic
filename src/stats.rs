@@ -233,8 +233,9 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     let mut difference_sum = 0.0;
     for i in 0..haplotypes_in_group.len() {
         for j in (i + 1)..haplotypes_in_group.len() {
-            let (sample_i, side_i) = *haplotypes_in_group[i];
-            let (sample_j, side_j) = *haplotypes_in_group[j];
+            // Unpack the sample index and haplotype side from the slice directly
+            let (sample_i, side_i) = haplotypes_in_group[i];
+            let (sample_j, side_j) = haplotypes_in_group[j];
 
             let mut diff_count = 0;
             let mut comparable_sites = 0;
@@ -244,7 +245,8 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
                     if let Some(gt_j) = var.genotypes.get(sample_j) {
                         if let Some(alleles_i) = gt_i {
                             if let Some(alleles_j) = gt_j {
-                                if let (Some(&a_i), Some(&a_j)) = (
+                                // Match allele values (u8) for both samples at their haplotype sides
+                                if let (Some(&a_i), Some(&a_j)): (Option<&u8>, Option<&u8>) = (
                                     alleles_i.get(side_i as usize),
                                     alleles_j.get(side_j as usize),
                                 ) {
