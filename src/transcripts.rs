@@ -1,10 +1,5 @@
 use crate::stats::{
-    calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site,
-    calculate_pi, calculate_watterson_theta, SiteDiversity,
-};
-
-use crate::parse::{
-    find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header,
+    SiteDiversity,
 };
 
 use crate::process::{
@@ -12,22 +7,14 @@ use crate::process::{
     create_temp_dir, map_sample_names_to_indices, get_haplotype_indices_for_group
 };
 
-use clap::Parser;
-use crossbeam_channel::bounded;
-use indicatif::{ProgressBar, ProgressStyle};
 use log::{info, warn};
 use parking_lot::Mutex;
-use prettytable::{row, Table};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, Write, BufWriter};
+use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write, BufWriter};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, SystemTime};
-use tempfile::TempDir;
-use once_cell::sync::Lazy;
+use std::time::SystemTime;
 
 /// A CDS sequence guaranteed to have length divisible by 3 and no internal stops.
 #[derive(Debug)]
