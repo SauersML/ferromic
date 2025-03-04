@@ -1289,12 +1289,7 @@ pub fn process_config_entries(
 
     // Populate our all_columns map with the data from each region–group combo.
     for (csv_row, per_site_vec) in &all_pairs {
-        // We'll produce 4 columns for each region+group combo:
-        //   unfiltered_pi_ + region_tag
-        //   unfiltered_theta_ + region_tag
-        //   filtered_pi_ + region_tag
-        //   filtered_theta_ + region_tag
-
+        // We'll produce 4 columns for each region+group combo.
         // We want to fill these columns for each entry in per_site_vec:
         // If is_filtered=false, we fill the "unfiltered_pi_" and "unfiltered_theta_" columns.
         // If is_filtered=true, we fill "filtered_pi_" and "filtered_theta_" columns.
@@ -1302,10 +1297,7 @@ pub fn process_config_entries(
 
         for &(pos, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
             // Compute 1-based relative position using ZeroBasedHalfOpen
-            let region = ZeroBasedHalfOpen {
-                start: csv_row.region_start as usize,
-                end: csv_row.region_end as usize,
-            };
+            let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
             if let Some(rel_pos) = region.relative_position_1based(pos) {
                 if rel_pos > max_position {
                     max_position = rel_pos;
