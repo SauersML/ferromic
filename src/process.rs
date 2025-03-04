@@ -624,13 +624,7 @@ Inside the file, each line is written by something like:
     writeln!(writer, "{}{}", padded_name, sequence);
 where padded_name = format!("{:<10}", sample_name).
 
-Now, the final sample_name is constructed with “_L” or “_R” to distinguish the left or right haplotype. Specifically, for (sample_idx, hap_idx) in haplotype_indices, the code does something like:
-    sample_name = match *hap_idx {
-        0 => format!("{}_L", sample_names[*mapped_index]),
-        1 => format!("{}_R", sample_names[*mapped_index]),
-        _ => panic!("Unexpected hap_idx"),
-    };
-and hap_sequences.insert(sample_name, reference_sequence);
+Now, the final sample_name is constructed with “_L” or “_R” to distinguish the left or right haplotype.
 
 Here, hap_idx of 0 means the sample’s left haplotype belongs to that inversion group; 1 means its right haplotype belongs. This logic comes from comparing haplotype_group (the “0 or 1” being processed) against the config file’s HashMap<String, (u8, u8)>, which might store (left_tsv, right_tsv) as (0,1) or (1,1). If the left_tsv matches haplotype_group, you push (sample_index, 0). If the right_tsv matches, you push (sample_index, 1).
 
@@ -990,7 +984,7 @@ fn initialize_hap_sequences(
         // We use a consistent naming format for each sample/haplotype: "SampleName_L" or "SampleName_R."
         let sample_name = format!(
             "{}_{}",
-            sample_names[*sample_idx],
+            sample_names[sample_idx],
             match *hap_idx {
                 HaplotypeSide::Left => "L",
                 HaplotypeSide::Right => "R",
@@ -1029,7 +1023,7 @@ fn apply_variants_to_transcripts(
         for &(sample_idx, hap_idx) in haplotype_indices {
             let sample_name = format!(
                 "{}_{}",
-                sample_names[*sample_idx],
+                sample_names[sample_idx],
                 match *hap_idx {
                     HaplotypeSide::Left => "L",
                     HaplotypeSide::Right => "R",
