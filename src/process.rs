@@ -192,6 +192,10 @@ impl ZeroBasedHalfOpen {
         self.end as i64
     }
 
+    pub fn to_1based_inclusive_tuple(&self) -> (i64, i64) {
+        (self.start_1based_inclusive(), self.end_1based_exclusive())
+    }
+
     /// Returns 1-based position of `pos` if inside [start..end), else None.
     pub fn relative_position_1based(&self, pos: i64) -> Option<usize> {
         let p = pos as usize;
