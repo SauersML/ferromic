@@ -13,24 +13,19 @@ use crate::process::{
 };
 
 use clap::Parser;
-use colored::*;
 use crossbeam_channel::bounded;
-use csv::WriterBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{info, warn};
 use parking_lot::Mutex;
 use prettytable::{row, Table};
-use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead};
-use std::io::{BufWriter, Write};
+use std::io::{self, BufRead, Write, BufWriter};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
-use std::collections::HashMap as Map2;
 use tempfile::TempDir;
 use once_cell::sync::Lazy;
 
