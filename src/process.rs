@@ -1401,8 +1401,10 @@ pub fn process_config_entries(
         }
 
         // Fill in data from per_site_vec
+        let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
         for &(pos_1based, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
             if let Some(rel_pos) = region.relative_position_1based(pos_1based) {
+
                 let idx_0based = rel_pos - 1;
                 let key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
                 {
