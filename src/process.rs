@@ -665,15 +665,16 @@ fn process_variants(
         index_map.insert(trimmed_id, sample_index);
     }
 
-    let mut group_haps = Vec::new();
+    // List of haplotype indices and their sides (left or right) for the given haplotype_group
+    let mut group_haps: Vec<(usize, HaplotypeSide)> = Vec::new();
     for (config_sample_name, &(left_side, right_side)) in sample_filter {
         match index_map.get(config_sample_name.as_str()) {
             Some(&mapped_index) => {
                 if left_side == haplotype_group {
-                    group_haps.push((mapped_index, 0));
+                    group_haps.push((mapped_index, HaplotypeSide::Left));
                 }
                 if right_side == haplotype_group {
-                    group_haps.push((mapped_index, 1));
+                    group_haps.push((mapped_index, HaplotypeSide::Right));
                 }
             }
             None => {
@@ -730,12 +731,13 @@ fn process_variants(
     let final_pi = calculate_pi(variants, &group_haps);
 
     for transcript in cds_regions {
+        // Map of haplotype labels to their assembled CDS sequences
         let mut assembled: HashMap<String, Vec<u8>> = HashMap::new();
         for (mapped_index, side) in &group_haps {
-            let label = match *side {
-                0 => format!("{}_L", sample_names[*mapped_index]),
-                1 => format!("{}_R", sample_names[*mapped_index]),
-                _ => panic!("Unexpected haplotype side"),
+            // Generate haplotype label based on side (Left -> _L, Right -> _R)
+            let label = match side {
+                HaplotypeSide::Left => format!("{}_L", sample_names[*mapped_index]),
+                HaplotypeSide::Right => format!("{}_R", sample_names[*mapped_index]),
             };
             assembled.insert(label, Vec::new());
         }
@@ -786,8 +788,8 @@ fn process_variants(
 
             for (mapped_index, side) in &group_haps {
                 let label = match *side {
-                    0 => format!("{}_L", sample_names[*mapped_index]),
-                    1 => format!("{}_R", sample_names[*mapped_index]),
+                        HaplotypeSide::Left => format!("{}_L", sample_names[*mapped_index]),
+                        HaplotypeSide::Right => format!("{}_R", sample_names[*mapped_index]),
                     _ => panic!("Unexpected side"),
                 };
                 let mutable_vec = assembled
@@ -947,10 +949,10 @@ fn get_haplotype_indices_for_group(
         match vcf_sample_id_to_index.get(sample_name.as_str()) {
             Some(&idx) => {
                 if left_tsv == haplotype_group {
-                    haplotype_indices.push((idx, 0));
+                    haplotype_indices.push((idx, HaplotypeSide::Left));
                 }
                 if right_tsv == haplotype_group {
-                    haplotype_indices.push((idx, 1));
+                    haplotype_indices.push((idx, HaplotypeSide::Right));
                 }
             }
             None => {
