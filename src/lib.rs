@@ -5,7 +5,7 @@ use crate::process::{Variant, HaplotypeSide};
 pub mod parse;
 pub mod process;
 pub mod stats;
-pub mod transcript;
+pub mod transcripts;
 
 /// PyO3 wrapper for count_segregating_sites
 #[pyfunction]
