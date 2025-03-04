@@ -246,7 +246,7 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
                         if let Some(alleles_i) = gt_i {
                             if let Some(alleles_j) = gt_j {
                                 // Match allele values (u8) for both samples at their haplotype sides
-                                if let (Some(&a_i), Some(&a_j)): (Option<&u8>, Option<&u8>) = (
+                                if let (Some(&a_i), Some(&a_j)) = (
                                     alleles_i.get(side_i as usize),
                                     alleles_j.get(side_j as usize),
                                 ) {
