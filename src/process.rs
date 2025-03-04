@@ -701,13 +701,14 @@ fn process_variants(
         
         // Iterate over haplotype group indices and sides, borrowing each tuple
         for (mapped_index, side) in &group_haps {
-            if let Some(some_genotypes) = current_variant.genotypes.get(mapped_index) {
-                if let Some(genotype_vec) = some_genotypes {
-                    // Extract the allele value (u8) from genotype_vec at the haplotype side index
-                    if let Some(&val): Option<&u8> = genotype_vec.get(side as usize) {
-                    let locked_map = position_allele_map.lock();
-                        if locked_map.get(&current_variant.position).is_some() {
+            // Access genotypes using the dereferenced index
+            if let Some(some_genotypes) = current_variant.genotypes.get(*mapped_index) {
+                for (side, genotype_vec) in some_genotypes.iter().enumerate() {
+                    // Retrieve genotype and quality values for current allele
+                    if let Some(&val) = genotype_vec.get(side as usize) {
+                        if let Some(qual) = quals.get(side as usize) {
                             allele_values.push(val);
+                            allele_quals.push(*qual);
                         }
                     }
                 }
