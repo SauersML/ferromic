@@ -2065,10 +2065,10 @@ fn filter_and_log_transcripts(
         }
 
         // Create a ZeroBasedHalfOpen for the transcript
-        let transcript_interval = ZeroBasedHalfOpen::from_1based_inclusive(
-            transcript_coding_start, 
-            transcript_coding_end
-        );
+        let transcript_interval = ZeroBasedHalfOpen {
+            start: transcript_coding_start as usize,
+            end: transcript_coding_end as usize,
+        };
         
         // Check for overlap using the intersect method
         let overlaps_query = transcript_interval.intersect(&query_interval).is_some();
