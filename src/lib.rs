@@ -1,37 +1,41 @@
-use crate::process::Variant;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
-use pyo3::wrap_pyfunction;
+use crate::stats::{calculate_pi, count_segregating_sites, calculate_watterson_theta};
+use crate::process::{Variant, HaplotypeSide};
 
 pub mod parse;
 pub mod process;
 pub mod stats;
 
+/// PyO3 wrapper for count_segregating_sites
 #[pyfunction]
-fn get_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
-    calculate_watterson_theta(seg_sites, n, seq_length)
+fn count_segregating_sites_py(variants: Vec<Variant>) -> PyResult<usize> {
+    Ok(count_segregating_sites(&variants))
 }
 
+/// PyO3 wrapper for calculate_pi
 #[pyfunction]
-fn count_segregating_sites(variants: Vec<Variant>) -> usize {
-    count_segregating_sites(&variants)
+fn calculate_pi_py(
+    variants: Vec<Variant>,
+    haplotypes: Vec<(usize, HaplotypeSide)>
+) -> PyResult<f64> {
+    Ok(calculate_pi(&variants, &haplotypes))
 }
 
+/// PyO3 wrapper for calculate_watterson_theta
 #[pyfunction]
-fn calculate_pi(variants: Vec<Variant>, haplotypes: Vec<(usize, HaplotypeSide)>) -> f64 {
-    calculate_pi(&variants, &haplotypes)
+fn calculate_watterson_theta_py(
+    seg_sites: usize,
+    n: usize,
+    seq_length: i64
+) -> PyResult<f64> {
+    Ok(calculate_watterson_theta(seg_sites, n, seq_length))
 }
 
-#[pyfunction]
-fn adjusted_sequence_length(region_start: i64, region_end: i64, allow_regions: Option<Vec<(i64, i64)>>, mask_regions: Option<Vec<(i64, i64)>>) -> i64 {
-    calculate_adjusted_sequence_length(region_start, region_end, allow_regions.as_ref(), mask_regions.as_ref())
-}
-
+/// PyO3 module definition
 #[pymodule]
-fn ferromic(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(get_theta, m)?)?;
-    m.add_function(wrap_pyfunction!(count_segregating_sites, m)?)?;
-    m.add_function(wrap_pyfunction!(calculate_pi, m)?)?;
-    m.add_function(wrap_pyfunction!(adjusted_sequence_length, m)?)?;
+fn ferromic(py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(count_segregating_sites_py, m)?)?;
+    m.add_function(wrap_pyfunction!(calculate_pi_py, m)?)?;
+    m.add_function(wrap_pyfunction!(calculate_watterson_theta_py, m)?)?;
     Ok(())
 }
