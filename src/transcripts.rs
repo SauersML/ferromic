@@ -414,7 +414,7 @@ pub fn prepare_to_write_cds(
             // A CDS entirely outside the query region but inside the extended region does not get written out to a .phy file.
             // If a CDS partially overlaps the query region, its entire transcript sequence
             // (including segments outside the query region but within the extended region) will be written out
-            for (i, seg) in cds.segments.iter().enumerate() {
+            for seg in cds.segments.iter() {
                 let strand = cds.strand;
                 // If the entire CDS segment is within the extended region, then the segment is included in full.
                 // If only part overlaps, only that partial segment is included. This should NEVER happen in humans, because the largest gene is smaller than the extended region.
