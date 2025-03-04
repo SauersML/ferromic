@@ -339,6 +339,13 @@ impl CdsSeq {
     }
 }
 
+/// Represents the side of a haplotype (left or right) for a sample.
+#[derive(Debug, Clone, PartialEq)]
+enum HaplotypeSide {
+    Left,  // The left haplotype of a diploid sample
+    Right, // The right haplotype of a diploid sample
+}
+
 // Data structures
 #[derive(Debug, Clone)]
 pub struct ConfigEntry {
