@@ -1009,7 +1009,7 @@ fn initialize_hap_sequences(
 
 fn apply_variants_to_transcripts(
     variants: &[Variant],
-    haplotype_indices: &[(usize, u8)],
+    haplotype_indices: &[(usize, HaplotypeSide)],
     extended_region: ZeroBasedHalfOpen,
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     hap_sequences: &mut HashMap<String, Vec<u8>>,
