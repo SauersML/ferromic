@@ -220,7 +220,7 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
 /// * `f64::INFINITY` if too few samples (n <= 1).
 /// * `f64::NAN` if no valid pair comparisons are possible.
 /// * `0.0` if no comparable sites exist between any pair.
-pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, u8)]) -> f64 {
+pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, HaplotypeSide)]) -> f64 {
     if haplotypes_in_group.len() <= 1 {
         return f64::INFINITY;
     }
@@ -270,7 +270,7 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, u8)]) -
 
 pub fn calculate_per_site(
     variants: &[Variant],
-    haplotypes_in_group: &[(usize, u8)],
+    haplotypes_in_group: &[(usize, HaplotypeSide)],
     region_start: i64,
     region_end: i64,
 ) -> Vec<SiteDiversity> {
