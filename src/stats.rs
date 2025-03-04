@@ -29,10 +29,7 @@ pub fn calculate_adjusted_sequence_length(
             
             // Use the intersect method to find overlap
             if let Some(overlap) = region.intersect(&allow_region) {
-                allowed_intervals.push((
-                    overlap.start_1based_inclusive(),
-                    overlap.end_1based_inclusive()
-                ));
+                allowed_intervals.push(overlap.to_1based_inclusive_tuple());
             }
         }
     } else {
