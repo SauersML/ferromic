@@ -1,4 +1,5 @@
-use crate::process::{ConfigEntry, TranscriptCDS, VcfError, ZeroBasedHalfOpen};
+use crate::process::{ConfigEntry, VcfError, ZeroBasedHalfOpen};
+use crate::transcript::TranscriptCDS;
 
 use colored::Colorize;
 use flate2::read::MultiGzDecoder;
