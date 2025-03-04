@@ -1,6 +1,11 @@
+use crate::process::Variant;
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 use pyo3::wrap_pyfunction;
-use crate::stats::*;
+
+pub mod parse;
+pub mod process;
+pub mod stats;
 
 #[pyfunction]
 fn get_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
