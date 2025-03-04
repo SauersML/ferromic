@@ -1296,43 +1296,44 @@ pub fn process_config_entries(
         // The relative position is (pos - region_start + 1).
 
         for &(pos, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
-            // Compute 1-based relative position using ZeroBasedHalfOpen
-            let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
-            if let Some(rel_pos) = region.relative_position_1based(pos) {
-                if rel_pos > max_position {
-                    max_position = rel_pos;
-                }
-                // Decide which prefix to use
-                if is_filtered {
-                    let pi_col = build_col_name("filtered_pi_", csv_row, group_id);
-                    let theta_col = build_col_name("filtered_theta_", csv_row, group_id);
-
-                    all_columns
-                        .entry(pi_col)
-                        .or_insert_with(BTreeMap::new)
-                        .insert(rel_pos as usize, pi_val);
-                    all_columns
-                        .entry(theta_col)
-                        .or_insert_with(BTreeMap::new)
-                        .insert(rel_pos as usize, theta_val);
-                } else {
-                    let pi_col = build_col_name("unfiltered_pi_", csv_row, group_id);
-                    let theta_col = build_col_name("unfiltered_theta_", csv_row, group_id);
-
-                    all_columns
-                        .entry(pi_col)
-                        .or_insert_with(BTreeMap::new)
-                        .insert(rel_pos as usize, pi_val);
-                    all_columns
-                        .entry(theta_col)
-                        .or_insert_with(BTreeMap::new)
-                        .insert(rel_pos as usize, theta_val);
-                }
-            } else {
+            // Compute a 0-based region from csv_row.region_start and csv_row.region_end
+            let region = ZeroBasedHalfOpen::from_0based_inclusive(csv_row.region_start, csv_row.region_end);
+            let pos_zero_based = pos;
+            if pos_zero_based < region.start as i64 || pos_zero_based >= region.end as i64 {
                 eprintln!(
                     "Warning: Position {} is outside region {}-{}",
-                    pos, csv_row.region_start, csv_row.region_end
+                    pos_zero_based, csv_row.region_start, csv_row.region_end
                 );
+                continue;
+            }
+            let rel_pos = (pos_zero_based - region.start as i64) + 1;
+            if (rel_pos as usize) > max_position {
+                max_position = rel_pos as usize;
+            }
+            if is_filtered {
+                let pi_col = build_col_name("filtered_pi_", csv_row, group_id);
+                let theta_col = build_col_name("filtered_theta_", csv_row, group_id);
+
+                all_columns
+                    .entry(pi_col)
+                    .or_insert_with(BTreeMap::new)
+                    .insert(rel_pos as usize, pi_val);
+                all_columns
+                    .entry(theta_col)
+                    .or_insert_with(BTreeMap::new)
+                    .insert(rel_pos as usize, theta_val);
+            } else {
+                let pi_col = build_col_name("unfiltered_pi_", csv_row, group_id);
+                let theta_col = build_col_name("unfiltered_theta_", csv_row, group_id);
+
+                all_columns
+                    .entry(pi_col)
+                    .or_insert_with(BTreeMap::new)
+                    .insert(rel_pos as usize, pi_val);
+                all_columns
+                    .entry(theta_col)
+                    .or_insert_with(BTreeMap::new)
+                    .insert(rel_pos as usize, theta_val);
             }
         }
     }
