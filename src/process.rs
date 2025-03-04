@@ -698,7 +698,7 @@ fn process_variants(
             continue;
         }
         let mut allele_values = Vec::new();
-        for &(mapped_index, side) in &group_haps {
+        for (mapped_index, side) in &group_haps {
             if let Some(some_genotypes) = current_variant.genotypes.get(mapped_index) {
                 if let Some(genotype_vec) = some_genotypes {
                     if let Some(&val) = genotype_vec.get(side as usize) {
@@ -985,7 +985,7 @@ fn initialize_hap_sequences(
         let sample_name = format!(
             "{}_{}",
             sample_names[sample_idx],
-            match *hap_idx {
+            match hap_idx {
                 HaplotypeSide::Left => "L",
                 HaplotypeSide::Right => "R",
             }
@@ -1024,7 +1024,7 @@ fn apply_variants_to_transcripts(
             let sample_name = format!(
                 "{}_{}",
                 sample_names[sample_idx],
-                match *hap_idx {
+                match hap_idx {
                     HaplotypeSide::Left => "L",
                     HaplotypeSide::Right => "R",
                 }
