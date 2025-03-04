@@ -7,6 +7,19 @@ use crate::parse::{
     find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header,
 };
 
+use crate::transcript::{
+    CdsSeq,
+    TranscriptCDS,
+    make_sequences,
+    initialize_hap_sequences,
+    apply_variants_to_transcripts,
+    generate_batch_statistics,
+    prepare_to_write_cds,
+    filter_and_log_transcripts,
+    CdsRegion,
+    write_phylip_file,
+};
+
 use clap::Parser;
 use colored::*;
 use crossbeam_channel::bounded;
