@@ -1,7 +1,3 @@
-use crate::stats::{
-    SiteDiversity,
-};
-
 use crate::process::{
     ZeroBasedHalfOpen, ZeroBasedPosition, VcfError, Variant, HaplotypeSide, QueryRegion, TEMP_DIR,
     create_temp_dir, map_sample_names_to_indices, get_haplotype_indices_for_group
@@ -12,7 +8,6 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write, BufWriter};
-use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
