@@ -128,12 +128,15 @@ fn main() -> Result<(), VcfError> {
     // ------------------------------------------------------------------------
     } else if let Some(chr) = args.chr.as_ref() {
         // Figure out region start/end from user input, or default to the entire chromosome
-        let (start, end) = if let Some(region_str) = args.region.as_ref() {
+        let interval = if let Some(region_str) = args.region.as_ref() {
             parse_region(region_str)?
         } else {
-            // If no region, use 1..i64::MAX; the pipeline will clamp to the actual chromosome length
-            (1, i64::MAX)
+            // If no region, use 1 to i64::MAX as a 1-based inclusive range; the pipeline will clamp to the actual chromosome length
+            ZeroBasedHalfOpen::from_1based_inclusive(1, i64::MAX)
         };
+
+        // Find a VCF for this chromosome
+        let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
 
         // Find a VCF for this chromosome
         let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
@@ -149,10 +152,10 @@ fn main() -> Result<(), VcfError> {
         // Filtered groups can be the same in this scenario
         let samples_filtered = samples_unfiltered.clone();
 
-        // Create a single ConfigEntry
+        // Create a single ConfigEntry using the pre-constructed interval
         let config_entry = ConfigEntry {
             seqname: chr.to_string(),
-            interval: ZeroBasedHalfOpen::from_1based_inclusive(start, end),
+            interval,
             samples_unfiltered,
             samples_filtered,
         };
