@@ -415,14 +415,11 @@ pub fn prepare_to_write_cds(
             // If a CDS partially overlaps the query region, its entire transcript sequence
             // (including segments outside the query region but within the extended region) will be written out
             for (i, seg) in cds.segments.iter().enumerate() {
-                let seg_s = seg.start as i64;
-                let seg_e = seg.end as i64;
                 let strand = cds.strand;
-                let _frame = cds.frames.get(i).copied().unwrap_or(0);
                 // If the entire CDS segment is within the extended region, then the segment is included in full.
                 // If only part overlaps, only that partial segment is included. This should NEVER happen in humans, because the largest gene is smaller than the extended region.
                 // If the segment lies wholly beyond the extended region (or the normal region), it is dropped entirely.
-                let seg_interval = ZeroBasedHalfOpen::from_1based_inclusive(seg_s, seg_e);
+                let seg_interval = *seg;
                 if let Some(overlap) = seg_interval.intersect(&hap_region) {
                     let offset_start = overlap.start.saturating_sub(hap_region.start);
                     let offset_end = overlap.end.saturating_sub(hap_region.start);
