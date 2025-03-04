@@ -785,7 +785,6 @@ fn process_variants(
                 let label = match *side {
                         HaplotypeSide::Left => format!("{}_L", sample_names[*mapped_index]),
                         HaplotypeSide::Right => format!("{}_R", sample_names[*mapped_index]),
-                    _ => panic!("Unexpected side"),
                 };
                 let mutable_vec = assembled
                     .get_mut(&label)
@@ -986,7 +985,7 @@ fn initialize_hap_sequences(
         // We use a consistent naming format for each sample/haplotype: "SampleName_L" or "SampleName_R."
         let sample_name = format!(
             "{}_{}",
-            sample_names[sample_idx],
+            sample_names[*sample_idx],
             match hap_idx {
                 HaplotypeSide::Left => "L",
                 HaplotypeSide::Right => "R",
