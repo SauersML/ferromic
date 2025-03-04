@@ -698,11 +698,14 @@ fn process_variants(
             continue;
         }
         let mut allele_values = Vec::new();
-        for (&mapped_index, &side) in &group_haps {
+        
+        // Iterate over haplotype group indices and sides, borrowing each tuple
+        for (mapped_index, side) in &group_haps {
             if let Some(some_genotypes) = current_variant.genotypes.get(mapped_index) {
                 if let Some(genotype_vec) = some_genotypes {
-                    if let Some(&val) = genotype_vec.get(side as usize) {
-                        let locked_map = position_allele_map.lock();
+                    // Extract the allele value (u8) from genotype_vec at the haplotype side index
+                    if let Some(&val): Option<&u8> = genotype_vec.get(side as usize) {
+                    let locked_map = position_allele_map.lock();
                         if locked_map.get(&current_variant.position).is_some() {
                             allele_values.push(val);
                         }
@@ -980,7 +983,8 @@ fn initialize_hap_sequences(
     let mut hap_sequences = HashMap::new();
 
     // For each relevant sample/haplotype pair, initialize its sequence by copying the chosen region.
-    for (&sample_idx, &hap_idx) in haplotype_indices {
+    // Iterate over haplotype indices and sides, binding directly to tuple components
+    for (sample_idx, hap_idx) in haplotype_indices {
         // We use a consistent naming format for each sample/haplotype: "SampleName_L" or "SampleName_R."
         let sample_name = format!(
             "{}_{}",
