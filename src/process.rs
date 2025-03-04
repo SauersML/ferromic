@@ -185,6 +185,10 @@ impl ZeroBasedHalfOpen {
 
     /// Returns the 1-based inclusive end coordinate of this interval.
     pub fn end_1based_inclusive(&self) -> i64 {
+        if self.end > self.start { (self.end - 1) as i64 } else { self.start as i64 }
+    }
+
+    pub fn end_1based_exclusive(&self) -> i64 {
         self.end as i64
     }
 
