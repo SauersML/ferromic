@@ -279,26 +279,13 @@ pub fn calculate_per_site(
     let max_haps = haplotypes_in_group.len();
     
     // Create a proper ZeroBasedHalfOpen for the region
-    let region = crate::process::ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end);
+    let region = crate::process::ZeroBasedHalfOpen::from_0based_half_open(region_start, region_end);
     let mut site_diversities = Vec::with_capacity(region.len());
-    
     if max_haps < 2 {
         return site_diversities;
     }
-    
-    // Convert variants to a HashMap for O(1) access by position (0-based)
     let variant_map: HashMap<i64, &Variant> = variants.iter().map(|v| (v.position, v)).collect();
-
-    // Iterate over each position in the region (inclusive 0-based start to end)
-    // Using region.start_1based_inclusive() and region.end_1based_inclusive() for correct boundaries
-    let start_pos = region_start;
-    let end_pos = region_end;
-    
-    for pos in start_pos..=end_pos {
-        // Check if position is within our region using the struct's contains method
-        if !region.contains(ZeroBasedPosition(pos)) {
-            continue;
-        }
+    for pos in region_start..region_end {
         
         if let Some(var) = variant_map.get(&pos) {
             // Variant exists at this position; calculate diversity metrics
