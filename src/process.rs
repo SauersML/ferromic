@@ -943,7 +943,7 @@ fn get_haplotype_indices_for_group(
     haplotype_group: u8,
     sample_filter: &HashMap<String, (u8, u8)>,
     vcf_sample_id_to_index: &HashMap<&str, usize>,
-) -> Result<Vec<(usize, u8)>, VcfError> {
+) -> Result<Vec<(usize, HaplotypeSide)>, VcfError> {
     let mut haplotype_indices = Vec::new();
     for (sample_name, &(left_tsv, right_tsv)) in sample_filter {
         match vcf_sample_id_to_index.get(sample_name.as_str()) {
