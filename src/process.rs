@@ -567,8 +567,8 @@ fn process_variants(
         }
         let mut allele_values = Vec::new();
         
-        // Iterate over haplotype group indices and sides, borrowing each tuple
-        for (mapped_index, side) in &group_haps {
+        // Iterate over haplotype group indices, borrowing each tuple
+        for (mapped_index, _) in &group_haps { // We don't need side in this outer loop
             // Access genotypes using the dereferenced index
             if let Some(some_genotypes) = current_variant.genotypes.get(*mapped_index) {
                 for (side, genotype_vec) in some_genotypes.iter().enumerate() {
