@@ -1400,36 +1400,29 @@ pub fn process_config_entries(
             records_map.insert(format!("filtered_theta_group_{}", grp), vec![None; region_len]);
         }
 
-
-        // Fill in data from per_site_vec.
-
+        // Fill in data from per_site_vec
         for &(pos_1based, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
-            let offset = pos_1based - csv_row.region_start;
-            if offset < 1 {
-                continue;
-            }
-            let idx_0based = (offset - 1) as usize;
-            if idx_0based >= region_len {
-                continue;
-            }
-            let key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
-            {
-                let combo_key = format!("{}pi_group_{}", key_prefix, group_id);
-                if let Some(vec_ref) = records_map.get_mut(&combo_key) {
-                    if pi_val == 0.0 {
-                        vec_ref[idx_0based] = Some(0.0);
-                    } else {
-                        vec_ref[idx_0based] = Some(pi_val);
+            if let Some(rel_pos) = region.relative_position_1based(pos_1based) {
+                let idx_0based = rel_pos - 1;
+                let key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
+                {
+                    let combo_key = format!("{}pi_group_{}", key_prefix, group_id);
+                    if let Some(vec_ref) = records_map.get_mut(&combo_key) {
+                        if pi_val == 0.0 {
+                            vec_ref[idx_0based] = Some(0.0);
+                        } else {
+                            vec_ref[idx_0based] = Some(pi_val);
+                        }
                     }
                 }
-            }
-            {
-                let combo_key = format!("{}theta_group_{}", key_prefix, group_id);
-                if let Some(vec_ref) = records_map.get_mut(&combo_key) {
-                    if theta_val == 0.0 {
-                        vec_ref[idx_0based] = Some(0.0);
-                    } else {
-                        vec_ref[idx_0based] = Some(theta_val);
+                {
+                    let combo_key = format!("{}theta_group_{}", key_prefix, group_id);
+                    if let Some(vec_ref) = records_map.get_mut(&combo_key) {
+                        if theta_val == 0.0 {
+                            vec_ref[idx_0based] = Some(0.0);
+                        } else {
+                            vec_ref[idx_0based] = Some(theta_val);
+                        }
                     }
                 }
             }
