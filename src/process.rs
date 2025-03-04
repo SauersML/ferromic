@@ -197,9 +197,30 @@ impl ZeroBasedHalfOpen {
             None
         }
     }
+
+    // Query region
+    pub fn to_zero_based_inclusive(&self) -> ZeroBasedInclusive {
+        ZeroBasedInclusive {
+            start: self.start as i64,
+            end: (self.end - 1) as i64,
+        }
+    }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ZeroBasedInclusive {
+    pub start: i64,
+    pub end: i64,
+}
 
+impl From<ZeroBasedInclusive> for QueryRegion {
+    fn from(interval: ZeroBasedInclusive) -> Self {
+        QueryRegion {
+            start: interval.start,
+            end: interval.end,
+        }
+    }
+}
 
 /// A 1-based VCF position. Guaranteed >= 1, no runtime overhead.
 #[derive(Debug, Clone, Copy)]
@@ -1308,10 +1329,7 @@ fn process_single_config_entry(
 
     let local_cds = filter_and_log_transcripts(
         cds_regions.to_vec(),
-        QueryRegion {
-            start: entry.interval.start as i64,
-            end: entry.interval.end as i64,
-        },
+        entry.interval.to_zero_based_inclusive().into(),
     );
 
     let chr_length = ref_sequence.len() as i64;
