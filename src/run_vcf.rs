@@ -8,8 +8,7 @@ use clap::Parser;
 use colored::Colorize;
 use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
-use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -134,9 +133,6 @@ fn main() -> Result<(), VcfError> {
             // If no region, use 1 to i64::MAX as a 1-based inclusive range; the pipeline will clamp to the actual chromosome length
             ZeroBasedHalfOpen::from_1based_inclusive(1, i64::MAX)
         };
-
-        // Find a VCF for this chromosome
-        let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
 
         // Find a VCF for this chromosome
         let vcf_file = find_vcf_file(&args.vcf_folder, chr)?;
