@@ -7,7 +7,7 @@ use crate::parse::{
     find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header,
 };
 
-use crate::transcript::{
+use crate::transcripts::{
     CdsSeq,
     TranscriptCDS,
     make_sequences,
@@ -42,11 +42,11 @@ use std::collections::HashMap as Map2;
 use tempfile::TempDir;
 use once_cell::sync::Lazy;
 
-static TEMP_DIR: Lazy<Mutex<Option<TempDir>>> = Lazy::new(|| {
+pub static TEMP_DIR: Lazy<Mutex<Option<TempDir>>> = Lazy::new(|| {
     Mutex::new(None)
 });
 
-fn create_temp_dir() -> Result<TempDir, VcfError> {
+pub fn create_temp_dir() -> Result<TempDir, VcfError> {
     let ramdisk_path = std::env::var("RAMDISK_PATH").unwrap_or_else(|_| "/dev/shm".to_string());
     let temp_dir = match TempDir::new_in(&ramdisk_path) {
         Ok(dir) => dir,
@@ -730,7 +730,7 @@ fn process_variants(
     )))
 }
 
-fn map_sample_names_to_indices(sample_names: &[String]) -> Result<HashMap<&str, usize>, VcfError> {
+pub fn map_sample_names_to_indices(sample_names: &[String]) -> Result<HashMap<&str, usize>, VcfError> {
     let mut vcf_sample_id_to_index = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         let sample_id = name.rsplit('_').next().unwrap_or(name);
@@ -739,7 +739,7 @@ fn map_sample_names_to_indices(sample_names: &[String]) -> Result<HashMap<&str, 
     Ok(vcf_sample_id_to_index)
 }
 
-fn get_haplotype_indices_for_group(
+pub fn get_haplotype_indices_for_group(
     haplotype_group: u8,
     sample_filter: &HashMap<String, (u8, u8)>,
     vcf_sample_id_to_index: &HashMap<&str, usize>,
