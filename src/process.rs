@@ -340,7 +340,7 @@ impl CdsSeq {
 }
 
 /// Represents the side of a haplotype (left or right) for a sample.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HaplotypeSide {
     Left,  // The left haplotype of a diploid sample
     Right, // The right haplotype of a diploid sample
@@ -698,7 +698,7 @@ fn process_variants(
             continue;
         }
         let mut allele_values = Vec::new();
-        for (mapped_index, side) in &group_haps {
+        for (&mapped_index, &side) in &group_haps {
             if let Some(some_genotypes) = current_variant.genotypes.get(mapped_index) {
                 if let Some(genotype_vec) = some_genotypes {
                     if let Some(&val) = genotype_vec.get(side as usize) {
@@ -980,7 +980,7 @@ fn initialize_hap_sequences(
     let mut hap_sequences = HashMap::new();
 
     // For each relevant sample/haplotype pair, initialize its sequence by copying the chosen region.
-    for (sample_idx, hap_idx) in haplotype_indices {
+    for (&sample_idx, &hap_idx) in haplotype_indices {
         // We use a consistent naming format for each sample/haplotype: "SampleName_L" or "SampleName_R."
         let sample_name = format!(
             "{}_{}",
