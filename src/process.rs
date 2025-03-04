@@ -688,7 +688,11 @@ fn process_variants(
         return Ok(Some((0, 0.0, 0.0, region_hap_count, Vec::new())));
     }
     for current_variant in variants {
-        if current_variant.position < region_start || current_variant.position > region_end {
+        let region_interval = ZeroBasedHalfOpen {
+            start: region_start as usize,
+            end: region_end as usize,
+        };
+        if !region_interval.contains(ZeroBasedPosition(current_variant.position)) {
             continue;
         }
         let mut allele_values = Vec::new();
