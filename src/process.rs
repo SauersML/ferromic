@@ -967,7 +967,7 @@ fn get_haplotype_indices_for_group(
 }
 
 fn initialize_hap_sequences(
-    haplotype_indices: &[(usize, u8)],
+    haplotype_indices: &[(usize, HaplotypeSide)],
     sample_names: &[String],
     reference_sequence: &[u8],
     extended_region: ZeroBasedHalfOpen,
@@ -991,7 +991,10 @@ fn initialize_hap_sequences(
         let sample_name = format!(
             "{}_{}",
             sample_names[*sample_idx],
-            if *hap_idx == 0 { "L" } else { "R" }
+            match *hap_idx {
+                HaplotypeSide::Left => "L",
+                HaplotypeSide::Right => "R",
+            }
         );
 
         // Collect the bytes into a new vector to store in our map.
@@ -1026,8 +1029,11 @@ fn apply_variants_to_transcripts(
         for &(sample_idx, hap_idx) in haplotype_indices {
             let sample_name = format!(
                 "{}_{}",
-                &sample_names[sample_idx],
-                if hap_idx == 0 { "L" } else { "R" }
+                sample_names[*sample_idx],
+                match *hap_idx {
+                    HaplotypeSide::Left => "L",
+                    HaplotypeSide::Right => "R",
+                }
             );
 
             // Get the mutable sequence vector for the current sample and haplotype
