@@ -706,10 +706,7 @@ fn process_variants(
                 for (side, genotype_vec) in some_genotypes.iter().enumerate() {
                     // Retrieve genotype and quality values for current allele
                     if let Some(&val) = genotype_vec.get(side as usize) {
-                        if let Some(qual) = quals.get(side as usize) {
-                            allele_values.push(val);
-                            allele_quals.push(*qual);
-                        }
+                        allele_values.push(val);
                     }
                 }
             }
