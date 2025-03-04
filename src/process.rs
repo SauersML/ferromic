@@ -8,16 +8,9 @@ use crate::parse::{
 };
 
 use crate::transcripts::{
-    CdsSeq,
     TranscriptCDS,
     make_sequences,
-    initialize_hap_sequences,
-    apply_variants_to_transcripts,
-    generate_batch_statistics,
-    prepare_to_write_cds,
     filter_and_log_transcripts,
-    CdsRegion,
-    write_phylip_file,
 };
 
 use clap::Parser;
@@ -25,19 +18,19 @@ use colored::*;
 use crossbeam_channel::bounded;
 use csv::WriterBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::{info, warn};
+use log::warn;
 use parking_lot::Mutex;
 use prettytable::{row, Table};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, BufRead};
 use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use std::collections::HashMap as Map2;
 use tempfile::TempDir;
 use once_cell::sync::Lazy;
