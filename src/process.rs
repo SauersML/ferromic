@@ -205,6 +205,17 @@ impl ZeroBasedHalfOpen {
             end: (self.end - 1) as i64,
         }
     }
+
+    // Make the names e.g. zero vs. 0 consistent later
+    
+    /// Creates a new half-open interval from 0-based half-open coordinates.
+    /// Takes a start (inclusive) and end (exclusive) as-is, assuming they are already 0-based.
+    pub fn from_0based_half_open(start: i64, end: i64) -> Self {
+        ZeroBasedHalfOpen {
+            start: start as usize,
+            end: end as usize,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
