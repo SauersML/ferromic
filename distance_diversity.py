@@ -16,45 +16,52 @@ def compute_distances(positions, sequence_length):
         dists[i] = min(positions[i], sequence_length - 1 - positions[i])
     return dists
 
-# Load data efficiently
-def load_data(file_path):
-    """Load theta and pi data from file."""
-    print(f"INFO: Loading data from {file_path}")
+# Load data efficiently, limited to some sequences
+def load_data(file_path, max_sequences=500):
+    """Load up to some theta and pi data sequences from file."""
+    print(f"INFO: Loading data from {file_path} (max {max_sequences} sequences)")
     start_time = time.time()
     theta_labels, theta_data = [], []
     pi_labels, pi_data = [], []
+    total_sequences = 0
     
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
         print(f"INFO: File read: {len(lines)} lines in {time.time() - start_time:.2f}s")
         for i in tqdm(range(len(lines) - 1), desc="Parsing lines", unit="line"):
+            if total_sequences >= max_sequences:
+                break
             if 'filtered_theta' in lines[i]:
                 values = lines[i + 1].strip().replace('NA', 'nan')
                 theta_labels.append(lines[i][1:].strip())
                 theta_data.append(np.fromstring(values, sep=',', dtype=np.float32))
+                total_sequences += 1
                 print(f"DEBUG: Theta line {len(theta_labels)} loaded: {theta_labels[-1]}, {len(theta_data[-1])} values")
             elif 'filtered_pi' in lines[i]:
                 values = lines[i + 1].strip().replace('NA', 'nan')
                 pi_labels.append(lines[i][1:].strip())
                 pi_data.append(np.fromstring(values, sep=',', dtype=np.float32))
+                total_sequences += 1
                 print(f"DEBUG: Pi line {len(pi_labels)} loaded: {pi_labels[-1]}, {len(pi_data[-1])} values")
     
-    print(f"INFO: Loaded {len(theta_labels)} theta and {len(pi_labels)} pi lines in {time.time() - start_time:.2f}s")
+    print(f"INFO: Loaded {len(theta_labels)} theta and {len(pi_labels)} pi lines (total {total_sequences}) in {time.time() - start_time:.2f}s")
     return (np.array(theta_labels, dtype=object), np.array(theta_data, dtype=object)), \
            (np.array(pi_labels, dtype=object), np.array(pi_data, dtype=object))
 
 # Process data efficiently
 def process_data(data_values):
-    """Process sequences into non-zero and zero-density lines."""
+    """Process sequences into non-zero and zero-density lines, returning max sequence length."""
     print(f"INFO: Processing {len(data_values)} sequences")
     start_time = time.time()
     line_nz_data, line_zero_data = [], []
     all_nz_dists, all_nz_vals = [], []
     all_closest, all_furthest = [], []
+    max_seq_len = 0  # Track maximum sequence length
     
     for idx, values in enumerate(tqdm(data_values, desc="Processing sequences", unit="seq")):
         print(f"DEBUG: Sequence {idx + 1}: Length = {len(values)}")
         seq_len = len(values)
+        max_seq_len = max(max_seq_len, seq_len)  # Update max sequence length
         positions = np.arange(seq_len, dtype=np.int32)
         print(f"DEBUG: Computing distances for sequence {idx + 1} with length {seq_len}")
         dists = compute_distances(positions, seq_len)
@@ -95,23 +102,22 @@ def process_data(data_values):
     all_nz_vals = np.concatenate(all_nz_vals) if all_nz_vals else np.array([], dtype=np.float32)
     all_closest = np.concatenate(all_closest) if all_closest else np.array([], dtype=bool)
     all_furthest = np.concatenate(all_furthest) if all_furthest else np.array([], dtype=bool)
-    print(f"INFO: Processed {len(line_nz_data)} lines, {len(all_nz_dists)} non-zero points in {time.time() - start_time:.2f}s")
+    print(f"INFO: Processed {len(line_nz_data)} lines, {len(all_nz_dists)} non-zero points, max_seq_len={max_seq_len} in {time.time() - start_time:.2f}s")
     
-    return line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, all_closest, all_furthest
+    return line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, all_closest, all_furthest, max_seq_len
 
-# Optimized function to compute overall smoothed line
-def compute_overall_smoothed_line(line_data, sigma=50):
-    """Compute overall smoothed line with NaN extrapolation and proper edge handling."""
+# Compute overall line as average without smoothing
+def compute_overall_line(line_data, max_seq_len):
+    """Compute overall line as the average of contributing lines, no smoothing."""
     print(f"INFO: Starting overall line computation for {len(line_data)} lines")
     start_time = time.time()
     if not line_data or all(len(dists) == 0 for dists, _ in line_data):
         print("WARNING: No valid data found")
         return np.array([]), np.array([])
     
-    print(f"DEBUG: Concatenating all distances")
-    all_dists = np.concatenate([dists for dists, _ in line_data if len(dists) > 0])
-    common_x = np.linspace(np.min(all_dists), np.max(all_dists), 500)
-    print(f"DEBUG: Common x-axis set: {len(common_x)} points, range [{np.min(all_dists):.2f}, {np.max(all_dists):.2f}]")
+    max_dist = max_seq_len // 2  # Maximum possible distance from edge
+    common_x = np.linspace(0, max_dist, 500)  # Fixed range from 0 to max possible distance
+    print(f"DEBUG: Common x-axis set: {len(common_x)} points, range [0, {max_dist:.2f}]")
     
     print(f"DEBUG: Initializing interpolated values array: {len(line_data)} x 500")
     interpolated_vals = np.full((len(line_data), 500), np.nan, dtype=np.float32)
@@ -125,15 +131,11 @@ def compute_overall_smoothed_line(line_data, sigma=50):
     overall_vals = np.nanmean(interpolated_vals, axis=0)
     print(f"DEBUG: Overall_vals non-NaN count = {np.sum(~np.isnan(overall_vals))}, range = [{np.nanmin(overall_vals):.2f}, {np.nanmax(overall_vals):.2f}]")
     
-    print(f"DEBUG: Smoothing averaged line with sigma={sigma} ({len(overall_vals)} points)")
-    overall_smoothed = gaussian_filter1d(overall_vals, sigma=sigma, mode='constant', cval=np.nan)
-    print(f"DEBUG: Overall_smoothed non-NaN count = {np.sum(~np.isnan(overall_smoothed))}, range = [{np.nanmin(overall_smoothed):.2f}, {np.nanmax(overall_smoothed):.2f}]")
-    
     print(f"INFO: Overall line computed in {time.time() - start_time:.2f}s")
-    return common_x, overall_smoothed
+    return common_x, overall_vals
 
 # Generate plot
-def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest, furthest, metric, suffix, sigma=400, max_lines=100):
+def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest, furthest, max_seq_len, metric, suffix, sigma=400):
     """Create plot with downsampled lines for efficiency."""
     print(f"\n=== Creating {metric} Plot ===")
     start_time = time.time()
@@ -150,8 +152,8 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
     max_points = 10000  # Downsample threshold
     
     if metric == 'Theta':
-        print(f"INFO: Plotting up to {max_lines} Theta zero-density lines")
-        for i, (dists, density) in enumerate(tqdm(line_zero_data[:max_lines], desc="Plotting Theta lines", unit="line")):
+        print(f"INFO: Plotting Theta zero-density lines")
+        for i, (dists, density) in enumerate(tqdm(line_zero_data, desc="Plotting Theta lines", unit="line")):
             if len(dists) > 0:
                 t0 = time.time()
                 if len(density) > max_points:
@@ -166,12 +168,12 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
                 print(f"DEBUG: Theta line {i + 1}: Plotted in {time.time() - t0:.2f}s, range = [{np.min(smoothed):.2f}, {np.max(smoothed):.2f}]")
         
         print(f"INFO: Computing Theta overall zero-density line")
-        common_x, overall_smoothed = compute_overall_smoothed_line(line_zero_data)
+        common_x, overall_line = compute_overall_line(line_zero_data, max_seq_len)
         if len(common_x) > 0:
-            valid_idx = ~np.isnan(overall_smoothed)
+            valid_idx = ~np.isnan(overall_line)
             if np.any(valid_idx):
-                ax2.plot(common_x[valid_idx], overall_smoothed[valid_idx], color='black', lw=2, alpha=0.8, label='Overall Zero-Density')
-                print(f"DEBUG: Theta overall line plotted, {np.sum(valid_idx)} valid points, range = [{np.min(overall_smoothed[valid_idx]):.2f}, {np.max(overall_smoothed[valid_idx]):.2f}]")
+                ax2.plot(common_x[valid_idx], overall_line[valid_idx], color='black', lw=2, alpha=0.8, label='Overall Zero-Density')
+                print(f"DEBUG: Theta overall line plotted, {np.sum(valid_idx)} valid points, range = [{np.min(overall_line[valid_idx]):.2f}, {np.max(overall_line[valid_idx]):.2f}]")
             else:
                 print(f"WARNING: Theta overall line not plotted - all values are NaN")
         ax2.legend(loc='upper right')
@@ -186,8 +188,8 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
                     s=15, alpha=0.7, edgecolors='none')
         print(f"DEBUG: Pi scatter plotted: {len(all_nz_dists)} points")
         
-        print(f"INFO: Plotting up to {max_lines} Pi non-zero lines")
-        for i, (dists, vals) in enumerate(tqdm(line_nz_data[:max_lines], desc="Plotting Pi lines", unit="line")):
+        print(f"INFO: Plotting Pi non-zero lines")
+        for i, (dists, vals) in enumerate(tqdm(line_nz_data, desc="Plotting Pi lines", unit="line")):
             if len(dists) > 0:
                 t0 = time.time()
                 if len(vals) > max_points:
@@ -202,12 +204,12 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
                 print(f"DEBUG: Pi line {i + 1}: Plotted in {time.time() - t0:.2f}s, range = [{np.min(smoothed):.2f}, {np.max(smoothed):.2f}]")
         
         print(f"INFO: Computing Pi overall non-zero line")
-        common_x, overall_smoothed = compute_overall_smoothed_line(line_nz_data)
+        common_x, overall_line = compute_overall_line(line_nz_data, max_seq_len)
         if len(common_x) > 0:
-            valid_idx = ~np.isnan(overall_smoothed)
+            valid_idx = ~np.isnan(overall_line)
             if np.any(valid_idx):
-                ax1.plot(common_x[valid_idx], overall_smoothed[valid_idx], color='black', lw=2, alpha=0.8, label='Overall Non-Zero')
-                print(f"DEBUG: Pi overall line plotted, {np.sum(valid_idx)} valid points, range = [{np.min(overall_smoothed[valid_idx]):.2f}, {np.max(overall_smoothed[valid_idx]):.2f}]")
+                ax1.plot(common_x[valid_idx], overall_line[valid_idx], color='black', lw=2, alpha=0.8, label='Overall Non-Zero')
+                print(f"DEBUG: Pi overall line plotted, {np.sum(valid_idx)} valid points, range = [{np.min(overall_line[valid_idx]):.2f}, {np.max(overall_line[valid_idx]):.2f}]")
             else:
                 print(f"WARNING: Pi overall line not plotted - all values are NaN")
         ax1.legend(loc='upper left')
@@ -216,7 +218,7 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
     ax1.set_title(f'{metric} vs. Distance from Edge', fontsize=16, fontweight='bold')
     ax1.set_xlabel('Distance from Nearest Edge', fontsize=14)
     ax1.set_ylabel(f'{metric} Value', fontsize=14)
-    ax2.set_ylabel('Smoothed % Zeros', fontsize=14, color='red')
+    ax2.set_ylabel('Zero-Density (Proportion)', fontsize=14, color='red')
     ax1.grid(True, ls='--', alpha=0.4)
     ax2.tick_params(axis='y', colors='red')
     
@@ -241,14 +243,14 @@ def main():
         return
     
     print(f"INFO: Processing Theta data")
-    theta_nz, theta_zero, theta_dists, theta_vals, theta_close, theta_far = process_data(theta_data)
+    theta_nz, theta_zero, theta_dists, theta_vals, theta_close, theta_far, theta_max_len = process_data(theta_data)
     print(f"INFO: Processing Pi data")
-    pi_nz, pi_zero, pi_dists, pi_vals, pi_close, pi_far = process_data(pi_data)
+    pi_nz, pi_zero, pi_dists, pi_vals, pi_close, pi_far, pi_max_len = process_data(pi_data)
     
     print(f"INFO: Generating Theta plot")
-    theta_plot = create_plot(theta_nz, theta_zero, theta_dists, theta_vals, theta_close, theta_far, 'Theta', 'theta')
+    theta_plot = create_plot(theta_nz, theta_zero, theta_dists, theta_vals, theta_close, theta_far, theta_max_len, 'Theta', 'theta')
     print(f"INFO: Generating Pi plot")
-    pi_plot = create_plot(pi_nz, pi_zero, pi_dists, pi_vals, pi_close, pi_far, 'Pi', 'pi')
+    pi_plot = create_plot(pi_nz, pi_zero, pi_dists, pi_vals, pi_close, pi_far, pi_max_len, 'Pi', 'pi')
     
     print(f"INFO: Opening plots")
     for plot in [theta_plot, pi_plot]:
