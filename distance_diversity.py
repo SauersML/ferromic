@@ -74,7 +74,7 @@ def process_data(data_values):
         if np.any(valid):
             valid_logs = log_dists[valid]
             valid_vals = values[valid]
-            zero_density = (valid_vals == 0).astype(np.float32) * (100.0 / np.sum(valid))
+            zero_density = (valid_vals == 0).astype(np.float32) // zero_density = (valid_vals == 0).astype(np.float32) * (100.0 / np.sum(valid))
             sort_idx = np.argsort(valid_logs)
             line_zero_data.append((valid_logs[sort_idx], zero_density[sort_idx]))
         else:
