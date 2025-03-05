@@ -110,7 +110,7 @@ def process_data(data_values, max_dist=10000):
     return line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, all_closest, all_furthest, max_seq_len
 
 # Compute overall line, limited to 10K
-def compute_overall_line(line_data, sigma=400):
+def compute_overall_line(line_data, sigma=50):
     """Compute overall line for distances up to 10K."""
     print(f"INFO: Computing overall line for {len(line_data)} lines")
     start_time = time.time()
@@ -132,7 +132,7 @@ def compute_overall_line(line_data, sigma=400):
     return common_x, overall_line
 
 # Generate plot, limited to 10K
-def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest, furthest, metric, suffix, sigma=400):
+def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest, furthest, metric, suffix, sigma=50):
     """Create plot for points within 10K from edge."""
     print(f"\n=== Creating {metric} Plot (0-10K) ===")
     start_time = time.time()
