@@ -7,14 +7,14 @@ from numba import njit
 from tqdm import tqdm
 import time
 
-# JIT-compiled function for log distances (no print inside njit)
+# JIT-compiled function for linear distances
 @njit
-def compute_log_distances(positions, sequence_length):
-    """Calculate log10 distance from nearest edge."""
-    log_dists = np.empty(len(positions), dtype=np.float32)
+def compute_distances(positions, sequence_length):
+    """Calculate linear distance from nearest edge."""
+    dists = np.empty(len(positions), dtype=np.float32)
     for i in range(len(positions)):
-        log_dists[i] = min(positions[i], sequence_length - 1 - positions[i])
-    return np.log10(log_dists + 1)  # +1 to avoid log(0)
+        dists[i] = min(positions[i], sequence_length - 1 - positions[i])
+    return dists
 
 # Load data efficiently
 def load_data(file_path):
@@ -49,16 +49,16 @@ def process_data(data_values):
     print(f"INFO: Processing {len(data_values)} sequences")
     start_time = time.time()
     line_nz_data, line_zero_data = [], []
-    all_nz_logs, all_nz_vals = [], []
+    all_nz_dists, all_nz_vals = [], []
     all_closest, all_furthest = [], []
     
     for idx, values in enumerate(tqdm(data_values, desc="Processing sequences", unit="seq")):
         print(f"DEBUG: Sequence {idx + 1}: Length = {len(values)}")
         seq_len = len(values)
         positions = np.arange(seq_len, dtype=np.int32)
-        print(f"DEBUG: Computing log distances for sequence {idx + 1} with length {seq_len}")
-        log_dists = compute_log_distances(positions, seq_len)
-        print(f"DEBUG: Log distances range: [{np.min(log_dists):.2f}, {np.max(log_dists):.2f}]")
+        print(f"DEBUG: Computing distances for sequence {idx + 1} with length {seq_len}")
+        dists = compute_distances(positions, seq_len)
+        print(f"DEBUG: Distances range: [{np.min(dists):.2f}, {np.max(dists):.2f}]")
         
         valid = ~np.isnan(values)
         nz = valid & (values != 0)
@@ -66,59 +66,59 @@ def process_data(data_values):
         print(f"DEBUG: Sequence {idx + 1}: {np.sum(valid)} valid, {np.sum(nz)} non-zero, {np.sum(zeros)} zeros")
         
         if np.any(nz):
-            nz_logs = log_dists[nz]
+            nz_dists = dists[nz]
             nz_vals = values[nz]
-            sort_idx = np.argsort(nz_logs)
-            line_nz_data.append((nz_logs[sort_idx], nz_vals[sort_idx]))
-            all_nz_logs.append(nz_logs)
+            sort_idx = np.argsort(nz_dists)
+            line_nz_data.append((nz_dists[sort_idx], nz_vals[sort_idx]))
+            all_nz_dists.append(nz_dists)
             all_nz_vals.append(nz_vals)
-            all_closest.append(nz_logs == np.min(nz_logs))
-            all_furthest.append(nz_logs == np.max(nz_logs))
-            print(f"DEBUG: Sequence {idx + 1}: Added {len(nz_logs)} non-zero points")
+            all_closest.append(nz_dists == np.min(nz_dists))
+            all_furthest.append(nz_dists == np.max(nz_dists))
+            print(f"DEBUG: Sequence {idx + 1}: Added {len(nz_dists)} non-zero points")
         else:
             line_nz_data.append((np.array([], dtype=np.float32), np.array([], dtype=np.float32)))
             print(f"DEBUG: Sequence {idx + 1}: No non-zero data")
         
         if np.any(valid):
-            valid_logs = log_dists[valid]
+            valid_dists = dists[valid]
             valid_vals = values[valid]
             zero_density = (valid_vals == 0).astype(np.float32)
-            sort_idx = np.argsort(valid_logs)
-            line_zero_data.append((valid_logs[sort_idx], zero_density[sort_idx]))
-            print(f"DEBUG: Sequence {idx + 1}: Added {len(valid_logs)} zero-density points")
+            sort_idx = np.argsort(valid_dists)
+            line_zero_data.append((valid_dists[sort_idx], zero_density[sort_idx]))
+            print(f"DEBUG: Sequence {idx + 1}: Added {len(valid_dists)} zero-density points")
         else:
             line_zero_data.append((np.array([], dtype=np.float32), np.array([], dtype=np.float32)))
             print(f"DEBUG: Sequence {idx + 1}: No valid data for zero-density")
     
     print(f"INFO: Concatenating non-zero data")
-    all_nz_logs = np.concatenate(all_nz_logs) if all_nz_logs else np.array([], dtype=np.float32)
+    all_nz_dists = np.concatenate(all_nz_dists) if all_nz_dists else np.array([], dtype=np.float32)
     all_nz_vals = np.concatenate(all_nz_vals) if all_nz_vals else np.array([], dtype=np.float32)
     all_closest = np.concatenate(all_closest) if all_closest else np.array([], dtype=bool)
     all_furthest = np.concatenate(all_furthest) if all_furthest else np.array([], dtype=bool)
-    print(f"INFO: Processed {len(line_nz_data)} lines, {len(all_nz_logs)} non-zero points in {time.time() - start_time:.2f}s")
+    print(f"INFO: Processed {len(line_nz_data)} lines, {len(all_nz_dists)} non-zero points in {time.time() - start_time:.2f}s")
     
-    return line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, all_closest, all_furthest
+    return line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, all_closest, all_furthest
 
 # Optimized function to compute overall smoothed line
-def compute_overall_smoothed_line(line_data, sigma=50):  # Reduced sigma for overall line
+def compute_overall_smoothed_line(line_data, sigma=50):
     """Compute overall smoothed line with NaN extrapolation and proper edge handling."""
     print(f"INFO: Starting overall line computation for {len(line_data)} lines")
     start_time = time.time()
-    if not line_data or all(len(logs) == 0 for logs, _ in line_data):
+    if not line_data or all(len(dists) == 0 for dists, _ in line_data):
         print("WARNING: No valid data found")
         return np.array([]), np.array([])
     
-    print(f"DEBUG: Concatenating all log distances")
-    all_logs = np.concatenate([logs for logs, _ in line_data if len(logs) > 0])
-    common_x = np.linspace(np.min(all_logs), np.max(all_logs), 500)
-    print(f"DEBUG: Common x-axis set: {len(common_x)} points, range [{np.min(all_logs):.2f}, {np.max(all_logs):.2f}]")
+    print(f"DEBUG: Concatenating all distances")
+    all_dists = np.concatenate([dists for dists, _ in line_data if len(dists) > 0])
+    common_x = np.linspace(np.min(all_dists), np.max(all_dists), 500)
+    print(f"DEBUG: Common x-axis set: {len(common_x)} points, range [{np.min(all_dists):.2f}, {np.max(all_dists):.2f}]")
     
     print(f"DEBUG: Initializing interpolated values array: {len(line_data)} x 500")
     interpolated_vals = np.full((len(line_data), 500), np.nan, dtype=np.float32)
-    for i, (logs, vals) in enumerate(tqdm(line_data, desc="Interpolating lines", unit="line")):
-        if len(logs) > 0:
+    for i, (dists, vals) in enumerate(tqdm(line_data, desc="Interpolating lines", unit="line")):
+        if len(dists) > 0:
             print(f"DEBUG: Line {i + 1}: Interpolating {len(vals)} values onto {len(common_x)} points")
-            interpolated_vals[i] = np.interp(common_x, logs, vals, left=np.nan, right=np.nan)
+            interpolated_vals[i] = np.interp(common_x, dists, vals, left=np.nan, right=np.nan)
             print(f"DEBUG: Line {i + 1}: Interpolated, non-NaN count = {np.sum(~np.isnan(interpolated_vals[i]))}")
     
     print(f"DEBUG: Averaging {len(line_data)} interpolated lines")
@@ -133,7 +133,7 @@ def compute_overall_smoothed_line(line_data, sigma=50):  # Reduced sigma for ove
     return common_x, overall_smoothed
 
 # Generate plot
-def create_plot(line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, closest, furthest, metric, suffix, sigma=400, max_lines=100):
+def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest, furthest, metric, suffix, sigma=400, max_lines=100):
     """Create plot with downsampled lines for efficiency."""
     print(f"\n=== Creating {metric} Plot ===")
     start_time = time.time()
@@ -141,28 +141,28 @@ def create_plot(line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, closest,
     fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
     
-    if len(all_nz_logs) == 0:
+    if len(all_nz_dists) == 0:
         print("WARNING: No valid data to plot")
         plt.close(fig)
         return None
     
-    print(f"INFO: Data stats: {len(line_nz_data)} non-zero lines, {len(line_zero_data)} zero-density lines, {len(all_nz_logs)} points")
+    print(f"INFO: Data stats: {len(line_nz_data)} non-zero lines, {len(line_zero_data)} zero-density lines, {len(all_nz_dists)} points")
     max_points = 10000  # Downsample threshold
     
     if metric == 'Theta':
         print(f"INFO: Plotting up to {max_lines} Theta zero-density lines")
-        for i, (logs, density) in enumerate(tqdm(line_zero_data[:max_lines], desc="Plotting Theta lines", unit="line")):
-            if len(logs) > 0:
+        for i, (dists, density) in enumerate(tqdm(line_zero_data[:max_lines], desc="Plotting Theta lines", unit="line")):
+            if len(dists) > 0:
                 t0 = time.time()
                 if len(density) > max_points:
                     idx = np.linspace(0, len(density) - 1, max_points, dtype=int)
-                    logs_ds, density_ds = logs[idx], density[idx]
+                    dists_ds, density_ds = dists[idx], density[idx]
                     print(f"DEBUG: Theta line {i + 1}: Downsampled {len(density)} to {max_points} points")
                 else:
-                    logs_ds, density_ds = logs, density
+                    dists_ds, density_ds = dists, density
                     print(f"DEBUG: Theta line {i + 1}: Using {len(density)} points (no downsampling)")
                 smoothed = gaussian_filter1d(density_ds, sigma=sigma, mode='nearest')
-                ax2.plot(logs_ds, smoothed, color='red', ls='--', lw=0.5, alpha=0.8, label='Zero-Density' if i == 0 else None)
+                ax2.plot(dists_ds, smoothed, color='red', ls='--', lw=0.5, alpha=0.8, label='Zero-Density' if i == 0 else None)
                 print(f"DEBUG: Theta line {i + 1}: Plotted in {time.time() - t0:.2f}s, range = [{np.min(smoothed):.2f}, {np.max(smoothed):.2f}]")
         
         print(f"INFO: Computing Theta overall zero-density line")
@@ -179,26 +179,26 @@ def create_plot(line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, closest,
         print(f"INFO: Plotting Pi scatter")
         z_scores = np.clip((all_nz_vals - np.nanmean(all_nz_vals)) / np.nanstd(all_nz_vals), -5, 5)
         colors = plt.cm.coolwarm(plt.Normalize(-5, 5)(z_scores))
-        ax1.scatter(all_nz_logs[closest], all_nz_vals[closest], c='black', s=15, alpha=0.7, edgecolors='none')
-        ax1.scatter(all_nz_logs[furthest & ~closest], all_nz_vals[furthest & ~closest], c=colors[furthest & ~closest], 
+        ax1.scatter(all_nz_dists[closest], all_nz_vals[closest], c='black', s=15, alpha=0.7, edgecolors='none')
+        ax1.scatter(all_nz_dists[furthest & ~closest], all_nz_vals[furthest & ~closest], c=colors[furthest & ~closest], 
                     s=15, alpha=0.7, edgecolors='black', linewidths=0.5)
-        ax1.scatter(all_nz_logs[~closest & ~furthest], all_nz_vals[~closest & ~furthest], c=colors[~closest & ~furthest], 
+        ax1.scatter(all_nz_dists[~closest & ~furthest], all_nz_vals[~closest & ~furthest], c=colors[~closest & ~furthest], 
                     s=15, alpha=0.7, edgecolors='none')
-        print(f"DEBUG: Pi scatter plotted: {len(all_nz_logs)} points")
+        print(f"DEBUG: Pi scatter plotted: {len(all_nz_dists)} points")
         
         print(f"INFO: Plotting up to {max_lines} Pi non-zero lines")
-        for i, (logs, vals) in enumerate(tqdm(line_nz_data[:max_lines], desc="Plotting Pi lines", unit="line")):
-            if len(logs) > 0:
+        for i, (dists, vals) in enumerate(tqdm(line_nz_data[:max_lines], desc="Plotting Pi lines", unit="line")):
+            if len(dists) > 0:
                 t0 = time.time()
                 if len(vals) > max_points:
                     idx = np.linspace(0, len(vals) - 1, max_points, dtype=int)
-                    logs_ds, vals_ds = logs[idx], vals[idx]
+                    dists_ds, vals_ds = dists[idx], vals[idx]
                     print(f"DEBUG: Pi line {i + 1}: Downsampled {len(vals)} to {max_points} points")
                 else:
-                    logs_ds, vals_ds = logs, vals
+                    dists_ds, vals_ds = dists, vals
                     print(f"DEBUG: Pi line {i + 1}: Using {len(vals)} points (no downsampling)")
                 smoothed = gaussian_filter1d(vals_ds, sigma=sigma, mode='nearest')
-                ax1.plot(logs_ds, smoothed, color='black', lw=0.5, alpha=1.0, label='Non-Zero' if i == 0 else None)
+                ax1.plot(dists_ds, smoothed, color='black', lw=0.5, alpha=1.0, label='Non-Zero' if i == 0 else None)
                 print(f"DEBUG: Pi line {i + 1}: Plotted in {time.time() - t0:.2f}s, range = [{np.min(smoothed):.2f}, {np.max(smoothed):.2f}]")
         
         print(f"INFO: Computing Pi overall non-zero line")
@@ -213,8 +213,8 @@ def create_plot(line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, closest,
         ax1.legend(loc='upper left')
     
     print(f"INFO: Customizing {metric} plot")
-    ax1.set_title(f'{metric} vs. Log Distance from Edge', fontsize=16, fontweight='bold')
-    ax1.set_xlabel('Log10(Distance from Nearest Edge + 1)', fontsize=14)
+    ax1.set_title(f'{metric} vs. Distance from Edge', fontsize=16, fontweight='bold')
+    ax1.set_xlabel('Distance from Nearest Edge', fontsize=14)
     ax1.set_ylabel(f'{metric} Value', fontsize=14)
     ax2.set_ylabel('Smoothed % Zeros', fontsize=14, color='red')
     ax1.grid(True, ls='--', alpha=0.4)
@@ -241,14 +241,14 @@ def main():
         return
     
     print(f"INFO: Processing Theta data")
-    theta_nz, theta_zero, theta_logs, theta_vals, theta_close, theta_far = process_data(theta_data)
+    theta_nz, theta_zero, theta_dists, theta_vals, theta_close, theta_far = process_data(theta_data)
     print(f"INFO: Processing Pi data")
-    pi_nz, pi_zero, pi_logs, pi_vals, pi_close, pi_far = process_data(pi_data)
+    pi_nz, pi_zero, pi_dists, pi_vals, pi_close, pi_far = process_data(pi_data)
     
     print(f"INFO: Generating Theta plot")
-    theta_plot = create_plot(theta_nz, theta_zero, theta_logs, theta_vals, theta_close, theta_far, 'Theta', 'theta')
+    theta_plot = create_plot(theta_nz, theta_zero, theta_dists, theta_vals, theta_close, theta_far, 'Theta', 'theta')
     print(f"INFO: Generating Pi plot")
-    pi_plot = create_plot(pi_nz, pi_zero, pi_logs, pi_vals, pi_close, pi_far, 'Pi', 'pi')
+    pi_plot = create_plot(pi_nz, pi_zero, pi_dists, pi_vals, pi_close, pi_far, 'Pi', 'pi')
     
     print(f"INFO: Opening plots")
     for plot in [theta_plot, pi_plot]:
