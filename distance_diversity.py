@@ -48,17 +48,27 @@ def load_data(file_path, max_sequences=5000):
     return (np.array(theta_labels, dtype=object), np.array(theta_data, dtype=object)), \
            (np.array(pi_labels, dtype=object), np.array(pi_data, dtype=object))
 
-# Process data, keeping only points within 10K from edge
+# Process data, keeping only points within 10K from edge and filtering sequences by mean
 def process_data(data_values, max_dist=10000):
     """Process sequences, keeping only points within 10K from edge."""
+    num_sd = 1  # Define number of standard deviations for filtering
     print(f"INFO: Processing {len(data_values)} sequences, max distance = {max_dist}")
     start_time = time.time()
+    
+    # Compute mean of each sequence and filter based on overall mean and SD
+    sequence_means = [np.nanmean(values) for values in data_values]
+    overall_mean = np.nanmean(sequence_means)
+    overall_std = np.nanstd(sequence_means)
+    keep_mask = [abs(mean - overall_mean) <= num_sd * overall_std for mean in sequence_means]
+    filtered_data_values = [data_values[i] for i in range(len(data_values)) if keep_mask[i]]
+    print(f"INFO: Filtered to {len(filtered_data_values)} sequences (removed {len(data_values) - len(filtered_data_values)} outliers > {num_sd} SD)")
+    
     line_nz_data, line_zero_data = [], []
     all_nz_dists, all_nz_vals = [], []
     all_closest, all_furthest = [], []
     max_seq_len = 0
     
-    for idx, values in enumerate(tqdm(data_values, desc="Processing sequences", unit="seq")):
+    for idx, values in enumerate(tqdm(filtered_data_values, desc="Processing sequences", unit="seq")):
         print(f"DEBUG: Sequence {idx + 1}: Length = {len(values)}")
         seq_len = len(values)
         max_seq_len = max(max_seq_len, seq_len)
