@@ -4,7 +4,7 @@ from pathlib import Path
 import os
 from scipy import stats
 from numba import njit
-from matplotlib.colors import hsv_to_rgb
+from matplotlib.colors import hsv_to_rgb, TwoSlopeNorm
 
 @njit
 def calculate_distances(positions, sequence_length):
@@ -96,7 +96,7 @@ def process_measurements_combined(headers, values):
     print(f"Processed arrays (distances: {distances_array.shape}, values: {values_array.shape})")
     return distances_array, values_array
 
-def create_measurement_plot_vectorized(distances, values, metric_name, base_hue, fit_line_color, file_suffix):
+def create_measurement_plot_vectorized(distances, values, metric_name, base_hue, fit_line_color, file_suffix, downsample_factor=0.1):
     print(f"Creating {metric_name} plot (vectorized)")
     plt.style.use('seaborn-v0_8-darkgrid')
     fig, ax = plt.subplots(figsize=(12, 7), facecolor='#f5f5f5')
@@ -119,9 +119,10 @@ def create_measurement_plot_vectorized(distances, values, metric_name, base_hue,
         hsv = np.vstack((hues, np.full_like(hues, 0.8), np.full_like(hues, 0.8))).T
         colors = hsv_to_rgb(hsv)
         
-        # Downsample for efficiency
+        # Downsample by factor (e.g., 0.1 keeps 10% of points)
         if len(distances) > 1000000:
-            idx = np.arange(0, len(distances), 10)
+            num_points = int(len(distances) * downsample_factor)
+            idx = np.random.choice(len(distances), size=num_points, replace=False)
             distances_plot = distances[idx]
             values_plot = values[idx]
             colors_plot = colors[idx]
@@ -145,12 +146,14 @@ def create_measurement_plot_vectorized(distances, values, metric_name, base_hue,
             except np.linalg.LinAlgError:
                 print(f"Warning: Could not fit line for {metric_name} due to numerical instability")
         
-        # Colorbar with matching colormap and z-score SD units
+        # Colorbar with fixed SD units (-5 to +5), centered at 0
         cmap = 'Purples' if metric_name == 'Theta' else 'Greens'
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=z_scores.min(), vmax=z_scores.max()))
+        norm = TwoSlopeNorm(vmin=-5, vcenter=0, vmax=5)  # Fixed range -5 to +5 SD
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])  # Dummy array for colorbar
         colorbar = fig.colorbar(sm, ax=ax, pad=0.01, aspect=30)
         colorbar.set_label(f'{metric_name} Z-score (SD)', size=12, weight='bold', color='#333333')
+        colorbar.set_ticks([-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5])  # Explicit SD ticks
         colorbar.outline.set_linewidth(0.5)
         colorbar.outline.set_edgecolor('#666666')
         colorbar.ax.tick_params(labelsize=10, color='#666666', width=0.5)
@@ -192,9 +195,9 @@ if not theta_headers.size and not pi_headers.size:
 theta_distances, theta_vals = process_measurements_combined(theta_headers, theta_values)
 pi_distances, pi_vals = process_measurements_combined(pi_headers, pi_values)
 
-# Create two plots with all points, hue varying by z-norm
-theta_plot_path = create_measurement_plot_vectorized(theta_distances, theta_vals, 'Theta', 0.75, 'purple', 'theta')  # Base hue ~purple
-pi_plot_path = create_measurement_plot_vectorized(pi_distances, pi_vals, 'Pi', 0.33, 'green', 'pi')  # Base hue ~green
+# Create two plots with all points, hue varying by z-norm, downsample factor 0.1
+theta_plot_path = create_measurement_plot_vectorized(theta_distances, theta_vals, 'Theta', 0.75, 'purple', 'theta', downsample_factor=0.1)
+pi_plot_path = create_measurement_plot_vectorized(pi_distances, pi_vals, 'Pi', 0.33, 'green', 'pi', downsample_factor=0.1)
 
 # Open plots
 print("Opening plots")
