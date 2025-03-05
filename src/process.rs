@@ -1046,7 +1046,7 @@ pub fn process_config_entries(
                 // e.g. >unfiltered_pi_chr_14_start_244000_end_248905_group_1
                 // Then below it, we produce region_len comma separated values. We skip if the data is all None.
 
-                let full_key = key_base.to_string();
+                let full_key = format!("{}group_{}", key_base, grp);
                 if let Some(vec_ref) = records_map.get(&full_key) {
                     let mut any_data = false;
                     for val_opt in vec_ref.iter() {
