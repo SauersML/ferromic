@@ -2,234 +2,168 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 import os
-from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 from numba import njit
-from matplotlib.colors import TwoSlopeNorm
 
-# JIT-compiled function to calculate log distances from sequence edges
+# JIT-compiled function for log distances
 @njit
 def compute_log_distances(positions, sequence_length):
-    """Calculate the minimum log10 distance from either sequence edge for each position."""
-    log_distances = np.empty(len(positions), dtype=np.float32)
+    """Calculate log10 distance from nearest edge for each position."""
+    log_dists = np.empty(len(positions), dtype=np.float32)
     for i in range(len(positions)):
-        log_distances[i] = min(positions[i], sequence_length - 1 - positions[i])
-    return np.log10(log_distances + 1)  # Add 1 to avoid log(0)
+        log_dists[i] = min(positions[i], sequence_length - 1 - positions[i])
+    return np.log10(log_dists + 1)  # +1 to avoid log(0)
 
-# Load filtered theta and pi data from the input file
-def load_filtered_measurements(file_path):
-    """Read filtered theta and pi data from a binary file, handling large datasets efficiently."""
-    print("Loading data from file")
-    theta_labels, theta_data, pi_labels, pi_data = [], [], [], []
-    buffer = b''
-    last_header = None
+# Load data efficiently
+def load_data(file_path):
+    """Load filtered theta and pi data from file."""
+    print("Loading data...")
+    theta_labels, theta_data = [], []
+    pi_labels, pi_data = [], []
     
-    with open(file_path, 'rb') as file:
-        buffer_size = 16 * 1024 * 1024  # 16MB buffer
-        while True:
-            chunk = file.read(buffer_size)
-            if not chunk and not buffer:
-                break
-            buffer += chunk
-            lines = buffer.split(b'\n')
-            
-            if chunk:  # Mid-file, last might be incomplete
-                buffer = lines[-1]
-                lines = lines[:-1]
-            else:  # EOF, process everything
-                buffer = b''
-            
-            i = 0
-            while i < len(lines):
-                if b'filtered' in lines[i]:
-                    last_header = lines[i]
-                    if i + 1 < len(lines):
-                        values_line = lines[i + 1].decode('utf-8', errors='ignore')
-                        value_array = np.fromstring(values_line.replace('NA', 'nan'), sep=',', dtype=np.float32)
-                        header_text = last_header[1:].decode('utf-8', errors='ignore')
-                        if 'theta' in header_text:
-                            theta_labels.append(header_text)
-                            theta_data.append(value_array)
-                        elif 'pi' in header_text:
-                            pi_labels.append(header_text)
-                            pi_data.append(value_array)
-                        i += 2
-                    else:
-                        i += 1
-                else:
-                    i += 1
-            
-            if not chunk and last_header and buffer:
-                values_line = buffer.decode('utf-8', errors='ignore')
-                value_array = np.fromstring(values_line.replace('NA', 'nan'), sep=',', dtype=np.float32)
-                header_text = last_header[1:].decode('utf-8', errors='ignore')
-                if 'theta' in header_text:
-                    theta_labels.append(header_text)
-                    theta_data.append(value_array)
-                elif 'pi' in header_text:
-                    pi_labels.append(header_text)
-                    pi_data.append(value_array)
+    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        lines = f.readlines()
+        for i in range(len(lines) - 1):  # Avoid empty last line
+            if 'filtered_theta' in lines[i]:
+                values = lines[i + 1].strip().replace('NA', 'nan')
+                theta_labels.append(lines[i][1:].strip())
+                theta_data.append(np.fromstring(values, sep=',', dtype=np.float32))
+            elif 'filtered_pi' in lines[i]:
+                values = lines[i + 1].strip().replace('NA', 'nan')
+                pi_labels.append(lines[i][1:].strip())
+                pi_data.append(np.fromstring(values, sep=',', dtype=np.float32))
     
-    print(f"Loaded {len(theta_labels)} theta and {len(pi_labels)} pi filtered data lines")
+    print(f"Loaded {len(theta_labels)} theta and {len(pi_labels)} pi data lines")
     return (np.array(theta_labels, dtype=object), np.array(theta_data, dtype=object)), \
            (np.array(pi_labels, dtype=object), np.array(pi_data, dtype=object))
 
-# Process measurements per sequence
-def process_measurements(measurement_values):
-    """Process measurements to get per-sequence data for lines and overall data for scatter points."""
-    line_nz_data = []
-    line_zero_data = []
-    all_nz_log_distances_list = []
-    all_nz_values_list = []
-    is_closest_list = []
-    is_furthest_list = []
+# Process data efficiently
+def process_data(data_values):
+    """Process sequences for non-zero values and zero-density."""
+    line_nz_data = []  # Non-zero data per line
+    line_zero_data = []  # Zero-density data per line
+    all_nz_logs = []  # All non-zero log distances
+    all_nz_vals = []  # All non-zero values
+    all_closest = []  # Flags for closest to edge
+    all_furthest = []  # Flags for furthest from edge
     
-    for value_array in measurement_values:
-        seq_len = len(value_array)
+    for values in data_values:
+        seq_len = len(values)
         positions = np.arange(seq_len, dtype=np.int32)
-        valid_mask = ~np.isnan(value_array)
-        nz_mask = valid_mask & (value_array != 0)
-        zero_mask = valid_mask & (value_array == 0)
-        all_log_distances = compute_log_distances(positions, seq_len)
+        log_dists = compute_log_distances(positions, seq_len)
         
-        # For zero-density (smoothed per line)
-        zero_indicators = np.zeros(seq_len, dtype=np.float32)
-        # For zero-density (smoothed per line)
-        valid_positions = valid_mask  # Positions that are not NaN
-        num_valid = np.sum(valid_positions)  # Total valid positions (zeros + non-zeros)
-        if num_valid > 0:
-            valid_log_distances = all_log_distances[valid_positions]
-            valid_values = value_array[valid_positions]
-            zero_indicators = np.zeros(num_valid, dtype=np.float32)
-            zero_indicators[valid_values == 0] = 1 / num_valid  # Each zero contributes 1/num_valid
-            sort_indices_all = np.argsort(valid_log_distances)
-            sorted_all_log_distances = valid_log_distances[sort_indices_all]
-            sorted_zero_indicators = zero_indicators[sort_indices_all]
-            line_zero_data.append((sorted_all_log_distances, sorted_zero_indicators))
-        else:
-            line_zero_data.append((np.array([]), np.array([])))
+        # Masks
+        valid = ~np.isnan(values)  # Valid (non-NaN) positions
+        nz = valid & (values != 0)  # Non-zero and valid
+        zeros = valid & (values == 0)  # Zero and valid
         
-        # For non-zero values (smoothed per line)
-        if np.sum(nz_mask) > 0:
-            nz_positions = positions[nz_mask]
-            nz_log_distances = all_log_distances[nz_mask]
-            nz_values = value_array[nz_mask]
-            sort_indices_nz = np.argsort(nz_log_distances)
-            sorted_nz_log_distances = nz_log_distances[sort_indices_nz]
-            sorted_nz_values = nz_values[sort_indices_nz]
-            line_nz_data.append((sorted_nz_log_distances, sorted_nz_values))
-            
-            # For scatter points: identify closest and furthest
-            min_log_dist = np.min(nz_log_distances)
-            max_log_dist = np.max(nz_log_distances)
-            is_closest_for_sequence = (nz_log_distances == min_log_dist)
-            is_furthest_for_sequence = (nz_log_distances == max_log_dist)
-            all_nz_log_distances_list.append(nz_log_distances)
-            all_nz_values_list.append(nz_values)
-            is_closest_list.append(is_closest_for_sequence)
-            is_furthest_list.append(is_furthest_for_sequence)
+        # Non-zero data
+        if np.any(nz):
+            nz_logs = log_dists[nz]
+            nz_vals = values[nz]
+            sort_idx = np.argsort(nz_logs)
+            line_nz_data.append((nz_logs[sort_idx], nz_vals[sort_idx]))
+            all_nz_logs.append(nz_logs)
+            all_nz_vals.append(nz_vals)
+            all_closest.append(nz_logs == np.min(nz_logs))
+            all_furthest.append(nz_logs == np.max(nz_logs))
         else:
-            line_nz_data.append((np.array([]), np.array([])))
+            line_nz_data.append((np.array([], dtype=np.float32), np.array([], dtype=np.float32)))
+        
+        # Zero-density data (percentage of zeros among valid positions)
+        if np.any(valid):
+            valid_logs = log_dists[valid]
+            valid_vals = values[valid]
+            zero_density = (valid_vals == 0).astype(np.float32) * (100.0 / np.sum(valid))
+            sort_idx = np.argsort(valid_logs)
+            line_zero_data.append((valid_logs[sort_idx], zero_density[sort_idx]))
+        else:
+            line_zero_data.append((np.array([], dtype=np.float32), np.array([], dtype=np.float32)))
     
-    # Concatenate data for scatter points
-    all_nz_log_distances = np.concatenate(all_nz_log_distances_list) if all_nz_log_distances_list else np.array([])
-    all_nz_values = np.concatenate(all_nz_values_list) if all_nz_values_list else np.array([])
-    is_closest = np.concatenate(is_closest_list) if is_closest_list else np.array([])
-    is_furthest = np.concatenate(is_furthest_list) if is_furthest_list else np.array([])
+    # Concatenate all non-zero data
+    all_nz_logs = np.concatenate(all_nz_logs) if all_nz_logs else np.array([], dtype=np.float32)
+    all_nz_vals = np.concatenate(all_nz_vals) if all_nz_vals else np.array([], dtype=np.float32)
+    all_closest = np.concatenate(all_closest) if all_closest else np.array([], dtype=bool)
+    all_furthest = np.concatenate(all_furthest) if all_furthest else np.array([], dtype=bool)
     
-    return line_nz_data, line_zero_data, all_nz_log_distances, all_nz_values, is_closest, is_furthest
+    return line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, all_closest, all_furthest
 
-# Create and save the scatter plot with per-line smoothed curves
-def generate_scatter_plot_with_smoothed_curves(line_nz_data, line_zero_data, all_nz_log_distances, all_nz_values, is_closest, is_furthest, metric_name, file_suffix, sigma=200):
-    """Generate a scatter plot with per-line Gaussian smoothed signal and zero-density curves."""
-    print(f"Creating {metric_name} plot with per-line smoothed signal and zero-density")
+# Generate plot efficiently
+def create_plot(line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, closest, furthest, metric, suffix, sigma=200, max_lines=100):
+    """Create scatter plot with per-line smoothed signals and zero-density."""
+    print(f"Creating {metric} plot with per-line smoothed signal and zero-density...")
     plt.style.use('seaborn-v0_8-darkgrid')
-    fig, ax1 = plt.subplots(figsize=(12, 7), facecolor='#f5f5f5')
-    ax1.set_facecolor('#ffffff')
-    ax2 = ax1.twinx()  # Secondary y-axis for zero-density
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+    ax2 = ax1.twinx()
     
-    if len(all_nz_log_distances) > 0:
-        # Compute z-scores across all non-zero values
-        z_scores = stats.zscore(all_nz_values, nan_policy='omit')
-        # Define norm and colormap for z-score coloring
-        norm = TwoSlopeNorm(vmin=-5, vcenter=0, vmax=5)
-        z_score_colors = plt.cm.coolwarm(norm(z_scores))
+    if len(all_nz_logs) > 0:
+        # Z-scores for coloring
+        z_scores = np.clip((all_nz_vals - np.nanmean(all_nz_vals)) / np.nanstd(all_nz_vals), -5, 5)
+        colors = plt.cm.coolwarm(plt.Normalize(-5, 5)(z_scores))
         
-        # Plot scatter points with special styling
-        # 1. Closest to edge: black (opaque)
-        if np.any(is_closest):
-            ax1.scatter(all_nz_log_distances[is_closest], all_nz_values[is_closest], c='black', s=15, alpha=0.7, edgecolors='none')
-        # 2. Furthest from edge (but not closest): z-score color with black outline
-        mask_furthest_not_closest = is_furthest & ~is_closest
-        if np.any(mask_furthest_not_closest):
-            ax1.scatter(all_nz_log_distances[mask_furthest_not_closest], all_nz_values[mask_furthest_not_closest],
-                        c=z_score_colors[mask_furthest_not_closest], s=15, alpha=0.7, edgecolors='black', linewidths=0.5)
-        # 3. All other points: z-score color only
-        mask_neither = ~is_closest & ~is_furthest
-        if np.any(mask_neither):
-            ax1.scatter(all_nz_log_distances[mask_neither], all_nz_values[mask_neither],
-                        c=z_score_colors[mask_neither], s=15, alpha=0.7, edgecolors='none')
+        # Scatter plot with batching
+        ax1.scatter(all_nz_logs[closest], all_nz_vals[closest], c='black', s=15, alpha=0.7, edgecolors='none')
+        ax1.scatter(all_nz_logs[furthest & ~closest], all_nz_vals[furthest & ~closest], c=colors[furthest & ~closest], 
+                    s=15, alpha=0.7, edgecolors='black', linewidths=0.5)
+        ax1.scatter(all_nz_logs[~closest & ~furthest], all_nz_vals[~closest & ~furthest], c=colors[~closest & ~furthest], 
+                    s=15, alpha=0.7, edgecolors='none')
         
-        # Plot per-line smoothed signal (non-zero values) and zero-density
-        for (sorted_nz_log_distances, sorted_nz_values) in line_nz_data:
-            if len(sorted_nz_log_distances) > 0:
-                smoothed_nz_values = gaussian_filter1d(sorted_nz_values, sigma=sigma, mode='nearest')
-                ax1.plot(sorted_nz_log_distances, smoothed_nz_values, color='black', linestyle='-', linewidth=0.5, alpha=1.0)
+        # Smoothed non-zero lines (limited to max_lines)
+        for i, (logs, vals) in enumerate(line_nz_data[:max_lines]):
+            if len(logs) > 0:
+                smoothed = gaussian_filter1d(vals, sigma=sigma, mode='nearest')
+                ax1.plot(logs, smoothed, color='black', lw=0.5, alpha=1.0)
         
-        for (sorted_all_log_distances, sorted_zero_indicators) in line_zero_data:
-            if len(sorted_all_log_distances) > 0:
-                smoothed_zero_density = gaussian_filter1d(sorted_zero_indicators, sigma=sigma, mode='nearest')
-                ax2.plot(sorted_all_log_distances, smoothed_zero_density, color='red', linestyle='--', linewidth=0.5, alpha=0.8)
+        # Smoothed zero-density lines (limited to max_lines)
+        for i, (logs, density) in enumerate(line_zero_data[:max_lines]):
+            if len(logs) > 0:
+                smoothed = gaussian_filter1d(density, sigma=sigma, mode='nearest')
+                ax2.plot(logs, smoothed, color='red', ls='--', lw=0.5, alpha=0.8)
     else:
-        print(f"No valid non-zero data to plot for {metric_name}")
+        print(f"No valid data for {metric} plot")
         plt.close(fig)
         return None
-
-    # Customize axes
-    ax1.set_title(f'Log Distance from Edge vs. {metric_name} (Filtered Data)', 
-                  fontsize=16, fontweight='bold', color='#333333', pad=20)
-    ax1.set_xlabel('Log10(Distance from Nearest Edge + 1)', size=14, color='#333333')
-    ax1.set_ylabel(f'{metric_name} Value', size=14, color='#333333')
-    ax2.set_ylabel('Proportion of Zeros (Smoothed)', size=14, color='#ff3333')
-    ax1.grid(True, linestyle='--', alpha=0.4, color='#999999')
-    ax1.tick_params(axis='both', which='major', labelsize=12, color='#666666')
-    ax2.tick_params(axis='y', labelsize=12, colors='#ff3333')
     
-    # Save plot without colorbar
-    output_plot_path = Path.home() / f'distance_plot_{file_suffix}_per_line.png'
+    # Customize plot
+    ax1.set_title(f'{metric} vs. Log Distance from Edge', fontsize=16, fontweight='bold')
+    ax1.set_xlabel('Log10(Distance from Nearest Edge + 1)', fontsize=14)
+    ax1.set_ylabel(f'{metric} Value', fontsize=14)
+    ax2.set_ylabel('Smoothed % Zeros', fontsize=14, color='red')
+    ax1.grid(True, ls='--', alpha=0.4)
+    ax2.tick_params(axis='y', colors='red')
+    
+    # Save plot
+    plot_path = Path.home() / f'distance_plot_{suffix}.png'
     plt.tight_layout()
-    plt.savefig(output_plot_path, dpi=150, bbox_inches='tight', facecolor='#f5f5f5')
+    plt.savefig(plot_path, dpi=150)
     plt.close(fig)
+    print(f"{metric} plot saved to: {plot_path}")
+    return plot_path
+
+# Main function
+def main():
+    file_path = 'per_site_output.falsta'
+    (theta_labels, theta_data), (pi_labels, pi_data) = load_data(file_path)
     
-    print(f"{metric_name} plot saved to: {output_plot_path}")
-    return output_plot_path
+    if not theta_data.size and not pi_data.size:
+        print("No data to process. Exiting.")
+        return
+    
+    # Process data
+    theta_nz, theta_zero, theta_logs, theta_vals, theta_close, theta_far = process_data(theta_data)
+    pi_nz, pi_zero, pi_logs, pi_vals, pi_close, pi_far = process_data(pi_data)
+    
+    # Generate plots
+    theta_plot = create_plot(theta_nz, theta_zero, theta_logs, theta_vals, theta_close, theta_far, 'Theta', 'theta')
+    pi_plot = create_plot(pi_nz, pi_zero, pi_logs, pi_vals, pi_close, pi_far, 'Pi', 'pi')
+    
+    # Open plots
+    for plot in [theta_plot, pi_plot]:
+        if plot:
+            if os.name == 'nt':
+                os.startfile(plot)
+            elif os.name == 'posix':
+                os.system(f'open "{plot}"' if 'darwin' in os.sys.platform else f'xdg-open "{plot}"')
 
-# Main execution: Load data, process, and generate plots
-input_file_path = 'per_site_output.falsta'
-(theta_labels, theta_data), (pi_labels, pi_data) = load_filtered_measurements(input_file_path)
-
-# Check if there's any data to plot
-if not theta_labels.size and not pi_labels.size:
-    print("No filtered data to plot. Exiting.")
-    exit()
-
-# Process theta and pi data
-theta_line_nz, theta_line_zero, theta_all_nz_log, theta_all_nz_val, theta_is_closest, theta_is_furthest = process_measurements(theta_data)
-pi_line_nz, pi_line_zero, pi_all_nz_log, pi_all_nz_val, pi_is_closest, pi_is_furthest = process_measurements(pi_data)
-
-# Generate plots
-theta_plot_path = generate_scatter_plot_with_smoothed_curves(
-    theta_line_nz, theta_line_zero, theta_all_nz_log, theta_all_nz_val, theta_is_closest, theta_is_furthest, 'Theta', 'theta', sigma=200)
-pi_plot_path = generate_scatter_plot_with_smoothed_curves(
-    pi_line_nz, pi_line_zero, pi_all_nz_log, pi_all_nz_val, pi_is_closest, pi_is_furthest, 'Pi', 'pi', sigma=200)
-
-# Open the generated plots based on OS
-print("Opening plots")
-for plot_path in [theta_plot_path, pi_plot_path]:
-    if plot_path:
-        if os.name == 'nt':  # Windows
-            os.startfile(plot_path)
-        elif os.name == 'posix':  # MacOS or Linux
-            os.system(f'open "{plot_path}"' if 'darwin' in os.sys.platform else f'xdg-open "{plot_path}"')
-
-print("Plot generation complete")
+if __name__ == "__main__":
+    main()
