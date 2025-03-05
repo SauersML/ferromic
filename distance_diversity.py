@@ -74,7 +74,7 @@ def process_data(data_values):
         if np.any(valid):
             valid_logs = log_dists[valid]
             valid_vals = values[valid]
-            zero_density = (valid_vals == 0).astype(np.float32) # zero_density = (valid_vals == 0).astype(np.float32) * (100.0 / np.sum(valid))
+            zero_density = (valid_vals == 0).astype(np.float32)
             sort_idx = np.argsort(valid_logs)
             line_zero_data.append((valid_logs[sort_idx], zero_density[sort_idx]))
         else:
@@ -88,37 +88,75 @@ def process_data(data_values):
     
     return line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, all_closest, all_furthest
 
-# Generate plot efficiently
-def create_plot(line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, closest, furthest, metric, suffix, sigma=200, max_lines=100):
-    """Create scatter plot with per-line smoothed signals and zero-density."""
-    print(f"Creating {metric} plot with per-line smoothed signal and zero-density...")
+# New function to compute overall smoothed line
+def compute_overall_smoothed_line(line_data, sigma):
+    """Compute an overall smoothed line by averaging interpolated individual lines."""
+    if not line_data or all(len(logs) == 0 for logs, _ in line_data):
+        return np.array([]), np.array([])
+    
+    # Define common x-axis spanning all log distances
+    all_logs = np.concatenate([logs for logs, _ in line_data if len(logs) > 0])
+    common_x = np.linspace(min(all_logs), max(all_logs), 500)
+    
+    # Interpolate each line onto common x-axis and collect values
+    interpolated_vals = []
+    for logs, vals in line_data:
+        if len(logs) > 0:
+            smoothed = gaussian_filter1d(vals, sigma=sigma, mode='nearest')
+            interp_vals = np.interp(common_x, logs, smoothed, left=smoothed[0], right=smoothed[-1])
+            interpolated_vals.append(interp_vals)
+    
+    # Average across all lines (equal weight per line)
+    overall_vals = np.mean(interpolated_vals, axis=0)
+    # Apply final smoothing
+    overall_smoothed = gaussian_filter1d(overall_vals, sigma=sigma, mode='nearest')
+    
+    return common_x, overall_smoothed
+
+# Generate plot with requested changes
+def create_plot(line_nz_data, line_zero_data, all_nz_logs, all_nz_vals, closest, furthest, metric, suffix, sigma=400, max_lines=100):
+    """Create plot with per-line smoothed signals, zero-density where applicable, and overall line."""
+    print(f"Creating {metric} plot with per-line smoothed signal and overall line...")
     plt.style.use('seaborn-v0_8-darkgrid')
     fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
     
     if len(all_nz_logs) > 0:
-        # Z-scores for coloring
-        z_scores = np.clip((all_nz_vals - np.nanmean(all_nz_vals)) / np.nanstd(all_nz_vals), -5, 5)
-        colors = plt.cm.coolwarm(plt.Normalize(-5, 5)(z_scores))
-        
-        # Scatter plot with batching
-        ax1.scatter(all_nz_logs[closest], all_nz_vals[closest], c='black', s=15, alpha=0.7, edgecolors='none')
-        ax1.scatter(all_nz_logs[furthest & ~closest], all_nz_vals[furthest & ~closest], c=colors[furthest & ~closest], 
-                    s=15, alpha=0.7, edgecolors='black', linewidths=0.5)
-        ax1.scatter(all_nz_logs[~closest & ~furthest], all_nz_vals[~closest & ~furthest], c=colors[~closest & ~furthest], 
-                    s=15, alpha=0.7, edgecolors='none')
-        
-        # Smoothed non-zero lines (limited to max_lines)
-        for i, (logs, vals) in enumerate(line_nz_data[:max_lines]):
-            if len(logs) > 0:
-                smoothed = gaussian_filter1d(vals, sigma=sigma, mode='nearest')
-                ax1.plot(logs, smoothed, color='black', lw=0.5, alpha=1.0)
-        
-        # Smoothed zero-density lines (limited to max_lines)
-        for i, (logs, density) in enumerate(line_zero_data[:max_lines]):
-            if len(logs) > 0:
-                smoothed = gaussian_filter1d(density, sigma=sigma, mode='nearest')
-                ax2.plot(logs, smoothed, color='red', ls='--', lw=0.5, alpha=0.8)
+        if metric == 'Theta':
+            # Theta: Only zero-density lines
+            for i, (logs, density) in enumerate(line_zero_data[:max_lines]):
+                if len(logs) > 0:
+                    smoothed = gaussian_filter1d(density, sigma=sigma, mode='nearest')
+                    ax2.plot(logs, smoothed, color='red', ls='--', lw=0.5, alpha=0.8, label='Zero-Density' if i == 0 else None)
+            
+            # Overall zero-density line
+            common_x, overall_smoothed = compute_overall_smoothed_line(line_zero_data, sigma)
+            if len(common_x) > 0:
+                ax2.plot(common_x, overall_smoothed, color='black', lw=2, alpha=0.8, label='Overall Zero-Density Average')
+            
+            ax2.legend(loc='upper right')
+        else:  # Pi
+            # Pi: Scatter plot
+            z_scores = np.clip((all_nz_vals - np.nanmean(all_nz_vals)) / np.nanstd(all_nz_vals), -5, 5)
+            colors = plt.cm.coolwarm(plt.Normalize(-5, 5)(z_scores))
+            ax1.scatter(all_nz_logs[closest], all_nz_vals[closest], c='black', s=15, alpha=0.7, edgecolors='none')
+            ax1.scatter(all_nz_logs[furthest & ~closest], all_nz_vals[furthest & ~closest], c=colors[furthest & ~closest], 
+                        s=15, alpha=0.7, edgecolors='black', linewidths=0.5)
+            ax1.scatter(all_nz_logs[~closest & ~furthest], all_nz_vals[~closest & ~furthest], c=colors[~closest & ~furthest], 
+                        s=15, alpha=0.7, edgecolors='none')
+            
+            # Smoothed non-zero lines
+            for i, (logs, vals) in enumerate(line_nz_data[:max_lines]):
+                if len(logs) > 0:
+                    smoothed = gaussian_filter1d(vals, sigma=sigma, mode='nearest')
+                    ax1.plot(logs, smoothed, color='black', lw=0.5, alpha=1.0, label='Non-Zero' if i == 0 else None)
+            
+            # Overall non-zero line
+            common_x, overall_smoothed = compute_overall_smoothed_line(line_nz_data, sigma)
+            if len(common_x) > 0:
+                ax1.plot(common_x, overall_smoothed, color='black', lw=2, alpha=0.8, label='Overall Non-Zero Average')
+            
+            ax1.legend(loc='upper left')
     else:
         print(f"No valid data for {metric} plot")
         plt.close(fig)
