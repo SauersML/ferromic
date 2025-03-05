@@ -197,9 +197,20 @@ impl ZeroBasedHalfOpen {
     }
 
     /// Returns 1-based position of `pos` if inside [start..end), else None.
+    // HALF-OPEN. Make clear later.
     pub fn relative_position_1based(&self, pos: i64) -> Option<usize> {
         let p = pos as usize;
         if p >= self.start && p < self.end {
+            Some(p - self.start + 1)
+        } else {
+            None
+        }
+    }
+
+    /// Returns 1-based position of `pos` if inside [start..end], inclusive, else None.
+    pub fn relative_position_1based_inclusive(&self, pos: i64) -> Option<usize> {
+        let p = pos as usize;
+        if p >= self.start && p <= self.end { // Inclusive end
             Some(p - self.start + 1)
         } else {
             None
