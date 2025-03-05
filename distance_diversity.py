@@ -16,9 +16,9 @@ def compute_distances(positions, sequence_length):
         dists[i] = min(positions[i], sequence_length - 1 - positions[i])
     return dists
 
-# Load data efficiently, limited to some sequences
+# Load data efficiently, limited to 500 sequences
 def load_data(file_path, max_sequences=500):
-    """Load up to some theta and pi data sequences from file."""
+    """Load up to 500 theta and pi data sequences from file."""
     print(f"INFO: Loading data from {file_path} (max {max_sequences} sequences)")
     start_time = time.time()
     theta_labels, theta_data = [], []
@@ -56,12 +56,12 @@ def process_data(data_values):
     line_nz_data, line_zero_data = [], []
     all_nz_dists, all_nz_vals = [], []
     all_closest, all_furthest = [], []
-    max_seq_len = 0  # Track maximum sequence length
+    max_seq_len = 0
     
     for idx, values in enumerate(tqdm(data_values, desc="Processing sequences", unit="seq")):
         print(f"DEBUG: Sequence {idx + 1}: Length = {len(values)}")
         seq_len = len(values)
-        max_seq_len = max(max_seq_len, seq_len)  # Update max sequence length
+        max_seq_len = max(max_seq_len, seq_len)
         positions = np.arange(seq_len, dtype=np.int32)
         print(f"DEBUG: Computing distances for sequence {idx + 1} with length {seq_len}")
         dists = compute_distances(positions, seq_len)
@@ -106,33 +106,40 @@ def process_data(data_values):
     
     return line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, all_closest, all_furthest, max_seq_len
 
-# Compute overall line as average without smoothing
-def compute_overall_line(line_data, max_seq_len):
-    """Compute overall line as the average of contributing lines, no smoothing."""
+# Compute overall line as average of smoothed individual lines
+def compute_overall_line(line_data, max_seq_len, sigma=400):
+    """Compute overall line as the average of smoothed individual lines, no additional smoothing."""
     print(f"INFO: Starting overall line computation for {len(line_data)} lines")
     start_time = time.time()
     if not line_data or all(len(dists) == 0 for dists, _ in line_data):
         print("WARNING: No valid data found")
         return np.array([]), np.array([])
     
-    max_dist = max_seq_len // 2  # Maximum possible distance from edge
-    common_x = np.linspace(0, max_dist, 500)  # Fixed range from 0 to max possible distance
+    max_dist = max_seq_len // 2
+    common_x = np.linspace(0, max_dist, 500)
     print(f"DEBUG: Common x-axis set: {len(common_x)} points, range [0, {max_dist:.2f}]")
     
-    print(f"DEBUG: Initializing interpolated values array: {len(line_data)} x 500")
-    interpolated_vals = np.full((len(line_data), 500), np.nan, dtype=np.float32)
-    for i, (dists, vals) in enumerate(tqdm(line_data, desc="Interpolating lines", unit="line")):
+    max_points = 10000  # Match create_plot's downsampling threshold
+    smoothed_vals = np.full((len(line_data), 500), np.nan, dtype=np.float32)
+    for i, (dists, vals) in enumerate(tqdm(line_data, desc="Smoothing and interpolating lines", unit="line")):
         if len(dists) > 0:
-            print(f"DEBUG: Line {i + 1}: Interpolating {len(vals)} values onto {len(common_x)} points")
-            interpolated_vals[i] = np.interp(common_x, dists, vals, left=np.nan, right=np.nan)
-            print(f"DEBUG: Line {i + 1}: Interpolated, non-NaN count = {np.sum(~np.isnan(interpolated_vals[i]))}")
+            print(f"DEBUG: Line {i + 1}: Processing {len(vals)} values")
+            if len(vals) > max_points:
+                idx = np.linspace(0, len(vals) - 1, max_points, dtype=int)
+                dists_ds, vals_ds = dists[idx], vals[idx]
+                print(f"DEBUG: Line {i + 1}: Downsampled to {max_points} points")
+            else:
+                dists_ds, vals_ds = dists, vals
+                print(f"DEBUG: Line {i + 1}: No downsampling needed")
+            smoothed = gaussian_filter1d(vals_ds, sigma=sigma, mode='nearest')
+            interpolated_smoothed = np.interp(common_x, dists_ds, smoothed, left=np.nan, right=np.nan)
+            smoothed_vals[i] = interpolated_smoothed
+            print(f"DEBUG: Line {i + 1}: Smoothed and interpolated, non-NaN count = {np.sum(~np.isnan(interpolated_smoothed))}")
     
-    print(f"DEBUG: Averaging {len(line_data)} interpolated lines")
-    overall_vals = np.nanmean(interpolated_vals, axis=0)
-    print(f"DEBUG: Overall_vals non-NaN count = {np.sum(~np.isnan(overall_vals))}, range = [{np.nanmin(overall_vals):.2f}, {np.nanmax(overall_vals):.2f}]")
-    
+    overall_line = np.nanmean(smoothed_vals, axis=0)
+    print(f"DEBUG: Overall line non-NaN count = {np.sum(~np.isnan(overall_line))}, range = [{np.nanmin(overall_line):.2f}, {np.nanmax(overall_line):.2f}]")
     print(f"INFO: Overall line computed in {time.time() - start_time:.2f}s")
-    return common_x, overall_vals
+    return common_x, overall_line
 
 # Generate plot
 def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest, furthest, max_seq_len, metric, suffix, sigma=400):
@@ -149,7 +156,7 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
         return None
     
     print(f"INFO: Data stats: {len(line_nz_data)} non-zero lines, {len(line_zero_data)} zero-density lines, {len(all_nz_dists)} points")
-    max_points = 10000  # Downsample threshold
+    max_points = 10000
     
     if metric == 'Theta':
         print(f"INFO: Plotting Theta zero-density lines")
@@ -168,7 +175,7 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
                 print(f"DEBUG: Theta line {i + 1}: Plotted in {time.time() - t0:.2f}s, range = [{np.min(smoothed):.2f}, {np.max(smoothed):.2f}]")
         
         print(f"INFO: Computing Theta overall zero-density line")
-        common_x, overall_line = compute_overall_line(line_zero_data, max_seq_len)
+        common_x, overall_line = compute_overall_line(line_zero_data, max_seq_len, sigma=sigma)
         if len(common_x) > 0:
             valid_idx = ~np.isnan(overall_line)
             if np.any(valid_idx):
@@ -204,7 +211,7 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
                 print(f"DEBUG: Pi line {i + 1}: Plotted in {time.time() - t0:.2f}s, range = [{np.min(smoothed):.2f}, {np.max(smoothed):.2f}]")
         
         print(f"INFO: Computing Pi overall non-zero line")
-        common_x, overall_line = compute_overall_line(line_nz_data, max_seq_len)
+        common_x, overall_line = compute_overall_line(line_nz_data, max_seq_len, sigma=sigma)
         if len(common_x) > 0:
             valid_idx = ~np.isnan(overall_line)
             if np.any(valid_idx):
