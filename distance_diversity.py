@@ -48,10 +48,10 @@ def load_data(file_path, max_sequences=5000):
     return (np.array(theta_labels, dtype=object), np.array(theta_data, dtype=object)), \
            (np.array(pi_labels, dtype=object), np.array(pi_data, dtype=object))
 
-# Process data, keeping only points within 10K from edge and filtering sequences by mean
-def process_data(data_values, max_dist=10000):
-    """Process sequences, keeping only points within 10K from edge."""
-    num_sd = 1  # Define number of standard deviations for filtering
+# Process data, keeping only points within some number from edge and filtering sequences by mean
+def process_data(data_values, max_dist=5000):
+    """Process sequences, keeping only points within some number from edge."""
+    num_sd = 4  # Define number of standard deviations for filtering
     print(f"INFO: Processing {len(data_values)} sequences, max distance = {max_dist}")
     start_time = time.time()
     
@@ -75,7 +75,7 @@ def process_data(data_values, max_dist=10000):
         positions = np.arange(seq_len, dtype=np.int32)
         dists = compute_distances(positions, seq_len)
         
-        # Filter for distances <= 10K
+        # Filter for distances <= some number
         mask = dists <= max_dist
         dists = dists[mask]
         values = values[mask]
@@ -119,16 +119,16 @@ def process_data(data_values, max_dist=10000):
     
     return line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, all_closest, all_furthest, max_seq_len
 
-# Compute overall line, limited to 10K
+# Compute overall line, limited to some number
 def compute_overall_line(line_data, sigma=50):
-    """Compute overall line for distances up to 10K."""
+    """Compute overall line for distances up to some number."""
     print(f"INFO: Computing overall line for {len(line_data)} lines")
     start_time = time.time()
     if not line_data or all(len(dists) == 0 for dists, _ in line_data):
         print("WARNING: No valid data found")
         return np.array([]), np.array([])
     
-    common_x = np.linspace(0, 10000, 500)  # Fixed range 0 to 10K
+    common_x = np.linspace(0, 5000, 500)  # Fixed range 0 to some number
     smoothed_vals = np.full((len(line_data), 500), np.nan, dtype=np.float32)
     
     for i, (dists, vals) in enumerate(tqdm(line_data, desc="Smoothing lines", unit="line")):
@@ -141,10 +141,10 @@ def compute_overall_line(line_data, sigma=50):
     print(f"INFO: Overall line computed in {time.time() - start_time:.2f}s")
     return common_x, overall_line
 
-# Generate plot, limited to 10K
+# Generate plot, limited to some number
 def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest, furthest, metric, suffix, sigma=50):
-    """Create plot for points within 10K from edge."""
-    print(f"\n=== Creating {metric} Plot (0-10K) ===")
+    """Create plot for points within some number from edge."""
+    print(f"\n=== Creating {metric} Plot (0-some number) ===")
     start_time = time.time()
     plt.style.use('seaborn-v0_8-darkgrid')
     fig, ax1 = plt.subplots(figsize=(12, 7))
@@ -155,7 +155,7 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
         plt.close(fig)
         return None
     
-    max_points = 10000
+    max_points = 5000
     if metric == 'Theta':
         for i, (dists, density) in enumerate(tqdm(line_zero_data, desc="Plotting Theta lines", unit="line")):
             if len(dists) > 0:
@@ -195,15 +195,15 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
                 ax1.plot(common_x[valid_idx], overall_line[valid_idx], color='black', lw=2, alpha=0.8, label='Overall Non-Zero')
         ax1.legend(loc='upper left')
     
-    ax1.set_title(f'{metric} vs. Distance from Edge (0-10K)', fontsize=16, fontweight='bold')
+    ax1.set_title(f'{metric} vs. Distance from Edge (0-some number)', fontsize=16, fontweight='bold')
     ax1.set_xlabel('Distance from Nearest Edge', fontsize=14)
     ax1.set_ylabel(f'{metric} Value', fontsize=14)
     ax2.set_ylabel('Zero-Density (Proportion)', fontsize=14, color='red')
     ax1.grid(True, ls='--', alpha=0.4)
     ax2.tick_params(axis='y', colors='red')
-    ax1.set_xlim(0, 10000)  # Restrict x-axis to 0-10K
+    ax1.set_xlim(0, 5000)  # Restrict x-axis to 0-some number
     
-    plot_path = Path.home() / f'distance_plot_{suffix}_10K.png'
+    plot_path = Path.home() / f'distance_plot_{suffix}_some number.png'
     plt.tight_layout()
     plt.savefig(plot_path, dpi=150)
     plt.close(fig)
