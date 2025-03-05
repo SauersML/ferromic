@@ -94,11 +94,20 @@ def process_measurements(measurement_values):
         
         # For zero-density (smoothed per line)
         zero_indicators = np.zeros(seq_len, dtype=np.float32)
-        zero_indicators[zero_mask] = 1
-        sort_indices_all = np.argsort(all_log_distances)
-        sorted_all_log_distances = all_log_distances[sort_indices_all]
-        sorted_zero_indicators = zero_indicators[sort_indices_all]
-        line_zero_data.append((sorted_all_log_distances, sorted_zero_indicators))
+        # For zero-density (smoothed per line)
+        valid_positions = valid_mask  # Positions that are not NaN
+        num_valid = np.sum(valid_positions)  # Total valid positions (zeros + non-zeros)
+        if num_valid > 0:
+            valid_log_distances = all_log_distances[valid_positions]
+            valid_values = value_array[valid_positions]
+            zero_indicators = np.zeros(num_valid, dtype=np.float32)
+            zero_indicators[valid_values == 0] = 1 / num_valid  # Each zero contributes 1/num_valid
+            sort_indices_all = np.argsort(valid_log_distances)
+            sorted_all_log_distances = valid_log_distances[sort_indices_all]
+            sorted_zero_indicators = zero_indicators[sort_indices_all]
+            line_zero_data.append((sorted_all_log_distances, sorted_zero_indicators))
+        else:
+            line_zero_data.append((np.array([]), np.array([])))
         
         # For non-zero values (smoothed per line)
         if np.sum(nz_mask) > 0:
@@ -131,7 +140,7 @@ def process_measurements(measurement_values):
     return line_nz_data, line_zero_data, all_nz_log_distances, all_nz_values, is_closest, is_furthest
 
 # Create and save the scatter plot with per-line smoothed curves
-def generate_scatter_plot_with_smoothed_curves(line_nz_data, line_zero_data, all_nz_log_distances, all_nz_values, is_closest, is_furthest, metric_name, file_suffix, sigma=50):
+def generate_scatter_plot_with_smoothed_curves(line_nz_data, line_zero_data, all_nz_log_distances, all_nz_values, is_closest, is_furthest, metric_name, file_suffix, sigma=200):
     """Generate a scatter plot with per-line Gaussian smoothed signal and zero-density curves."""
     print(f"Creating {metric_name} plot with per-line smoothed signal and zero-density")
     plt.style.use('seaborn-v0_8-darkgrid')
@@ -181,7 +190,7 @@ def generate_scatter_plot_with_smoothed_curves(line_nz_data, line_zero_data, all
                   fontsize=16, fontweight='bold', color='#333333', pad=20)
     ax1.set_xlabel('Log10(Distance from Nearest Edge + 1)', size=14, color='#333333')
     ax1.set_ylabel(f'{metric_name} Value', size=14, color='#333333')
-    ax2.set_ylabel('Zero Density', size=14, color='#ff3333')
+    ax2.set_ylabel('Proportion of Zeros (Smoothed)', size=14, color='#ff3333')
     ax1.grid(True, linestyle='--', alpha=0.4, color='#999999')
     ax1.tick_params(axis='both', which='major', labelsize=12, color='#666666')
     ax2.tick_params(axis='y', labelsize=12, colors='#ff3333')
@@ -210,9 +219,9 @@ pi_line_nz, pi_line_zero, pi_all_nz_log, pi_all_nz_val, pi_is_closest, pi_is_fur
 
 # Generate plots
 theta_plot_path = generate_scatter_plot_with_smoothed_curves(
-    theta_line_nz, theta_line_zero, theta_all_nz_log, theta_all_nz_val, theta_is_closest, theta_is_furthest, 'Theta', 'theta')
+    theta_line_nz, theta_line_zero, theta_all_nz_log, theta_all_nz_val, theta_is_closest, theta_is_furthest, 'Theta', 'theta', sigma=200)
 pi_plot_path = generate_scatter_plot_with_smoothed_curves(
-    pi_line_nz, pi_line_zero, pi_all_nz_log, pi_all_nz_val, pi_is_closest, pi_is_furthest, 'Pi', 'pi')
+    pi_line_nz, pi_line_zero, pi_all_nz_log, pi_all_nz_val, pi_is_closest, pi_is_furthest, 'Pi', 'pi', sigma=200)
 
 # Open the generated plots based on OS
 print("Opening plots")
