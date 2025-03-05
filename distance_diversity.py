@@ -17,62 +17,60 @@ def compute_log_distances(positions, sequence_length):
 
 # Load filtered theta and pi data from the input file
 def load_filtered_measurements(file_path):
-    """Read filtered theta and pi data from a binary file, handling large datasets efficiently."""
     print("Loading data from file")
-    theta_labels = []  # Headers for theta measurements
-    theta_data = []    # Values for theta measurements
-    pi_labels = []     # Headers for pi measurements
-    pi_data = []       # Values for pi measurements
+    theta_labels, theta_data, pi_labels, pi_data = [], [], [], []
+    buffer = b''
+    last_header = None
     
     with open(file_path, 'rb') as file:
-        buffer_size = 16 * 1024 * 1024  # 16MB buffer for reading large files
-        buffer = b''
-        lines_processed = 0
-        
+        buffer_size = 16 * 1024 * 1024
         while True:
             chunk = file.read(buffer_size)
             if not chunk and not buffer:
-                break  # End of file and buffer
-            elif not chunk:
-                lines = buffer.split(b'\n')
-            else:
-                buffer += chunk
-                lines = buffer.split(b'\n')
-                buffer = lines[-1]  # Keep incomplete line for next iteration
-                lines = lines[:-1]  # Process all but the last line... double check
+                break
+            buffer += chunk
+            lines = buffer.split(b'\n')
+            
+            # Process all lines, keeping the last if incomplete
+            if chunk:  # Mid-file, last might be incomplete
+                buffer = lines[-1]
+                lines = lines[:-1]
+            else:  # EOF, process everything
+                buffer = b''
             
             i = 0
-            while i < len(lines) - 1:
-                header = lines[i]
-                if b'filtered' in header:
-                    header_text = header[1:].decode('utf-8', errors='ignore')
-                    values_line = lines[i + 1].decode('utf-8', errors='ignore')
-                    value_array = np.fromstring(values_line.replace('NA', 'nan'), sep=',', dtype=np.float32)
-                    if 'theta' in header_text:
-                        theta_labels.append(header_text)
-                        theta_data.append(value_array)
-                    elif 'pi' in header_text:
-                        pi_labels.append(header_text)
-                        pi_data.append(value_array)
-                    lines_processed += 1
-                i += 2
+            while i < len(lines):
+                if b'filtered' in lines[i]:
+                    last_header = lines[i]
+                    if i + 1 < len(lines):
+                        values_line = lines[i + 1].decode('utf-8', errors='ignore')
+                        value_array = np.fromstring(values_line.replace('NA', 'nan'), sep=',', dtype=np.float32)
+                        header_text = last_header[1:].decode('utf-8', errors='ignore')
+                        if 'theta' in header_text:
+                            theta_labels.append(header_text)
+                            theta_data.append(value_array)
+                        elif 'pi' in header_text:
+                            pi_labels.append(header_text)
+                            pi_data.append(value_array)
+                        i += 2
+                    else:
+                        i += 1  # Header without value yet
+                else:
+                    i += 1
             
-            # Handle any remaining line at EOF
-            if not chunk and i < len(lines):
-                header = lines[i]
-                if b'filtered' in header and i + 1 < len(lines):
-                    header_text = header[1:].decode('utf-8', errors='ignore')
-                    values_line = lines[i + 1].decode('utf-8', errors='ignore')
-                    value_array = np.fromstring(values_line.replace('NA', 'nan'), sep=',', dtype=np.float32)
-                    if 'theta' in header_text:
-                        theta_labels.append(header_text)
-                        theta_data.append(value_array)
-                    elif 'pi' in header_text:
-                        pi_labels.append(header_text)
-                        pi_data.append(value_array)
-                    lines_processed += 1
+            # Handle leftover header at EOF
+            if not chunk and last_header and buffer:
+                values_line = buffer.decode('utf-8', errors='ignore')
+                value_array = np.fromstring(values_line.replace('NA', 'nan'), sep=',', dtype=np.float32)
+                header_text = last_header[1:].decode('utf-8', errors='ignore')
+                if 'theta' in header_text:
+                    theta_labels.append(header_text)
+                    theta_data.append(value_array)
+                elif 'pi' in header_text:
+                    pi_labels.append(header_text)
+                    pi_data.append(value_array)
     
-    print(f"Loaded {len(theta_labels)} theta and {len(pi_labels)} pi filtered data lines (total processed: {lines_processed})")
+    print(f"Loaded {len(theta_labels)} theta and {len(pi_labels)} pi filtered data lines")
     return (np.array(theta_labels, dtype=object), np.array(theta_data, dtype=object)), \
            (np.array(pi_labels, dtype=object), np.array(pi_data, dtype=object))
 
