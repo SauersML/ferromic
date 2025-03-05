@@ -147,15 +147,15 @@ def generate_scatter_plot_with_smoothed_curves(line_nz_data, line_zero_data, all
         z_score_colors = plt.cm.coolwarm(norm(z_scores))
         
         # Plot scatter points with special styling
-        # Closest to edge: black (opaque)
+        # 1. Closest to edge: black (opaque)
         if np.any(is_closest):
             ax1.scatter(all_nz_log_distances[is_closest], all_nz_values[is_closest], c='black', s=15, alpha=0.7, edgecolors='none')
-        # Furthest from edge: z-score color with black outline
+        # 2. Furthest from edge (but not closest): z-score color with black outline
         mask_furthest_not_closest = is_furthest & ~is_closest
         if np.any(mask_furthest_not_closest):
             ax1.scatter(all_nz_log_distances[mask_furthest_not_closest], all_nz_values[mask_furthest_not_closest],
                         c=z_score_colors[mask_furthest_not_closest], s=15, alpha=0.7, edgecolors='black', linewidths=0.5)
-        # All other points: z-score color only
+        # 3. All other points: z-score color only
         mask_neither = ~is_closest & ~is_furthest
         if np.any(mask_neither):
             ax1.scatter(all_nz_log_distances[mask_neither], all_nz_values[mask_neither],
@@ -181,7 +181,7 @@ def generate_scatter_plot_with_smoothed_curves(line_nz_data, line_zero_data, all
                   fontsize=16, fontweight='bold', color='#333333', pad=20)
     ax1.set_xlabel('Log10(Distance from Nearest Edge + 1)', size=14, color='#333333')
     ax1.set_ylabel(f'{metric_name} Value', size=14, color='#333333')
-    ax2.set_ylabel('Zero-Density (Arbitrary Units)', size=14, color='#ff3333')
+    ax2.set_ylabel('Zero Density', size=14, color='#ff3333')
     ax1.grid(True, linestyle='--', alpha=0.4, color='#999999')
     ax1.tick_params(axis='both', which='major', labelsize=12, color='#666666')
     ax2.tick_params(axis='y', labelsize=12, colors='#ff3333')
