@@ -984,11 +984,41 @@ def main():
                 desc="Loading CSVs"
             ):
                 all_csv_data.append(result)
-        for result_list in all_csv_data:
-            for cache_key, record_tuple in result_list:
-                if not db_has_key(db_conn, cache_key):
-                    db_insert_or_ignore(db_conn, cache_key, record_tuple)
-                    count_loaded_from_csv += 1
+            # Get the current number of rows in the pairwise_cache table before insertion
+            initial_row_count = db_count_keys(db_conn)
+            
+            # Collect all records from CSV data to insert into the database
+            records_to_insert = []
+            for result_list in all_csv_data:
+                for cache_key, record_tuple in result_list:
+                    records_to_insert.append((cache_key,) + record_tuple)
+            
+            # Perform batch insertion of all records with a single commit
+            if records_to_insert:
+                print(f"Starting batch insertion of {len(records_to_insert)} records into the database.")
+                sys.stdout.flush()
+                try:
+                    db_conn.executemany(
+                        "INSERT OR IGNORE INTO pairwise_cache "
+                        "(cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        records_to_insert
+                    )
+                    db_conn.commit()
+                    # Calculate the number of new records inserted by comparing row counts
+                    final_row_count = db_count_keys(db_conn)
+                    count_loaded_from_csv = final_row_count - initial_row_count
+                    print(f"Batch insertion completed: {count_loaded_from_csv} new records added to the database.")
+                    sys.stdout.flush()
+                except Exception as e:
+                    print(f"Batch insertion failed with error: {e}")
+                    sys.stdout.flush()
+                    count_loaded_from_csv = 0
+            else:
+                print("No records found to insert from CSV data.")
+                sys.stdout.flush()
+                count_loaded_from_csv = 0
+
     print(f"Preloaded {count_loaded_from_csv} comparison records from CSV into the SQLite DB.")
 
     # Load GTF coords once
@@ -1256,14 +1286,18 @@ def main():
             for pair in to_compute
         ]
         num_processes = min(NUM_PARALLEL, len(to_compute))
-        print(f"Running codeml on {len(to_compute)} pairs with {num_processes} processes.")
+        print(f"Starting codeml execution on {len(to_compute)} pairs using {num_processes} processes.")
         sys.stdout.flush()
 
         results_accum = []
         with multiprocessing.Pool(processes=num_processes) as pool:
+            print(f"Processing {len(to_compute)} pairs in parallel for {cds_id}.")
+            sys.stdout.flush()
             for r in pool.imap_unordered(process_pair, pool_args, chunksize=10):
                 if r is not None:
                     results_accum.append(r)
+            print(f"Completed processing {len(results_accum)} results for {cds_id}.")
+            sys.stdout.flush()
 
         # Insert all new results into DB
         for r in results_accum:
@@ -1343,6 +1377,9 @@ def main():
         old_size = db_count_keys(db_conn)
         newly_done = run_cds_file(phy_file, args.output_dir, args.codeml_path, db_conn)
         new_size = db_count_keys(db_conn)
+        added_in_db = new_size - old_size
+        print(f"Finished processing {phy_file}: computed {newly_done} new pairs, added {added_in_db} records to the database.")
+        sys.stdout.flush()
 
         # The actual newly_done might differ from the DB difference if some pairs were duplicates
         added_in_db = new_size - old_size
