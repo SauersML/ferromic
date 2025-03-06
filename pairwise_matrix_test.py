@@ -418,7 +418,6 @@ def create_visualization(matrix_0, matrix_1, transcript, result, full_cds):
 def analyze_cds_parallel(args):
     """Analyze a single transcript using explicit group assignments."""
     df_cds, transcript = args
-    print(f"\nAnalyzing {transcript}")
     cached_result = load_cached_result(transcript)
     if cached_result is not None:
         return transcript, cached_result
