@@ -1088,21 +1088,42 @@ def main():
 
     # Figure out the best representative per cluster
     allowed_cds_ids = set()
+    # For each cluster, pick the single transcript ID that is present in both group_0 and group_1, 
+    # with the largest minimum .phy length across those two group files. If none appear in both, skip.
     for cluster in clusters:
-        best_id = None
+        selected_tid = None
         best_len = -1
+        # Gather transcripts in this cluster, grouped by transcript_id and group number.
+        # The dict will look like: {tid: {'0': (cid, length), '1': (cid, length)}}
+        transcripts_in_cluster = {}
         for cid in cluster:
-            # cd = (cds_id, tid, chrom, start, end, parsed_data)
-            _, _, _, _, _, seq_data = cds_id_to_data[cid]
+            cds_id, tid, _, _, _, seq_data = cds_id_to_data[cid]
             if seq_data['sequences']:
-                # length of first sequence is enough to guess "length" of alignment
                 any_seq = next(iter(seq_data['sequences'].values()))
                 seqlen = len(any_seq)
-                if seqlen > best_len:
-                    best_len = seqlen
-                    best_id = cid
-        if best_id:
-            allowed_cds_ids.add(best_id)
+                match_group = re.match(r'^group_(\d+)_', cds_id)
+                if match_group:
+                    group_str = match_group.group(1)
+                    transcripts_in_cluster.setdefault(tid, {})[group_str] = (cid, seqlen)
+
+        # Now search for any transcript_id that appears in both group_0 and group_1; pick the largest.
+        # We measure "largest" as the minimum .phy length of the two .phy files, 
+        # so that both group_0 and group_1 are guaranteed to have a similarly large .phy.
+        for tid, group_dict in transcripts_in_cluster.items():
+            if '0' in group_dict and '1' in group_dict:
+                len_0 = group_dict['0'][1]
+                len_1 = group_dict['1'][1]
+                candidate_len = min(len_0, len_1)
+                if candidate_len > best_len:
+                    best_len = candidate_len
+                    selected_tid = tid
+
+        # If we found a valid transcript_id, add both group_0 and group_1 to allowed_cds_ids.
+        if selected_tid is not None:
+            group_0_cid = transcripts_in_cluster[selected_tid]['0'][0]
+            group_1_cid = transcripts_in_cluster[selected_tid]['1'][0]
+            allowed_cds_ids.add(group_0_cid)
+            allowed_cds_ids.add(group_1_cid)
 
     # Filter out any .phy whose CDS id is not in allowed_cds_ids
     # We'll produce a final list of paths to process
