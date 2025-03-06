@@ -207,15 +207,20 @@ impl ZeroBasedHalfOpen {
         }
     }
 
-    /// Returns 1-based position of `pos` if inside [start..end], inclusive, else None.
+    /// self is the half-open interval [start..end). self.start is the inclusive lower
+    /// bound and self.end is the exclusive upper bound.
+    /// It treats the input pos as 1-based inclusive and converts it to 0-based.
+    /// Then it checks if the converted position is in [start..end). If so, it
+    /// returns the offset plus 1 as the relative 1-based position.
     pub fn relative_position_1based_inclusive(&self, pos: i64) -> Option<usize> {
-        let p = pos as usize;
-        if p >= self.start && p <= self.end { // Inclusive end
+        let p = (pos - 1) as usize;
+        if p >= self.start && p < self.end {
             Some(p - self.start + 1)
         } else {
             None
         }
     }
+
 
     // Query region
     pub fn to_zero_based_inclusive(&self) -> ZeroBasedInclusive {
