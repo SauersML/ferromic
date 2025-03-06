@@ -1406,41 +1406,188 @@ def main():
         return len(to_compute)
 
     # --------------------------------------------------------------------------------
-    # PROCESS EACH ALLOWED FILE
+    # PROCESS EACH ALLOWED FILE (Unified Parallel Approach)
     # --------------------------------------------------------------------------------
+
+    # This gathers all pairwise tasks from all final_phy_files in one pool,
+    # then we write each file's CSV after all computations complete.
+
+    all_pairs_tasks = []
+    file_info_list = []
 
     for idx, phy_file in enumerate(final_phy_files, 1):
         logging.info(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
         print(f"Processing file {idx}/{len(final_phy_files)}: {phy_file}")
         sys.stdout.flush()
 
-        old_size = db_count_keys(db_conn)
-        newly_done = run_cds_file(phy_file, args.output_dir, args.codeml_path, db_conn)
-        new_size = db_count_keys(db_conn)
-        added_in_db = new_size - old_size
-        print(f"Finished processing {phy_file}: computed {newly_done} new pairs, added {added_in_db} records to the database.")
+        cds_id = os.path.basename(phy_file).replace('.phy', '')
+        mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
+        output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}.csv')
+        haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
+
+        # Skip if output already exists
+        if os.path.exists(output_csv):
+            print(f"Output {output_csv} already exists, skipping.")
+            sys.stdout.flush()
+            continue
+
+        parsed_data = PARSED_PHY.get(phy_file, None)
+        if not parsed_data or not parsed_data['sequences']:
+            print(f"No valid sequences for {phy_file}, skipping.")
+            sys.stdout.flush()
+            continue
+
+        # Update counters for this file
+        GLOBAL_COUNTERS['invalid_seqs'] += parsed_data['local_invalid']
+        GLOBAL_COUNTERS['stop_codons'] += parsed_data['local_stop_codons']
+        GLOBAL_COUNTERS['total_seqs'] += parsed_data['local_total_seqs']
+        GLOBAL_COUNTERS['duplicates'] += parsed_data['local_duplicates']
+
+        sequences = parsed_data['sequences']
+        group_num_match = re.search(r'^group_(\d+)_', os.path.basename(phy_file))
+        if not group_num_match:
+            print("Could not parse group number from filename. Defaulting to group=0.")
+            group_num = 0
+        else:
+            group_num = int(group_num_match.group(1))
+
+        sample_groups = {sname: group_num for sname in sequences.keys()}
+
+        # Generate all pairs
+        if COMPARE_BETWEEN_GROUPS:
+            all_samples = list(sample_groups.keys())
+            all_pairs = list(combinations(all_samples, 2))
+        else:
+            group_samples = list(sample_groups.keys())
+            all_pairs = list(combinations(group_samples, 2))
+
+        if not all_pairs:
+            print(f"No pairs to compare for {phy_file}, skipping.")
+            sys.stdout.flush()
+            continue
+
+        temp_dir = os.path.join(args.output_dir, 'temp', cds_id)
+        os.makedirs(temp_dir, exist_ok=True)
+
+        # Gather only those pairs not in DB
+        to_compute = []
+        for pair in all_pairs:
+            check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
+            if not db_has_key(db_conn, check_key):
+                to_compute.append(pair)
+
+        print(f"File {phy_file} has {len(all_pairs)} total pairs, {len(to_compute)} remain to compute.")
         sys.stdout.flush()
 
-        # The actual newly_done might differ from the DB difference if some pairs were duplicates
-        added_in_db = new_size - old_size
-        completed_comparisons += added_in_db
+        # Prepare to store info for later CSV creation
+        info_entry = {
+            'phy_file': phy_file,
+            'cds_id': cds_id,
+            'output_csv': output_csv,
+            'haplotype_csv': haplotype_output_csv,
+            'all_pairs': all_pairs,
+            'sequences': sequences,
+            'sample_groups': sample_groups
+        }
+        file_info_list.append(info_entry)
 
-        percent = (
-            (completed_comparisons / GLOBAL_COUNTERS['total_comparisons']) * 100
-            if GLOBAL_COUNTERS['total_comparisons'] > 0
-            else 0
+        # Build tasks for the global pool
+        for pair in to_compute:
+            task_args = (pair, sequences, sample_groups, cds_id, args.codeml_path, temp_dir, None)
+            all_pairs_tasks.append(task_args)
+
+    # Run all remaining pairwise comparisons in a single Pool
+    if all_pairs_tasks:
+        print(f"Running a single parallel pool for {len(all_pairs_tasks)} comparisons across all CDS.")
+        sys.stdout.flush()
+        num_processes = min(NUM_PARALLEL, len(all_pairs_tasks))
+        with multiprocessing.Pool(processes=num_processes) as pool:
+            for result in pool.imap_unordered(process_pair, all_pairs_tasks, chunksize=10):
+                if result is not None:
+                    seq1, seq2, grp1, grp2, dn, ds, omega, cid = result
+                    newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
+                    record_tuple = (seq1, seq2, grp1, grp2, dn, ds, omega, cid)
+                    db_insert_or_ignore(db_conn, newkey, record_tuple)
+                completed_comparisons = db_count_keys(db_conn)
+                print_eta(completed_comparisons, GLOBAL_COUNTERS['total_comparisons'], ETA_DATA['start_time'], ETA_DATA)
+    else:
+        print("No new comparisons to compute across all CDS.")
+        sys.stdout.flush()
+
+    # Build final CSV and haplotype stats for each file
+    for info_entry in file_info_list:
+        cds_id = info_entry['cds_id']
+        output_csv = info_entry['output_csv']
+        haplotype_output_csv = info_entry['haplotype_csv']
+        all_pairs = info_entry['all_pairs']
+        sequences = info_entry['sequences']
+        sample_groups = info_entry['sample_groups']
+
+        if os.path.exists(output_csv):
+            print(f"Skipping CSV creation, file {output_csv} already present.")
+            sys.stdout.flush()
+            continue
+
+        # Gather all results for these pairs from DB
+        relevant_keys = []
+        for pair in all_pairs:
+            final_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
+            relevant_keys.append(final_key)
+
+        results_for_csv = []
+        CHUNK_SIZE = 10000
+        start_index = 0
+        while start_index < len(relevant_keys):
+            chunk_keys = relevant_keys[start_index : start_index + CHUNK_SIZE]
+            in_clause = ",".join(["?"] * len(chunk_keys))
+            sql = f"""
+                SELECT cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds
+                FROM pairwise_cache
+                WHERE cache_key IN ({in_clause})
+            """
+            rows = db_conn.execute(sql, chunk_keys).fetchall()
+            for row in rows:
+                results_for_csv.append(row[1:])
+            start_index += CHUNK_SIZE
+
+        df = pd.DataFrame(
+            results_for_csv,
+            columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS']
         )
-        logging.info(f"Overall: {completed_comparisons}/{GLOBAL_COUNTERS['total_comparisons']} comps ({percent:.2f}%)")
-        print(f"Overall progress: {completed_comparisons}/{GLOBAL_COUNTERS['total_comparisons']} comps ({percent:.2f}%)")
+        df.to_csv(output_csv, index=False)
+        print(f"Results for {cds_id} saved to {output_csv}")
         sys.stdout.flush()
-        print_eta(completed_comparisons, GLOBAL_COUNTERS['total_comparisons'], ETA_DATA['start_time'], ETA_DATA)
+
+        # Build haplotype-level stats
+        hap_stats = []
+        for sample in sequences.keys():
+            sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
+            omega_vals = sample_df['omega'].dropna()
+            omega_vals = omega_vals[~omega_vals.isin([-1, 99])]
+            if not omega_vals.empty:
+                mean_omega = omega_vals.mean()
+                median_omega = omega_vals.median()
+            else:
+                mean_omega = np.nan
+                median_omega = np.nan
+            hap_stats.append({
+                'Haplotype': sample,
+                'Group': sample_groups[sample],
+                'CDS': cds_id,
+                'Mean_dNdS': mean_omega,
+                'Median_dNdS': median_omega,
+                'Num_Comparisons': len(omega_vals)
+            })
+        hap_df = pd.DataFrame(hap_stats)
+        hap_df.to_csv(haplotype_output_csv, index=False)
+        print(f"Haplotype stats for {cds_id} saved to {haplotype_output_csv}")
+        sys.stdout.flush()
 
     # --------------------------------------------------------------------------------
     # FINAL SUMMARY & CLEANUP
     # --------------------------------------------------------------------------------
     end_time = time.time()
 
-    # Final counters
     total_seqs = GLOBAL_COUNTERS['total_seqs']
     invalid_seqs = GLOBAL_COUNTERS['invalid_seqs']
     duplicates = GLOBAL_COUNTERS['duplicates']
@@ -1459,19 +1606,18 @@ def main():
     logging.info(f"Duplicates: {duplicates}")
     logging.info(f"Total CDS (final) after clustering: {total_cds_processed}")
     logging.info(f"Planned comparisons: {total_comps_planned}")
-    logging.info(f"Completed comps: {completed_comparisons}")
+    current_db_count = db_count_keys(db_conn)
+    logging.info(f"Completed comps: {current_db_count}")
+
     if ETA_DATA['start_time']:
-        run_minutes = (end_time - ETA_DATA['start_time'])/60
+        run_minutes = (end_time - ETA_DATA['start_time']) / 60
         logging.info(f"Total time: {run_minutes:.2f} min")
     else:
-        # If no comparisons were actually done
-        total_run_min = (end_time - start_time)/60
+        total_run_min = (end_time - start_time) / 60
         logging.info(f"Total time: {total_run_min:.2f} min")
 
-    # Save updated counters
     save_cache(cache_file, GLOBAL_COUNTERS)
 
-    # Save the updated validation cache
     try:
         with open(VALIDATION_CACHE_FILE, 'wb') as f:
             pickle.dump(VALIDATION_CACHE, f)
