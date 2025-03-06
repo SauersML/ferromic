@@ -63,7 +63,7 @@ def get_top_n_sequences(file_path, n=6):
     return top_n
 
 def load_data_for_headers(file_path, top_n):
-    # Load data only for top N filtered_pi sequences
+    # Load data only for top N filtered_pi sequences, handling empty strings
     start_time = time.time()
     print(f"INFO: Loading data for {len(top_n)} filtered_pi sequences at {time.ctime()}")
     
@@ -74,10 +74,19 @@ def load_data_for_headers(file_path, top_n):
             f.seek(offset)
             data_line = f.readline().strip()
             print(f"DEBUG: Read data line with {len(data_line)} chars")
-            data = [float(x) if x != 'NA' else np.nan for x in data_line.split(',')]
-            data = np.array(data, dtype=np.float32)
-            data_dict[header] = (length, data)
-            print(f"DEBUG: Loaded {len(data)} values for length={length}, header={header[:50]}...")
+            # Split and inspect data
+            data_split = data_line.split(',')
+            print(f"DEBUG: Split into {len(data_split)} values, first few: {data_split[:5]}")
+            # Handle empty strings and 'NA'
+            try:
+                data = [float(x) if x != 'NA' and x != '' else np.nan for x in data_split]
+                data = np.array(data, dtype=np.float32)
+                data_dict[header] = (length, data)
+                print(f"DEBUG: Loaded {len(data)} values for length={length}, header={header[:50]}...")
+            except ValueError as e:
+                print(f"ERROR: Failed to parse data for {header[:50]}...: {e}")
+                print(f"DEBUG: Problematic data sample: {data_split[:10]}")
+                data_dict[header] = (length, np.array([], dtype=np.float32))  # Empty array as fallback
     
     print(f"INFO: Loaded data for {len(data_dict)} filtered_pi sequences in {time.time() - start_time:.2f}s")
     return data_dict
@@ -92,6 +101,9 @@ def plot_top_n_sequences(data_dict):
     
     for i, (header, (length, data)) in enumerate(data_dict.items()):
         print(f"DEBUG: Processing filtered_pi sequence {i+1}, length={length}, points={len(data)}")
+        if len(data) == 0:
+            print(f"WARNING: No data to plot for {header[:50]}...")
+            continue
         series = pd.Series(data)
         smoothed = series.rolling(window=1000, min_periods=1, center=True).mean().to_numpy()
         positions = np.arange(len(data))
@@ -101,7 +113,7 @@ def plot_top_n_sequences(data_dict):
     
     ax.set_xlabel("Position (bp)", fontsize=12)
     ax.set_ylabel("Smoothed Pi Value (1000 bp window)", fontsize=12)
-    ax.set_title("Top Longest Filtered Pi Sequences", fontsize=14, fontweight='bold')
+    ax.set_title(f"Top {len(data_dict)} Longest Filtered Pi Sequences", fontsize=14, fontweight='bold')
     ax.legend(title="Filtered Pi Headers", loc='upper right', fontsize=8, title_fontsize=10)
     ax.grid(True, linestyle='--', alpha=0.5)
     
