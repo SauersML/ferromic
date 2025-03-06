@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import re
 from collections import defaultdict
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -36,27 +37,46 @@ PLOTS_DIR = Path("plots")
 for directory in [CACHE_DIR, RESULTS_DIR, PLOTS_DIR]:
     directory.mkdir(exist_ok=True)
 
-def get_cache_path(transcript):
-    """Generate cache file path for a transcript."""
-    return CACHE_DIR / f"{transcript}.pkl"
+def get_cache_path(key):
+    """Generate cache file path for a transcript or coordinates.
+    
+    Args:
+        key: Either a transcript ID or a coordinate string
+    """
+    # Safety check to clean the filename
+    clean_key = "".join(c if c.isalnum() or c in "._-" else "_" for c in str(key))
+    return CACHE_DIR / f"{clean_key}.pkl"
 
-def load_cached_result(transcript):
-    """Load cached result for a transcript if it exists."""
-    cache_path = get_cache_path(transcript)
+def load_cached_result(cache_key):
+    """Load cached result using a cache key (transcript ID or coordinates).
+    
+    Args:
+        cache_key: Either a transcript ID or a coordinate string
+    """
+    cache_path = get_cache_path(cache_key)
     if cache_path.exists():
         try:
             with open(cache_path, 'rb') as f:
                 cached_result = pickle.load(f)
             return cached_result
-        except:
+        except Exception as e:
+            print(f"Error loading cache for {cache_key}: {str(e)}")
             return None
     return None
 
-def save_cached_result(transcript, result):
-    """Save result for a transcript to cache."""
-    cache_path = get_cache_path(transcript)
-    with open(cache_path, 'wb') as f:
-        pickle.dump(result, f)
+def save_cached_result(cache_key, result):
+    """Save result to cache using a cache key.
+    
+    Args:
+        cache_key: Either a transcript ID or a coordinate string
+        result: The analysis result to cache
+    """
+    cache_path = get_cache_path(cache_key)
+    try:
+        with open(cache_path, 'wb') as f:
+            pickle.dump(result, f)
+    except Exception as e:
+        print(f"Error saving cache for {cache_key}: {str(e)}")
 
 def read_and_preprocess_data(file_path):
     """Read and preprocess the CSV file."""
@@ -120,8 +140,33 @@ def analysis_worker(args):
     import numpy as np
 
     all_sequences, n0, pairwise_dict, sequences_0, sequences_1 = args
+    
+    # Initialize failure reason (will be set if analysis fails)
+    failure_reason = None
 
-    # Prepare data
+    # Check if we only have sequences in one group (either all in group 0 or all in group 1)
+    # This happens when the CDS prefix dictates all sequences go to one group
+    only_group_0 = len(sequences_0) > 0 and len(sequences_1) == 0
+    only_group_1 = len(sequences_1) > 0 and len(sequences_0) == 0
+    
+    # If all sequences are in a single group, statistical comparison isn't possible
+    if only_group_0 or only_group_1:
+        group_num = '0' if only_group_0 else '1'
+        failure_reason = f"All sequences in group {group_num}, need both groups for comparison"
+        print(f"WARNING: {failure_reason}")
+        print(f"No statistical comparison can be performed with only one group (need both group 0 and group 1).")
+        return {
+            'observed_effect_size': np.nan,
+            'p_value': np.nan,
+            'n0': n0,
+            'n1': n1,
+            'num_comp_group_0': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_0 and seq2 in sequences_0),
+            'num_comp_group_1': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_1 and seq2 in sequences_1),
+            'std_err': np.nan,
+            'failure_reason': failure_reason
+        }
+    
+    # Prepare data for mixed-model analysis (only used when we have both groups)
     data = []
     for (seq1, seq2), omega in pairwise_dict.items():
         if seq1 in sequences_0 and seq2 in sequences_0:
@@ -143,6 +188,16 @@ def analysis_worker(args):
     std_err = np.nan
 
     if df.empty or df['group'].nunique() < 2 or df['omega_value'].nunique() < 2:
+        failure_reason = ""
+        if df.empty:
+            failure_reason = "No valid pairwise comparisons found"
+        elif df['group'].nunique() < 2:
+            failure_reason = "Missing one of the groups in pairwise comparisons"
+        elif df['omega_value'].nunique() < 2:
+            failure_reason = "Not enough omega value variation for statistical analysis"
+        
+        print(f"WARNING: {failure_reason}")
+        
         return {
             'observed_effect_size': effect_size,
             'p_value': p_value,
@@ -150,7 +205,8 @@ def analysis_worker(args):
             'n1': len(all_sequences) - n0,
             'num_comp_group_0': (df['group'] == 0).sum() if not df.empty else 0,
             'num_comp_group_1': (df['group'] == 1).sum() if not df.empty else 0,
-            'std_err': std_err
+            'std_err': std_err,
+            'failure_reason': failure_reason
         }
 
     df['seq1_code'] = pd.Categorical(df['seq1']).codes
@@ -183,7 +239,11 @@ def analysis_worker(args):
         print(f"Group 1 comparisons: {(df['group'] == 1).sum()}")
         
     except Exception as e:
-        print(f"Model fitting failed with error: {str(e)}")
+        error_msg = str(e)
+        print(f"Model fitting failed with error: {error_msg}")
+        # Initialize failure_reason if not already set
+        if not failure_reason:
+            failure_reason = f"Statistical model error: {error_msg[:100]}..."  # Truncate very long errors
 
     return {
         'observed_effect_size': effect_size,
@@ -193,6 +253,7 @@ def analysis_worker(args):
         'std_err': std_err,
         'num_comp_group_0': (df['group'] == 0).sum(),
         'num_comp_group_1': (df['group'] == 1).sum(),
+        'failure_reason': failure_reason if np.isnan(p_value) else None
     }
 
 def compute_cliffs_delta(x, y):
@@ -448,9 +509,41 @@ def analyze_cds_parallel(args):
     """Analyze a single transcript using explicit group assignments."""
     df_cds, transcript = args
     print(f"\nAnalyzing {transcript}")
-    cached_result = load_cached_result(transcript)
+    
+    # Extract genomic coordinates for more robust caching
+    coordinates = None
+    try:
+        full_cds = df_cds['full_cds'].iloc[0]
+        # Extract chr, start and end coords from full_cds
+        if 'chr_' in full_cds and 'start_' in full_cds and 'end_' in full_cds:
+            # Extract chromosome
+            chr_idx = full_cds.find('chr_') + 4
+            chr_end_idx = full_cds.find('_', chr_idx)
+            chr_num = full_cds[chr_idx:chr_end_idx]
+            
+            # Extract start
+            start_idx = full_cds.find('start_') + 6
+            start_end_idx = full_cds.find('_', start_idx)
+            start = full_cds[start_idx:start_end_idx]
+            
+            # Extract end
+            end_idx = full_cds.find('end_') + 4
+            end_end_idx = full_cds.find('_', end_idx) if '_' in full_cds[end_idx:] else len(full_cds)
+            end = full_cds[end_idx:end_end_idx]
+            
+            # Create universal coordinate key
+            coordinates = f"chr_{chr_num}_start_{start}_end_{end}"
+            print(f"Using universal coordinates {coordinates} for caching")
+        else:
+            coordinates = full_cds  # Fallback if we can't extract coordinates
+    except Exception as e:
+        print(f"Could not extract coordinates: {str(e)}")
+        coordinates = transcript  # Fallback to transcript ID
+    
+    # Try to load from cache using coordinates
+    cached_result = load_cached_result(coordinates) if coordinates else load_cached_result(transcript)
     if cached_result is not None:
-        print(f"Using cached result for {transcript}")
+        print(f"Using cached result for {coordinates if coordinates else transcript}")
         # If we have a cached result with p-value, print it
         if 'p_value' in cached_result and not np.isnan(cached_result['p_value']):
             print(f"\nStatistical Analysis Results for {transcript} (from cache):")
@@ -461,14 +554,56 @@ def analyze_cds_parallel(args):
             print(f"Group 1 comparisons: {cached_result['num_comp_group_1']}")
         return transcript, cached_result
 
+    # Create pairwise dictionary and get unique sequences
     pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega'] for _, row in df_cds.iterrows()}
     all_seqs = pd.concat([df_cds['Seq1'], df_cds['Seq2']]).unique()
-    seq_to_group = {}
-    for _, row in df_cds.iterrows():
-        seq_to_group[row['Seq1']] = row['Group1']
-        seq_to_group[row['Seq2']] = row['Group2']
-    sequences_0 = np.array([seq for seq in all_seqs if seq_to_group.get(seq, 0) == 0])
-    sequences_1 = np.array([seq for seq in all_seqs if seq_to_group.get(seq, 0) == 1])
+    
+    # Extract group from the CDS column
+    full_cds = df_cds['full_cds'].iloc[0] if 'full_cds' in df_cds.columns and not df_cds.empty else ""
+    
+    # For parsing, grab a prefix of 7 characters for safety (handle "group_0_" or "group_1_")
+    prefix = full_cds[:7] if len(full_cds) >= 7 else ""
+    
+    # Get group assignment method from environment variable or default to 'cds_prefix'
+    group_method = os.environ.get('GROUP_METHOD', 'cds_prefix')
+    
+    if group_method == 'cds_prefix':
+        # Assign all sequences to one group based on CDS prefix
+        if full_cds.startswith('group_1'):
+            print(f"CDS starts with 'group_1', assigning all sequences to group 1")
+            sequences_0 = np.array([])
+            sequences_1 = np.array(all_seqs)
+        elif full_cds.startswith('group_0'):
+            print(f"CDS starts with 'group_0', assigning all sequences to group 0")
+            sequences_0 = np.array(all_seqs)
+            sequences_1 = np.array([])
+        else:
+            # If no valid prefix, print warning and use default assignment
+            print(f"WARNING: CDS does not start with 'group_0' or 'group_1': {full_cds}")
+            print(f"Falling back to default assignment (all to group 0)")
+            sequences_0 = np.array(all_seqs)
+            sequences_1 = np.array([])
+    
+    elif group_method == 'debug_alternate':
+        # Debug method: split sequences evenly between groups for testing
+        # This is only for debugging when you want to artificially create groups
+        half_idx = len(all_seqs) // 2
+        sequences_0 = np.array(all_seqs[:half_idx])
+        sequences_1 = np.array(all_seqs[half_idx:])
+        print(f"DEBUG: Using alternate assignment method (split evenly)")
+    
+    else:
+        # Default fallback
+        print(f"Unknown group method '{group_method}', defaulting to CDS prefix")
+        if full_cds.startswith('group_1'):
+            sequences_0 = np.array([])
+            sequences_1 = np.array(all_seqs)
+        else:
+            sequences_0 = np.array(all_seqs)
+            sequences_1 = np.array([])
+    
+    # Print group assignment information
+    print(f"Sequences in group 0: {len(sequences_0)}, group 1: {len(sequences_1)}")
     all_sequences = np.concatenate([sequences_0, sequences_1])
     n0, n1 = len(sequences_0), len(sequences_1)
     matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
@@ -501,26 +636,75 @@ def analyze_cds_parallel(args):
         else:
             result.update(analysis_worker((all_sequences, n0, pairwise_dict, sequences_0, sequences_1)))
 
-    save_cached_result(transcript, result)
+    # Save result using coordinates if available
+    if coordinates:
+        save_cached_result(coordinates, result)
+    else:
+        save_cached_result(transcript, result)
     return transcript, result
 
 def parse_cds_coordinates(cds_name):
-    """Extract chromosome and coordinates from CDS name."""
+    """Extract chromosome and coordinates from CDS name.
+    
+    Returns:
+        Tuple of (chrom, start, end) or (None, None, None) if parsing fails.
+    """
     try:
         if ':' in cds_name:
+            # Format: chr1:12345-67890
             chrom, coords = cds_name.split(':')
             start, end = map(int, coords.split('-'))
-        else:
+        elif 'chr_' in cds_name and 'start_' in cds_name and 'end_' in cds_name:
+            # Universal format: chr_8_start_4301022_end_15598379
             parts = cds_name.split('_')
-            chr_index = parts.index('chr')
-            start_index = parts.index('start')
-            end_index = parts.index('end')
-            chrom = 'chr' + parts[chr_index + 1]
-            start = int(parts[start_index + 1])
-            end = int(parts[end_index + 1])
+            # Find indices of the coordinate markers
+            chr_indices = [i for i, part in enumerate(parts) if part == 'chr']
+            start_indices = [i for i, part in enumerate(parts) if part == 'start']
+            end_indices = [i for i, part in enumerate(parts) if part == 'end']
+            
+            if chr_indices and start_indices and end_indices:
+                chr_index = chr_indices[0]
+                start_index = start_indices[0]
+                end_index = end_indices[0]
+                
+                # Get chromosome number
+                chr_num = parts[chr_index + 1]
+                chrom = 'chr' + chr_num
+                
+                # Get start and end
+                start = int(parts[start_index + 1])
+                
+                # Handle end position (might be at the end without underscore)
+                if end_index + 1 < len(parts):
+                    end = int(parts[end_index + 1])
+                else:
+                    # End might be the last element without underscore
+                    remaining = parts[-1]
+                    end = int(remaining)
+                
+                # Create universal coordinate key for future reference
+                universal_key = f"chr_{chr_num}_start_{start}_end_{end}"
+                if universal_key != cds_name:
+                    print(f"Standardized coordinates to {universal_key}")
+            else:
+                return None, None, None
+        else:
+            # Legacy format with underscores
+            parts = cds_name.split('_')
+            if 'chr' in parts and 'start' in parts and 'end' in parts:
+                chr_index = parts.index('chr')
+                start_index = parts.index('start')
+                end_index = parts.index('end')
+                
+                chrom = 'chr' + parts[chr_index + 1]
+                start = int(parts[start_index + 1])
+                end = int(parts[end_index + 1])
+            else:
+                return None, None, None
+                
         return chrom, start, end
     except Exception as e:
-        print(f"Error parsing {cds_name}: {str(e)}")
+        print(f"Error parsing coordinates in {cds_name}: {str(e)}")
         return None, None, None
 
 CLUSTERS_CACHE_PATH = CACHE_DIR / "clusters.pkl"
@@ -539,40 +723,83 @@ def save_clusters_cache(clusters):
         pickle.dump(clusters, f)
 
 def build_overlap_clusters(results_df):
-    """Build clusters of overlapping CDS regions."""
+    """Build clusters of overlapping CDS regions using universal genomic coordinates."""
+    # Filter out rows with missing coordinates
+    valid_df = results_df.dropna(subset=['chrom', 'start', 'end'])
+    
+    # Create a mapping of transcript to coordinate info
+    transcript_coords = {}
+    for _, row in valid_df.iterrows():
+        # Create universal coordinate key
+        chr_num = row['chrom'].replace('chr', '')
+        universal_key = f"chr_{chr_num}_start_{int(row['start'])}_end_{int(row['end'])}"
+        
+        transcript_coords[row['CDS']] = {
+            'chrom': row['chrom'],
+            'start': int(row['start']), 
+            'end': int(row['end']),
+            'full_cds': row['full_cds'],
+            'universal_key': universal_key
+        }
+    
+    # Sort coordinates for clustering
     cds_coords = [
-        (chrom, start, end, cds)
-        for chrom, start, end, cds in results_df[['chrom', 'start', 'end', 'full_cds']].values
-        if chrom is not None
+        (chrom, start, end, universal_key, cds)
+        for cds, info in transcript_coords.items()
+        for chrom, start, end, universal_key in [(info['chrom'], info['start'], info['end'], info['universal_key'])]
     ]
-    cds_coords.sort(key=lambda x: (x[0], x[1]))
+    cds_coords.sort(key=lambda x: (x[0], x[1]))  # Sort by chromosome, then start position
+    
+    # Build clusters of overlapping regions
     clusters = {}
     cluster_id = 0
-    active = []
+    active = []  # (chrom, end, cluster_id)
 
-    for chrom, start, end, cds in cds_coords:
+    for chrom, start, end, universal_key, cds in cds_coords:
+        # Remove active clusters that end before this region's start
         active = [(c, e, cid) for c, e, cid in active if not (c == chrom and e < start)]
+        
+        # Find all clusters that overlap with this region
         overlapping = {cid for c, e, cid in active if c == chrom and e >= start}
+        
         if not overlapping:
-            clusters[cluster_id] = {cds}
+            # Create new cluster
+            clusters[cluster_id] = {universal_key}
             active.append((chrom, end, cluster_id))
             cluster_id += 1
         else:
+            # Add to existing cluster(s) and merge overlapping clusters
             target = min(overlapping)
-            clusters[target].add(cds)
+            clusters[target].add(universal_key)
+            
+            # Merge overlapping clusters
             merged = []
             for c, e, cid in active:
                 if cid in overlapping and cid != target:
                     clusters[target].update(clusters[cid])
                     del clusters[cid]
                 merged.append((c, e, target if cid in overlapping else cid))
+            
+            # Add this region to active list
             merged.append((chrom, end, target))
             active = merged
 
+    # Print cluster statistics
+    print(f"\nBuilt {len(clusters)} clusters from {len(valid_df)} transcripts")
+    cluster_sizes = [len(c) for c in clusters.values()]
+    if cluster_sizes:
+        print(f"Cluster sizes: min={min(cluster_sizes)}, max={max(cluster_sizes)}, avg={sum(cluster_sizes)/len(cluster_sizes):.1f}")
+    
+    # Debug the first few clusters
+    if clusters:
+        print("\nSample cluster contents:")
+        for cluster_id, coords in list(clusters.items())[:3]:
+            print(f"Cluster {cluster_id}: {', '.join(list(coords)[:3])}")
+    
     return clusters
 
 def combine_cluster_evidence(cluster_cdss, results_df, results):
-    """Select the largest CDS by amino acid length from the cluster."""
+    """Select transcripts based on genomic coordinates from the cluster."""
     if not hasattr(combine_cluster_evidence, "_aa_length_map"):
         combine_cluster_evidence._aa_length_map = {}
         combine_cluster_evidence._interval_map = defaultdict(list)
@@ -595,56 +822,90 @@ def combine_cluster_evidence(cluster_cdss, results_df, results):
             for t, length in cds_lengths.items():
                 combine_cluster_evidence._aa_length_map[t] = length / 3.0
 
-    def find_transcript_id_for_cds(cds_name):
-        chrom, start, end = parse_cds_coordinates(cds_name)
+    # Group by universal genomic coordinates
+    valid_results = []
+    for cds in cluster_cdss:
+        # Parse coordinates from the CDS name
+        chrom, start, end = parse_cds_coordinates(cds)
         if chrom is None:
-            return None
-        best_tid, best_len = None, -1
-        for tid, intervals in combine_cluster_evidence._interval_map.items():
-            t_chrom, _ = combine_cluster_evidence._chrom_strand[tid]
-            if t_chrom != chrom:
-                continue
-            merged = []
-            for s, e in sorted(intervals):
-                if not merged or s > merged[-1][1] + 1:
-                    merged.append([s, e])
-                else:
-                    merged[-1][1] = max(merged[-1][1], e)
-            covered, needed = False, start
-            for ms, me in merged:
-                if ms <= needed <= me:
-                    if me >= end:
-                        covered = True
-                        break
-                    needed = me + 1
-                elif ms > needed:
-                    break
-            if covered and (aa_len := combine_cluster_evidence._aa_length_map.get(tid, -1)) > best_len:
-                best_len, best_tid = aa_len, tid
-        return best_tid
-
-    best_cds, best_len = None, -1
-    for c in cluster_cdss:
-        tid = find_transcript_id_for_cds(c)
-        if tid and (aa_len := combine_cluster_evidence._aa_length_map.get(tid, -1)) > best_len:
-            best_len, best_cds = aa_len, c
-
-    if not best_cds:
-        return {'combined_pvalue': np.nan, 'weighted_effect_size': np.nan, 'n_comparisons': 0, 'n_valid_cds': 0, 'cluster_pairs': set()}
-
-    best_transcript = results_df[results_df['full_cds'] == best_cds]['CDS'].iloc[0]
-    chosen = results_df[results_df['CDS'] == best_transcript].dropna(subset=['observed_effect_size', 'p_value'])
-    if chosen.empty:
+            continue
+            
+        # Create universal coordinate key
+        chr_num = chrom.replace('chr', '')
+        universal_key = f"chr_{chr_num}_start_{start}_end_{end}"
+        print(f"Processing cluster item using universal key: {universal_key}")
+        
+        # Find matching rows by coordinates or full_cds
+        coord_matches = results_df[
+            (results_df['chrom'] == chrom) & 
+            (results_df['start'] == start) & 
+            (results_df['end'] == end) &
+            results_df['p_value'].notnull() & 
+            results_df['observed_effect_size'].notnull()
+        ]
+        
+        direct_matches = results_df[
+            (results_df['full_cds'] == cds) & 
+            results_df['p_value'].notnull() & 
+            results_df['observed_effect_size'].notnull()
+        ]
+        
+        # Combine matches, prioritizing coordinate matches
+        matching_rows = pd.concat([coord_matches, direct_matches]).drop_duplicates()
+        
+        if not matching_rows.empty:
+            for _, row in matching_rows.iterrows():
+                transcript = row['CDS']
+                if transcript in results:
+                    valid_results.append((row, transcript, results.get(transcript, {})))
+                    print(f"Found match for {universal_key}: transcript {transcript}")
+    
+    if not valid_results:
         return {'combined_pvalue': np.nan, 'weighted_effect_size': np.nan, 'n_comparisons': 0, 'n_valid_cds': 0, 'cluster_pairs': set()}
     
-    row = chosen.iloc[0]
-    pairs = results.get(best_transcript, {}).get('pairwise_comparisons', set())
+    # Combine results from all valid entries in the cluster
+    combined_p_values = []
+    effect_sizes = []
+    weights = []
+    all_pairs = set()
+    
+    for row, transcript, result_data in valid_results:
+        p_value = row['p_value']
+        effect_size = row['observed_effect_size']
+        pairs = result_data.get('pairwise_comparisons', set())
+        
+        if not np.isnan(p_value) and not np.isnan(effect_size):
+            combined_p_values.append(p_value)
+            effect_sizes.append(effect_size)
+            weights.append(len(pairs))
+            all_pairs.update(pairs)
+    
+    if not combined_p_values:
+        return {'combined_pvalue': np.nan, 'weighted_effect_size': np.nan, 'n_comparisons': 0, 'n_valid_cds': 0, 'cluster_pairs': set()}
+    
+    # If we have only one valid result, use it directly
+    if len(combined_p_values) == 1:
+        return {
+            'combined_pvalue': combined_p_values[0],
+            'weighted_effect_size': effect_sizes[0],
+            'n_comparisons': weights[0],
+            'n_valid_cds': 1,
+            'cluster_pairs': all_pairs
+        }
+    
+    # Combine p-values using Fisher's method
+    statistic, combined_p = stats.combine_pvalues(combined_p_values, method='fisher')
+    
+    # Calculate weighted effect size
+    total_weight = sum(weights)
+    weighted_effect = sum(e * w for e, w in zip(effect_sizes, weights)) / total_weight if total_weight > 0 else np.nan
+    
     return {
-        'combined_pvalue': row['p_value'],
-        'weighted_effect_size': row['observed_effect_size'],
-        'n_comparisons': len(pairs),
-        'n_valid_cds': 1,
-        'cluster_pairs': pairs
+        'combined_pvalue': combined_p,
+        'weighted_effect_size': weighted_effect,
+        'n_comparisons': len(all_pairs),
+        'n_valid_cds': len(combined_p_values),
+        'cluster_pairs': all_pairs
     }
 
 def compute_overall_significance(cluster_results):
@@ -775,29 +1036,159 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     plt.savefig(os.path.join("plots", 'manhattan_plot.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
+def print_group_assignment_table(df):
+    """Print a table showing group assignments by chromosome location."""
+    print("\n=== Group Assignment Summary by Location ===")
+    
+    # Extract chromosome, start, end, and group info from full_cds
+    location_groups = defaultdict(lambda: {'group_0': 0, 'group_1': 0, 'transcripts': []})
+    
+    for transcript, group in df.groupby('CDS'):
+        try:
+            row = group.iloc[0]
+            full_cds = row['full_cds']
+            
+            # Extract chromosome coordinates
+            chrom, start, end = parse_cds_coordinates(full_cds)
+            if chrom is None:
+                continue
+                
+            # Determine group from CDS prefix
+            group_prefix = 'group_0'
+            if full_cds.startswith('group_1'):
+                group_prefix = 'group_1'
+            elif full_cds.startswith('group_0'):
+                group_prefix = 'group_0'
+                
+            location_key = f"{chrom}:{start}-{end}"
+            location_groups[location_key][group_prefix] += 1
+            location_groups[location_key]['transcripts'].append(transcript)
+        except Exception as e:
+            print(f"Error processing {transcript}: {str(e)}")
+    
+    # Create a sorted list of locations
+    sorted_locations = sorted(location_groups.items())
+    
+    # Print the table header
+    print(f"{'Location':<30} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'Transcripts'}")
+    print("-" * 100)
+    
+    # Print each location with group counts
+    total_group_0 = 0
+    total_group_1 = 0
+    
+    for location, counts in sorted_locations:
+        group_0_count = counts['group_0']
+        group_1_count = counts['group_1']
+        total = group_0_count + group_1_count
+        transcript_list = ", ".join(counts['transcripts'])
+        
+        total_group_0 += group_0_count
+        total_group_1 += group_1_count
+        
+        # Truncate transcript list if too long
+        if len(transcript_list) > 50:
+            transcript_list = transcript_list[:47] + "..."
+            
+        print(f"{location:<30} {group_0_count:<10} {group_1_count:<10} {total:<10} {transcript_list}")
+    
+    # Print totals
+    print("-" * 100)
+    print(f"{'TOTAL':<30} {total_group_0:<10} {total_group_1:<10} {total_group_0 + total_group_1:<10}")
+    print(f"\nTotal unique locations: {len(location_groups)}")
+
 def main():
     """Main execution function."""
     start_time = datetime.now()
     print(f"Analysis started at {start_time}")
 
     df = read_and_preprocess_data('all_pairwise_results.csv')
+    
+    # Print group assignment table before processing
+    print_group_assignment_table(df)
+    
     transcript_args = [(df[df['CDS'] == t], t) for t in df['CDS'].unique()]
+    # Track reasons for transcript analysis failures
+    failure_reasons = defaultdict(int)
+    
     results = {}
     with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
         for transcript, result in tqdm(executor.map(analyze_cds_parallel, transcript_args), total=len(transcript_args), desc="Processing transcripts"):
             results[transcript] = result
+            
+            # Check for failure reasons
+            if result.get('p_value') is None or np.isnan(result.get('p_value', np.nan)):
+                if result.get('failure_reason'):
+                    failure_reasons[result['failure_reason']] += 1
+                elif result.get('n0', 0) == 0 or result.get('n1', 0) == 0:
+                    failure_reasons['All sequences in one group'] += 1
+                elif result.get('matrix_0') is None or result.get('matrix_1') is None:
+                    failure_reasons['No valid matrices created'] += 1
+                else:
+                    failure_reasons['Unknown reason'] += 1
 
-    results_df = pd.DataFrame([
-        {'CDS': t, 'full_cds': df[df['CDS'] == t]['full_cds'].iloc[0], **{k: v for k, v in r.items() if k not in ['matrix_0', 'matrix_1', 'pairwise_comparisons']}}
-        for t, r in results.items()
-    ])
-    coords = results_df['full_cds'].apply(parse_cds_coordinates)
-    results_df[['chrom', 'start', 'end']] = pd.DataFrame(coords.tolist(), index=results_df.index)
-    results_df.dropna(subset=['chrom', 'start', 'end'], inplace=True)
+    # Create results dataframe with enhanced coordinate tracking
+    results_data = []
+    for t, r in results.items():
+        # Get the full CDS with genomic coordinates
+        try:
+            full_cds = df[df['CDS'] == t]['full_cds'].iloc[0]
+            chrom, start, end = parse_cds_coordinates(full_cds)
+            
+            # Extract result data excluding large matrix objects
+            result_data = {k: v for k, v in r.items() if k not in ['matrix_0', 'matrix_1', 'pairwise_comparisons']}
+            
+            # Create full entry with coordinates
+            entry = {
+                'CDS': t, 
+                'full_cds': full_cds,
+                'chrom': chrom,
+                'start': start,
+                'end': end,
+                **result_data
+            }
+            results_data.append(entry)
+        except (IndexError, ValueError) as e:
+            print(f"Warning: Couldn't process transcript {t}: {str(e)}")
+    
+    # Create dataframe and validate coordinates
+    results_df = pd.DataFrame(results_data)
+    
+    # Filter out rows with invalid coordinates
+    valid_coords = results_df['chrom'].notnull() & results_df['start'].notnull() & results_df['end'].notnull()
+    if not valid_coords.all():
+        invalid_count = (~valid_coords).sum()
+        print(f"\nWarning: {invalid_count} transcripts had invalid coordinates and will be excluded")
+        results_df = results_df[valid_coords]
+    
+    print(f"\nProcessed {len(results_df)} transcripts with valid coordinates")
 
     valid_df = results_df[results_df['p_value'].notnull() & (results_df['p_value'] > 0)]
-    total_valid = len(valid_df)
-    results_df['bonferroni_p_value'] = (results_df['p_value'] * total_valid).clip(upper=1.0)
+    
+    # Group transcripts by location before Bonferroni correction
+    print("\nGrouping transcripts by genomic location before multiple testing correction...")
+    location_groups = valid_df.groupby(['chrom', 'start', 'end'])
+    unique_locations = len(location_groups)
+    print(f"Found {unique_locations} unique genomic locations among {len(valid_df)} transcripts with valid p-values")
+    
+    # Create a mapping of transcript to its location group
+    transcript_to_group = {}
+    for (chrom, start, end), group_df in location_groups:
+        location_key = f"{chrom}:{start}-{end}"
+        for transcript in group_df['CDS']:
+            transcript_to_group[transcript] = location_key
+    
+    # Apply Bonferroni correction only if there's more than one location
+    if unique_locations > 1:
+        print(f"Applying Bonferroni correction based on {unique_locations} unique locations")
+        results_df['bonferroni_p_value'] = results_df.apply(
+            lambda row: row['p_value'] * unique_locations if row['CDS'] in transcript_to_group else np.nan, 
+            axis=1
+        ).clip(upper=1.0)
+    else:
+        print(f"Only one unique location found - no multiple testing correction needed")
+        results_df['bonferroni_p_value'] = results_df['p_value']
+    
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
     results_df.to_csv(RESULTS_DIR / 'final_results.csv', index=False)
     results_df[['CDS', 'p_value', 'observed_effect_size', 'chrom', 'start', 'end', 'bonferroni_p_value', 'neg_log_p']].to_csv(RESULTS_DIR / 'manhattan_plot_data.csv', index=False)
@@ -823,16 +1214,87 @@ def main():
     valid_results = results_df[results_df['p_value'].notnull()]
     print(f"Total transcripts analyzed: {len(results_df)}")
     print(f"Transcripts with valid p-values: {len(valid_results)}")
+    print(f"Transcripts with failed analyses: {len(results_df) - len(valid_results)}")
     
-    # Print significant results
-    sig_results = valid_results[valid_results['bonferroni_p_value'] < 0.05]
-    print(f"\nSignificant transcripts (Bonferroni p < 0.05): {len(sig_results)}")
-    if not sig_results.empty:
-        print("\nTop 10 significant transcripts:")
-        for i, (_, row) in enumerate(sig_results.sort_values('p_value').head(10).iterrows(), 1):
+    # Print failure reason summary
+    if failure_reasons:
+        print("\n=== Failure Reason Summary ===")
+        for reason, count in sorted(failure_reasons.items(), key=lambda x: x[1], reverse=True):
+            print(f"- {reason}: {count} transcripts")
+        print()
+    
+    # Group transcripts by genomic coordinates for display
+    grouped_by_location = valid_results.groupby(['chrom', 'start', 'end'])
+    print(f"Unique genomic locations: {len(grouped_by_location)}")
+    
+    # Print all unique genomic locations with valid p-values
+    print("\nAll unique genomic locations with valid p-values:")
+    for i, ((chrom, start, end), group) in enumerate(sorted(grouped_by_location, key=lambda x: x[1]['p_value'].iloc[0]), 1):
+        # Take first transcript in group for representative info
+        row = group.iloc[0]
+        gene_symbol, gene_name, _ = get_gene_annotation(row['full_cds'])
+        gene_info = f" ({gene_symbol}: {gene_name})" if gene_symbol and gene_name != "Unknown" else ""
+        coords_info = f"{chrom}:{start}-{end}"
+        
+        p_value = row['p_value']
+        effect_size = row['observed_effect_size']
+        bonferroni_p = row['bonferroni_p_value']
+        num_transcripts = len(group)
+        
+        # Create a string with all transcript IDs in this location
+        transcript_ids = ", ".join(group['CDS'].values)
+        
+        print(f"{i}. {coords_info}{gene_info}")
+        print(f"   Transcripts ({num_transcripts}): {transcript_ids}")
+        
+        # Show p-value information (different format if no correction was applied)
+        if len(grouped_by_location) == 1:
+            print(f"   p-value: {p_value:.6e}, effect size: {effect_size:.3f}")
+            print(f"   (No multiple testing correction needed for single location)")
+        else:
+            print(f"   p-value: {p_value:.6e}, corrected p-value: {bonferroni_p:.6e}, effect size: {effect_size:.3f}")
+        print()
+    
+    # Determine significant results based on p-value threshold
+    p_value_threshold = 0.05
+    
+    # For a single location, use raw p-value; for multiple locations, use Bonferroni-corrected
+    if len(grouped_by_location) == 1:
+        sig_results = valid_results[valid_results['p_value'] < p_value_threshold]
+        sig_locations = set((row['chrom'], row['start'], row['end']) for _, row in sig_results.iterrows())
+        print(f"\nSignificant locations (p < {p_value_threshold}): {len(sig_locations)}")
+    else:
+        sig_results = valid_results[valid_results['bonferroni_p_value'] < p_value_threshold]
+        sig_locations = set((row['chrom'], row['start'], row['end']) for _, row in sig_results.iterrows())
+        print(f"\nSignificant locations after Bonferroni correction (p < {p_value_threshold}): {len(sig_locations)}")
+    
+    if sig_locations:
+        print("\nSignificant genomic locations:")
+        
+        # Group significant results by location
+        for i, loc in enumerate(sorted(sig_locations), 1):
+            chrom, start, end = loc
+            group = valid_results[(valid_results['chrom'] == chrom) & 
+                              (valid_results['start'] == start) & 
+                              (valid_results['end'] == end)]
+            
+            # Take first transcript in group for representative info
+            row = group.iloc[0]
             gene_symbol, gene_name, _ = get_gene_annotation(row['full_cds'])
             gene_info = f" ({gene_symbol}: {gene_name})" if gene_symbol and gene_name != "Unknown" else ""
-            print(f"{i}. {row['CDS']}{gene_info} - p-value: {row['p_value']:.2e}, effect size: {row['observed_effect_size']:.3f}")
+            coords_info = f"{chrom}:{start}-{end}"
+            
+            p_value = row['p_value']
+            effect_size = row['observed_effect_size']
+            bonferroni_p = row['bonferroni_p_value']
+            
+            print(f"{i}. {coords_info}{gene_info}")
+            
+            if len(grouped_by_location) == 1:
+                print(f"   p-value: {p_value:.6e}, effect size: {effect_size:.3f}")
+            else:
+                print(f"   p-value: {p_value:.6e}, corrected p-value: {bonferroni_p:.6e}, effect size: {effect_size:.3f}")
+            print()
     
     # Print overall results
     print("\nOverall analysis results:")
