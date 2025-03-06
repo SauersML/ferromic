@@ -173,6 +173,15 @@ def analysis_worker(args):
         effect_size = result.fe_params['group']
         p_value = result.pvalues['group']
         std_err = result.bse['group']
+        
+        # Print the statistical analysis results for this transcript
+        print(f"\nStatistical Analysis Results for transcript:")
+        print(f"Effect size: {effect_size:.4f}")
+        print(f"P-value: {p_value:.4e}")
+        print(f"Standard error: {std_err:.4f}")
+        print(f"Group 0 comparisons: {(df['group'] == 0).sum()}")
+        print(f"Group 1 comparisons: {(df['group'] == 1).sum()}")
+        
     except Exception as e:
         print(f"Model fitting failed with error: {str(e)}")
 
@@ -261,13 +270,32 @@ def get_gene_annotation(full_cds, cache_file='gene_name_cache.json'):
             if not response.ok:
                 return None, f"ERROR: API request failed with status {response.status_code}"
             data = response.json()
-            track_data = data.get('knownGene', data) if isinstance(data, list) else data
-            if not track_data:
+            
+            # Handle different response structures
+            if isinstance(data, dict) and 'knownGene' in data:
+                track_data = data['knownGene']
+            else:
+                track_data = data
+            
+            # Handle case where track_data is a string
+            if isinstance(track_data, str):
+                return None, f"ERROR: Unexpected API response format: {track_data}"
+                
+            # Handle case where track_data is empty
+            if not track_data or (isinstance(track_data, list) and len(track_data) == 0):
                 return None, "No gene data found in response"
-            overlapping_genes = [
-                gene for gene in track_data
-                if gene.get('chromStart', 0) <= end and gene.get('chromEnd', 0) >= start
-            ]
+                
+            # Filter for overlapping genes
+            overlapping_genes = []
+            if isinstance(track_data, list):
+                for gene in track_data:
+                    if not isinstance(gene, dict):
+                        continue
+                    gene_start = gene.get('chromStart', 0)
+                    gene_end = gene.get('chromEnd', 0)
+                    if gene_start <= end and gene_end >= start:
+                        overlapping_genes.append(gene)
+            
             return overlapping_genes if overlapping_genes else None, None
         except Exception as e:
             return None, f"ERROR: API query failed: {str(e)}"
@@ -333,6 +361,7 @@ def create_visualization(matrix_0, matrix_1, transcript, result, full_cds):
 
     if matrix_0_full is None or matrix_1_full is None:
         print(f"No data available for transcript: {transcript}")
+        # We can't visualize without valid matrices
         return
 
     color_minus_one = (242/255, 235/255, 250/255)
@@ -418,8 +447,18 @@ def create_visualization(matrix_0, matrix_1, transcript, result, full_cds):
 def analyze_cds_parallel(args):
     """Analyze a single transcript using explicit group assignments."""
     df_cds, transcript = args
+    print(f"\nAnalyzing {transcript}")
     cached_result = load_cached_result(transcript)
     if cached_result is not None:
+        print(f"Using cached result for {transcript}")
+        # If we have a cached result with p-value, print it
+        if 'p_value' in cached_result and not np.isnan(cached_result['p_value']):
+            print(f"\nStatistical Analysis Results for {transcript} (from cache):")
+            print(f"Effect size: {cached_result['observed_effect_size']:.4f}")
+            print(f"P-value: {cached_result['p_value']:.4e}")
+            print(f"Standard error: {cached_result['std_err']:.4f}")
+            print(f"Group 0 comparisons: {cached_result['num_comp_group_0']}")
+            print(f"Group 1 comparisons: {cached_result['num_comp_group_1']}")
         return transcript, cached_result
 
     pairwise_dict = {(row['Seq1'], row['Seq2']): row['omega'] for _, row in df_cds.iterrows()}
@@ -773,8 +812,40 @@ def main():
 
     create_manhattan_plot(results_df)
     for _, row in results_df[results_df['bonferroni_p_value'] < 0.05].sort_values('p_value').head(30).iterrows():
-        create_visualization(results[row['CDS']]['matrix_0'], results[row['CDS']]['matrix_1'], row['CDS'], row, row['full_cds'])
+        try:
+            create_visualization(results[row['CDS']]['matrix_0'], results[row['CDS']]['matrix_1'], row['CDS'], row, row['full_cds'])
+        except (KeyError, TypeError) as e:
+            print(f"Could not create visualization for {row['CDS']}: {str(e)}")
+            # Continue with the next transcript rather than failing completely
 
+    # Print statistical analysis summary
+    print("\n=== Statistical Analysis Summary ===")
+    valid_results = results_df[results_df['p_value'].notnull()]
+    print(f"Total transcripts analyzed: {len(results_df)}")
+    print(f"Transcripts with valid p-values: {len(valid_results)}")
+    
+    # Print significant results
+    sig_results = valid_results[valid_results['bonferroni_p_value'] < 0.05]
+    print(f"\nSignificant transcripts (Bonferroni p < 0.05): {len(sig_results)}")
+    if not sig_results.empty:
+        print("\nTop 10 significant transcripts:")
+        for i, (_, row) in enumerate(sig_results.sort_values('p_value').head(10).iterrows(), 1):
+            gene_symbol, gene_name, _ = get_gene_annotation(row['full_cds'])
+            gene_info = f" ({gene_symbol}: {gene_name})" if gene_symbol and gene_name != "Unknown" else ""
+            print(f"{i}. {row['CDS']}{gene_info} - p-value: {row['p_value']:.2e}, effect size: {row['observed_effect_size']:.3f}")
+    
+    # Print overall results
+    print("\nOverall analysis results:")
+    with open(RESULTS_DIR / 'overall_results.json', 'r') as f:
+        overall = json.load(f)
+    for key, value in overall.items():
+        if key in ['overall_pvalue', 'overall_pvalue_fisher', 'overall_pvalue_stouffer']:
+            print(f"  {key}: {value:.2e}" if value is not None else f"  {key}: None")
+        elif isinstance(value, (int, float)) and value is not None:
+            print(f"  {key}: {value:.3f}")
+        else:
+            print(f"  {key}: {value}")
+    
     print(f"\nAnalysis completed at {datetime.now()}")
     print(f"Total runtime: {datetime.now() - start_time}")
 
