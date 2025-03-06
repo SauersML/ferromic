@@ -1501,6 +1501,7 @@ def main():
         print(f"Running a single parallel pool for {len(all_pairs_tasks)} comparisons across all CDS.")
         sys.stdout.flush()
         num_processes = min(NUM_PARALLEL, len(all_pairs_tasks))
+        results_done = 0  # Tracks number of processed comparisons for ETA
         with multiprocessing.Pool(processes=num_processes) as pool:
             for result in pool.imap_unordered(process_pair, all_pairs_tasks, chunksize=10):
                 if result is not None:
@@ -1508,8 +1509,10 @@ def main():
                     newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
                     record_tuple = (seq1, seq2, grp1, grp2, dn, ds, omega, cid)
                     db_insert_or_ignore(db_conn, newkey, record_tuple)
-                completed_comparisons = db_count_keys(db_conn)
-                print_eta(completed_comparisons, GLOBAL_COUNTERS['total_comparisons'], ETA_DATA['start_time'], ETA_DATA)
+                results_done += 1  # Increment after each processed result
+                if results_done % 1000 == 0:  # Only update ETA every few results
+                    completed_comparisons = db_count_keys(db_conn)
+                    print_eta(completed_comparisons, GLOBAL_COUNTERS['total_comparisons'], ETA_DATA['start_time'], ETA_DATA)
     else:
         print("No new comparisons to compute across all CDS.")
         sys.stdout.flush()
