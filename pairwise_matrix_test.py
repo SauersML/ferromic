@@ -726,7 +726,9 @@ def create_manhattan_plot(results_df, inv_file='inv_info.csv', top_hits_to_annot
     significant_hits = results_df[valid_mask].sort_values('p_value').head(top_hits_to_annotate)
     texts = []
     for _, row in significant_hits.iterrows():
-        symbol, _, _ = get_gene_annotation(row['full_cds'])
+        annotation = get_gene_annotation(row['full_cds'])
+        symbol = annotation[0] if annotation is not None else None
+
         if symbol and symbol != 'Unknown':
             texts.append(ax.text(row['plot_x'], row['neg_log_p'] + 1, symbol, fontsize=12, ha='center', va='bottom'))
     adjust_text(texts, ax=ax)
