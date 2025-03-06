@@ -1,7 +1,7 @@
 use crate::process::{Variant, ZeroBasedPosition, HaplotypeSide};
 use rayon::iter::IntoParallelIterator;
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet}
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // Define a struct to hold diversity metrics for each genomic site
