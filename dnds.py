@@ -505,7 +505,8 @@ def parse_phy_file_once(filepath):
 
     # Print summary
     print(f"Finished parsing {filepath}. Valid: {data['local_total_seqs']}, "
-          f"Invalid: {data['local_invalid']}, Duplicates found: {data['duplicates_found']}")
+          f"Invalid: {data['local_invalid']}, Stop codons: {data['local_stop_codons']}, "
+          f"Duplicates: {data['local_duplicates']} (found: {data['duplicates_found']})")
 
     return data
 
