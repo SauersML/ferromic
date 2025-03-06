@@ -30,7 +30,6 @@ import sys
 import glob
 import subprocess
 import multiprocessing
-import psutil
 from itertools import combinations
 import pandas as pd
 import numpy as np
@@ -41,7 +40,6 @@ import time
 import logging
 import pickle
 import sqlite3
-from functools import partial
 import hashlib
 from tqdm import tqdm
 
@@ -398,98 +396,118 @@ def parse_codeml_output(outfile_dir):
 
 def parse_phy_file_once(filepath):
     """
-    Parse a .phy file fully, returning a dictionary of:
-        {
-          'sequences': {sample_name: validated_seq, ...},
-          'duplicates_found': bool,
-          'local_invalid': int,
-          'local_stop_codons': int,
-          'local_total_seqs': int,
-          'local_duplicates': int
-        }
-    This function does NOT increment the global counters directly.
-    We store all data in a single structure and only later decide whether to
-    add them to global counters (once we confirm that the file is used).
+    Parse a .phy file with a header line 'N M', where N is the number of sequences
+    and M is the length of each sequence. The next N lines each contain a sample
+    name ending with '_L' or '_R', immediately followed by a sequence of M characters
+    (no whitespace). Returns a dictionary with sequence data and parsing statistics.
     """
     print(f"Parsing phy file (once): {filepath}")
     data = {
-        'sequences': {},
-        'duplicates_found': False,
-        'local_invalid': 0,
-        'local_stop_codons': 0,
-        'local_total_seqs': 0,
-        'local_duplicates': 0
+        'sequences': {},           # {sample_name: sequence}
+        'duplicates_found': False, # Whether duplicates were encountered
+        'local_invalid': 0,        # Count of invalid sequences
+        'local_stop_codons': 0,    # Count of sequences with stop codons
+        'local_total_seqs': 0,     # Count of valid sequences
+        'local_duplicates': 0      # Count of duplicate sequences renamed
     }
 
-    if not os.path.isfile(filepath):
+    if not os.path.exists(filepath):
         print(f"File does not exist: {filepath}")
         return data
 
-    line_pattern = re.compile(r'^([A-Za-z0-9_.]+_[LR01])([ATCGNatcgn-]+)$')
-    with open(filepath, 'r', encoding='utf-8', errors='replace') as file:
-        lines = file.read().strip().split('\n')
-        for line_num, line in enumerate(lines, 1):
-            line = line.strip()
-            if not line:
-                continue
-            match = line_pattern.match(line)
-            if not match:
-                continue
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            # Parse the header
+            header_line = f.readline().strip()
+            if not header_line:
+                print("Empty file or missing header line.")
+                return data
+            parts = header_line.split()
+            if len(parts) != 2:
+                print("Invalid PHYLIP header format (expected 'N M').")
+                return data
+            try:
+                num_seqs = int(parts[0])
+                seq_len = int(parts[1])
+            except ValueError:
+                print("PHYLIP header does not contain valid integers.")
+                return data
 
-            orig_name = match.group(1)
-            sequence = match.group(2)
-            name_parts = orig_name.split('_')
-            if len(name_parts) < 4:
-                # Unexpected sample naming format, skip
-                continue
+            # Parse each sequence line
+            for i in range(num_seqs):
+                line = f.readline().strip()
+                if not line:
+                    print("File ended before reading all sequences.")
+                    break
+                if len(line) < seq_len:
+                    print(f"Skipping line with insufficient length: {len(line)} < {seq_len}")
+                    data['local_invalid'] += 1
+                    continue
 
-            # Derive a short stable sample_name
-            first = name_parts[0][:3]
-            second = name_parts[1][:3]
-            hg_part = name_parts[-2]
-            group = name_parts[-1]
+                # Extract sequence (last seq_len characters)
+                sequence = line[-seq_len:]
+                # Extract sample name (everything before the sequence)
+                orig_name = line[:-seq_len]
 
-            md5_val = hashlib.md5(hg_part.encode('utf-8')).hexdigest()
-            hash_str = md5_val[:2]
-            sample_name = f"{first}{second}{hash_str}_{group}"
+                # Check if name ends with _L or _R
+                if not (orig_name.endswith('_L') or orig_name.endswith('_R')):
+                    print(f"Skipping line with invalid sample name format: {orig_name}")
+                    data['local_invalid'] += 1
+                    continue
 
-            # Check if we have validated this exact sequence for this file.
-            seq_hash = hashlib.md5(sequence.encode('utf-8')).hexdigest()
-            cache_key = (os.path.basename(filepath), sample_name, seq_hash)
+                # Construct short sample name (consistent with prior logic)
+                name_parts = orig_name.split('_')
+                if len(name_parts) < 4:
+                    print(f"Skipping unexpected sample naming: {orig_name}")
+                    data['local_invalid'] += 1
+                    continue
+                first = name_parts[0][:3]
+                second = name_parts[1][:3]
+                hg_part = name_parts[-2]
+                group = name_parts[-1]
+                md5_val = hashlib.md5(hg_part.encode('utf-8')).hexdigest()
+                hash_str = md5_val[:2]
+                sample_name = f"{first}{second}{hash_str}_{group}"
 
-            if cache_key in VALIDATION_CACHE:
-                validated_seq, stop_codon_found = VALIDATION_CACHE[cache_key]
-                print(f"Skipping validation for {sample_name}, found in cache.")
-            else:
-                validated_seq, stop_codon_found = validate_sequence(
-                    sequence, filepath, sample_name, line
-                )
-                VALIDATION_CACHE[cache_key] = (validated_seq, stop_codon_found)
-
-            if validated_seq is None:
-                # Sequence is invalid
-                data['local_invalid'] += 1
-                if stop_codon_found:
-                    data['local_stop_codons'] += 1
-            else:
-                # Valid sequence
-                data['local_total_seqs'] += 1
-                if sample_name in data['sequences']:
-                    data['duplicates_found'] = True
-                    data['local_duplicates'] += 1
-                    # Attempt to rename the sample to avoid collisions
-                    base_name = sample_name[:2] + sample_name[3:]
-                    dup_count = sum(1 for s in data['sequences']
-                                    if s[:2] + s[3:] == base_name)
-                    new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
-                    data['sequences'][new_name] = validated_seq
+                # Validate sequence
+                seq_hash = hashlib.md5(sequence.encode('utf-8')).hexdigest()
+                cache_key = (os.path.basename(filepath), sample_name, seq_hash)
+                if cache_key in VALIDATION_CACHE:
+                    validated_seq, stop_codon_found = VALIDATION_CACHE[cache_key]
+                    print(f"Skipping validation for {sample_name}, found in cache.")
                 else:
-                    data['sequences'][sample_name] = validated_seq
+                    # Placeholder for validate_sequence; adjust as needed
+                    validated_seq, stop_codon_found = validate_sequence(
+                        sequence, filepath, sample_name, line
+                    )
+                    VALIDATION_CACHE[cache_key] = (validated_seq, stop_codon_found)
 
+                if validated_seq is None:
+                    data['local_invalid'] += 1
+                    if stop_codon_found:
+                        data['local_stop_codons'] += 1
+                else:
+                    data['local_total_seqs'] += 1
+                    if sample_name in data['sequences']:
+                        data['duplicates_found'] = True
+                        data['local_duplicates'] += 1
+                        # Rename duplicate
+                        base_name = sample_name[:2] + sample_name[3:]
+                        dup_count = sum(1 for s in data['sequences']
+                                        if s[:2] + s[3:] == base_name)
+                        new_name = sample_name[:2] + str(dup_count) + sample_name[3:]
+                        data['sequences'][new_name] = validated_seq
+                    else:
+                        data['sequences'][sample_name] = validated_seq
+
+    except Exception as e:
+        print(f"Error reading or parsing file {filepath}: {e}")
+
+    # Print summary
     print(f"Finished parsing {filepath}. Valid: {data['local_total_seqs']}, "
           f"Invalid: {data['local_invalid']}, Duplicates found: {data['duplicates_found']}")
-    return data
 
+    return data
 
 # --------------------------------------------------------------------------------
 # CACHING GLOBAL COUNTERS
