@@ -780,13 +780,11 @@ def process_pair(args):
     logging.debug(f"run_codeml result: success={success}")
 
     if not success:
-        print(f"EXIT: Codeml run failed, returning NaN values")
+        print(f"EXIT: Codeml run failed, returning None so it can be retried next time")
         logging.warning(f"run_codeml failed for {seq1_name} vs {seq2_name}")
-        result = (seq1_name, seq2_name, group1, group2, np.nan, np.nan, np.nan, cds_id)
-        print(f"Returning NaN result: {result}")
-        print(f"run_codeml WAS CALLED but failed")
         sys.stdout.flush()
-        return result
+        return None
+
     print(f"run_codeml succeeded, proceeding to parse output")
 
     # Parse CODEML output
