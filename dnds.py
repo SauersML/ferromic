@@ -1367,92 +1367,93 @@ def main():
     all_pairs_tasks = []
     file_info_list = []
 
+    def parallel_handle_file(phy_file):
+        global GLOBAL_COUNTERS, PARSED_PHY, db_conn, args
+        logging.info(f"Processing file: {phy_file}")
+        print(f"Processing file: {phy_file}")
+        sys.stdout.flush()
+    
+        cds_id = os.path.basename(phy_file).replace('.phy', '')
+        mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
+        output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}.csv')
+        haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
+    
+        # Skip if output already exists
+        if os.path.exists(output_csv):
+            print(f"Output {output_csv} already exists, skipping.")
+            sys.stdout.flush()
+            return None, []
+    
+        parsed_data = PARSED_PHY.get(phy_file, None)
+        if not parsed_data or not parsed_data['sequences']:
+            print(f"No valid sequences for {phy_file}, skipping.")
+            sys.stdout.flush()
+            return None, []
+    
+        # Update counters for this file
+        GLOBAL_COUNTERS['invalid_seqs'] += parsed_data['local_invalid']
+        GLOBAL_COUNTERS['stop_codons'] += parsed_data['local_stop_codons']
+        GLOBAL_COUNTERS['total_seqs'] += parsed_data['local_total_seqs']
+        GLOBAL_COUNTERS['duplicates'] += parsed_data['local_duplicates']
+    
+        sequences = parsed_data['sequences']
+        group_num_match = re.search(r'^group_(\d+)_', os.path.basename(phy_file))
+        if not group_num_match:
+            print("Could not parse group number from filename. Defaulting to group=0.")
+            group_num = 0
+        else:
+            group_num = int(group_num_match.group(1))
+    
+        sample_groups = {sname: group_num for sname in sequences.keys()}
+    
+        # Generate all pairs
+        if COMPARE_BETWEEN_GROUPS:
+            all_samples = list(sample_groups.keys())
+            all_pairs = list(combinations(all_samples, 2))
+        else:
+            group_samples = list(sample_groups.keys())
+            all_pairs = list(combinations(group_samples, 2))
+    
+        if not all_pairs:
+            print(f"No pairs to compare for {phy_file}, skipping.")
+            sys.stdout.flush()
+            return None, []
+    
+        temp_dir = os.path.join(args.output_dir, 'temp', cds_id)
+        os.makedirs(temp_dir, exist_ok=True)
+    
+        # Gather only those pairs not in DB
+        to_compute = []
+        for pair in all_pairs:
+            check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
+            if not db_has_key(db_conn, check_key):
+                to_compute.append(pair)
+    
+        print(f"File {phy_file} has {len(all_pairs)} total pairs, {len(to_compute)} remain to compute.")
+        sys.stdout.flush()
+    
+        # Prepare to store info for later CSV creation
+        info_entry = {
+            'phy_file': phy_file,
+            'cds_id': cds_id,
+            'output_csv': output_csv,
+            'haplotype_csv': haplotype_output_csv,
+            'all_pairs': all_pairs,
+            'sequences': sequences,
+            'sample_groups': sample_groups
+        }
+    
+        # Build tasks for the global pool
+        tasks = []
+        for pair in to_compute:
+            task_args = (pair, sequences, sample_groups, cds_id, args.codeml_path, temp_dir, None)
+            tasks.append(task_args)
+    
+        return info_entry, tasks
+    
     with multiprocessing.Pool(processes=min(NUM_PARALLEL, len(final_phy_files))) as pool:
-        def parallel_handle_file(phy_file):
-            logging.info(f"Processing file: {phy_file}")
-            print(f"Processing file: {phy_file}")
-            sys.stdout.flush()
-
-            cds_id = os.path.basename(phy_file).replace('.phy', '')
-            mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
-            output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}.csv')
-            haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
-
-            # Skip if output already exists
-            if os.path.exists(output_csv):
-                print(f"Output {output_csv} already exists, skipping.")
-                sys.stdout.flush()
-                return None, []
-
-            parsed_data = PARSED_PHY.get(phy_file, None)
-            if not parsed_data or not parsed_data['sequences']:
-                print(f"No valid sequences for {phy_file}, skipping.")
-                sys.stdout.flush()
-                return None, []
-
-            # Update counters for this file
-            GLOBAL_COUNTERS['invalid_seqs'] += parsed_data['local_invalid']
-            GLOBAL_COUNTERS['stop_codons'] += parsed_data['local_stop_codons']
-            GLOBAL_COUNTERS['total_seqs'] += parsed_data['local_total_seqs']
-            GLOBAL_COUNTERS['duplicates'] += parsed_data['local_duplicates']
-
-            sequences = parsed_data['sequences']
-            group_num_match = re.search(r'^group_(\d+)_', os.path.basename(phy_file))
-            if not group_num_match:
-                print("Could not parse group number from filename. Defaulting to group=0.")
-                group_num = 0
-            else:
-                group_num = int(group_num_match.group(1))
-
-            sample_groups = {sname: group_num for sname in sequences.keys()}
-
-            # Generate all pairs
-            if COMPARE_BETWEEN_GROUPS:
-                all_samples = list(sample_groups.keys())
-                all_pairs = list(combinations(all_samples, 2))
-            else:
-                group_samples = list(sample_groups.keys())
-                all_pairs = list(combinations(group_samples, 2))
-
-            if not all_pairs:
-                print(f"No pairs to compare for {phy_file}, skipping.")
-                sys.stdout.flush()
-                return None, []
-
-            temp_dir = os.path.join(args.output_dir, 'temp', cds_id)
-            os.makedirs(temp_dir, exist_ok=True)
-
-            # Gather only those pairs not in DB
-            to_compute = []
-            for pair in all_pairs:
-                check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
-                if not db_has_key(db_conn, check_key):
-                    to_compute.append(pair)
-
-            print(f"File {phy_file} has {len(all_pairs)} total pairs, {len(to_compute)} remain to compute.")
-            sys.stdout.flush()
-
-            # Prepare to store info for later CSV creation
-            info_entry = {
-                'phy_file': phy_file,
-                'cds_id': cds_id,
-                'output_csv': output_csv,
-                'haplotype_csv': haplotype_output_csv,
-                'all_pairs': all_pairs,
-                'sequences': sequences,
-                'sample_groups': sample_groups
-            }
-
-            # Build tasks for the global pool
-            tasks = []
-            for pair in to_compute:
-                task_args = (pair, sequences, sample_groups, cds_id, args.codeml_path, temp_dir, None)
-                tasks.append(task_args)
-
-            return info_entry, tasks
-
         results = pool.map(parallel_handle_file, final_phy_files)
-
+    
     for res in results:
         if res is not None:
             info_entry, tasks = res
