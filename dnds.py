@@ -392,7 +392,7 @@ def parse_codeml_output(outfile_dir):
 
 def load_temp_dir_results(temp_dir, db_conn):
     """
-    Scan paml_output/temp subdirectories for existing CODEML results. If valid, insert them
+    Scan /dev/shm/paml_output/temp subdirectories for existing CODEML results. If valid, insert them
     into the DB so we can skip re-running those pairs in future steps. If invalid or incomplete,
     do not insert, so they will be re-run.
     """
@@ -1009,7 +1009,7 @@ def main():
     # We do NOT change how codeml is discovered, to keep environment consistent
     codeml_inferred = os.path.abspath(os.path.join(script_dir, '..', 'paml', 'bin', 'codeml'))
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
-    parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
+    parser.add_argument('--output_dir', type=str, default='/dev/shm/paml_output', help='Directory to store output files.')
     parser.add_argument('--codeml_path', type=str, default=codeml_inferred, help='Path to codeml executable.')
     global args
     args = parser.parse_args()
