@@ -1,411 +1,442 @@
-import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
-from pathlib import Path
+import re
+from collections import defaultdict
+from tqdm.auto import tqdm
+import warnings
 import os
-import time
-from scipy.stats import mannwhitneyu, gaussian_kde
+import json
+from datetime import datetime
+from scipy import stats
+import requests
+from urllib.parse import urlencode
+from multiprocessing import cpu_count
+from concurrent.futures import ProcessPoolExecutor
+import statsmodels.api as sm
+from statsmodels.regression.mixed_linear_model import MixedLM
 
-# Constants
-MIN_LENGTH = 1_000_000  # Minimum sequence length (1M bp)
-EDGE_SIZE = 250_000     # Number of positions from each edge
-MAX_PLOT_POINTS = 100_000  # Downsample limit for plotting
-BW_METHOD = 0.5  # Bandwidth method for KDE
-LOGSPACE_POINTS = 2000  # Number of points for logspace in KDE plots
+# Suppress warnings
+warnings.filterwarnings('ignore')
 
-def parse_header(line):
+def read_and_preprocess_data(file_path):
+    """Read and preprocess the CSV file."""
+    print("Reading data...")
+    df = pd.read_csv(file_path)
+    
+    # Store original CDS as full_cds
+    df['full_cds'] = df['CDS']
+    
+    # Extract transcript ID, chromosome, start, and end positions from CDS
+    df['group'] = df['CDS'].apply(lambda x: 1 if x.startswith('group_1') else 0)
+    
+    # Extract coordinates using regex
+    coord_pattern = r'chr_(\w+)_start_(\d+)_end_(\d+)'
+    coords = df['CDS'].str.extract(coord_pattern)
+    df['chrom'] = 'chr' + coords[0]
+    df['start'] = pd.to_numeric(coords[1])
+    df['end'] = pd.to_numeric(coords[2])
+    
+    # Extract transcript ID
+    transcript_pattern = r'(ENST\d+\.\d+)'
+    df['transcript_id'] = df['CDS'].str.extract(transcript_pattern)[0]
+    
+    # Convert omega to numeric, coerce non-numeric to NaN
+    df['omega'] = pd.to_numeric(df['omega'], errors='coerce')
+    
+    # Filter valid omega values
+    df = df[
+        (df['omega'] != -1) &
+        (df['omega'] != 99)
+    ].dropna(subset=['omega'])
+
+    print(f"Total valid comparisons: {len(df)}")
+    print(f"Unique coordinates found: {df.groupby(['chrom', 'start', 'end']).ngroups}")
+    return df
+
+def get_pairwise_value(seq1, seq2, pairwise_dict):
+    """Get omega value for a pair of sequences."""
+    key = (seq1, seq2) if (seq1, seq2) in pairwise_dict else (seq2, seq1)
+    val = pairwise_dict.get(key)
+    return val
+
+def create_matrices(sequences_0, sequences_1, pairwise_dict):
+    """Create matrices for two groups based on sequence assignments."""
+    n0, n1 = len(sequences_0), len(sequences_1)
+    
+    if n0 == 0 and n1 == 0:
+        return None, None
+        
+    matrix_0 = np.full((n0, n0), np.nan) if n0 > 0 else None
+    matrix_1 = np.full((n1, n1), np.nan) if n1 > 0 else None
+
+    # Fill matrix 0
+    if n0 > 0:
+        for i in range(n0):
+            for j in range(i + 1, n0):
+                val = get_pairwise_value(sequences_0[i], sequences_0[j], pairwise_dict)
+                if val is not None:
+                    matrix_0[i, j] = matrix_0[j, i] = float(val)
+
+    # Fill matrix 1
+    if n1 > 0:
+        for i in range(n1):
+            for j in range(i + 1, n1):
+                val = get_pairwise_value(sequences_1[i], sequences_1[j], pairwise_dict)
+                if val is not None:
+                    matrix_1[i, j] = matrix_1[j, i] = float(val)
+
+    return matrix_0, matrix_1
+
+def get_gene_info(gene_symbol):
+    """Get human-readable gene info from MyGene.info using gene symbol."""
+    try:
+        url = f"http://mygene.info/v3/query?q=symbol:{gene_symbol}&species=human&fields=name"
+        response = requests.get(url, timeout=10)
+        if response.ok:
+            data = response.json()
+            if data.get('hits') and len(data['hits']) > 0:
+                return data['hits'][0].get('name', 'Unknown')
+    except Exception as e:
+        print(f"Error fetching gene info: {str(e)}")
+    return 'Unknown'
+
+def get_gene_annotation(coordinates):
     """
-    Parse a header line starting with '>' for filtered theta/pi sequences.
-
-    Args:
-        line (str): Header line.
-
-    Returns:
-        tuple: (metric, length, full_header) or None if not filtered theta/pi ≥ MIN_LENGTH.
+    Get gene annotation for a genomic location.
+    Returns (gene_symbol, gene_name).
     """
-    if not line.startswith(">") or "filtered" not in line.lower():
-        return None
-    header = line[1:].strip()
-    parts = header.split('_')
-    metric = None
-    if "theta" in header.lower():
-        metric = "theta"
-    elif "pi" in header.lower():
-        metric = "pi"
-    else:
-        return None
+    try:
+        # Parse coordinates
+        match = re.search(r'chr_(\w+)_start_(\d+)_end_(\d+)', coordinates)
+        if not match:
+            return None, None
+            
+        chrom, start, end = match.groups()
+        chrom = 'chr' + chrom
+        start, end = int(start), int(end)
+        
+        # Query UCSC API
+        base_url = "https://api.genome.ucsc.edu/getData/track"
+        params = {'genome': 'hg38', 'track': 'knownGene', 'chrom': chrom, 'start': start, 'end': end}
+        
+        response = requests.get(f"{base_url}?{urlencode(params)}", timeout=10)
+        if not response.ok:
+            return None, None
+            
+        data = response.json()
+        
+        # Handle different response structures
+        track_data = data.get('knownGene', data)
+        
+        if isinstance(track_data, str) or not track_data:
+            return None, None
+            
+        # Find overlapping genes
+        overlapping_genes = []
+        if isinstance(track_data, list):
+            for gene in track_data:
+                if not isinstance(gene, dict):
+                    continue
+                gene_start = gene.get('chromStart', 0)
+                gene_end = gene.get('chromEnd', 0)
+                if gene_start <= end and gene_end >= start:
+                    overlapping_genes.append(gene)
+        
+        if not overlapping_genes:
+            return None, None
+            
+        # Get the best overlapping gene
+        best_gene = max(
+            overlapping_genes,
+            key=lambda gene: max(0, min(gene.get('chromEnd', 0), end) - max(gene.get('chromStart', 0), start))
+        )
+        
+        symbol = best_gene.get('geneName', 'Unknown')
+        if symbol in ['none', None] or symbol.startswith('ENSG'):
+            for gene in overlapping_genes:
+                potential_symbol = gene.get('geneName')
+                if potential_symbol and potential_symbol != 'none' and not potential_symbol.startswith('ENSG'):
+                    symbol = potential_symbol
+                    break
+                    
+        name = get_gene_info(symbol)
+        return symbol, name
+        
+    except Exception as e:
+        print(f"Error in gene annotation: {str(e)}")
+        return None, None
+
+def analysis_worker(args):
+    """Mixed effects analysis for a single coordinate with crossed random effects."""
+    all_sequences, pairwise_dict, sequences_0, sequences_1 = args
+    
+    n0, n1 = len(sequences_0), len(sequences_1)
+    
+    # Check if we only have sequences in one group
+    if n0 == 0 or n1 == 0:
+        group_with_data = '0' if n1 == 0 else '1'
+        print(f"All sequences in group {group_with_data}, need both groups for comparison.")
+        return {
+            'effect_size': np.nan,
+            'p_value': np.nan,
+            'n0': n0,
+            'n1': n1,
+            'num_comp_group_0': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_0 and seq2 in sequences_0),
+            'num_comp_group_1': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_1 and seq2 in sequences_1),
+            'std_err': np.nan,
+            'failure_reason': f"All sequences in group {group_with_data}"
+        }
+    
+    # Prepare data for mixed-model analysis
+    data = []
+    for (seq1, seq2), omega in pairwise_dict.items():
+        if seq1 in sequences_0 and seq2 in sequences_0:
+            group = 0
+        elif seq1 in sequences_1 and seq2 in sequences_1:
+            group = 1
+        else:
+            continue
+        data.append({
+            'omega_value': omega,
+            'group': group,
+            'seq1': seq1,
+            'seq2': seq2
+        })
+
+    df = pd.DataFrame(data)
+    
+    # Initialize values
+    effect_size = np.nan
+    p_value = np.nan
+    std_err = np.nan
+    failure_reason = None
+
+    # Check for valid data
+    if df.empty or df['group'].nunique() < 2 or df['omega_value'].nunique() < 2:
+        if df.empty:
+            failure_reason = "No valid pairwise comparisons found"
+        elif df['group'].nunique() < 2:
+            failure_reason = "Missing one of the groups in pairwise comparisons"
+        elif df['omega_value'].nunique() < 2:
+            failure_reason = "Not enough omega value variation for statistical analysis"
+        
+        print(f"WARNING: {failure_reason}")
+        
+        return {
+            'effect_size': effect_size,
+            'p_value': p_value,
+            'n0': n0,
+            'n1': n1,
+            'num_comp_group_0': (df['group'] == 0).sum() if not df.empty else 0,
+            'num_comp_group_1': (df['group'] == 1).sum() if not df.empty else 0,
+            'std_err': std_err,
+            'failure_reason': failure_reason
+        }
+
+    # Categorize sequences for random effects modeling
+    df['seq1_code'] = pd.Categorical(df['seq1']).codes
+    df['seq2_code'] = pd.Categorical(df['seq2']).codes
 
     try:
-        start_idx = parts.index("start")
-        end_idx = parts.index("end")
-        start = int(parts[start_idx + 1])
-        end = int(parts[end_idx + 1])
-        length = end - start + 1  # Inclusive range
-        if length >= MIN_LENGTH:
-            return metric, length, header
-        return None
-    except (ValueError, IndexError):
-        return None
+        # Set up mixed model with sequence random effects
+        df['groups'] = 1
+        vc = {
+            'seq1': '0 + C(seq1_code)',
+            'seq2': '0 + C(seq2_code)'
+        }
+        
+        # Fit mixed model
+        model = MixedLM.from_formula(
+            'omega_value ~ group',
+            groups='groups',
+            vc_formula=vc,
+            re_formula='0',
+            data=df
+        )
+        result = model.fit(reml=False)
+        
+        # Extract results
+        effect_size = result.fe_params['group']
+        p_value = result.pvalues['group']
+        std_err = result.bse['group']
+        
+    except Exception as e:
+        failure_reason = f"Statistical model error: {str(e)[:100]}..."
+        print(f"Model fitting failed with error: {str(e)}")
 
-def count_sequences(file_path):
-    """
-    First pass: Count filtered sequences and total sizes for pre-allocation.
+    return {
+        'effect_size': effect_size,
+        'p_value': p_value,
+        'n0': n0,
+        'n1': n1,
+        'std_err': std_err,
+        'num_comp_group_0': (df['group'] == 0).sum(),
+        'num_comp_group_1': (df['group'] == 1).sum(),
+        'failure_reason': failure_reason
+    }
 
-    Args:
-        file_path (Path): Input file path.
-
-    Returns:
-        tuple: Counts and total sizes for theta/pi edge/middle.
-    """
-    num_theta = 0
-    num_pi = 0
-    theta_edge_total = 0
-    theta_middle_total = 0
-    pi_edge_total = 0
-    pi_middle_total = 0
-
-    with open(file_path, 'r') as f:
-        while True:
-            try:
-                header = next(f).strip()
-                result = parse_header(header)
-                if result:
-                    _, length, _ = result
-                    if length >= 2 * EDGE_SIZE:
-                        if "theta" in result[0]:
-                            num_theta += 1
-                            theta_edge_total += 2 * EDGE_SIZE
-                            theta_middle_total += length - 2 * EDGE_SIZE
-                        elif "pi" in result[0]:
-                            num_pi += 1
-                            pi_edge_total += 2 * EDGE_SIZE
-                            pi_middle_total += length - 2 * EDGE_SIZE
-                    next(f)  # Skip data line
-            except StopIteration:
-                break
-
-    print(f"Found {num_theta} filtered theta and {num_pi} filtered pi sequences ≥ {MIN_LENGTH:,} bp")
-    return num_theta, num_pi, theta_edge_total, theta_middle_total, pi_edge_total, pi_middle_total
-
-def load_data(file_path, num_theta, num_pi, theta_edge_total, theta_middle_total, pi_edge_total, pi_middle_total):
-    """
-    Second pass: Load data into pre-allocated arrays efficiently.
-
-    Args:
-        file_path (Path): Input file path.
-        num_theta, num_pi (int): Number of theta/pi sequences.
-        theta_edge_total, theta_middle_total, pi_edge_total, pi_middle_total (int): Total sizes.
-
-    Returns:
-        tuple: Cleaned theta/pi edge/middle arrays.
-    """
-    theta_edge = np.empty(theta_edge_total, dtype=np.float32)
-    theta_middle = np.empty(theta_middle_total, dtype=np.float32)
-    pi_edge = np.empty(pi_edge_total, dtype=np.float32)
-    pi_middle = np.empty(pi_middle_total, dtype=np.float32)
-
-    theta_edge_idx = 0
-    theta_middle_idx = 0
-    pi_edge_idx = 0
-    pi_middle_idx = 0
-    line_num = 0
-
-    with open(file_path, 'r') as f:
-        while True:
-            try:
-                header = next(f).strip()
-                line_num += 1
-                result = parse_header(header)
-                if result:
-                    metric, length, full_header = result
-                    data_line = next(f).strip()
-                    line_num += 1
-                    print(f"DATA LINE (Line {line_num}): {data_line[:100]}{'...' if len(data_line) > 100 else ''}")
-                    data = np.array([float(x) if x.upper() != 'NA' else np.nan for x in data_line.split(',')],
-                                  dtype=np.float32)
-
-                    if len(data) != length:
-                        print(f"WARNING: Line {line_num-1} - Length mismatch in {full_header[:50]}... "
-                              f"({len(data):,} vs {length:,})")
-                        continue
-
-                    if length < 2 * EDGE_SIZE:
-                        print(f"WARNING: Line {line_num-1} - Sequence too short: {length:,} bp")
-                        continue
-
-                    edge_left = data[:EDGE_SIZE]
-                    edge_right = data[-EDGE_SIZE:]
-                    middle = data[EDGE_SIZE:-EDGE_SIZE]
-
-                    if metric == "theta":
-                        theta_edge[theta_edge_idx:theta_edge_idx + EDGE_SIZE] = edge_left
-                        theta_edge_idx += EDGE_SIZE
-                        theta_edge[theta_edge_idx:theta_edge_idx + EDGE_SIZE] = edge_right
-                        theta_edge_idx += EDGE_SIZE
-                        theta_middle[theta_middle_idx:theta_middle_idx + len(middle)] = middle
-                        theta_middle_idx += len(middle)
-                        print(f"DEBUG: Theta {full_header[:50]}...: {2*EDGE_SIZE:,} edge, {len(middle):,} middle")
-                    elif metric == "pi":
-                        pi_edge[pi_edge_idx:pi_edge_idx + EDGE_SIZE] = edge_left
-                        pi_edge_idx += EDGE_SIZE
-                        pi_edge[pi_edge_idx:pi_edge_idx + EDGE_SIZE] = edge_right
-                        pi_edge_idx += EDGE_SIZE
-                        pi_middle[pi_middle_idx:pi_middle_idx + len(middle)] = middle
-                        pi_middle_idx += len(middle)
-                        print(f"DEBUG: Pi {full_header[:50]}...: {2*EDGE_SIZE:,} edge, {len(middle):,} middle")
-            except StopIteration:
-                break
-            except ValueError as e:
-                print(f"ERROR: Line {line_num} - Data parsing failed: {e}")
-                continue
-
-    # Clean NaNs
-    theta_edge_clean = theta_edge[~np.isnan(theta_edge)]
-    theta_middle_clean = theta_middle[~np.isnan(theta_middle)]
-    pi_edge_clean = pi_edge[~np.isnan(pi_edge)]
-    pi_middle_clean = pi_middle[~np.isnan(pi_middle)]
-
-    # Print means and medians of full cleaned data
-    print(f"Full Theta Edge: mean={np.mean(theta_edge_clean):.6f}, median={np.median(theta_edge_clean):.6f}")
-    print(f"Full Theta Middle: mean={np.mean(theta_middle_clean):.6f}, median={np.median(theta_middle_clean):.6f}")
-    print(f"Full Pi Edge: mean={np.mean(pi_edge_clean):.6f}, median={np.median(pi_edge_clean):.6f}")
-    print(f"Full Pi Middle: mean={np.mean(pi_middle_clean):.6f}, median={np.median(pi_middle_clean):.6f}")
-
-    print(f"Loaded: Theta edge={len(theta_edge_clean):,}, middle={len(theta_middle_clean):,}, "
-          f"Pi edge={len(pi_edge_clean):,}, middle={len(pi_middle_clean):,}")
-    return theta_edge_clean, theta_middle_clean, pi_edge_clean, pi_middle_clean
-
-def significance_test(edge, middle, metric):
-    """
-    Perform one-sided Mann-Whitney U test and compute mean/median differences.
-
-    Args:
-        edge (np.ndarray): Edge data.
-        middle (np.ndarray): Middle data.
-        metric (str): 'Theta' or 'Pi'.
-    """
-    if len(edge) < 10 or len(middle) < 10:
-        print(f"WARNING: Too few {metric} values (edge={len(edge):,}, middle={len(middle):,})")
-        return
-
-    mean_diff = np.nanmean(middle) - np.nanmean(edge)
-    median_diff = np.nanmedian(middle) - np.nanmedian(edge)
-    stat, p = mannwhitneyu(middle, edge, alternative='greater')
-    print(f"{metric} (middle > edge): U={stat:,}, p={p}, "
-          f"Mean Diff (middle - edge)={mean_diff}, Median Diff (middle - edge)={median_diff}")
-
-def downsample(data, max_points=MAX_PLOT_POINTS):
-    """
-    Downsample data for plotting.
-
-    Args:
-        data (np.ndarray): Data to downsample.
-        max_points (int): Max number of points.
-
-    Returns:
-        np.ndarray: Downsampled data.
-    """
-    if len(data) > max_points:
-        return np.random.choice(data, size=max_points, replace=False)
-    return data
-
-def create_smooth_log_plots(theta_edge, theta_middle, pi_edge, pi_middle, output_dir):
-    """
-    Generate smooth plots with log-scaled axes using KDE, with added diagnostics.
-
-    Args:
-        theta_edge, theta_middle, pi_edge, pi_middle (np.ndarray): Data arrays.
-        output_dir (Path): Directory to save the plot.
-
-    Returns:
-        Path: Path to saved plot or None if failed.
-    """
-    print("Generating smooth log-scaled plots...")
-    if (len(theta_edge) < 10 or len(theta_middle) < 10 or
-        len(pi_edge) < 10 or len(pi_middle) < 10):
-        print("ERROR: Insufficient data for plotting (need at least 10 points per category)")
-        return None
-
-    # Downsample for efficiency
-    theta_edge_plot = downsample(theta_edge)
-    theta_middle_plot = downsample(theta_middle)
-    pi_edge_plot = downsample(pi_edge)
-    pi_middle_plot = downsample(pi_middle)
-
-    # Filter positive values for log scale
-    theta_edge_pos = theta_edge_plot[theta_edge_plot > 0]
-    theta_middle_pos = theta_middle_plot[theta_middle_plot > 0]
-    pi_edge_pos = pi_edge_plot[pi_edge_plot > 0]
-    pi_middle_pos = pi_middle_plot[pi_middle_plot > 0]
-
-    if (len(theta_edge_pos) < 10 or len(theta_middle_pos) < 10 or
-        len(pi_edge_pos) < 10 or len(pi_middle_pos) < 10):
-        print("ERROR: Too few positive values for log-scale plotting")
-        return None
-
-    # Print means and medians of downsampled positive data
-    print(f"Downsampled Theta Edge (positive): mean={np.mean(theta_edge_pos):.6f}, "
-          f"median={np.median(theta_edge_pos):.6f}")
-    print(f"Downsampled Theta Middle (positive): mean={np.mean(theta_middle_pos):.6f}, "
-          f"median={np.median(theta_middle_pos):.6f}")
-    print(f"Downsampled Pi Edge (positive): mean={np.mean(pi_edge_pos):.6f}, "
-          f"median={np.median(pi_edge_pos):.6f}")
-    print(f"Downsampled Pi Middle (positive): mean={np.mean(pi_middle_pos):.6f}, "
-          f"median={np.median(pi_middle_pos):.6f}")
-
-    # Compute KDE with adjusted bandwidth
-    theta_edge_kde = gaussian_kde(theta_edge_pos, bw_method=BW_METHOD)
-    theta_middle_kde = gaussian_kde(theta_middle_pos, bw_method=BW_METHOD)
-    pi_edge_kde = gaussian_kde(pi_edge_pos, bw_method=BW_METHOD)
-    pi_middle_kde = gaussian_kde(pi_middle_pos, bw_method=BW_METHOD)
-
-    # Define x-range for plotting (log scale) with more points
-    theta_x = np.logspace(np.log10(min(theta_edge_pos.min(), theta_middle_pos.min())),
-                          np.log10(max(theta_edge_pos.max(), theta_middle_pos.max())), LOGSPACE_POINTS)
-    pi_x = np.logspace(np.log10(min(pi_edge_pos.min(), pi_middle_pos.min())),
-                       np.log10(max(pi_edge_pos.max(), pi_middle_pos.max())), LOGSPACE_POINTS)
-
-    theta_edge_y = theta_edge_kde(theta_x)
-    theta_middle_y = theta_middle_kde(theta_x)
-    pi_edge_y = pi_edge_kde(pi_x)
-    pi_middle_y = pi_middle_kde(pi_x)
-
-    # Create figure
-    plt.style.use('seaborn-v0_8-whitegrid')
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-
-    # Theta plot
-    ax1.plot(theta_x, theta_edge_y, label='Edge', color='#4C78A8')
-    ax1.plot(theta_x, theta_middle_y, label='Middle', color='#F28E2B')
-    ax1.set_xscale('log')
-    ax1.set_yscale('log')
-    ax1.set_title('Filtered Theta (Log Scale)', fontsize=14)
-    ax1.set_xlabel('Theta', fontsize=12)
-    ax1.set_ylabel('Density', fontsize=12)
-    ax1.legend()
-
-    # Pi plot
-    ax2.plot(pi_x, pi_edge_y, label='Edge', color='#4C78A8')
-    ax2.plot(pi_x, pi_middle_y, label='Middle', color='#F28E2B')
-    ax2.set_xscale('log')
-    ax2.set_yscale('log')
-    ax2.set_title('Filtered Pi (Log Scale)', fontsize=14)
-    ax2.set_xlabel('Pi', fontsize=12)
-    ax2.set_ylabel('Density', fontsize=12)
-    ax2.legend()
-
-    plt.tight_layout()
-    plot_path = output_dir / 'filtered_theta_pi_smooth_log_1M.png'
-    plt.savefig(plot_path, dpi=200, bbox_inches='tight')
-    plt.close()
-    print(f"KDE plots saved to {plot_path}")
-    return plot_path
-
-def create_cdf_plots(theta_edge, theta_middle, pi_edge, pi_middle, output_dir):
-    """
-    Generate CDF plots for theta and pi data.
-
-    Args:
-        theta_edge, theta_middle, pi_edge, pi_middle (np.ndarray): Data arrays.
-        output_dir (Path): Directory to save the plot.
-
-    Returns:
-        Path: Path to saved CDF plot or None if failed.
-    """
-    print("Generating CDF plots...")
-    # Filter positive values for log scale
-    theta_edge_pos = theta_edge[theta_edge > 0]
-    theta_middle_pos = theta_middle[theta_middle > 0]
-    pi_edge_pos = pi_edge[pi_edge > 0]
-    pi_middle_pos = pi_middle[pi_middle > 0]
-
-    if (len(theta_edge_pos) < 10 or len(theta_middle_pos) < 10 or
-        len(pi_edge_pos) < 10 or len(pi_middle_pos) < 10):
-        print("ERROR: Too few positive values for CDF plotting")
-        return None
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-
-    # Theta CDF
-    theta_edge_sorted = np.sort(theta_edge_pos)
-    theta_middle_sorted = np.sort(theta_middle_pos)
-    ax1.plot(theta_edge_sorted, np.linspace(0, 1, len(theta_edge_sorted)), label='Edge', color='#4C78A8')
-    ax1.plot(theta_middle_sorted, np.linspace(0, 1, len(theta_middle_sorted)), label='Middle', color='#F28E2B')
-    ax1.set_xscale('log')
-    ax1.set_title('Theta CDF', fontsize=14)
-    ax1.set_xlabel('Theta', fontsize=12)
-    ax1.set_ylabel('Cumulative Probability', fontsize=12)
-    ax1.legend()
-
-    # Pi CDF
-    pi_edge_sorted = np.sort(pi_edge_pos)
-    pi_middle_sorted = np.sort(pi_middle_pos)
-    ax2.plot(pi_edge_sorted, np.linspace(0, 1, len(pi_edge_sorted)), label='Edge', color='#4C78A8')
-    ax2.plot(pi_middle_sorted, np.linspace(0, 1, len(pi_middle_sorted)), label='Middle', color='#F28E2B')
-    ax2.set_xscale('log')
-    ax2.set_title('Pi CDF', fontsize=14)
-    ax2.set_xlabel('Pi', fontsize=12)
-    ax2.set_ylabel('Cumulative Probability', fontsize=12)
-    ax2.legend()
-
-    plt.tight_layout()
-    cdf_path = output_dir / 'filtered_theta_pi_cdf_log_1M.png'
-    plt.savefig(cdf_path, dpi=200, bbox_inches='tight')
-    plt.close()
-    print(f"CDF plot saved to {cdf_path}")
-    return cdf_path
+def analyze_coordinates(args):
+    """Analyze a specific genomic coordinate."""
+    df_coord, coord_key = args
+    chrom, start, end = coord_key
+    
+    print(f"\nAnalyzing {chrom}:{start}-{end}")
+    
+    # Group sequences by their group (0 or 1)
+    group_0_df = df_coord[df_coord['group'] == 0]
+    group_1_df = df_coord[df_coord['group'] == 1]
+    
+    # Get unique sequences for each group
+    sequences_0 = pd.concat([group_0_df['Seq1'], group_0_df['Seq2']]).unique()
+    sequences_1 = pd.concat([group_1_df['Seq1'], group_1_df['Seq2']]).unique()
+    
+    # Create pairwise dictionary
+    pairwise_dict = {}
+    for _, row in df_coord.iterrows():
+        pairwise_dict[(row['Seq1'], row['Seq2'])] = row['omega']
+    
+    # All sequences for analysis
+    all_sequences = np.concatenate([sequences_0, sequences_1]) if len(sequences_0) > 0 and len(sequences_1) > 0 else \
+                   (sequences_0 if len(sequences_0) > 0 else sequences_1)
+    
+    # Create matrices for visualization or further analysis if needed
+    matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
+    
+    # Get the transcripts for this coordinate
+    transcripts = df_coord['transcript_id'].unique()
+    
+    # Get gene annotation
+    coordinates_str = f"chr_{chrom.replace('chr', '')}_start_{start}_end_{end}"
+    gene_symbol, gene_name = get_gene_annotation(coordinates_str)
+    
+    # Perform statistical analysis
+    analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
+    
+    # Combine results
+    result = {
+        'chrom': chrom,
+        'start': start,
+        'end': end,
+        'coordinates': f"{chrom}:{start}-{end}",
+        'gene_symbol': gene_symbol,
+        'gene_name': gene_name,
+        'n0': len(sequences_0),
+        'n1': len(sequences_1),
+        'num_comp_group_0': analysis_result['num_comp_group_0'],
+        'num_comp_group_1': analysis_result['num_comp_group_1'],
+        'effect_size': analysis_result['effect_size'],
+        'p_value': analysis_result['p_value'],
+        'std_err': analysis_result['std_err'],
+        'failure_reason': analysis_result['failure_reason'],
+        'transcripts': ','.join(transcripts)
+    }
+    
+    return result
 
 def main():
-    """Main function to run the analysis."""
-    start_time = time.time()
+    """Main execution function."""
+    start_time = datetime.now()
+    print(f"Analysis started at {start_time}")
 
-    file_path = Path('per_site_output.falsta')
-    if not file_path.exists():
-        print(f"ERROR: {file_path} not found!")
-        return
-
-    output_dir = file_path.parent
-
-    # First pass: Count sequences and sizes
-    num_theta, num_pi, theta_edge_total, theta_middle_total, pi_edge_total, pi_middle_total = count_sequences(file_path)
-    if num_theta == 0 and num_pi == 0:
-        print("No filtered sequences ≥ 1M bp found. Exiting.")
-        return
-
-    # Second pass: Load data efficiently
-    theta_edge, theta_middle, pi_edge, pi_middle = load_data(file_path, num_theta, num_pi,
-                                                            theta_edge_total, theta_middle_total,
-                                                            pi_edge_total, pi_middle_total)
-
-    # Significance tests
-    print("\nSignificance Tests (One-Sided: Middle > Edge):")
-    significance_test(theta_edge, theta_middle, "Theta")
-    significance_test(pi_edge, pi_middle, "Pi")
-
-    # Generate and open KDE plots
-    kde_plot_path = create_smooth_log_plots(theta_edge, theta_middle, pi_edge, pi_middle, output_dir)
-    if kde_plot_path and kde_plot_path.exists():
-        try:
-            if os.name == 'nt':  # Windows
-                os.startfile(str(kde_plot_path))
-            elif os.name == 'posix':  # MacOS/Linux
-                cmd = 'open' if 'darwin' in os.sys.platform else 'xdg-open'
-                os.system(f'{cmd} "{kde_plot_path}"')
-        except Exception as e:
-            print(f"WARNING: Failed to open KDE plot: {e}")
-
-    # Generate and open CDF plots
-    cdf_plot_path = create_cdf_plots(theta_edge, theta_middle, pi_edge, pi_middle, output_dir)
-    if cdf_plot_path and cdf_plot_path.exists():
-        try:
-            if os.name == 'nt':  # Windows
-                os.startfile(str(cdf_plot_path))
-            elif os.name == 'posix':  # MacOS/Linux
-                cmd = 'open' if 'darwin' in os.sys.platform else 'xdg-open'
-                os.system(f'{cmd} "{cdf_plot_path}"')
-        except Exception as e:
-            print(f"WARNING: Failed to open CDF plot: {e}")
-
-    print(f"Total execution time: {time.time() - start_time:.2f}s")
+    # Read and preprocess data
+    df = read_and_preprocess_data('all_pairwise_results.csv')
+    
+    # Group by genomic coordinates
+    coord_groups = df.groupby(['chrom', 'start', 'end'])
+    print(f"\nFound {len(coord_groups)} unique genomic coordinates")
+    
+    # Prepare arguments for parallel processing
+    coord_args = [(coord_group, coord_key) for coord_key, coord_group in coord_groups]
+    
+    # Process each coordinate in parallel
+    results = []
+    with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
+        for result in tqdm(executor.map(analyze_coordinates, coord_args), 
+                          total=len(coord_args), 
+                          desc="Processing coordinates"):
+            results.append(result)
+    
+    # Create results dataframe
+    results_df = pd.DataFrame(results)
+    
+    # Apply Bonferroni correction
+    valid_results = results_df[results_df['p_value'].notna() & (results_df['p_value'] > 0)]
+    num_valid_tests = len(valid_results)
+    
+    if num_valid_tests > 0:
+        results_df['bonferroni_p_value'] = (results_df['p_value'] * num_valid_tests).clip(upper=1.0)
+    else:
+        results_df['bonferroni_p_value'] = results_df['p_value']
+    
+    # Add -log10(p) for easier interpretation
+    results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
+    
+    # Save results
+    os.makedirs('results', exist_ok=True)
+    results_df.to_csv('results/final_results.csv', index=False)
+    
+    # Print summary table
+    print("\n=== Group Assignment Summary by Location ===")
+    print(f"{'Location':<30} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value':<15} {'Effect Size':<15} {'Gene'}")
+    print("-" * 100)
+    
+    # Calculate totals
+    total_group_0 = results_df['n0'].sum()
+    total_group_1 = results_df['n1'].sum()
+    
+    # Sort by p-value for display
+    sorted_results = results_df.sort_values('p_value')
+    
+    for _, row in sorted_results.iterrows():
+        location = f"{row['chrom']}:{row['start']}-{row['end']}"
+        group_0_count = row['n0']
+        group_1_count = row['n1']
+        total = group_0_count + group_1_count
+        
+        p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
+        effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
+        
+        gene_info = f"{row['gene_symbol']}" if row['gene_symbol'] else ""
+        
+        print(f"{location:<30} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<15} {effect_size:<15} {gene_info}")
+    
+    # Print totals
+    print("-" * 100)
+    print(f"{'TOTAL':<30} {total_group_0:<10} {total_group_1:<10} {total_group_0 + total_group_1:<10}")
+    
+    # Print Bonferroni results
+    significant_count = (results_df['bonferroni_p_value'] < 0.05).sum()
+    print(f"\nSignificant results after Bonferroni correction (p < 0.05): {significant_count}")
+    
+    # Print significant results
+    if significant_count > 0:
+        print("\nSignificant results after Bonferroni correction:")
+        print(f"{'Location':<30} {'P-value':<15} {'Corrected P':<15} {'Effect Size':<15} {'Gene'}")
+        print("-" * 90)
+        
+        sig_results = results_df[results_df['bonferroni_p_value'] < 0.05].sort_values('p_value')
+        
+        for _, row in sig_results.iterrows():
+            location = f"{row['chrom']}:{row['start']}-{row['end']}"
+            p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
+            corrected_p = f"{row['bonferroni_p_value']:.6e}" if not pd.isna(row['bonferroni_p_value']) else "N/A"
+            effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
+            
+            gene_info = f"{row['gene_symbol']}: {row['gene_name']}" if row['gene_symbol'] and row['gene_name'] else ""
+            gene_info = gene_info[:40]  # Truncate if too long
+            
+            print(f"{location:<30} {p_value:<15} {corrected_p:<15} {effect_size:<15} {gene_info}")
+    
+    # Print summary of failure reasons
+    failure_counts = results_df['failure_reason'].value_counts()
+    if not failure_counts.empty:
+        print("\n=== Analysis Failure Summary ===")
+        for reason, count in failure_counts.items():
+            if pd.notna(reason):
+                print(f"- {reason}: {count} coordinates")
+    
+    print(f"\nAnalysis completed at {datetime.now()}")
+    print(f"Total runtime: {datetime.now() - start_time}")
 
 if __name__ == "__main__":
     main()
