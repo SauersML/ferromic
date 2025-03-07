@@ -390,6 +390,42 @@ def parse_codeml_output(outfile_dir):
         return None, None, None
 
 
+def load_temp_dir_results(temp_dir, db_conn):
+    """
+    Scan paml_output/temp subdirectories for existing CODEML results. If valid, insert them
+    into the DB so we can skip re-running those pairs in future steps. If invalid or incomplete,
+    do not insert, so they will be re-run.
+    """
+    if not os.path.exists(temp_dir):
+        return
+    for cds_dir in os.listdir(temp_dir):
+        full_cds_path = os.path.join(temp_dir, cds_dir)
+        if not os.path.isdir(full_cds_path):
+            continue
+        cds_id = cds_dir
+        subdirs = os.listdir(full_cds_path)
+        for sd in subdirs:
+            pair_dir = os.path.join(full_cds_path, sd)
+            if not os.path.isdir(pair_dir):
+                continue
+            pair_name = sd
+            underscore_parts = pair_name.split('_')
+            if len(underscore_parts) < 2:
+                continue
+            seq1_name = underscore_parts[0]
+            seq2_name = '_'.join(underscore_parts[1:])
+            cache_key = f"{cds_id}::{seq1_name}::{seq2_name}::{COMPARE_BETWEEN_GROUPS}"
+            if db_has_key(db_conn, cache_key):
+                continue
+            dn, ds, omega = parse_codeml_output(pair_dir)
+            if dn is None or ds is None or omega is None:
+                continue
+            group1 = 0
+            group2 = 0
+            record_tuple = (seq1_name, seq2_name, group1, group2, dn, ds, omega, cds_id)
+            db_insert_or_ignore(db_conn, cache_key, record_tuple)
+
+
 # --------------------------------------------------------------------------------
 # PARSING PHY FILES EXACTLY ONCE
 # --------------------------------------------------------------------------------
