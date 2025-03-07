@@ -1503,16 +1503,26 @@ def main():
         num_processes = min(NUM_PARALLEL, len(all_pairs_tasks))
         results_done = 0  # Tracks number of processed comparisons for ETA
         with multiprocessing.Pool(processes=num_processes) as pool:
+            # Buffer to store results for batch insertion into SQLite
+            records_buffer = []
             for result in pool.imap_unordered(process_pair, all_pairs_tasks, chunksize=10):
                 if result is not None:
                     seq1, seq2, grp1, grp2, dn, ds, omega, cid = result
                     newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
                     record_tuple = (seq1, seq2, grp1, grp2, dn, ds, omega, cid)
-                    db_insert_or_ignore(db_conn, newkey, record_tuple)
+                    records_buffer.append((newkey, record_tuple))
                 results_done += 1  # Increment after each processed result
                 if results_done % 1000 == 0:  # Only update ETA every few results
                     completed_comparisons = db_count_keys(db_conn)
                     print_eta(completed_comparisons, GLOBAL_COUNTERS['total_comparisons'], ETA_DATA['start_time'], ETA_DATA)
+            # Perform batch insertion of all collected results into SQLite
+            if records_buffer:
+                db_conn.executemany(
+                    "INSERT OR IGNORE INTO pairwise_cache (cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(key, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], rec[6], rec[7]) for key, rec in records_buffer]
+                )
+                db_conn.commit()
     else:
         print("No new comparisons to compute across all CDS.")
         sys.stdout.flush()
