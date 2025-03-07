@@ -281,49 +281,54 @@ def analysis_worker(args):
         'failure_reason': failure_reason
     }
 
-def analyze_coordinates(args):
-    """Analyze a specific genomic coordinate."""
-    df_coord, coord_key = args
-    chrom, start, end = coord_key
-    
-    print(f"\nAnalyzing {chrom}:{start}-{end}")
-    
+
+def analyze_transcript(args):
+    """Analyze a specific transcript."""
+    df_transcript, transcript_id = args
+
+    print(f"\nAnalyzing transcript: {transcript_id}")
+
     # Group sequences by their group (0 or 1)
-    group_0_df = df_coord[df_coord['group'] == 0]
-    group_1_df = df_coord[df_coord['group'] == 1]
-    
+    group_0_df = df_transcript[df_transcript['group'] == 0]
+    group_1_df = df_transcript[df_transcript['group'] == 1]
+
     # Get unique sequences for each group
     sequences_0 = pd.concat([group_0_df['Seq1'], group_0_df['Seq2']]).unique()
     sequences_1 = pd.concat([group_1_df['Seq1'], group_1_df['Seq2']]).unique()
-    
+
     # Create pairwise dictionary
     pairwise_dict = {}
-    for _, row in df_coord.iterrows():
+    for _, row in df_transcript.iterrows():
         pairwise_dict[(row['Seq1'], row['Seq2'])] = row['omega']
-    
+
     # All sequences for analysis
-    all_sequences = np.concatenate([sequences_0, sequences_1]) if len(sequences_0) > 0 and len(sequences_1) > 0 else \
-                   (sequences_0 if len(sequences_0) > 0 else sequences_1)
-    
+    all_sequences = (
+        np.concatenate([sequences_0, sequences_1])
+        if len(sequences_0) > 0 and len(sequences_1) > 0
+        else (sequences_0 if len(sequences_0) > 0 else sequences_1)
+    )
+
+    # Collect coordinate references (for display only)
+    unique_coords = set(
+        f"{r['chrom']}:{r['start']}-{r['end']}" for _, r in df_transcript.iterrows()
+    )
+    coords_str = ";".join(sorted(unique_coords))
+
     # Create matrices for visualization or further analysis if needed
     matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
-    
-    # Get the transcripts for this coordinate
-    transcripts = df_coord['transcript_id'].unique()
-    
-    # Get gene annotation
-    coordinates_str = f"chr_{chrom.replace('chr', '')}_start_{start}_end_{end}"
+
+    # For annotation, pick the first row
+    first_row = df_transcript.iloc[0]
+    coordinates_str = f"chr_{first_row['chrom'].replace('chr', '')}_start_{first_row['start']}_end_{first_row['end']}"
     gene_symbol, gene_name = get_gene_annotation(coordinates_str)
-    
+
     # Perform statistical analysis
     analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
-    
+
     # Combine results
     result = {
-        'chrom': chrom,
-        'start': start,
-        'end': end,
-        'coordinates': f"{chrom}:{start}-{end}",
+        'transcript_id': transcript_id,
+        'coordinates': coords_str,
         'gene_symbol': gene_symbol,
         'gene_name': gene_name,
         'n0': len(sequences_0),
@@ -333,10 +338,9 @@ def analyze_coordinates(args):
         'effect_size': analysis_result['effect_size'],
         'p_value': analysis_result['p_value'],
         'std_err': analysis_result['std_err'],
-        'failure_reason': analysis_result['failure_reason'],
-        'transcripts': ','.join(transcripts)
+        'failure_reason': analysis_result['failure_reason']
     }
-    
+
     return result
 
 def main():
@@ -347,20 +351,21 @@ def main():
     # Read and preprocess data
     df = read_and_preprocess_data('all_pairwise_results.csv')
     
-    # Group by genomic coordinates
-    coord_groups = df.groupby(['chrom', 'start', 'end'])
-    print(f"\nFound {len(coord_groups)} unique genomic coordinates")
+    # Group by transcript
+    transcript_groups = df.groupby('transcript_id')
+    print(f"\nFound {len(transcript_groups)} unique transcripts")
     
     # Prepare arguments for parallel processing
-    coord_args = [(coord_group, coord_key) for coord_key, coord_group in coord_groups]
+    transcript_args = [(transcript_group, transcript_id) for transcript_id, transcript_group in transcript_groups]
     
-    # Process each coordinate in parallel
+    # Process each transcript in parallel
     results = []
     with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
-        for result in tqdm(executor.map(analyze_coordinates, coord_args), 
-                          total=len(coord_args), 
-                          desc="Processing coordinates"):
+        for result in tqdm(executor.map(analyze_transcript, transcript_args), 
+                          total=len(transcript_args), 
+                          desc="Processing transcripts"):
             results.append(result)
+
     
     # Create results dataframe
     results_df = pd.DataFrame(results)
