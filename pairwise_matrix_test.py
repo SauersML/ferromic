@@ -387,9 +387,9 @@ def main():
     results_df.to_csv('results/final_results.csv', index=False)
     
     # Print summary table
-    print("\n=== Group Assignment Summary by Location ===")
-    print(f"{'Location':<30} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value':<15} {'Effect Size':<15} {'Gene'}")
-    print("-" * 100)
+    print("\n=== Group Assignment Summary by Transcript ===")
+    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value':<15} {'Effect Size':<15} {'Gene'}")
+    print("-" * 120)
     
     # Calculate totals
     total_group_0 = results_df['n0'].sum()
@@ -399,28 +399,23 @@ def main():
     sorted_results = results_df.sort_values('p_value')
     
     for _, row in sorted_results.iterrows():
-        location = f"{row['chrom']}:{row['start']}-{row['end']}"
+        transcript_str = str(row['transcript_id']) if 'transcript_id' in row and pd.notna(row['transcript_id']) else ""
+        coords_str = str(row['coordinates']) if 'coordinates' in row and pd.notna(row['coordinates']) else ""
+        summary_label = f"{transcript_str} / {coords_str}".strip(" /")
+    
         group_0_count = row['n0']
         group_1_count = row['n1']
         total = group_0_count + group_1_count
-    
+        
         p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
         effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
+        
+        gene_info = f"{row['gene_symbol']}" if 'gene_symbol' in row and pd.notna(row['gene_symbol']) else ""
     
-        gene_info = f"{row['gene_symbol']}" if row['gene_symbol'] else ""
+        print(f"{summary_label:<50} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<15} {effect_size:<15} {gene_info}")
     
-        if pd.notna(row['failure_reason']):
-            line_color = Fore.RED
-        elif (not pd.isna(row['bonferroni_p_value'])) and (row['bonferroni_p_value'] < 0.05):
-            line_color = Fore.GREEN
-        else:
-            line_color = Fore.RESET
-    
-        print(line_color + f"{location:<30} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<15} {effect_size:<15} {gene_info}" + Style.RESET_ALL)
-    
-    # Print totals
-    print("-" * 100)
-    print(f"{'TOTAL':<30} {total_group_0:<10} {total_group_1:<10} {total_group_0 + total_group_1:<10}")
+    print("-" * 120)
+    print(f"{'TOTAL':<50} {total_group_0:<10} {total_group_1:<10} {total_group_0 + total_group_1:<10}")
     
     # Print Bonferroni results
     significant_count = (results_df['bonferroni_p_value'] < 0.05).sum()
@@ -429,21 +424,25 @@ def main():
     # Print significant results
     if significant_count > 0:
         print("\nSignificant results after Bonferroni correction:")
-        print(f"{'Location':<30} {'P-value':<15} {'Corrected P':<15} {'Effect Size':<15} {'Gene'}")
-        print("-" * 90)
+        print(f"{'Transcript/Coordinates':<50} {'P-value':<15} {'Corrected P':<15} {'Effect Size':<15} {'Gene'}")
+        print("-" * 120)
         
         sig_results = results_df[results_df['bonferroni_p_value'] < 0.05].sort_values('p_value')
         
         for _, row in sig_results.iterrows():
-            location = f"{row['chrom']}:{row['start']}-{row['end']}"
+            transcript_str = str(row['transcript_id']) if 'transcript_id' in row and pd.notna(row['transcript_id']) else ""
+            coords_str = str(row['coordinates']) if 'coordinates' in row and pd.notna(row['coordinates']) else ""
+            label = f"{transcript_str} / {coords_str}".strip(" /")
             p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
             corrected_p = f"{row['bonferroni_p_value']:.6e}" if not pd.isna(row['bonferroni_p_value']) else "N/A"
             effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
             
-            gene_info = f"{row['gene_symbol']}: {row['gene_name']}" if row['gene_symbol'] and row['gene_name'] else ""
-            gene_info = gene_info[:40]  # Truncate if too long
+            gene_info = ""
+            if 'gene_symbol' in row and pd.notna(row['gene_symbol']) and 'gene_name' in row and pd.notna(row['gene_name']):
+                gene_info = f"{row['gene_symbol']}: {row['gene_name']}"
+            gene_info = gene_info[:40]
             
-            print(f"{location:<30} {p_value:<15} {corrected_p:<15} {effect_size:<15} {gene_info}")
+            print(f"{label:<50} {p_value:<15} {corrected_p:<15} {effect_size:<15} {gene_info}")
     
     # Print summary of failure reasons
     failure_counts = results_df['failure_reason'].value_counts()
