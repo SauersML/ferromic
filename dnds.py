@@ -884,62 +884,6 @@ def get_transcript_coordinates(transcript_id):
     return (chrom, min_start, max_end)
 
 
-def overlaps(a_start, a_end, b_start, b_end):
-    """
-    True if intervals [a_start,a_end] and [b_start,b_end] overlap at all.
-    """
-    return not (b_end < a_start or a_end < b_start)
-
-
-def cluster_by_coordinates(cds_meta):
-    """
-    Cluster CDS by coordinate overlaps, so that only the 'best' (longest) 
-    representative in each cluster is used for final analysis.
-    """
-    print("Clustering CDS by coordinate overlaps...")
-    sys.stdout.flush()
-    chr_map = {}
-    for cd in cds_meta:
-        cds_id, tid, chrom, st, en, seq_data = cd
-        if chrom not in chr_map:
-            chr_map[chrom] = []
-        chr_map[chrom].append(cd)
-
-    clusters = []
-    for chrom in chr_map:
-        print(f"Processing chromosome: {chrom}")
-        sys.stdout.flush()
-        cds_list = chr_map[chrom]
-        adjacency = {c[0]: set() for c in cds_list}
-        # Build adjacency if there's overlap
-        for i in range(len(cds_list)):
-            for j in range(i + 1, len(cds_list)):
-                idA, tidA, chA, stA, enA, seqA = cds_list[i]
-                idB, tidB, chB, stB, enB, seqB = cds_list[j]
-                if overlaps(stA, enA, stB, enB):
-                    adjacency[idA].add(idB)
-                    adjacency[idB].add(idA)
-
-        # BFS or DFS to find connected components
-        visited = set()
-        for node in adjacency.keys():
-            if node not in visited:
-                stack = [node]
-                comp = []
-                while stack:
-                    n = stack.pop()
-                    if n not in visited:
-                        visited.add(n)
-                        comp.append(n)
-                        for neigh in adjacency[n]:
-                            if neigh not in visited:
-                                stack.append(neigh)
-                clusters.append(comp)
-    print(f"Clustering complete. Found {len(clusters)} clusters.")
-    sys.stdout.flush()
-    return clusters
-
-
 # --------------------------------------------------------------------------------
 # MAIN SCRIPT
 # --------------------------------------------------------------------------------
@@ -1090,69 +1034,79 @@ def main():
             PARSED_PHY[phy_file] = parsed_data
             continue
 
-        # We'll store these entries for potential clustering
+        # We'll store these entries for the gene-based
         cds_id = basename.replace('.phy', '')
-        cds_meta_all.append((cds_id, transcript_id, chrom, st, en, parsed_data))
+        cds_meta_all.append((cds_id, transcript_id, parsed_data))
         PARSED_PHY[phy_file] = parsed_data
 
     print(f"Metadata parsing complete. {len(cds_meta_all)} CDS entries collected.")
     sys.stdout.flush()
 
-    # Now cluster by coordinate so we only keep the best (longest) representative in overlapping sets
-    print("Clustering CDS by coordinates to select best representative...")
-    clusters = cluster_by_coordinates(cds_meta_all)
+    # Build a map of transcript_id to gene_id by parsing the GTF for gene_id and transcript_id.
+    # Then collect .phy files per gene, grouped by group_0 or group_1, and pick the single transcript
+    # that is present in both groups and has the largest .phy alignment length.
 
-    # Create a dict to quickly fetch the data by cds_id
-    cds_id_to_data = {c[0]: c for c in cds_meta_all}
+    gene_map = {}
+    with open("../hg38.knownGene.gtf", "r") as gtf_f:
+        for line in gtf_f:
+            if line.strip().startswith("#"):
+                continue
+            fields = line.strip().split("\t")
+            if len(fields) < 9:
+                continue
+            attributes = fields[8]
+            transcript_match = re.search(r'transcript_id "([^"]+)"', attributes)
+            gene_match = re.search(r'gene_id "([^"]+)"', attributes)
+            if transcript_match and gene_match:
+                t_val = transcript_match.group(1)
+                g_val = gene_match.group(1)
+                gene_map[t_val] = g_val
 
-    # Figure out the best representative per cluster
+    # Build a dictionary of gene_id -> {0: [ (transcript_id, cds_id, length), ...], 1: [ (transcript_id, cds_id, length), ...]}
+    per_gene = {}
+    for item in cds_meta_all:
+        cds_id, t_id, seq_data = item
+        if t_id not in gene_map:
+            continue
+        gene_id_val = gene_map[t_id]
+        if gene_id_val not in per_gene:
+            per_gene[gene_id_val] = {0: [], 1: []}
+        group_match = re.match(r'^group_(\d+)_', cds_id)
+        if group_match:
+            group_num_val = int(group_match.group(1))
+            if group_num_val in per_gene[gene_id_val]:
+                seq_any = next(iter(seq_data['sequences'].values()))
+                length_val = len(seq_any)
+                per_gene[gene_id_val][group_num_val].append((t_id, cds_id, length_val))
+
+    # For each gene, pick the single transcript that appears in both group_0 and group_1
+    # with the largest minimum alignment length across the two groups.
     allowed_cds_ids = set()
-    # For each cluster, pick the single transcript ID that is present in both group_0 and group_1, 
-    # with the largest minimum .phy length across those two group files. If none appear in both, skip.
-    for cluster in clusters:
-        selected_tid = None
-        best_len = -1
-        # Gather transcripts in this cluster, grouped by transcript_id and group number.
-        # The dict will look like: {tid: {'0': (cid, length), '1': (cid, length)}}
-        transcripts_in_cluster = {}
-        for cid in cluster:
-            cds_id, tid, _, _, _, seq_data = cds_id_to_data[cid]
-            if seq_data['sequences']:
-                any_seq = next(iter(seq_data['sequences'].values()))
-                seqlen = len(any_seq)
-                match_group = re.match(r'^group_(\d+)_', cds_id)
-                if match_group:
-                    group_str = match_group.group(1)
-                    transcripts_in_cluster.setdefault(tid, {})[group_str] = (cid, seqlen)
+    for gene_id_val, group_data in per_gene.items():
+        if 0 not in group_data or 1 not in group_data:
+            continue
+        if not group_data[0] or not group_data[1]:
+            continue
+        chosen_length = -1
+        chosen_pair = None
+        for (tid0, cid0, len0) in group_data[0]:
+            match_in_1 = [(tid1, cid1, len1) for (tid1, cid1, len1) in group_data[1] if tid1 == tid0]
+            for (tid1, cid1, len1) in match_in_1:
+                score_val = min(len0, len1)
+                if score_val > chosen_length:
+                    chosen_length = score_val
+                    chosen_pair = (cid0, cid1)
+        if chosen_pair is not None:
+            for chosen_cid in chosen_pair:
+                allowed_cds_ids.add(chosen_cid)
 
-        # Now search for any transcript_id that appears in both group_0 and group_1; pick the largest.
-        # We measure "largest" as the minimum .phy length of the two .phy files, 
-        # so that both group_0 and group_1 are guaranteed to have a similarly large .phy.
-        for tid, group_dict in transcripts_in_cluster.items():
-            if '0' in group_dict and '1' in group_dict:
-                len_0 = group_dict['0'][1]
-                len_1 = group_dict['1'][1]
-                candidate_len = min(len_0, len_1)
-                if candidate_len > best_len:
-                    best_len = candidate_len
-                    selected_tid = tid
-
-        # If we found a valid transcript_id, add both group_0 and group_1 to allowed_cds_ids.
-        if selected_tid is not None:
-            group_0_cid = transcripts_in_cluster[selected_tid]['0'][0]
-            group_1_cid = transcripts_in_cluster[selected_tid]['1'][0]
-            allowed_cds_ids.add(group_0_cid)
-            allowed_cds_ids.add(group_1_cid)
-
-    # Filter out any .phy whose CDS id is not in allowed_cds_ids
-    # We'll produce a final list of paths to process
     all_phy_filtered = []
     for phy_file in phy_files:
         base_id = os.path.basename(phy_file).replace('.phy', '')
         if base_id in allowed_cds_ids:
             all_phy_filtered.append(phy_file)
 
-    print(f"After clustering, we have {len(all_phy_filtered)} .phy files allowed.")
+    print(f"After gene-based transcript selection, we have {len(all_phy_filtered)} .phy files allowed.")
 
     # Next, skip any that already have final CSV
     final_phy_files = []
@@ -1226,7 +1180,7 @@ def main():
     logging.info(f"Duplicates (prev sessions): {duplicates_so_far}")
     logging.info(f"Stop codons (prev sessions): {stop_codons_so_far}")
     logging.info(f"Valid sequences so far: {valid_sequences} ({valid_percentage:.2f}%)")
-    logging.info(f"Total CDS after clustering: {GLOBAL_COUNTERS['total_cds']}")
+    logging.info(f"Total CDS after gene association: {GLOBAL_COUNTERS['total_cds']}")
     logging.info(f"Expected new comparisons: {GLOBAL_COUNTERS['total_comparisons']}")
 
     cached_results_count = db_count_keys(db_conn)
@@ -1617,7 +1571,7 @@ def main():
     logging.info(f"Invalid seq: {invalid_seqs} ({final_invalid_pct:.2f}%)")
     logging.info(f"Sequences with stop codons: {stop_codons}")
     logging.info(f"Duplicates: {duplicates}")
-    logging.info(f"Total CDS (final) after clustering: {total_cds_processed}")
+    logging.info(f"Total CDS (final) after gene association: {total_cds_processed}")
     logging.info(f"Planned comparisons: {total_comps_planned}")
     current_db_count = db_count_keys(db_conn)
     logging.info(f"Completed comps: {current_db_count}")
