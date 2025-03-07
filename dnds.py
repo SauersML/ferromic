@@ -975,6 +975,7 @@ def main():
     parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
     parser.add_argument('--output_dir', type=str, default='paml_output', help='Directory to store output files.')
     parser.add_argument('--codeml_path', type=str, default=codeml_inferred, help='Path to codeml executable.')
+    global args
     args = parser.parse_args()
 
     # Attempt to load existing validation cache (sequence-level checks)
