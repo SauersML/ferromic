@@ -1003,6 +1003,7 @@ def main():
 
     # Initialize SQLite DB
     db_path = os.path.join(args.output_dir, 'pairwise_results.sqlite')
+    global db_conn
     db_conn = init_sqlite_db(db_path)
 
     # Pre-load any existing CSV data into the DB
