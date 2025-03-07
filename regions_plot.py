@@ -5,8 +5,8 @@ import os
 import time
 
 # Constants
-MIN_LENGTH = 1_000_000  # Minimum sequence length (1M bp)
-EDGE_SIZE = 250_000     # Number of positions from each edge
+MIN_LENGTH = 500_000  # Minimum sequence length (1M bp)
+EDGE_SIZE = 100_000     # Number of positions from each edge
 
 def parse_header(line):
     """Parse header line for filtered pi sequences only."""
