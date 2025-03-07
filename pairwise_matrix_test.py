@@ -6,6 +6,9 @@ from tqdm.auto import tqdm
 import warnings
 import os
 import json
+import colorama
+from colorama import Fore, Style
+colorama.init(autoreset=True)
 from datetime import datetime
 from scipy import stats
 import requests
@@ -218,7 +221,10 @@ def analysis_worker(args):
         elif df['group'].nunique() < 2:
             failure_reason = "Missing one of the groups in pairwise comparisons"
         elif df['omega_value'].nunique() < 2:
+            print("RAW DATA for Not enough omega value variation for statistical analysis:")
+            print(df)
             failure_reason = "Not enough omega value variation for statistical analysis"
+
         
         print(f"WARNING: {failure_reason}")
         
@@ -392,13 +398,20 @@ def main():
         group_0_count = row['n0']
         group_1_count = row['n1']
         total = group_0_count + group_1_count
-        
+    
         p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
         effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
-        
+    
         gene_info = f"{row['gene_symbol']}" if row['gene_symbol'] else ""
-        
-        print(f"{location:<30} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<15} {effect_size:<15} {gene_info}")
+    
+        if pd.notna(row['failure_reason']):
+            line_color = Fore.RED
+        elif (not pd.isna(row['bonferroni_p_value'])) and (row['bonferroni_p_value'] < 0.05):
+            line_color = Fore.GREEN
+        else:
+            line_color = Fore.RESET
+    
+        print(line_color + f"{location:<30} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<15} {effect_size:<15} {gene_info}" + Style.RESET_ALL)
     
     # Print totals
     print("-" * 100)
