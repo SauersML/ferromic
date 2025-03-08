@@ -687,12 +687,13 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
 
    println!("Selecting best transcript for each gene...");
    
-   // For each gene, select the best transcript based on priority rules
-   let mut best_transcripts = HashSet::new();
-   for (gene_id, transcript_ids) in gene_to_transcripts {
-       if transcript_ids.is_empty() {
-           continue;
-       }
+    // For each gene, select the best transcript based on priority rules
+    let mut best_transcripts = HashSet::new();
+    for (gene_id, transcript_ids) in gene_to_transcripts {
+        println!("Selecting best transcript for gene: {}", gene_id);
+        if transcript_ids.is_empty() {
+            continue;
+        }
 
        // Find transcript with highest priority (lowest priority_level)
        let min_priority = transcript_ids.iter()
