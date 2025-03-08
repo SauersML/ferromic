@@ -790,21 +790,32 @@ fn process_variants(
         }
     }
 
+    // Check SeqInfo for validation
     let locked_seqinfo = seqinfo_storage.lock();
     if locked_seqinfo.is_empty() {
-        println!("No SeqInfo in stats pass for group {}", haplotype_group);
+        log(LogLevel::Warning, &format!("No SeqInfo in stats pass for group {}", haplotype_group));
     } else {
-        display_seqinfo_entries(&locked_seqinfo, 12);
+        if group_hap_count > 20 {
+            // Only display the table for smaller sample sets to avoid cluttering
+            log(LogLevel::Info, &format!("Processed {} haplotypes for group {}", group_hap_count, haplotype_group));
+        } else {
+            display_seqinfo_entries(&locked_seqinfo, 12);
+        }
     }
     drop(locked_seqinfo);
     seqinfo_storage.lock().clear();
 
-    println!(
-        "Finishing up the variant region... is_filtered_set = {:?}",
-        is_filtered_set
-    );
+    // Generate sequence files if this is the filtered set
     if is_filtered_set {
-        println!("Calling make_sequences with filtered set...");
+        log(LogLevel::Info, &format!(
+            "Generating sequence files for {} CDS regions, group {}",
+            cds_regions.len(), haplotype_group
+        ));
+        
+        let spinner = create_spinner(&format!(
+            "Creating sequences for group {} haplotypes", haplotype_group
+        ));
+        
         make_sequences(
             variants,
             sample_names,
@@ -816,15 +827,27 @@ fn process_variants(
             position_allele_map.clone(),
             &chromosome,
         )?;
+        
+        spinner.finish_with_message(&format!(
+            "Created sequence files for group {} haplotypes", haplotype_group
+        ));
     }
 
+    // Calculate per-site diversity
+    let spinner = create_spinner("Calculating per-site diversity");
     let site_diversities = calculate_per_site(variants, &group_haps, region_start, region_end);
-    println!(
-        "Computed per-site diversity for group {}: found {} sites in region {}",
-        haplotype_group,
-        site_diversities.len(),
-        chromosome
-    );
+    spinner.finish_with_message(&format!(
+        "Calculated diversity for {} sites", site_diversities.len()
+    ));
+    
+    log(LogLevel::Info, &format!(
+        "Completed analysis for {} group {}: {} segregating sites, θ={:.6}, π={:.6}",
+        group_type, haplotype_group, region_segsites, final_theta, final_pi
+    ));
+    
+    finish_step_progress(&format!(
+        "Completed group {} analysis", haplotype_group
+    ));
 
     Ok(Some((
         region_segsites,
