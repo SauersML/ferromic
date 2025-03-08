@@ -8,7 +8,7 @@ use crate::parse::{
 };
 
 use crate::transcripts::{
-    TranscriptCDS,
+    TranscriptAnnotationCDS,
     make_sequences,
     filter_and_log_transcripts,
 };
@@ -575,7 +575,7 @@ fn process_variants(
     chromosome: String,
     is_filtered_set: bool,
     reference_sequence: &[u8],
-    cds_regions: &[TranscriptCDS],
+    cds_regions: &[TranscriptAnnotationCDS],
 ) -> Result<Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>, VcfError> {
     let mut index_map = HashMap::new();
     for (sample_index, name) in sample_names.iter().enumerate() {
@@ -1352,7 +1352,7 @@ fn process_single_config_entry(
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     ref_sequence: &[u8],
-    cds_regions: &[TranscriptCDS],
+    cds_regions: &[TranscriptAnnotationCDS],
     chr: &str,
     args: &Args,
 ) -> Result<Option<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)>, VcfError> {
