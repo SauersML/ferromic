@@ -731,16 +731,16 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
                 // If something goes wrong and we get no lengths (shouldn’t happen), use 0 as a fallback.
         
             // Now, collect all transcript IDs that have this maximum CDS length.
-            let longest_candidates: Vec<&String> = candidates.iter()
-                // Loop through the candidates again.
+            let longest_candidates: Vec<&&String> = candidates.iter()
+                // Iterate over references to transcript IDs in candidates.
                 .filter(|tid| {
-                    // For each transcript ID:
-                    transcript_info_map.get(*tid)
-                    // Look up its details in the map.
+                    // For each transcript ID reference
+                    transcript_info_map.get(&tid[..])
+                    // Look up its details in the transcript_info_map using a string slice.
                     .map(|info| info.cds_length == max_length)
-                    // Check if its CDS length matches the maximum we found.
+                    // Check if its CDS length matches the maximum found earlier.
                     .unwrap_or(false)
-                    // If the lookup fails (shouldn’t happen), assume it doesn’t match.
+                    // Return false if the transcript isn’t found in the map.
                 })
                 .collect();
                 // Gather all matching transcript IDs into a vector.
@@ -748,11 +748,11 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
             // Pick the best one from the transcripts with the longest CDS.
             // If there’s more than one with the same max length, take the first.
             longest_candidates.first()
-                // Get the first transcript ID from our list of longest candidates.
-                .map(|s| (*s).clone())
-                // If there’s a first one, make a copy of it to return.
+                // Retrieve the first reference to a transcript ID from longest_candidates.
+                .map(|s| (**s).clone())
+                // Dereference twice to get the String and clone it for the result.
                 .unwrap_or_else(|| candidates[0].clone())
-                // If the list is empty (shouldn’t happen), fall back to copying the first candidate.
+                // If no longest candidate exists, use the first candidate as a fallback.
         };
 
        best_transcripts.insert(best_transcript);
