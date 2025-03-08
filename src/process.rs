@@ -1341,12 +1341,17 @@ fn process_chromosome_entries(
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
 ) -> Result<Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)>, VcfError> {
-    println!("Processing chromosome: {}", chr);
-
+    set_stage(ProcessingStage::ConfigEntry);
+    log(LogLevel::Info, &format!("Processing chromosome: {}", chr));
+    
+    init_step_progress(&format!("Loading resources for chr{}", chr), 3);
+    
     // Load entire chromosome length from reference index
+    update_step_progress(0, &format!("Reading reference index for chr{}", chr));
     let chr_length = {
         let fasta_reader =
             bio::io::fasta::IndexedReader::from_file(&args.reference_path).map_err(|e| {
+                log(LogLevel::Error, &format!("Failed to open reference file: {}", e));
                 VcfError::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     e.to_string(),
@@ -1357,6 +1362,7 @@ fn process_chromosome_entries(
             .iter()
             .find(|seq| seq.name == chr || seq.name == format!("chr{}", chr))
             .ok_or_else(|| {
+                log(LogLevel::Error, &format!("Chromosome {} not found in reference", chr));
                 VcfError::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!("Chromosome {} not found in reference", chr),
@@ -1366,6 +1372,7 @@ fn process_chromosome_entries(
     };
 
     // Read the full reference sequence for that chromosome.
+    update_step_progress(1, &format!("Loading reference sequence for chr{}", chr));
     let ref_sequence = {
         let entire_chrom = ZeroBasedHalfOpen {
             start: 0,
@@ -1373,29 +1380,45 @@ fn process_chromosome_entries(
         };
         read_reference_sequence(Path::new(&args.reference_path), chr, entire_chrom)?
     };
+    log(LogLevel::Info, &format!("Loaded {}bp reference sequence for chr{}", ref_sequence.len(), chr));
 
     // Parse all transcripts for that chromosome from the GTF
+    update_step_progress(2, &format!("Loading transcript annotations for chr{}", chr));
     let all_transcripts = parse_gtf_file(Path::new(&args.gtf_path), chr)?;
     // We'll keep them in `cds_regions` for subsequent filtering
     let cds_regions = all_transcripts;
+    log(LogLevel::Info, &format!("Loaded {} transcript annotations for chr{}", cds_regions.len(), chr));
 
     // Locate the VCF file for this chromosome
     let vcf_file = match find_vcf_file(vcf_folder, chr) {
-        Ok(file) => file,
+        Ok(file) => {
+            log(LogLevel::Info, &format!("Found VCF file for chr{}: {}", chr, file.display()));
+            file
+        },
         Err(e) => {
-            eprintln!("Error finding VCF file for {}: {:?}", chr, e);
+            log(LogLevel::Error, &format!("Error finding VCF file for chr{}: {:?}", chr, e));
+            finish_step_progress(&format!("Failed to find VCF for chr{}", chr));
             return Ok(Vec::new());
         }
     };
+    
+    finish_step_progress(&format!("Loaded resources for chr{}", chr));
 
     // We'll store final rows from each entry in this vector
     let mut rows = Vec::with_capacity(entries.len());
 
+    // Initialize progress for config entries
+    init_entry_progress(&format!("Processing {} regions on chr{}", entries.len(), chr), entries.len() as u64);
+
     // For each config entry in this chromosome, do the work
     //    (We could also parallelize here...)
-    for entry in entries {
+    // Should this be for entry in entries instead?
+    for (idx, entry) in entries.iter().enumerate() {
+        let region_desc = format!("{}:{}-{}", chr, entry.interval.start, entry.interval.end);
+        update_entry_progress(idx as u64, &format!("Processing region {}", region_desc));
+        
         match process_single_config_entry(
-            entry,
+            entry.clone(),
             &vcf_file,
             min_gq,
             mask,
@@ -1407,15 +1430,29 @@ fn process_chromosome_entries(
         ) {
             Ok(Some(row_data)) => {
                 rows.push(row_data);
+                log(LogLevel::Info, &format!("Successfully processed region {}", region_desc));
             }
             Ok(None) => {
-                // Something was skipped or no haplotypes found
+                log(LogLevel::Warning, &format!(
+                    "Skipped region {} (no matching haplotypes)", region_desc
+                ));
             }
             Err(e) => {
-                eprintln!("Error processing entry on {}: {}", chr, e);
+                log(LogLevel::Error, &format!("Error processing region {}: {}", region_desc, e));
             }
         }
     }
+
+    finish_entry_progress(&format!("Processed {} regions on chr{}", entries.len(), chr));
+    
+    display_status_box(StatusBox {
+        title: format!("Chromosome {} Statistics", chr),
+        stats: vec![
+            ("Total regions".to_string(), entries.len().to_string()),
+            ("Successful regions".to_string(), rows.len().to_string()),
+            ("Skipped/failed".to_string(), (entries.len() - rows.len()).to_string()),
+        ],
+    });
 
     Ok(rows)
 }
