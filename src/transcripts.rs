@@ -141,6 +141,10 @@ impl CdsSeq {
 pub struct TranscriptAnnotationCDS {
     /// The transcript identifier from the GTF
     pub transcript_id: String,
+    /// The gene identifier from the GTF
+    pub gene_id: String,
+    /// The human-readable gene name from the GTF
+    pub gene_name: String,
     /// The strand for the transcript
     pub strand: char,
     /// A list of frames, one per CDS segment
