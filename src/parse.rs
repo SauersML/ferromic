@@ -710,28 +710,50 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
            })
            .collect();
 
-       // Among candidates with the same priority, pick the one with longest CDS
-       let best_transcript = if candidates.len() == 1 {
-           candidates[0].clone()
-       } else {
-           let max_length = candidates.iter()
-               .filter_map(|tid| transcript_info_map.get(*tid))
-               .map(|info| info.cds_length)
-               .max()
-               .unwrap_or(0);
-
-           // Get all transcripts with max length
-           let longest_candidates: Vec<&String> = candidates.iter()
-               .filter(|tid| {
-                   transcript_info_map.get(*tid)
-                       .map(|info| info.cds_length == max_length)
-                       .unwrap_or(false)
-               })
-               .collect();
-
-           // If multiple transcripts have the same priority and length, pick the first one
-           longest_candidates.first().map(|s| (*s).clone()).unwrap_or_else(|| candidates[0].clone())
-       };
+        // When multiple transcripts have the same priority,
+        // choose the one with the longest coding sequence length.
+        let best_transcript = if candidates.len() == 1 {
+            // If there's only one transcript in the candidates list,
+            // no need to compare anything—just copy and return it.
+            candidates[0].clone()
+        } else {
+            // For multiple candidates, find the longest CDS length among them.
+            let max_length = candidates.iter()
+                // Loop through each transcript ID in the candidates list.
+                .filter_map(|tid| transcript_info_map.get(*tid))
+                // For each ID, look it up in the transcript_info_map to get its details.
+                // filter_map skips any missing entries, but we expect all IDs to exist here.
+                .map(|info| info.cds_length)
+                // From each transcript's info, grab the CDS length.
+                .max()
+                // Find the biggest CDS length in the list.
+                .unwrap_or(0);
+                // If something goes wrong and we get no lengths (shouldn’t happen), use 0 as a fallback.
+        
+            // Now, collect all transcript IDs that have this maximum CDS length.
+            let longest_candidates: Vec<&String> = candidates.iter()
+                // Loop through the candidates again.
+                .filter(|tid| {
+                    // For each transcript ID:
+                    transcript_info_map.get(*tid)
+                    // Look up its details in the map.
+                    .map(|info| info.cds_length == max_length)
+                    // Check if its CDS length matches the maximum we found.
+                    .unwrap_or(false)
+                    // If the lookup fails (shouldn’t happen), assume it doesn’t match.
+                })
+                .collect();
+                // Gather all matching transcript IDs into a vector.
+        
+            // Pick the best one from the transcripts with the longest CDS.
+            // If there’s more than one with the same max length, take the first.
+            longest_candidates.first()
+                // Get the first transcript ID from our list of longest candidates.
+                .map(|s| (*s).clone())
+                // If there’s a first one, make a copy of it to return.
+                .unwrap_or_else(|| candidates[0].clone())
+                // If the list is empty (shouldn’t happen), fall back to copying the first candidate.
+        };
 
        best_transcripts.insert(best_transcript);
    }
