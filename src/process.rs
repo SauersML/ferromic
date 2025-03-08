@@ -8,7 +8,11 @@ use crate::parse::{
 };
 
 use crate::progress::{
-    init_global_progress, update_global_progress, log, LogLevel, finish_all, display_status_box, StatusBox,
+    init_global_progress, update_global_progress, log, LogLevel, ProcessingStage, set_stage,
+    init_entry_progress, update_entry_progress, finish_entry_progress,
+    init_step_progress, update_step_progress, finish_step_progress,
+    init_variant_progress, update_variant_progress, finish_variant_progress,
+    create_spinner, display_status_box, StatusBox, finish_all
 };
 
 use crate::transcripts::{
@@ -581,6 +585,15 @@ fn process_variants(
     reference_sequence: &[u8],
     cds_regions: &[TranscriptAnnotationCDS],
 ) -> Result<Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>, VcfError> {
+    set_stage(ProcessingStage::VariantAnalysis);
+    
+    let group_type = if is_filtered_set { "filtered" } else { "unfiltered" };
+    log(LogLevel::Info, &format!("Processing {} variants for group {} in {}:{}-{}", 
+        variants.len(), haplotype_group, chromosome, region_start, region_end));
+        
+    // Map sample names to indices
+    init_step_progress(&format!("Mapping samples for group {}", haplotype_group), 3);
+    
     let mut index_map = HashMap::new();
     for (sample_index, name) in sample_names.iter().enumerate() {
         let trimmed_id = name.rsplit('_').next().unwrap_or(name);
@@ -600,6 +613,11 @@ fn process_variants(
                 }
             }
             None => {
+                log(LogLevel::Error, &format!(
+                    "Sample '{}' from config not found in VCF",
+                    config_sample_name
+                ));
+                finish_step_progress("Error: sample mapping failed");
                 return Err(VcfError::Parse(format!(
                     "Sample '{}' from config not found in VCF",
                     config_sample_name
@@ -608,25 +626,44 @@ fn process_variants(
         }
     }
     if group_haps.is_empty() {
-        println!("No haplotypes found for group {}", haplotype_group);
+        log(LogLevel::Warning, &format!("No haplotypes found for group {}", haplotype_group));
+        finish_step_progress("No haplotypes found");
         return Ok(None);
     }
+    
+    update_step_progress(1, &format!("Found {} haplotypes for group {}", group_haps.len(), haplotype_group));
 
+    // Count segregating sites
     let mut region_segsites = 0;
     let region_hap_count = group_haps.len();
+    
     if variants.is_empty() {
+        log(LogLevel::Info, &format!("No variants found for {}:{}-{} in group {}", 
+            chromosome, region_start, region_end, haplotype_group));
+        finish_step_progress("No variants to analyze");
         return Ok(Some((0, 0.0, 0.0, region_hap_count, Vec::new())));
     }
-    for current_variant in variants {
-        let region_interval = ZeroBasedHalfOpen {
-            start: region_start as usize,
-            end: region_end as usize,
-        };
-        if !region_interval.contains(ZeroBasedPosition(current_variant.position)) {
-            continue;
+    
+    let region_interval = ZeroBasedHalfOpen {
+        start: region_start as usize,
+        end: region_end as usize,
+    };
+    
+    let variants_in_region: Vec<_> = variants.iter()
+        .filter(|v| region_interval.contains(ZeroBasedPosition(v.position)))
+        .collect();
+    
+    init_variant_progress(&format!("Analyzing {} variants in region", variants_in_region.len()), 
+        variants_in_region.len() as u64);
+    
+    for (i, current_variant) in variants_in_region.iter().enumerate() {
+        if i % 100 == 0 {
+            update_variant_progress(i as u64, 
+                &format!("Processing variant {} of {}", i+1, variants_in_region.len()));
         }
-        let mut allele_values = Vec::new();
         
+        let mut allele_values = Vec::new();
+
         // Iterate over haplotype group indices, borrowing each tuple
         for (mapped_index, _) in &group_haps { // We don't need side in this outer loop
             // Access genotypes using the dereferenced index
@@ -644,6 +681,12 @@ fn process_variants(
             region_segsites += 1;
         }
     }
+    
+    finish_variant_progress(&format!("Found {} segregating sites", region_segsites));
+
+    // Calculate diversity statistics
+    update_step_progress(2, "Calculating diversity statistics");
+    
     // Define the region as a ZeroBasedHalfOpen interval for length calculation
     let region = ZeroBasedHalfOpen {
         start: region_start as usize,
@@ -652,7 +695,17 @@ fn process_variants(
     let final_length = adjusted_sequence_length.unwrap_or(region.len() as i64);
     let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, final_length);
     let final_pi = calculate_pi(variants, &group_haps);
+    
+    log(LogLevel::Info, &format!(
+        "Group {} ({}): θ={:.6}, π={:.6}, with {} segregating sites across {} haplotypes",
+        haplotype_group, group_type, final_theta, final_pi, region_segsites, region_hap_count
+    ));
 
+    // Step 4: Process transcripts for this region
+    if !cds_regions.is_empty() {
+        update_step_progress(3, &format!("Processing {} CDS regions", cds_regions.len()));
+    }
+    
     for transcript in cds_regions {
         // Map of haplotype labels to their assembled CDS sequences
         let mut assembled: HashMap<String, Vec<u8>> = HashMap::new();
