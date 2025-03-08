@@ -138,7 +138,7 @@ impl CdsSeq {
 /// Represents one transcript's coding sequence. It stores all CDS segments
 /// belonging to a single transcript (no introns).
 #[derive(Debug, Clone)]
-pub struct TranscriptCDS {
+pub struct TranscriptAnnotationCDS {
     /// The transcript identifier from the GTF
     pub transcript_id: String,
     /// The strand for the transcript
@@ -158,7 +158,7 @@ pub fn make_sequences(
     sample_filter: &HashMap<String, (u8, u8)>,
     extended_region: ZeroBasedHalfOpen,
     reference_sequence: &[u8],
-    cds_regions: &[TranscriptCDS],
+    cds_regions: &[TranscriptAnnotationCDS],
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: &str,
 ) -> Result<(), VcfError> {
@@ -393,7 +393,7 @@ pub fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Re
 
 pub fn prepare_to_write_cds(
     haplotype_group: u8,
-    cds_regions: &[TranscriptCDS],
+    cds_regions: &[TranscriptAnnotationCDS],
     hap_sequences: &HashMap<String, Vec<u8>>,
     chromosome: &str,
     hap_region: ZeroBasedHalfOpen,
@@ -475,11 +475,11 @@ pub fn prepare_to_write_cds(
     Ok(())
 }
 
-// This function filters the TranscriptCDS by QueryRegion overlap and prints stats
+// This function filters the TranscriptAnnotationCDS by QueryRegion overlap and prints stats
 pub fn filter_and_log_transcripts(
-    transcripts: Vec<TranscriptCDS>,
+    transcripts: Vec<TranscriptAnnotationCDS>,
     query: QueryRegion,
-) -> Vec<TranscriptCDS> {
+) -> Vec<TranscriptAnnotationCDS> {
     use colored::Colorize;
     use std::fs::OpenOptions;
     use std::io::{BufWriter, Write};
