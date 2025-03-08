@@ -791,12 +791,14 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
            .map(|&(s, e, _, _)| ZeroBasedHalfOpen::from_1based_inclusive(s, e))
            .collect();
 
-       transcripts_vec.push(TranscriptAnnotationCDS {
-           transcript_id: tid,
-           strand: strand_char,
-           frames: frames_vec,
-           segments: seg_intervals,
-       });
+        transcripts_vec.push(TranscriptAnnotationCDS {
+            transcript_id: tid,
+            gene_id: info.gene_id,
+            gene_name: info.gene_name.unwrap_or_default(),
+            strand: strand_char,
+            frames: frames_vec,
+            segments: seg_intervals,
+        });
    }
 
    println!(
