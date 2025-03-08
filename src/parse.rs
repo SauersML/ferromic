@@ -734,16 +734,17 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
    }
 
    // Print summary of how many lines, transcripts, genes, etc.
-   println!("\nFinished reading GTF.");
-   println!("Total CDS entries processed: {}", processed_lines);
-   println!("Skipped lines: {}", skipped_lines);
-   println!("Unique transcripts found: {}", transcripts_found.len());
-   println!("Unique genes found: {}", genes_found.len());
+   update_step_progress(1, "Building transcript database");
+   log(LogLevel::Info, "Finished reading GTF file");
+   log(LogLevel::Info, &format!("Total CDS entries processed: {}", processed_lines));
+   log(LogLevel::Info, &format!("Skipped lines: {}", skipped_lines));
+   log(LogLevel::Info, &format!("Unique transcripts found: {}", transcripts_found.len()));
+   log(LogLevel::Info, &format!("Unique genes found: {}", genes_found.len()));
    if malformed_attributes > 0 {
-       println!(
+       log(LogLevel::Warning, &format!(
            "Entries with missing required attributes: {}",
            malformed_attributes
-       );
+       ));
    }
 
    // Group transcripts by gene_id
@@ -755,12 +756,12 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
            .push(transcript_id.clone());
    }
 
-   println!("Selecting best transcript for each gene...");
+   log(LogLevel::Info, "Starting to select best transcript for each gene");
    
     // For each gene, select the best transcript based on priority rules
     let mut best_transcripts = HashSet::new();
     for (gene_id, transcript_ids) in gene_to_transcripts {
-        // println!("Selecting best transcript for gene: {}", gene_id);
+        log(LogLevel::Debug, &format!("Selecting best transcript for gene: {}", gene_id));
         if transcript_ids.is_empty() {
             continue;
         }
@@ -829,8 +830,11 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
        best_transcripts.insert(best_transcript);
    }
 
-   println!("Selected {} best transcripts out of {} total transcripts",
-            best_transcripts.len(), transcript_info_map.len());
+    log(LogLevel::Info, &format!(
+      "Selected {} best transcripts out of {} total transcripts",
+      best_transcripts.len(), transcript_info_map.len()
+   ));
+   update_step_progress(2, "Building transcript data structures");
 
    // Now build a vector of TranscriptAnnotationCDS objects, but only for the best transcripts
    let mut transcripts_vec = Vec::new();
@@ -871,13 +875,18 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
         });
    }
 
-   println!(
-       "\nNumber of best transcripts returned: {}",
+    log(LogLevel::Info, &format!(
+       "Number of best transcripts returned: {}",
        transcripts_vec.len()
-   );
+   ));
    if transcripts_vec.is_empty() {
-       println!("No CDS transcripts parsed for chromosome {}", chr);
+       log(LogLevel::Warning, &format!("No CDS transcripts parsed for chromosome {}", chr));
    }
+   
+   finish_step_progress(&format!(
+       "Parsed {} transcripts for chr{}", 
+       transcripts_vec.len(), chr
+   ));
 
    // Return only the best transcript for each gene
    Ok(transcripts_vec)
