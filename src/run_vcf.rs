@@ -4,6 +4,10 @@ use ferromic::parse::{
 use ferromic::process::{
     process_config_entries, Args, ConfigEntry, VcfError, ZeroBasedHalfOpen,
 };
+use ferromic::progress::{
+    init_global_progress, update_global_progress, log, LogLevel, 
+    finish_all, display_status_box, StatusBox,
+};
 use clap::Parser;
 use colored::Colorize;
 use rayon::ThreadPoolBuilder;
@@ -50,9 +54,18 @@ fn main() -> Result<(), VcfError> {
         .build_global()
         .unwrap();
 
+    display_status_box(StatusBox {
+        title: "Ferromic VCF Analysis".to_string(),
+        stats: vec![
+            ("Version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
+            ("CPU Threads".to_string(), num_logical_cpus.to_string()),
+            ("Date".to_string(), chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+        ],
+    });
+
     // Parse a mask file (regions to exclude)
     let mask_regions = if let Some(mask_file) = args.mask_file.as_ref() {
-        println!("Mask file provided: {}", mask_file);
+        log(LogLevel::Info, &format!("Mask file provided: {}", mask_file));
         Some(Arc::new(
             parse_regions_file(Path::new(mask_file))?
                 .into_iter()
@@ -73,7 +86,7 @@ fn main() -> Result<(), VcfError> {
 
     // Parse an allow file (regions to include)
     let allow_regions = if let Some(allow_file) = args.allow_file.as_ref() {
-        println!("Allow file provided: {}", allow_file);
+        log(LogLevel::Info, &format!("Allow file provided: {}", allow_file));
         Some(Arc::new(
             parse_regions_file(Path::new(allow_file))?
                 .into_iter()
@@ -92,16 +105,13 @@ fn main() -> Result<(), VcfError> {
         None
     };
 
-    println!(
-        "\n{}",
-        "Starting VCF analysis with ferromic...".green().bold()
-    );
+    log(LogLevel::Info, "Starting VCF analysis with ferromic...");
 
     // ------------------------------------------------------------------------
     // CASE 1: A config file is provided
     // ------------------------------------------------------------------------
     if let Some(config_file) = args.config_file.as_ref() {
-        println!("Config file provided: {}", config_file);
+        log(LogLevel::Info, &format!("Config file provided: {}", config_file));
         let config_entries = parse_config_file(Path::new(config_file))?;
 
         let output_file = args
@@ -109,6 +119,10 @@ fn main() -> Result<(), VcfError> {
             .as_ref()
             .map(Path::new)
             .unwrap_or_else(|| Path::new("output.csv"));
+            
+        // Initialize global progress with total entries
+        init_global_progress(config_entries.len());
+        update_global_progress(0, &format!("Starting analysis of {} regions", config_entries.len()));
 
         // Hand off to the standard config-based pipeline
         process_config_entries(
@@ -139,6 +153,8 @@ fn main() -> Result<(), VcfError> {
         // Collect sample names so we can assign them to a default group
         let sample_names = read_sample_names_from_vcf(&vcf_file)?;
 
+        log(LogLevel::Info, &format!("Processing chromosome {} with {} samples", chr, sample_names.len()));
+
         // Build a trivial "all samples => group 0" mapping
         let mut samples_unfiltered: HashMap<String, (u8, u8)> = HashMap::new();
         for sname in sample_names {
@@ -161,6 +177,10 @@ fn main() -> Result<(), VcfError> {
             .as_ref()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("output.csv"));
+            
+        // Initialize global progress with just one entry
+        init_global_progress(1);
+        update_global_progress(0, &format!("Processing chr{}", chr));
 
         // Reuse the standard config-based pipeline with our single entry
         process_config_entries(
@@ -180,6 +200,6 @@ fn main() -> Result<(), VcfError> {
         ));
     }
 
-    println!("{}", "Analysis complete.".green().bold());
+    finish_all();
     Ok(())
 }
