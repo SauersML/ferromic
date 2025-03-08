@@ -1473,31 +1473,50 @@ fn process_single_config_entry(
     chr: &str,
     args: &Args,
 ) -> Result<Option<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)>, VcfError> {
-    println!(
-        "Processing entry: {}:{}-{}",
-        entry.seqname, entry.interval.start, entry.interval.end
-    );
-
+    set_stage(ProcessingStage::ConfigEntry);
+    let region_desc = format!("{}:{}-{}", 
+        entry.seqname, entry.interval.start, entry.interval.end);
+    
+    log(LogLevel::Info, &format!("Processing region: {}", region_desc));
+    
+    init_step_progress(&format!("Filtering transcripts for {}", region_desc), 2);
+    
     let local_cds = filter_and_log_transcripts(
         cds_regions.to_vec(),
         entry.interval.to_zero_based_inclusive().into(),
     );
+    
+    log(LogLevel::Info, &format!(
+        "Found {} transcripts overlapping region {}",
+        local_cds.len(), region_desc
+    ));
 
+    update_step_progress(1, "Preparing extended region");
+    
     let chr_length = ref_sequence.len() as i64;
     let extended_region = ZeroBasedHalfOpen::from_1based_inclusive(
         (entry.interval.start as i64 - 3_000_000).max(0),
         ((entry.interval.end as i64) + 3_000_000).min(chr_length),
     );
+    
+    finish_step_progress(&format!(
+        "Extended region: {}:{}-{}", 
+        chr, extended_region.start_1based_inclusive(), extended_region.end_1based_inclusive()
+    ));
 
     let seqinfo_storage_unfiltered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
     let position_allele_map_unfiltered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
     let seqinfo_storage_filtered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
     let position_allele_map_filtered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
-    println!(
-        "Calling process_vcf for {} from {} to {} (extended: {}-{})",
-        chr, entry.interval.start, entry.interval.end, extended_region.start, extended_region.end
-    );
+    set_stage(ProcessingStage::VcfProcessing);
+    init_step_progress(&format!("Processing VCF for {}", region_desc), 2);
+    
+    log(LogLevel::Info, &format!(
+        "Processing VCF for {}:{}-{} (extended: {}-{})",
+        chr, entry.interval.start, entry.interval.end, 
+        extended_region.start, extended_region.end
+    ));
 
     let (
         unfiltered_variants,
@@ -1521,21 +1540,41 @@ fn process_single_config_entry(
     ) {
         Ok(data) => data,
         Err(e) => {
-            eprintln!("Error processing VCF for {}: {}", chr, e);
+            log(LogLevel::Error, &format!("Error processing VCF for {}: {}", chr, e));
+            finish_step_progress("VCF processing failed");
             return Ok(None);
         }
     };
+    
+    update_step_progress(1, "Analyzing variant statistics");
 
-    println!(
-        "Total variants: {}, Filtered: {} (some reasons: mask={}, allow={}, multi-allelic={}, low_GQ={}, missing={})",
+    // Display variant filtering statistics
+    display_status_box(StatusBox {
+        title: format!("Variant Statistics for {}", region_desc),
+        stats: vec![
+            ("Total variants".to_string(), filtering_stats.total_variants.to_string()),
+            ("Filtered variants".to_string(), filtering_stats._filtered_variants.to_string()),
+            ("% Filtered".to_string(), format!("{:.1}%", 
+                (filtering_stats._filtered_variants as f64 / 
+                 filtering_stats.total_variants.max(1) as f64) * 100.0)),
+            ("Due to mask".to_string(), filtering_stats.filtered_due_to_mask.to_string()),
+            ("Due to allow".to_string(), filtering_stats.filtered_due_to_allow.to_string()),
+            ("Multi-allelic".to_string(), filtering_stats.multi_allelic_variants.to_string()),
+            ("Low GQ".to_string(), filtering_stats.low_gq_variants.to_string()),
+            ("Missing data".to_string(), filtering_stats.missing_data_variants.to_string()),
+        ],
+    });
+    
+    log(LogLevel::Info, &format!(
+        "Variant statistics: {} total, {} filtered (mask={}, allow={}, multi={}, lowGQ={}, missing={})",
         filtering_stats.total_variants,
         filtering_stats._filtered_variants,
         filtering_stats.filtered_due_to_mask,
         filtering_stats.filtered_due_to_allow,
         filtering_stats.multi_allelic_variants,
         filtering_stats.low_gq_variants,
-        filtering_stats.missing_data_variants,
-    );
+        filtering_stats.missing_data_variants
+    ));
 
     let sequence_length = (entry.interval.end - entry.interval.start) as i64;
     let adjusted_sequence_length = calculate_adjusted_sequence_length(
@@ -1544,12 +1583,26 @@ fn process_single_config_entry(
         allow.as_ref().and_then(|a| a.get(&chr.to_string())),
         mask.as_ref().and_then(|m| m.get(&chr.to_string())),
     );
+    
+    log(LogLevel::Info, &format!(
+        "Region length: {}bp (adjusted: {}bp after masking)", 
+        sequence_length, adjusted_sequence_length
+    ));
 
+    // Filter to variants specifically in this region
     let region_variants_unfiltered: Vec<_> = unfiltered_variants
         .iter()
         .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
         .cloned()
         .collect();
+    
+    log(LogLevel::Info, &format!(
+        "Found {} unfiltered variants in precise region {}:{}-{}", 
+        region_variants_unfiltered.len(), chr, entry.interval.start, entry.interval.end
+    ));
+    
+    finish_step_progress(&format!("Found {} variants in region", 
+        region_variants_unfiltered.len()));
 
     #[derive(Clone)]
     struct VariantInvocation<'a> {
@@ -1562,6 +1615,10 @@ fn process_single_config_entry(
         position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     }
 
+    // Set up the four analysis invocations (filtered/unfiltered × group 0/1)
+    set_stage(ProcessingStage::VariantAnalysis);
+    init_step_progress("Analyzing haplotype groups", 4);
+    
     let invocations = [
         VariantInvocation {
             group_id: 0,
@@ -1605,6 +1662,11 @@ fn process_single_config_entry(
         [None, None, None, None];
 
     for (i, call) in invocations.iter().enumerate() {
+        let filter_type = if call.is_filtered { "filtered" } else { "unfiltered" };
+        update_step_progress(i as u64, &format!(
+            "Analyzing {} group {}", filter_type, call.group_id
+        ));
+        
         let region_start = entry.interval.start as i64;
         let region_end = entry.interval.end as i64;
         let stats_opt = process_variants(
@@ -1634,14 +1696,16 @@ fn process_single_config_entry(
                 (1, false) => "unfiltered group 1",
                 _ => "unknown scenario",
             };
-            println!(
+            log(LogLevel::Warning, &format!(
                 "No haplotypes found for {} in region {}-{}",
                 label, region_start, region_end
-            );
+            ));
+            finish_step_progress("No matching haplotypes found");
             return Ok(None);
         }
     }
 
+    // Extract all results
     let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f, site_divs_0_f) =
         results[0].take().unwrap();
     let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f, site_divs_1_f) =
@@ -1651,13 +1715,21 @@ fn process_single_config_entry(
     let (num_segsites_1_u, w_theta_1_u, pi_1_u, n_hap_1_u, site_divs_1_u) =
         results[3].take().unwrap();
 
+    // Calculate inversion frequencies
+    log(LogLevel::Info, "Calculating inversion frequencies");
     let inversion_freq_filt =
         calculate_inversion_allele_frequency(&entry.samples_filtered).unwrap_or(-1.0);
     let inversion_freq_no_filter =
         calculate_inversion_allele_frequency(&entry.samples_unfiltered).unwrap_or(-1.0);
+    
+    log(LogLevel::Info, &format!(
+        "Inversion frequency: {:.2}% (unfiltered), {:.2}% (filtered)",
+        inversion_freq_no_filter * 100.0, inversion_freq_filt * 100.0
+    ));
 
+    // Prepare the CSV row data
     let row_data = CsvRowData {
-        seqname: entry.seqname,
+        seqname: entry.seqname.clone(),
         region_start: entry.interval.start as i64,
         region_end: entry.interval.end as i64,
         seq_len_0: sequence_length,
@@ -1683,12 +1755,29 @@ fn process_single_config_entry(
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
     };
+    
+    // Display summary of results
+    display_status_box(StatusBox {
+        title: format!("Results for {}", region_desc),
+        stats: vec![
+            ("Unfiltered θ Group 0".to_string(), format!("{:.6}", w_theta_0_u)),
+            ("Unfiltered θ Group 1".to_string(), format!("{:.6}", w_theta_1_u)),
+            ("Unfiltered π Group 0".to_string(), format!("{:.6}", pi_0_u)),
+            ("Unfiltered π Group 1".to_string(), format!("{:.6}", pi_1_u)),
+            ("Filtered θ Group 0".to_string(), format!("{:.6}", w_theta_0_f)),
+            ("Filtered θ Group 1".to_string(), format!("{:.6}", w_theta_1_f)),
+            ("Filtered π Group 0".to_string(), format!("{:.6}", pi_0_f)),
+            ("Filtered π Group 1".to_string(), format!("{:.6}", pi_1_f)),
+            ("Inversion Frequency".to_string(), format!("{:.2}%", inversion_freq_filt * 100.0)),
+        ],
+    });
+    
+    finish_step_progress(&format!(
+        "Completed analysis for {}", region_desc
+    ));
 
-    println!(
-        "Finished stats for region {}-{}.",
-        entry.interval.start, entry.interval.end
-    );
-
+    // Collect per-site diversity records
+    log(LogLevel::Info, "Collecting per-site diversity statistics");
     let mut per_site_records = Vec::new();
     for sd in site_divs_0_u {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 0, false));
@@ -1702,6 +1791,11 @@ fn process_single_config_entry(
     for sd in site_divs_1_f {
         per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 1, true));
     }
+    
+    log(LogLevel::Info, &format!(
+        "Collected {} per-site diversity records for {}",
+        per_site_records.len(), region_desc
+    ));
 
     Ok(Some((row_data, per_site_records)))
 }
@@ -1719,7 +1813,7 @@ pub fn process_vcf(
     seqinfo_storage_filtered: Arc<Mutex<Vec<SeqInfo>>>,
     position_allele_map_unfiltered: Arc<Mutex<HashMap<i64, (char, char)>>>,
     position_allele_map_filtered: Arc<Mutex<HashMap<i64, (char, char)>>>,
-) -> Result<
+) -> Result
     (
         Vec<Variant>,
         Vec<Variant>,
@@ -1730,9 +1824,18 @@ pub fn process_vcf(
     ),
     VcfError,
 > {
-    // Initialize the VCF reader.
+    set_stage(ProcessingStage::VcfProcessing);
+    log(LogLevel::Info, &format!(
+        "Processing VCF file {} for chr{}:{}-{}", 
+        file.display(), chr, region.start, region.end
+    ));
+    
+    // Initialize the VCF reader
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
+    
+    // Get chromosome length from reference
+    let spinner = create_spinner("Reading reference chromosome length");
     let chr_length = {
         let fasta_reader = bio::io::fasta::IndexedReader::from_file(&reference_path)
             .map_err(|e| VcfError::Parse(e.to_string()))?;
@@ -1743,16 +1846,17 @@ pub fn process_vcf(
             .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?;
         seq_info.len as i64
     };
+    spinner.finish_with_message(&format!("Chromosome {} length: {}bp", chr, chr_length));
 
-    // Small vectors to hold variants in batches, limiting memory usage.
+    // Small vectors to hold variants in batches, limiting memory usage
     let unfiltered_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
     let filtered_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
 
-    // Shared stats.
+    // Shared stats
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
     let _filtering_stats = Arc::new(Mutex::new(FilteringStats::default()));
 
-    // Progress UI setup.
+    // Create a more modern progress bar
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
     let progress_bar = Arc::new(if is_gzipped {
         ProgressBar::new_spinner()
@@ -1760,18 +1864,23 @@ pub fn process_vcf(
         let file_size = fs::metadata(file)?.len();
         ProgressBar::new(file_size)
     });
+    
     let style = if is_gzipped {
         ProgressStyle::default_spinner()
-            .template("{spinner:.bold.green} VCF {elapsed_precise} {msg}")
+            .template("{spinner:.bold.green} Reading VCF {elapsed_precise} {msg}")
             .expect("Spinner template error")
-            .tick_strings(&["░░", "▒▒", "▓▓", "██", "▓▓", "▒▒"])
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
     } else {
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
             .expect("Progress bar template error")
-            .progress_chars("=>-")
+            .progress_chars("█▓▒░")
     };
+    
     progress_bar.set_style(style);
+    progress_bar.set_message(&format!("Reading VCF for chr{}:{}-{}", 
+        chr, region.start, region.end));
+        
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = Arc::clone(&processing_complete);
     let progress_bar_clone = Arc::clone(&progress_bar); // Clone Arc for progress thread
@@ -2003,6 +2112,17 @@ pub fn process_vcf(
         .into_inner();
     let final_names = Arc::try_unwrap(arc_sample_names)
         .map_err(|_| VcfError::Parse("Sample names have multiple owners".to_string()))?;
+        
+    log(LogLevel::Info, &format!(
+        "VCF processing complete for chr{}:{}-{}: {} variants loaded, {} filtered",
+        chr, region.start, region.end, final_unfiltered.len(), final_filtered.len()
+    ));
+    
+    log(LogLevel::Info, &format!(
+        "VCF statistics: missing data points: {}/{} ({:.2}%)",
+        final_miss.missing_data_points, final_miss.total_data_points,
+        (final_miss.missing_data_points as f64 / final_miss.total_data_points.max(1) as f64) * 100.0
+    ));
 
     Ok((
         final_unfiltered,
