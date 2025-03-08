@@ -1,5 +1,5 @@
 use crate::process::{ConfigEntry, VcfError, ZeroBasedHalfOpen};
-use crate::transcripts::TranscriptCDS;
+use crate::transcripts::TranscriptAnnotationCDS;
 
 use colored::Colorize;
 use flate2::read::MultiGzDecoder;
@@ -420,199 +420,370 @@ pub fn read_reference_sequence(
     Ok(sequence)
 }
 
-// IN PROGRESS
-// Helper function to parse GTF file and extract CDS regions
+// Helper function to parse GTF file and extract best CDS regions for each gene
 // GTF and GFF use 1-based coordinate system
-pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptCDS>, VcfError> {
-    // Print overall GTF parsing context.
-    println!("\nParsing GTF file for chromosome: {}", chr);
+// Returns one TranscriptAnnotationCDS per gene (the best transcript according to priority rules)
+pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnotationCDS>, VcfError> {
+   // Print overall GTF parsing context.
+   println!("\nParsing GTF file for chromosome: {}", chr);
 
-    // Open the GTF file.
-    let file = File::open(gtf_path).map_err(|e| {
-        VcfError::Io(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("GTF file not found: {:?}", e),
-        ))
-    })?;
-    let reader = BufReader::new(file);
+   // Open the GTF file.
+   let file = File::open(gtf_path).map_err(|e| {
+       VcfError::Io(io::Error::new(
+           io::ErrorKind::NotFound,
+           format!("GTF file not found: {:?}", e),
+       ))
+   })?;
+   let reader = BufReader::new(file);
 
-    // Map of transcript_id -> list of CDS segments.
-    let mut transcript_map: HashMap<String, Vec<(i64, i64, char, i64)>> = HashMap::new();
+   // Define priority order for transcript tags
+   // Lower index = higher priority
+   const PRIORITY_TAGS: [&str; 7] = [
+       "MANE_Select",
+       "MANE_Plus_Clinical",
+       "CCDS",
+       "appris_principal_1",
+       "GENCODE_Primary",
+       "Ensembl_canonical",
+       "basic",
+   ];
 
-    let mut skipped_lines = 0;
-    let mut processed_lines = 0;
-    let mut transcripts_found = HashSet::new();
-    let mut malformed_attributes = 0;
+   // Structure to hold transcript information for selection
+   #[derive(Default)]
+   struct TranscriptInfo {
+       segments: Vec<(i64, i64, char, i64)>, // start, end, strand, frame
+       priority_level: usize,                // Lower is higher priority (usize::MAX = no priority tag)
+       cds_length: i64,                      // Total length of all CDS segments
+       gene_id: String,                      // Gene this transcript belongs to
+       gene_name: Option<String>,            // Optional gene name
+   }
 
-    println!("Reading GTF entries...");
+   // Map of transcript_id -> transcript info
+   let mut transcript_info_map: HashMap<String, TranscriptInfo> = HashMap::new();
+   
+   // Track statistics for logging
+   let mut skipped_lines = 0;
+   let mut processed_lines = 0;
+   let mut transcripts_found = HashSet::new();
+   let mut genes_found = HashSet::new();
+   let mut malformed_attributes = 0;
 
-    // Read each line, parse if CDS, and store in transcript_map.
-    for (line_num, line_result) in reader.lines().enumerate() {
-        let line = line_result?;
-        if line.starts_with('#') {
-            continue;
-        }
+   println!("Reading GTF entries...");
 
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 9 {
-            skipped_lines += 1;
-            continue;
-        }
+   // Read each line, parse if CDS, and store in transcript_info_map
+   for (line_num, line_result) in reader.lines().enumerate() {
+       let line = line_result?;
+       if line.starts_with('#') {
+           continue;
+       }
 
-        let seqname = fields[0].trim().trim_start_matches("chr");
-        if seqname != chr.trim_start_matches("chr") {
-            continue;
-        }
+       let fields: Vec<&str> = line.split('\t').collect();
+       if fields.len() < 9 {
+           skipped_lines += 1;
+           continue;
+       }
 
-        // Only process CDS features.
-        if fields[2] != "CDS" {
-            continue;
-        }
+       let seqname = fields[0].trim().trim_start_matches("chr");
+       if seqname != chr.trim_start_matches("chr") {
+           continue;
+       }
 
-        processed_lines += 1;
-        if processed_lines % 10000 == 0 {
-            println!("Processed {} CDS entries...", processed_lines);
-        }
+       // Only process CDS features.
+       if fields[2] != "CDS" {
+           continue;
+       }
 
-        let start: i64 = match fields[3].parse() {
-            Ok(s) => s,
-            Err(_) => {
-                eprintln!(
-                    "Warning: Invalid start position at line {}, skipping",
-                    line_num + 1
-                );
-                skipped_lines += 1;
-                continue;
-            }
-        };
+       processed_lines += 1;
+       if processed_lines % 10000 == 0 {
+           println!("Processed {} CDS entries...", processed_lines);
+       }
 
-        let end: i64 = match fields[4].parse() {
-            Ok(e) => e,
-            Err(_) => {
-                eprintln!(
-                    "Warning: Invalid end position at line {}, skipping",
-                    line_num + 1
-                );
-                skipped_lines += 1;
-                continue;
-            }
-        };
+       let start: i64 = match fields[3].parse() {
+           Ok(s) => s,
+           Err(_) => {
+               eprintln!(
+                   "Warning: Invalid start position at line {}, skipping",
+                   line_num + 1
+               );
+               skipped_lines += 1;
+               continue;
+           }
+       };
 
-        let strand_char = fields[6].chars().next().unwrap_or('.');
-        let frame: i64 = fields[7].parse().unwrap_or_else(|_| {
-            eprintln!("Warning: Invalid frame at line {}, using 0", line_num + 1);
-            0
-        });
+       let end: i64 = match fields[4].parse() {
+           Ok(e) => e,
+           Err(_) => {
+               eprintln!(
+                   "Warning: Invalid end position at line {}, skipping",
+                   line_num + 1
+               );
+               skipped_lines += 1;
+               continue;
+           }
+       };
 
-        // Parse attributes to find transcript_id (and gene_name, if present).
-        let attributes = fields[8];
-        let mut transcript_id = None;
-        let mut gene_name = None;
+       let strand_char = fields[6].chars().next().unwrap_or('.');
+       let frame: i64 = fields[7].parse().unwrap_or_else(|_| {
+           eprintln!("Warning: Invalid frame at line {}, using 0", line_num + 1);
+           0
+       });
 
-        for attr in attributes.split(';') {
-            let attr = attr.trim();
-            let parts: Vec<&str> = if attr.contains('=') {
-                attr.splitn(2, '=').collect()
-            } else {
-                attr.splitn(2, ' ').collect()
-            };
+       // Parse attributes to find transcript_id, gene_id, gene_name, and priority tags
+       let attributes = fields[8];
+       let mut transcript_id = None;
+       let mut gene_id = None;
+       let mut gene_name = None;
+       let mut found_tags = Vec::new();
+       let mut gene_type = None;
+       let mut transcript_type = None;
 
-            if parts.len() != 2 {
-                continue;
-            }
+       for attr in attributes.split(';') {
+           let attr = attr.trim();
+           if attr.is_empty() {
+               continue;
+           }
 
-            let key = parts[0].trim();
-            let value = parts[1].trim().trim_matches('"').trim_matches('\'');
+           let parts: Vec<&str> = if attr.contains('=') {
+               attr.splitn(2, '=').collect()
+           } else {
+               attr.splitn(2, ' ').collect()
+           };
 
-            match key {
-                "transcript_id" => transcript_id = Some(value.to_string()),
-                "gene_name" => gene_name = Some(value.to_string()),
-                _ => {}
-            }
-        }
+           if parts.len() != 2 {
+               continue;
+           }
 
-        let transcript_id = match transcript_id {
-            Some(id) => id,
-            None => {
-                malformed_attributes += 1;
-                if malformed_attributes <= 5 {
-                    eprintln!(
-                        "Warning: Could not find transcript_id in attributes at line {}: {}",
-                        line_num + 1,
-                        attributes
-                    );
-                }
-                continue;
-            }
-        };
+           let key = parts[0].trim();
+           let value = parts[1].trim().trim_matches('"').trim_matches('\'');
 
-        // Track transcripts found
-        if let Some(gene) = gene_name {
-            transcripts_found.insert(format!("{}:{}", gene, transcript_id));
-        } else {
-            transcripts_found.insert(transcript_id.clone());
-        }
+           match key {
+               "transcript_id" => transcript_id = Some(value.to_string()),
+               "gene_id" => gene_id = Some(value.to_string()),
+               "gene_name" => gene_name = Some(value.to_string()),
+               "gene_type" => gene_type = Some(value.to_string()),
+               "transcript_type" => transcript_type = Some(value.to_string()),
+               "tag" => found_tags.push(value.to_string()),
+               _ => {}
+           }
+       }
 
-        // Push this CDS segment into the map for that transcript.
-        transcript_map
-            .entry(transcript_id)
-            .or_default()
-            .push((start, end, strand_char, frame));
-    }
+       // Skip non-protein-coding features if we can determine type
+       if let Some(ref gt) = gene_type {
+           if gt != "protein_coding" {
+               continue;
+           }
+       }
+       if let Some(ref tt) = transcript_type {
+           if tt != "protein_coding" {
+               continue;
+           }
+       }
 
-    // Print summary of how many lines, transcripts, etc.
-    println!("\nFinished reading GTF.");
-    println!("Total CDS entries processed: {}", processed_lines);
-    println!("Skipped lines: {}", skipped_lines);
-    println!("Unique transcripts found: {}", transcripts_found.len());
-    if malformed_attributes > 0 {
-        println!(
-            "Entries with missing transcript IDs: {}",
-            malformed_attributes
-        );
-    }
+       // Get transcript ID or skip if missing
+       let transcript_id = match transcript_id {
+           Some(id) => id,
+           None => {
+               malformed_attributes += 1;
+               if malformed_attributes <= 5 {
+                   eprintln!(
+                       "Warning: Could not find transcript_id in attributes at line {}: {}",
+                       line_num + 1,
+                       attributes
+                   );
+               }
+               continue;
+           }
+       };
 
-    // Now build a vector of TranscriptCDS objects.
-    let mut transcripts_vec = Vec::new();
+       // Get gene ID or skip if missing
+       let gene_id = match gene_id {
+           Some(id) => id,
+           None => {
+               malformed_attributes += 1;
+               if malformed_attributes <= 5 {
+                   eprintln!(
+                       "Warning: Could not find gene_id in attributes at line {}: {}",
+                       line_num + 1,
+                       attributes
+                   );
+               }
+               continue;
+           }
+       };
 
-    for (tid, mut segments) in transcript_map {
-        segments.sort_by_key(|&(s, _, _, _)| s);
+       // Track stats
+       genes_found.insert(gene_id.clone());
+       if let Some(ref gene) = gene_name {
+           transcripts_found.insert(format!("{}:{}", gene, transcript_id));
+       } else {
+           transcripts_found.insert(transcript_id.clone());
+       }
 
-        if !segments.is_empty() {
-            let strand = segments[0].2;
-            if strand == '-' {
-                segments.reverse();
-            }
-        }
+       // Calculate CDS segment length
+       let segment_length = end - start + 1;
+       
+       // Determine priority level based on tags
+       let priority_level = found_tags.iter()
+           .filter_map(|tag| PRIORITY_TAGS.iter().position(|&p| p == tag))
+           .min()
+           .unwrap_or(usize::MAX); // Use MAX value if no priority tag found
 
-        let strand_char = if segments.is_empty() { '.' } else { segments[0].2 };
-        let mut frames_vec: Vec<i64> = segments.iter().map(|&(_s, _e, _str, f)| f).collect();
-        let mut seg_intervals: Vec<ZeroBasedHalfOpen> = segments
-            .iter()
-            .map(|&(s, e, _, _)| ZeroBasedHalfOpen::from_1based_inclusive(s, e))
-            .collect();
+       // Get existing transcript info or create a new one
+       let transcript_info = transcript_info_map.entry(transcript_id.clone()).or_insert_with(|| {
+           TranscriptInfo {
+               segments: Vec::new(),
+               priority_level,
+               cds_length: 0,
+               gene_id: gene_id.clone(),
+               gene_name: gene_name.clone(),
+           }
+       });
 
-        if strand_char == '-' {
-            seg_intervals.reverse();
-            frames_vec.reverse();
-        }
+       // Update the transcript info
+       transcript_info.segments.push((start, end, strand_char, frame));
+       transcript_info.cds_length += segment_length;
+       
+       // Update priority level if we found a better one
+       if priority_level < transcript_info.priority_level {
+           transcript_info.priority_level = priority_level;
+       }
 
-        transcripts_vec.push(TranscriptCDS {
-            transcript_id: tid,
-            strand: strand_char,
-            frames: frames_vec,
-            segments: seg_intervals,
-        });
-    }
+       // Make sure gene_id is consistent (should be the same for all segments of a transcript)
+       if transcript_info.gene_id != gene_id {
+           eprintln!(
+               "Warning: Inconsistent gene_id for transcript {} at line {}: {} vs {}",
+               transcript_id, line_num + 1, transcript_info.gene_id, gene_id
+           );
+           // Keep the first gene_id we encountered
+       }
 
-    println!(
-        "\nNumber of transcripts returned: {}",
-        transcripts_vec.len()
-    );
-    if transcripts_vec.is_empty() {
-        println!("No CDS transcripts parsed for chromosome {}", chr);
-    }
+       // Set gene_name if we didn't have it before
+       if transcript_info.gene_name.is_none() && gene_name.is_some() {
+           transcript_info.gene_name = gene_name;
+       }
+   }
 
-    // Return them all (we do not filter by user region here).
-    Ok(transcripts_vec)
+   // Print summary of how many lines, transcripts, genes, etc.
+   println!("\nFinished reading GTF.");
+   println!("Total CDS entries processed: {}", processed_lines);
+   println!("Skipped lines: {}", skipped_lines);
+   println!("Unique transcripts found: {}", transcripts_found.len());
+   println!("Unique genes found: {}", genes_found.len());
+   if malformed_attributes > 0 {
+       println!(
+           "Entries with missing required attributes: {}",
+           malformed_attributes
+       );
+   }
+
+   // Group transcripts by gene_id
+   let mut gene_to_transcripts: HashMap<String, Vec<String>> = HashMap::new();
+   for (transcript_id, info) in &transcript_info_map {
+       gene_to_transcripts
+           .entry(info.gene_id.clone())
+           .or_default()
+           .push(transcript_id.clone());
+   }
+
+   println!("Selecting best transcript for each gene...");
+   
+   // For each gene, select the best transcript based on priority rules
+   let mut best_transcripts = HashSet::new();
+   for (gene_id, transcript_ids) in gene_to_transcripts {
+       if transcript_ids.is_empty() {
+           continue;
+       }
+
+       // Find transcript with highest priority (lowest priority_level)
+       let min_priority = transcript_ids.iter()
+           .filter_map(|tid| transcript_info_map.get(tid))
+           .map(|info| info.priority_level)
+           .min()
+           .unwrap_or(usize::MAX);
+
+       // Get all transcripts with this priority level
+       let candidates: Vec<&String> = transcript_ids.iter()
+           .filter(|tid| {
+               transcript_info_map.get(*tid)
+                   .map(|info| info.priority_level == min_priority)
+                   .unwrap_or(false)
+           })
+           .collect();
+
+       // Among candidates with the same priority, pick the one with longest CDS
+       let best_transcript = if candidates.len() == 1 {
+           candidates[0].clone()
+       } else {
+           let max_length = candidates.iter()
+               .filter_map(|tid| transcript_info_map.get(*tid))
+               .map(|info| info.cds_length)
+               .max()
+               .unwrap_or(0);
+
+           // Get all transcripts with max length
+           let longest_candidates: Vec<&String> = candidates.iter()
+               .filter(|tid| {
+                   transcript_info_map.get(*tid)
+                       .map(|info| info.cds_length == max_length)
+                       .unwrap_or(false)
+               })
+               .collect();
+
+           // If multiple transcripts have the same priority and length, pick the first one
+           longest_candidates.first().map(|s| (*s).clone()).unwrap_or_else(|| candidates[0].clone())
+       };
+
+       best_transcripts.insert(best_transcript);
+   }
+
+   println!("Selected {} best transcripts out of {} total transcripts",
+            best_transcripts.len(), transcript_info_map.len());
+
+   // Now build a vector of TranscriptAnnotationCDS objects, but only for the best transcripts
+   let mut transcripts_vec = Vec::new();
+
+   for (tid, info) in transcript_info_map {
+       // Skip if this transcript is not the best for its gene
+       if !best_transcripts.contains(&tid) {
+           continue;
+       }
+
+       // Process segments
+       let mut segments = info.segments;
+       segments.sort_by_key(|&(s, _, _, _)| s);
+
+       if segments.is_empty() {
+           continue;
+       }
+
+       let strand = segments[0].2;
+       if strand == '-' {
+           segments.reverse();
+       }
+
+       let strand_char = segments[0].2;
+       let frames_vec: Vec<i64> = segments.iter().map(|&(_s, _e, _str, f)| f).collect();
+       let seg_intervals: Vec<ZeroBasedHalfOpen> = segments
+           .iter()
+           .map(|&(s, e, _, _)| ZeroBasedHalfOpen::from_1based_inclusive(s, e))
+           .collect();
+
+       transcripts_vec.push(TranscriptAnnotationCDS {
+           transcript_id: tid,
+           strand: strand_char,
+           frames: frames_vec,
+           segments: seg_intervals,
+       });
+   }
+
+   println!(
+       "\nNumber of best transcripts returned: {}",
+       transcripts_vec.len()
+   );
+   if transcripts_vec.is_empty() {
+       println!("No CDS transcripts parsed for chromosome {}", chr);
+   }
+
+   // Return only the best transcript for each gene
+   Ok(transcripts_vec)
 }
