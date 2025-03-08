@@ -470,9 +470,30 @@ pub fn prepare_to_write_cds(
         if filtered_map.is_empty() {
             continue;
         }
+        // Calculate true CDS boundaries in 1-based inclusive coordinates
+        let (cds_start, cds_end) = if cds.segments.is_empty() {
+            (0, 0)
+        } else {
+            if cds.strand == '+' {
+                // For positive strand: first segment start to last segment end
+                let first_seg = cds.segments.first().unwrap();
+                let last_seg = cds.segments.last().unwrap();
+                (first_seg.start_1based_inclusive(), last_seg.end_1based_inclusive())
+            } else {
+                // For negative strand: last segment start to first segment end
+                let first_seg = cds.segments.first().unwrap();
+                let last_seg = cds.segments.last().unwrap();
+                (last_seg.start_1based_inclusive(), first_seg.end_1based_inclusive())
+            }
+        };
+        
+        // Create a filename-safe version of gene name
+        let safe_gene_name = cds.gene_name.replace(|c: char| !c.is_alphanumeric(), "");
+        
         let filename = format!(
-            "group_{}_{}_chr_{}_start_{}_end_{}_combined.phy",
-            haplotype_group, cds.transcript_id, chromosome, hap_region.start, hap_region.end
+            "group{}_{}_{}_{}_chr{}_start{}_end{}.phy",
+            haplotype_group, safe_gene_name, cds.gene_id, cds.transcript_id, 
+            chromosome, cds_start, cds_end
         );
         write_phylip_file(&filename, &filtered_map, &cds.transcript_id)?;
     }
