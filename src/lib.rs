@@ -6,6 +6,7 @@ pub mod parse;
 pub mod process;
 pub mod stats;
 pub mod transcripts;
+pub mod progress;
 
 /// PyO3 wrapper for count_segregating_sites
 #[pyfunction]
