@@ -1,5 +1,9 @@
 use crate::process::{ConfigEntry, VcfError, ZeroBasedHalfOpen};
 use crate::transcripts::TranscriptAnnotationCDS;
+use crate::progress::{
+    log, LogLevel, init_step_progress, update_step_progress,
+    finish_step_progress, create_spinner, set_stage, ProcessingStage
+};
 
 use colored::Colorize;
 use flate2::read::MultiGzDecoder;
@@ -12,7 +16,11 @@ use std::path::{Path, PathBuf};
 pub fn parse_regions_file(
     path: &Path,
 ) -> Result<HashMap<String, Vec<ZeroBasedHalfOpen>>, VcfError> {
+    set_stage(ProcessingStage::Global);
     let is_bed_file = path.extension().and_then(|s| s.to_str()) == Some("bed");
+    
+    log(LogLevel::Info, &format!("Parsing regions file: {}", path.display()));
+    let spinner = create_spinner(&format!("Parsing regions file: {}", path.display()));
 
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -22,10 +30,8 @@ pub fn parse_regions_file(
         let line = line_result?;
         let fields: Vec<&str> = line.split_whitespace().collect();
         if fields.len() < 3 {
-            eprintln!(
-                "{}",
-                format!("Skipping invalid line {}: '{}'", line_num + 1, line).red()
-            );
+            let error_msg = format!("Skipping invalid line {}: '{}'", line_num + 1, line);
+            log(LogLevel::Warning, &error_msg);
             continue;
         }
 
@@ -33,30 +39,24 @@ pub fn parse_regions_file(
         let raw_start: i64 = match fields[1].trim().parse() {
             Ok(val) => val,
             Err(_) => {
-                eprintln!(
-                    "{}",
-                    format!(
-                        "Invalid start position on line {}: '{}'",
-                        line_num + 1,
-                        fields[1]
-                    )
-                    .red()
+                let error_msg = format!(
+                    "Invalid start position on line {}: '{}'",
+                    line_num + 1,
+                    fields[1]
                 );
+                log(LogLevel::Warning, &error_msg);
                 continue;
             }
         };
         let raw_end: i64 = match fields[2].trim().parse() {
             Ok(val) => val,
             Err(_) => {
-                eprintln!(
-                    "{}",
-                    format!(
-                        "Invalid end position on line {}: '{}'",
-                        line_num + 1,
-                        fields[2]
-                    )
-                    .red()
+                let error_msg = format!(
+                    "Invalid end position on line {}: '{}'",
+                    line_num + 1,
+                    fields[2]
                 );
+                log(LogLevel::Warning, &error_msg);
                 continue;
             }
         };
@@ -76,12 +76,21 @@ pub fn parse_regions_file(
     for intervals in regions.values_mut() {
         intervals.sort_by_key(|iv| iv.start);
     }
+    
+    let num_regions: usize = regions.values().map(|v| v.len()).sum();
+    spinner.finish_with_message(format!("Parsed {} regions across {} chromosomes", num_regions, regions.len()));
+    log(LogLevel::Info, &format!("Completed parsing {} regions", num_regions));
 
     Ok(regions)
 }
 
 // Check 0-based vs. 1 based, half-open vs. inclusive, between config file and mask/allow file
 pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
+    set_stage(ProcessingStage::Global);
+    log(LogLevel::Info, &format!("Parsing config file: {}", path.display()));
+    
+    let spinner = create_spinner(&format!("Reading config file: {}", path.display()));
+    
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(b'\t')
         .from_path(path)
@@ -95,11 +104,15 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
     // Check if the number of sample names is consistent
     if sample_names.is_empty() {
-        eprintln!("{}", "Error: No sample names found in the configuration file header after skipping the first 7 columns. Tabs must separate all columns, including sample names.".red());
+        let error_msg = "Error: No sample names found in the configuration file header after skipping the first 7 columns. Tabs must separate all columns, including sample names.";
+        log(LogLevel::Error, error_msg);
+        spinner.finish_with_message("Failed to parse config file: no sample names found");
         return Err(VcfError::Parse(
             "No sample names found in config file header.".to_string(),
         ));
     }
+    
+    spinner.set_message(format!("Found {} sample columns in config file", sample_names.len()));
 
     let mut entries = Vec::new();
     let mut invalid_genotypes = 0;
@@ -110,7 +123,12 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
 
         // Check if the record has the expected number of fields
         if record.len() != headers.len() {
-            eprintln!("{}", format!("Error: Record on line {} does not have the same number of fields as the header. Expected {}, found {}. Please check for missing tabs in the config file.", line_num + 2, headers.len(), record.len()).red());
+            let error_msg = format!(
+                "Error: Record on line {} does not have the same number of fields as the header. Expected {}, found {}. Please check for missing tabs in the config file.", 
+                line_num + 2, headers.len(), record.len()
+            );
+            log(LogLevel::Error, &error_msg);
+            spinner.finish_with_message("Failed to parse config file: mismatched field count");
             return Err(VcfError::Parse(format!(
                 "Mismatched number of fields in record on line {}",
                 line_num + 2
@@ -184,10 +202,10 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
         }
 
         if samples_unfiltered.is_empty() {
-            println!(
-                "Warning: No valid genotypes found for region {}:{}-{}",
+            log(LogLevel::Warning, &format!(
+                "No valid genotypes found for region {}:{}-{}",
                 seqname, start_pos, end_pos
-            );
+            ));
             continue;
         }
 
@@ -200,10 +218,15 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     }
 
     let invalid_percentage = (invalid_genotypes as f64 / total_genotypes as f64) * 100.0;
-    println!(
-        "Number of invalid genotypes: {} ({:.2}%)",
-        invalid_genotypes, invalid_percentage
-    );
+    spinner.finish_with_message(format!(
+        "Parsed {} entries with {} samples (invalid genotypes: {:.2}%)",
+        entries.len(), sample_names.len(), invalid_percentage
+    ));
+    
+    log(LogLevel::Info, &format!(
+        "Finished parsing config file. Found {} entries with {} samples. Invalid genotypes: {} ({:.2}%)",
+        entries.len(), sample_names.len(), invalid_genotypes, invalid_percentage
+    ));
 
     Ok(entries)
 }
@@ -231,6 +254,11 @@ pub fn parse_region(region: &str) -> Result<ZeroBasedHalfOpen, VcfError> {
 }
 
 pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
+    set_stage(ProcessingStage::Global);
+    log(LogLevel::Info, &format!("Searching for VCF file for chromosome {} in folder: {}", chr, folder));
+    
+    let spinner = create_spinner(&format!("Looking for VCF file for chr{}", chr));
+    
     let path = Path::new(folder);
     let chr_specific_files: Vec<_> = fs::read_dir(path)?
         .filter_map(|entry| entry.ok())
@@ -263,8 +291,13 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
             });
 
             if let Some(exact_file) = exact_match {
+                spinner.finish_with_message(format!("Found VCF file: {}", exact_file.display()));
+                log(LogLevel::Info, &format!("Found exact VCF file match: {}", exact_file.display()));
                 Ok(exact_file.clone())
             } else {
+                log(LogLevel::Warning, "Multiple VCF files found, requesting user selection");
+                spinner.finish_with_message("Multiple VCF files found, please select one");
+                
                 println!("{}", "Multiple VCF files found:".yellow());
                 for (i, file) in chr_specific_files.iter().enumerate() {
                     println!("{}. {}", i + 1, file.display());
@@ -278,10 +311,13 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
                     .parse()
                     .map_err(|_| VcfError::Parse("Invalid input".to_string()))?;
 
-                chr_specific_files
+                let chosen_file = chr_specific_files
                     .get(choice - 1)
                     .cloned()
-                    .ok_or_else(|| VcfError::Parse("Invalid file number".to_string()))
+                    .ok_or_else(|| VcfError::Parse("Invalid file number".to_string()))?;
+                
+                log(LogLevel::Info, &format!("User selected VCF file: {}", chosen_file.display()));
+                Ok(chosen_file)
             }
         }
     }
@@ -320,11 +356,25 @@ pub fn read_reference_sequence(
     chr: &str,
     region: ZeroBasedHalfOpen,
 ) -> Result<Vec<u8>, VcfError> {
+    set_stage(ProcessingStage::Global);
+    log(LogLevel::Info, &format!(
+        "Reading reference sequence for chromosome {} from {}:{}-{}", 
+        chr, fasta_path.display(), region.start, region.end
+    ));
+    
+    let spinner = create_spinner(&format!(
+        "Reading reference sequence for chr{}:{}-{}", 
+        chr, region.start, region.end
+    ));
+    
     // Create reader for the FASTA file and its index
     let mut reader = bio::io::fasta::IndexedReader::from_file(&fasta_path).map_err(|e| {
+        let error_msg = format!("Failed to open FASTA file: {}", e);
+        log(LogLevel::Error, &error_msg);
+        spinner.finish_with_message("Failed to open reference FASTA file");
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
-            format!("Failed to open FASTA file: {}", e),
+            error_msg,
         ))
     })?;
 
@@ -336,15 +386,19 @@ pub fn read_reference_sequence(
     };
 
     // Find chromosome
+    spinner.set_message("Finding chromosome in reference index");
     let sequences = reader.index.sequences();
     let seq_info = sequences
         .iter()
         .find(|seq| seq.name == chr_with_prefix || seq.name == chr)
         .ok_or_else(|| {
-            VcfError::Parse(format!(
+            let error_msg = format!(
                 "Chromosome {} (or {}) not found in reference",
                 chr, chr_with_prefix
-            ))
+            );
+            log(LogLevel::Error, &error_msg);
+            spinner.finish_with_message("Chromosome not found in reference");
+            VcfError::Parse(error_msg)
         })?;
 
     let seq_length = seq_info.len;
@@ -402,20 +456,30 @@ pub fn read_reference_sequence(
         .collect();
 
     if !invalid_chars.is_empty() {
-        println!("Found invalid characters:");
+        log(LogLevel::Warning, "Found invalid characters in reference sequence:");
         for (pos, ch) in invalid_chars {
-            println!(
+            log(LogLevel::Warning, &format!(
                 "Position {}: '{}' (ASCII: {})",
                 pos,
                 String::from_utf8_lossy(&[ch]),
                 ch
-            );
+            ));
         }
+        spinner.finish_with_message("Found invalid nucleotides in reference sequence");
         return Err(VcfError::Parse(format!(
             "Invalid nucleotides found in sequence for region {}:{}-{}",
             actual_chr_name, clamped_start, clamped_end
         )));
     }
+
+    spinner.finish_with_message(format!(
+        "Successfully read {}bp of reference sequence for chr{}",
+        sequence.len(), chr
+    ));
+    log(LogLevel::Info, &format!(
+        "Completed reading reference sequence: {}bp for chr{}:{}-{}", 
+        sequence.len(), chr, clamped_start, clamped_end
+    ));
 
     Ok(sequence)
 }
@@ -424,14 +488,18 @@ pub fn read_reference_sequence(
 // GTF and GFF use 1-based coordinate system
 // Returns one TranscriptAnnotationCDS per gene (the best transcript according to priority rules)
 pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnotationCDS>, VcfError> {
-   // Print overall GTF parsing context.
-   println!("\nParsing GTF file for chromosome: {}", chr);
-
+   set_stage(ProcessingStage::Global);
+   log(LogLevel::Info, &format!("Parsing GTF file for chromosome: {}", chr));
+   
+   init_step_progress(&format!("Parsing GTF file for chr{}", chr), 3);
+   
    // Open the GTF file.
    let file = File::open(gtf_path).map_err(|e| {
+       let error_msg = format!("GTF file not found: {:?}", e);
+       log(LogLevel::Error, &error_msg);
        VcfError::Io(io::Error::new(
            io::ErrorKind::NotFound,
-           format!("GTF file not found: {:?}", e),
+           error_msg,
        ))
    })?;
    let reader = BufReader::new(file);
@@ -468,7 +536,8 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
    let mut genes_found = HashSet::new();
    let mut malformed_attributes = 0;
 
-   println!("Reading GTF entries...");
+   update_step_progress(0, &format!("Reading GTF entries for chr{}", chr));
+   log(LogLevel::Info, "Starting to read GTF entries");
 
    // Read each line, parse if CDS, and store in transcript_info_map
    for (line_num, line_result) in reader.lines().enumerate() {
@@ -495,7 +564,8 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
 
        processed_lines += 1;
        if processed_lines % 10000 == 0 {
-           println!("Processed {} CDS entries...", processed_lines);
+           update_step_progress(0, &format!("Processed {} CDS entries for chr{}", processed_lines, chr));
+           log(LogLevel::Info, &format!("Processed {} CDS entries", processed_lines));
        }
 
        let start: i64 = match fields[3].parse() {
@@ -585,11 +655,11 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
            None => {
                malformed_attributes += 1;
                if malformed_attributes <= 5 {
-                   eprintln!(
-                       "Warning: Could not find transcript_id in attributes at line {}: {}",
+                   log(LogLevel::Warning, &format!(
+                       "Could not find transcript_id in attributes at line {}: {}",
                        line_num + 1,
                        attributes
-                   );
+                   ));
                }
                continue;
            }
@@ -601,11 +671,11 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
            None => {
                malformed_attributes += 1;
                if malformed_attributes <= 5 {
-                   eprintln!(
-                       "Warning: Could not find gene_id in attributes at line {}: {}",
+                   log(LogLevel::Warning, &format!(
+                       "Could not find gene_id in attributes at line {}: {}",
                        line_num + 1,
                        attributes
-                   );
+                   ));
                }
                continue;
            }
@@ -650,10 +720,10 @@ pub fn parse_gtf_file(gtf_path: &Path, chr: &str) -> Result<Vec<TranscriptAnnota
 
        // Make sure gene_id is consistent (should be the same for all segments of a transcript)
        if transcript_info.gene_id != gene_id {
-           eprintln!(
-               "Warning: Inconsistent gene_id for transcript {} at line {}: {} vs {}",
+           log(LogLevel::Warning, &format!(
+               "Inconsistent gene_id for transcript {} at line {}: {} vs {}",
                transcript_id, line_num + 1, transcript_info.gene_id, gene_id
-           );
+           ));
            // Keep the first gene_id we encountered
        }
 
