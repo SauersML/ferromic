@@ -7,6 +7,10 @@ use crate::parse::{
     find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header,
 };
 
+use ferromic::progress::{
+    init_global_progress, update_global_progress, log, LogLevel, finish_all, display_status_box, StatusBox,
+};
+
 use crate::transcripts::{
     TranscriptAnnotationCDS,
     make_sequences,
