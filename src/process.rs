@@ -1076,8 +1076,8 @@ pub fn process_config_entries(
     // We do this for each region row in all_pairs.
 
     for (csv_row, per_site_vec) in &all_pairs {
-        // For the region length we do (row.region_end - row.region_start + 1).
-        let region_len = (csv_row.region_end - csv_row.region_start + 1) as usize;
+        let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+        let region_len = region.len();
 
         // We store 4 possible keys: "unfiltered_pi", "unfiltered_theta", "filtered_pi", "filtered_theta".
         // Each key maps to a vector of the same length as region_len, initially None.
