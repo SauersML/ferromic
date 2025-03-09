@@ -515,7 +515,6 @@ pub fn read_reference_sequence(
     };
 
     // Find chromosome
-    spinner.set_message("Finding chromosome in reference index");
     let sequences = reader.index.sequences();
     let seq_info = sequences
         .iter()
