@@ -345,8 +345,8 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
         .map(|path| {
             // Score each candidate based on naming conventions
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let mut score = 0;
-            
+            let mut score: i32 = 0;
+
             // Prioritize standard naming patterns
             if file_name == format!("chr{}.vcf.gz", chr) { score += 100; }
             else if file_name == format!("chr{}.vcf", chr) { score += 90; }
