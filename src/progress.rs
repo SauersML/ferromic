@@ -200,19 +200,13 @@ impl ProgressTracker {
         None
     }
 
-    /// Properly handles output that might contain multiple lines by suspending
-    /// the progress bar temporarily rather than trying to use set_message.
     fn inplace_print(&self, text: &str) {
         if let Some(bar) = self.find_active_bar() {
-            // Suspend the bar temporarily, print the text, then resume the bar
-            // This prevents duplicate progress bar outputs on new lines
-            bar.suspend(|| {
-                print!("{}", text);
-                std::io::stdout().flush().ok();
-            });
+            // Use the bar's own println
+            bar.println(text);
         } else {
             // No active bar found, print directly
-            print!("{}", text);
+            println!("{}", text);
             std::io::stdout().flush().ok();
         }
     }
@@ -719,38 +713,46 @@ pub fn set_stage(stage: ProcessingStage) {
 
 /// Display status box without directly borrowing the mutable tracker.
 pub fn display_status_box(status: StatusBox) {
-    // Use the current stage from the global tracker
-    let mut tracker = PROGRESS_TRACKER.lock();
-
-    // Same logic as the method above
-    let stage_context = match tracker.current_stage {
-        ProcessingStage::Global => "[Global Context]",
-        ProcessingStage::ConfigEntry => "[Config Entry]",
-        ProcessingStage::VcfProcessing => "[VCF Processing]",
-        ProcessingStage::VariantAnalysis => "[Variant Analysis]",
-        ProcessingStage::CdsProcessing => "[CDS Processing]",
-        ProcessingStage::StatsCalculation => "[Statistics]",
+    // Get active progress bar and context information
+    let active_bar_opt = {
+        let tracker = PROGRESS_TRACKER.lock();
+        
+        // Get context
+        let stage_context = match tracker.current_stage {
+            ProcessingStage::Global => "[Global Context]",
+            ProcessingStage::ConfigEntry => "[Config Entry]",
+            ProcessingStage::VcfProcessing => "[VCF Processing]",
+            ProcessingStage::VariantAnalysis => "[Variant Analysis]",
+            ProcessingStage::CdsProcessing => "[CDS Processing]",
+            ProcessingStage::StatsCalculation => "[Statistics]",
+        };
+        
+        // Log the status box display
+        tracker.log(LogLevel::Info, &format!("Displaying status box: {}", status.title));
+        
+        // Create timestamp for the status box
+        let timestamp = Local::now().format("%H:%M:%S").to_string();
+        
+        // Construct the status box content
+        let mut content = String::new();
+        content.push_str(&format!("[{}] {} {}\n", timestamp, stage_context, status.title));
+        for (key, value) in status.stats.iter() {
+            content.push_str(&format!("  {}: {}\n", key, value));
+        }
+        
+        // Get the active bar if any (cloned to avoid borrowing issues)
+        if let Some(bar) = tracker.find_active_bar() {
+            Some((bar.clone(), content))
+        } else {
+            println!("\n{}", content);
+            None
+        }
     };
-    
-    // Create timestamp for the status box
-    let timestamp = Local::now().format("%H:%M:%S").to_string();
-    
-    // Also log it
-    tracker.log(LogLevel::Info, &format!("Displaying status box: {}", status.title));
-    
-    // Construct a textual block
-    let mut simple_box = String::new();
-    simple_box.push_str(&format!(
-        "\n[{}] {} {}\n",
-        timestamp, stage_context, status.title
-    ));
-    for (key, value) in status.stats.iter() {
-        simple_box.push_str(&format!("  {}: {}\n", key, value));
-    }
-    simple_box.push('\n');
 
-    // Now print it in place
-    tracker.inplace_print(&simple_box);
+    // If we have an active bar, use its println method to avoid conflicts
+    if let Some((bar, content)) = active_bar_opt {
+        bar.println(format!("\n{}", content));
+    }
 }
 
 pub fn finish_all() {
