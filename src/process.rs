@@ -363,6 +363,11 @@ impl QueryRegion {
     pub fn contains(&self, pos: i64) -> bool {
         pos >= self.start && pos <= self.end
     }
+
+    /// Returns the number of positions in this inclusive range
+    pub fn len(&self) -> i64 {
+        self.end - self.start + 1
+    }
 }
 
 /// Holds all the output columns for writing one row in the CSV.
