@@ -1884,6 +1884,8 @@ pub fn process_vcf(
     };
     
     progress_bar.set_style(style);
+    // Set to use stdout directly to avoid duplication in multi-threaded environment
+    progress_bar.set_draw_target(indicatif::ProgressDrawTarget::stdout());
     progress_bar.set_message(format!("Reading VCF for chr{}:{}-{}", chr, region.start, region.end));
         
     let processing_complete = Arc::new(AtomicBool::new(false));
@@ -1891,7 +1893,8 @@ pub fn process_vcf(
     let progress_bar_clone = Arc::clone(&progress_bar); // Clone Arc for progress thread
     let progress_thread = thread::spawn(move || {
         while !processing_complete_clone.load(Ordering::Relaxed) {
-            thread::sleep(Duration::from_millis(100));
+            // Less frequent updates to prevent overprinting
+            thread::sleep(Duration::from_millis(200));
         }
         // Progress bar tick removed to reduce repeated prints
         progress_bar_clone.finish_with_message("Finished reading VCF");
