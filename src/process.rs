@@ -841,7 +841,10 @@ fn process_variants(
 
     // Calculate per-site diversity
     let spinner = create_spinner("Calculating per-site diversity");
-    let site_diversities = calculate_per_site(variants, &group_haps, QueryRegion { start: region_start, end: region_end });
+    // Convert from 1-based inclusive to QueryRegion using type conversions
+    let region_zero_based = ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end)
+        .to_zero_based_inclusive();
+    let site_diversities = calculate_per_site(variants, &group_haps, region_zero_based.into());
     spinner.finish_and_clear();
     log(LogLevel::Info, &format!(
         "Calculated diversity for {} sites",
