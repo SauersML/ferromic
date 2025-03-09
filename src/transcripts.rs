@@ -747,13 +747,13 @@ pub fn filter_and_log_transcripts(
             )
             .expect("Failed to write to transcript_overlap.log");
 
-            println!(
+            log(LogLevel::Info, &format!(
                 "    Individual segment lengths: {:?}",
                 tcds.segments
                     .iter()
                     .map(|seg| seg.len())
                     .collect::<Vec<_>>()
-            );
+            ));
             writeln!(
                 log_file,
                 "    Individual segment lengths: {:?}",
