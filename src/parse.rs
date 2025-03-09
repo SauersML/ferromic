@@ -253,6 +253,7 @@ pub fn parse_region(region: &str) -> Result<ZeroBasedHalfOpen, VcfError> {
     Ok(interval)
 }
 
+
 pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     set_stage(ProcessingStage::Global);
     log(LogLevel::Info, &format!("Searching for VCF file for chromosome {} in folder: {}", chr, folder));
@@ -277,14 +278,16 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
         )));
     }
 
+    // Define valid VCF file extensions and invalid extensions to filter out
+    let vcf_extensions = [".vcf", ".vcf.gz"];
+    let invalid_extensions = [".csi", ".tbi", ".idx", ".md5", ".bai"];
+
     // First, try standard naming patterns (searching with more specific patterns first)
     let common_patterns = vec![
         format!("chr{}.vcf.gz", chr),
         format!("chr{}.vcf", chr),
         format!("{}.vcf.gz", chr),
         format!("{}.vcf", chr),
-        format!("chr{}.*vcf*", chr),
-        format!("{}.*vcf*", chr),
     ];
     
     spinner.set_message(format!("Searching for chromosome {} using standard patterns", chr));
@@ -294,15 +297,14 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
         // Use glob for pattern matching
         let glob_pattern = format!("{}/{}", folder, pattern);
         if let Ok(glob_paths) = glob::glob(&glob_pattern) {
-            let matches: Vec<_> = glob_paths.filter_map(Result::ok).collect();
-            if matches.len() == 1 {
+            let matches: Vec<_> = glob_paths
+                .filter_map(Result::ok)
+                .collect();
+            if !matches.is_empty() {
                 let file_path = &matches[0];
                 spinner.finish_with_message(format!("Found VCF file: {}", file_path.display()));
                 log(LogLevel::Info, &format!("Found VCF file using pattern '{}': {}", pattern, file_path.display()));
                 return Ok(file_path.clone());
-            } else if matches.len() > 1 {
-                // Found multiple matches with this pattern, will handle later
-                break;
             }
         }
     }
@@ -310,144 +312,106 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     // If exact patterns didn't work, try more flexible search
     spinner.set_message(format!("Searching for chromosome {} files", chr));
     
-    let chr_specific_files: Vec<_> = match fs::read_dir(path) {
-        Ok(entries) => entries
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                let path = entry.path();
-                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let chr_pattern = format!("chr{}", chr);
-                
-                // More robust file matching logic
-                let is_vcf = file_name.ends_with(".vcf") || 
-                             file_name.ends_with(".vcf.gz") || 
-                             file_name.contains(".vcf.");
-                             
-                let has_chr = file_name.starts_with(&chr_pattern) || 
-                              file_name.starts_with(chr) ||
-                              file_name.contains(&format!("_{}", chr)) ||
-                              file_name.contains(&format!("_{}_", chr));
-                              
-                is_vcf && has_chr
-            })
-            .map(|entry| entry.path())
-            .collect(),
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
         Err(e) => {
             spinner.finish_with_message(format!("Error reading directory: {}", e));
             return Err(VcfError::Io(e));
         }
     };
 
-    match chr_specific_files.len() {
-        0 => {
-            // Error message with suggestions
-            spinner.finish_with_message(format!("No VCF files found for chr{}", chr));
-            log(LogLevel::Error, &format!(
-                "Could not find VCF files for chromosome {} in folder: {}", 
-                chr, folder
-            ));
+    // Find all valid VCF files for the chromosome
+    let mut vcf_candidates: Vec<(PathBuf, i32)> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             
-            // Check if any VCF files exist at all
-            let any_vcf_files: Vec<_> = fs::read_dir(path)
-                .unwrap_or_else(|_| fs::read_dir(".").unwrap())
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| {
-                    let file_name = entry.file_name();
-                    let name = file_name.to_string_lossy();
-                    name.ends_with(".vcf") || name.ends_with(".vcf.gz")
-                })
-                .collect();
-                
-            if any_vcf_files.is_empty() {
-                log(LogLevel::Error, &format!(
-                    "No VCF files found in directory {}. Please check path is correct and contains VCF files.", 
-                    folder
-                ));
-            } else {
-                log(LogLevel::Info, "Available VCF files in directory:");
-                for file in any_vcf_files.iter().take(5) {
-                    log(LogLevel::Info, &format!("  - {}", file.file_name().to_string_lossy()));
-                }
-                if any_vcf_files.len() > 5 {
-                    log(LogLevel::Info, &format!("  ... and {} more", any_vcf_files.len() - 5));
-                }
-            }
+            // Check if it's a valid VCF file (has .vcf or .vcf.gz extension)
+            let is_vcf = vcf_extensions.iter().any(|ext| file_name.ends_with(ext));
             
-            Err(VcfError::NoVcfFiles)
-        },
-        1 => {
-            // Single match found
-            let file_path = &chr_specific_files[0];
-            spinner.finish_with_message(format!("Found VCF file: {}", file_path.display()));
-            log(LogLevel::Info, &format!("Found VCF file: {}", file_path.display()));
-            Ok(file_path.clone())
-        },
-        _ => {
-            // Multiple matches - try to find best match or ask user
-            log(LogLevel::Warning, &format!(
-                "Found {} potential VCF files for chromosome {}", 
-                chr_specific_files.len(), chr
-            ));
+            // Ensure it's not an index or other auxiliary file
+            let not_auxiliary = !invalid_extensions.iter().any(|ext| file_name.ends_with(ext));
             
-            // First try to select the best match based on filename patterns
-            let exact_matches: Vec<_> = chr_specific_files.iter()
-                .filter(|&file| {
-                    let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    // Preferred naming patterns in order
-                    file_name == format!("chr{}.vcf.gz", chr) || 
-                    file_name == format!("chr{}.vcf", chr) ||
-                    file_name == format!("{}.vcf.gz", chr) ||
-                    file_name == format!("{}.vcf", chr)
-                })
-                .collect();
-                
-            if exact_matches.len() == 1 {
-                let best_match = exact_matches[0];
-                spinner.finish_with_message(format!("Selected VCF: {}", best_match.display()));
-                log(LogLevel::Info, &format!("Selected best matching VCF file: {}", best_match.display()));
-                return Ok(best_match.clone());
-            }
+            // Check chromosome match
+            let chr_pattern = format!("chr{}", chr);
+            let has_chr = file_name.starts_with(&chr_pattern) || 
+                          file_name.starts_with(chr) ||
+                          file_name.contains(&format!("_{}", chr)) ||
+                          file_name.contains(&format!("_{}_", chr));
             
-            // Need user selection
-            spinner.finish_with_message("Multiple VCF files found, please select one");
+            is_vcf && not_auxiliary && has_chr
+        })
+        .map(|path| {
+            // Score each candidate based on naming conventions
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let mut score = 0;
             
-            println!("\n{}", "Multiple VCF files found for chromosome:".yellow().bold());
-            for (i, file) in chr_specific_files.iter().enumerate() {
-                println!("{}. {}", (i + 1).to_string().cyan(), file.display());
-            }
+            // Prioritize standard naming patterns
+            if file_name == format!("chr{}.vcf.gz", chr) { score += 100; }
+            else if file_name == format!("chr{}.vcf", chr) { score += 90; }
+            else if file_name == format!("{}.vcf.gz", chr) { score += 80; }
+            else if file_name == format!("{}.vcf", chr) { score += 70; }
+            
+            // Prefer compressed VCF files
+            if file_name.ends_with(".vcf.gz") { score += 15; }
+            
+            // Prefer files with standard chromosome nomenclature
+            if file_name.starts_with(&format!("chr{}", chr)) { score += 10; }
+            else if file_name.starts_with(chr) { score += 5; }
+            
+            // Penalize complex filenames (but not too much)
+            score -= file_name.len() / 5;
+            
+            (path, score)
+        })
+        .collect();
+    
+    // Sort by score (highest first)
+    vcf_candidates.sort_by(|a, b| b.1.cmp(&a.1));
 
-            println!("\n{}", "Please enter the number of the file you want to use:".green());
-            let mut input = String::new();
-            match io::stdin().read_line(&mut input) {
-                Ok(_) => {
-                    match input.trim().parse::<usize>() {
-                        Ok(choice) if choice > 0 && choice <= chr_specific_files.len() => {
-                            let chosen_file = &chr_specific_files[choice - 1];
-                            log(LogLevel::Info, &format!("User selected VCF file: {}", chosen_file.display()));
-                            Ok(chosen_file.clone())
-                        },
-                        Ok(_) => {
-                            log(LogLevel::Error, &format!(
-                                "Invalid selection. Please enter a number between 1 and {}", 
-                                chr_specific_files.len()
-                            ));
-                            Err(VcfError::Parse(format!(
-                                "Invalid file number. Must be between 1 and {}", 
-                                chr_specific_files.len()
-                            )))
-                        },
-                        Err(_) => {
-                            log(LogLevel::Error, "Invalid input, expected a number");
-                            Err(VcfError::Parse("Invalid input, expected a number".to_string()))
-                        }
-                    }
-                },
-                Err(e) => {
-                    log(LogLevel::Error, &format!("Failed to read input: {}", e));
-                    Err(VcfError::Io(e))
-                }
+    if vcf_candidates.is_empty() {
+        // No VCF files found for the specified chromosome
+        spinner.finish_with_message(format!("No VCF files found for chr{}", chr));
+        log(LogLevel::Error, &format!(
+            "Could not find VCF files for chromosome {} in folder: {}", 
+            chr, folder
+        ));
+        
+        // Check if any VCF files exist to provide helpful error message
+        let any_vcf_files: Vec<_> = fs::read_dir(path)
+            .unwrap_or_else(|_| fs::read_dir(".").unwrap())
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy();
+                vcf_extensions.iter().any(|ext| name.ends_with(ext)) &&
+                !invalid_extensions.iter().any(|ext| name.ends_with(ext))
+            })
+            .collect();
+            
+        if any_vcf_files.is_empty() {
+            log(LogLevel::Error, &format!(
+                "No VCF files found in directory {}. Please check path is correct and contains VCF files.", 
+                folder
+            ));
+        } else {
+            log(LogLevel::Info, "Available VCF files in directory:");
+            for file in any_vcf_files.iter().take(5) {
+                log(LogLevel::Info, &format!("  - {}", file.file_name().to_string_lossy()));
+            }
+            if any_vcf_files.len() > 5 {
+                log(LogLevel::Info, &format!("  ... and {} more", any_vcf_files.len() - 5));
             }
         }
+        
+        Err(VcfError::NoVcfFiles)
+    } else {
+        // Select the highest scoring VCF file automatically
+        let best_match = &vcf_candidates[0].0;
+        spinner.finish_with_message(format!("Selected VCF file: {}", best_match.display()));
+        log(LogLevel::Info, &format!("Selected best matching VCF file: {}", best_match.display()));
+        return Ok(best_match.clone());
     }
 }
 
