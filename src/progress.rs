@@ -68,9 +68,6 @@ pub struct ProgressTracker {
     // Track timing for operations
     start_time: Instant,
     
-    // Directory for log files
-    log_dir: PathBuf,
-    
     // Cache for reusable progress styles
     styles: HashMap<String, ProgressStyle>,
 }
