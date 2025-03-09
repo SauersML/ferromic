@@ -9,7 +9,6 @@ use ferromic::progress::{
     finish_all, display_status_box, StatusBox,
 };
 use clap::Parser;
-use colored::Colorize;
 use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
 use std::io::{BufRead};
