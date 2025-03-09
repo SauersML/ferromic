@@ -442,7 +442,7 @@ pub fn calculate_per_site(
     let update_interval = std::cmp::min(1000, region_length as usize / 100);
 
     // Process in batches for more efficient update frequency
-    for (idx, pos) in (region_start..region_end).enumerate() {
+    for (idx, pos) in (region_start..region_end).enumerate() { // Or just for pos in region_start..region_end?
         positions_since_update += 1;
         
         // Update progress at reasonable intervals or when a significant amount of work is done
