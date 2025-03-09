@@ -1122,106 +1122,62 @@ def main():
         r'^group(\d+)_([^_]+)_([^_]+)_([^_]+)_chr([^_]+)_start(\d+)_end(\d+)\.phy$'
     )
 
-    cds_meta_all = []
-    print("Parsing all .phy files once for metadata (and local counters).")
+    # Create a mapping of gene_id to lists of PHY files for each group
+    gene_to_files = {}
+    
+    print("Parsing all .phy files and grouping by gene_id...")
     sys.stdout.flush()
-
+    
     for phy_file in phy_files:
         basename = os.path.basename(phy_file)
-        m = filename_pattern.match(basename)
-        if not m:
+        match = filename_pattern.match(basename)
+        if not match:
             continue  # skip files that don't match pattern
-
-        group_num = m.group(1)
-        transcript_id = m.group(2)
-
-        # Get transcript coords from the GTF
-        chrom, st, en = get_transcript_coordinates(transcript_id)
-        if chrom is None or st is None or en is None:
-            continue
-
+            
+        # Extract components from new filename format
+        group_num = match.group(1)
+        gene_name = match.group(2)
+        gene_id = match.group(3)
+        transcript_id = match.group(4)
+        chromosome = match.group(5)
+        start_pos = match.group(6)
+        end_pos = match.group(7)
+        
         # Parse the file once, store in PARSED_PHY
         parsed_data = parse_phy_file_once(phy_file)
         valid_seq_count = len(parsed_data['sequences'])
-
+        
         if valid_seq_count == 0:
             # If no valid sequences remain, skip
             PARSED_PHY[phy_file] = parsed_data
             continue
-
-        # We'll store these entries for the gene-based
-        cds_id = basename.replace('.phy', '')
-        cds_meta_all.append((cds_id, transcript_id, parsed_data))
+            
+        # Store the PHY file path by gene_id and group
+        if gene_id not in gene_to_files:
+            gene_to_files[gene_id] = {0: [], 1: []}
+            
+        group_num_int = int(group_num)
+        if group_num_int in gene_to_files[gene_id]:
+            gene_to_files[gene_id][group_num_int].append(phy_file)
+            
+        # Store parsed data
         PARSED_PHY[phy_file] = parsed_data
-
-    print(f"Metadata parsing complete. {len(cds_meta_all)} CDS entries collected.")
-    sys.stdout.flush()
-
-    # Build a map of transcript_id to gene_id by parsing the GTF for gene_id and transcript_id.
-    # Then collect .phy files per gene, grouped by group_0 or group_1, and pick the single transcript
-    # that is present in both groups and has the largest .phy alignment length.
-
-    gene_map = {}
-    with open("../hg38.knownGene.gtf", "r") as gtf_f:
-        for line in gtf_f:
-            if line.strip().startswith("#"):
-                continue
-            fields = line.strip().split("\t")
-            if len(fields) < 9:
-                continue
-            attributes = fields[8]
-            transcript_match = re.search(r'transcript_id "([^"]+)"', attributes)
-            gene_match = re.search(r'gene_id "([^"]+)"', attributes)
-            if transcript_match and gene_match:
-                t_val = transcript_match.group(1)
-                g_val = gene_match.group(1)
-                gene_map[t_val] = g_val
-
-    # Build a dictionary of gene_id -> {0: [ (transcript_id, cds_id, length), ...], 1: [ (transcript_id, cds_id, length), ...]}
-    per_gene = {}
-    for item in cds_meta_all:
-        cds_id, t_id, seq_data = item
-        if t_id not in gene_map:
-            continue
-        gene_id_val = gene_map[t_id]
-        if gene_id_val not in per_gene:
-            per_gene[gene_id_val] = {0: [], 1: []}
-        group_match = re.match(r'^group_(\d+)_', cds_id)
-        if group_match:
-            group_num_val = int(group_match.group(1))
-            if group_num_val in per_gene[gene_id_val]:
-                seq_any = next(iter(seq_data['sequences'].values()))
-                length_val = len(seq_any)
-                per_gene[gene_id_val][group_num_val].append((t_id, cds_id, length_val))
-
-    # For each gene, pick the single transcript that appears in both group_0 and group_1
-    # with the largest minimum alignment length across the two groups.
-    allowed_cds_ids = set()
-    for gene_id_val, group_data in per_gene.items():
-        if 0 not in group_data or 1 not in group_data:
-            continue
-        if not group_data[0] or not group_data[1]:
-            continue
-        chosen_length = -1
-        chosen_pair = None
-        for (tid0, cid0, len0) in group_data[0]:
-            match_in_1 = [(tid1, cid1, len1) for (tid1, cid1, len1) in group_data[1] if tid1 == tid0]
-            for (tid1, cid1, len1) in match_in_1:
-                score_val = min(len0, len1)
-                if score_val > chosen_length:
-                    chosen_length = score_val
-                    chosen_pair = (cid0, cid1)
-        if chosen_pair is not None:
-            for chosen_cid in chosen_pair:
-                allowed_cds_ids.add(chosen_cid)
-
+    
+    # Find genes that have files in both group 0 and group 1
+    valid_genes = {}
+    for gene_id, group_files in gene_to_files.items():
+        if 0 in group_files and 1 in group_files and group_files[0] and group_files[1]:
+            valid_genes[gene_id] = group_files
+    
+    # Collect all files from valid genes (those present in both groups)
     all_phy_filtered = []
-    for phy_file in phy_files:
-        base_id = os.path.basename(phy_file).replace('.phy', '')
-        if base_id in allowed_cds_ids:
-            all_phy_filtered.append(phy_file)
-
-    print(f"After gene-based transcript selection, we have {len(all_phy_filtered)} .phy files allowed.")
+    for gene_id, group_files in valid_genes.items():
+        all_phy_filtered.extend(group_files[0])
+        all_phy_filtered.extend(group_files[1])
+    
+    print(f"Found {len(valid_genes)} genes with files in both groups.")
+    print(f"Total PHY files to process: {len(all_phy_filtered)}")
+    sys.stdout.flush()
 
     # Next, skip any that already have final CSV
     final_phy_files = []
