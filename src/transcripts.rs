@@ -1018,7 +1018,8 @@ pub fn write_phylip_file(
         ))
     })?;
 
-    spinner.finish_with_message(format!("Wrote {} sequences to {}", n, output_file));
+    spinner.set_message(format!("Wrote {} sequences to {}", n, output_file));
+    spinner.finish_and_clear();
     log(LogLevel::Info, &format!("Successfully wrote PHYLIP file for transcript {}", transcript_id));
 
     Ok(())
