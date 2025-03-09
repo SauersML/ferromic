@@ -86,8 +86,6 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     set_stage(ProcessingStage::Global);
     log(LogLevel::Info, &format!("Parsing config file: {}", path.display()));
     
-    let spinner = create_spinner(&format!("Reading config file: {}", path.display()));
-    
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(b'\t')
         .from_path(path)
@@ -108,7 +106,7 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
             "No sample names found in config file header.".to_string(),
         ));
     }
-    
+
     spinner.set_message(format!("Found {} sample columns in config file", sample_names.len()));
 
     let mut entries = Vec::new();
