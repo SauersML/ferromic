@@ -361,7 +361,7 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
             else if file_name.starts_with(chr) { score += 5; }
             
             // Penalize complex filenames (but not too much)
-            score -= file_name.len() / 5;
+            score -= (file_name.len() / 5) as i32;
             
             (path, score)
         })
