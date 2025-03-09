@@ -1,4 +1,4 @@
-use crate::process::{Variant, ZeroBasedPosition, HaplotypeSide, ZeroBasedHalfOpen};
+use crate::process::{Variant, ZeroBasedPosition, HaplotypeSide, ZeroBasedHalfOpen, QueryRegion};
 use crate::progress::{
     log, LogLevel, init_step_progress, update_step_progress, 
     finish_step_progress, create_spinner, display_status_box, StatusBox, set_stage, ProcessingStage
