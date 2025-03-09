@@ -211,7 +211,7 @@ pub fn calculate_pairwise_differences(
         .into_par_iter() // Convert range into a parallel iterator
         .flat_map(|sample_idx_i| {
             // Clone the Arc for each thread to safely access the variants data
-            let variants_local = Arc::clone(&variants_shared);
+            let variants_local: Arc<[Variant]> = Arc::clone(&variants_shared);
             // Parallel iteration over second sample indices (i+1 to n-1) to avoid duplicate pairs
             (sample_idx_i + 1..number_of_samples)
                 .into_par_iter()
