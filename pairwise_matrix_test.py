@@ -319,9 +319,8 @@ def analyze_transcript(args):
 
     # For annotation, pick the first row
     first_row = df_transcript.iloc[0]
-    coordinates_str = f"chr_{first_row['chrom'].replace('chr', '')}_start_{first_row['start']}_end_{first_row['end']}"
+    coordinates_str = f"chr_{str(first_row['chrom']).replace('chr', '')}_start_{first_row['start']}_end_{first_row['end']}"
     gene_symbol, gene_name = get_gene_annotation(coordinates_str)
-
     # Perform statistical analysis
     analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
 
