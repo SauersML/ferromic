@@ -589,10 +589,9 @@ pub fn filter_and_log_transcripts(
 
     let mut overlapping_transcript_count = 0;
 
-    println!(
-        "\n{}",
-        "Processing CDS regions by transcript...".green().bold()
-    );
+    log(LogLevel::Info, "Processing CDS regions by transcript");
+    init_step_progress("Filtering transcripts", transcripts.len() as u64);
+    
     writeln!(log_file, "Processing CDS regions by transcript...")
         .expect("Failed to write to transcript_overlap.log");
 
@@ -613,7 +612,10 @@ pub fn filter_and_log_transcripts(
 
     let mut stats = TranscriptStats::default();
 
-    for mut tcds in transcripts {
+    // Should this be for mut tcds in transcripts instead?
+    for (idx, mut tcds) in transcripts.into_iter().enumerate() {
+        update_step_progress(idx as u64, &format!("Processing transcript {}", tcds.transcript_id));
+
         let transcript_coding_start = tcds
             .segments
             .iter()
@@ -933,13 +935,15 @@ pub fn write_phylip_file(
         }
     };
 
-    println!("Writing {} for transcript {}", temp_output_file.display(), transcript_id);
+    let spinner = create_spinner(&format!("Writing PHYLIP for {}", transcript_id));
     let file = File::create(&temp_output_file).map_err(|e| {
+        spinner.finish_with_message(format!("Failed to create file: {}", e));
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
             format!("Failed to create PHYLIP file '{}': {:?}", temp_output_file.display(), e),
         ))
     })?;
+
     let mut writer = BufWriter::new(file);
 
     let mut length = None;
@@ -985,6 +989,9 @@ pub fn write_phylip_file(
             format!("Failed to flush PHYLIP file '{}': {:?}", output_file, e),
         ))
     })?;
+
+    spinner.finish_with_message(format!("Wrote {} sequences to {}", n, output_file));
+    log(LogLevel::Info, &format!("Successfully wrote PHYLIP file for transcript {}", transcript_id));
 
     Ok(())
 }
