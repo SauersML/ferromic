@@ -8,7 +8,6 @@ use crate::progress::{
     finish_step_progress, create_spinner, display_status_box, StatusBox, set_stage, ProcessingStage
 };
 
-use log as external_log;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
