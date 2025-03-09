@@ -777,11 +777,17 @@ pub fn filter_and_log_transcripts(
         writeln!(log_file, "  CDS region: {}-{}", min_start, max_end)
             .expect("Failed to write to transcript_overlap.log");
 
-        println!("    Genomic span: {}", transcript_span);
+        log(LogLevel::Info, &format!(
+            "    Genomic span: {}",
+            transcript_span
+        ));
         writeln!(log_file, "    Genomic span: {}", transcript_span)
             .expect("Failed to write to transcript_overlap.log");
 
-        println!("    Total coding length: {}", total_coding_length);
+        log(LogLevel::Info, &format!(
+            "    Total coding length: {}",
+            total_coding_length
+        ));
         writeln!(log_file, "    Total coding length: {}", total_coding_length)
             .expect("Failed to write to transcript_overlap.log");
 
@@ -913,7 +919,10 @@ pub fn filter_and_log_transcripts(
     }
 
     if filtered.is_empty() {
-        println!("{}", "No valid CDS regions found!".red());
+        log(LogLevel::Warning, &format!(
+            "{}",
+            "No valid CDS regions found!".red()
+        ));
         writeln!(log_file, "No valid CDS regions found!")
             .expect("Failed to write to transcript_overlap.log");
     }
