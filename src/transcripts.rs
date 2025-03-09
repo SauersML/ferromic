@@ -408,7 +408,7 @@ pub fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Re
     
     display_status_box(StatusBox {
         title: "Sequence Batch Statistics".to_string(),
-        stats: stats_vec,
+        stats: stats_vec.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
     });
     
     log(LogLevel::Info, &format!("Batch statistics: {} sequences processed.", total_sequences));
@@ -845,7 +845,7 @@ pub fn filter_and_log_transcripts(
         // Display the status box
         display_status_box(StatusBox {
             title: "CDS Processing Summary".to_string(),
-            stats: summary_stats,
+            stats: summary_stats.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
         });
         
         // Still log everything to the file
