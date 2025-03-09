@@ -715,7 +715,7 @@ pub fn set_stage(stage: ProcessingStage) {
 pub fn display_status_box(status: StatusBox) {
     // Get active progress bar and context information
     let active_bar_opt = {
-        let tracker = PROGRESS_TRACKER.lock();
+        let mut tracker = PROGRESS_TRACKER.lock();
         
         // Get context
         let stage_context = match tracker.current_stage {
