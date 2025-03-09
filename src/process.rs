@@ -1424,12 +1424,12 @@ fn process_chromosome_entries(
         
         match process_single_config_entry(
             entry.clone(),
-            &vcf_file,
+            vcf_file,
             min_gq,
             mask,
             allow,
             &ref_sequence,
-            &cds_regions,
+            cds_regions,
             chr,
             args,
         ) {
@@ -1446,7 +1446,10 @@ fn process_chromosome_entries(
                 log(LogLevel::Error, &format!("Error processing region {}: {}", region_desc, e));
             }
         }
+    
+        update_global_progress(idx + 1, &format!("Global progress for region {}", region_desc));
     }
+
 
     finish_entry_progress(&format!("Processed {} regions on chr{}", entries.len(), chr));
     
@@ -1890,9 +1893,9 @@ pub fn process_vcf(
     let progress_bar_clone = Arc::clone(&progress_bar); // Clone Arc for progress thread
     let progress_thread = thread::spawn(move || {
         while !processing_complete_clone.load(Ordering::Relaxed) {
-            progress_bar_clone.tick();
             thread::sleep(Duration::from_millis(100));
         }
+        // Progress bar tick removed to reduce repeated prints
         progress_bar_clone.finish_with_message("Finished reading VCF");
     });
 
