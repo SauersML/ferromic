@@ -200,15 +200,14 @@ impl ProgressTracker {
         None
     }
 
-    /// In-place printing that doesn’t push the bar upward,
-    /// using either the topmost bar or the MultiProgress directly.
+    /// In-place printing that keeps a single line, using bar.set_message
+    /// instead of printing new lines. This avoids multiple line outputs.
     fn inplace_print(&self, text: &str) {
         if let Some(bar) = self.find_active_bar() {
-            // Print above the bar, so the bar remains in place
-            bar.println(text);
+            bar.set_message(text.to_string());
         } else {
-            // Fallback to multi_progress if no bar is active
-            let _ = self.multi_progress.println(text);
+            // No active bar found, so we ignore or log the text
+            // to prevent extra new lines in the terminal.
         }
     }
 
