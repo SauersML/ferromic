@@ -93,7 +93,6 @@ impl ProgressTracker {
                 .template("{spinner:.blue} {prefix:4} [{elapsed_precise}] {wide_bar:.cyan/blue} {pos:>4}/{len:<4} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
-                .with_prefix("GLB")
         );
         
         // Entry progress style with clear hierarchy
@@ -103,7 +102,6 @@ impl ProgressTracker {
                 .template("  {spinner:.green} {prefix:4} [{elapsed_precise}] {wide_bar:.green/white} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
-                .with_prefix("ENT")
         );
         
         // Step progress style with more detailed information
@@ -113,7 +111,6 @@ impl ProgressTracker {
                 .template("    {spinner:.yellow} {prefix:4} [{elapsed_precise}] {wide_bar:.yellow/white} {pos:>6}/{len:<6} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
-                .with_prefix("STP")
         );
         
         // Variant progress style with enhanced visualization
@@ -123,7 +120,6 @@ impl ProgressTracker {
                 .template("      {spinner:.magenta} {prefix:4} [{elapsed_precise}] {wide_bar:.magenta/white} {pos:>7}/{len:<7} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
-                .with_prefix("VAR")
         );
         
         // Spinner style with contextual information
@@ -142,7 +138,6 @@ impl ProgressTracker {
                 .template("    {spinner:.red} {prefix:4} [{elapsed_precise}] {wide_bar:.red/white} {pos:>7}/{len:<7} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
-                .with_prefix("MEM")
         );
         
         // Add IO-intensive operation style
@@ -152,7 +147,6 @@ impl ProgressTracker {
                 .template("    {spinner:.blue} {prefix:4} [{elapsed_precise}] {wide_bar:.blue/white} {pos:>7}/{len:<7} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
-                .with_prefix("I/O")
         );
         
         ProgressTracker {
@@ -286,9 +280,9 @@ impl ProgressTracker {
         display_status_box(StatusBox {
             title: format!("Entry {}/{} Complete ({})", current_entry, total_entries, entry_name),
             stats: vec![
-                ("Progress", format!("{:.1}%", progress_percentage)),
-                ("Time taken", format!("{:.2}s", execution_time.as_secs_f64())),
-                ("Remaining entries", format!("{}", total_entries - current_entry)),
+                (String::from("Progress"), format!("{:.1}%", progress_percentage)),
+                (String::from("Time taken"), format!("{:.2}s", execution_time.as_secs_f64())),
+                (String::from("Remaining entries"), format!("{}", total_entries - current_entry)),
             ],
         });
     
@@ -449,7 +443,7 @@ impl ProgressTracker {
         self.current_stage = stage;
     }
     
-    pub fn display_status_box(&self, status: StatusBox) {
+    pub fn display_status_box(&mut self, status: StatusBox) {
         // Get the terminal width
         let terminal_width = match terminal_size() {
             Some((Width(w), Height(_))) => w as usize,
@@ -652,8 +646,30 @@ pub fn set_stage(stage: ProcessingStage) {
 }
 
 pub fn display_status_box(status: StatusBox) {
-    let tracker = PROGRESS_TRACKER.lock();
-    tracker.display_status_box(status);
+    // Don't use the display_status_box method of the tracker directly,
+    // as it requires a mutable reference and there are borrowing issues
+    // Instead, recreate the Status Box formatting logic here
+    let stage_context = match PROGRESS_TRACKER.lock().current_stage {
+        ProcessingStage::Global => "[Global Context]",
+        ProcessingStage::ConfigEntry => "[Config Entry]",
+        ProcessingStage::VcfProcessing => "[VCF Processing]",
+        ProcessingStage::VariantAnalysis => "[Variant Analysis]",
+        ProcessingStage::CdsProcessing => "[CDS Processing]",
+        ProcessingStage::StatsCalculation => "[Statistics]",
+    };
+    
+    // Create timestamp for the status box
+    let timestamp = Local::now().format("%H:%M:%S").to_string();
+    
+    // Log the action but don't use the tracker method directly
+    log(LogLevel::Info, &format!("Displaying status box: {}", status.title));
+    
+    // Print a simplified status box
+    println!("\n[{}] {} {}", timestamp, stage_context, status.title);
+    for (key, value) in status.stats.iter() {
+        println!("  {}: {}", key, value);
+    }
+    println!("");
 }
 
 pub fn finish_all() {
