@@ -249,17 +249,11 @@ pub fn calculate_pairwise_differences(
         
     let result_count = result.len();
     spinner.finish_and_clear();
-    log(LogLevel::Info, &format!(
-        "Wrote {} sequences to {}",
-        n,
-        output_file
-    ));
+    spinner.finish_and_clear();
+        log(LogLevel::Info, &format!(
+            "Computed {} pairwise comparisons", result_count
+        ));
 
-    
-    log(LogLevel::Info, &format!(
-        "Computed {} pairwise comparisons", result_count
-    ));
-    
     result
 }
 
