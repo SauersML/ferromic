@@ -378,10 +378,25 @@ pub fn calculate_per_site(
     // Initialize progress for this long computation
     let region_length = region_end - region_start;
     init_step_progress("Calculating per-site diversity", region_length as u64);
+    
+    // Initialize progress for this long computation
+    let region_length = region_end - region_start;
+    init_step_progress("Calculating per-site diversity", region_length as u64);
 
     // Build a map of variants by position for O(1) lookup
     let variant_map: HashMap<i64, &Variant> = variants.iter().map(|v| (v.position, v)).collect();
-    for pos in region_start..region_end {
+    log(LogLevel::Info, &format!("Mapped {} variants for fast lookup", variant_map.len()));
+    
+    // Track statistics for progress updates
+    let mut variants_processed = 0;
+    let mut polymorphic_sites = 0;
+
+    for (idx, pos) in (region_start..region_end).enumerate() { // Or for pos in region_start..region_end?
+        // Update progress every 1000 positions
+        if idx % 1000 == 0 || idx == 0 {
+            update_step_progress(idx as u64, &format!("Position {}/{}", idx, region_length));
+        }
+
         if let Some(var) = variant_map.get(&pos) {
             // Variant exists at this position; compute diversity metrics
             let mut allele_counts = HashMap::new(); // Map to count occurrences of each allele
