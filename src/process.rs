@@ -688,10 +688,8 @@ fn process_variants(
     update_step_progress(2, "Calculating diversity statistics");
     
     // Define the region as a ZeroBasedHalfOpen interval for length calculation
-    let region = ZeroBasedHalfOpen {
-        start: region_start as usize,
-        end: region_end as usize,
-    };
+    let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+
     let final_length = adjusted_sequence_length.unwrap_or(region.len() as i64);
     let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, final_length);
     let final_pi = calculate_pi(variants, &group_haps);
