@@ -727,10 +727,11 @@ fn process_variants(
             let mut seg_len = seg_end.saturating_sub(seg_start).saturating_add(1) as usize;
 
             if seg_start < 0 {
-                eprintln!(
+                // Log to file instead of printing to terminal
+                log(LogLevel::Warning, &format!(
                     "Skipping negative start {} for transcript {} on {}",
                     seg_start, transcript.transcript_id, chromosome
-                );
+                ));
                 continue;
             }
             let base_idx = {
