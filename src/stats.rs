@@ -268,9 +268,13 @@ pub fn harmonic(n: usize) -> f64 { // Returns the harmonic number as a float
 
 // Calculate Watterson's theta (θ_w), a measure of genetic diversity
 pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
-    // Handle edge cases where computation isn’t meaningful
+    // Handle edge cases where computation isn't meaningful
     if n <= 1 || seq_length == 0 {
         // If 1 or fewer haplotypes or sequence length is zero, return infinity
+        log(LogLevel::Warning, &format!(
+            "Cannot calculate Watterson's theta: {} haplotypes, {} length",
+            n, seq_length
+        ));
         return f64::INFINITY;
     }
 
@@ -278,11 +282,20 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
     let harmonic_value = harmonic(n - 1);
     if harmonic_value == 0.0 {
         // Prevent division by zero
+        log(LogLevel::Warning, "Harmonic denominator is zero, cannot calculate theta");
         return f64::INFINITY;
     }
-    // Watterson’s theta formula: θ_w = S / (a_n * L)
+    
+    // Watterson's theta formula: θ_w = S / (a_n * L)
     // S = number of segregating sites, a_n = H_{n-1}, L = sequence length
-    seg_sites as f64 / harmonic_value / seq_length as f64
+    let theta = seg_sites as f64 / harmonic_value / seq_length as f64;
+    
+    log(LogLevel::Debug, &format!(
+        "Watterson's theta: {} (from {} segregating sites, {} haplotypes, {} length)",
+        theta, seg_sites, n, seq_length
+    ));
+    
+    theta
 }
 
 // Calculate nucleotide diversity (π) across all sites, accounting for missing data
@@ -296,6 +309,10 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
 pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, HaplotypeSide)]) -> f64 {
     if haplotypes_in_group.len() <= 1 {
         // Need at least 2 haplotypes to compute diversity; return infinity if not
+        log(LogLevel::Warning, &format!(
+            "Cannot calculate pi: insufficient haplotypes ({})", 
+            haplotypes_in_group.len()
+        ));
         return f64::INFINITY;
     }
 
@@ -303,8 +320,14 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     let total_possible_pairs = haplotypes_in_group.len() * (haplotypes_in_group.len() - 1) / 2;
     if total_possible_pairs == 0 {
         // If no pairs can be formed (redundant check, but kept for robustness), return NaN
+        log(LogLevel::Warning, "No valid pairs can be formed for pi calculation");
         return f64::NAN;
     }
+    
+    let spinner = create_spinner(&format!(
+        "Calculating π for {} haplotypes ({} pairs)",
+        haplotypes_in_group.len(), total_possible_pairs
+    ));
 
     let mut difference_sum = 0.0; // Sum of per-pair differences normalized by comparable sites
     for i in 0..haplotypes_in_group.len() {
@@ -347,7 +370,19 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     }
 
     // Compute average nucleotide diversity over all pairs
-    difference_sum / total_possible_pairs as f64
+    let pi = difference_sum / total_possible_pairs as f64;
+    
+    spinner.finish_with_message(format!(
+        "π = {:.6} (from {} haplotype pairs)",
+        pi, total_possible_pairs
+    ));
+
+    log(LogLevel::Info, &format!(
+        "Calculated nucleotide diversity (π): {:.6}",
+        pi
+    ));
+    
+    pi
 }
 
 // Calculate per-site diversity metrics (π and Watterson’s θ) across a genomic region
@@ -448,13 +483,19 @@ pub fn calculate_per_site(
             };
 
             // Add the diversity metrics for this site to the vector
+            if pi_value > 0.0 || watterson_value > 0.0 {
+                polymorphic_sites += 1;
+            }
+            
             site_diversities.push(SiteDiversity {
                 position: ZeroBasedPosition(pos).to_one_based(), // Convert to 1-based for output
                 pi: pi_value,
                 watterson_theta: watterson_value,
             });
+            
+            variants_processed += 1;
         } else {
-            // No variant at this position; it’s monomorphic (all same allele)
+            // No variant at this position; it's monomorphic (all same allele)
             site_diversities.push(SiteDiversity {
                 position: ZeroBasedPosition(pos).to_one_based(), // Convert to 1-based
                 pi: 0.0, // No diversity since no variation
@@ -462,6 +503,31 @@ pub fn calculate_per_site(
             });
         }
     }
+    
+    // Finish progress and display summary statistics
+    finish_step_progress(&format!(
+        "Completed: {} positions, {} variants, {} polymorphic sites", 
+        region_length, variants_processed, polymorphic_sites
+    ));
+    
+    log(LogLevel::Info, &format!(
+        "Per-site diversity calculation complete: {} positions analyzed, {} polymorphic sites",
+        region_length, polymorphic_sites
+    ));
+    
+    // Show summary in status box
+    display_status_box(StatusBox {
+        title: "Per-Site Diversity Summary".to_string(),
+        stats: vec![
+            ("Region length", region_length.to_string()),
+            ("Haplotypes", max_haps.to_string()),
+            ("Variants processed", variants_processed.to_string()),
+            ("Polymorphic sites", polymorphic_sites.to_string()),
+            ("Percentage polymorphic", format!("{:.2}%", 
+                if region_length > 0 { (polymorphic_sites as f64 / region_length as f64) * 100.0 } else { 0.0 }
+            ))
+        ],
+    });
 
     site_diversities // Return the vector of per-site diversity metrics
 }
