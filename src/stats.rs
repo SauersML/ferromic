@@ -68,11 +68,13 @@ pub fn calculate_adjusted_sequence_length(
         .sum(); // Sum all lengths to get the total adjusted length
     
     // Display results and finish spinner
-    spinner.finish_with_message(format!(
-        "Original length: {}, Adjusted length: {}", 
+    spinner.finish_and_clear();
+    log(LogLevel::Info, &format!(
+        "Original length: {}, Adjusted length: {}",
         region_end - region_start + 1,
         adjusted_length
     ));
+
     
     log(LogLevel::Info, &format!(
         "Adjusted sequence length: {} (original: {})", 
@@ -371,10 +373,13 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     // Compute average nucleotide diversity over all pairs
     let pi = difference_sum / total_possible_pairs as f64;
     
-    spinner.finish_with_message(format!(
+    spinner.finish_and_clear();
+    log(LogLevel::Info, &format!(
         "π = {:.6} (from {} haplotype pairs)",
-        pi, total_possible_pairs
+        pi,
+        total_possible_pairs
     ));
+
 
     log(LogLevel::Info, &format!(
         "Calculated nucleotide diversity (π): {:.6}",
