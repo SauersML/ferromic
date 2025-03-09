@@ -369,7 +369,10 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
 
     if vcf_candidates.is_empty() {
         // No VCF files found for the specified chromosome
-        spinner.finish_with_message(format!("No VCF files found for chr{}", chr));
+        log(LogLevel::Warning, &format!(
+            "No VCF files found for chr{}",
+            chr
+        ));
         log(LogLevel::Error, &format!(
             "Could not find VCF files for chromosome {} in folder: {}", 
             chr, folder
