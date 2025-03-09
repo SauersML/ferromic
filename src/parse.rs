@@ -257,7 +257,17 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     set_stage(ProcessingStage::Global);
     log(LogLevel::Info, &format!("Searching for VCF file for chromosome {} in folder: {}", chr, folder));
 
-    let spinner = create_spinner(&format!("Looking for VCF file for chr{}", chr));
+    // Use a static flag to only show one VCF spinner at a time
+    static VCF_SPINNER_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let spinner = if !VCF_SPINNER_ACTIVE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        // First spinner shows general message
+        create_spinner("Loading VCF files")
+    } else {
+        // Other spinners are hidden from terminal output
+        let hidden_spinner = create_spinner("");
+        hidden_spinner.set_draw_target(indicatif::ProgressDrawTarget::hidden());
+        hidden_spinner
+    };
 
     // Validate folder exists first
     let path = Path::new(folder);
