@@ -1445,7 +1445,7 @@ fn process_chromosome_entries(
             }
         }
     
-        update_entry_progress(idx + 1, &format!("Global progress for region {}", region_desc));
+        update_entry_progress((idx + 1) as u64, &format!("Global progress for region {}", region_desc));
     }
 
 
