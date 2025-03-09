@@ -795,9 +795,9 @@ fn process_variants(
     if locked_seqinfo.is_empty() {
         log(LogLevel::Warning, &format!("No SeqInfo in stats pass for group {}", haplotype_group));
     } else {
-        if group_hap_count > 20 {
+        if region_hap_count > 20 {
             // Only display the table for smaller sample sets to avoid cluttering
-            log(LogLevel::Info, &format!("Processed {} haplotypes for group {}", group_hap_count, haplotype_group));
+            log(LogLevel::Info, &format!("Processed {} haplotypes for group {}", region_hap_count, haplotype_group));
         } else {
             display_seqinfo_entries(&locked_seqinfo, 12);
         }
@@ -828,17 +828,13 @@ fn process_variants(
             &chromosome,
         )?;
         
-        spinner.finish_with_message(&format!(
-            "Created sequence files for group {} haplotypes", haplotype_group
-        ));
+        spinner.finish_with_message(format!("Created sequence files for group {} haplotypes", haplotype_group));
     }
 
     // Calculate per-site diversity
     let spinner = create_spinner("Calculating per-site diversity");
     let site_diversities = calculate_per_site(variants, &group_haps, region_start, region_end);
-    spinner.finish_with_message(&format!(
-        "Calculated diversity for {} sites", site_diversities.len()
-    ));
+    spinner.finish_with_message(format!("Calculated diversity for {} sites", site_diversities.len()));
     
     log(LogLevel::Info, &format!(
         "Completed analysis for {} group {}: {} segregating sites, θ={:.6}, π={:.6}",
@@ -1813,7 +1809,7 @@ pub fn process_vcf(
     seqinfo_storage_filtered: Arc<Mutex<Vec<SeqInfo>>>,
     position_allele_map_unfiltered: Arc<Mutex<HashMap<i64, (char, char)>>>,
     position_allele_map_filtered: Arc<Mutex<HashMap<i64, (char, char)>>>,
-) -> Result
+) -> Result<
     (
         Vec<Variant>,
         Vec<Variant>,
@@ -1846,7 +1842,7 @@ pub fn process_vcf(
             .ok_or_else(|| VcfError::Parse(format!("Chromosome {} not found in reference", chr)))?;
         seq_info.len as i64
     };
-    spinner.finish_with_message(&format!("Chromosome {} length: {}bp", chr, chr_length));
+    spinner.finish_with_message(format!("Chromosome {} length: {}bp", chr, chr_length));
 
     // Small vectors to hold variants in batches, limiting memory usage
     let unfiltered_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
@@ -1878,8 +1874,7 @@ pub fn process_vcf(
     };
     
     progress_bar.set_style(style);
-    progress_bar.set_message(&format!("Reading VCF for chr{}:{}-{}", 
-        chr, region.start, region.end));
+    progress_bar.set_message(format!("Reading VCF for chr{}:{}-{}", chr, region.start, region.end));
         
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = Arc::clone(&processing_complete);
