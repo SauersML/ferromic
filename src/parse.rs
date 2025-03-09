@@ -457,7 +457,6 @@ pub fn read_reference_sequence(
     let mut reader = bio::io::fasta::IndexedReader::from_file(&fasta_path).map_err(|e| {
         let error_msg = format!("Failed to open FASTA file: {}", e);
         log(LogLevel::Error, &error_msg);
-        spinner.finish_with_message("Failed to open reference FASTA file");
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
             error_msg,
@@ -482,7 +481,6 @@ pub fn read_reference_sequence(
                 chr, chr_with_prefix
             );
             log(LogLevel::Error, &error_msg);
-            spinner.finish_with_message("Chromosome not found in reference");
             VcfError::Parse(error_msg)
         })?;
 
@@ -550,7 +548,6 @@ pub fn read_reference_sequence(
                 ch
             ));
         }
-        spinner.finish_with_message("Found invalid nucleotides in reference sequence");
         return Err(VcfError::Parse(format!(
             "Invalid nucleotides found in sequence for region {}:{}-{}",
             actual_chr_name, clamped_start, clamped_end
