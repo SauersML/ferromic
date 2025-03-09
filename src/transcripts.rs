@@ -680,14 +680,15 @@ pub fn filter_and_log_transcripts(
         for (i, seg) in tcds.segments.iter().enumerate() {
             let segment_length = seg.len() as i64;
             let frame = tcds.frames.get(i).copied().unwrap_or(0);
-            println!(
+            log(LogLevel::Info, &format!(
                 "  Segment {}: {}-{} (length: {}, frame: {})",
                 i + 1,
                 seg.start,
                 seg.end,
                 segment_length,
                 frame
-            );
+            ));
+
             writeln!(
                 log_file,
                 "  Segment {}: {}-{} (length: {}, frame: {})",
