@@ -1119,7 +1119,7 @@ def main():
 
     # Regex pattern to extract group_num, transcript_id, chromosome, start, end
     filename_pattern = re.compile(
-        r'^group_(\d+)_([A-Za-z0-9\.]+)_chr_([A-Za-z0-9]+)_start_(\d+)_end_(\d+)_combined\.phy$'
+        r'^group(\d+)_([^_]+)_([^_]+)_([^_]+)_chr([^_]+)_start(\d+)_end(\d+)\.phy$'
     )
 
     cds_meta_all = []
