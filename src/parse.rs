@@ -5,7 +5,6 @@ use crate::progress::{
     finish_step_progress, create_spinner, set_stage, ProcessingStage
 };
 
-use colored::Colorize;
 use flate2::read::MultiGzDecoder;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
