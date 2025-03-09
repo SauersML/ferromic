@@ -736,10 +736,10 @@ pub fn filter_and_log_transcripts(
             )
             .expect("Failed to write to transcript_overlap.log");
 
-            println!(
+            log(LogLevel::Info, &format!(
                 "    Remainder when divided by 3: {}",
                 total_coding_length % 3
-            );
+            ));
             writeln!(
                 log_file,
                 "    Remainder when divided by 3: {}",
