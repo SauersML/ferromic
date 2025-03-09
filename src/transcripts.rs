@@ -639,18 +639,18 @@ pub fn filter_and_log_transcripts(
         
         // Check for overlap using the intersect method
         let overlaps_query = transcript_interval.intersect(&query_interval).is_some();
-
+        
         if !overlaps_query {
             continue;
         }
-
+        
         tcds.segments.sort_by_key(|seg| seg.start);
-
-        println!("\nProcessing transcript: {}", tcds.transcript_id);
+        
+        // Only log to file instead of printing to terminal to reduce spam
         writeln!(log_file, "\nProcessing transcript: {}", tcds.transcript_id)
             .expect("Failed to write to transcript_overlap.log");
-
-        println!("Found {} CDS segments", tcds.segments.len());
+        
+        // Log to file only, not terminal
         writeln!(log_file, "Found {} CDS segments", tcds.segments.len())
             .expect("Failed to write to transcript_overlap.log");
 
