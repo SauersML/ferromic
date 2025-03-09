@@ -4,25 +4,25 @@ dN/dS Analysis Script using PAML's CODEML
 This script calculates pairwise dN/dS values using PAML's CODEML program.
 
 1. Input Files:
-    Each input file is a PHYLIP-like file with lines consisting of:
-        SAMPLE_NAME_L/R + SEQUENCE (no spaces). For example:
-            ABC_XYZ_HG01352_LACGGAGTAC...
-    Where each sample name ends with "_L" or "_R" before the sequence.
+   Each input file is a PHYLIP-like file with lines consisting of:
+       SAMPLE_NAME_L/R + SEQUENCE (no spaces). For example:
+           ABC_XYZ_HG01352_LACGGAGTAC...
+   Where each sample name ends with "_L" or "_R" before the sequence.
 
-    The input file names follow a pattern including a transcript ID and chromosome info:
-        group_0_ENST00000706755.1_chr_19_start_..._combined.phy
-        group_1_ENST00000704003.1_chr_7_start_..._combined.phy
-        ...
-    Each file corresponds to a single CDS/transcript variant (one full alignment).
+   The input file names follow a pattern including gene name, gene ID, transcript ID and chromosome info:
+       group0_ZNF488_ENSG00000265763.4_ENST00000585316.3_chr10_start47367810_end47368828.phy
+       group1_ZNF488_ENSG00000265763.4_ENST00000585316.3_chr10_start47367810_end47368828.phy
+   Each file corresponds to a single CDS/transcript variant (one full alignment).
+   The script only processes genes that have files in both group 0 and group 1.
 
 2. Sequence Validation:
-    - Sequences must be non-empty, length divisible by 3.
-    - Only valid bases: A,T,C,G,N,-
-    - No in-frame stop codons (TAA,TAG,TGA).
-    - If invalid, the sequence is discarded.
+   - Sequences must be non-empty, length divisible by 3.
+   - Only valid bases: A,T,C,G,N,-
+   - No in-frame stop codons (TAA,TAG,TGA).
+   - If invalid, the sequence is discarded.
 
 Usage:
-    python3 dnds.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
+   python3 dnds.py --phy_dir PATH_TO_PHY_FILES --output_dir OUTPUT_DIRECTORY --codeml_path PATH_TO_CODEML
 """
 
 import os
@@ -935,13 +935,13 @@ def parallel_handle_file(phy_file):
     GLOBAL_COUNTERS['duplicates'] += parsed_data['local_duplicates']
 
     sequences = parsed_data['sequences']
-    group_num_match = re.search(r'^group_(\d+)_', os.path.basename(phy_file))
-    if not group_num_match:
-        print("Could not parse group number from filename. Defaulting to group=0.")
-        group_num = 0
+    basename = os.path.basename(phy_file)
+    match = filename_pattern.match(basename)
+    if not match:
+        print(f"ERROR: Could not parse group number from filename: {basename}")
+        sys.exit(1)  # Exit with error
     else:
-        group_num = int(group_num_match.group(1))
-
+        group_num = int(match.group(1))
     sample_groups = {sname: group_num for sname in sequences.keys()}
 
     if COMPARE_BETWEEN_GROUPS:
@@ -1284,12 +1284,13 @@ def main():
         GLOBAL_COUNTERS['duplicates']   += parsed_data['local_duplicates']
 
         sequences = parsed_data['sequences']
-        group_num_match = re.search(r'^group_(\d+)_', os.path.basename(phy_file))
-        if not group_num_match:
-            print("Could not parse group number from filename. Defaulting to group=0.")
-            group_num = 0
+        basename = os.path.basename(phy_file)
+        match = filename_pattern.match(basename)
+        if not match:
+            print(f"ERROR: Could not parse group number from filename: {basename}")
+            sys.exit(1)  # Exit with error instead of defaulting to group 0
         else:
-            group_num = int(group_num_match.group(1))
+            group_num = int(match.group(1))
 
         # Build a sample_groups map
         sample_groups = {sname: group_num for sname in sequences.keys()}
