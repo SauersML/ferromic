@@ -200,14 +200,20 @@ impl ProgressTracker {
         None
     }
 
-    /// In-place printing that keeps a single line, using bar.set_message
-    /// instead of printing new lines. This avoids multiple line outputs.
+    /// Properly handles output that might contain multiple lines by suspending
+    /// the progress bar temporarily rather than trying to use set_message.
     fn inplace_print(&self, text: &str) {
         if let Some(bar) = self.find_active_bar() {
-            bar.set_message(text.to_string());
+            // Suspend the bar temporarily, print the text, then resume the bar
+            // This prevents duplicate progress bar outputs on new lines
+            bar.suspend(|| {
+                print!("{}", text);
+                std::io::stdout().flush().ok();
+            });
         } else {
-            // No active bar found, so we ignore or log the text
-            // to prevent extra new lines in the terminal.
+            // No active bar found, print directly
+            print!("{}", text);
+            std::io::stdout().flush().ok();
         }
     }
 
