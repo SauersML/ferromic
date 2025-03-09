@@ -86,49 +86,73 @@ impl ProgressTracker {
         // Create reusable styles
         let mut styles = HashMap::new();
         
-        // Global progress style
+        // Global progress style with improved layout and ETA
         styles.insert(
             "global".to_string(),
             ProgressStyle::default_bar()
-                .template("{spinner:.blue} [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} entries {msg}")
+                .template("{spinner:.blue} {prefix:4} [{elapsed_precise}] {wide_bar:.cyan/blue} {pos:>4}/{len:<4} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
+                .with_prefix("GLB")
         );
         
-        // Entry progress style
+        // Entry progress style with clear hierarchy
         styles.insert(
             "entry".to_string(),
             ProgressStyle::default_bar()
-                .template("  {spinner:.green} [{elapsed_precise}] {bar:30.green/white} {msg}")
+                .template("  {spinner:.green} {prefix:4} [{elapsed_precise}] {wide_bar:.green/white} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
+                .with_prefix("ENT")
         );
         
-        // Step progress style
+        // Step progress style with more detailed information
         styles.insert(
             "step".to_string(),
             ProgressStyle::default_bar()
-                .template("    {spinner:.yellow} [{elapsed_precise}] {bar:20.yellow/white} {pos}/{len} {msg}")
+                .template("    {spinner:.yellow} {prefix:4} [{elapsed_precise}] {wide_bar:.yellow/white} {pos:>6}/{len:<6} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
+                .with_prefix("STP")
         );
         
-        // Variant progress style
+        // Variant progress style with enhanced visualization
         styles.insert(
             "variant".to_string(),
             ProgressStyle::default_bar()
-                .template("      {spinner:.magenta} [{elapsed_precise}] {bar:15.magenta/white} {pos}/{len} {msg}")
+                .template("      {spinner:.magenta} {prefix:4} [{elapsed_precise}] {wide_bar:.magenta/white} {pos:>7}/{len:<7} {percent:>3}% {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
+                .with_prefix("VAR")
         );
         
-        // Spinner style
+        // Spinner style with contextual information
         styles.insert(
             "spinner".to_string(),
             ProgressStyle::default_spinner()
-                .template("{spinner:.bold.green} {msg} {elapsed_precise}")
+                .template("{spinner:.bold.green} [{elapsed_precise}] {msg}")
                 .expect("Spinner template error")
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+        );
+        
+        // Add memory-intensive operation style for operations with heavy memory usage
+        styles.insert(
+            "memory_intensive".to_string(),
+            ProgressStyle::default_bar()
+                .template("    {spinner:.red} {prefix:4} [{elapsed_precise}] {wide_bar:.red/white} {pos:>7}/{len:<7} {percent:>3}% {msg}")
+                .expect("Progress bar template error")
+                .progress_chars("█▓▒░")
+                .with_prefix("MEM")
+        );
+        
+        // Add IO-intensive operation style
+        styles.insert(
+            "io_intensive".to_string(),
+            ProgressStyle::default_bar()
+                .template("    {spinner:.blue} {prefix:4} [{elapsed_precise}] {wide_bar:.blue/white} {pos:>7}/{len:<7} {percent:>3}% {msg}")
+                .expect("Progress bar template error")
+                .progress_chars("█▓▒░")
+                .with_prefix("I/O")
         );
         
         ProgressTracker {
