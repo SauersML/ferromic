@@ -248,10 +248,13 @@ pub fn calculate_pairwise_differences(
         .collect(); // Collect all pair results into the final vector
         
     let result_count = result.len();
-    spinner.finish_with_message(format!(
-        "Completed pairwise analysis for {} samples ({} pairs)", 
-        number_of_samples, result_count
+    spinner.finish_and_clear();
+    log(LogLevel::Info, &format!(
+        "Wrote {} sequences to {}",
+        n,
+        output_file
     ));
+
     
     log(LogLevel::Info, &format!(
         "Computed {} pairwise comparisons", result_count
