@@ -8,11 +8,11 @@ use crate::parse::{
 };
 
 use crate::progress::{
-    init_global_progress, update_global_progress, log, LogLevel, ProcessingStage, set_stage,
+    log, LogLevel, ProcessingStage, set_stage,
     init_entry_progress, update_entry_progress, finish_entry_progress,
     init_step_progress, update_step_progress, finish_step_progress,
     init_variant_progress, update_variant_progress, finish_variant_progress,
-    create_spinner, display_status_box, StatusBox, finish_all
+    create_spinner, display_status_box, StatusBox
 };
 
 use crate::transcripts::{
