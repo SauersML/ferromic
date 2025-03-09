@@ -559,21 +559,21 @@ pub fn calculate_per_site(
     display_status_box(StatusBox {
         title: "Per-Site Diversity Summary".to_string(),
         stats: vec![
-            ("Region", format!("{}:{}-{}", 
+            (String::from("Region"), format!("{}:{}-{}", 
                 ZeroBasedPosition(region_start).to_one_based(), 
                 ZeroBasedPosition(region_end).to_one_based(), 
                 region_length)),
-            ("Haplotypes", max_haps.to_string()),
-            ("Variants processed", variants_processed.to_string()),
-            ("Polymorphic sites", format!("{} ({:.2}%)",
+            (String::from("Haplotypes"), max_haps.to_string()),
+            (String::from("Variants processed"), variants_processed.to_string()),
+            (String::from("Polymorphic sites"), format!("{} ({:.2}%)",
                 polymorphic_sites,
                 if region_length > 0 { (polymorphic_sites as f64 / region_length as f64) * 100.0 } else { 0.0 }
             )),
-            ("Processing time", format!("{:.2}s ({:.1} pos/sec)", 
+            (String::from("Processing time"), format!("{:.2}s ({:.1} pos/sec)", 
                 total_time.as_secs_f64(),
                 region_length as f64 / total_time.as_secs_f64()
             )),
-            ("Memory usage", format!("~{:.1} MB", 
+            (String::from("Memory usage"), format!("~{:.1} MB", 
                 (site_diversities.capacity() * std::mem::size_of::<SiteDiversity>()) as f64 / 1_048_576.0
             ))
         ],
