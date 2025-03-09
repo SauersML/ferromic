@@ -1422,12 +1422,12 @@ fn process_chromosome_entries(
         
         match process_single_config_entry(
             entry.clone(),
-            vcf_file,
+            &vcf_file,
             min_gq,
             mask,
             allow,
             &ref_sequence,
-            cds_regions,
+            &cds_regions,
             chr,
             args,
         ) {
@@ -1445,7 +1445,7 @@ fn process_chromosome_entries(
             }
         }
     
-        update_global_progress(idx + 1, &format!("Global progress for region {}", region_desc));
+        update_entry_progress(idx + 1, &format!("Global progress for region {}", region_desc));
     }
 
 
