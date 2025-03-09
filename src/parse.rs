@@ -101,13 +101,10 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     if sample_names.is_empty() {
         let error_msg = "Error: No sample names found in the configuration file header after skipping the first 7 columns. Tabs must separate all columns, including sample names.";
         log(LogLevel::Error, error_msg);
-        spinner.finish_with_message("Failed to parse config file: no sample names found");
         return Err(VcfError::Parse(
             "No sample names found in config file header.".to_string(),
         ));
     }
-
-    spinner.set_message(format!("Found {} sample columns in config file", sample_names.len()));
 
     let mut entries = Vec::new();
     let mut invalid_genotypes = 0;
@@ -123,7 +120,6 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
                 line_num + 2, headers.len(), record.len()
             );
             log(LogLevel::Error, &error_msg);
-            spinner.finish_with_message("Failed to parse config file: mismatched field count");
             return Err(VcfError::Parse(format!(
                 "Mismatched number of fields in record on line {}",
                 line_num + 2
