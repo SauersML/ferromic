@@ -112,8 +112,7 @@ fn main() -> Result<(), VcfError> {
     if let Some(config_file) = args.config_file.as_ref() {
         log(LogLevel::Info, &format!("Config file provided: {}", config_file));
         let config_entries = parse_config_file(Path::new(config_file))?;
-        init_global_progress(config_entries.len());
-
+    
         let output_file = args
             .output_file
             .as_ref()
