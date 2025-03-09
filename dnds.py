@@ -80,6 +80,12 @@ GLOBAL_COUNTERS = manager.dict({
     'stop_codons': 0        # Number of sequences that had in-frame stop codons
 })
 
+# Regex pattern to extract group_num, gene_name, gene_id, transcript_id, chromosome, start, end
+# Global variable accessible to all functions
+filename_pattern = re.compile(
+    r'^group(\d+)_([^_]+)_([^_]+)_([^_]+)_chr([^_]+)_start(\d+)_end(\d+)\.phy$'
+)
+
 # These are for ETA updates (time/rate).
 ETA_DATA = {
     'start_time': None,
@@ -1102,11 +1108,6 @@ def main():
     total_files = len(phy_files)
     print(f"Found {total_files} phy files in {args.phy_dir}")
     sys.stdout.flush()
-
-    # Regex pattern to extract group_num, transcript_id, chromosome, start, end
-    filename_pattern = re.compile(
-        r'^group(\d+)_([^_]+)_([^_]+)_([^_]+)_chr([^_]+)_start(\d+)_end(\d+)\.phy$'
-    )
 
     # Create a mapping of gene_id to lists of PHY files for each group
     gene_to_files = {}
