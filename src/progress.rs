@@ -319,18 +319,29 @@ impl ProgressTracker {
     }
     
     pub fn spinner(&mut self, message: &str) -> ProgressBar {
+        // Spinner with stage context and better timing information
+        let stage_indicator = match self.current_stage {
+            ProcessingStage::Global => "[Global]",
+            ProcessingStage::ConfigEntry => "[Entry]",
+            ProcessingStage::VcfProcessing => "[VCF]",
+            ProcessingStage::VariantAnalysis => "[Variant]",
+            ProcessingStage::CdsProcessing => "[CDS]",
+            ProcessingStage::StatsCalculation => "[Stats]",
+        };
+    
         let style = self.styles.get("spinner").cloned().unwrap_or_else(|| {
             ProgressStyle::default_spinner()
-                .template("{spinner:.bold.green} {msg} {elapsed_precise}")
+                .template(&format!("{{spinner:.bold.green}} {} {{msg}} [{{elapsed_precise}}]", stage_indicator))
                 .expect("Spinner template error")
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         });
-        
+    
         let spinner = self.multi_progress.add(ProgressBar::new_spinner());
         spinner.set_style(style);
         spinner.set_message(message.to_string());
         spinner.enable_steady_tick(Duration::from_millis(80));
-        
+    
+        self.log(LogLevel::Info, &format!("Started operation: {}", message));
         spinner
     }
     
@@ -369,48 +380,79 @@ impl ProgressTracker {
             Some((Width(w), Height(_))) => w as usize,
             None => 80,
         };
-        
+    
         // Calculate box width based on content
         let title_len = status.title.len();
         let max_content_width = status.stats.iter()
             .map(|(k, v)| k.len() + v.len() + 3) // +3 for separator and spacing
             .max()
             .unwrap_or(20);
-        
+    
         let content_width = std::cmp::max(max_content_width, title_len);
         let box_width = std::cmp::min(terminal_width - 4, content_width + 4);
+    
+        // Create timestamp for the status box
+        let timestamp = Local::now().format("%H:%M:%S").to_string();
+        let timestamp_display = format!(" [{}] ", timestamp);
+        let timestamp_len = timestamp_display.len();
+    
+        // Create stage context for the status box
+        let stage_context = match self.current_stage {
+            ProcessingStage::Global => "[Global Context]",
+            ProcessingStage::ConfigEntry => "[Config Entry]",
+            ProcessingStage::VcfProcessing => "[VCF Processing]",
+            ProcessingStage::VariantAnalysis => "[Variant Analysis]",
+            ProcessingStage::CdsProcessing => "[CDS Processing]",
+            ProcessingStage::StatsCalculation => "[Statistics]",
+        };
         
-        // Create the top border
-        let top_border = format!("┌{}┐", "─".repeat(box_width - 2));
-        
-        // Create the title bar
+        // Create the top border with timestamp
+        let top_border = format!("┌{}{}{}┐", 
+            "─".repeat((box_width - 2 - timestamp_len) / 2),
+            timestamp_display,
+            "─".repeat((box_width - 2 - timestamp_len + 1) / 2)
+        );
+    
+        // Create the title bar with special formatting
         let padding = (box_width - 2 - title_len) / 2;
-        let title_bar = format!("│{}{}{}│", 
+        let title_bar = format!("│{}{}{}│",
             " ".repeat(padding),
-            status.title,
+            status.title.bold(),
             " ".repeat(box_width - 2 - padding - title_len)
         );
         
+        // Create the context bar
+        let context_padding = (box_width - 2 - stage_context.len()) / 2;
+        let context_bar = format!("│{}{}{}│",
+            " ".repeat(context_padding),
+            stage_context.dimmed(),
+            " ".repeat(box_width - 2 - context_padding - stage_context.len())
+        );
+    
         // Create the divider
         let divider = format!("├{}┤", "─".repeat(box_width - 2));
-        
-        // Create the stats rows
+    
+        // Create the stats rows with improved formatting
         let mut stats_rows = Vec::new();
         for (key, value) in status.stats.iter() {
             let row = format!("│ {}: {}{} │",
-                key,
-                value,
+                key.yellow(),
+                value.white().bold(),
                 " ".repeat(box_width - 5 - key.len() - value.len())
             );
             stats_rows.push(row);
         }
-        
+    
         // Create the bottom border
         let bottom_border = format!("└{}┘", "─".repeat(box_width - 2));
-        
-        // Print the box
+    
+        // Log the status box creation
+        self.log(LogLevel::Info, &format!("Displaying status box: {}", status.title));
+    
+        // Print the box with enhanced visuals
         println!("\n{}", top_border.cyan());
         println!("{}", title_bar.cyan());
+        println!("{}", context_bar.cyan());
         println!("{}", divider.cyan());
         for row in stats_rows {
             println!("{}", row.cyan());
