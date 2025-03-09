@@ -209,11 +209,7 @@ pub fn parse_config_file(path: &Path) -> Result<Vec<ConfigEntry>, VcfError> {
     }
 
     let invalid_percentage = (invalid_genotypes as f64 / total_genotypes as f64) * 100.0;
-    spinner.finish_with_message(format!(
-        "Parsed {} entries with {} samples (invalid genotypes: {:.2}%)",
-        entries.len(), sample_names.len(), invalid_percentage
-    ));
-    
+
     log(LogLevel::Info, &format!(
         "Finished parsing config file. Found {} entries with {} samples. Invalid genotypes: {} ({:.2}%)",
         entries.len(), sample_names.len(), invalid_genotypes, invalid_percentage
