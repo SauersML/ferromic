@@ -893,17 +893,6 @@ def load_gtf_into_dict(gtf_file):
         transcript_dict[k] = (c, s, e)
     return transcript_dict
 
-
-def preload_transcript_coords(gtf_file):
-    """
-    Load once into TRANSCRIPT_COORDS if not already loaded.
-    """
-    global TRANSCRIPT_COORDS
-    if not TRANSCRIPT_COORDS:
-        TRANSCRIPT_COORDS = load_gtf_into_dict(gtf_file)
-        print(f"[INFO] GTF loaded into memory: {len(TRANSCRIPT_COORDS)} transcripts.")
-
-
 def get_transcript_coordinates(transcript_id):
     """
     Return (chrom, start, end) for transcript_id, or (None, None, None) if not found.
@@ -1099,9 +1088,6 @@ def main():
 
     print(f"Preloaded {count_loaded_from_csv} comparison records from CSV into the SQLite DB.")
 
-    # Load GTF coords once
-    preload_transcript_coords('../hg38.knownGene.gtf')
-
     # Identify which .phy files already have final CSV (so we skip them)
     existing_csv_files = glob.glob(os.path.join(args.output_dir, '*.csv'))
     completed_cds_ids = set()
@@ -1199,10 +1185,10 @@ def main():
     def quick_estimate(phy_path):
         # Extract group_num from the filename
         base = os.path.basename(phy_path)
-        m = filename_pattern.match(base)
-        if not m:
+        match = filename_pattern.match(base)
+        if not match:
             return (0, 0)
-        group_num = m.group(1)
+        group_num = match.group(1)
 
         pdict = PARSED_PHY.get(phy_path, None)
         if not pdict or not pdict['sequences']:
@@ -1213,13 +1199,8 @@ def main():
         seq_names = list(pdict['sequences'].keys())
         sample_groups = {name: group_num_int for name in seq_names}
 
-        if COMPARE_BETWEEN_GROUPS:
-            pairs = list(combinations(seq_names, 2))
-        else:
-            # If group_num == 0, we only do within group0? Actually this is for 2-group scenario,
-            # but we only have the single group from the file. So just do combos within that group.
-            pairs = list(combinations(seq_names, 2))
-
+        pairs = list(combinations(seq_names, 2))
+        
         if len(pairs) > 0:
             return (1, len(pairs))
         else:
