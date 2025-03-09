@@ -352,7 +352,8 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
                 .unwrap_or_else(|_| fs::read_dir(".").unwrap())
                 .filter_map(|entry| entry.ok())
                 .filter(|entry| {
-                    let name = entry.file_name().to_string_lossy();
+                    let file_name = entry.file_name();
+                    let name = file_name.to_string_lossy();
                     name.ends_with(".vcf") || name.ends_with(".vcf.gz")
                 })
                 .collect();
