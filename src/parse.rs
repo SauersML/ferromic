@@ -19,7 +19,6 @@ pub fn parse_regions_file(
     let is_bed_file = path.extension().and_then(|s| s.to_str()) == Some("bed");
     
     log(LogLevel::Info, &format!("Parsing regions file: {}", path.display()));
-    let spinner = create_spinner(&format!("Parsing regions file: {}", path.display()));
 
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -75,9 +74,8 @@ pub fn parse_regions_file(
     for intervals in regions.values_mut() {
         intervals.sort_by_key(|iv| iv.start);
     }
-    
+
     let num_regions: usize = regions.values().map(|v| v.len()).sum();
-    spinner.finish_with_message(format!("Parsed {} regions across {} chromosomes", num_regions, regions.len()));
     log(LogLevel::Info, &format!("Completed parsing {} regions", num_regions));
 
     Ok(regions)
