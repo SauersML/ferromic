@@ -200,14 +200,13 @@ impl ProgressTracker {
         None
     }
 
+    /// In-place printing that keeps output coordinated with progress bars
     fn inplace_print(&self, text: &str) {
         if let Some(bar) = self.find_active_bar() {
-            // Use the bar's own println
             bar.println(text);
         } else {
             // No active bar found, print directly
             println!("{}", text);
-            std::io::stdout().flush().ok();
         }
     }
 
