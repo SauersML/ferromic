@@ -393,45 +393,84 @@ pub fn calculate_per_site(
     region_end: i64, // End of the region (0-based, half-open)
 ) -> Vec<SiteDiversity> { // Returns a vector of SiteDiversity structs
     set_stage(ProcessingStage::StatsCalculation);
-    
+
+    let start_time = std::time::Instant::now();
     log(LogLevel::Info, &format!(
         "Calculating per-site diversity for region {}:{}-{} with {} haplotypes",
         region_start, region_end, region_end - region_start, haplotypes_in_group.len()
     ));
 
     let max_haps = haplotypes_in_group.len(); // Number of haplotypes in the group
-    
+
     // Create a ZeroBasedHalfOpen interval for the region to determine its length
     let region = crate::process::ZeroBasedHalfOpen::from_0based_half_open(region_start, region_end);
-    let mut site_diversities = Vec::with_capacity(region.len()); // Pre-allocate
+    let region_length = region_end - region_start;
+    
+    // Pre-allocate with correct capacity for better memory efficiency
+    let mut site_diversities = Vec::with_capacity(region_length as usize);
+    
     if max_haps < 2 {
         // Need at least 2 haplotypes for diversity; return empty vector if not
         log(LogLevel::Warning, "Insufficient haplotypes (<2) for diversity calculation");
         return site_diversities;
     }
-    
-    // Initialize progress for this long computation
-    let region_length = region_end - region_start;
-    init_step_progress("Calculating per-site diversity", region_length as u64);
-    
-    // Initialize progress for this long computation
-    let region_length = region_end - region_start;
-    init_step_progress("Calculating per-site diversity", region_length as u64);
+
+    // Initialize progress with more informative message
+    let spinner = create_spinner(&format!(
+        "Preparing to analyze {} positions for {} haplotypes", 
+        region_length, max_haps
+    ));
 
     // Build a map of variants by position for O(1) lookup
     let variant_map: HashMap<i64, &Variant> = variants.iter().map(|v| (v.position, v)).collect();
-    log(LogLevel::Info, &format!("Mapped {} variants for fast lookup", variant_map.len()));
-    
-    // Track statistics for progress updates
+    spinner.finish_with_message(format!(
+        "Indexed {} variants for fast lookup ({}ms)", 
+        variant_map.len(),
+        start_time.elapsed().as_millis()
+    ));
+
+    // Initialize detailed progress tracking with checkpoints
+    init_step_progress(&format!(
+        "Calculating diversity across {} positions", region_length
+    ), region_length as u64);
+
+    // Track statistics for progress updates and performance monitoring
     let mut variants_processed = 0;
     let mut polymorphic_sites = 0;
+    let mut last_update_time = std::time::Instant::now();
+    let mut positions_since_update = 0;
+    let update_interval = std::cmp::min(1000, region_length as usize / 100);
 
-    for (idx, pos) in (region_start..region_end).enumerate() { // Or for pos in region_start..region_end?
-        // Update progress every 1000 positions
-        if idx % 1000 == 0 || idx == 0 {
-            update_step_progress(idx as u64, &format!("Position {}/{}", idx, region_length));
+    // Process in batches for more efficient update frequency
+    for (idx, pos) in (region_start..region_end).enumerate() {
+        positions_since_update += 1;
+        
+        // Update progress at reasonable intervals or when a significant amount of work is done
+        if positions_since_update >= update_interval || idx == 0 || idx as i64 == region_length - 1 {
+            let elapsed = last_update_time.elapsed();
+            let positions_per_sec = if elapsed.as_millis() > 0 {
+                positions_since_update as f64 * 1000.0 / elapsed.as_millis() as f64
+            } else {
+                0.0
+            };
+            
+            let progress_pct = (idx as f64 / region_length as f64) * 100.0;
+            let remaining_secs = if positions_per_sec > 0.0 {
+                (region_length as f64 - idx as f64) / positions_per_sec
+            } else {
+                0.0
+            };
+            
+            update_step_progress(idx as u64, &format!(
+                "Position {}/{} ({:.1}%) - {:.1} pos/sec - ~{:.0}s remaining",
+                idx, region_length, progress_pct, positions_per_sec, remaining_secs
+            ));
+            
+            positions_since_update = 0;
+            last_update_time = std::time::Instant::now();
         }
 
+        // Process the current position
         if let Some(var) = variant_map.get(&pos) {
             // Variant exists at this position; compute diversity metrics
             let mut allele_counts = HashMap::new(); // Map to count occurrences of each allele
@@ -466,7 +505,7 @@ pub fn calculate_per_site(
                 let pi_value =
                     (total_called as f64 / (total_called as f64 - 1.0)) * (1.0 - freq_sq_sum);
 
-                // Calculate Watterson’s θ for this site
+                // Calculate Watterson's θ for this site
                 let distinct_alleles = allele_counts.len();
                 let watterson_value = if distinct_alleles > 1 {
                     // Site is polymorphic; θ_w = 1 / H_{n-1}
@@ -486,13 +525,13 @@ pub fn calculate_per_site(
             if pi_value > 0.0 || watterson_value > 0.0 {
                 polymorphic_sites += 1;
             }
-            
+
             site_diversities.push(SiteDiversity {
                 position: ZeroBasedPosition(pos).to_one_based(), // Convert to 1-based for output
                 pi: pi_value,
                 watterson_theta: watterson_value,
             });
-            
+
             variants_processed += 1;
         } else {
             // No variant at this position; it's monomorphic (all same allele)
@@ -503,28 +542,39 @@ pub fn calculate_per_site(
             });
         }
     }
-    
+
+    let total_time = start_time.elapsed();
     // Finish progress and display summary statistics
     finish_step_progress(&format!(
-        "Completed: {} positions, {} variants, {} polymorphic sites", 
-        region_length, variants_processed, polymorphic_sites
+        "Completed: {} positions, {} variants, {} polymorphic sites in {:.2}s",
+        region_length, variants_processed, polymorphic_sites, total_time.as_secs_f64()
     ));
-    
+
     log(LogLevel::Info, &format!(
         "Per-site diversity calculation complete: {} positions analyzed, {} polymorphic sites",
         region_length, polymorphic_sites
     ));
-    
-    // Show summary in status box
+
+    // Show detailed summary in status box with performance metrics
     display_status_box(StatusBox {
         title: "Per-Site Diversity Summary".to_string(),
         stats: vec![
-            ("Region length", region_length.to_string()),
+            ("Region", format!("{}:{}-{}", 
+                ZeroBasedPosition(region_start).to_one_based(), 
+                ZeroBasedPosition(region_end).to_one_based(), 
+                region_length)),
             ("Haplotypes", max_haps.to_string()),
             ("Variants processed", variants_processed.to_string()),
-            ("Polymorphic sites", polymorphic_sites.to_string()),
-            ("Percentage polymorphic", format!("{:.2}%", 
+            ("Polymorphic sites", format!("{} ({:.2}%)",
+                polymorphic_sites,
                 if region_length > 0 { (polymorphic_sites as f64 / region_length as f64) * 100.0 } else { 0.0 }
+            )),
+            ("Processing time", format!("{:.2}s ({:.1} pos/sec)", 
+                total_time.as_secs_f64(),
+                region_length as f64 / total_time.as_secs_f64()
+            )),
+            ("Memory usage", format!("~{:.1} MB", 
+                (site_diversities.capacity() * std::mem::size_of::<SiteDiversity>()) as f64 / 1_048_576.0
             ))
         ],
     });
