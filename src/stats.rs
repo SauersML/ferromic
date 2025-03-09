@@ -425,11 +425,13 @@ pub fn calculate_per_site(
 
     // Build a map of variants by position for O(1) lookup
     let variant_map: HashMap<i64, &Variant> = variants.iter().map(|v| (v.position, v)).collect();
-    spinner.finish_with_message(format!(
-        "Indexed {} variants for fast lookup ({}ms)", 
+    spinner.finish_and_clear();
+    log(LogLevel::Info, &format!(
+        "Indexed {} variants for fast lookup ({}ms)",
         variant_map.len(),
         start_time.elapsed().as_millis()
     ));
+
 
     // Initialize detailed progress tracking with checkpoints
     init_step_progress(&format!(
