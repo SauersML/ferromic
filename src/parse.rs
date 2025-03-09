@@ -452,17 +452,6 @@ pub fn read_reference_sequence(
         "Reading reference sequence for chromosome {} from {}:{}-{}", 
         chr, fasta_path.display(), region.start, region.end
     ));
-
-    // Try not to flood the terminal
-    static READING_REFERENCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let spinner = if !READING_REFERENCE.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        // First time only - create a global spinner
-        let spinner = create_spinner("Reading reference sequences");
-        spinner
-    } else {
-        // Reuse previous spinner
-        create_spinner("")
-    };
     
     // Create reader for the FASTA file and its index
     let mut reader = bio::io::fasta::IndexedReader::from_file(&fasta_path).map_err(|e| {
