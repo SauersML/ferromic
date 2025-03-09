@@ -769,7 +769,11 @@ pub fn filter_and_log_transcripts(
         let max_end = tcds.segments.iter().map(|seg| seg.end as i64).max().unwrap();
         let transcript_span = max_end - min_start;
 
-        println!("  CDS region: {}-{}", min_start, max_end);
+        log(LogLevel::Info, &format!(
+            "  CDS region: {}-{}",
+            min_start,
+            max_end
+        ));
         writeln!(log_file, "  CDS region: {}-{}", min_start, max_end)
             .expect("Failed to write to transcript_overlap.log");
 
