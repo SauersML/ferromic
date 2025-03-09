@@ -3,7 +3,13 @@ use crate::process::{
     create_temp_dir, map_sample_names_to_indices, get_haplotype_indices_for_group
 };
 
-use log::{info, warn};
+use crate::progress::{
+    log, LogLevel, init_step_progress, update_step_progress, 
+    finish_step_progress, create_spinner, display_status_box, StatusBox, set_stage, ProcessingStage
+};
+
+use log as external_log;
+use external_log::{info, warn};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
