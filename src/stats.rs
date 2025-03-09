@@ -392,7 +392,7 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     pi
 }
 
-// Calculate per-site diversity metrics (π and Watterson’s θ) across a genomic region
+// Calculate per-site diversity metrics (π and Watterson's θ) across a genomic region
 pub fn calculate_per_site(
     variants: &[Variant], 
     haplotypes_in_group: &[(usize, HaplotypeSide)], 
@@ -403,12 +403,12 @@ pub fn calculate_per_site(
     let start_time = std::time::Instant::now();
     log(LogLevel::Info, &format!(
         "Calculating per-site diversity for region {}:{}-{} with {} haplotypes",
-        region.start, region.end, region.end - region.start + 1, haplotypes_in_group.len()
+        region.start, region.end, region.len(), haplotypes_in_group.len()
     ));
 
     let max_haps = haplotypes_in_group.len(); // Number of haplotypes in the group
 
-    let region_length = region.end - region.start + 1; // +1 for inclusive range
+    let region_length = region.len();
     
     // Pre-allocate with correct capacity for better memory efficiency
     let mut site_diversities = Vec::with_capacity(region_length as usize);
@@ -434,7 +434,6 @@ pub fn calculate_per_site(
         start_time.elapsed().as_millis()
     ));
 
-
     // Initialize detailed progress tracking with checkpoints
     init_step_progress(&format!(
         "Calculating diversity across {} positions", region_length
@@ -448,10 +447,10 @@ pub fn calculate_per_site(
     let update_interval = std::cmp::min(1000, region_length as usize / 100);
 
     // Process in batches for more efficient update frequency
-    for (idx, pos) in (region.start..=region.end).enumerate() { // inclusive
+    for (idx, pos) in (region.start..=region.end).enumerate() { // Inclusive range
         positions_since_update += 1;
         
-        // Update progress at reasonable intervals or when a significant amount of work is done
+        // Update progress sometimes
         if positions_since_update >= update_interval || idx == 0 || idx as i64 == region_length - 1 {
             let elapsed = last_update_time.elapsed();
             let positions_per_sec = if elapsed.as_millis() > 0 {
@@ -566,8 +565,8 @@ pub fn calculate_per_site(
         title: "Per-Site Diversity Summary".to_string(),
         stats: vec![
             (String::from("Region"), format!("{}:{}-{}", 
-                ZeroBasedPosition(region_start).to_one_based(), 
-                ZeroBasedPosition(region_end).to_one_based(), 
+                ZeroBasedPosition(region.start).to_one_based(), 
+                ZeroBasedPosition(region.end).to_one_based(), 
                 region_length)),
             (String::from("Haplotypes"), max_haps.to_string()),
             (String::from("Variants processed"), variants_processed.to_string()),
