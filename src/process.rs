@@ -1832,7 +1832,6 @@ pub fn process_vcf(
     let mut sample_names = Vec::new();
     
     // Get chromosome length from reference
-    let spinner = create_spinner("Reading reference chromosome data");
     let chr_length = {
         let fasta_reader = bio::io::fasta::IndexedReader::from_file(&reference_path)
             .map_err(|e| VcfError::Parse(e.to_string()))?;
@@ -1845,7 +1844,6 @@ pub fn process_vcf(
     };
     // Log without terminal message to reduce spam
     log(LogLevel::Info, &format!("Chromosome {} length: {}bp", chr, chr_length));
-    spinner.finish();
 
     // Small vectors to hold variants in batches, limiting memory usage
     let unfiltered_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
