@@ -1,4 +1,8 @@
 use crate::process::{Variant, ZeroBasedPosition, HaplotypeSide};
+use crate::progress::{
+    log, LogLevel, init_step_progress, update_step_progress, 
+    finish_step_progress, create_spinner, display_status_box, StatusBox, set_stage, ProcessingStage
+};
 use rayon::iter::IntoParallelIterator;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -19,6 +23,15 @@ pub fn calculate_adjusted_sequence_length(
     allow_regions_chr: Option<&Vec<(i64, i64)>>, // Optional list of allowed regions as (start, end) tuples
     mask_regions_chr: Option<&Vec<(i64, i64)>>, // Optional list of masked regions to exclude
 ) -> i64 { // Returns the adjusted length as an i64
+    log(LogLevel::Info, &format!(
+        "Calculating adjusted sequence length for region {}:{}-{}", 
+        if allow_regions_chr.is_some() { "with allow regions" } else { "full" },
+        region_start, 
+        region_end
+    ));
+    
+    let spinner = create_spinner("Adjusting sequence length");
+
     // Convert the input region to a ZeroBasedHalfOpen interval
     let region = crate::process::ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end);
     
@@ -53,6 +66,19 @@ pub fn calculate_adjusted_sequence_length(
             interval.len() as i64 // Get the length and cast to i64
         })
         .sum(); // Sum all lengths to get the total adjusted length
+    
+    // Display results and finish spinner
+    spinner.finish_with_message(format!(
+        "Original length: {}, Adjusted length: {}", 
+        region_end - region_start + 1,
+        adjusted_length
+    ));
+    
+    log(LogLevel::Info, &format!(
+        "Adjusted sequence length: {} (original: {})", 
+        adjusted_length, 
+        region_end - region_start + 1
+    ));
         
     adjusted_length // Return the computed length
 }
@@ -165,6 +191,18 @@ pub fn calculate_pairwise_differences(
     variants: &[Variant],
     number_of_samples: usize,
 ) -> Vec<((usize, usize), usize, usize)> {
+    set_stage(ProcessingStage::StatsCalculation);
+    
+    let total_pairs = (number_of_samples * (number_of_samples - 1)) / 2;
+    log(LogLevel::Info, &format!(
+        "Calculating pairwise differences across {} samples ({} pairs)", 
+        number_of_samples, total_pairs
+    ));
+    
+    let spinner = create_spinner(&format!(
+        "Processing pairwise differences for {} samples", number_of_samples
+    ));
+
     // Wrap variants in an Arc for thread-safe sharing across parallel threads
     let variants_shared = Arc::new(variants);
 
@@ -206,7 +244,19 @@ pub fn calculate_pairwise_differences(
                 })
                 .collect::<Vec<_>>() // Collect results for this sample_idx_i
         })
-        .collect() // Collect all pair results into the final vector
+    .collect(); // Collect all pair results into the final vector
+        
+    let result_count = result.len();
+    spinner.finish_with_message(format!(
+        "Completed pairwise analysis for {} samples ({} pairs)", 
+        number_of_samples, result_count
+    ));
+    
+    log(LogLevel::Info, &format!(
+        "Computed {} pairwise comparisons", result_count
+    ));
+    
+    result
 }
 
 // Calculate the harmonic number H_n = sum_{k=1}^n 1/k
@@ -307,15 +357,28 @@ pub fn calculate_per_site(
     region_start: i64, // Start of the region (0-based, half-open)
     region_end: i64, // End of the region (0-based, half-open)
 ) -> Vec<SiteDiversity> { // Returns a vector of SiteDiversity structs
+    set_stage(ProcessingStage::StatsCalculation);
+    
+    log(LogLevel::Info, &format!(
+        "Calculating per-site diversity for region {}:{}-{} with {} haplotypes",
+        region_start, region_end, region_end - region_start, haplotypes_in_group.len()
+    ));
+
     let max_haps = haplotypes_in_group.len(); // Number of haplotypes in the group
     
     // Create a ZeroBasedHalfOpen interval for the region to determine its length
     let region = crate::process::ZeroBasedHalfOpen::from_0based_half_open(region_start, region_end);
-    let mut site_diversities = Vec::with_capacity(region.len()); // Pre-allocate for efficiency
+    let mut site_diversities = Vec::with_capacity(region.len()); // Pre-allocate
     if max_haps < 2 {
         // Need at least 2 haplotypes for diversity; return empty vector if not
+        log(LogLevel::Warning, "Insufficient haplotypes (<2) for diversity calculation");
         return site_diversities;
     }
+    
+    // Initialize progress for this long computation
+    let region_length = region_end - region_start;
+    init_step_progress("Calculating per-site diversity", region_length as u64);
+
     // Build a map of variants by position for O(1) lookup
     let variant_map: HashMap<i64, &Variant> = variants.iter().map(|v| (v.position, v)).collect();
     for pos in region_start..region_end {
