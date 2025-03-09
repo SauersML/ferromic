@@ -839,7 +839,11 @@ fn process_variants(
     // Calculate per-site diversity
     let spinner = create_spinner("Calculating per-site diversity");
     let site_diversities = calculate_per_site(variants, &group_haps, region_start, region_end);
-    spinner.finish_with_message(format!("Calculated diversity for {} sites", site_diversities.len()));
+    spinner.finish_and_clear();
+    log(LogLevel::Info, &format!(
+        "Calculated diversity for {} sites",
+        site_diversities.len()
+    ));
     
     log(LogLevel::Info, &format!(
         "Completed analysis for {} group {}: {} segregating sites, θ={:.6}, π={:.6}",
