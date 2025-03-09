@@ -1,4 +1,4 @@
-use crate::process::{Variant, ZeroBasedPosition, HaplotypeSide};
+use crate::process::{Variant, ZeroBasedPosition, HaplotypeSide, ZeroBasedHalfOpen};
 use crate::progress::{
     log, LogLevel, init_step_progress, update_step_progress, 
     finish_step_progress, create_spinner, display_status_box, StatusBox, set_stage, ProcessingStage
@@ -33,7 +33,7 @@ pub fn calculate_adjusted_sequence_length(
     let spinner = create_spinner("Adjusting sequence length");
 
     // Convert the input region to a ZeroBasedHalfOpen interval
-    let region = crate::process::ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end);
+    let region = ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end);
     
     // Initialize a vector to store intervals that are allowed after intersecting with allow_regions_chr
     let mut allowed_intervals = Vec::new();
@@ -41,7 +41,7 @@ pub fn calculate_adjusted_sequence_length(
         // If allowed regions are provided, intersect the input region with each allowed region
         for &(start, end) in allow_regions {
             // Convert each allowed region to ZeroBasedHalfOpen for consistent interval operations
-            let allow_region = crate::process::ZeroBasedHalfOpen::from_1based_inclusive(start, end);
+            let allow_region = ZeroBasedHalfOpen::from_1based_inclusive(start, end);
             
             // Find the overlapping section between the input region and the allowed region
             if let Some(overlap) = region.intersect(&allow_region) {
@@ -62,7 +62,7 @@ pub fn calculate_adjusted_sequence_length(
         .iter() // Iterate over each unmasked interval
         .map(|&(start, end)| {
             // Convert the interval back to ZeroBasedHalfOpen to use its length method
-            let interval = crate::process::ZeroBasedHalfOpen::from_1based_inclusive(start, end);
+            let interval = ZeroBasedHalfOpen::from_1based_inclusive(start, end);
             interval.len() as i64 // Get the length and cast to i64
         })
         .sum(); // Sum all lengths to get the total adjusted length
@@ -205,13 +205,12 @@ pub fn calculate_pairwise_differences(
 
     // Wrap variants in an Arc for thread-safe sharing across parallel threads
     let variants_shared = Arc::new(variants);
-
-    // Parallel iteration over all first sample indices (0 to n-1)
-    (0..number_of_samples)
+        
+    let result: Vec<((usize, usize), usize, usize)> = (0..number_of_samples)
         .into_par_iter() // Convert range into a parallel iterator
         .flat_map(|sample_idx_i| {
             // Clone the Arc for each thread to safely access the variants data
-            let variants_local: Arc<[Variant]> = Arc::clone(&variants_shared);
+            let variants_local = Arc::clone(&variants_shared);
             // Parallel iteration over second sample indices (i+1 to n-1) to avoid duplicate pairs
             (sample_idx_i + 1..number_of_samples)
                 .into_par_iter()
@@ -219,7 +218,7 @@ pub fn calculate_pairwise_differences(
                     let mut difference_count = 0; // Number of sites where genotypes differ
                     let mut comparable_site_count = 0; // Number of sites with data for both samples
 
-                    // Iterate over all variants to compare this pair’s genotypes
+                    // Iterate over all variants to compare this pair's genotypes
                     for variant in variants_local.iter() {
                         if let (Some(genotype_i), Some(genotype_j)) = (
                             &variant.genotypes[sample_idx_i],
@@ -235,7 +234,7 @@ pub fn calculate_pairwise_differences(
                         // If either genotype is None, skip this site (missing data)
                     }
 
-                    // Return the pair’s indices and their comparison metrics
+                    // Return the pair's indices and their comparison metrics
                     (
                         (sample_idx_i, sample_idx_j),
                         difference_count,
@@ -244,7 +243,7 @@ pub fn calculate_pairwise_differences(
                 })
                 .collect::<Vec<_>>() // Collect results for this sample_idx_i
         })
-    .collect(); // Collect all pair results into the final vector
+        .collect(); // Collect all pair results into the final vector
         
     let result_count = result.len();
     spinner.finish_with_message(format!(
@@ -402,8 +401,6 @@ pub fn calculate_per_site(
 
     let max_haps = haplotypes_in_group.len(); // Number of haplotypes in the group
 
-    // Create a ZeroBasedHalfOpen interval for the region to determine its length
-    let region = crate::process::ZeroBasedHalfOpen::from_0based_half_open(region_start, region_end);
     let region_length = region_end - region_start;
     
     // Pre-allocate with correct capacity for better memory efficiency
