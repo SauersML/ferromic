@@ -232,17 +232,68 @@ impl ProgressTracker {
     }
     
     pub fn finish_entry_progress(&mut self, message: &str) {
-        if let Some(bar) = &self.entry_bar {
-            bar.finish_with_message(message.to_string());
-        }
+        // Calculate entry completion time and statistics
+        let entry_name = self.entry_name.clone();
+        let execution_time = self.start_time.elapsed();
+        let current_entry = self.current_entry + 1; // +1 because we're about to increment it
+        let total_entries = self.total_entries;
         
+        // Format a detailed completion message with timing
+        let completion_message = format!(
+            "{} (in {:.2}s)", 
+            message, 
+            execution_time.as_secs_f64()
+        );
+        
+        // Log detailed completion info
+        self.log(LogLevel::Info, &format!(
+            "Entry {}/{} completed: {} - execution time: {:.2}s",
+            current_entry, total_entries, entry_name, execution_time.as_secs_f64()
+        ));
+        
+        // Finish entry progress bar with detailed message
+        if let Some(bar) = &self.entry_bar {
+            bar.finish_with_message(completion_message);
+        }
+    
+        // Display a mini summary box for this entry
+        let progress_percentage = (current_entry as f64 / total_entries as f64) * 100.0;
+        
+        display_status_box(StatusBox {
+            title: format!("Entry {}/{} Complete ({})", current_entry, total_entries, entry_name),
+            stats: vec![
+                ("Progress", format!("{:.1}%", progress_percentage)),
+                ("Time taken", format!("{:.2}s", execution_time.as_secs_f64())),
+                ("Remaining entries", format!("{}", total_entries - current_entry)),
+            ],
+        });
+    
         // Also update global progress
         if let Some(bar) = &self.global_bar {
             self.current_entry += 1;
             bar.set_position(self.current_entry as u64);
-            bar.set_message(format!("Completed {}/{}: {}", 
-                self.current_entry, self.total_entries, self.entry_name));
+            
+            // Estimate remaining time based on average time per entry
+            let elapsed_total = self.start_time.elapsed();
+            let avg_time_per_entry = if self.current_entry > 0 {
+                elapsed_total.as_secs_f64() / self.current_entry as f64
+            } else {
+                0.0
+            };
+            
+            let remaining_entries = self.total_entries - self.current_entry;
+            let est_remaining_time = avg_time_per_entry * remaining_entries as f64;
+            
+            bar.set_message(format!(
+                "Completed {}/{}: {} - {:.1}% complete - ~{:.0}s remaining",
+                self.current_entry, self.total_entries, self.entry_name,
+                (self.current_entry as f64 / self.total_entries as f64) * 100.0,
+                est_remaining_time
+            ));
         }
+        
+        // Reset timer for next entry
+        self.start_time = std::time::Instant::now();
     }
     
     pub fn init_step_progress(&mut self, step_desc: &str, len: u64) {
