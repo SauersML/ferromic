@@ -601,10 +601,6 @@ pub fn read_reference_sequence(
         )));
     }
 
-    spinner.finish_with_message(format!(
-        "Successfully read {}bp of reference sequence for chr{}",
-        sequence.len(), chr
-    ));
     log(LogLevel::Info, &format!(
         "Completed reading reference sequence: {}bp for chr{}:{}-{}", 
         sequence.len(), chr, clamped_start, clamped_end
