@@ -260,7 +260,11 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     // Validate folder exists first
     let path = Path::new(folder);
     if !path.exists() {
-        spinner.finish_with_message(format!("Error: Folder not found: {}", folder));
+        spinner.finish_and_clear();
+        log(LogLevel::Error, &format!(
+            "Error: Folder not found: {}",
+            folder
+        ));
         return Err(VcfError::Io(io::Error::new(
             io::ErrorKind::NotFound,
             format!("VCF folder does not exist: {}", folder)
@@ -268,7 +272,11 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     }
     
     if !path.is_dir() {
-        spinner.finish_with_message(format!("Error: Not a directory: {}", folder));
+        spinner.finish_and_clear();
+        log(LogLevel::Error, &format!(
+            "Error: Not a directory: {}",
+            folder
+        ));
         return Err(VcfError::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("VCF path is not a directory: {}", folder)
@@ -299,7 +307,11 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
                 .collect();
             if !matches.is_empty() {
                 let file_path = &matches[0];
-                spinner.finish_with_message(format!("Found VCF file: {}", file_path.display()));
+                spinner.finish_and_clear();
+                log(LogLevel::Info, &format!(
+                    "Found VCF file: {}",
+                    file_path.display()
+                ));
                 log(LogLevel::Info, &format!("Found VCF file using pattern '{}': {}", pattern, file_path.display()));
                 return Ok(file_path.clone());
             }
@@ -312,7 +324,11 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     let entries = match fs::read_dir(path) {
         Ok(entries) => entries,
         Err(e) => {
-            spinner.finish_with_message(format!("Error reading directory: {}", e));
+            spinner.finish_and_clear();
+            log(LogLevel::Error, &format!(
+                "Error reading directory: {}",
+                e
+            ));
             return Err(VcfError::Io(e));
         }
     };
@@ -409,7 +425,11 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
     } else {
         // Select the highest scoring VCF file automatically
         let best_match = &vcf_candidates[0].0;
-        spinner.finish_with_message(format!("Selected VCF file: {}", best_match.display()));
+        spinner.finish_and_clear();
+        log(LogLevel::Info, &format!(
+            "Selected VCF file: {}",
+            best_match.display()
+        ));
         log(LogLevel::Info, &format!("Selected best matching VCF file: {}", best_match.display()));
         return Ok(best_match.clone());
     }
