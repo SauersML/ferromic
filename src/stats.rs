@@ -394,22 +394,21 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
 
 // Calculate per-site diversity metrics (π and Watterson’s θ) across a genomic region
 pub fn calculate_per_site(
-    variants: &[Variant], // Slice of variants with genotype data
-    haplotypes_in_group: &[(usize, HaplotypeSide)], // List of (sample index, haplotype side) tuples
-    region_start: i64, // Start of the region (0-based, half-open)
-    region_end: i64, // End of the region (0-based, half-open)
+    variants: &[Variant], 
+    haplotypes_in_group: &[(usize, HaplotypeSide)], 
+    region: QueryRegion, // Inclusive range [start..end] in 0-based coordinates
 ) -> Vec<SiteDiversity> { // Returns a vector of SiteDiversity structs
     set_stage(ProcessingStage::StatsCalculation);
 
     let start_time = std::time::Instant::now();
     log(LogLevel::Info, &format!(
         "Calculating per-site diversity for region {}:{}-{} with {} haplotypes",
-        region_start, region_end, region_end - region_start, haplotypes_in_group.len()
+        region.start, region.end, region.end - region.start + 1, haplotypes_in_group.len()
     ));
 
     let max_haps = haplotypes_in_group.len(); // Number of haplotypes in the group
 
-    let region_length = region_end - region_start;
+    let region_length = region.end - region.start + 1; // +1 for inclusive range
     
     // Pre-allocate with correct capacity for better memory efficiency
     let mut site_diversities = Vec::with_capacity(region_length as usize);
@@ -449,7 +448,7 @@ pub fn calculate_per_site(
     let update_interval = std::cmp::min(1000, region_length as usize / 100);
 
     // Process in batches for more efficient update frequency
-    for (idx, pos) in (region_start..region_end).enumerate() { // Or just for pos in region_start..region_end?
+    for (idx, pos) in (region.start..=region.end).enumerate() { // inclusive
         positions_since_update += 1;
         
         // Update progress at reasonable intervals or when a significant amount of work is done
