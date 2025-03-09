@@ -30,10 +30,18 @@ def read_and_preprocess_data(file_path):
     df['full_cds'] = df['CDS']
     
     # Extract transcript ID, chromosome, start, and end positions from CDS
-    df['group'] = df['CDS'].apply(lambda x: 1 if x.startswith('group_1') else 0)
+    def extract_group(x):
+        if x.startswith('group1_'):
+            return 1
+        elif x.startswith('group0_'):
+            return 0
+        else:
+            raise ValueError(f"Invalid group format in CDS: {x}")
+    
+    df['group'] = df['CDS'].apply(extract_group)
     
     # Extract coordinates using regex
-    coord_pattern = r'chr_(\w+)_start_(\d+)_end_(\d+)'
+    coord_pattern = r'chr(\w+)_start(\d+)_end(\d+)'
     coords = df['CDS'].str.extract(coord_pattern)
     df['chrom'] = 'chr' + coords[0]
     df['start'] = pd.to_numeric(coords[1])
