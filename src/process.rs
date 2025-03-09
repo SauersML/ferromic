@@ -829,7 +829,11 @@ fn process_variants(
             &chromosome,
         )?;
         
-        spinner.finish_with_message(format!("Created sequence files for group {} haplotypes", haplotype_group));
+        spinner.finish_and_clear();
+        log(LogLevel::Info, &format!(
+            "Created sequence files for group {} haplotypes",
+            haplotype_group
+        ));
     }
 
     // Calculate per-site diversity
