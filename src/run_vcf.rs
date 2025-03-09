@@ -124,7 +124,7 @@ fn main() -> Result<(), VcfError> {
         init_global_progress(config_entries.len());
         log(LogLevel::Info, &format!(
             "Starting analysis of {} regions",
-            total_regions
+            config_entries.len()
         ));
 
         // Hand off to the standard config-based pipeline
