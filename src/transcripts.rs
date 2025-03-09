@@ -786,38 +786,83 @@ pub fn filter_and_log_transcripts(
     }
 
     if stats.total_transcripts > 0 {
-        println!("\n{}", "CDS Processing Summary:".blue().bold());
+        log(LogLevel::Info, "CDS Processing Summary");
         writeln!(log_file, "\nCDS Processing Summary:")
             .expect("Failed to write to transcript_overlap.log");
-
-        println!("Total transcripts processed: {}", stats.total_transcripts);
+            
+        // Build status box data
+        let mut summary_stats = Vec::new();
+        summary_stats.push(("Total transcripts", stats.total_transcripts.to_string()));
+        summary_stats.push(("Total CDS segments", stats.total_cds_segments.to_string()));
+        summary_stats.push((
+            "Avg segments/transcript", 
+            format!("{:.2}", stats.total_cds_segments as f64 / stats.total_transcripts as f64)
+        ));
+        summary_stats.push((
+            "Single-CDS transcripts", 
+            format!("{} ({:.1}%)", 
+                stats.single_cds_transcripts,
+                100.0 * stats.single_cds_transcripts as f64 / stats.total_transcripts as f64
+            )
+        ));
+        summary_stats.push((
+            "Multi-CDS transcripts", 
+            format!("{} ({:.1}%)", 
+                stats.multi_cds_transcripts,
+                100.0 * stats.multi_cds_transcripts as f64 / stats.total_transcripts as f64
+            )
+        ));
+        summary_stats.push((
+            "Transcripts with gaps", 
+            format!("{} ({:.1}%)", 
+                stats.transcripts_with_gaps,
+                100.0 * stats.transcripts_with_gaps as f64 / stats.total_transcripts as f64
+            )
+        ));
+        summary_stats.push((
+            "Non-divisible by three", 
+            format!("{} ({:.1}%)", 
+                stats.non_divisible_by_three,
+                100.0 * stats.non_divisible_by_three as f64 / stats.total_transcripts as f64
+            )
+        ));
+        summary_stats.push(("Total coding bases", stats.total_coding_length.to_string()));
+        
+        if let Some(shortest) = stats.shortest_transcript_length {
+            summary_stats.push(("Shortest transcript", format!("{} bp", shortest)));
+        }
+        if let Some(longest) = stats.longest_transcript_length {
+            summary_stats.push(("Longest transcript", format!("{} bp", longest)));
+        }
+        
+        let avg_len = if stats.total_transcripts == 0 {
+            0.0
+        } else {
+            stats.total_coding_length as f64 / stats.total_transcripts as f64
+        };
+        summary_stats.push(("Average length", format!("{:.1} bp", avg_len)));
+        
+        // Display the status box
+        display_status_box(StatusBox {
+            title: "CDS Processing Summary".to_string(),
+            stats: summary_stats,
+        });
+        
+        // Still log everything to the file
         writeln!(
             log_file,
             "Total transcripts processed: {}",
             stats.total_transcripts
         )
         .expect("Failed to write to transcript_overlap.log");
-
-        println!("Total CDS segments: {}", stats.total_cds_segments);
         writeln!(log_file, "Total CDS segments: {}", stats.total_cds_segments)
             .expect("Failed to write to transcript_overlap.log");
-
-        println!(
-            "Average segments per transcript: {:.2}",
-            stats.total_cds_segments as f64 / stats.total_transcripts as f64
-        );
         writeln!(
             log_file,
             "Average segments per transcript: {:.2}",
             stats.total_cds_segments as f64 / stats.total_transcripts as f64
         )
         .expect("Failed to write to transcript_overlap.log");
-
-        println!(
-            "Single-cds transcripts: {} ({:.1}%)",
-            stats.single_cds_transcripts,
-            100.0 * stats.single_cds_transcripts as f64 / stats.total_transcripts as f64
-        );
         writeln!(
             log_file,
             "Single-cds transcripts: {} ({:.1}%)",
@@ -825,12 +870,6 @@ pub fn filter_and_log_transcripts(
             100.0 * stats.single_cds_transcripts as f64 / stats.total_transcripts as f64
         )
         .expect("Failed to write to transcript_overlap.log");
-
-        println!(
-            "Multi-cds transcripts: {} ({:.1}%)",
-            stats.multi_cds_transcripts,
-            100.0 * stats.multi_cds_transcripts as f64 / stats.total_transcripts as f64
-        );
         writeln!(
             log_file,
             "Multi-cds transcripts: {} ({:.1}%)",
@@ -838,12 +877,6 @@ pub fn filter_and_log_transcripts(
             100.0 * stats.multi_cds_transcripts as f64 / stats.total_transcripts as f64
         )
         .expect("Failed to write to transcript_overlap.log");
-
-        println!(
-            "Transcripts with gaps: {} ({:.1}%)",
-            stats.transcripts_with_gaps,
-            100.0 * stats.transcripts_with_gaps as f64 / stats.total_transcripts as f64
-        );
         writeln!(
             log_file,
             "Transcripts with gaps: {} ({:.1}%)",
@@ -851,12 +884,6 @@ pub fn filter_and_log_transcripts(
             100.0 * stats.transcripts_with_gaps as f64 / stats.total_transcripts as f64
         )
         .expect("Failed to write to transcript_overlap.log");
-
-        println!(
-            "Non-divisible by three: {} ({:.1}%)",
-            stats.non_divisible_by_three,
-            100.0 * stats.non_divisible_by_three as f64 / stats.total_transcripts as f64
-        );
         writeln!(
             log_file,
             "Non-divisible by three: {} ({:.1}%)",
@@ -864,31 +891,20 @@ pub fn filter_and_log_transcripts(
             100.0 * stats.non_divisible_by_three as f64 / stats.total_transcripts as f64
         )
         .expect("Failed to write to transcript_overlap.log");
-
-        println!("Total coding bases: {}", stats.total_coding_length);
         writeln!(
             log_file,
             "Total coding bases: {}",
             stats.total_coding_length
         )
         .expect("Failed to write to transcript_overlap.log");
-
         if let Some(shortest) = stats.shortest_transcript_length {
-            println!("Shortest transcript: {} bp", shortest);
             writeln!(log_file, "Shortest transcript: {} bp", shortest)
                 .expect("Failed to write to transcript_overlap.log");
         }
         if let Some(longest) = stats.longest_transcript_length {
-            println!("Longest transcript: {} bp", longest);
             writeln!(log_file, "Longest transcript: {} bp", longest)
                 .expect("Failed to write to transcript_overlap.log");
         }
-        let avg_len = if stats.total_transcripts == 0 {
-            0.0
-        } else {
-            stats.total_coding_length as f64 / stats.total_transcripts as f64
-        };
-        println!("Average transcript length: {:.1} bp", avg_len);
         writeln!(log_file, "Average transcript length: {:.1} bp", avg_len)
             .expect("Failed to write to transcript_overlap.log");
     }
