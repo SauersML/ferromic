@@ -403,7 +403,7 @@ pub fn find_vcf_file(folder: &str, chr: &str) -> Result<PathBuf, VcfError> {
                 
             if exact_matches.len() == 1 {
                 let best_match = exact_matches[0];
-                spinner.finish_with_message(format!("Selected best match: {}", best_match.display()));
+                spinner.finish_with_message(format!("Selected VCF: {}", best_match.display()));
                 log(LogLevel::Info, &format!("Selected best matching VCF file: {}", best_match.display()));
                 return Ok(best_match.clone());
             }
