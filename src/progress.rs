@@ -161,7 +161,6 @@ impl ProgressTracker {
             transcripts_log: Self::create_log_file(&log_dir, "transcripts.log"),
             stats_log: Self::create_log_file(&log_dir, "stats.log"),
             start_time: Instant::now(),
-            log_dir,
             styles,
         }
     }
