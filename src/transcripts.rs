@@ -9,7 +9,6 @@ use crate::progress::{
 };
 
 use log as external_log;
-use external_log;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
