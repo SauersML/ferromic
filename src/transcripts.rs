@@ -172,21 +172,33 @@ pub fn make_sequences(
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: &str,
 ) -> Result<(), VcfError> {
+    set_stage(ProcessingStage::CdsProcessing);
+    log(LogLevel::Info, &format!(
+        "Generating sequences for group {} on chromosome {}", 
+        haplotype_group, chromosome
+    ));
+    
+    init_step_progress("Sequence generation", 4); // 4 major steps
+    
+    update_step_progress(0, "Mapping samples and haplotypes");
     let vcf_sample_id_to_index = map_sample_names_to_indices(sample_names)?;
 
     let haplotype_indices =
         get_haplotype_indices_for_group(haplotype_group, sample_filter, &vcf_sample_id_to_index)?;
 
     if haplotype_indices.is_empty() {
-        warn!("No haplotypes found for group {}.", haplotype_group);
+        log(LogLevel::Warning, &format!("No haplotypes found for group {}.", haplotype_group));
+        finish_step_progress("No haplotypes found");
         return Ok(());
     }
 
     if cds_regions.is_empty() {
-        warn!("No CDS regions available for transcript. Skipping sequence generation.");
+        log(LogLevel::Warning, "No CDS regions available for transcript. Skipping sequence generation.");
+        finish_step_progress("No CDS regions found");
         return Ok(());
     }
 
+    update_step_progress(1, "Initializing sequences");
     let mut hap_sequences = initialize_hap_sequences(
         &haplotype_indices,
         &sample_names,
@@ -195,13 +207,15 @@ pub fn make_sequences(
     );
 
     if hap_sequences.is_empty() {
-        warn!(
+        log(LogLevel::Warning, &format!(
             "No sequences initialized for group {}. Skipping variant application.",
             haplotype_group
-        );
+        ));
+        finish_step_progress("No sequences initialized");
         return Ok(());
     }
 
+    update_step_progress(2, "Applying variants");
     apply_variants_to_transcripts(
         variants,
         &haplotype_indices,
@@ -216,8 +230,10 @@ pub fn make_sequences(
         .map(|(k, v)| (k.clone(), v.iter().copied().map(|b| b as u8).collect()))
         .collect();
 
+    update_step_progress(3, "Generating statistics");
     generate_batch_statistics(&hap_sequences_u8)?;
 
+    update_step_progress(4, "Writing CDS files");
     prepare_to_write_cds(
         haplotype_group,
         cds_regions,
@@ -226,6 +242,10 @@ pub fn make_sequences(
         extended_region,
     )?;
 
+    finish_step_progress(&format!(
+        "Completed sequence generation for {} haplotypes in group {}", 
+        haplotype_indices.len(), haplotype_group
+    ));
     Ok(())
 }
 
@@ -236,12 +256,12 @@ pub fn initialize_hap_sequences(
     extended_region: ZeroBasedHalfOpen,
 ) -> HashMap<String, Vec<u8>> {
     if extended_region.end > reference_sequence.len() {
-        warn!(
+        log(LogLevel::Warning, &format!(
             "Invalid extended region: start={}, end={}, reference length={}",
             extended_region.start,
             extended_region.end,
             reference_sequence.len()
-        );
+        ));
         return HashMap::new();
     }
     let region_slice = extended_region.slice(reference_sequence);
@@ -332,10 +352,10 @@ pub fn apply_variants_to_transcripts(
                     }
                 } else {
                     // If the position is out of bounds, log a warning
-                    warn!(
+                    log(LogLevel::Warning, &format!(
                         "Position {} is out of bounds for sequence {}",
                         variant.position, sample_name
-                    );
+                    ));
                 }
             }
         }
@@ -376,27 +396,42 @@ pub fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Re
         }
     }
 
-    info!("Batch statistics: {} sequences processed.", total_sequences);
-    info!(
+    // Display batch statistics in a status box and log the information
+    let stats_vec = vec![
+        ("Total sequences", total_sequences.to_string()),
+        ("Stop codon/too short", format!("{:.2}%", (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0)),
+        ("Skipped sequences", format!("{:.2}%", (skipped_sequences as f64 / total_sequences as f64) * 100.0)),
+        ("Not divisible by three", format!("{:.2}%", (not_divisible_by_three as f64 / total_sequences as f64) * 100.0)),
+        ("Mid-sequence stop", format!("{:.2}%", (mid_sequence_stop as f64 / total_sequences as f64) * 100.0)),
+        ("Modified length", format!("{:.2}%", (length_modified as f64 / total_sequences as f64) * 100.0))
+    ];
+    
+    display_status_box(StatusBox {
+        title: "Sequence Batch Statistics".to_string(),
+        stats: stats_vec,
+    });
+    
+    log(LogLevel::Info, &format!("Batch statistics: {} sequences processed.", total_sequences));
+    log(LogLevel::Info, &format!(
         "Percentage of sequences with stop codon or too short: {:.2}%",
         (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
-    );
-    info!(
+    ));
+    log(LogLevel::Info, &format!(
         "Percentage of sequences skipped: {:.2}%",
         (skipped_sequences as f64 / total_sequences as f64) * 100.0
-    );
-    info!(
+    ));
+    log(LogLevel::Info, &format!(
         "Percentage of sequences not divisible by three: {:.2}%",
         (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
-    );
-    info!(
+    ));
+    log(LogLevel::Info, &format!(
         "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
         (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
-    );
-    info!(
+    ));
+    log(LogLevel::Info, &format!(
         "Percentage of sequences with modified length: {:.2}%",
         (length_modified as f64 / total_sequences as f64) * 100.0
-    );
+    ));
 
     Ok(())
 }
@@ -408,12 +443,26 @@ pub fn prepare_to_write_cds(
     chromosome: &str,
     hap_region: ZeroBasedHalfOpen,
 ) -> Result<(), VcfError> {
+    log(LogLevel::Info, &format!("Preparing to write CDS files for group {} ({} regions)", 
+        haplotype_group, cds_regions.len()));
+    
+    // Skip initialization if no CDS regions
+    if cds_regions.is_empty() {
+        log(LogLevel::Info, "No CDS regions to process");
+        return Ok(());
+    }
+    
+    init_step_progress(&format!("Writing CDS files for group {}", haplotype_group), cds_regions.len() as u64);
+    
     // For each transcript, we build a spliced coding sequence for every sample in hap_sequences.
     // Offsets come from intersecting each CDS with hap_region in zero-based form.
-    for cds in cds_regions {
+    for (idx, cds) in cds_regions.iter().enumerate() {
+        update_step_progress(idx as u64, &format!("Processing {}", cds.transcript_id));
+        
         if cds.segments.is_empty() {
             continue;
         }
+
         let mut final_cds_map: HashMap<String, Vec<u8>> = HashMap::new();
         for (sample_name, _) in hap_sequences {
             final_cds_map.insert(sample_name.clone(), Vec::new());
