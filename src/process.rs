@@ -2235,13 +2235,14 @@ fn process_variant(
         }
     } else if mask_regions.is_some() {
         // Chromosome not found in mask regions, but mask was provided
-        if !SUPPRESS_WARNINGS.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            // Log once
-            log(LogLevel::Warning, &format!(
-                "Chromosome {} not found in mask file. No positions will be masked for this chromosome.",
+        // This is a warning condition - the chromosome exists in the VCF but not in the mask
+        eprintln!(
+            "{}",
+            format!(
+                "Warning: Chromosome {} not found in mask file. No positions will be masked for this chromosome.",
                 vcf_chr
-            ));
-        }
+            ).yellow()
+        );
     }
 
     // Store reference and alternate alleles
