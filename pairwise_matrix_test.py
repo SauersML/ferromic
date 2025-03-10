@@ -443,6 +443,10 @@ def analysis_worker(args):
     # Prepare data for mixed-model analysis by organizing pairwise comparisons
     data = []
     for (seq1, seq2), omega in pairwise_dict.items():
+        # FIXED: Skip special values -1 and 99
+        if omega == -1 or omega == 99:
+            continue
+
         # Only include within-group comparisons (not between-group)
         if seq1 in sequences_0 and seq2 in sequences_0:
             group = 0
