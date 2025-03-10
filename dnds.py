@@ -1598,22 +1598,23 @@ def main():
         print(f"Could not save validation cache: {e}")
 
     # Consolidate all final CSVs if desired
-    def consolidate_all_csvs(csv_dir, final_csv='all_pairwise_results.csv'):
-        all_dfs = []
-        potential_csvs = glob.glob(os.path.join(csv_dir, '*.csv'))
-        for cf in potential_csvs:
-            # Skip haplotype stats
-            if cf.endswith('_haplotype_stats.csv'):
-                continue
-            df = pd.read_csv(cf)
-            all_dfs.append(df)
-        if all_dfs:
-            combined = pd.concat(all_dfs, ignore_index=True)
-            outpath = os.path.join(csv_dir, final_csv)
-            combined.to_csv(outpath, index=False)
-            print(f"Final combined CSV with {len(combined)} rows saved to {outpath}")
-        else:
-            print("No CSV files found to combine at the end.")
+   def consolidate_all_csvs(csv_dir, final_csv='all_pairwise_results.csv'):
+       all_dfs = []
+       potential_csvs = glob.glob(os.path.join(csv_dir, '*.csv'))
+       for cf in potential_csvs:
+           if cf.endswith('_haplotype_stats.csv'):
+               continue
+           df = pd.read_csv(cf)
+           all_dfs.append(df)
+       if all_dfs:
+           combined = pd.concat(all_dfs, ignore_index=True)
+           outpath = os.path.join(csv_dir, final_csv)
+           combined.to_csv(outpath, index=False)
+           print(f"Final combined CSV with {len(combined)} rows saved to {outpath}")
+           shutil.copy2(outpath, os.path.join('.', final_csv))
+           print(f"Copied final CSV to current directory: {final_csv}")
+       else:
+           print("No CSV files found to combine at the end.")
 
     consolidate_all_csvs(args.output_dir)
 
