@@ -416,6 +416,10 @@ def main():
     # Sort by p-value for display
     sorted_results = results_df.sort_values('p_value')
     
+    print("\n=== Group Assignment Summary by Transcript ===")
+    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value/Status':<40} {'Effect Size':<15} {'Gene'}")
+    print("-" * 145)  # Extended line length
+    
     for _, row in sorted_results.iterrows():
         transcript_str = str(row['transcript_id']) if 'transcript_id' in row and pd.notna(row['transcript_id']) else ""
         coords_str = str(row['coordinates']) if 'coordinates' in row and pd.notna(row['coordinates']) else ""
@@ -427,23 +431,19 @@ def main():
         
         # Show failure reason instead of N/A for p-value if available
         if pd.isna(row['p_value']) and pd.notna(row['failure_reason']):
-            failure_text = row['failure_reason']
-            # Truncate long failure reasons to fit in the column
-            if len(failure_text) > 15:
-                failure_text = failure_text[:12] + "..."
-            p_value = failure_text
+            p_value = row['failure_reason']  # No truncation
         else:
             p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
             
         # Show same reason for effect size
         if pd.isna(row['effect_size']) and pd.notna(row['failure_reason']):
-            effect_size = "N/A"  # Keep effect size as N/A since showing the reason twice is redundant
+            effect_size = "N/A"  # Keep effect size as N/A
         else:
             effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
         
         gene_info = f"{row['gene_symbol']}" if 'gene_symbol' in row and pd.notna(row['gene_symbol']) else ""
     
-        print(f"{summary_label:<50} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<15} {effect_size:<15} {gene_info}")
+        print(f"{summary_label:<50} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<40} {effect_size:<15} {gene_info}")
     
     print("-" * 120)
     print(f"{'TOTAL':<50} {total_group_0:<10} {total_group_1:<10} {total_group_0 + total_group_1:<10}")
