@@ -425,8 +425,21 @@ def main():
         group_1_count = row['n1']
         total = group_0_count + group_1_count
         
-        p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
-        effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
+        # Show failure reason instead of N/A for p-value if available
+        if pd.isna(row['p_value']) and pd.notna(row['failure_reason']):
+            failure_text = row['failure_reason']
+            # Truncate long failure reasons to fit in the column
+            if len(failure_text) > 15:
+                failure_text = failure_text[:12] + "..."
+            p_value = failure_text
+        else:
+            p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
+            
+        # Show same reason for effect size
+        if pd.isna(row['effect_size']) and pd.notna(row['failure_reason']):
+            effect_size = "N/A"  # Keep effect size as N/A since showing the reason twice is redundant
+        else:
+            effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
         
         gene_info = f"{row['gene_symbol']}" if 'gene_symbol' in row and pd.notna(row['gene_symbol']) else ""
     
