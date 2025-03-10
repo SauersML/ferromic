@@ -1152,13 +1152,36 @@ def main():
     for gene_id, group_files in gene_to_files.items():
         if 0 in group_files and 1 in group_files and group_files[0] and group_files[1]:
             valid_genes[gene_id] = group_files
-    
+
     # Collect all files from valid genes (those present in both groups)
     all_phy_filtered = []
     for gene_id, group_files in valid_genes.items():
         all_phy_filtered.extend(group_files[0])
         all_phy_filtered.extend(group_files[1])
-    
+        if COMPARE_BETWEEN_GROUPS:
+            combined_path = os.path.join(args.phy_dir, f"combined_{gene_id}.phy")
+            seq_map = {}
+            file_list = group_files[0] + group_files[1]
+            alignment_length = None
+            for fpath in file_list:
+                data = PARSED_PHY.get(fpath)
+                if data and data['sequences']:
+                    for sname, sseq in data['sequences'].items():
+                        if alignment_length is None:
+                            alignment_length = len(sseq)
+                        else:
+                            if len(sseq) != alignment_length:
+                                print(f"Error: alignment length mismatch for gene {gene_id} in file {fpath}")
+                                continue
+                        seq_map[sname] = sseq
+            total_sequences = len(seq_map)
+            if total_sequences > 0 and alignment_length is not None:
+                with open(combined_path, 'w') as outf:
+                    outf.write(f"{total_sequences} {alignment_length}\n")
+                    for sname, sseq in seq_map.items():
+                        outf.write(f"{sname} {sseq}\n")
+                all_phy_filtered.append(combined_path)
+
     print(f"Found {len(valid_genes)} genes with files in both groups.")
     print(f"Total PHY files to process: {len(all_phy_filtered)}")
     sys.stdout.flush()
