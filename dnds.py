@@ -1604,8 +1604,8 @@ def main():
         for cf in potential_csvs:
            if cf.endswith('_haplotype_stats.csv'):
                 continue
-            df = pd.read_csv(cf)
-            all_dfs.append(df)
+           df = pd.read_csv(cf)
+           all_dfs.append(df)
         if all_dfs:
             combined = pd.concat(all_dfs, ignore_index=True)
             outpath = os.path.join(csv_dir, final_csv)
