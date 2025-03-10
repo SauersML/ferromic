@@ -1497,7 +1497,7 @@ fn process_chromosome_entries(
     let mut rows = Vec::with_capacity(entries.len());
     
     // Store filtered variants for PCA if enabled
-    if let Some((variants_storage, sample_names_storage)) = &pca_storage {
+    if let Some((_, sample_names_storage)) = &pca_storage {
         let vcf_file = match find_vcf_file(vcf_folder, chr) {
             Ok(file) => file,
             Err(e) => {
@@ -1538,7 +1538,7 @@ fn process_chromosome_entries(
             }
         }
         
-        spinner.finish_with_message(&format!("Collected data for PCA from chr{}", chr));
+        spinner.finish_with_message("Collected data for PCA");
     }
 
     // Initialize progress for config entries
@@ -1561,6 +1561,7 @@ fn process_chromosome_entries(
             &cds_regions,
             chr,
             args,
+            pca_storage.as_ref(),
         ) {
             Ok(Some(row_data)) => {
                 rows.push(row_data);
@@ -1609,6 +1610,7 @@ fn process_single_config_entry(
     cds_regions: &[TranscriptAnnotationCDS],
     chr: &str,
     args: &Args,
+    pca_storage: Option<&(Arc<Mutex<HashMap<String, Vec<Variant>>>>, Arc<Mutex<Vec<String>>>)>,
 ) -> Result<Option<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)>, VcfError> {
     set_stage(ProcessingStage::ConfigEntry);
     let region_desc = format!("{}:{}-{}", 
@@ -1686,22 +1688,20 @@ fn process_single_config_entry(
     update_step_progress(1, "Analyzing variant statistics");
     
     // Store filtered variants for PCA if enabled and the pca_storage is provided
-    if args.enable_pca {
-        if let Some((variants_storage, sample_names_storage)) = &pca_storage {
-            // Store filtered variants for this chromosome
-            variants_storage.lock().insert(chr.to_string(), filtered_variants.clone());
-            
-            // Store sample names if not already stored
-            let mut names = sample_names_storage.lock();
-            if names.is_empty() {
-                *names = sample_names.clone();
-            }
-            
-            log(LogLevel::Info, &format!(
-                "Stored {} filtered variants from chr{} for PCA analysis", 
-                filtered_variants.len(), chr
-            ));
+    if let Some((variants_storage, sample_names_storage)) = &pca_storage {
+        // Store filtered variants for this chromosome
+        variants_storage.lock().insert(chr.to_string(), filtered_variants.clone());
+        
+        // Store sample names if not already stored
+        let mut names = sample_names_storage.lock();
+        if names.is_empty() {
+            *names = sample_names.clone();
         }
+        
+        log(LogLevel::Info, &format!(
+            "Stored {} filtered variants from chr{} for PCA analysis", 
+            filtered_variants.len(), chr
+        ));
     }
 
     // Display variant filtering statistics
