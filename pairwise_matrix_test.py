@@ -194,10 +194,16 @@ def analysis_worker(args):
     
     n0, n1 = len(sequences_0), len(sequences_1)
     
-    # Check if we only have sequences in one group
-    if n0 == 0 or n1 == 0:
-        group_with_data = '0' if n1 == 0 else '1'
-        print(f"All sequences in group {group_with_data}, need both groups for comparison.")
+    # Check if we have enough sequences in each group (minimum 3 required)
+    if n0 < 3 or n1 < 3:
+        insufficient_groups = []
+        if n0 < 3:
+            insufficient_groups.append('0')
+        if n1 < 3:
+            insufficient_groups.append('1')
+            
+        groups_str = " and ".join(insufficient_groups)
+        print(f"Insufficient sequences in group(s) {groups_str}, need at least 3 sequences per group.")
         return {
             'effect_size': np.nan,
             'p_value': np.nan,
@@ -206,7 +212,7 @@ def analysis_worker(args):
             'num_comp_group_0': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_0 and seq2 in sequences_0),
             'num_comp_group_1': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_1 and seq2 in sequences_1),
             'std_err': np.nan,
-            'failure_reason': f"All sequences in group {group_with_data}"
+            'failure_reason': f"Insufficient sequences in group(s) {groups_str} (minimum 3 required)"
         }
     
     # Prepare data for mixed-model analysis
