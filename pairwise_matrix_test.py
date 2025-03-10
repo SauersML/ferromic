@@ -718,9 +718,11 @@ def main():
     # Larger values indicate more significant results
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
     
-    # Save complete results to CSV file
+    # Save results to CSV file
     os.makedirs('results', exist_ok=True)
-    results_df.to_csv('results/final_results.csv', index=False)
+    # Create a copy without data structures for CSV export
+    csv_results_df = results_df.drop(['matrix_0', 'matrix_1', 'pairwise_comparisons'], axis=1)
+    csv_results_df.to_csv('results/final_results.csv', index=False)
     
     # Create and save filtered results sorted by absolute effect size
     valid_p_results = results_df[results_df['p_value'].notna()]
@@ -728,7 +730,9 @@ def main():
     sorted_by_effect['abs_effect_size'] = sorted_by_effect['effect_size'].abs()
     sorted_by_effect = sorted_by_effect.sort_values('abs_effect_size', ascending=False)
     sorted_by_effect = sorted_by_effect.drop('abs_effect_size', axis=1)  # Remove the temporary column
-    sorted_by_effect.to_csv('results/significant_by_effect.csv', index=False)
+    # Remove data structures before saving to CSV
+    csv_sorted_by_effect = sorted_by_effect.drop(['matrix_0', 'matrix_1', 'pairwise_comparisons'], axis=1)
+    csv_sorted_by_effect.to_csv('results/significant_by_effect.csv', index=False)
     
     # Print initial header for summary table
     print("\n=== Group Assignment Summary by Transcript ===")
