@@ -116,6 +116,19 @@ def create_visualization(transcript_id, coordinates, stats, pickle_data, output_
     if matrix_0 is None or matrix_1 is None:
         print(f"ERROR: Matrix data not available for {coordinates}")
         return False
+
+    is_valid_0, counts_0 = validate_matrix(matrix_0, "Direct")
+    is_valid_1, counts_1 = validate_matrix(matrix_1, "Inverted")
+
+    # Print detailed validation information
+    print("\nMatrix validation results:")
+    for counts in [counts_0, counts_1]:
+        if isinstance(counts, dict) and "matrix_name" in counts:
+            name = counts["matrix_name"]
+            print(f"  {name} matrix: {counts['normal_values']} normal values ({counts['pct_normal']:.1f}%)")
+            print(f"    minus_one values: {counts['minus_one_values']} ({counts['pct_minus_one']:.1f}%)")
+            print(f"    ninety_nine values: {counts['ninety_nine_values']} ({counts['pct_ninety_nine']:.1f}%)")
+            print(f"    non-diagonal NaN: {counts['nan_values_non_diag']} ({counts['pct_nan']:.1f}%)")
     
     # Get sequence counts (estimated from matrix shapes)
     n0 = matrix_0.shape[0]
@@ -307,6 +320,54 @@ def create_visualization(transcript_id, coordinates, stats, pickle_data, output_
         print(f"Error saving figure to {output_path}: {e}")
         plt.close(fig)
         return False
+
+
+def validate_matrix(matrix, matrix_name):
+    """
+    Validate a matrix to ensure it's not dominated by special values.
+    Returns a tuple (is_valid, detailed_counts) where:
+    - is_valid: Boolean indicating if the matrix has sufficient normal values
+    - detailed_counts: Dictionary with counts of different value types
+    """
+    if matrix is None:
+        return False, {"error": "Matrix is None"}
+    
+    total_cells = matrix.size
+    diag_cells = matrix.shape[0]  # Number of diagonal cells (usually NaN)
+    non_diag_cells = total_cells - diag_cells
+    
+    # Count different types of values
+    nan_values = np.isnan(matrix).sum()
+    minus_one_values = np.sum(matrix == -1)
+    ninety_nine_values = np.sum(matrix == 99)
+    normal_values = total_cells - nan_values - minus_one_values - ninety_nine_values
+    
+    # Calculate percentages (of non-diagonal cells)
+    pct_normal = normal_values / non_diag_cells * 100 if non_diag_cells > 0 else 0
+    pct_minus_one = minus_one_values / non_diag_cells * 100 if non_diag_cells > 0 else 0
+    pct_ninety_nine = ninety_nine_values / non_diag_cells * 100 if non_diag_cells > 0 else 0
+    pct_nan = (nan_values - diag_cells) / non_diag_cells * 100 if non_diag_cells > 0 else 0
+    
+    counts = {
+        "matrix_name": matrix_name,
+        "total_cells": total_cells,
+        "diagonal_cells": diag_cells,
+        "non_diagonal_cells": non_diag_cells,
+        "normal_values": normal_values,
+        "pct_normal": pct_normal,
+        "minus_one_values": minus_one_values,
+        "pct_minus_one": pct_minus_one,
+        "ninety_nine_values": ninety_nine_values,
+        "pct_ninety_nine": pct_ninety_nine,
+        "nan_values_non_diag": nan_values - diag_cells,
+        "pct_nan": pct_nan
+    }
+    
+    # Consider a matrix invalid if >95% of non-diagonal cells are special values or NaN
+    is_valid = pct_normal >= 5
+    
+    return is_valid, counts
+
 
 def main():
     """Main function to process data and create visualizations."""
