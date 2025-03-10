@@ -950,12 +950,8 @@ def parallel_handle_file(phy_file):
         group_num = int(match.group(1))
     sample_groups = {sname: group_num for sname in sequences.keys()}
 
-    if COMPARE_BETWEEN_GROUPS:
-        all_samples = list(sample_groups.keys())
-        all_pairs = list(combinations(all_samples, 2))
-    else:
-        group_samples = list(sample_groups.keys())
-        all_pairs = list(combinations(group_samples, 2))
+   all_samples = list(sample_groups.keys())
+   all_pairs = list(combinations(all_samples, 2))
 
     if not all_pairs:
         print(f"No pairs to compare for {phy_file}, skipping.")
