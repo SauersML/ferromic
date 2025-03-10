@@ -32,6 +32,7 @@ pub enum ProcessingStage {
     ConfigEntry,
     VcfProcessing,
     VariantAnalysis,
+    PcaAnalysis,
     CdsProcessing,
     StatsCalculation,
 }
