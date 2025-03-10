@@ -649,6 +649,14 @@ def main():
     os.makedirs('results', exist_ok=True)
     results_df.to_csv('results/final_results.csv', index=False)
     
+    # Create and save filtered results sorted by absolute effect size
+    valid_p_results = results_df[results_df['p_value'].notna()]
+    sorted_by_effect = valid_p_results.copy()
+    sorted_by_effect['abs_effect_size'] = sorted_by_effect['effect_size'].abs()
+    sorted_by_effect = sorted_by_effect.sort_values('abs_effect_size', ascending=False)
+    sorted_by_effect = sorted_by_effect.drop('abs_effect_size', axis=1)  # Remove the temporary column
+    sorted_by_effect.to_csv('results/significant_by_effect.csv', index=False)
+    
     # Print initial header for summary table
     print("\n=== Group Assignment Summary by Transcript ===")
     print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value':<15} {'Effect Size':<15} {'Gene'}")
