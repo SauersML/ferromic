@@ -5,7 +5,7 @@ use std::path::Path;
 use std::collections::HashMap;
 
 use crate::Variant;
-use crate::VcfError;
+use crate::process::VcfError;
 use crate::progress::{log, LogLevel, create_spinner, ProcessingStage, set_stage, display_status_box, StatusBox};
 
 /// Structure to hold PCA results
