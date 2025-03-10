@@ -4,7 +4,7 @@ import pandas as pd
 df = pd.read_csv('all_pairwise_results.csv')
 original_rows = len(df)
 
-# Remove duplicates
+# Remove duplicates (keeping the first occurrence)
 df = df.drop_duplicates()
 removed_rows = original_rows - len(df)
 
