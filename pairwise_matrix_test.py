@@ -461,20 +461,25 @@ def analysis_worker(args):
             'seq2': '0 + C(seq2_code)'   # Random effect for second sequence
         }
         
-        # Fit mixed linear model with group as fixed effect and sequence IDs as random effects
+        # Fit mixed linear model with group as fixed effect and sequence IDs as random effect
+        # Create dummy variables for each group explicitly
+        df['is_group1'] = (df['group'] == 1).astype(int)
+        df['is_group2'] = (df['group'] == 2).astype(int)  # Cross-group comparison
+        
+        # Use these dummy variables in the model
         model = MixedLM.from_formula(
-             'ranked_omega ~ C(group)',      # Fixed effect of group on omega
-            groups='groups',            # Model organization
-            vc_formula=vc,              # Random effects specification
-            re_formula='0',             # No additional random effects
+            'ranked_omega ~ is_group1 + is_group2',  # Group 0 is reference
+            groups='groups',
+            vc_formula=vc,
+            re_formula='0',
             data=df
         )
-        result = model.fit(reml=False)  # Maximum likelihood estimation
+        result = model.fit(reml=False)
         
-        # Extract key statistical results
-        effect_size = result.fe_params['group']  # Estimated effect of group
-        p_value = result.pvalues['group']        # Statistical significance
-        std_err = result.bse['group']            # Standard error of estimate
+        # Extract ONLY the group 0 vs group 1 effect
+        effect_size = result.params.get('is_group1', np.nan)
+        p_value = result.pvalues.get('is_group1', np.nan)
+        std_err = result.bse.get('is_group1', np.nan)
         
     except Exception as e:
         # Handle statistical model failures
