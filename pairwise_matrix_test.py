@@ -495,8 +495,12 @@ def analysis_worker(args):
         }
 
     # Prepare categorical codes for sequence identifiers to use in random effects
-    df['seq1_code'] = pd.Categorical(df['seq1']).codes
-    df['seq2_code'] = pd.Categorical(df['seq2']).codes
+    all_unique_seqs = pd.unique(pd.concat([df['seq1'], df['seq2']]))
+    seq_to_code = {seq: i for i, seq in enumerate(all_unique_seqs)}
+
+    # Apply the same coding to both columns
+    df['seq1_code'] = df['seq1'].map(seq_to_code)
+    df['seq2_code'] = df['seq2'].map(seq_to_code)
 
     try:
         # Set up mixed model with crossed random effects for sequence identities
