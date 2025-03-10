@@ -49,7 +49,7 @@ from tqdm import tqdm
 
 COMPARE_BETWEEN_GROUPS = True  # If False, only compare within the same group.
 VALIDATION_CACHE_FILE = 'validation_results.pkl'
-NUM_PARALLEL = 96  # Maximum concurrency for pairwise codeml runs.
+NUM_PARALLEL = 110  # Maximum concurrency for pairwise codeml runs.
 
 # --------------------------------------------------------------------------------
 # LOGGING CONFIG
