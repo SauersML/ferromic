@@ -130,6 +130,7 @@ def read_and_preprocess_data(file_path):
 def calculate_distance_to_nearest_breakpoint(chrom, start, end, inv_info_df):
     """
     Calculate the distance to the nearest breakpoint in kilobases.
+    Raises an exception if no matching regions are found for the chromosome.
     
     Parameters:
     -----------
@@ -148,6 +149,10 @@ def calculate_distance_to_nearest_breakpoint(chrom, start, end, inv_info_df):
         The distance to the nearest breakpoint in kilobases.
     """
     chrom_regions = inv_info_df[inv_info_df['chr'] == chrom]
+    
+    # Check if any regions match the chromosome
+    if chrom_regions.empty:
+        raise ValueError(f"No breakpoint regions found for chromosome {chrom}")
     
     # Initialize the minimum distance as a large number
     min_distance = float('inf')
