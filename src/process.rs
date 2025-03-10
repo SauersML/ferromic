@@ -3,6 +3,8 @@ use crate::stats::{
     calculate_pi, calculate_watterson_theta, SiteDiversity,
 };
 
+use crate::pca;
+
 use crate::parse::{
     find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header,
 };
@@ -98,11 +100,17 @@ pub struct Args {
     #[arg(long = "gtf")]
     pub gtf_path: String,
 
+    // Enable PCA analysis on all haplotypes
     #[arg(long = "pca", help = "Perform PCA analysis on all haplotypes")]
     pub enable_pca: bool,
-
+    
+    // Number of principal components to compute
     #[arg(long = "pca_components", default_value = "10", help = "Number of principal components to compute")]
     pub pca_components: usize,
+    
+    // Output file for PCA results
+    #[arg(long = "pca_output", default_value = "pca_results.tsv", help = "Output file for PCA results")]
+    pub pca_output: String,
 }
 
 /// ZeroBasedHalfOpen represents a half-open interval [start..end).
@@ -930,6 +938,11 @@ pub fn process_config_entries(
         
         temp_path
     };
+    
+    // For PCA, collect filtered variants across chromosomes
+    let global_filtered_variants: Arc<Mutex<HashMap<String, Vec<Variant>>>> = 
+        Arc::new(Mutex::new(HashMap::new()));
+    let global_sample_names: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
     // Create CSV writer and write the header once in the temporary directory
     let temp_output_file = temp_dir_path.join(output_file.file_name().unwrap());
@@ -952,6 +965,11 @@ pub fn process_config_entries(
                 &mask,
                 &allow,
                 args,
+                if args.enable_pca {
+                    Some((global_filtered_variants.clone(), global_sample_names.clone()))
+                } else {
+                    None
+                },
             ) {
                 Ok(list) => list,
                 Err(e) => {
@@ -1226,6 +1244,59 @@ pub fn process_config_entries(
     }
     std::fs::copy(&temp_csv, output_file)?;
     
+    // Run PCA analysis if enabled
+    if args.enable_pca {
+        set_stage(ProcessingStage::PcaAnalysis);
+        log(LogLevel::Info, "Starting global PCA analysis across all chromosomes");
+        
+        // Get variants and sample names from storage
+        let variants_by_chr = global_filtered_variants.lock().clone();
+        let sample_names = global_sample_names.lock().clone();
+        
+        // Create output path for PCA results
+        let pca_output_path = Path::new(&args.pca_output);
+        
+        // Display PCA parameters
+        display_status_box(StatusBox {
+            title: "PCA Analysis Configuration".to_string(),
+            stats: vec![
+                ("Chromosomes".to_string(), variants_by_chr.len().to_string()),
+                ("Samples".to_string(), sample_names.len().to_string()),
+                ("Components".to_string(), args.pca_components.to_string()),
+                ("Output file".to_string(), args.pca_output.to_string()),
+            ],
+        });
+        
+        // Run PCA analysis
+        match pca::run_global_pca_analysis(
+            &variants_by_chr,
+            &sample_names,
+            pca_output_path,
+            args.pca_components,
+        ) {
+            Ok(_) => {
+                log(LogLevel::Info, &format!("PCA analysis completed successfully. Results saved to {}", args.pca_output));
+                display_status_box(StatusBox {
+                    title: "PCA Analysis Complete".to_string(),
+                    stats: vec![
+                        ("Status".to_string(), "Success".to_string()),
+                        ("Output file".to_string(), args.pca_output.to_string()),
+                    ],
+                });
+            },
+            Err(e) => {
+                log(LogLevel::Error, &format!("PCA analysis failed: {}", e));
+                display_status_box(StatusBox {
+                    title: "PCA Analysis Failed".to_string(),
+                    stats: vec![
+                        ("Status".to_string(), "Error".to_string()),
+                        ("Reason".to_string(), e.to_string()),
+                    ],
+                });
+            }
+        }
+    }
+    
     // Copy FASTA file
     let temp_fasta = temp_dir_path.join("per_site_output.falsta");
     if temp_fasta.exists() {
@@ -1357,6 +1428,7 @@ fn process_chromosome_entries(
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
+    pca_storage: Option<(Arc<Mutex<HashMap<String, Vec<Variant>>>>, Arc<Mutex<Vec<String>>>)>,
 ) -> Result<Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)>, VcfError> {
     set_stage(ProcessingStage::ConfigEntry);
     log(LogLevel::Info, &format!("Processing chromosome: {}", chr));
@@ -1423,6 +1495,51 @@ fn process_chromosome_entries(
 
     // We'll store final rows from each entry in this vector
     let mut rows = Vec::with_capacity(entries.len());
+    
+    // Store filtered variants for PCA if enabled
+    if let Some((variants_storage, sample_names_storage)) = &pca_storage {
+        let vcf_file = match find_vcf_file(vcf_folder, chr) {
+            Ok(file) => file,
+            Err(e) => {
+                log(LogLevel::Error, &format!("Error finding VCF file for chr{} for PCA: {:?}", chr, e));
+                return Ok(Vec::new());
+            }
+        };
+        
+        // Create a spinner for PCA data collection
+        let spinner = create_spinner(&format!("Collecting variants from chr{} for PCA", chr));
+        
+        // Open VCF reader to get sample names
+        let mut reader = open_vcf_reader(&vcf_file)?;
+        let mut buffer = String::new();
+        let mut sample_names = Vec::new();
+        
+        // Extract sample names from VCF header
+        while reader.read_line(&mut buffer)? > 0 {
+            if buffer.starts_with("##") {
+                // Skip metadata lines
+            } else if buffer.starts_with("#CHROM") {
+                validate_vcf_header(&buffer)?;
+                sample_names = buffer
+                    .split_whitespace()
+                    .skip(9)
+                    .map(String::from)
+                    .collect();
+                break;
+            }
+            buffer.clear();
+        }
+        
+        // Store sample names (once)
+        {
+            let mut names_storage = sample_names_storage.lock();
+            if names_storage.is_empty() {
+                *names_storage = sample_names;
+            }
+        }
+        
+        spinner.finish_with_message(&format!("Collected data for PCA from chr{}", chr));
+    }
 
     // Initialize progress for config entries
     init_entry_progress(&format!("Processing {} regions on chr{}", entries.len(), chr), entries.len() as u64);
@@ -1567,6 +1684,25 @@ fn process_single_config_entry(
     };
     
     update_step_progress(1, "Analyzing variant statistics");
+    
+    // Store filtered variants for PCA if enabled and the pca_storage is provided
+    if args.enable_pca {
+        if let Some((variants_storage, sample_names_storage)) = &pca_storage {
+            // Store filtered variants for this chromosome
+            variants_storage.lock().insert(chr.to_string(), filtered_variants.clone());
+            
+            // Store sample names if not already stored
+            let mut names = sample_names_storage.lock();
+            if names.is_empty() {
+                *names = sample_names.clone();
+            }
+            
+            log(LogLevel::Info, &format!(
+                "Stored {} filtered variants from chr{} for PCA analysis", 
+                filtered_variants.len(), chr
+            ));
+        }
+    }
 
     // Display variant filtering statistics
     display_status_box(StatusBox {
