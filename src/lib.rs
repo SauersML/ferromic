@@ -96,7 +96,7 @@ fn calculate_pi_py(_py: Python, variants_obj: &PyAny, haplotypes_obj: &PyAny) ->
         rust_haplotypes.push((index, side));
     }
     
-    Ok(calculate_pi(&rust_variants, &rust_haplotypes))
+    Ok(calculate_pi(&rust_variants, &rust_haplotypes, seq_length))
 }
 
 /// PyO3 wrapper for calculate_watterson_theta
