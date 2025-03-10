@@ -1616,12 +1616,12 @@ def main():
         else:
             print("No CSV files found to combine at the end.")
 
-     consolidate_all_csvs(args.output_dir)
-
-     db_conn.close()
-     logging.info("dN/dS analysis done.")
-     print("dN/dS analysis done.")
-     sys.stdout.flush()
+    consolidate_all_csvs(args.output_dir)
+   
+    db_conn.close()
+    logging.info("dN/dS analysis done.")
+    print("dN/dS analysis done.")
+    sys.stdout.flush()
 
 
 if __name__ == '__main__':
