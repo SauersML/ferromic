@@ -6,6 +6,7 @@ from tqdm.auto import tqdm
 import warnings
 import os
 import json
+import pickle
 import colorama
 from colorama import Fore, Style
 colorama.init(autoreset=True)
@@ -822,9 +823,16 @@ def main():
             if pd.notna(reason):
                 print(f"- {reason}: {count} coordinates")
     
+    # Save the CDS results to pickle file for matrix visualization
+    os.makedirs('cache', exist_ok=True)
+    cds_results_file = 'cache/all_cds_results.pkl'
+    print(f"\nSaving CDS results to {cds_results_file}...")
+    with open(cds_results_file, 'wb') as f:
+        pickle.dump(cds_results, f)
+    print(f"Saved results for {len(cds_results)} CDSs")
+    
     # Print completion information and runtime
     print(f"\nAnalysis completed at {datetime.now()}")
     print(f"Total runtime: {datetime.now() - start_time}")
-
 if __name__ == "__main__":
     main()
