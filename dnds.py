@@ -944,12 +944,26 @@ def parallel_handle_file(phy_file):
     basename = os.path.basename(phy_file)
     match = filename_pattern.match(basename)
     if not match:
-        print(f"ERROR: Could not parse group number from filename: {basename}")
-        sys.exit(1)  # Exit with error
+        if basename.startswith("combined_"):
+            group_num = -1
+        else:
+            print(f"ERROR: Could not parse group number from filename: {basename}")
+            sys.exit(1)
     else:
         group_num = int(match.group(1))
+
    
-    sample_groups = {sname: group_num for sname in sequences.keys()}
+    if group_num == -1:
+        sample_groups = {}
+        for sname in sequences:
+            suffix = sname.rsplit('_', 1)[-1]
+            try:
+                inferred_group = int(suffix)
+            except ValueError:
+                inferred_group = 99
+            sample_groups[sname] = inferred_group
+    else:
+        sample_groups = {sname: group_num for sname in sequences.keys()}
    
     all_samples = list(sample_groups.keys())
     all_pairs = list(combinations(all_samples, 2))
@@ -1308,13 +1322,26 @@ def main():
         basename = os.path.basename(phy_file)
         match = filename_pattern.match(basename)
         if not match:
-            print(f"ERROR: Could not parse group number from filename: {basename}")
-            sys.exit(1)  # Exit with error instead of defaulting to group 0
+            if basename.startswith("combined_"):
+                group_num = -1
+            else:
+                print(f"ERROR: Could not parse group number from filename: {basename}")
+                sys.exit(1)
         else:
             group_num = int(match.group(1))
 
-        # Build a sample_groups map
-        sample_groups = {sname: group_num for sname in sequences.keys()}
+      # Build a sample_groups map
+      if group_num == -1:
+          sample_groups = {}
+          for sname in sequences:
+              suffix = sname.rsplit('_', 1)[-1]
+              try:
+                  inferred_group = int(suffix)
+              except ValueError:
+                  inferred_group = 99
+              sample_groups[sname] = inferred_group
+      else:
+          sample_groups = {sname: group_num for sname in sequences.keys()}
 
         # Generate all pairs
         if COMPARE_BETWEEN_GROUPS:
