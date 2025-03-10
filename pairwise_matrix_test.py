@@ -37,8 +37,8 @@ def read_and_preprocess_data(file_path):
     3. Parses genomic coordinates (chromosome, start, end)
     4. Extracts transcript identifiers
     5. Validates omega values and handles special cases (-1, 99)
-    6. Adds the distance to the nearest breakpoint for each region
 
+    
     Parameters:
     -----------
     file_path : str
@@ -53,7 +53,6 @@ def read_and_preprocess_data(file_path):
         - start: Start coordinate of the genomic region
         - end: End coordinate of the genomic region
         - transcript_id: Ensembl transcript identifier
-        - Distance_to_nearest_breakpoint: The distance to the nearest breakpoint in kilobases
 
     Note:
     -----
@@ -112,11 +111,6 @@ def read_and_preprocess_data(file_path):
     # Load the inversion info CSV
     inv_info_df = pd.read_csv('inv_info.csv')
 
-    # Calculate distance to the nearest breakpoint for each region in df
-    df['Distance_to_nearest_breakpoint'] = df.apply(
-        lambda row: calculate_distance_to_nearest_breakpoint(row['chrom'], row['start'], row['end'], inv_info_df),
-        axis=1
-    )
 
     # Summarize sequence counts by group assignment
     # This is important to verify sufficient sample sizes for statistical analysis
@@ -126,46 +120,6 @@ def read_and_preprocess_data(file_path):
     print(f"Sequences in group 1: {len(group1_seqs)}")
 
     return df
-
-def calculate_distance_to_nearest_breakpoint(chrom, start, end, inv_info_df):
-    """
-    Calculate the distance to the nearest breakpoint in kilobases.
-    Raises an exception if no matching regions are found for the chromosome.
-    
-    Parameters:
-    -----------
-    chrom : str
-        Chromosome of the region.
-    start : int
-        Start position of the region.
-    end : int
-        End position of the region.
-    inv_info_df : DataFrame
-        Dataframe containing inversion breakpoints.
-    
-    Returns:
-    --------
-    float
-        The distance to the nearest breakpoint in kilobases.
-    """
-    chrom_regions = inv_info_df[inv_info_df['chr'] == chrom]
-    
-    # Check if any regions match the chromosome
-    if chrom_regions.empty:
-        raise ValueError(f"No breakpoint regions found for chromosome {chrom}")
-    
-    # Initialize the minimum distance as a large number
-    min_distance = float('inf')
-    
-    # Iterate through all breakpoints in the same chromosome
-    for _, row in chrom_regions.iterrows():
-        distance_to_start = abs(row['region_start'] - start)
-        distance_to_end = abs(row['region_end'] - end)
-        
-        # Update the minimum distance if the current region is closer
-        min_distance = min(min_distance, distance_to_start, distance_to_end)
-    
-    return min_distance / 1000  # Return distance in kilobases (kb)
 
 
 def get_pairwise_value(seq1, seq2, pairwise_dict):
@@ -549,7 +503,7 @@ def analyze_transcript(args):
     
     This function processes all pairwise comparisons for a single transcript,
     organizing sequences by group, performing statistical analysis, retrieving
-    gene annotations, and calculating the mean distance to the nearest breakpoint.
+    gene annotations
     
     Parameters:
     -----------
@@ -572,14 +526,12 @@ def analyze_transcript(args):
         - p_value: Statistical significance of the effect
         - std_err: Standard error of the effect size estimate
         - failure_reason: Description of analysis failure (if any)
-        - distance_to_breakpoint: Mean distance to the nearest breakpoint in kilobases
         
     Note:
     -----
     - Creates pairwise dictionary of omega values for statistical analysis
     - Identifies gene annotations using UCSC and MyGene.info APIs
     - Delegates statistical analysis to analysis_worker function
-    - Calculates mean distance to nearest breakpoint for reporting
     """
     df_transcript, transcript_id = args
 
@@ -622,8 +574,6 @@ def analyze_transcript(args):
     # Perform statistical analysis on the transcript data
     analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
 
-    # Calculate the mean distance to the nearest breakpoint in kilobases
-    mean_distance = df_transcript['Distance_to_nearest_breakpoint'].mean()
 
     # Combine results into a comprehensive result dictionary
     result = {
@@ -639,7 +589,6 @@ def analyze_transcript(args):
         'p_value': analysis_result['p_value'],
         'std_err': analysis_result['std_err'],
         'failure_reason': analysis_result['failure_reason'],
-        'distance_to_breakpoint': mean_distance,
         'matrix_0': matrix_0,
         'matrix_1': matrix_1,
         'pairwise_comparisons': set(pairwise_dict.keys())
@@ -789,11 +738,8 @@ def main():
         # Format gene information display
         gene_info = f"{row['gene_symbol']}" if 'gene_symbol' in row and pd.notna(row['gene_symbol']) else ""
         
-        # Format distance to nearest breakpoint in kilobases
-        distance_str = f"{row['distance_to_breakpoint']:.2f}" if pd.notna(row['distance_to_breakpoint']) else "N/A"
-    
         # Print row of results table
-        print(f"{summary_label:<50} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<40} {effect_size:<15} {gene_info:<15} {distance_str}")
+        print(f"{summary_label:<50} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<40} {effect_size:<15} {gene_info:<15}")
     
     # Print table footer with totals
     print("-" * 160)
@@ -827,10 +773,7 @@ def main():
                 gene_info = f"{row['gene_symbol']}: {row['gene_name']}"
             gene_info = gene_info[:40]
             
-            # Format distance to nearest breakpoint
-            distance_str = f"{row['distance_to_breakpoint']:.2f}" if pd.notna(row['distance_to_breakpoint']) else "N/A"
-            
-            print(f"{label:<50} {p_value:<15} {corrected_p:<15} {effect_size:<15} {gene_info:<15} {distance_str}")
+            print(f"{label:<50} {p_value:<15} {corrected_p:<15} {effect_size:<15} {gene_info:<15}")
                 
     # Summarize analysis failures by reason
     failure_counts = results_df['failure_reason'].value_counts()
