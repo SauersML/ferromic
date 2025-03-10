@@ -712,8 +712,8 @@ def main():
     
     # Print initial header for summary table
     print("\n=== Group Assignment Summary by Transcript ===")
-    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value':<15} {'Effect Size':<15} {'Gene'}")
-    print("-" * 120)
+    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value':<15} {'Effect Size':<15} {'Gene':<15} {'Distance (kb)'}")
+    print("-" * 160)
     
     # Calculate total sequence counts by group
     total_group_0 = results_df['n0'].sum()
@@ -724,8 +724,8 @@ def main():
     
     # Print detailed header for main results table
     print("\n=== Group Assignment Summary by Transcript ===")
-    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value/Status':<40} {'Effect Size':<15} {'Gene'}")
-    print("-" * 145)  # Extended line length for readability
+    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value/Status':<40} {'Effect Size':<15} {'Gene':<15} {'Distance (kb)'}")
+    print("-" * 160)
     
     # Print detailed information for each transcript
     for _, row in sorted_results.iterrows():
@@ -739,24 +739,27 @@ def main():
         
         # Format p-value display, showing failure reason if analysis failed
         if pd.isna(row['p_value']) and pd.notna(row['failure_reason']):
-            p_value = row['failure_reason']  # Show full failure reason
+            p_value = row['failure_reason']
         else:
             p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
             
         # Format effect size display
         if pd.isna(row['effect_size']) and pd.notna(row['failure_reason']):
-            effect_size = "N/A"  # Keep effect size as N/A for failed analyses
+            effect_size = "N/A"
         else:
             effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
         
         # Format gene information display
         gene_info = f"{row['gene_symbol']}" if 'gene_symbol' in row and pd.notna(row['gene_symbol']) else ""
+        
+        # Format distance to nearest breakpoint in kilobases
+        distance_str = f"{row['distance_to_breakpoint']:.2f}" if pd.notna(row['distance_to_breakpoint']) else "N/A"
     
         # Print row of results table
-        print(f"{summary_label:<50} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<40} {effect_size:<15} {gene_info}")
+        print(f"{summary_label:<50} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<40} {effect_size:<15} {gene_info:<15} {distance_str}")
     
     # Print table footer with totals
-    print("-" * 120)
+    print("-" * 160)
     print(f"{'TOTAL':<50} {total_group_0:<10} {total_group_1:<10} {total_group_0 + total_group_1:<10}")
     
     # Summarize significant results after multiple testing correction
@@ -766,8 +769,8 @@ def main():
     # Print detailed information for significant results
     if significant_count > 0:
         print("\nSignificant results after Bonferroni correction:")
-        print(f"{'Transcript/Coordinates':<50} {'P-value':<15} {'Corrected P':<15} {'Effect Size':<15} {'Gene'}")
-        print("-" * 120)
+        print(f"{'Transcript/Coordinates':<50} {'P-value':<15} {'Corrected P':<15} {'Effect Size':<15} {'Gene':<15} {'Distance (kb)'}")
+        print("-" * 160)
         
         # Select and sort significant results
         sig_results = results_df[results_df['bonferroni_p_value'] < 0.05].sort_values('p_value')
@@ -785,10 +788,13 @@ def main():
             gene_info = ""
             if 'gene_symbol' in row and pd.notna(row['gene_symbol']) and 'gene_name' in row and pd.notna(row['gene_name']):
                 gene_info = f"{row['gene_symbol']}: {row['gene_name']}"
-            gene_info = gene_info[:40]  # Truncate long gene names for display
+            gene_info = gene_info[:40]
             
-            print(f"{label:<50} {p_value:<15} {corrected_p:<15} {effect_size:<15} {gene_info}")
-    
+            # Format distance to nearest breakpoint
+            distance_str = f"{row['distance_to_breakpoint']:.2f}" if pd.notna(row['distance_to_breakpoint']) else "N/A"
+            
+            print(f"{label:<50} {p_value:<15} {corrected_p:<15} {effect_size:<15} {gene_info:<15} {distance_str}")
+                
     # Summarize analysis failures by reason
     failure_counts = results_df['failure_reason'].value_counts()
     if not failure_counts.empty:
