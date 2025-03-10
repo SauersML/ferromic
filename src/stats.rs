@@ -304,7 +304,7 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
 /// * f64::INFINITY if fewer than 2 haplotypes
 /// * f64::NAN if no valid pairs exist
 /// * Otherwise, the average π across all sites
-pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, HaplotypeSide)]) -> f64 {
+pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, HaplotypeSide)], seq_length: i64) -> f64 {
     if haplotypes_in_group.len() <= 1 {
         // Need at least 2 haplotypes to compute diversity; return infinity if not
         log(LogLevel::Warning, &format!(
@@ -317,17 +317,27 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     // Calculate total possible pairs: n * (n-1) / 2
     let total_possible_pairs = haplotypes_in_group.len() * (haplotypes_in_group.len() - 1) / 2;
     if total_possible_pairs == 0 {
-        // If no pairs can be formed (redundant check, but kept for robustness), return NaN
+        // If no pairs can be formed (redundant check), return NaN
         log(LogLevel::Warning, "No valid pairs can be formed for pi calculation");
         return f64::NAN;
     }
     
+    if seq_length <= 0 {
+        log(LogLevel::Warning, &format!(
+            "Cannot calculate pi: invalid sequence length ({})",
+            seq_length
+        ));
+        return f64::INFINITY;
+    }
+    
     let spinner = create_spinner(&format!(
-        "Calculating π for {} haplotypes ({} pairs)",
-        haplotypes_in_group.len(), total_possible_pairs
+        "Calculating π for {} haplotypes ({} pairs) over {} bp",
+        haplotypes_in_group.len(), total_possible_pairs, seq_length
     ));
 
-    let mut difference_sum = 0.0; // Sum of per-pair differences normalized by comparable sites
+    let mut total_differences = 0; // Total number of differences across all pairs
+    let mut total_compared_pairs = 0; // Count of pairs with at least one comparable site
+
     for i in 0..haplotypes_in_group.len() {
         for j in (i + 1)..haplotypes_in_group.len() {
             // Extract sample index and haplotype side (left or right) for both haplotypes
@@ -343,7 +353,7 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
                     if let Some(gt_j) = var.genotypes.get(sample_j) {
                         if let Some(alleles_i) = gt_i {
                             if let Some(alleles_j) = gt_j {
-                                // Get the specific allele for each haplotype’s side
+                                // Get the specific allele for each haplotype's side
                                 if let (Some(&a_i), Some(&a_j)) = (
                                     alleles_i.get(side_i as usize),
                                     alleles_j.get(side_j as usize),
@@ -360,23 +370,30 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
             }
 
             if comparable_sites > 0 {
-                // Add this pair’s contribution: differences per comparable site
-                difference_sum += diff_count as f64 / comparable_sites as f64;
+                // Track the number of differences and the number of pairs with data
+                total_differences += diff_count;
+                total_compared_pairs += 1;
             }
-            // If no comparable sites, contribution is 0 (implicitly handled by not adding)
+            // If no comparable sites, this pair is not counted
         }
     }
 
-    // Compute average nucleotide diversity over all pairs
-    let pi = difference_sum / total_possible_pairs as f64;
+    // Compute nucleotide diversity: average number of differences per site
+    // Pi = (total number of differences) / (sequence length * number of pairs)
+    let pi = if total_compared_pairs > 0 {
+        total_differences as f64 / (seq_length as f64 * total_compared_pairs as f64)
+    } else {
+        0.0
+    };
     
     spinner.finish_and_clear();
     log(LogLevel::Info, &format!(
-        "π = {:.6} (from {} haplotype pairs)",
+        "π = {:.6} (from {} differences across {} bp in {} haplotype pairs)",
         pi,
-        total_possible_pairs
+        total_differences,
+        seq_length,
+        total_compared_pairs
     ));
-
 
     log(LogLevel::Info, &format!(
         "Calculated nucleotide diversity (π): {:.6}",
@@ -385,6 +402,7 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     
     pi
 }
+
 
 // Calculate per-site diversity metrics (π and Watterson's θ) across a genomic region
 pub fn calculate_per_site(
