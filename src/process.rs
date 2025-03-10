@@ -97,6 +97,12 @@ pub struct Args {
     // GTF or GFF
     #[arg(long = "gtf")]
     pub gtf_path: String,
+
+    #[arg(long = "pca", help = "Perform PCA analysis on all haplotypes")]
+    pub enable_pca: bool,
+
+    #[arg(long = "pca_components", default_value = "10", help = "Number of principal components to compute")]
+    pub pca_components: usize,
 }
 
 /// ZeroBasedHalfOpen represents a half-open interval [start..end).
