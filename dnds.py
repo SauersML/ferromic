@@ -1330,18 +1330,18 @@ def main():
         else:
             group_num = int(match.group(1))
 
-      # Build a sample_groups map
-      if group_num == -1:
-          sample_groups = {}
-          for sname in sequences:
-              suffix = sname.rsplit('_', 1)[-1]
-              try:
-                  inferred_group = int(suffix)
-              except ValueError:
-                  inferred_group = 99
-              sample_groups[sname] = inferred_group
-      else:
-          sample_groups = {sname: group_num for sname in sequences.keys()}
+        # Build a sample_groups map
+        if group_num == -1:
+            sample_groups = {}
+            for sname in sequences:
+                suffix = sname.rsplit('_', 1)[-1]
+                try:
+                    inferred_group = int(suffix)
+                except ValueError:
+                    inferred_group = 99
+                sample_groups[sname] = inferred_group
+        else:
+            sample_groups = {sname: group_num for sname in sequences.keys()}
 
         # Generate all pairs
         if COMPARE_BETWEEN_GROUPS:
