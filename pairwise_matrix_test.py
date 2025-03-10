@@ -93,8 +93,8 @@ def read_and_preprocess_data(file_path):
     df['omega'] = pd.to_numeric(df['omega'], errors='coerce')
 
     # Report special omega values that may have biological significance
-    # -1 often indicates calculation errors or undefined values
-    # 99 is often used as a ceiling value for extremely high ratios
+    # -1 means identical sequences
+    # 99 means inf (or very high) omega
     omega_minus1_count = len(df[df['omega'] == -1])
     omega_99_count = len(df[df['omega'] == 99])
     print(f"Rows with omega = -1: {omega_minus1_count}")
@@ -394,29 +394,26 @@ def analysis_worker(args):
             'failure_reason': f"Insufficient sequences in group(s) {groups_str} (minimum {MIN_SEQUENCES_PER_GROUP} required)"
         }
     
-    # Prepare data for mixed-model analysis by organizing pairwise comparisons
+    # Prepare data for mixed-model analysis by collecting all pairwise comparisons, including cross-group
     data = []
     for (seq1, seq2), omega in pairwise_dict.items():
-        # FIXED: Skip special values -1 and 99
-        if omega == -1 or omega == 99:
-            continue
-
-        # Only include within-group comparisons (not between-group)
+        pair_group = None
         if seq1 in sequences_0 and seq2 in sequences_0:
-            group = 0
+            pair_group = 0
         elif seq1 in sequences_1 and seq2 in sequences_1:
-            group = 1
+            pair_group = 1
         else:
-            continue
+            pair_group = 2
         data.append({
             'omega_value': omega,
-            'group': group,
+            'group': pair_group,
             'seq1': seq1,
             'seq2': seq2
         })
 
     df = pd.DataFrame(data)
-    
+    df['ranked_omega'] = df['omega_value'].rank(method='average')
+
     # Initialize results variables
     effect_size = np.nan
     p_value = np.nan
@@ -424,16 +421,15 @@ def analysis_worker(args):
     failure_reason = None
 
     # Validate data requirements for statistical analysis
-    if df.empty or df['group'].nunique() < 2 or df['omega_value'].nunique() < 2:
+    if df.empty or df['group'].nunique() < 2 or df['ranked_omega'].nunique() < 2:
         if df.empty:
             failure_reason = "No valid pairwise comparisons found"
         elif df['group'].nunique() < 2:
             failure_reason = "Missing one of the groups in pairwise comparisons"
-        elif df['omega_value'].nunique() < 2:
+        elif df['ranked_omega'].nunique() < 2:
             print("RAW DATA for Not enough omega value variation for statistical analysis:")
             print(df)
             failure_reason = "Not enough omega value variation for statistical analysis"
-
         
         print(f"WARNING: {failure_reason}")
         
@@ -467,7 +463,7 @@ def analysis_worker(args):
         
         # Fit mixed linear model with group as fixed effect and sequence IDs as random effects
         model = MixedLM.from_formula(
-            'omega_value ~ group',      # Fixed effect of group on omega
+             'ranked_omega ~ C(group)',      # Fixed effect of group on omega
             groups='groups',            # Model organization
             vc_formula=vc,              # Random effects specification
             re_formula='0',             # No additional random effects
