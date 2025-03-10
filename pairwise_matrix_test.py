@@ -19,7 +19,11 @@ import statsmodels.api as sm
 from statsmodels.regression.mixed_linear_model import MixedLM
 
 # Suppress warnings
+# Suppress warnings
 warnings.filterwarnings('ignore')
+
+# Analysis configuration parameters
+MIN_SEQUENCES_PER_GROUP = 3  # Minimum number of sequences required in each group for valid analysis
 
 def read_and_preprocess_data(file_path):
     """Read and preprocess the CSV file."""
@@ -194,16 +198,17 @@ def analysis_worker(args):
     
     n0, n1 = len(sequences_0), len(sequences_1)
     
-    # Check if we have enough sequences in each group (minimum 3 required)
-    if n0 < 3 or n1 < 3:
+    # Check if we have enough sequences in each group
+    if n0 < MIN_SEQUENCES_PER_GROUP or n1 < MIN_SEQUENCES_PER_GROUP:
         insufficient_groups = []
-        if n0 < 3:
+        if n0 < MIN_SEQUENCES_PER_GROUP:
             insufficient_groups.append('0')
-        if n1 < 3:
+        if n1 < MIN_SEQUENCES_PER_GROUP:
             insufficient_groups.append('1')
             
         groups_str = " and ".join(insufficient_groups)
-        print(f"Insufficient sequences in group(s) {groups_str}, need at least 3 sequences per group.")
+        print(f"Insufficient sequences in group(s) {groups_str}, need at least {MIN_SEQUENCES_PER_GROUP} sequences per group.")
+
         return {
             'effect_size': np.nan,
             'p_value': np.nan,
@@ -212,7 +217,7 @@ def analysis_worker(args):
             'num_comp_group_0': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_0 and seq2 in sequences_0),
             'num_comp_group_1': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_1 and seq2 in sequences_1),
             'std_err': np.nan,
-            'failure_reason': f"Insufficient sequences in group(s) {groups_str} (minimum 3 required)"
+            'failure_reason': f"Insufficient sequences in group(s) {groups_str} (minimum {MIN_SEQUENCES_PER_GROUP} required)"
         }
     
     # Prepare data for mixed-model analysis
