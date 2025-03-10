@@ -534,8 +534,8 @@ def analyze_transcript(args):
     Analyze evolutionary rates for a specific transcript.
     
     This function processes all pairwise comparisons for a single transcript,
-    organizing sequences by group, performing statistical analysis, and
-    retrieving gene annotations.
+    organizing sequences by group, performing statistical analysis, retrieving
+    gene annotations, and calculating the mean distance to the nearest breakpoint.
     
     Parameters:
     -----------
@@ -558,12 +558,14 @@ def analyze_transcript(args):
         - p_value: Statistical significance of the effect
         - std_err: Standard error of the effect size estimate
         - failure_reason: Description of analysis failure (if any)
+        - distance_to_breakpoint: Mean distance to the nearest breakpoint in kilobases
         
     Note:
     -----
     - Creates pairwise dictionary of omega values for statistical analysis
     - Identifies gene annotations using UCSC and MyGene.info APIs
     - Delegates statistical analysis to analysis_worker function
+    - Calculates mean distance to nearest breakpoint for reporting
     """
     df_transcript, transcript_id = args
 
@@ -606,6 +608,9 @@ def analyze_transcript(args):
     # Perform statistical analysis on the transcript data
     analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
 
+    # Calculate the mean distance to the nearest breakpoint in kilobases
+    mean_distance = df_transcript['Distance_to_nearest_breakpoint'].mean()
+
     # Combine results into a comprehensive result dictionary
     result = {
         'transcript_id': transcript_id,
@@ -619,7 +624,8 @@ def analyze_transcript(args):
         'effect_size': analysis_result['effect_size'],
         'p_value': analysis_result['p_value'],
         'std_err': analysis_result['std_err'],
-        'failure_reason': analysis_result['failure_reason']
+        'failure_reason': analysis_result['failure_reason'],
+        'distance_to_breakpoint': mean_distance
     }
 
     return result
