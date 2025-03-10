@@ -29,19 +29,20 @@ MIN_SEQUENCES_PER_GROUP = 15
 def read_and_preprocess_data(file_path):
     """
     Read and preprocess the evolutionary rate data from a CSV file.
-    
+
     This function performs several key preprocessing steps:
     1. Reads the CSV containing pairwise sequence comparisons
     2. Extracts group assignments (0 or 1) from CDS identifiers 
     3. Parses genomic coordinates (chromosome, start, end)
     4. Extracts transcript identifiers
     5. Validates omega values and handles special cases (-1, 99)
-    
+    6. Adds the distance to the nearest breakpoint for each region
+
     Parameters:
     -----------
     file_path : str
         Path to the CSV file containing raw pairwise comparison data
-    
+
     Returns:
     --------
     DataFrame
@@ -51,7 +52,8 @@ def read_and_preprocess_data(file_path):
         - start: Start coordinate of the genomic region
         - end: End coordinate of the genomic region
         - transcript_id: Ensembl transcript identifier
-        
+        - Distance_to_nearest_breakpoint: The distance to the nearest breakpoint in kilobases
+
     Note:
     -----
     The function retains all omega values, including special cases like -1 and 99,
@@ -59,10 +61,10 @@ def read_and_preprocess_data(file_path):
     """
     print("Reading data...")
     df = pd.read_csv(file_path)
-    
+
     # Store original CDS as full_cds for reference and troubleshooting
     df['full_cds'] = df['CDS']
-    
+
     # Extract group assignment (0 or 1) from the CDS column prefix
     def extract_group(x):
         if x.startswith('group1_'):
@@ -71,9 +73,9 @@ def read_and_preprocess_data(file_path):
             return 0
         else:
             raise ValueError(f"Invalid group format in CDS: {x}")
-    
+
     df['group'] = df['CDS'].apply(extract_group)
-    
+
     # Extract genomic coordinates using regex pattern
     # Format expected: chrX_startNNN_endNNN where X is chromosome and NNN are positions
     coord_pattern = r'chr(\w+)_start(\d+)_end(\d+)'
@@ -81,15 +83,15 @@ def read_and_preprocess_data(file_path):
     df['chrom'] = 'chr' + coords[0]
     df['start'] = pd.to_numeric(coords[1])
     df['end'] = pd.to_numeric(coords[2])
-    
+
     # Extract transcript ID using Ensembl format pattern (ENSTXXXXX.X)
     transcript_pattern = r'(ENST\d+\.\d+)'
     df['transcript_id'] = df['CDS'].str.extract(transcript_pattern)[0]
-    
+
     # Convert omega to numeric values, coercing non-numeric entries to NaN
     # Omega is the ratio of non-synonymous to synonymous substitution rates
     df['omega'] = pd.to_numeric(df['omega'], errors='coerce')
-    
+
     # Report special omega values that may have biological significance
     # -1 often indicates calculation errors or undefined values
     # 99 is often used as a ceiling value for extremely high ratios
@@ -97,23 +99,68 @@ def read_and_preprocess_data(file_path):
     omega_99_count = len(df[df['omega'] == 99])
     print(f"Rows with omega = -1: {omega_minus1_count}")
     print(f"Rows with omega = 99: {omega_99_count}")
-    
+
     # Keep all valid omega values, only dropping NaN entries
     # This preserves special codes while ensuring numeric analysis
     df = df.dropna(subset=['omega'])
-    
+
     # Report dataset dimensions after preprocessing
     print(f"Total comparisons (including all omega values): {len(df)}")
     print(f"Unique coordinates found: {df.groupby(['chrom', 'start', 'end']).ngroups}")
-    
+
+    # Load the inversion info CSV
+    inv_info_df = pd.read_csv('inv_info.csv')
+
+    # Calculate distance to the nearest breakpoint for each region in df
+    df['Distance_to_nearest_breakpoint'] = df.apply(
+        lambda row: calculate_distance_to_nearest_breakpoint(row['chrom'], row['start'], row['end'], inv_info_df),
+        axis=1
+    )
+
     # Summarize sequence counts by group assignment
     # This is important to verify sufficient sample sizes for statistical analysis
     group0_seqs = set(pd.concat([df[df['group'] == 0]['Seq1'], df[df['group'] == 0]['Seq2']]).unique())
     group1_seqs = set(pd.concat([df[df['group'] == 1]['Seq1'], df[df['group'] == 1]['Seq2']]).unique())
     print(f"Sequences in group 0: {len(group0_seqs)}")
     print(f"Sequences in group 1: {len(group1_seqs)}")
-    
+
     return df
+
+def calculate_distance_to_nearest_breakpoint(chrom, start, end, inv_info_df):
+    """
+    Calculate the distance to the nearest breakpoint in kilobases.
+    
+    Parameters:
+    -----------
+    chrom : str
+        Chromosome of the region.
+    start : int
+        Start position of the region.
+    end : int
+        End position of the region.
+    inv_info_df : DataFrame
+        Dataframe containing inversion breakpoints.
+    
+    Returns:
+    --------
+    float
+        The distance to the nearest breakpoint in kilobases.
+    """
+    chrom_regions = inv_info_df[inv_info_df['chr'] == chrom]
+    
+    # Initialize the minimum distance as a large number
+    min_distance = float('inf')
+    
+    # Iterate through all breakpoints in the same chromosome
+    for _, row in chrom_regions.iterrows():
+        distance_to_start = abs(row['region_start'] - start)
+        distance_to_end = abs(row['region_end'] - end)
+        
+        # Update the minimum distance if the current region is closer
+        min_distance = min(min_distance, distance_to_start, distance_to_end)
+    
+    return min_distance / 1000  # Return distance in kilobases (kb)
+
 
 def get_pairwise_value(seq1, seq2, pairwise_dict):
     """
