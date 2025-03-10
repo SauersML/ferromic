@@ -1,3 +1,4 @@
+
 use colored::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
@@ -436,6 +437,7 @@ impl ProgressTracker {
             ProcessingStage::VariantAnalysis => "[Variant]",
             ProcessingStage::CdsProcessing => "[CDS]",
             ProcessingStage::StatsCalculation => "[Stats]",
+            ProcessingStage::PcaAnalysis => "[PCA]",
         };
     
         let style = self.styles.get("spinner").cloned().unwrap_or_else(|| {
@@ -519,6 +521,7 @@ impl ProgressTracker {
             ProcessingStage::VariantAnalysis => "[Variant Analysis]",
             ProcessingStage::CdsProcessing => "[CDS Processing]",
             ProcessingStage::StatsCalculation => "[Statistics]",
+            ProcessingStage::PcaAnalysis => "[PCA Analysis]",
         };
         
         // Create the top border with timestamp
@@ -725,6 +728,7 @@ pub fn display_status_box(status: StatusBox) {
             ProcessingStage::VariantAnalysis => "[Variant Analysis]",
             ProcessingStage::CdsProcessing => "[CDS Processing]",
             ProcessingStage::StatsCalculation => "[Statistics]",
+            ProcessingStage::PcaAnalysis => "[PCA Analysis]",
         };
         
         // Log the status box display
