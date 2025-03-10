@@ -625,7 +625,10 @@ def analyze_transcript(args):
         'p_value': analysis_result['p_value'],
         'std_err': analysis_result['std_err'],
         'failure_reason': analysis_result['failure_reason'],
-        'distance_to_breakpoint': mean_distance
+        'distance_to_breakpoint': mean_distance,
+        'matrix_0': matrix_0,
+        'matrix_1': matrix_1,
+        'pairwise_comparisons': set(pairwise_dict.keys())
     }
 
     return result
@@ -673,12 +676,28 @@ def main():
     
     # Process each transcript in parallel using all available CPU cores
     results = []
+    cds_results = {}
     with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
         for result in tqdm(executor.map(analyze_transcript, transcript_args), 
                           total=len(transcript_args), 
                           desc="Processing transcripts"):
             results.append(result)
-
+            
+            # Extract CDS from coordinates and store in CDS-based dictionary
+            coords_split = result['coordinates'].split(';')
+            for coord in coords_split:
+                if coord:
+                    # Use CDS as key for matrix visualization compatibility
+                    cds_results[coord] = {
+                        'matrix_0': result['matrix_0'],
+                        'matrix_1': result['matrix_1'],
+                        'pairwise_comparisons': result['pairwise_comparisons'],
+                        'p_value': result['p_value'],
+                        'observed_effect_size': result['effect_size'],
+                        'bonferroni_p_value': result['p_value'] * len(transcript_args) if not pd.isna(result['p_value']) else np.nan,
+                        'gene_symbol': result['gene_symbol'],
+                        'gene_name': result['gene_name']
+                    }
     
     # Create results dataframe for further analysis and reporting
     results_df = pd.DataFrame(results)
