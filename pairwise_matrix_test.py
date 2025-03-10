@@ -54,14 +54,25 @@ def read_and_preprocess_data(file_path):
     # Convert omega to numeric, coerce non-numeric to NaN
     df['omega'] = pd.to_numeric(df['omega'], errors='coerce')
     
-    # Filter valid omega values
-    df = df[
-        (df['omega'] != -1) &
-        (df['omega'] != 99)
-    ].dropna(subset=['omega'])
-
-    print(f"Total valid comparisons: {len(df)}")
+    # Print information about omega values
+    omega_minus1_count = len(df[df['omega'] == -1])
+    omega_99_count = len(df[df['omega'] == 99])
+    print(f"Rows with omega = -1: {omega_minus1_count}")
+    print(f"Rows with omega = 99: {omega_99_count}")
+    
+    # Include all omega values including -1 and 99
+    # Only drop NaN values
+    df = df.dropna(subset=['omega'])
+    
+    print(f"Total comparisons (including all omega values): {len(df)}")
     print(f"Unique coordinates found: {df.groupby(['chrom', 'start', 'end']).ngroups}")
+    
+    # Log sequence counts by group
+    group0_seqs = set(pd.concat([df[df['group'] == 0]['Seq1'], df[df['group'] == 0]['Seq2']]).unique())
+    group1_seqs = set(pd.concat([df[df['group'] == 1]['Seq1'], df[df['group'] == 1]['Seq2']]).unique())
+    print(f"Sequences in group 0: {len(group0_seqs)}")
+    print(f"Sequences in group 1: {len(group1_seqs)}")
+    
     return df
 
 def get_pairwise_value(seq1, seq2, pairwise_dict):
