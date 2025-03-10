@@ -948,8 +948,9 @@ def parallel_handle_file(phy_file):
         sys.exit(1)  # Exit with error
     else:
         group_num = int(match.group(1))
+   
     sample_groups = {sname: group_num for sname in sequences.keys()}
-
+   
    all_samples = list(sample_groups.keys())
    all_pairs = list(combinations(all_samples, 2))
 
