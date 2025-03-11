@@ -426,10 +426,18 @@ def load_temp_dir_results(temp_dir, db_conn):
             dn, ds, omega = parse_codeml_output(pair_dir)
             if dn is None or ds is None or omega is None:
                 continue
-            group1 = 0
-            group2 = 0
+            def _parse_group_from_name(name_str):
+                suffix = name_str.rsplit('_', 1)[-1]
+                try:
+                    return int(suffix)
+                except ValueError:
+                    return 99
+            
+            group1 = _parse_group_from_name(seq1_name)
+            group2 = _parse_group_from_name(seq2_name)
             record_tuple = (seq1_name, seq2_name, group1, group2, dn, ds, omega, cds_id)
             db_insert_or_ignore(db_conn, cache_key, record_tuple)
+
 
 
 # --------------------------------------------------------------------------------
@@ -1227,11 +1235,11 @@ def main():
                 return (0, 0)
         else:
             group_num = int(match.group(1))
-   
+    
         pdict = PARSED_PHY.get(phy_path, None)
         if not pdict or not pdict['sequences']:
             return (0, 0)
-   
+    
         if group_num == -1:
             sample_groups = {}
             for sname in pdict['sequences']:
@@ -1243,22 +1251,10 @@ def main():
                 sample_groups[sname] = inferred_group
         else:
             sample_groups = {name: group_num for name in pdict['sequences']}
-   
+    
         seq_names = list(sample_groups.keys())
         pairs = list(combinations(seq_names, 2))
         if pairs:
-            return (1, len(pairs))
-        else:
-            return (0, 0)
-
-        # Build pairs
-        group_num_int = int(group_num)
-        seq_names = list(pdict['sequences'].keys())
-        sample_groups = {name: group_num_int for name in seq_names}
-
-        pairs = list(combinations(seq_names, 2))
-        
-        if len(pairs) > 0:
             return (1, len(pairs))
         else:
             return (0, 0)
