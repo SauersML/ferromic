@@ -922,26 +922,51 @@ def get_transcript_coordinates(transcript_id):
 
 
 def parallel_handle_file(phy_file):
-    global GLOBAL_COUNTERS, PARSED_PHY, db_conn, args
-    logging.info(f"Processing file: {phy_file}")
-    print(f"Processing file: {phy_file}")
-    sys.stdout.flush()
+   global GLOBAL_COUNTERS, PARSED_PHY, db_conn, args
+   logging.info(f"Processing file: {phy_file}")
+   print(f"Processing file: {phy_file}")
+   sys.stdout.flush()
+   
+   cds_id = os.path.basename(phy_file).replace('.phy', '')
+   mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
+   output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}.csv')
+   haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
+   
+   if os.path.exists(output_csv):
+       print(f"Output {output_csv} already exists, skipping.")
+       sys.stdout.flush()
+       return None, []
+   
+   parsed_data = PARSED_PHY.get(phy_file, None)
+   if not parsed_data:
+       print(f"ERROR: No parsed data found for {phy_file}.")
+       sys.stdout.flush()
+       return None, []
+   
+   if not parsed_data['sequences']:
+       print(f"ERROR: No valid sequences in {phy_file}. Details:")
+       print(f"  - Invalid sequences: {parsed_data['local_invalid']}")
+       print(f"  - Stop codons found: {parsed_data['local_stop_codons']}")
+       print(f"  - Duplicates found: {parsed_data['local_duplicates']}")
+       print(f"  - File is combined: {os.path.basename(phy_file).startswith('combined_')}")
 
-    cds_id = os.path.basename(phy_file).replace('.phy', '')
-    mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
-    output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}.csv')
-    haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
-
-    if os.path.exists(output_csv):
-        print(f"Output {output_csv} already exists, skipping.")
-        sys.stdout.flush()
-        return None, []
-
-    parsed_data = PARSED_PHY.get(phy_file, None)
-    if not parsed_data or not parsed_data['sequences']:
-        print(f"No valid sequences for {phy_file}, skipping.")
-        sys.stdout.flush()
-        return None, []
+       # For combined files, try reading directly to debug
+       if os.path.basename(phy_file).startswith('combined_'):
+           try:
+               with open(phy_file, 'r', encoding='utf-8', errors='replace') as f:
+                   header = f.readline().strip()
+                   first_seq = f.readline().strip() if header else ""
+                   print(f"  - Header: '{header}'")
+                   print(f"  - First sequence length: {len(first_seq) if first_seq else 0}")
+                   if first_seq:
+                       name_part = first_seq[:-int(header.split()[1])] if len(header.split()) > 1 else "?"
+                       print(f"  - First sequence name: '{name_part}'")
+                       print(f"  - Name ends with _L or _R: {name_part.endswith('_L') or name_part.endswith('_R')}")
+           except Exception as e:
+               print(f"  - Error reading file directly: {e}")
+   
+       sys.stdout.flush()
+       return None, []
 
     GLOBAL_COUNTERS['invalid_seqs'] += parsed_data['local_invalid']
     GLOBAL_COUNTERS['stop_codons'] += parsed_data['local_stop_codons']
