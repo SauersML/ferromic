@@ -24,8 +24,9 @@ warnings.filterwarnings('ignore')
 # =====================================================================
 # CONFIGURATION PARAMETERS
 # =====================================================================
+
 # Minimum number of sequences required in each group for valid analysis
-MIN_SEQUENCES_PER_GROUP = 15  
+MIN_SEQUENCES_PER_GROUP = 10
 
 def read_and_preprocess_data(file_path):
     """
@@ -66,7 +67,7 @@ def read_and_preprocess_data(file_path):
     df['full_cds'] = df['CDS']
 
     # Determine comparison group based on Group1 and Group2 columns
-    df['group'] = None  # Initialize column
+    df['group'] = None
     
     # Within-group comparisons
     df.loc[(df['Group1'] == 0) & (df['Group2'] == 0), 'group'] = 0  # Group 0 vs Group 0
@@ -141,7 +142,6 @@ def get_pairwise_value(seq1, seq2, pairwise_dict):
     float or None
         The omega value for the sequence pair, or None if not found
         
-    Note:
     -----
     Since sequence comparisons can be stored with sequences in either order,
     this function checks both (seq1, seq2) and (seq2, seq1) as potential keys.
@@ -277,7 +277,7 @@ def get_gene_annotation(coordinates):
             return None, None
             
         chrom, start, end = match.groups()
-        chrom = 'chr' + chrom  # Ensure chromosome has "chr" prefix for UCSC API
+        chrom = 'chr' + chrom
         start, end = int(start), int(end)
         
         # Query the UCSC Genome Browser API for gene annotations
@@ -326,7 +326,7 @@ def get_gene_annotation(coordinates):
                     symbol = potential_symbol
                     break
                     
-        # Get full gene name from MyGene.info to enhance readability
+        # Get full gene name from MyGene.info for readability
         name = get_gene_info(symbol)
         return symbol, name
         
@@ -575,7 +575,6 @@ def analyze_transcript(args):
     # Perform statistical analysis on the transcript data
     analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
 
-
     # Combine results into a comprehensive result dictionary
     result = {
         'transcript_id': transcript_id,
@@ -662,7 +661,7 @@ def main():
                         'gene_symbol': result['gene_symbol'],
                         'gene_name': result['gene_name']
                     }
-    
+
     # Create results dataframe for further analysis and reporting
     results_df = pd.DataFrame(results)
     
@@ -800,8 +799,8 @@ def main():
         for reason, count in failure_counts.items():
             if pd.notna(reason):
                 print(f"- {reason}: {count} coordinates")
-    
-    # Save the CDS results to pickle file for matrix visualization
+
+    # Save the CDS results to pickle file for matrix visualization later
     os.makedirs('cache', exist_ok=True)
     cds_results_file = 'cache/all_cds_results.pkl'
     print(f"\nSaving CDS results to {cds_results_file}...")
