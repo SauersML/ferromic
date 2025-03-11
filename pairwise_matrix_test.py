@@ -621,7 +621,7 @@ def main():
     Note:
     -----
     - Uses parallel processing via ProcessPoolExecutor
-    - Applies Bonferroni correction for multiple hypothesis testing
+    - Applies correction for multiple hypothesis testing
     - Outputs both comprehensive and significant result summaries
     - Tracks and reports analysis runtime
     """
@@ -658,7 +658,7 @@ def main():
                         'pairwise_comparisons': result['pairwise_comparisons'],
                         'p_value': result['p_value'],
                         'observed_effect_size': result['effect_size'],
-                        'bonferroni_p_value': result['p_value'] * len(transcript_args) if not pd.isna(result['p_value']) else np.nan,
+                        'corrected_p_value': result['p_value'] * len(transcript_args) if not pd.isna(result['p_value']) else np.nan,
                         'gene_symbol': result['gene_symbol'],
                         'gene_name': result['gene_name']
                     }
@@ -666,16 +666,33 @@ def main():
     # Create results dataframe for further analysis and reporting
     results_df = pd.DataFrame(results)
     
-    # Apply Bonferroni correction for multiple hypothesis testing
-    # This controls family-wise error rate across all statistical tests
+    # Apply Benjamini-Hochberg procedure for FDR control
     valid_results = results_df[results_df['p_value'].notna() & (results_df['p_value'] > 0)]
     num_valid_tests = len(valid_results)
     
     if num_valid_tests > 0:
-        # Multiply p-values by number of tests, capping at 1.0
-        results_df['bonferroni_p_value'] = (results_df['p_value'] * num_valid_tests).clip(upper=1.0)
+        # Sort p-values
+        valid_results = valid_results.sort_values('p_value').copy()
+
+        # Calculate ranks
+        valid_results['rank'] = np.arange(1, len(valid_results) + 1)
+        
+        # Calculate BH adjusted p-values
+        valid_results['corrected_p_value'] = valid_results['p_value'] * num_valid_tests / valid_results['rank']
+
+        # Monotonicity of p-values (step-up procedure)
+        valid_results['corrected_p_value'] = valid_results['corrected_p_value'].iloc[::-1].cummin().iloc[::-1]
+
+        # Create a mapping from transcript_id to adjusted p-value
+        corrected_p_value_map = dict(zip(valid_results['transcript_id'], valid_results['corrected_p_value']))
+    
+        # Map adjusted p-values back to the original dataframe
+        results_df['corrected_p_value'] = results_df['transcript_id'].map(corrected_p_value_map)
+
+        # Cap adjusted p-values at 1.0
+        results_df['corrected_p_value'] = results_df['corrected_p_value'].clip(upper=1.0)
     else:
-        results_df['bonferroni_p_value'] = results_df['p_value']
+        results_df['corrected_p_value'] = results_df['p_value']
     
     # Calculate -log10(p) for visualization and interpretation
     # Larger values indicate more significant results
@@ -747,17 +764,17 @@ def main():
     print(f"{'TOTAL':<50} {total_group_0:<10} {total_group_1:<10} {total_group_0 + total_group_1:<10}")
     
     # Summarize significant results after multiple testing correction
-    significant_count = (results_df['bonferroni_p_value'] < 0.05).sum()
-    print(f"\nSignificant results after Bonferroni correction (p < 0.05): {significant_count}")
+    significant_count = (results_df['corrected_p_value'] < 0.05).sum()
+    print(f"\nSignificant results after correction (p < 0.05): {significant_count}")
     
     # Print detailed information for significant results
     if significant_count > 0:
-        print("\nSignificant results after Bonferroni correction:")
+        print("\nSignificant results after correction:")
         print(f"{'Transcript/Coordinates':<50} {'P-value':<15} {'Corrected P':<15} {'Effect Size':<15} {'Gene':<15} {'Distance (kb)'}")
         print("-" * 160)
         
         # Select and sort significant results
-        sig_results = results_df[results_df['bonferroni_p_value'] < 0.05].sort_values('p_value')
+        sig_results = results_df[results_df['corrected_p_value'] < 0.05].sort_values('p_value')
         
         # Print each significant result with detailed information
         for _, row in sig_results.iterrows():
@@ -765,7 +782,7 @@ def main():
             coords_str = str(row['coordinates']) if 'coordinates' in row and pd.notna(row['coordinates']) else ""
             label = f"{transcript_str} / {coords_str}".strip(" /")
             p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
-            corrected_p = f"{row['bonferroni_p_value']:.6e}" if not pd.isna(row['bonferroni_p_value']) else "N/A"
+            corrected_p = f"{row['corrected_p_value']:.6e}" if not pd.isna(row['corrected_p_value']) else "N/A"
             effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
             
             # Format gene information with name if available
