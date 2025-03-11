@@ -3,14 +3,37 @@ Convert PHY files to FASTA format.
 
 This script processes all PHY files in the current directory (or a specified directory)
 and converts them to FASTA format with the same base name but .fa extension.
+Optionally translates DNA sequences to protein sequences.
 """
 
 import os
 import sys
 import re
 import argparse
+from Bio.Seq import Seq
+from Bio.SeqUtils import six_frame_translations
 
-def convert_phy_to_fasta(phy_file_path, pattern=None, wrap_length=60):
+def translate_dna_to_protein(dna_sequence):
+    """
+    Translate a DNA sequence to a protein sequence using the standard genetic code
+    
+    Parameters:
+    dna_sequence (str): DNA sequence to translate
+    
+    Returns:
+    str: Protein sequence
+    """
+    try:
+        # Create a Seq object and translate it
+        seq_obj = Seq(dna_sequence)
+        # Translate using standard genetic code, stop at first stop codon
+        protein_seq = str(seq_obj.translate())
+        return protein_seq
+    except Exception as e:
+        print(f"Error translating DNA sequence: {e}")
+        return dna_sequence
+
+def convert_phy_to_fasta(phy_file_path, pattern=None, wrap_length=60, translate_to_protein=False):
     """
     Convert a PHY file to FASTA format
     
@@ -18,12 +41,16 @@ def convert_phy_to_fasta(phy_file_path, pattern=None, wrap_length=60):
     phy_file_path (str): Path to the PHY file
     pattern (str, optional): Regular expression pattern to identify the ID/sequence boundary
     wrap_length (int, optional): Number of characters per line for the sequence
+    translate_to_protein (bool, optional): Whether to translate DNA sequences to protein
     
     Returns:
     bool: True if conversion was successful, False otherwise
     """
     # Get the output file path
-    fa_file_path = os.path.splitext(phy_file_path)[0] + '.fa'
+    if translate_to_protein:
+        fa_file_path = os.path.splitext(phy_file_path)[0] + '_protein.fa'
+    else:
+        fa_file_path = os.path.splitext(phy_file_path)[0] + '.fa'
     
     # Use default pattern if not provided
     if pattern is None:
@@ -75,6 +102,10 @@ def convert_phy_to_fasta(phy_file_path, pattern=None, wrap_length=60):
                         if seq_length is not None and len(seq_data) != seq_length:
                             print(f"Warning: Line {line_num} has sequence length {len(seq_data)}, expected {seq_length}")
                         
+                        # Translate sequence if required
+                        if translate_to_protein:
+                            seq_data = translate_dna_to_protein(seq_data)
+                        
                         # Write in FASTA format
                         fa_file.write(f'>{seq_id}\n')
                         
@@ -90,6 +121,10 @@ def convert_phy_to_fasta(phy_file_path, pattern=None, wrap_length=60):
                             seq_id = line[:split_position]
                             seq_data = line[split_position:]
                             
+                            # Translate sequence if required
+                            if translate_to_protein:
+                                seq_data = translate_dna_to_protein(seq_data)
+                                
                             fa_file.write(f'>{seq_id}\n')
                             for i in range(0, len(seq_data), wrap_length):
                                 fa_file.write(seq_data[i:i+wrap_length] + '\n')
@@ -121,6 +156,8 @@ def parse_arguments():
                              'Default is "(_[LR])([ACGTN])" to match the end of ID followed by sequence start.')
     parser.add_argument('--wrap', type=int, default=60,
                         help='Number of characters per line for the sequence (default: 60)')
+    parser.add_argument('--protein', action='store_true',
+                        help='Translate DNA sequences to protein sequences')
     return parser.parse_args()
 
 def main():
@@ -138,9 +175,11 @@ def main():
         success_count = 0
         for filename in phy_files:
             phy_file_path = os.path.join(args.directory, filename)
-            print(f"Converting {phy_file_path} to FASTA format...")
-            if convert_phy_to_fasta(phy_file_path, pattern=args.pattern, wrap_length=args.wrap):
-                print(f"Conversion complete: {os.path.splitext(phy_file_path)[0] + '.fa'}")
+            output_type = "protein FASTA" if args.protein else "FASTA"
+            print(f"Converting {phy_file_path} to {output_type} format...")
+            if convert_phy_to_fasta(phy_file_path, pattern=args.pattern, wrap_length=args.wrap, translate_to_protein=args.protein):
+                output_file = os.path.splitext(phy_file_path)[0] + ('_protein.fa' if args.protein else '.fa')
+                print(f"Conversion complete: {output_file}")
                 success_count += 1
         
         print(f"Conversion completed for {success_count} out of {len(phy_files)} PHY files.")
