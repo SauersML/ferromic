@@ -33,10 +33,10 @@ warnings.filterwarnings("ignore")
 INPUT_CSV = "all_pairwise_results.csv"
 OUTPUT_DIR = "results"
 CACHE_DIR = "cache"
-MIN_SEQUENCES_PER_GROUP = 2
-NUM_PERMUTATIONS = 1000
+MIN_SEQUENCES_PER_GROUP = 10
+NUM_PERMUTATIONS = 10000
 FDR_THRESHOLD = 0.05
-USE_GENE_ANNOTATION = False
+USE_GENE_ANNOTATION = True
 
 
 # -----------------------------------------------------------------------------------
