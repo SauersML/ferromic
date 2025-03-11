@@ -947,22 +947,23 @@ def parallel_handle_file(phy_file):
       print(f"  - Invalid sequences: {parsed_data['local_invalid']}")
       print(f"  - Stop codons found: {parsed_data['local_stop_codons']}")
       print(f"  - Duplicates found: {parsed_data['local_duplicates']}")
-      print(f"  - File is combined: {os.path.basename(phy_file).startswith('combined_')}")
+      print(f"  - File is group_both: {os.path.basename(phy_file).startswith('group_both_')}")
 
       # For combined files, try reading directly to debug
-      if os.path.basename(phy_file).startswith('combined_'):
-         try:
-            with open(phy_file, 'r', encoding='utf-8', errors='replace') as f:
-               header = f.readline().strip()
-               first_seq = f.readline().strip() if header else ""
-               print(f"  - Header: '{header}'")
-               print(f"  - First sequence length: {len(first_seq) if first_seq else 0}")
-               if first_seq:
-                  name_part = first_seq[:-int(header.split()[1])] if len(header.split()) > 1 else "?"
-                  print(f"  - First sequence name: '{name_part}'")
-                  print(f"  - Name ends with _L or _R: {name_part.endswith('_L') or name_part.endswith('_R')}")
-         except Exception as e:
-            print(f"  - Error reading file directly: {e}")
+      if os.path.basename(phy_file).startswith('group_both_'):
+               try:
+                   with open(phy_file, 'r', encoding='utf-8', errors='replace') as f:
+                       header = f.readline().strip()
+                       first_seq = f.readline().strip() if header else ""
+                       print(f"  - Header: '{header}'")
+                       print(f"  - First sequence length: {len(first_seq) if first_seq else 0}")
+                       if first_seq:
+                           name_part = first_seq[:-int(header.split()[1])] if len(header.split()) > 1 else "?"
+                           print(f"  - First sequence name: '{name_part}'")
+                           print(f"  - Name ends with _L or _R: {name_part.endswith('_L') or name_part.endswith('_R')}")
+               except Exception as e:
+                   print(f"  - Error reading file directly: {e}")
+
    
       sys.stdout.flush()
       return None, []
@@ -1164,7 +1165,10 @@ def main():
       basename = os.path.basename(phy_file)
       match = filename_pattern.match(basename)
       if not match:
-         continue  # skip files that don't match pattern
+         print("No match.")
+         if not basename.startswith("group_both_"):
+             continue
+
          
       # Extract components from new filename format
       group_num = match.group(1)
@@ -1186,7 +1190,16 @@ def main():
          
       # Store the PHY file path by gene_id and group
       if gene_id not in gene_to_files:
-         gene_to_files[gene_id] = {0: [], 1: []}
+         gene_to_files[gene_id] = {
+             0: [],
+             1: [],
+             "gene_name": gene_name,
+             "transcript_id": transcript_id,
+             "chromosome": chromosome,
+             "start_pos": start_pos,
+             "end_pos": end_pos
+         }
+
          
       group_num_int = int(group_num)
       if group_num_int in gene_to_files[gene_id]:
@@ -1207,57 +1220,51 @@ def main():
       all_phy_filtered.extend(group_files[0])
       all_phy_filtered.extend(group_files[1])
       if COMPARE_BETWEEN_GROUPS:
-         combined_path = os.path.join(args.phy_dir, f"combined_{gene_id}.phy")
-         seq_map = {}
-         file_list = group_files[0] + group_files[1]
-         alignment_length = None
-         for fpath in file_list:
-            # Re-open the original PHY file to get the original names
-            data = PARSED_PHY.get(fpath)
-            if data and data['sequences']:
-               # First get the original PHY file content
-               with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
-                  # Skip header line
-                  header_line = f.readline().strip()
-                  parts = header_line.split()
-                  if len(parts) != 2:
-                     continue
-                  try:
-                     num_seqs = int(parts[0])
-                     seq_len = int(parts[1])
-                  except ValueError:
-                     continue
-                  
-                  # Parse each line to get original names and sequences
-                  for i in range(num_seqs):
-                     line = f.readline().strip()
-                     if not line or len(line) < seq_len:
+      group_both_path = os.path.join(
+        args.phy_dir,
+        f"group_both_{gene_to_files[gene_id]['gene_name']}_{gene_id}_{gene_to_files[gene_id]['transcript_id']}_chr{gene_to_files[gene_id]['chromosome']}_start{gene_to_files[gene_id]['start_pos']}_end{gene_to_files[gene_id]['end_pos']}.phy"
+      )
+      seq_map = {}
+      file_list = group_files[0] + group_files[1]
+      alignment_length = None
+      for fpath in file_list:
+        data = PARSED_PHY.get(fpath)
+        if data and data['sequences']:
+            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                header_line = f.readline().strip()
+                parts = header_line.split()
+                if len(parts) != 2:
+                    continue
+                try:
+                    num_seqs = int(parts[0])
+                    seq_len = int(parts[1])
+                except ValueError:
+                    continue
+                for i in range(num_seqs):
+                    line = f.readline().strip()
+                    if not line or len(line) < seq_len:
                         continue
-                        
-                     # Extract sequence and original name
-                     sequence = line[-seq_len:]
-                     orig_name = line[:-seq_len]
-                     
-                     # Only add if the sequence is valid (exists in our processed data)
-                     for processed_name, processed_seq in data['sequences'].items():
+                    sequence = line[-seq_len:]
+                    orig_name = line[:-seq_len]
+                    for processed_name, processed_seq in data['sequences'].items():
                         if sequence == processed_seq:
-                           # Use the original name from the file
-                           if alignment_length is None:
-                              alignment_length = len(sequence)
-                           else:
-                              if len(sequence) != alignment_length:
-                                 print(f"Error: alignment length mismatch for gene {gene_id} in file {fpath}")
-                                 continue
-                           seq_map[orig_name] = sequence
-                           break
-
-         total_sequences = len(seq_map)
-         if total_sequences > 0 and alignment_length is not None:
-            with open(combined_path, 'w') as outf:
-               outf.write(f"{total_sequences} {alignment_length}\n")
-               for sname, sseq in seq_map.items():
-                  outf.write(f"{sname}{sseq}\n")
-            all_phy_filtered.append(combined_path)
+                            if alignment_length is None:
+                                alignment_length = len(sequence)
+                            else:
+                                if len(sequence) != alignment_length:
+                                    print(f"Error: alignment length mismatch for gene {gene_id} in file {fpath}")
+                                    continue
+                            seq_map[orig_name] = sequence
+                            break
+      total_sequences = len(seq_map)
+      if total_sequences > 0 and alignment_length is not None:
+        with open(group_both_path, 'w') as outf:
+            outf.write(f"{total_sequences} {alignment_length}\n")
+            for sname, sseq in seq_map.items():
+                outf.write(f"{sname}{sseq}\n")
+        all_phy_filtered.append(group_both_path)
+        parsed_data_combined = parse_phy_file_once(group_both_path)
+        PARSED_PHY[group_both_path] = parsed_data_combined
 
    print(f"Found {len(valid_genes)} genes with files in both groups.")
    print(f"Total PHY files to process: {len(all_phy_filtered)}")
