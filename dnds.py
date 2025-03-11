@@ -701,161 +701,160 @@ def _read_csv_rows(csv_path):
         print(f"Failed to load CSV {csv_path}: {str(e)}")
     return rows_to_insert
 
-
 # --------------------------------------------------------------------------------
 # PAIRWISE COMPARISON LOGIC
 # --------------------------------------------------------------------------------
 
 def process_pair(args):
-    """
-    Worker function for pairwise dN/dS. 
-    - pair: (seq1_name, seq2_name)
-    - sequences: dict of {name->seq}
-    - sample_groups: dict of {name->group}
-    - cds_id: unique identifier for the alignment
-    - codeml_path, temp_dir, ...
-    Returns (seq1_name, seq2_name, group1, group2, dN, dS, omega, cds_id) or None if skipped.
-    """
-    pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, _ = args
-    seq1_name, seq2_name = pair
+   """
+   Worker function for pairwise dN/dS. 
+   - pair: (seq1_name, seq2_name)
+   - sequences: dict of {name->seq}
+   - sample_groups: dict of {name->group}
+   - cds_id: unique identifier for the alignment
+   - codeml_path, temp_dir, ...
+   Returns (seq1_name, seq2_name, group1, group2, dN, dS, omega, cds_id) or None if skipped.
+   """
+   pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, _ = args
+   seq1_name, seq2_name = pair
 
-    print(f"===== STARTING process_pair for pair: {seq1_name} vs {seq2_name} in CDS: {cds_id} =====")
-    logging.debug(f"process_pair started: seq1={seq1_name}, seq2={seq2_name}, cds_id={cds_id}")
-    print(f"Unpacking args: pair={pair}, cds_id={cds_id}, codeml_path={codeml_path}, temp_dir={temp_dir}")
-    print(f"Sequences dict has {len(sequences)} entries")
-    print(f"Sample_groups dict has {len(sample_groups)} entries")
+   print(f"===== STARTING process_pair for pair: {seq1_name} vs {seq2_name} in CDS: {cds_id} =====")
+   logging.debug(f"process_pair started: seq1={seq1_name}, seq2={seq2_name}, cds_id={cds_id}")
+   print(f"Unpacking args: pair={pair}, cds_id={cds_id}, codeml_path={codeml_path}, temp_dir={temp_dir}")
+   print(f"Sequences dict has {len(sequences)} entries")
+   print(f"Sample_groups dict has {len(sample_groups)} entries")
 
-    # Check for missing sequences
-    print(f"Checking if sequences exist: {seq1_name} in sequences: {seq1_name in sequences}, {seq2_name} in sequences: {seq2_name in sequences}")
-    if seq1_name not in sequences or seq2_name not in sequences:
-        print(f"EXIT: One of the sequences is missing ({seq1_name} or {seq2_name}), returning None.")
-        logging.warning(f"process_pair exiting early: missing sequence for {seq1_name} or {seq2_name} in {cds_id}")
-        print(f"NOT CALLING run_codeml due to missing sequence")
-        sys.stdout.flush()
-        return None
-    print(f"Both sequences found: {seq1_name} and {seq2_name}")
+   # Check for missing sequences
+   print(f"Checking if sequences exist: {seq1_name} in sequences: {seq1_name in sequences}, {seq2_name} in sequences: {seq2_name in sequences}")
+   if seq1_name not in sequences or seq2_name not in sequences:
+      print(f"EXIT: One of the sequences is missing ({seq1_name} or {seq2_name}), returning None.")
+      logging.warning(f"process_pair exiting early: missing sequence for {seq1_name} or {seq2_name} in {cds_id}")
+      print(f"NOT CALLING run_codeml due to missing sequence")
+      sys.stdout.flush()
+      return None
+   print(f"Both sequences found: {seq1_name} and {seq2_name}")
 
-    # Fetch group info
-    group1 = sample_groups.get(seq1_name)
-    group2 = sample_groups.get(seq2_name)
-    print(f"Group1 for {seq1_name}: {group1}, Group2 for {seq2_name}: {group2}")
-    logging.debug(f"Groups assigned: group1={group1}, group2={group2}")
+   # Fetch group info
+   group1 = sample_groups.get(seq1_name)
+   group2 = sample_groups.get(seq2_name)
+   print(f"Group1 for {seq1_name}: {group1}, Group2 for {seq2_name}: {group2}")
+   logging.debug(f"Groups assigned: group1={group1}, group2={group2}")
 
-    # Check for cross-group comparison
-    print(f"COMPARE_BETWEEN_GROUPS: {COMPARE_BETWEEN_GROUPS}, group1 == group2: {group1 == group2}")
-    if not COMPARE_BETWEEN_GROUPS and group1 != group2:
-        print(f"EXIT: Not comparing between groups, and groups differ (group1={group1}, group2={group2}). Skipping.")
-        logging.info(f"process_pair skipping: cross-group comparison not allowed for {seq1_name} vs {seq2_name}")
-        print(f"NOT CALLING run_codeml due to group mismatch")
-        sys.stdout.flush()
-        return None
-    print(f"Group check passed, proceeding")
+   # Check for cross-group comparison
+   print(f"COMPARE_BETWEEN_GROUPS: {COMPARE_BETWEEN_GROUPS}, group1 == group2: {group1 == group2}")
+   if not COMPARE_BETWEEN_GROUPS and group1 != group2:
+      print(f"EXIT: Not comparing between groups, and groups differ (group1={group1}, group2={group2}). Skipping.")
+      logging.info(f"process_pair skipping: cross-group comparison not allowed for {seq1_name} vs {seq2_name}")
+      print(f"NOT CALLING run_codeml due to group mismatch")
+      sys.stdout.flush()
+      return None
+   print(f"Group check passed, proceeding")
 
-    # Check for identical sequences
-    seq1 = sequences[seq1_name]
-    seq2 = sequences[seq2_name]
-    print(f"Sequence lengths: {seq1_name}={len(seq1)}, {seq2_name}={len(seq2)}")
-    print(f"Comparing sequences for identity: {seq1_name} vs {seq2_name}")
-    are_identical = seq1 == seq2
-    print(f"Sequences identical: {are_identical}")
-    if are_identical:
-        print(f"EXIT: Sequences are identical, returning special marker (omega=-1)")
-        logging.info(f"process_pair found identical sequences for {seq1_name} vs {seq2_name}, omega=-1")
-        print(f"NOT CALLING run_codeml due to identical sequences")
-        result = (seq1_name, seq2_name, group1, group2, 0.0, 0.0, -1.0, cds_id)
-        print(f"Returning: {result}")
-        sys.stdout.flush()
-        return result
-    print(f"Sequences differ, proceeding to CODEML execution")
-    logging.debug(f"Sequences differ: {seq1_name} and {seq2_name}, length diff={abs(len(seq1) - len(seq2))}")
+   # Check for identical sequences
+   seq1 = sequences[seq1_name]
+   seq2 = sequences[seq2_name]
+   print(f"Sequence lengths: {seq1_name}={len(seq1)}, {seq2_name}={len(seq2)}")
+   print(f"Comparing sequences for identity: {seq1_name} vs {seq2_name}")
+   are_identical = seq1 == seq2
+   print(f"Sequences identical: {are_identical}")
+   if are_identical:
+      print(f"EXIT: Sequences are identical, returning special marker (omega=-1)")
+      logging.info(f"process_pair found identical sequences for {seq1_name} vs {seq2_name}, omega=-1")
+      print(f"NOT CALLING run_codeml due to identical sequences")
+      result = (seq1_name, seq2_name, group1, group2, 0.0, 0.0, -1.0, cds_id)
+      print(f"Returning: {result}")
+      sys.stdout.flush()
+      return result
+   print(f"Sequences differ, proceeding to CODEML execution")
+   logging.debug(f"Sequences differ: {seq1_name} and {seq2_name}, length diff={abs(len(seq1) - len(seq2))}")
 
-    # Prepare temporary directory
-    working_dir = os.path.join(temp_dir, f'{seq1_name}_{seq2_name}')
-    print(f"Preparing working directory: {working_dir}")
-    logging.debug(f"Creating working_dir: {working_dir}")
-    try:
-        os.makedirs(working_dir, exist_ok=True)
-        print(f"Successfully created/ensured working_dir: {working_dir}")
-    except Exception as e:
-        print(f"ERROR: Failed to create working_dir {working_dir}: {e}")
-        logging.error(f"Failed to create working_dir: {e}")
-        return None
-    print(f"Directory contents before files: {os.listdir(working_dir) if os.path.exists(working_dir) else 'empty'}")
+   # Prepare temporary directory
+   working_dir = os.path.join(temp_dir, f'{seq1_name}_{seq2_name}')
+   print(f"Preparing working directory: {working_dir}")
+   logging.debug(f"Creating working_dir: {working_dir}")
+   try:
+      os.makedirs(working_dir, exist_ok=True)
+      print(f"Successfully created/ensured working_dir: {working_dir}")
+   except Exception as e:
+      print(f"ERROR: Failed to create working_dir {working_dir}: {e}")
+      logging.error(f"Failed to create working_dir: {e}")
+      return None
+   print(f"Directory contents before files: {os.listdir(working_dir) if os.path.exists(working_dir) else 'empty'}")
 
-    # Create seqfile.phy
-    seqfile = os.path.join(working_dir, 'seqfile.phy')
-    print(f"Creating seqfile.phy at: {seqfile}")
-    logging.debug(f"Writing seqfile: {seqfile}")
-    try:
-        with open(seqfile, 'w') as f:
-            seq_content = f" 2 {len(seq1)}\n{seq1_name}  {seq1}\n{seq2_name}  {seq2}\n"
-            f.write(seq_content)
-        print(f"Created seqfile.phy for codeml input: {seqfile}")
-        print(f"Seqfile content preview: {seq_content[:100]}...")
-        logging.info(f"seqfile.phy written for {seq1_name} vs {seq2_name}")
-    except Exception as e:
-        print(f"ERROR: Failed to write seqfile {seqfile}: {e}")
-        logging.error(f"seqfile write failed: {e}")
-        return None
-    print(f"Confirming seqfile exists: {os.path.exists(seqfile)}")
+   # Create seqfile.phy
+   seqfile = os.path.join(working_dir, 'seqfile.phy')
+   print(f"Creating seqfile.phy at: {seqfile}")
+   logging.debug(f"Writing seqfile: {seqfile}")
+   try:
+      with open(seqfile, 'w') as f:
+         seq_content = f" 2 {len(seq1)}\n{seq1_name}  {seq1}\n{seq2_name}  {seq2}\n"
+         f.write(seq_content)
+      print(f"Created seqfile.phy for codeml input: {seqfile}")
+      print(f"Seqfile content preview: {seq_content[:100]}...")
+      logging.info(f"seqfile.phy written for {seq1_name} vs {seq2_name}")
+   except Exception as e:
+      print(f"ERROR: Failed to write seqfile {seqfile}: {e}")
+      logging.error(f"seqfile write failed: {e}")
+      return None
+   print(f"Confirming seqfile exists: {os.path.exists(seqfile)}")
 
-    # Create tree.txt
-    treefile = os.path.join(working_dir, 'tree.txt')
-    print(f"Creating tree.txt at: {treefile}")
-    logging.debug(f"Writing treefile: {treefile}")
-    try:
-        with open(treefile, 'w') as f:
-            tree_content = f"({seq1_name},{seq2_name});\n"
-            f.write(tree_content)
-        print(f"Created tree.txt for codeml input: {treefile}")
-        print(f"Treefile content: {tree_content.strip()}")
-        logging.info(f"tree.txt written for {seq1_name} vs {seq2_name}")
-    except Exception as e:
-        print(f"ERROR: Failed to write treefile {treefile}: {e}")
-        logging.error(f"treefile write failed: {e}")
-        return None
-    print(f"Confirming treefile exists: {os.path.exists(treefile)}")
+   # Create tree.txt
+   treefile = os.path.join(working_dir, 'tree.txt')
+   print(f"Creating tree.txt at: {treefile}")
+   logging.debug(f"Writing treefile: {treefile}")
+   try:
+      with open(treefile, 'w') as f:
+         tree_content = f"({seq1_name},{seq2_name});\n"
+         f.write(tree_content)
+      print(f"Created tree.txt for codeml input: {treefile}")
+      print(f"Treefile content: {tree_content.strip()}")
+      logging.info(f"tree.txt written for {seq1_name} vs {seq2_name}")
+   except Exception as e:
+      print(f"ERROR: Failed to write treefile {treefile}: {e}")
+      logging.error(f"treefile write failed: {e}")
+      return None
+   print(f"Confirming treefile exists: {os.path.exists(treefile)}")
 
-    # Prepare to call run_codeml
-    print(f"Calling create_paml_ctl with seqfile={seqfile}, outfile='results.txt', working_dir={working_dir}")
-    ctl_path = create_paml_ctl(seqfile, 'results.txt', working_dir)
-    print(f"create_paml_ctl returned ctl_path: {ctl_path}")
-    logging.debug(f"ctl_path generated: {ctl_path}")
+   # Prepare to call run_codeml
+   print(f"Calling create_paml_ctl with seqfile={seqfile}, outfile='results.txt', working_dir={working_dir}")
+   ctl_path = create_paml_ctl(seqfile, 'results.txt', working_dir)
+   print(f"create_paml_ctl returned ctl_path: {ctl_path}")
+   logging.debug(f"ctl_path generated: {ctl_path}")
 
-    print(f"===== PREPARING TO CALL run_codeml for {seq1_name} vs {seq2_name} =====")
-    print(f"run_codeml args: ctl_path={ctl_path}, working_dir={working_dir}, codeml_path={codeml_path}")
-    logging.info(f"Calling run_codeml for pair {seq1_name} vs {seq2_name} in {cds_id}")
-    success = run_codeml(ctl_path, working_dir, codeml_path)
-    print(f"run_codeml returned success: {success}")
-    logging.debug(f"run_codeml result: success={success}")
+   print(f"===== PREPARING TO CALL run_codeml for {seq1_name} vs {seq2_name} =====")
+   print(f"run_codeml args: ctl_path={ctl_path}, working_dir={working_dir}, codeml_path={codeml_path}")
+   logging.info(f"Calling run_codeml for pair {seq1_name} vs {seq2_name} in {cds_id}")
+   success = run_codeml(ctl_path, working_dir, codeml_path)
+   print(f"run_codeml returned success: {success}")
+   logging.debug(f"run_codeml result: success={success}")
 
-    if not success:
-        print(f"EXIT: Codeml run failed, returning None so it can be retried next time")
-        logging.warning(f"run_codeml failed for {seq1_name} vs {seq2_name}")
-        sys.stdout.flush()
-        return None
+   if not success:
+      print(f"EXIT: Codeml run failed, returning None so it can be retried next time")
+      logging.warning(f"run_codeml failed for {seq1_name} vs {seq2_name}")
+      sys.stdout.flush()
+      return None
 
-    print(f"run_codeml succeeded, proceeding to parse output")
+   print(f"run_codeml succeeded, proceeding to parse output")
 
-    # Parse CODEML output
-    print(f"Calling parse_codeml_output with outfile_dir={working_dir}")
-    dn, ds, omega = parse_codeml_output(working_dir)
-    print(f"parse_codeml_output returned: dn={dn}, ds={ds}, omega={omega}")
-    logging.debug(f"Parsed values: dn={dn}, ds={ds}, omega={omega}")
-    if omega is None:
-        print(f"Omega is None, setting to NaN")
-        omega = np.nan
-        logging.warning(f"parse_codeml_output returned None for omega, using NaN")
+   # Parse CODEML output
+   print(f"Calling parse_codeml_output with outfile_dir={working_dir}")
+   dn, ds, omega = parse_codeml_output(working_dir)
+   print(f"parse_codeml_output returned: dn={dn}, ds={ds}, omega={omega}")
+   logging.debug(f"Parsed values: dn={dn}, ds={ds}, omega={omega}")
+   if omega is None:
+      print(f"Omega is None, setting to NaN")
+      omega = np.nan
+      logging.warning(f"parse_codeml_output returned None for omega, using NaN")
 
-    # Final result
-    result = (seq1_name, seq2_name, group1, group2, dn, ds, omega, cds_id)
-    print(f"Pair processed successfully: dn={dn}, ds={ds}, omega={omega}")
-    print(f"Returning result: {result}")
-    logging.info(f"process_pair completed: {seq1_name} vs {seq2_name}, omega={omega}")
-    print(f"run_codeml WAS CALLED and completed")
-    print(f"===== FINISHED process_pair for pair: {seq1_name} vs {seq2_name} =====")
-    sys.stdout.flush()
-    return result
+   # Final result
+   result = (seq1_name, seq2_name, group1, group2, dn, ds, omega, cds_id)
+   print(f"Pair processed successfully: dn={dn}, ds={ds}, omega={omega}")
+   print(f"Returning result: {result}")
+   logging.info(f"process_pair completed: {seq1_name} vs {seq2_name}, omega={omega}")
+   print(f"run_codeml WAS CALLED and completed")
+   print(f"===== FINISHED process_pair for pair: {seq1_name} vs {seq2_name} =====")
+   sys.stdout.flush()
+   return result
 
 
 # --------------------------------------------------------------------------------
@@ -863,62 +862,62 @@ def process_pair(args):
 # --------------------------------------------------------------------------------
 
 def load_gtf_into_dict(gtf_file):
-    """
-    Parse a GTF for CDS lines only, building a dict of transcript_id->(chr, minStart, maxEnd).
-    """
-    transcript_dict = {}
-    with open(gtf_file, 'r') as f:
-        for line in f:
-            if not line.strip() or line.startswith('#'):
-                continue
-            fields = line.split('\t')
-            if len(fields) < 9:
-                continue
-            if fields[2] != 'CDS':
-                continue
+   """
+   Parse a GTF for CDS lines only, building a dict of transcript_id->(chr, minStart, maxEnd).
+   """
+   transcript_dict = {}
+   with open(gtf_file, 'r') as f:
+      for line in f:
+         if not line.strip() or line.startswith('#'):
+            continue
+         fields = line.split('\t')
+         if len(fields) < 9:
+            continue
+         if fields[2] != 'CDS':
+            continue
 
-            chr_ = fields[0]
-            start = int(fields[3])
-            end = int(fields[4])
-            attrs = fields[8].strip()
-            tid = None
-            for attr in attrs.split(';'):
-                attr = attr.strip()
-                if attr.startswith('transcript_id "'):
-                    tid = attr.split('"')[1]
-                    break
-            if tid is None:
-                continue
+         chr_ = fields[0]
+         start = int(fields[3])
+         end = int(fields[4])
+         attrs = fields[8].strip()
+         tid = None
+         for attr in attrs.split(';'):
+            attr = attr.strip()
+            if attr.startswith('transcript_id "'):
+               tid = attr.split('"')[1]
+               break
+         if tid is None:
+            continue
 
-            if tid not in transcript_dict:
-                transcript_dict[tid] = [chr_, start, end]
-            else:
-                existing_chr, existing_start, existing_end = transcript_dict[tid]
-                # We won't attempt to unify different chromosomes; 
-                # we just keep the first if there's mismatch.
-                if chr_ == existing_chr:
-                    if start < existing_start:
-                        transcript_dict[tid][1] = start
-                    if end > existing_end:
-                        transcript_dict[tid][2] = end
-    # Convert to tuple
-    for k in transcript_dict:
-        c, s, e = transcript_dict[k]
-        transcript_dict[k] = (c, s, e)
-    return transcript_dict
+         if tid not in transcript_dict:
+            transcript_dict[tid] = [chr_, start, end]
+         else:
+            existing_chr, existing_start, existing_end = transcript_dict[tid]
+            # We won't attempt to unify different chromosomes; 
+            # we just keep the first if there's mismatch.
+            if chr_ == existing_chr:
+               if start < existing_start:
+                  transcript_dict[tid][1] = start
+               if end > existing_end:
+                  transcript_dict[tid][2] = end
+   # Convert to tuple
+   for k in transcript_dict:
+      c, s, e = transcript_dict[k]
+      transcript_dict[k] = (c, s, e)
+   return transcript_dict
 
 def get_transcript_coordinates(transcript_id):
-    """
-    Return (chrom, start, end) for transcript_id, or (None, None, None) if not found.
-    """
-    print(f"Getting transcript coordinates for {transcript_id}")
-    if transcript_id not in TRANSCRIPT_COORDS:
-        print(f"No coordinates found for {transcript_id}")
-        return (None, None, None)
+   """
+   Return (chrom, start, end) for transcript_id, or (None, None, None) if not found.
+   """
+   print(f"Getting transcript coordinates for {transcript_id}")
+   if transcript_id not in TRANSCRIPT_COORDS:
+      print(f"No coordinates found for {transcript_id}")
+      return (None, None, None)
 
-    chrom, min_start, max_end = TRANSCRIPT_COORDS[transcript_id]
-    print(f"Coordinates for {transcript_id}: {chrom}, {min_start}, {max_end}")
-    return (chrom, min_start, max_end)
+   chrom, min_start, max_end = TRANSCRIPT_COORDS[transcript_id]
+   print(f"Coordinates for {transcript_id}: {chrom}, {min_start}, {max_end}")
+   return (chrom, min_start, max_end)
 
 
 def parallel_handle_file(phy_file):
@@ -933,795 +932,857 @@ def parallel_handle_file(phy_file):
    haplotype_output_csv = os.path.join(args.output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
    
    if os.path.exists(output_csv):
-       print(f"Output {output_csv} already exists, skipping.")
-       sys.stdout.flush()
-       return None, []
+      print(f"Output {output_csv} already exists, skipping.")
+      sys.stdout.flush()
+      return None, []
    
    parsed_data = PARSED_PHY.get(phy_file, None)
    if not parsed_data:
-       print(f"ERROR: No parsed data found for {phy_file}.")
-       sys.stdout.flush()
-       return None, []
+      print(f"ERROR: No parsed data found for {phy_file}.")
+      sys.stdout.flush()
+      return None, []
    
    if not parsed_data['sequences']:
-       print(f"ERROR: No valid sequences in {phy_file}. Details:")
-       print(f"  - Invalid sequences: {parsed_data['local_invalid']}")
-       print(f"  - Stop codons found: {parsed_data['local_stop_codons']}")
-       print(f"  - Duplicates found: {parsed_data['local_duplicates']}")
-       print(f"  - File is combined: {os.path.basename(phy_file).startswith('combined_')}")
+      print(f"ERROR: No valid sequences in {phy_file}. Details:")
+      print(f"  - Invalid sequences: {parsed_data['local_invalid']}")
+      print(f"  - Stop codons found: {parsed_data['local_stop_codons']}")
+      print(f"  - Duplicates found: {parsed_data['local_duplicates']}")
+      print(f"  - File is combined: {os.path.basename(phy_file).startswith('combined_')}")
 
-       # For combined files, try reading directly to debug
-       if os.path.basename(phy_file).startswith('combined_'):
-           try:
-               with open(phy_file, 'r', encoding='utf-8', errors='replace') as f:
-                   header = f.readline().strip()
-                   first_seq = f.readline().strip() if header else ""
-                   print(f"  - Header: '{header}'")
-                   print(f"  - First sequence length: {len(first_seq) if first_seq else 0}")
-                   if first_seq:
-                       name_part = first_seq[:-int(header.split()[1])] if len(header.split()) > 1 else "?"
-                       print(f"  - First sequence name: '{name_part}'")
-                       print(f"  - Name ends with _L or _R: {name_part.endswith('_L') or name_part.endswith('_R')}")
-           except Exception as e:
-               print(f"  - Error reading file directly: {e}")
+      # For combined files, try reading directly to debug
+      if os.path.basename(phy_file).startswith('combined_'):
+         try:
+            with open(phy_file, 'r', encoding='utf-8', errors='replace') as f:
+               header = f.readline().strip()
+               first_seq = f.readline().strip() if header else ""
+               print(f"  - Header: '{header}'")
+               print(f"  - First sequence length: {len(first_seq) if first_seq else 0}")
+               if first_seq:
+                  name_part = first_seq[:-int(header.split()[1])] if len(header.split()) > 1 else "?"
+                  print(f"  - First sequence name: '{name_part}'")
+                  print(f"  - Name ends with _L or _R: {name_part.endswith('_L') or name_part.endswith('_R')}")
+         except Exception as e:
+            print(f"  - Error reading file directly: {e}")
    
-       sys.stdout.flush()
-       return None, []
+      sys.stdout.flush()
+      return None, []
 
-    GLOBAL_COUNTERS['invalid_seqs'] += parsed_data['local_invalid']
-    GLOBAL_COUNTERS['stop_codons'] += parsed_data['local_stop_codons']
-    GLOBAL_COUNTERS['total_seqs'] += parsed_data['local_total_seqs']
-    GLOBAL_COUNTERS['duplicates'] += parsed_data['local_duplicates']
+   GLOBAL_COUNTERS['invalid_seqs'] += parsed_data['local_invalid']
+   GLOBAL_COUNTERS['stop_codons'] += parsed_data['local_stop_codons']
+   GLOBAL_COUNTERS['total_seqs'] += parsed_data['local_total_seqs']
+   GLOBAL_COUNTERS['duplicates'] += parsed_data['local_duplicates']
 
-    sequences = parsed_data['sequences']
-    basename = os.path.basename(phy_file)
-    match = filename_pattern.match(basename)
-    if not match:
-        if basename.startswith("combined_"):
-            group_num = -1
-        else:
-            print(f"ERROR: Could not parse group number from filename: {basename}")
-            sys.exit(1)
-    else:
-        group_num = int(match.group(1))
+   sequences = parsed_data['sequences']
+   basename = os.path.basename(phy_file)
+   match = filename_pattern.match(basename)
+   if not match:
+      if basename.startswith("combined_"):
+         group_num = -1
+      else:
+         print(f"ERROR: Could not parse group number from filename: {basename}")
+         sys.exit(1)
+   else:
+      group_num = int(match.group(1))
    
-    if group_num == -1:
-        sample_groups = {}
-        for sname in sequences:
-            suffix = sname.rsplit('_', 1)[-1]
-            try:
-                inferred_group = int(suffix)
-            except ValueError:
-                inferred_group = 99
-            sample_groups[sname] = inferred_group
-    else:
-        sample_groups = {sname: group_num for sname in sequences.keys()}
+   if group_num == -1:
+      sample_groups = {}
+      for sname in sequences:
+         suffix = sname.rsplit('_', 1)[-1]
+         try:
+            inferred_group = int(suffix)
+         except ValueError:
+            inferred_group = 99
+         sample_groups[sname] = inferred_group
+   else:
+      sample_groups = {sname: group_num for sname in sequences.keys()}
 
    
-    all_samples = list(sample_groups.keys())
-    all_pairs = list(combinations(all_samples, 2))
+   all_samples = list(sample_groups.keys())
+   all_pairs = list(combinations(all_samples, 2))
 
-    if not all_pairs:
-        print(f"No pairs to compare for {phy_file}, skipping.")
-        sys.stdout.flush()
-        return None, []
+   if not all_pairs:
+      print(f"No pairs to compare for {phy_file}, skipping.")
+      sys.stdout.flush()
+      return None, []
 
-    temp_dir = os.path.join(args.output_dir, 'temp', cds_id)
-    os.makedirs(temp_dir, exist_ok=True)
+   temp_dir = os.path.join(args.output_dir, 'temp', cds_id)
+   os.makedirs(temp_dir, exist_ok=True)
 
-    to_compute = []
-    for pair in all_pairs:
-        check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
-        if not db_has_key(db_conn, check_key):
-            to_compute.append(pair)
+   to_compute = []
+   for pair in all_pairs:
+      check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
+      if not db_has_key(db_conn, check_key):
+         to_compute.append(pair)
 
-    print(f"File {phy_file} has {len(all_pairs)} total pairs, {len(to_compute)} remain to compute.")
-    sys.stdout.flush()
+   print(f"File {phy_file} has {len(all_pairs)} total pairs, {len(to_compute)} remain to compute.")
+   sys.stdout.flush()
 
-    info_entry = {
-        'phy_file': phy_file,
-        'cds_id': cds_id,
-        'output_csv': output_csv,
-        'haplotype_csv': haplotype_output_csv,
-        'all_pairs': all_pairs,
-        'sequences': sequences,
-        'sample_groups': sample_groups
-    }
+   info_entry = {
+      'phy_file': phy_file,
+      'cds_id': cds_id,
+      'output_csv': output_csv,
+      'haplotype_csv': haplotype_output_csv,
+      'all_pairs': all_pairs,
+      'sequences': sequences,
+      'sample_groups': sample_groups
+   }
 
-    tasks = []
-    for pair in to_compute:
-        task_args = (pair, sequences, sample_groups, cds_id, args.codeml_path, temp_dir, None)
-        tasks.append(task_args)
+   tasks = []
+   for pair in to_compute:
+      task_args = (pair, sequences, sample_groups, cds_id, args.codeml_path, temp_dir, None)
+      tasks.append(task_args)
 
-    return info_entry, tasks
+   return info_entry, tasks
+
+         
 
 # --------------------------------------------------------------------------------
 # MAIN SCRIPT
 # --------------------------------------------------------------------------------
 
 def main():
-    print("Starting main process...")
-    sys.stdout.flush()
-    parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+   print("Starting main process...")
+   sys.stdout.flush()
+   parser = argparse.ArgumentParser(description="Calculate pairwise dN/dS using PAML.")
+   script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # We do NOT change how codeml is discovered, to keep environment consistent
-    codeml_inferred = os.path.abspath(os.path.join(script_dir, '..', 'paml', 'bin', 'codeml'))
-    parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
-    parser.add_argument('--output_dir', type=str, default='/dev/shm/paml_output', help='Directory to store output files.')
-    parser.add_argument('--codeml_path', type=str, default=codeml_inferred, help='Path to codeml executable.')
-    global args
-    args = parser.parse_args()
+   # We do NOT change how codeml is discovered, to keep environment consistent
+   codeml_inferred = os.path.abspath(os.path.join(script_dir, '..', 'paml', 'bin', 'codeml'))
+   parser.add_argument('--phy_dir', type=str, default='.', help='Directory containing .phy files.')
+   parser.add_argument('--output_dir', type=str, default='/dev/shm/paml_output', help='Directory to store output files.')
+   parser.add_argument('--codeml_path', type=str, default=codeml_inferred, help='Path to codeml executable.')
+   global args
+   args = parser.parse_args()
 
-    # Attempt to load existing validation cache (sequence-level checks)
-    global VALIDATION_CACHE
-    if os.path.exists(VALIDATION_CACHE_FILE):
-        try:
-            with open(VALIDATION_CACHE_FILE, 'rb') as f:
-                VALIDATION_CACHE = pickle.load(f)
-            print(f"Loaded validation cache with {len(VALIDATION_CACHE)} entries.")
-        except Exception as e:
-            print(f"Could not load validation cache: {e}")
-    else:
-        print("No prior validation cache found.")
+   # Attempt to load existing validation cache (sequence-level checks)
+   global VALIDATION_CACHE
+   if os.path.exists(VALIDATION_CACHE_FILE):
+      try:
+         with open(VALIDATION_CACHE_FILE, 'rb') as f:
+            VALIDATION_CACHE = pickle.load(f)
+         print(f"Loaded validation cache with {len(VALIDATION_CACHE)} entries.")
+      except Exception as e:
+         print(f"Could not load validation cache: {e}")
+   else:
+      print("No prior validation cache found.")
 
-    print(f"PHY_DIR: {args.phy_dir}")
-    print(f"OUTPUT_DIR: {args.output_dir}")
-    print(f"CODEML_PATH: {args.codeml_path}")
-    sys.stdout.flush()
+   print(f"PHY_DIR: {args.phy_dir}")
+   print(f"OUTPUT_DIR: {args.output_dir}")
+   print(f"CODEML_PATH: {args.codeml_path}")
+   sys.stdout.flush()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+   os.makedirs(args.output_dir, exist_ok=True)
 
-    # Load counters from pickle
-    cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
-    load_cache(cache_file)
+   # Load counters from pickle
+   cache_file = os.path.join(args.output_dir, 'results_cache.pkl')
+   load_cache(cache_file)
 
-    # Initialize SQLite DB
-    db_path = os.path.join(args.output_dir, 'pairwise_results.sqlite')
-    global db_conn
-    db_conn = init_sqlite_db(db_path)
-    load_temp_dir_results(os.path.join(args.output_dir, 'temp'), db_conn)
+   # Initialize SQLite DB
+   db_path = os.path.join(args.output_dir, 'pairwise_results.sqlite')
+   global db_conn
+   db_conn = init_sqlite_db(db_path)
+   load_temp_dir_results(os.path.join(args.output_dir, 'temp'), db_conn)
 
-    # Pre-load any existing CSV data into the DB
-    csv_files_to_load = [
-        f for f in glob.glob(os.path.join(args.output_dir, '*.csv'))
-        if not f.endswith('_haplotype_stats.csv')
-    ]
-    print(f"Found {len(csv_files_to_load)} CSV files to scan for existing results.")
-    sys.stdout.flush()
+   # Pre-load any existing CSV data into the DB
+   csv_files_to_load = [
+      f for f in glob.glob(os.path.join(args.output_dir, '*.csv'))
+      if not f.endswith('_haplotype_stats.csv')
+   ]
+   print(f"Found {len(csv_files_to_load)} CSV files to scan for existing results.")
+   sys.stdout.flush()
 
-    parallel_csv = min(NUM_PARALLEL, len(csv_files_to_load))
-    count_loaded_from_csv = 0
-    if csv_files_to_load:
-        with multiprocessing.Pool(processes=parallel_csv) as pool:
-            all_csv_data = []
-            for result in tqdm(
-                pool.imap_unordered(_read_csv_rows, csv_files_to_load, chunksize=50),
-                total=len(csv_files_to_load),
-                desc="Loading CSVs"
-            ):
-                all_csv_data.append(result)
-            # Get the current number of rows in the pairwise_cache table before insertion
-            initial_row_count = db_count_keys(db_conn)
-            
-            # Collect all records from CSV data to insert into the database
-            records_to_insert = []
-            for result_list in all_csv_data:
-                for cache_key, record_tuple in result_list:
-                    records_to_insert.append((cache_key,) + record_tuple)
-            
-            # Perform batch insertion of all records with a single commit
-            if records_to_insert:
-                print(f"Starting batch insertion of {len(records_to_insert)} records into the database.")
-                sys.stdout.flush()
-                try:
-                    db_conn.executemany(
-                        "INSERT OR IGNORE INTO pairwise_cache "
-                        "(cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds) "
-                        "VALUES (?,?,?,?,?,?,?,?,?)",
-                        records_to_insert
-                    )
-                    db_conn.commit()
-                    # Calculate the number of new records inserted by comparing row counts
-                    final_row_count = db_count_keys(db_conn)
-                    count_loaded_from_csv = final_row_count - initial_row_count
-                    print(f"Batch insertion completed: {count_loaded_from_csv} new records added to the database.")
-                    sys.stdout.flush()
-                except Exception as e:
-                    print(f"Batch insertion failed with error: {e}")
-                    sys.stdout.flush()
-                    count_loaded_from_csv = 0
-            else:
-                print("No records found to insert from CSV data.")
-                sys.stdout.flush()
-                count_loaded_from_csv = 0
-
-    print(f"Preloaded {count_loaded_from_csv} comparison records from CSV into the SQLite DB.")
-
-    # Identify which .phy files already have final CSV (so we skip them)
-    existing_csv_files = glob.glob(os.path.join(args.output_dir, '*.csv'))
-    completed_cds_ids = set()
-    for csv_file in existing_csv_files:
-        if csv_file.endswith('_haplotype_stats.csv'):
-            continue
-        base_name = os.path.basename(csv_file).replace('.csv', '')
-        completed_cds_ids.add(base_name)
-
-    # Gather .phy files
-    phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
-    total_files = len(phy_files)
-    print(f"Found {total_files} phy files in {args.phy_dir}")
-    sys.stdout.flush()
-
-    # Create a mapping of gene_id to lists of PHY files for each group
-    gene_to_files = {}
-    
-    print("Parsing all .phy files and grouping by gene_id...")
-    sys.stdout.flush()
-    
-    for phy_file in phy_files:
-        basename = os.path.basename(phy_file)
-        match = filename_pattern.match(basename)
-        if not match:
-            continue  # skip files that don't match pattern
-            
-        # Extract components from new filename format
-        group_num = match.group(1)
-        gene_name = match.group(2)
-        gene_id = match.group(3)
-        transcript_id = match.group(4)
-        chromosome = match.group(5)
-        start_pos = match.group(6)
-        end_pos = match.group(7)
-        
-        # Parse the file once, store in PARSED_PHY
-        parsed_data = parse_phy_file_once(phy_file)
-        valid_seq_count = len(parsed_data['sequences'])
-        
-        if valid_seq_count == 0:
-            # If no valid sequences remain, skip
-            PARSED_PHY[phy_file] = parsed_data
-            continue
-            
-        # Store the PHY file path by gene_id and group
-        if gene_id not in gene_to_files:
-            gene_to_files[gene_id] = {0: [], 1: []}
-            
-        group_num_int = int(group_num)
-        if group_num_int in gene_to_files[gene_id]:
-            gene_to_files[gene_id][group_num_int].append(phy_file)
-            
-        # Store parsed data
-        PARSED_PHY[phy_file] = parsed_data
-    
-    # Find genes that have files in both group 0 and group 1
-    valid_genes = {}
-    for gene_id, group_files in gene_to_files.items():
-        if 0 in group_files and 1 in group_files and group_files[0] and group_files[1]:
-            valid_genes[gene_id] = group_files
-
-    # Collect all files from valid genes (those present in both groups)
-    all_phy_filtered = []
-    for gene_id, group_files in valid_genes.items():
-        all_phy_filtered.extend(group_files[0])
-        all_phy_filtered.extend(group_files[1])
-        if COMPARE_BETWEEN_GROUPS:
-            combined_path = os.path.join(args.phy_dir, f"combined_{gene_id}.phy")
-            seq_map = {}
-            file_list = group_files[0] + group_files[1]
-            alignment_length = None
-            for fpath in file_list:
-                # Re-open the original PHY file to get the original names
-                data = PARSED_PHY.get(fpath)
-                if data and data['sequences']:
-                    # First get the original PHY file content
-                    with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
-                        # Skip header line
-                        header_line = f.readline().strip()
-                        parts = header_line.split()
-                        if len(parts) != 2:
-                            continue
-                        try:
-                            num_seqs = int(parts[0])
-                            seq_len = int(parts[1])
-                        except ValueError:
-                            continue
-                        
-                        # Parse each line to get original names and sequences
-                        for i in range(num_seqs):
-                            line = f.readline().strip()
-                            if not line or len(line) < seq_len:
-                                continue
-                                
-                            # Extract sequence and original name
-                            sequence = line[-seq_len:]
-                            orig_name = line[:-seq_len]
-                            
-                            # Only add if the sequence is valid (exists in our processed data)
-                            for processed_name, processed_seq in data['sequences'].items():
-                                if sequence == processed_seq:
-                                    # Use the original name from the file
-                                    if alignment_length is None:
-                                        alignment_length = len(sequence)
-                                    else:
-                                        if len(sequence) != alignment_length:
-                                            print(f"Error: alignment length mismatch for gene {gene_id} in file {fpath}")
-                                            continue
-                                    seq_map[orig_name] = sequence
-                                    break
-
-            total_sequences = len(seq_map)
-            if total_sequences > 0 and alignment_length is not None:
-                with open(combined_path, 'w') as outf:
-                    outf.write(f"{total_sequences} {alignment_length}\n")
-                    for sname, sseq in seq_map.items():
-                        outf.write(f"{sname}{sseq}\n")
-                all_phy_filtered.append(combined_path)
-
-    print(f"Found {len(valid_genes)} genes with files in both groups.")
-    print(f"Total PHY files to process: {len(all_phy_filtered)}")
-    sys.stdout.flush()
-
-    # Next, skip any that already have final CSV
-    final_phy_files = []
-    for pf in all_phy_filtered:
-        cds_id = os.path.basename(pf).replace('.phy', '')
-        if cds_id in completed_cds_ids:
-            print(f"Skipping {pf}, final CSV/haplotype CSV present.")
-            continue
-        final_phy_files.append(pf)
-
-    print(f"After skipping existing CSVs, we have {len(final_phy_files)} files to process for pairwise dN/dS.")
-
-    # --------------------------------------------------------------------------------
-    # ESTIMATE TOTAL COMPARISONS
-    # --------------------------------------------------------------------------------
-
-    # We'll do a quick pass to see how many total comparisons we expect.
-    # We do NOT parse files again. Instead, we reuse PARSED_PHY data.
-    def quick_estimate(phy_path):
-        base = os.path.basename(phy_path)
-        match = filename_pattern.match(base)
-        if not match:
-            if base.startswith("combined_"):
-                group_num = -1
-            else:
-                return (0, 0)
-        else:
-            group_num = int(match.group(1))
-    
-        pdict = PARSED_PHY.get(phy_path, None)
-        if not pdict or not pdict['sequences']:
-            return (0, 0)
-    
-        if group_num == -1:
-            sample_groups = {}
-            for sname in pdict['sequences']:
-                suffix = sname.rsplit('_', 1)[-1]
-                try:
-                    inferred_group = int(suffix)
-                except ValueError:
-                    inferred_group = 99
-                sample_groups[sname] = inferred_group
-        else:
-            sample_groups = {name: group_num for name in pdict['sequences']}
-    
-        seq_names = list(sample_groups.keys())
-        pairs = list(combinations(seq_names, 2))
-        if pairs:
-            return (1, len(pairs))
-        else:
-            return (0, 0)
-
-    # Summarize
-    totals = [quick_estimate(x) for x in final_phy_files]
-    total_cds = sum(t[0] for t in totals)
-    total_comps = sum(t[1] for t in totals)
-    GLOBAL_COUNTERS['total_cds'] = total_cds
-    GLOBAL_COUNTERS['total_comparisons'] = total_comps
-
-    # --------------------------------------------------------------------------------
-    # LOG START SUMMARY
-    # --------------------------------------------------------------------------------
-    total_seq_so_far = GLOBAL_COUNTERS['total_seqs']
-    invalid_seq_so_far = GLOBAL_COUNTERS['invalid_seqs']
-    duplicates_so_far = GLOBAL_COUNTERS['duplicates']
-    stop_codons_so_far = GLOBAL_COUNTERS['stop_codons']
-
-    # These are from any previous runs loaded via results_cache.pkl
-    valid_sequences = total_seq_so_far - invalid_seq_so_far
-    valid_percentage = (valid_sequences / total_seq_so_far * 100) if total_seq_so_far > 0 else 0
-
-    logging.info("=== START OF RUN SUMMARY ===")
-    logging.info(f"Total PHYLIP files found: {total_files}")
-    logging.info(f"Total sequences encountered (prev sessions): {total_seq_so_far}")
-    logging.info(f"Invalid sequences (prev sessions): {invalid_seq_so_far}")
-    logging.info(f"Duplicates (prev sessions): {duplicates_so_far}")
-    logging.info(f"Stop codons (prev sessions): {stop_codons_so_far}")
-    logging.info(f"Valid sequences so far: {valid_sequences} ({valid_percentage:.2f}%)")
-    logging.info(f"Total CDS after gene association: {GLOBAL_COUNTERS['total_cds']}")
-    logging.info(f"Expected new comparisons: {GLOBAL_COUNTERS['total_comparisons']}")
-
-    cached_results_count = db_count_keys(db_conn)
-    remaining = GLOBAL_COUNTERS['total_comparisons'] - cached_results_count
-    logging.info(f"Cache already has {cached_results_count} results. {remaining} remain to run.")
-    sys.stdout.flush()
-
-    if GLOBAL_COUNTERS['total_comparisons'] > 0:
-        ETA_DATA['start_time'] = time.time()
-
-    start_time = time.time()
-    completed_comparisons = cached_results_count
-
-    # --------------------------------------------------------------------------------
-    # FUNCTION TO RUN A SINGLE CDS FILE (final pairwise)
-    # --------------------------------------------------------------------------------
-
-    def run_cds_file(phy_file, output_dir, codeml_path, db_conn):
-        """
-        Perform the actual pairwise analysis on one .phy file that we
-        have confirmed is allowed and not already completed. 
-        Increments global counters (exactly once) for the valid/invalid 
-        data from this file if it has not yet been used in a prior run.
-        """
-        print(f"Running CDS file: {phy_file}")
-        sys.stdout.flush()
-
-        cds_id = os.path.basename(phy_file).replace('.phy', '')
-        mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
-        output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}.csv')
-        haplotype_output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
-
-        if os.path.exists(output_csv):
-            print(f"Output {output_csv} already exists, skipping.")
+   parallel_csv = min(NUM_PARALLEL, len(csv_files_to_load))
+   count_loaded_from_csv = 0
+   if csv_files_to_load:
+      with multiprocessing.Pool(processes=parallel_csv) as pool:
+         all_csv_data = []
+         for result in tqdm(
+            pool.imap_unordered(_read_csv_rows, csv_files_to_load, chunksize=50),
+            total=len(csv_files_to_load),
+            desc="Loading CSVs"
+         ):
+            all_csv_data.append(result)
+         # Get the current number of rows in the pairwise_cache table before insertion
+         initial_row_count = db_count_keys(db_conn)
+         
+         # Collect all records from CSV data to insert into the database
+         records_to_insert = []
+         for result_list in all_csv_data:
+            for cache_key, record_tuple in result_list:
+               records_to_insert.append((cache_key,) + record_tuple)
+         
+         # Perform batch insertion of all records with a single commit
+         if records_to_insert:
+            print(f"Starting batch insertion of {len(records_to_insert)} records into the database.")
             sys.stdout.flush()
-            return 0  # no new comparisons
-
-        parsed_data = PARSED_PHY.get(phy_file, None)
-        if not parsed_data or not parsed_data['sequences']:
-            print(f"No valid sequences for {phy_file}, skipping.")
+            try:
+               db_conn.executemany(
+                  "INSERT OR IGNORE INTO pairwise_cache "
+                  "(cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds) "
+                  "VALUES (?,?,?,?,?,?,?,?,?)",
+                  records_to_insert
+               )
+               db_conn.commit()
+               # Calculate the number of new records inserted by comparing row counts
+               final_row_count = db_count_keys(db_conn)
+               count_loaded_from_csv = final_row_count - initial_row_count
+               print(f"Batch insertion completed: {count_loaded_from_csv} new records added to the database.")
+               sys.stdout.flush()
+            except Exception as e:
+               print(f"Batch insertion failed with error: {e}")
+               sys.stdout.flush()
+               count_loaded_from_csv = 0
+         else:
+            print("No records found to insert from CSV data.")
             sys.stdout.flush()
-            return 0
+            count_loaded_from_csv = 0
 
-        # Before we do anything, increment global counters exactly once 
-        # for this file's local stats (so they appear in final summary).
-        GLOBAL_COUNTERS['invalid_seqs'] += parsed_data['local_invalid']
-        GLOBAL_COUNTERS['stop_codons']  += parsed_data['local_stop_codons']
-        GLOBAL_COUNTERS['total_seqs']   += parsed_data['local_total_seqs']
-        GLOBAL_COUNTERS['duplicates']   += parsed_data['local_duplicates']
+   print(f"Preloaded {count_loaded_from_csv} comparison records from CSV into the SQLite DB.")
 
-        sequences = parsed_data['sequences']
-        basename = os.path.basename(phy_file)
-        match = filename_pattern.match(basename)
-        if not match:
-            if basename.startswith("combined_"):
-                group_num = -1
-            else:
-                print(f"ERROR: Could not parse group number from filename: {basename}")
-                sys.exit(1)
-        else:
-            group_num = int(match.group(1))
+   # Identify which .phy files already have final CSV (so we skip them)
+   existing_csv_files = glob.glob(os.path.join(args.output_dir, '*.csv'))
+   completed_cds_ids = set()
+   for csv_file in existing_csv_files:
+      if csv_file.endswith('_haplotype_stats.csv'):
+         continue
+      base_name = os.path.basename(csv_file).replace('.csv', '')
+      completed_cds_ids.add(base_name)
 
-        # Build a sample_groups map
-        if group_num == -1:
-            sample_groups = {}
-            for sname in sequences:
-                suffix = sname.rsplit('_', 1)[-1]
-                try:
-                    inferred_group = int(suffix)
-                except ValueError:
-                    inferred_group = 99
-                sample_groups[sname] = inferred_group
-        else:
-            sample_groups = {sname: group_num for sname in sequences.keys()}
+   # Gather .phy files
+   phy_files = glob.glob(os.path.join(args.phy_dir, '*.phy'))
+   total_files = len(phy_files)
+   print(f"Found {total_files} phy files in {args.phy_dir}")
+   sys.stdout.flush()
 
-        # Generate all pairs
-        if COMPARE_BETWEEN_GROUPS:
-            all_samples = list(sample_groups.keys())
-            all_pairs = list(combinations(all_samples, 2))
-        else:
-            # For within-group only
-            group_samples = list(sample_groups.keys())  # single group
-            all_pairs = list(combinations(group_samples, 2))
-
-        if not all_pairs:
-            print(f"No pairs to compare for {phy_file}, skipping.")
-            sys.stdout.flush()
-            return 0
-
-        temp_dir = os.path.join(output_dir, 'temp', cds_id)
-        os.makedirs(temp_dir, exist_ok=True)
-
-        # Check which pairs remain to be computed (db cache)
-        to_compute = []
-        for pair in all_pairs:
-            check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
-            if not db_has_key(db_conn, check_key):
-                to_compute.append(pair)
-
-        if not to_compute:
-            print(f"All {len(all_pairs)} pairs for {cds_id} are in DB, skipping codeml.")
-            sys.stdout.flush()
-            return 0
-
-        print(f"Computing {len(to_compute)} new pairs out of {len(all_pairs)} total for {cds_id}.")
-        sys.stdout.flush()
-
-        # Prepare arguments for parallel processing
-        pool_args = [
-            (pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, None)
-            for pair in to_compute
-        ]
-        num_processes = min(NUM_PARALLEL, len(to_compute))
-        print(f"Starting codeml execution on {len(to_compute)} pairs using {num_processes} processes.")
-        sys.stdout.flush()
-
-        results_accum = []
-        with multiprocessing.Pool(processes=num_processes) as pool:
-            print(f"Processing {len(to_compute)} pairs in parallel for {cds_id}.")
-            sys.stdout.flush()
-            for r in pool.imap_unordered(process_pair, pool_args, chunksize=10):
-                if r is not None:
-                    results_accum.append(r)
-            print(f"Completed processing {len(results_accum)} results for {cds_id}.")
-            sys.stdout.flush()
-
-        # Insert all new results into DB
-        for r in results_accum:
-            seq1, seq2, grp1, grp2, dn, ds, omega, cid = r
-            newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
-            record_tuple = (seq1, seq2, grp1, grp2, dn, ds, omega, cid)
-            db_insert_or_ignore(db_conn, newkey, record_tuple)
-
-        # Now gather final results (entire set) from DB for CSV output
-        relevant_keys = []
-        for pair in all_pairs:
-            final_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
-            relevant_keys.append(final_key)
-
-        results_for_csv = []
-        CHUNK_SIZE = 10000
-        start_index = 0
-        while start_index < len(relevant_keys):
-            chunk_keys = relevant_keys[start_index : start_index + CHUNK_SIZE]
-            in_clause = ",".join(["?"] * len(chunk_keys))
-            sql = f"""
-                SELECT cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds
-                FROM pairwise_cache
-                WHERE cache_key IN ({in_clause})
-            """
-            rows = db_conn.execute(sql, chunk_keys).fetchall()
-            for row in rows:
-                # row is (cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds)
-                results_for_csv.append(row[1:])  # skip the cache_key index
-            start_index += CHUNK_SIZE
-
-        # Convert to dataframe
-        df = pd.DataFrame(
-            results_for_csv,
-            columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS']
-        )
-        df.to_csv(output_csv, index=False)
-        print(f"Results saved to {output_csv}")
-        sys.stdout.flush()
-
-        # Build haplotype-level stats
-        hap_stats = []
-        for sample in sequences.keys():
-            sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
-            omega_vals = sample_df['omega'].dropna()
-            omega_vals = omega_vals[~omega_vals.isin([-1, 99])]
-            if not omega_vals.empty:
-                mean_omega = omega_vals.mean()
-                median_omega = omega_vals.median()
-            else:
-                mean_omega = np.nan
-                median_omega = np.nan
-            hap_stats.append({
-                'Haplotype': sample,
-                'Group': sample_groups[sample],
-                'CDS': cds_id,
-                'Mean_dNdS': mean_omega,
-                'Median_dNdS': median_omega,
-                'Num_Comparisons': len(omega_vals)
-            })
-        hap_df = pd.DataFrame(hap_stats)
-        hap_df.to_csv(haplotype_output_csv, index=False)
-        print(f"Haplotype stats saved to {haplotype_output_csv}")
-        sys.stdout.flush()
-
-        return len(to_compute)
-
-    # --------------------------------------------------------------------------------
-    # PROCESS EACH ALLOWED FILE (Unified Parallel Approach)
-    # --------------------------------------------------------------------------------
-
-    # This gathers all pairwise tasks from all final_phy_files in one pool,
-    # then we write each file's CSV after all computations complete.
-
-    all_pairs_tasks = []
-    file_info_list = []
-
-    
-    with multiprocessing.Pool(processes=min(NUM_PARALLEL, len(final_phy_files))) as pool:
-        results = pool.map(parallel_handle_file, final_phy_files)
-    
-    for res in results:
-        if res is not None:
-            info_entry, tasks = res
-            if info_entry is not None:
-                file_info_list.append(info_entry)
-            for t in tasks:
-                all_pairs_tasks.append(t)
-
-    # Run all remaining pairwise comparisons in a single Pool
-    if all_pairs_tasks:
-        print(f"Running a single parallel pool for {len(all_pairs_tasks)} comparisons across all CDS.")
-        sys.stdout.flush()
-        num_processes = min(NUM_PARALLEL, len(all_pairs_tasks))
-        results_done = 0  # Tracks number of processed comparisons for ETA
-        with multiprocessing.Pool(processes=num_processes) as pool:
-            # Buffer to store results for batch insertion into SQLite
-            records_buffer = []
-            for result in pool.imap_unordered(process_pair, all_pairs_tasks, chunksize=10):
-                if result is not None:
-                    seq1, seq2, grp1, grp2, dn, ds, omega, cid = result
-                    newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
-                    record_tuple = (seq1, seq2, grp1, grp2, dn, ds, omega, cid)
-                    records_buffer.append((newkey, record_tuple))
-                results_done += 1  # Increment after each processed result
-                if results_done % 1000 == 0:  # Only update ETA every few results
-                    completed_comparisons = db_count_keys(db_conn)
-                    print_eta(completed_comparisons, GLOBAL_COUNTERS['total_comparisons'], ETA_DATA['start_time'], ETA_DATA)
-            # Perform batch insertion of all collected results into SQLite
-            if records_buffer:
-                db_conn.executemany(
-                    "INSERT OR IGNORE INTO pairwise_cache (cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [(key, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], rec[6], rec[7]) for key, rec in records_buffer]
-                )
-                db_conn.commit()
-    else:
-        print("No new comparisons to compute across all CDS.")
-        sys.stdout.flush()
-
-    # Build final CSV and haplotype stats for each file
-    for info_entry in file_info_list:
-        cds_id = info_entry['cds_id']
-        output_csv = info_entry['output_csv']
-        haplotype_output_csv = info_entry['haplotype_csv']
-        all_pairs = info_entry['all_pairs']
-        sequences = info_entry['sequences']
-        sample_groups = info_entry['sample_groups']
-
-        if os.path.exists(output_csv):
-            print(f"Skipping CSV creation, file {output_csv} already present.")
-            sys.stdout.flush()
-            continue
-
-        # Gather all results for these pairs from DB
-        relevant_keys = []
-        for pair in all_pairs:
-            final_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
-            relevant_keys.append(final_key)
-
-        results_for_csv = []
-        CHUNK_SIZE = 10000
-        start_index = 0
-        while start_index < len(relevant_keys):
-            chunk_keys = relevant_keys[start_index : start_index + CHUNK_SIZE]
-            in_clause = ",".join(["?"] * len(chunk_keys))
-            sql = f"""
-                SELECT cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds
-                FROM pairwise_cache
-                WHERE cache_key IN ({in_clause})
-            """
-            rows = db_conn.execute(sql, chunk_keys).fetchall()
-            for row in rows:
-                results_for_csv.append(row[1:])
-            start_index += CHUNK_SIZE
-
-        df = pd.DataFrame(
-            results_for_csv,
-            columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS']
-        )
-        df.to_csv(output_csv, index=False)
-        print(f"Results for {cds_id} saved to {output_csv}")
-        sys.stdout.flush()
-
-        # Build haplotype-level stats
-        hap_stats = []
-        for sample in sequences.keys():
-            sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
-            omega_vals = sample_df['omega'].dropna()
-            omega_vals = omega_vals[~omega_vals.isin([-1, 99])]
-            if not omega_vals.empty:
-                mean_omega = omega_vals.mean()
-                median_omega = omega_vals.median()
-            else:
-                mean_omega = np.nan
-                median_omega = np.nan
-            hap_stats.append({
-                'Haplotype': sample,
-                'Group': sample_groups[sample],
-                'CDS': cds_id,
-                'Mean_dNdS': mean_omega,
-                'Median_dNdS': median_omega,
-                'Num_Comparisons': len(omega_vals)
-            })
-        hap_df = pd.DataFrame(hap_stats)
-        hap_df.to_csv(haplotype_output_csv, index=False)
-        print(f"Haplotype stats for {cds_id} saved to {haplotype_output_csv}")
-        sys.stdout.flush()
-
-    # --------------------------------------------------------------------------------
-    # FINAL SUMMARY & CLEANUP
-    # --------------------------------------------------------------------------------
-    end_time = time.time()
-
-    total_seqs = GLOBAL_COUNTERS['total_seqs']
-    invalid_seqs = GLOBAL_COUNTERS['invalid_seqs']
-    duplicates = GLOBAL_COUNTERS['duplicates']
-    total_cds_processed = GLOBAL_COUNTERS['total_cds']
-    total_comps_planned = GLOBAL_COUNTERS['total_comparisons']
-    stop_codons = GLOBAL_COUNTERS['stop_codons']
-
-    valid_seqs_final = total_seqs - invalid_seqs
-    final_invalid_pct = (invalid_seqs / total_seqs * 100) if total_seqs > 0 else 0
-
-    logging.info("=== END OF RUN SUMMARY ===")
-    logging.info(f"Total PHYLIP found: {total_files}")
-    logging.info(f"Total seq processed: {total_seqs}")
-    logging.info(f"Invalid seq: {invalid_seqs} ({final_invalid_pct:.2f}%)")
-    logging.info(f"Sequences with stop codons: {stop_codons}")
-    logging.info(f"Duplicates: {duplicates}")
-    logging.info(f"Total CDS (final) after gene association: {total_cds_processed}")
-    logging.info(f"Planned comparisons: {total_comps_planned}")
-    current_db_count = db_count_keys(db_conn)
-    logging.info(f"Completed comps: {current_db_count}")
-
-    if ETA_DATA['start_time']:
-        run_minutes = (end_time - ETA_DATA['start_time']) / 60
-        logging.info(f"Total time: {run_minutes:.2f} min")
-    else:
-        total_run_min = (end_time - start_time) / 60
-        logging.info(f"Total time: {total_run_min:.2f} min")
-
-    save_cache(cache_file, GLOBAL_COUNTERS)
-
-    try:
-        with open(VALIDATION_CACHE_FILE, 'wb') as f:
-            pickle.dump(VALIDATION_CACHE, f)
-        print(f"Validation cache saved with {len(VALIDATION_CACHE)} entries.")
-    except Exception as e:
-        print(f"Could not save validation cache: {e}")
-
-    # Consolidate all final CSVs if desired
-    def consolidate_all_csvs(csv_dir, final_csv='all_pairwise_results.csv'):
-        all_dfs = []
-        potential_csvs = glob.glob(os.path.join(csv_dir, '*.csv'))
-        for cf in potential_csvs:
-           if cf.endswith('_haplotype_stats.csv'):
-                continue
-           df = pd.read_csv(cf)
-           all_dfs.append(df)
-        if all_dfs:
-            combined = pd.concat(all_dfs, ignore_index=True)
-            outpath = os.path.join(csv_dir, final_csv)
-            combined.to_csv(outpath, index=False)
-            print(f"Final combined CSV with {len(combined)} rows saved to {outpath}")
-            shutil.copy2(outpath, os.path.join('.', final_csv))
-            print(f"Copied final CSV to current directory: {final_csv}")
-        else:
-            print("No CSV files found to combine at the end.")
-
-    consolidate_all_csvs(args.output_dir)
+   # Create a mapping of gene_id to lists of PHY files for each group
+   gene_to_files = {}
    
-    db_conn.close()
-    logging.info("dN/dS analysis done.")
-    print("dN/dS analysis done.")
-    sys.stdout.flush()
+   print("Parsing all .phy files and grouping by gene_id...")
+   sys.stdout.flush()
+   
+   for phy_file in phy_files:
+      basename = os.path.basename(phy_file)
+      match = filename_pattern.match(basename)
+      if not match:
+         continue  # skip files that don't match pattern
+         
+      # Extract components from new filename format
+      group_num = match.group(1)
+      gene_name = match.group(2)
+      gene_id = match.group(3)
+      transcript_id = match.group(4)
+      chromosome = match.group(5)
+      start_pos = match.group(6)
+      end_pos = match.group(7)
+      
+      # Parse the file once, store in PARSED_PHY
+      parsed_data = parse_phy_file_once(phy_file)
+      valid_seq_count = len(parsed_data['sequences'])
+      
+      if valid_seq_count == 0:
+         # If no valid sequences remain, skip
+         PARSED_PHY[phy_file] = parsed_data
+         continue
+         
+      # Store the PHY file path by gene_id and group
+      if gene_id not in gene_to_files:
+         gene_to_files[gene_id] = {0: [], 1: []}
+         
+      group_num_int = int(group_num)
+      if group_num_int in gene_to_files[gene_id]:
+         gene_to_files[gene_id][group_num_int].append(phy_file)
+         
+      # Store parsed data
+      PARSED_PHY[phy_file] = parsed_data
+   
+   # Find genes that have files in both group 0 and group 1
+   valid_genes = {}
+   for gene_id, group_files in gene_to_files.items():
+      if 0 in group_files and 1 in group_files and group_files[0] and group_files[1]:
+         valid_genes[gene_id] = group_files
+
+   # Collect all files from valid genes (those present in both groups)
+   all_phy_filtered = []
+   for gene_id, group_files in valid_genes.items():
+      all_phy_filtered.extend(group_files[0])
+      all_phy_filtered.extend(group_files[1])
+      if COMPARE_BETWEEN_GROUPS:
+         combined_path = os.path.join(args.phy_dir, f"combined_{gene_id}.phy")
+         seq_map = {}
+         file_list = group_files[0] + group_files[1]
+         alignment_length = None
+         for fpath in file_list:
+            # Re-open the original PHY file to get the original names
+            data = PARSED_PHY.get(fpath)
+            if data and data['sequences']:
+               # First get the original PHY file content
+               with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                  # Skip header line
+                  header_line = f.readline().strip()
+                  parts = header_line.split()
+                  if len(parts) != 2:
+                     continue
+                  try:
+                     num_seqs = int(parts[0])
+                     seq_len = int(parts[1])
+                  except ValueError:
+                     continue
+                  
+                  # Parse each line to get original names and sequences
+                  for i in range(num_seqs):
+                     line = f.readline().strip()
+                     if not line or len(line) < seq_len:
+                        continue
+                        
+                     # Extract sequence and original name
+                     sequence = line[-seq_len:]
+                     orig_name = line[:-seq_len]
+                     
+                     # Only add if the sequence is valid (exists in our processed data)
+                     for processed_name, processed_seq in data['sequences'].items():
+                        if sequence == processed_seq:
+                           # Use the original name from the file
+                           if alignment_length is None:
+                              alignment_length = len(sequence)
+                           else:
+                              if len(sequence) != alignment_length:
+                                 print(f"Error: alignment length mismatch for gene {gene_id} in file {fpath}")
+                                 continue
+                           seq_map[orig_name] = sequence
+                           break
+
+         total_sequences = len(seq_map)
+         if total_sequences > 0 and alignment_length is not None:
+            with open(combined_path, 'w') as outf:
+               outf.write(f"{total_sequences} {alignment_length}\n")
+               for sname, sseq in seq_map.items():
+                  outf.write(f"{sname}{sseq}\n")
+            all_phy_filtered.append(combined_path)
+
+   print(f"Found {len(valid_genes)} genes with files in both groups.")
+   print(f"Total PHY files to process: {len(all_phy_filtered)}")
+   sys.stdout.flush()
+
+   # Next, skip any that already have final CSV
+   final_phy_files = []
+   for pf in all_phy_filtered:
+      cds_id = os.path.basename(pf).replace('.phy', '')
+      if cds_id in completed_cds_ids:
+         print(f"Skipping {pf}, final CSV/haplotype CSV present.")
+         continue
+      final_phy_files.append(pf)
+
+   print(f"After skipping existing CSVs, we have {len(final_phy_files)} files to process for pairwise dN/dS.")
+
+   # --------------------------------------------------------------------------------
+   # ESTIMATE TOTAL COMPARISONS
+   # --------------------------------------------------------------------------------
+
+   # We'll do a quick pass to see how many total comparisons we expect.
+   # We do NOT parse files again. Instead, we reuse PARSED_PHY data.
+   def quick_estimate(phy_path):
+      base = os.path.basename(phy_path)
+      match = filename_pattern.match(base)
+      if not match:
+         if base.startswith("combined_"):
+            group_num = -1
+         else:
+            return (0, 0)
+      else:
+         group_num = int(match.group(1))
+   
+      pdict = PARSED_PHY.get(phy_path, None)
+      if not pdict or not pdict['sequences']:
+         return (0, 0)
+   
+      if group_num == -1:
+         sample_groups = {}
+         for sname in pdict['sequences']:
+            suffix = sname.rsplit('_', 1)[-1]
+            try:
+               inferred_group = int(suffix)
+            except ValueError:
+               inferred_group = 99
+            sample_groups[sname] = inferred_group
+      else:
+         sample_groups = {name: group_num for name in pdict['sequences']}
+   
+      seq_names = list(sample_groups.keys())
+      pairs = list(combinations(seq_names, 2))
+      if pairs:
+         return (1, len(pairs))
+      else:
+         return (0, 0)
+
+   # Summarize
+   totals = [quick_estimate(x) for x in final_phy_files]
+   total_cds = sum(t[0] for t in totals)
+   total_comps = sum(t[1] for t in totals)
+   GLOBAL_COUNTERS['total_cds'] = total_cds
+   GLOBAL_COUNTERS['total_comparisons'] = total_comps
+
+   # --------------------------------------------------------------------------------
+   # LOG START SUMMARY
+   # --------------------------------------------------------------------------------
+   total_seq_so_far = GLOBAL_COUNTERS['total_seqs']
+   invalid_seq_so_far = GLOBAL_COUNTERS['invalid_seqs']
+   duplicates_so_far = GLOBAL_COUNTERS['duplicates']
+   stop_codons_so_far = GLOBAL_COUNTERS['stop_codons']
+
+   # These are from any previous runs loaded via results_cache.pkl
+   valid_sequences = total_seq_so_far - invalid_seq_so_far
+   valid_percentage = (valid_sequences / total_seq_so_far * 100) if total_seq_so_far > 0 else 0
+
+   logging.info("=== START OF RUN SUMMARY ===")
+   logging.info(f"Total PHYLIP files found: {total_files}")
+   logging.info(f"Total sequences encountered (prev sessions): {total_seq_so_far}")
+   logging.info(f"Invalid sequences (prev sessions): {invalid_seq_so_far}")
+   logging.info(f"Duplicates (prev sessions): {duplicates_so_far}")
+   logging.info(f"Stop codons (prev sessions): {stop_codons_so_far}")
+   logging.info(f"Valid sequences so far: {valid_sequences} ({valid_percentage:.2f}%)")
+   logging.info(f"Total CDS after gene association: {GLOBAL_COUNTERS['total_cds']}")
+   logging.info(f"Expected new comparisons: {GLOBAL_COUNTERS['total_comparisons']}")
+
+   cached_results_count = db_count_keys(db_conn)
+   remaining = GLOBAL_COUNTERS['total_comparisons'] - cached_results_count
+   logging.info(f"Cache already has {cached_results_count} results. {remaining} remain to run.")
+   sys.stdout.flush()
+
+   if GLOBAL_COUNTERS['total_comparisons'] > 0:
+      ETA_DATA['start_time'] = time.time()
+
+   start_time = time.time()
+   completed_comparisons = cached_results_count
+
+   # --------------------------------------------------------------------------------
+   # FUNCTION TO RUN A SINGLE CDS FILE (final pairwise)
+   # --------------------------------------------------------------------------------
+
+   def run_cds_file(phy_file, output_dir, codeml_path, db_conn):
+      """
+      Perform the actual pairwise analysis on one .phy file that we
+      have confirmed is allowed and not already completed. 
+      Increments global counters (exactly once) for the valid/invalid 
+      data from this file if it has not yet been used in a prior run.
+      """
+      print(f"Running CDS file: {phy_file}")
+      sys.stdout.flush()
+      
+      cds_id = os.path.basename(phy_file).replace('.phy', '')
+      mode_suffix = "_all" if COMPARE_BETWEEN_GROUPS else ""
+      output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}.csv')
+      haplotype_output_csv = os.path.join(output_dir, f'{cds_id}{mode_suffix}_haplotype_stats.csv')
+      
+      if os.path.exists(output_csv):
+         print(f"Output {output_csv} already exists, skipping.")
+         sys.stdout.flush()
+         return 0  # no new comparisons
+      
+      parsed_data = PARSED_PHY.get(phy_file, None)
+      
+      if not parsed_data:
+         print(f"ERROR: No parsed data found for {phy_file}. File may not have been processed during initial scan.")
+         sys.stdout.flush()
+         return 0
+      
+      if not parsed_data['sequences']:
+         print(f"ERROR: No valid sequences in {phy_file}. Detailed diagnosis:")
+         print(f"  - Invalid sequence count: {parsed_data['local_invalid']}")
+         print(f"  - Stop codons detected: {parsed_data['local_stop_codons']}")
+         print(f"  - Duplicate sequences detected: {parsed_data['local_duplicates']}")
+         print(f"  - Is combined file: {os.path.basename(phy_file).startswith('combined_')}")
+         
+         # For combined files, perform additional diagnostics
+         if os.path.basename(phy_file).startswith('combined_'):
+            try:
+               print(f"  - Detailed combined file analysis:")
+               with open(phy_file, 'r', encoding='utf-8', errors='replace') as f:
+                  header = f.readline().strip()
+                  header_parts = header.split()
+                  if len(header_parts) == 2:
+                     expected_seqs, seq_len = int(header_parts[0]), int(header_parts[1])
+                     print(f"    - Header claims {expected_seqs} sequences of length {seq_len}")
+                     
+                     # Read first few sequences to diagnose
+                     for i in range(min(expected_seqs, 3)):  # Read at most 3 for diagnostics
+                        line = f.readline().strip()
+                        if not line:
+                           print(f"    - Line {i+1}: Empty line where sequence expected")
+                           continue
+                           
+                        if len(line) < seq_len:
+                           print(f"    - Line {i+1}: Sequence too short ({len(line)} < {seq_len})")
+                           continue
+                           
+                        name = line[:-seq_len]
+                        sequence = line[-seq_len:]
+                        print(f"    - Line {i+1}: Name='{name}', valid ending: {name.endswith('_L') or name.endswith('_R')}")
+                        
+                        # Check sequence for stop codons
+                        if len(sequence) % 3 != 0:
+                           print(f"    - Line {i+1}: Sequence length not divisible by 3 ({len(sequence)})")
+                        
+                        stop_codons = {'TAA', 'TAG', 'TGA'}
+                        has_stop = False
+                        for j in range(0, len(sequence) - 2, 3):
+                           codon = sequence[j:j+3]
+                           if codon in stop_codons:
+                              print(f"    - Line {i+1}: Contains stop codon {codon} at position {j}")
+                              has_stop = True
+                              break
+                        if not has_stop:
+                           print(f"    - Line {i+1}: No stop codons found")
+                        
+                        invalid_chars = set(sequence.upper()) - set('ATCGN-')
+                        if invalid_chars:
+                           print(f"    - Line {i+1}: Contains invalid characters: {invalid_chars}")
+                  else:
+                     print(f"    - Invalid header format: '{header}'")
+            except Exception as e:
+               print(f"  - Error during detailed diagnosis: {e}")
+         
+         sys.stdout.flush()
+         return 0
+
+      # Before we do anything, increment global counters exactly once 
+      # for this file's local stats (so they appear in final summary).
+      GLOBAL_COUNTERS['invalid_seqs'] += parsed_data['local_invalid']
+      GLOBAL_COUNTERS['stop_codons']  += parsed_data['local_stop_codons']
+      GLOBAL_COUNTERS['total_seqs']   += parsed_data['local_total_seqs']
+      GLOBAL_COUNTERS['duplicates']   += parsed_data['local_duplicates']
+
+      sequences = parsed_data['sequences']
+      basename = os.path.basename(phy_file)
+      match = filename_pattern.match(basename)
+      if not match:
+         if basename.startswith("combined_"):
+            group_num = -1
+         else:
+            print(f"ERROR: Could not parse group number from filename: {basename}")
+            sys.exit(1)
+      else:
+         group_num = int(match.group(1))
+
+      # Build a sample_groups map
+      if group_num == -1:
+         sample_groups = {}
+         for sname in sequences:
+            suffix = sname.rsplit('_', 1)[-1]
+            try:
+               inferred_group = int(suffix)
+            except ValueError:
+               inferred_group = 99
+            sample_groups[sname] = inferred_group
+      else:
+         sample_groups = {sname: group_num for sname in sequences.keys()}
+
+      # Generate all pairs
+      if COMPARE_BETWEEN_GROUPS:
+         all_samples = list(sample_groups.keys())
+         all_pairs = list(combinations(all_samples, 2))
+      else:
+         # For within-group only
+         group_samples = list(sample_groups.keys())  # single group
+         all_pairs = list(combinations(group_samples, 2))
+
+      if not all_pairs:
+         print(f"No pairs to compare for {phy_file}, skipping.")
+         sys.stdout.flush()
+         return 0
+
+      temp_dir = os.path.join(output_dir, 'temp', cds_id)
+      os.makedirs(temp_dir, exist_ok=True)
+
+      # Check which pairs remain to be computed (db cache)
+      to_compute = []
+      for pair in all_pairs:
+         check_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
+         if not db_has_key(db_conn, check_key):
+            to_compute.append(pair)
+
+      if not to_compute:
+         print(f"All {len(all_pairs)} pairs for {cds_id} are in DB, skipping codeml.")
+         sys.stdout.flush()
+         return 0
+
+      print(f"Computing {len(to_compute)} new pairs out of {len(all_pairs)} total for {cds_id}.")
+      sys.stdout.flush()
+
+      # Prepare arguments for parallel processing
+      pool_args = [
+         (pair, sequences, sample_groups, cds_id, codeml_path, temp_dir, None)
+         for pair in to_compute
+      ]
+      num_processes = min(NUM_PARALLEL, len(to_compute))
+      print(f"Starting codeml execution on {len(to_compute)} pairs using {num_processes} processes.")
+      sys.stdout.flush()
+
+      results_accum = []
+      with multiprocessing.Pool(processes=num_processes) as pool:
+         print(f"Processing {len(to_compute)} pairs in parallel for {cds_id}.")
+         sys.stdout.flush()
+         for r in pool.imap_unordered(process_pair, pool_args, chunksize=10):
+            if r is not None:
+               results_accum.append(r)
+         print(f"Completed processing {len(results_accum)} results for {cds_id}.")
+         sys.stdout.flush()
+
+      # Insert all new results into DB
+      for r in results_accum:
+         seq1, seq2, grp1, grp2, dn, ds, omega, cid = r
+         newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
+         record_tuple = (seq1, seq2, grp1, grp2, dn, ds, omega, cid)
+         db_insert_or_ignore(db_conn, newkey, record_tuple)
+
+      # Now gather final results (entire set) from DB for CSV output
+      relevant_keys = []
+      for pair in all_pairs:
+         final_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
+         relevant_keys.append(final_key)
+
+      results_for_csv = []
+      CHUNK_SIZE = 10000
+      start_index = 0
+      while start_index < len(relevant_keys):
+         chunk_keys = relevant_keys[start_index : start_index + CHUNK_SIZE]
+         in_clause = ",".join(["?"] * len(chunk_keys))
+         sql = f"""
+                SELECT cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds
+                FROM pairwise_cache
+                WHERE cache_key IN ({in_clause})
+            """
+         rows = db_conn.execute(sql, chunk_keys).fetchall()
+         for row in rows:
+            # row is (cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds)
+            results_for_csv.append(row[1:])  # skip the cache_key index
+         start_index += CHUNK_SIZE
+
+      # Convert to dataframe
+      df = pd.DataFrame(
+         results_for_csv,
+         columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS']
+      )
+      df.to_csv(output_csv, index=False)
+      print(f"Results saved to {output_csv}")
+      sys.stdout.flush()
+
+      # Build haplotype-level stats
+      hap_stats = []
+      for sample in sequences.keys():
+         sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
+         omega_vals = sample_df['omega'].dropna()
+         omega_vals = omega_vals[~omega_vals.isin([-1, 99])]
+         if not omega_vals.empty:
+            mean_omega = omega_vals.mean()
+            median_omega = omega_vals.median()
+         else:
+            mean_omega = np.nan
+            median_omega = np.nan
+         hap_stats.append({
+            'Haplotype': sample,
+            'Group': sample_groups[sample],
+            'CDS': cds_id,
+            'Mean_dNdS': mean_omega,
+            'Median_dNdS': median_omega,
+            'Num_Comparisons': len(omega_vals)
+         })
+      hap_df = pd.DataFrame(hap_stats)
+      hap_df.to_csv(haplotype_output_csv, index=False)
+      print(f"Haplotype stats saved to {haplotype_output_csv}")
+      sys.stdout.flush()
+
+      return len(to_compute)
+
+   # --------------------------------------------------------------------------------
+   # PROCESS EACH ALLOWED FILE (Unified Parallel Approach)
+   # --------------------------------------------------------------------------------
+
+   # This gathers all pairwise tasks from all final_phy_files in one pool,
+   # then we write each file's CSV after all computations complete.
+
+   all_pairs_tasks = []
+   file_info_list = []
+
+   
+   with multiprocessing.Pool(processes=min(NUM_PARALLEL, len(final_phy_files))) as pool:
+      results = pool.map(parallel_handle_file, final_phy_files)
+   
+   for res in results:
+      if res is not None:
+         info_entry, tasks = res
+         if info_entry is not None:
+            file_info_list.append(info_entry)
+         for t in tasks:
+            all_pairs_tasks.append(t)
+
+   # Run all remaining pairwise comparisons in a single Pool
+   if all_pairs_tasks:
+      print(f"Running a single parallel pool for {len(all_pairs_tasks)} comparisons across all CDS.")
+      sys.stdout.flush()
+      num_processes = min(NUM_PARALLEL, len(all_pairs_tasks))
+      results_done = 0  # Tracks number of processed comparisons for ETA
+      with multiprocessing.Pool(processes=num_processes) as pool:
+         # Buffer to store results for batch insertion into SQLite
+         records_buffer = []
+         for result in pool.imap_unordered(process_pair, all_pairs_tasks, chunksize=10):
+            if result is not None:
+               seq1, seq2, grp1, grp2, dn, ds, omega, cid = result
+               newkey = f"{cid}::{seq1}::{seq2}::{COMPARE_BETWEEN_GROUPS}"
+               record_tuple = (seq1, seq2, grp1, grp2, dn, ds, omega, cid)
+               records_buffer.append((newkey, record_tuple))
+            results_done += 1  # Increment after each processed result
+            if results_done % 1000 == 0:  # Only update ETA every few results
+               completed_comparisons = db_count_keys(db_conn)
+               print_eta(completed_comparisons, GLOBAL_COUNTERS['total_comparisons'], ETA_DATA['start_time'], ETA_DATA)
+         # Perform batch insertion of all collected results into SQLite
+         if records_buffer:
+            db_conn.executemany(
+               "INSERT OR IGNORE INTO pairwise_cache (cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds) "
+               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+               [(key, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], rec[6], rec[7]) for key, rec in records_buffer]
+            )
+            db_conn.commit()
+   else:
+      print("No new comparisons to compute across all CDS.")
+      sys.stdout.flush()
+
+   # Build final CSV and haplotype stats for each file
+   for info_entry in file_info_list:
+      cds_id = info_entry['cds_id']
+      output_csv = info_entry['output_csv']
+      haplotype_output_csv = info_entry['haplotype_csv']
+      all_pairs = info_entry['all_pairs']
+      sequences = info_entry['sequences']
+      sample_groups = info_entry['sample_groups']
+
+      if os.path.exists(output_csv):
+         print(f"Skipping CSV creation, file {output_csv} already present.")
+         sys.stdout.flush()
+         continue
+
+      # Gather all results for these pairs from DB
+      relevant_keys = []
+      for pair in all_pairs:
+         final_key = f"{cds_id}::{pair[0]}::{pair[1]}::{COMPARE_BETWEEN_GROUPS}"
+         relevant_keys.append(final_key)
+
+      results_for_csv = []
+      CHUNK_SIZE = 10000
+      start_index = 0
+      while start_index < len(relevant_keys):
+         chunk_keys = relevant_keys[start_index : start_index + CHUNK_SIZE]
+         in_clause = ",".join(["?"] * len(chunk_keys))
+         sql = f"""
+                SELECT cache_key, seq1, seq2, group1, group2, dN, dS, omega, cds
+                FROM pairwise_cache
+                WHERE cache_key IN ({in_clause})
+            """
+         rows = db_conn.execute(sql, chunk_keys).fetchall()
+         for row in rows:
+            results_for_csv.append(row[1:])
+         start_index += CHUNK_SIZE
+
+      df = pd.DataFrame(
+         results_for_csv,
+         columns=['Seq1','Seq2','Group1','Group2','dN','dS','omega','CDS']
+      )
+      df.to_csv(output_csv, index=False)
+      print(f"Results for {cds_id} saved to {output_csv}")
+      sys.stdout.flush()
+
+      # Build haplotype-level stats
+      hap_stats = []
+      for sample in sequences.keys():
+         sample_df = df[(df['Seq1'] == sample) | (df['Seq2'] == sample)]
+         omega_vals = sample_df['omega'].dropna()
+         omega_vals = omega_vals[~omega_vals.isin([-1, 99])]
+         if not omega_vals.empty:
+            mean_omega = omega_vals.mean()
+            median_omega = omega_vals.median()
+         else:
+            mean_omega = np.nan
+            median_omega = np.nan
+         hap_stats.append({
+            'Haplotype': sample,
+            'Group': sample_groups[sample],
+            'CDS': cds_id,
+            'Mean_dNdS': mean_omega,
+            'Median_dNdS': median_omega,
+            'Num_Comparisons': len(omega_vals)
+         })
+      hap_df = pd.DataFrame(hap_stats)
+      hap_df.to_csv(haplotype_output_csv, index=False)
+      print(f"Haplotype stats for {cds_id} saved to {haplotype_output_csv}")
+      sys.stdout.flush()
+
+   # --------------------------------------------------------------------------------
+   # FINAL SUMMARY & CLEANUP
+   # --------------------------------------------------------------------------------
+   end_time = time.time()
+
+   total_seqs = GLOBAL_COUNTERS['total_seqs']
+   invalid_seqs = GLOBAL_COUNTERS['invalid_seqs']
+   duplicates = GLOBAL_COUNTERS['duplicates']
+   total_cds_processed = GLOBAL_COUNTERS['total_cds']
+   total_comps_planned = GLOBAL_COUNTERS['total_comparisons']
+   stop_codons = GLOBAL_COUNTERS['stop_codons']
+
+   valid_seqs_final = total_seqs - invalid_seqs
+   final_invalid_pct = (invalid_seqs / total_seqs * 100) if total_seqs > 0 else 0
+
+   logging.info("=== END OF RUN SUMMARY ===")
+   logging.info(f"Total PHYLIP found: {total_files}")
+   logging.info(f"Total seq processed: {total_seqs}")
+   logging.info(f"Invalid seq: {invalid_seqs} ({final_invalid_pct:.2f}%)")
+   logging.info(f"Sequences with stop codons: {stop_codons}")
+   logging.info(f"Duplicates: {duplicates}")
+   logging.info(f"Total CDS (final) after gene association: {total_cds_processed}")
+   logging.info(f"Planned comparisons: {total_comps_planned}")
+   current_db_count = db_count_keys(db_conn)
+   logging.info(f"Completed comps: {current_db_count}")
+
+   if ETA_DATA['start_time']:
+      run_minutes = (end_time - ETA_DATA['start_time']) / 60
+      logging.info(f"Total time: {run_minutes:.2f} min")
+   else:
+      total_run_min = (end_time - start_time) / 60
+      logging.info(f"Total time: {total_run_min:.2f} min")
+
+   save_cache(cache_file, GLOBAL_COUNTERS)
+
+   try:
+      with open(VALIDATION_CACHE_FILE, 'wb') as f:
+         pickle.dump(VALIDATION_CACHE, f)
+      print(f"Validation cache saved with {len(VALIDATION_CACHE)} entries.")
+   except Exception as e:
+      print(f"Could not save validation cache: {e}")
+
+   # Consolidate all final CSVs if desired
+   def consolidate_all_csvs(csv_dir, final_csv='all_pairwise_results.csv'):
+      all_dfs = []
+      potential_csvs = glob.glob(os.path.join(csv_dir, '*.csv'))
+      for cf in potential_csvs:
+         if cf.endswith('_haplotype_stats.csv'):
+            continue
+         df = pd.read_csv(cf)
+         all_dfs.append(df)
+      if all_dfs:
+         combined = pd.concat(all_dfs, ignore_index=True)
+         outpath = os.path.join(csv_dir, final_csv)
+         combined.to_csv(outpath, index=False)
+         print(f"Final combined CSV with {len(combined)} rows saved to {outpath}")
+         shutil.copy2(outpath, os.path.join('.', final_csv))
+         print(f"Copied final CSV to current directory: {final_csv}")
+      else:
+         print("No CSV files found to combine at the end.")
+
+   consolidate_all_csvs(args.output_dir)
+   
+   db_conn.close()
+   logging.info("dN/dS analysis done.")
+   print("dN/dS analysis done.")
+   sys.stdout.flush()
 
 
 if __name__ == '__main__':
-    main()
+   main()
