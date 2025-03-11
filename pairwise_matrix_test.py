@@ -28,6 +28,9 @@ warnings.filterwarnings('ignore')
 # Minimum number of sequences required in each group for valid analysis
 MIN_SEQUENCES_PER_GROUP = 10
 
+# Flag to determine whether to filter out special omega values (-1 and 99)
+FILTER_SPECIAL_OMEGA_VALUES = False
+
 def read_and_preprocess_data(file_path):
     """
     Read and preprocess the evolutionary rate data from a CSV file.
@@ -93,14 +96,21 @@ def read_and_preprocess_data(file_path):
     # Omega is the ratio of non-synonymous to synonymous substitution rates
     df['omega'] = pd.to_numeric(df['omega'], errors='coerce')
 
-    # Report special omega values that may have biological significance
+    # Report special omega values
     # -1 means identical sequences
     # 99 means inf (or very high) omega
     omega_minus1_count = len(df[df['omega'] == -1])
     omega_99_count = len(df[df['omega'] == 99])
     print(f"Rows with omega = -1: {omega_minus1_count}")
     print(f"Rows with omega = 99: {omega_99_count}")
-
+    
+    # Filter out special omega values if flag is set
+    if FILTER_SPECIAL_OMEGA_VALUES:
+        original_len = len(df)
+        df = df[(df['omega'] != -1) & (df['omega'] != 99)]
+        filtered_count = original_len - len(df)
+        print(f"Filtered out {filtered_count} rows with special omega values (-1 or 99)")
+    
     # Keep all valid omega values, only dropping NaN entries
     # This preserves special codes while ensuring numeric analysis
     df = df.dropna(subset=['omega'])
