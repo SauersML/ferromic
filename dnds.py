@@ -1217,55 +1217,55 @@ def main():
    # Collect all files from valid genes (those present in both groups)
    all_phy_filtered = []
    for gene_id, group_files in valid_genes.items():
-      all_phy_filtered.extend(group_files[0])
-      all_phy_filtered.extend(group_files[1])
-      if COMPARE_BETWEEN_GROUPS:
-      group_both_path = os.path.join(
-        args.phy_dir,
-        f"group_both_{gene_to_files[gene_id]['gene_name']}_{gene_id}_{gene_to_files[gene_id]['transcript_id']}_chr{gene_to_files[gene_id]['chromosome']}_start{gene_to_files[gene_id]['start_pos']}_end{gene_to_files[gene_id]['end_pos']}.phy"
-      )
-      seq_map = {}
-      file_list = group_files[0] + group_files[1]
-      alignment_length = None
-      for fpath in file_list:
-        data = PARSED_PHY.get(fpath)
-        if data and data['sequences']:
-            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
-                header_line = f.readline().strip()
-                parts = header_line.split()
-                if len(parts) != 2:
-                    continue
-                try:
-                    num_seqs = int(parts[0])
-                    seq_len = int(parts[1])
-                except ValueError:
-                    continue
-                for i in range(num_seqs):
-                    line = f.readline().strip()
-                    if not line or len(line) < seq_len:
-                        continue
-                    sequence = line[-seq_len:]
-                    orig_name = line[:-seq_len]
-                    for processed_name, processed_seq in data['sequences'].items():
-                        if sequence == processed_seq:
-                            if alignment_length is None:
-                                alignment_length = len(sequence)
-                            else:
-                                if len(sequence) != alignment_length:
-                                    print(f"Error: alignment length mismatch for gene {gene_id} in file {fpath}")
-                                    continue
-                            seq_map[orig_name] = sequence
-                            break
-      total_sequences = len(seq_map)
-      if total_sequences > 0 and alignment_length is not None:
-        with open(group_both_path, 'w') as outf:
-            outf.write(f"{total_sequences} {alignment_length}\n")
-            for sname, sseq in seq_map.items():
-                outf.write(f"{sname}{sseq}\n")
-        all_phy_filtered.append(group_both_path)
-        parsed_data_combined = parse_phy_file_once(group_both_path)
-        PARSED_PHY[group_both_path] = parsed_data_combined
-
+       all_phy_filtered.extend(group_files[0])
+       all_phy_filtered.extend(group_files[1])
+       if COMPARE_BETWEEN_GROUPS:
+           group_both_path = os.path.join(
+               args.phy_dir,
+               f"group_both_{gene_to_files[gene_id]['gene_name']}_{gene_id}_{gene_to_files[gene_id]['transcript_id']}_chr{gene_to_files[gene_id]['chromosome']}_start{gene_to_files[gene_id]['start_pos']}_end{gene_to_files[gene_id]['end_pos']}.phy"
+           )
+           seq_map = {}
+           file_list = group_files[0] + group_files[1]
+           alignment_length = None
+           for fpath in file_list:
+               data = PARSED_PHY.get(fpath)
+               if data and data['sequences']:
+                   with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                       header_line = f.readline().strip()
+                       parts = header_line.split()
+                       if len(parts) != 2:
+                           continue
+                       try:
+                           num_seqs = int(parts[0])
+                           seq_len = int(parts[1])
+                       except ValueError:
+                           continue
+                       for i in range(num_seqs):
+                           line = f.readline().strip()
+                           if not line or len(line) < seq_len:
+                               continue
+                           sequence = line[-seq_len:]
+                           orig_name = line[:-seq_len]
+                           for processed_name, processed_seq in data['sequences'].items():
+                               if sequence == processed_seq:
+                                   if alignment_length is None:
+                                       alignment_length = len(sequence)
+                                   else:
+                                       if len(sequence) != alignment_length:
+                                           print(f"Error: alignment length mismatch for gene {gene_id} in file {fpath}")
+                                           continue
+                                   seq_map[orig_name] = sequence
+                                   break
+           total_sequences = len(seq_map)
+           if total_sequences > 0 and alignment_length is not None:
+               with open(group_both_path, 'w') as outf:
+                   outf.write(f"{total_sequences} {alignment_length}\n")
+                   for sname, sseq in seq_map.items():
+                       outf.write(f"{sname}{sseq}\n")
+               all_phy_filtered.append(group_both_path)
+               parsed_data_combined = parse_phy_file_once(group_both_path)
+               PARSED_PHY[group_both_path] = parsed_data_combined
+   
    print(f"Found {len(valid_genes)} genes with files in both groups.")
    print(f"Total PHY files to process: {len(all_phy_filtered)}")
    sys.stdout.flush()
