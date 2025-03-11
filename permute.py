@@ -279,7 +279,7 @@ def permutation_test(df_sub: pd.DataFrame,
         return dict(effect_size=T_obs, p_value=math.nan,
                     group0_count=len(g0_vals), group1_count=len(g1_vals),
                     failure_reason="No valid permutations")
-    p_val = count_extreme / total_valid
+    p_val = max(count_extreme / total_valid, 1/(total_valid + 1))
     return dict(effect_size=T_obs, p_value=p_val,
                 group0_count=len(g0_vals), group1_count=len(g1_vals),
                 failure_reason=None)
@@ -418,8 +418,6 @@ def main():
     n_tx = df['transcript_id'].nunique()
     print(f"Found {n_tx} transcripts.\n")
 
-    # 2) Group by transcript
-    grouped = df.groupby('transcript_id')
     tasks = []
     for tx_id, df_tx in grouped:
         tasks.append((tx_id, df_tx, NUM_PERMUTATIONS))
@@ -444,7 +442,8 @@ def main():
         m = len(valid_df)
         valid_df['rank'] = np.arange(1,m+1)
         valid_df['bh'] = valid_df['p_value']*m/valid_df['rank']
-        valid_df['bh'] = valid_df['bh'].cummin().clip(upper=1.0)
+        valid_df['bh'] = valid_df['bh'].iloc[::-1].cummin().iloc[::-1]
+        valid_df['bh'] = valid_df['bh'].clip(upper=1.0)
         bh_map = dict(zip(valid_df['transcript_id'], valid_df['bh']))
         res_df['corrected_p_value'] = res_df['transcript_id'].map(bh_map)
     else:
