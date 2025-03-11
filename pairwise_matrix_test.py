@@ -846,13 +846,22 @@ def main():
             corrected_p = f"{row['corrected_p_value']:.6e}" if not pd.isna(row['corrected_p_value']) else "N/A"
             effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
             
+            median_0 = row['median_0']
+            mean_0 = row['mean_0']
+            median_1 = row['median_1']
+            mean_1 = row['mean_1']
+            median_0_str = f"{median_0:.3f}" if not pd.isna(median_0) else "N/A"
+            mean_0_str = f"{mean_0:.3f}" if not pd.isna(mean_0) else "N/A"
+            median_1_str = f"{median_1:.3f}" if not pd.isna(median_1) else "N/A"
+            mean_1_str = f"{mean_1:.3f}" if not pd.isna(mean_1) else "N/A"
+
             # Format gene information with name if available
             gene_info = ""
             if 'gene_symbol' in row and pd.notna(row['gene_symbol']) and 'gene_name' in row and pd.notna(row['gene_name']):
                 gene_info = f"{row['gene_symbol']}: {row['gene_name']}"
             gene_info = gene_info[:40]
             
-            print(f"{label:<50} {p_value:<15} {corrected_p:<15} {effect_size:<15} {gene_info:<15}")
+            print(f"{label:<50} {p_value:<15} {corrected_p:<15} {effect_size:<15} {median_0_str:<10} {mean_0_str:<10} {median_1_str:<10} {mean_1_str:<10} {gene_info:<15}")
                 
     # Summarize analysis failures by reason
     failure_counts = results_df['failure_reason'].value_counts()
