@@ -1186,16 +1186,45 @@ def main():
             file_list = group_files[0] + group_files[1]
             alignment_length = None
             for fpath in file_list:
+                # Re-open the original PHY file to get the original names
                 data = PARSED_PHY.get(fpath)
                 if data and data['sequences']:
-                    for sname, sseq in data['sequences'].items():
-                        if alignment_length is None:
-                            alignment_length = len(sseq)
-                        else:
-                            if len(sseq) != alignment_length:
-                                print(f"Error: alignment length mismatch for gene {gene_id} in file {fpath}")
+                    # First get the original PHY file content
+                    with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                        # Skip header line
+                        header_line = f.readline().strip()
+                        parts = header_line.split()
+                        if len(parts) != 2:
+                            continue
+                        try:
+                            num_seqs = int(parts[0])
+                            seq_len = int(parts[1])
+                        except ValueError:
+                            continue
+                        
+                        # Parse each line to get original names and sequences
+                        for i in range(num_seqs):
+                            line = f.readline().strip()
+                            if not line or len(line) < seq_len:
                                 continue
-                        seq_map[sname] = sseq
+                                
+                            # Extract sequence and original name
+                            sequence = line[-seq_len:]
+                            orig_name = line[:-seq_len]
+                            
+                            # Only add if the sequence is valid (exists in our processed data)
+                            for processed_name, processed_seq in data['sequences'].items():
+                                if sequence == processed_seq:
+                                    # Use the original name from the file
+                                    if alignment_length is None:
+                                        alignment_length = len(sequence)
+                                    else:
+                                        if len(sequence) != alignment_length:
+                                            print(f"Error: alignment length mismatch for gene {gene_id} in file {fpath}")
+                                            continue
+                                    seq_map[orig_name] = sequence
+                                    break
+
             total_sequences = len(seq_map)
             if total_sequences > 0 and alignment_length is not None:
                 with open(combined_path, 'w') as outf:
