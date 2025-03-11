@@ -619,11 +619,19 @@ def analyze_transcript(args):
     # Perform statistical analysis on the transcript data
     analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
 
-    # Compute median and mean omega values for each group
-    median_0 = group_0_df['omega'].median()
-    mean_0 = group_0_df['omega'].mean()
-    median_1 = group_1_df['omega'].median()
-    mean_1 = group_1_df['omega'].mean()
+    # Compute normal-only median and mean for each group (excluding -1 and 99)
+    group_0_normal = group_0_df[(group_0_df['omega'] != -1) & (group_0_df['omega'] != 99)]
+    median_0_normal = group_0_normal['omega'].median()
+    mean_0_normal = group_0_normal['omega'].mean()
+    group_1_normal = group_1_df[(group_1_df['omega'] != -1) & (group_1_df['omega'] != 99)]
+    median_1_normal = group_1_normal['omega'].median()
+    mean_1_normal = group_1_normal['omega'].mean()
+
+    # Compute percentage of identical (-1) and no synonymous variation (99) in each group
+    pct_identical_0 = 100.0 * (group_0_df['omega'] == -1).mean()
+    pct_nosyn_0 = 100.0 * (group_0_df['omega'] == 99).mean()
+    pct_identical_1 = 100.0 * (group_1_df['omega'] == -1).mean()
+    pct_nosyn_1 = 100.0 * (group_1_df['omega'] == 99).mean()
     
     result = {
         'transcript_id': transcript_id,
@@ -641,15 +649,19 @@ def analyze_transcript(args):
         'matrix_0': matrix_0,
         'matrix_1': matrix_1,
         'pairwise_comparisons': set(pairwise_dict.keys()),
-        # Add median and mean for each group
-        'median_0': median_0,
-        'mean_0': mean_0,
-        'median_1': median_1,
-        'mean_1': mean_1
+        'median_0_normal': median_0_normal,
+        'mean_0_normal': mean_0_normal,
+        'median_1_normal': median_1_normal,
+        'mean_1_normal': mean_1_normal,
+        'pct_identical_0': pct_identical_0,
+        'pct_nosyn_0': pct_nosyn_0,
+        'pct_identical_1': pct_identical_1,
+        'pct_nosyn_1': pct_nosyn_1
     }
 
 
     return result
+
 
 def main():
     """
