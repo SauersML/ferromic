@@ -951,7 +951,6 @@ def parallel_handle_file(phy_file):
             sys.exit(1)
     else:
         group_num = int(match.group(1))
-
    
     if group_num == -1:
         sample_groups = {}
@@ -964,6 +963,7 @@ def parallel_handle_file(phy_file):
             sample_groups[sname] = inferred_group
     else:
         sample_groups = {sname: group_num for sname in sequences.keys()}
+
    
     all_samples = list(sample_groups.keys())
     all_pairs = list(combinations(all_samples, 2))
@@ -1218,15 +1218,37 @@ def main():
     # We'll do a quick pass to see how many total comparisons we expect.
     # We do NOT parse files again. Instead, we reuse PARSED_PHY data.
     def quick_estimate(phy_path):
-        # Extract group_num from the filename
         base = os.path.basename(phy_path)
         match = filename_pattern.match(base)
         if not match:
-            return (0, 0)
-        group_num = match.group(1)
-
+            if base.startswith("combined_"):
+                group_num = -1
+            else:
+                return (0, 0)
+        else:
+            group_num = int(match.group(1))
+   
         pdict = PARSED_PHY.get(phy_path, None)
         if not pdict or not pdict['sequences']:
+            return (0, 0)
+   
+        if group_num == -1:
+            sample_groups = {}
+            for sname in pdict['sequences']:
+                suffix = sname.rsplit('_', 1)[-1]
+                try:
+                    inferred_group = int(suffix)
+                except ValueError:
+                    inferred_group = 99
+                sample_groups[sname] = inferred_group
+        else:
+            sample_groups = {name: group_num for name in pdict['sequences']}
+   
+        seq_names = list(sample_groups.keys())
+        pairs = list(combinations(seq_names, 2))
+        if pairs:
+            return (1, len(pairs))
+        else:
             return (0, 0)
 
         # Build pairs
