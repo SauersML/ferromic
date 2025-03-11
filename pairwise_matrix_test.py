@@ -778,7 +778,7 @@ def main():
     
     # Print detailed header for main results table
     print("\n=== Group Assignment Summary by Transcript ===")
-    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value/Status':<40} {'Effect Size':<15} {'Gene':<15} {'Distance (kb)'}")
+    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value/Status':<40} {'Effect Size':<15}")
     print("-" * 160)
     
     # Print detailed information for each transcript
@@ -830,7 +830,6 @@ def main():
             f"{'Median_1':<10} "
             f"{'Mean_1':<10} "
             f"{'Gene':<15} "
-            f"{'Distance (kb)'}"
         )
         print("-" * 160)
 
