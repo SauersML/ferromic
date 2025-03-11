@@ -1238,6 +1238,16 @@ def main():
 
    logging.info("=== START OF RUN SUMMARY ===")
    logging.info(f"Total PHYLIP files found: {total_files}")
+   
+   # Retrieve counters from GLOBAL_COUNTERS before logging
+   total_seq_so_far = GLOBAL_COUNTERS['total_seqs']
+   invalid_seq_so_far = GLOBAL_COUNTERS['invalid_seqs']
+   duplicates_so_far = GLOBAL_COUNTERS['duplicates']
+   stop_codons_so_far = GLOBAL_COUNTERS['stop_codons']
+   
+   valid_sequences = total_seq_so_far - invalid_seq_so_far
+   valid_percentage = (valid_sequences / total_seq_so_far * 100) if total_seq_so_far > 0 else 0
+   
    logging.info(f"Total sequences encountered (prev sessions): {total_seq_so_far}")
    logging.info(f"Invalid sequences (prev sessions): {invalid_seq_so_far}")
    logging.info(f"Duplicates (prev sessions): {duplicates_so_far}")
