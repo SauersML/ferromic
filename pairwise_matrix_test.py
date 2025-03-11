@@ -767,11 +767,7 @@ def main():
     # Remove data structures before saving to CSV
     csv_sorted_by_effect = sorted_by_effect.drop(['matrix_0', 'matrix_1', 'pairwise_comparisons'], axis=1)
     csv_sorted_by_effect.to_csv('results/significant_by_effect.csv', index=False)
-    
-    # Print initial header for summary table
-    print("\n=== Group Assignment Summary by Transcript ===")
-    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value':<15} {'Effect Size':<15} {'Gene':<15} {'Distance (kb)'}")
-    print("-" * 160)
+
     
     # Calculate total sequence counts by group
     total_group_0 = results_df['n0'].sum()
