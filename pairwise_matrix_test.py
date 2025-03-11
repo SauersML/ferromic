@@ -34,6 +34,9 @@ FILTER_SPECIAL_OMEGA_VALUES = False
 # Flag to determine whether to calculate omega manually from dN/dS
 CALCULATE_OMEGA_MANUALLY = False
 
+# Flag to enable Low-Middle-High omega categorization analysis
+PERFORM_OMEGA_CATEGORY_ANALYSIS = True
+
 def read_and_preprocess_data(file_path):
     """
     Read and preprocess the evolutionary rate data from a CSV file.
@@ -185,6 +188,150 @@ def get_pairwise_value(seq1, seq2, pairwise_dict):
     val = pairwise_dict.get(key)
     return val
 
+def categorize_omega(omega_value):
+    """
+    Categorize omega values into Low, Middle, and High categories.
+    
+    Parameters:
+    -----------
+    omega_value : float
+        The omega (dN/dS) value to categorize
+        
+    Returns:
+    --------
+    str
+        Category label: 'Low', 'Middle', or 'High'
+    """
+    # Identical sequences (-1) are categorized as Low (strong conservation)
+    if omega_value == -1:
+        return 'Low'
+    # Infinite omega values (99) are categorized as High (potential positive selection)
+    elif omega_value == 99:
+        return 'High'
+    # Regular omega value categories
+    elif omega_value < LOW_OMEGA_THRESHOLD:
+        return 'Low'
+    elif omega_value > HIGH_OMEGA_THRESHOLD:
+        return 'High'
+    else:
+        return 'Middle'
+
+def analyze_omega_categories(group_0_df, group_1_df):
+    """
+    Analyze the conservation differences between two groups.
+    Uses sequence-level median omega values directly for a more powerful
+    continuous value analysis rather than categorical binning.
+    
+    Parameters:
+    -----------
+    group_0_df : DataFrame
+        DataFrame containing group 0 pairwise comparisons
+    group_1_df : DataFrame
+        DataFrame containing group 1 pairwise comparisons
+        
+    Returns:
+    --------
+    dict
+        Dictionary with sequence-level conservation analysis results:
+        - median_values: Median omega values for each group
+        - p_value: Statistical test p-value
+        - test_used: Name of statistical test used
+        - dominant_difference: Simple conservation comparison
+    """
+    # Skip analysis if either group is empty
+    if group_0_df.empty or group_1_df.empty:
+        return {
+            'median_values': None,
+            'p_value': np.nan,
+            'test_used': None,
+            'dominant_difference': None
+        }
+    
+    # Extract all unique sequences in each group
+    g0_seqs = set(pd.concat([group_0_df['Seq1'], group_0_df['Seq2']]))
+    g1_seqs = set(pd.concat([group_1_df['Seq1'], group_1_df['Seq2']]))
+    
+    # Calculate median omega for each sequence in Group 0
+    g0_seq_medians = []
+    for seq in g0_seqs:
+        # Find all pairwise comparisons involving this sequence
+        seq_comparisons = group_0_df[(group_0_df['Seq1'] == seq) | (group_0_df['Seq2'] == seq)]
+        if not seq_comparisons.empty:
+            g0_seq_medians.append(seq_comparisons['omega'].median())
+    
+    # Calculate median omega for each sequence in Group 1
+    g1_seq_medians = []
+    for seq in g1_seqs:
+        # Find all pairwise comparisons involving this sequence
+        seq_comparisons = group_1_df[(group_1_df['Seq1'] == seq) | (group_1_df['Seq2'] == seq)]
+        if not seq_comparisons.empty:
+            g1_seq_medians.append(seq_comparisons['omega'].median())
+    
+    # Check if we have enough sequences for analysis
+    g0_total = len(g0_seq_medians)
+    g1_total = len(g1_seq_medians)
+    
+    if g0_total < MIN_SEQUENCES_PER_GROUP or g1_total < MIN_SEQUENCES_PER_GROUP:
+        return {
+            'median_values': {
+                'group_0': np.nan,
+                'group_1': np.nan
+            },
+            'p_value': np.nan,
+            'test_used': "Insufficient sequences",
+            'dominant_difference': None,
+            'sequences_per_group': {
+                'group_0': g0_total,
+                'group_1': g1_total
+            }
+        }
+    
+    # Calculate group-level median values
+    median_0 = np.median(g0_seq_medians) if g0_seq_medians else np.nan
+    median_1 = np.median(g1_seq_medians) if g1_seq_medians else np.nan
+    
+    # Determine conservation difference (lower omega = more conservation)
+    if not np.isnan(median_0) and not np.isnan(median_1):
+        if median_1 < median_0:
+            dominant_difference = "Group 1 more conserved than Group 0"
+        else:
+            dominant_difference = "Group 1 less conserved than Group 0"
+    else:
+        dominant_difference = None
+    
+    # Perform Mann-Whitney U test (more robust for non-normal distributions)
+    test_used = "Mann-Whitney U"
+    p_value = np.nan
+    
+    try:
+        # Only perform test if we have enough sequences
+        if g0_total >= MIN_SEQUENCES_PER_GROUP and g1_total >= MIN_SEQUENCES_PER_GROUP:
+            # Handle special omega values (-1 and 99) by converting to ranks internally
+            g0_array = np.array(g0_seq_medians)
+            g1_array = np.array(g1_seq_medians)
+            
+            # Mann-Whitney U test (non-parametric, robust to non-normal distributions)
+            _, p_value = stats.mannwhitneyu(g0_array, g1_array, alternative='two-sided')
+        else:
+            test_used = "Insufficient sequences"
+    except Exception as e:
+        test_used = f"Failed: {str(e)[:50]}"
+    
+    # Return results
+    return {
+        'median_values': {
+            'group_0': median_0,
+            'group_1': median_1
+        },
+        'p_value': p_value,
+        'test_used': test_used,
+        'dominant_difference': dominant_difference,
+        'sequences_per_group': {
+            'group_0': g0_total,
+            'group_1': g1_total
+        }
+    }
+
 def create_matrices(sequences_0, sequences_1, pairwise_dict):
     """
     Create pairwise omega value matrices for the two sequence groups.
@@ -247,6 +394,9 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
 
     return matrix_0, matrix_1
 
+# Cache to store gene information to avoid redundant API calls
+GENE_INFO_CACHE = {}
+
 def get_gene_info(gene_symbol):
     """
     Retrieve human-readable gene information from MyGene.info API using gene symbol.
@@ -267,6 +417,10 @@ def get_gene_info(gene_symbol):
     - Returns "Unknown" on any exception (network error, parsing error, etc.)
     - Filters specifically for human genes
     """
+    # Check cache first
+    if gene_symbol in GENE_INFO_CACHE:
+        return GENE_INFO_CACHE['gene_symbol']
+        
     try:
         # Query the MyGene.info API with the gene symbol, species constraint, and field selection
         url = f"http://mygene.info/v3/query?q=symbol:{gene_symbol}&species=human&fields=name"
@@ -274,10 +428,66 @@ def get_gene_info(gene_symbol):
         if response.ok:
             data = response.json()
             if data.get('hits') and len(data['hits']) > 0:
-                return data['hits'][0].get('name', 'Unknown')
+                name = data['hits'][0].get('name', 'Unknown')
+                # Cache the result
+                GENE_INFO_CACHE[gene_symbol] = name
+                return name
     except Exception as e:
         print(f"Error fetching gene info: {str(e)}")
+    
+    # Cache the negative result too
+    GENE_INFO_CACHE[gene_symbol] = 'Unknown'
     return 'Unknown'  # Default return value for any error case
+
+def get_gene_info_from_transcript(transcript_id):
+    """
+    Retrieve human-readable gene information from MyGene.info API using transcript ID.
+    
+    Parameters:
+    -----------
+    transcript_id : str
+        Ensembl transcript identifier (e.g., "ENST00000519106.2")
+        
+    Returns:
+    --------
+    tuple (str, str)
+        A tuple containing (gene_symbol, gene_name), or ("Unknown", "Unknown") if not found
+        
+    Note:
+    -----
+    - Uses MyGene.info REST API with 10-second timeout
+    - Removes version number from transcript ID (e.g., ENST00000519106.2 -> ENST00000519106)
+    - Returns ("Unknown", "Unknown") on any exception (network error, parsing error, etc.)
+    - Filters specifically for human genes
+    """
+    # Check cache first
+    if transcript_id in GENE_INFO_CACHE:
+        return GENE_INFO_CACHE[transcript_id]
+    
+    try:
+        # Remove version number if present
+        base_id = transcript_id.split('.')[0]
+        
+        # Query the MyGene.info API with the transcript ID, species constraint, and field selection
+        url = f"http://mygene.info/v3/query?q=ensembl.transcript:{base_id}&species=human&fields=_id,name,symbol,summary"
+        response = requests.get(url, timeout=10)
+        
+        if response.ok:
+            data = response.json()
+            if data.get('hits') and len(data['hits']) > 0:
+                hit = data['hits'][0]
+                result = (hit.get('symbol', 'Unknown'), hit.get('name', 'Unknown'))
+                # Cache the result
+                GENE_INFO_CACHE[transcript_id] = result
+                return result
+    except Exception as e:
+        print(f"Error fetching gene info for transcript {transcript_id}: {str(e)}")
+    
+    # Cache the negative result too
+    result = ('Unknown', 'Unknown')
+    GENE_INFO_CACHE[transcript_id] = result
+    return result
+
 
 def get_gene_annotation(coordinates):
     """
@@ -611,10 +821,8 @@ def analyze_transcript(args):
     # Create matrices for possible visualization or additional analysis
     matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
 
-    # Get gene annotation information from the first entry's coordinates
-    first_row = df_transcript.iloc[0]
-    coordinates_str = f"chr_{str(first_row['chrom']).replace('chr', '')}_start_{first_row['start']}_end_{first_row['end']}"
-    gene_symbol, gene_name = get_gene_annotation(coordinates_str)
+    # Get gene information directly from transcript ID
+    gene_symbol, gene_name = get_gene_info_from_transcript(transcript_id)
     
     # Perform statistical analysis on the transcript data
     analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
@@ -659,7 +867,18 @@ def analyze_transcript(args):
         'pct_nosyn_1': pct_nosyn_1
     }
 
-
+    # Perform omega category analysis if enabled
+    if PERFORM_OMEGA_CATEGORY_ANALYSIS:
+        category_result = analyze_omega_categories(group_0_df, group_1_df)
+        
+        # Add category analysis results to the output
+        result.update({
+            'category_p_value': category_result['p_value'],
+            'corrected_category_p_value': np.nan,  # Will be filled in later during multiple testing correction
+            'category_test': category_result['test_used'],
+            'median_values': category_result['median_values'],
+            'category_difference': category_result['dominant_difference']
+        })
     return result
 
 
@@ -732,14 +951,15 @@ def main():
     # Create results dataframe for further analysis and reporting
     results_df = pd.DataFrame(results)
     
-    # Apply Benjamini-Hochberg procedure for FDR control
+# Apply Benjamini-Hochberg procedure for FDR control
+    # For main analysis p-values
     valid_results = results_df[results_df['p_value'].notna() & (results_df['p_value'] > 0)]
     num_valid_tests = len(valid_results)
     
     if num_valid_tests > 0:
         # Sort p-values
         valid_results = valid_results.sort_values('p_value').copy()
-
+        
         # Calculate ranks
         valid_results['rank'] = np.arange(1, len(valid_results) + 1)
         
@@ -759,6 +979,35 @@ def main():
         results_df['corrected_p_value'] = results_df['corrected_p_value'].clip(upper=1.0)
     else:
         results_df['corrected_p_value'] = results_df['p_value']
+    
+    # Apply the same procedure to category p-values if category analysis was performed
+    if PERFORM_OMEGA_CATEGORY_ANALYSIS:
+        valid_cat_results = results_df[results_df['category_p_value'].notna() & (results_df['category_p_value'] > 0)]
+        num_valid_cat_tests = len(valid_cat_results)
+        
+        if num_valid_cat_tests > 0:
+            # Sort category p-values
+            valid_cat_results = valid_cat_results.sort_values('category_p_value').copy()
+            
+            # Calculate ranks for category p-values
+            valid_cat_results['cat_rank'] = np.arange(1, len(valid_cat_results) + 1)
+            
+            # Calculate BH adjusted category p-values
+            valid_cat_results['corrected_category_p_value'] = valid_cat_results['category_p_value'] * num_valid_cat_tests / valid_cat_results['cat_rank']
+            
+            # Monotonicity of category p-values (step-up procedure)
+            valid_cat_results['corrected_category_p_value'] = valid_cat_results['corrected_category_p_value'].iloc[::-1].cummin().iloc[::-1]
+            
+            # Create a mapping from transcript_id to adjusted category p-value
+            corrected_cat_p_value_map = dict(zip(valid_cat_results['transcript_id'], valid_cat_results['corrected_category_p_value']))
+            
+            # Map adjusted category p-values back to the original dataframe
+            results_df['corrected_category_p_value'] = results_df['transcript_id'].map(corrected_cat_p_value_map)
+            
+            # Cap adjusted category p-values at 1.0
+            results_df['corrected_category_p_value'] = results_df['corrected_category_p_value'].clip(upper=1.0)
+        else:
+            results_df['corrected_category_p_value'] = results_df['category_p_value']
     
     # Calculate -log10(p) for visualization and interpretation
     # Larger values indicate more significant results
@@ -828,6 +1077,45 @@ def main():
     # Summarize significant results after multiple testing correction
     significant_count = (results_df['corrected_p_value'] < 0.05).sum()
     print(f"\nSignificant results after correction (p < 0.05): {significant_count}")
+    
+    # Summarize significant results from category analysis
+    if PERFORM_OMEGA_CATEGORY_ANALYSIS:
+        print("\n\n=== Conservation Analysis Results ===")
+        print("Comparing evolutionary conservation between groups (Low vs High omega ratio)")
+        
+        cat_significant_count = (results_df['category_p_value'] < 0.05).sum()
+        cat_significant_corrected_count = (results_df['corrected_category_p_value'] < 0.05).sum()
+        print(f"Significant conservation differences (raw p < 0.05): {cat_significant_count}")
+        print(f"Significant conservation differences after correction (corrected p < 0.05): {cat_significant_corrected_count}")
+        
+        # Show breakdown of conservation patterns after correction
+        if cat_significant_corrected_count > 0:
+            cat_results = results_df[results_df['corrected_category_p_value'] < 0.05]
+            pattern_counts = cat_results['category_difference'].value_counts()
+            
+            print("\nConservation patterns (after multiple testing correction):")
+            for pattern, count in pattern_counts.items():
+                print(f"  {pattern}: {count} genes")
+            
+            # Print simple list of significant hits
+            print("\nSignificant conservation differences (after correction):")
+            print(f"{'Gene':<15} {'Raw P':<15} {'Corrected P':<15} {'Median Grp0':<12} {'Median Grp1':<12} {'Pattern':<30}")
+            print("-" * 95)
+            for _, row in cat_results.sort_values('corrected_category_p_value').iterrows():
+                gene_name = row['gene_symbol'] if pd.notna(row['gene_symbol']) else "Unknown"
+                cat_p_val = f"{row['category_p_value']:.6e}" if pd.notna(row['category_p_value']) else "N/A"
+                cat_corr_p_val = f"{row['corrected_category_p_value']:.6e}" if pd.notna(row['corrected_category_p_value']) else "N/A"
+                cat_diff = row.get('category_difference', 'N/A')
+                
+                # Get median values if available
+                median_0 = median_1 = "N/A"
+                if (row.get('median_values') is not None and 
+                    'group_0' in row['median_values'] and 
+                    'group_1' in row['median_values']):
+                    median_0 = f"{row['median_values']['group_0']:.4f}" if pd.notna(row['median_values']['group_0']) else "N/A"
+                    median_1 = f"{row['median_values']['group_1']:.4f}" if pd.notna(row['median_values']['group_1']) else "N/A"
+                
+                print(f"{gene_name:<15} {cat_p_val:<15} {cat_corr_p_val:<15} {median_0:<12} {median_1:<12} {cat_diff:<30}")
     
     # Print detailed information for significant results
     if significant_count > 0:
