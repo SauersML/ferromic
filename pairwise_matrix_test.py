@@ -422,7 +422,16 @@ def analysis_worker(args):
         })
 
     df = pd.DataFrame(data)
-    df['ranked_omega'] = df['omega_value'].rank(method='average')
+    
+    # Apply different transformations based on our filtering flag
+    if FILTER_SPECIAL_OMEGA_VALUES:
+        # Use raw omega values directly when special values are filtered out
+        df['analysis_var'] = df['omega_value']
+    else:
+        # Use rank transform when keeping special values
+        df['ranked_omega'] = df['omega_value'].rank(method='average')
+        # Analysis variable will be the rank
+        df['analysis_var'] = df['ranked_omega']
 
     # Initialize results variables
     effect_size = np.nan
@@ -431,12 +440,12 @@ def analysis_worker(args):
     failure_reason = None
 
     # Validate data requirements for statistical analysis
-    if df.empty or df['group'].nunique() < 2 or df['ranked_omega'].nunique() < 2:
+    if df.empty or df['group'].nunique() < 2 or df['analysis_var'].nunique() < 2:
         if df.empty:
             failure_reason = "No valid pairwise comparisons found"
         elif df['group'].nunique() < 2:
             failure_reason = "Missing one of the groups in pairwise comparisons"
-        elif df['ranked_omega'].nunique() < 2:
+        elif df['analysis_var'].nunique() < 2:
             print("RAW DATA for Not enough omega value variation for statistical analysis:")
             print(df)
             failure_reason = "Not enough omega value variation for statistical analysis"
@@ -478,7 +487,7 @@ def analysis_worker(args):
         
         # Use these dummy variables in the model
         model = MixedLM.from_formula(
-            'ranked_omega ~ is_group1 + is_group2',  # Group 0 is reference
+            'analysis_var ~ is_group1 + is_group2',  # Group 0 is reference
             groups='groups',
             vc_formula=vc,
             re_formula='0',
