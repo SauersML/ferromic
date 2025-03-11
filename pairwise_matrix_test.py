@@ -857,10 +857,11 @@ def main():
             corrected_p = f"{row['corrected_p_value']:.6e}" if not pd.isna(row['corrected_p_value']) else "N/A"
             effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
             
-            median_0 = row['median_0']
-            mean_0 = row['mean_0']
-            median_1 = row['median_1']
-            mean_1 = row['mean_1']
+            median_0 = row['median_0_normal']
+            mean_0 = row['mean_0_normal']
+            median_1 = row['median_1_normal']
+            mean_1 = row['mean_1_normal']
+
             median_0_str = f"{median_0:.3f}" if not pd.isna(median_0) else "N/A"
             mean_0_str = f"{mean_0:.3f}" if not pd.isna(mean_0) else "N/A"
             median_1_str = f"{median_1:.3f}" if not pd.isna(median_1) else "N/A"
