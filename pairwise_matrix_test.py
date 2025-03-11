@@ -833,7 +833,7 @@ def main():
     if significant_count > 0:
         print("\nSignificant results after correction:")
         print(
-            f"{'Transcript/Coordinates':<50} "
+            f"{'Chrom':<10} "
             f"{'P-value':<15} "
             f"{'Corrected P':<15} "
             f"{'Effect Size':<15} "
@@ -841,6 +841,10 @@ def main():
             f"{'Mean_0':<10} "
             f"{'Median_1':<10} "
             f"{'Mean_1':<10} "
+            f"{'Pct_id_0':<10} "
+            f"{'Pct_noSyn_0':<10} "
+            f"{'Pct_id_1':<10} "
+            f"{'Pct_noSyn_1':<10} "
             f"{'Gene':<15} "
         )
         print("-" * 160)
@@ -850,9 +854,7 @@ def main():
         
         # Print each significant result with detailed information
         for _, row in sig_results.iterrows():
-            transcript_str = str(row['transcript_id']) if 'transcript_id' in row and pd.notna(row['transcript_id']) else ""
             coords_str = str(row['coordinates']) if 'coordinates' in row and pd.notna(row['coordinates']) else ""
-            label = f"{transcript_str} / {coords_str}".strip(" /")
             p_value = f"{row['p_value']:.6e}" if not pd.isna(row['p_value']) else "N/A"
             corrected_p = f"{row['corrected_p_value']:.6e}" if not pd.isna(row['corrected_p_value']) else "N/A"
             effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
@@ -861,20 +863,45 @@ def main():
             mean_0 = row['mean_0_normal']
             median_1 = row['median_1_normal']
             mean_1 = row['mean_1_normal']
-
             median_0_str = f"{median_0:.3f}" if not pd.isna(median_0) else "N/A"
             mean_0_str = f"{mean_0:.3f}" if not pd.isna(mean_0) else "N/A"
             median_1_str = f"{median_1:.3f}" if not pd.isna(median_1) else "N/A"
             mean_1_str = f"{mean_1:.3f}" if not pd.isna(mean_1) else "N/A"
 
-            # Format gene information with name if available
+            pct_id_0_val = row['pct_identical_0']
+            pct_noSyn_0_val = row['pct_nosyn_0']
+            pct_id_1_val = row['pct_identical_1']
+            pct_noSyn_1_val = row['pct_nosyn_1']
+            pct_id_0_str = f"{pct_id_0_val:.2f}%" if not pd.isna(pct_id_0_val) else "N/A"
+            pct_noSyn_0_str = f"{pct_noSyn_0_val:.2f}%" if not pd.isna(pct_noSyn_0_val) else "N/A"
+            pct_id_1_str = f"{pct_id_1_val:.2f}%" if not pd.isna(pct_id_1_val) else "N/A"
+            pct_noSyn_1_str = f"{pct_noSyn_1_val:.2f}%" if not pd.isna(pct_noSyn_1_val) else "N/A"
+
+            chrom_str = ""
+            if pd.notna(coords_str):
+                chrom_str = coords_str.split(":")[0]
+
             gene_info = ""
             if 'gene_symbol' in row and pd.notna(row['gene_symbol']) and 'gene_name' in row and pd.notna(row['gene_name']):
                 gene_info = f"{row['gene_symbol']}: {row['gene_name']}"
             gene_info = gene_info[:40]
             
-            print(f"{label:<50} {p_value:<15} {corrected_p:<15} {effect_size:<15} {median_0_str:<10} {mean_0_str:<10} {median_1_str:<10} {mean_1_str:<10} {gene_info:<15}")
-                
+            print(
+                f"{chrom_str:<10} "
+                f"{p_value:<15} "
+                f"{corrected_p:<15} "
+                f"{effect_size:<15} "
+                f"{median_0_str:<10} "
+                f"{mean_0_str:<10} "
+                f"{median_1_str:<10} "
+                f"{mean_1_str:<10} "
+                f"{pct_id_0_str:<10} "
+                f"{pct_noSyn_0_str:<10} "
+                f"{pct_id_1_str:<10} "
+                f"{pct_noSyn_1_str:<10} "
+                f"{gene_info:<15}"
+            )
+                 
     # Summarize analysis failures by reason
     failure_counts = results_df['failure_reason'].value_counts()
     if not failure_counts.empty:
