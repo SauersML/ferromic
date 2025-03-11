@@ -1083,11 +1083,9 @@ def main():
       basename = os.path.basename(phy_file)
       match = filename_pattern.match(basename)
       if not match:
-         print("No match.")
-         if not basename.startswith("group_both_"):
-            continue
+         print(f"No match for {basename}. Skipping this file entirely.")
+         continue
 
-      # Extract components from new filename format
       group_num = match.group(1)
       gene_name = match.group(2)
       gene_id = match.group(3)
@@ -1095,7 +1093,7 @@ def main():
       chromosome = match.group(5)
       start_pos = match.group(6)
       end_pos = match.group(7)
-      
+
       # Parse the file once, store in PARSED_PHY
       parsed_data = parse_phy_file_once(phy_file)
       valid_seq_count = len(parsed_data['sequences'])
