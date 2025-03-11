@@ -31,6 +31,9 @@ MIN_SEQUENCES_PER_GROUP = 10
 # Flag to determine whether to filter out special omega values (-1 and 99)
 FILTER_SPECIAL_OMEGA_VALUES = False
 
+# Flag to determine whether to calculate omega manually from dN/dS
+CALCULATE_OMEGA_MANUALLY = False
+
 def read_and_preprocess_data(file_path):
     """
     Read and preprocess the evolutionary rate data from a CSV file.
@@ -95,7 +98,29 @@ def read_and_preprocess_data(file_path):
     # Convert omega to numeric values, coercing non-numeric entries to NaN
     # Omega is the ratio of non-synonymous to synonymous substitution rates
     df['omega'] = pd.to_numeric(df['omega'], errors='coerce')
-
+    df['dN'] = pd.to_numeric(df['dN'], errors='coerce')
+    df['dS'] = pd.to_numeric(df['dS'], errors='coerce')
+    
+    # Calculate omega manually if flag is set
+    if CALCULATE_OMEGA_MANUALLY:
+        print("Calculating omega manually from dN and dS values...")
+        # Store original omega for reference
+        df['original_omega'] = df['omega']
+        
+        # Calculate omega as dN/dS with special case handling
+        # Case 1: dN = 0, dS = 0 -> omega = -1 (identical sequences)
+        # Case 2: dN = any value, dS = 0 -> omega = 99 (infinite/undefined)
+        # Case 3: Normal case -> omega = dN/dS
+        df['omega'] = df.apply(
+            lambda row: -1.0 if row['dN'] == 0 and row['dS'] == 0 else
+                       (99.0 if row['dS'] == 0 else row['dN'] / row['dS']),
+            axis=1
+        )
+    
+        # Report differences between original and calculated omega
+        different_count = (df['original_omega'] != df['omega']).sum()
+        print(f"Manual calculation resulted in {different_count} different omega values")
+    
     # Report special omega values
     # -1 means identical sequences
     # 99 means inf (or very high) omega
