@@ -110,10 +110,6 @@ VALIDATION_CACHE = {}
 #   }
 PARSED_PHY = {}
 
-# Maps transcript_id -> (chrom, start, end) from the GTF
-TRANSCRIPT_COORDS = {}
-
-
 # --------------------------------------------------------------------------------
 # HELPER FUNCTIONS: TIME/ETA
 # --------------------------------------------------------------------------------
