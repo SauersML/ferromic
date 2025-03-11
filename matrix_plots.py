@@ -30,15 +30,15 @@ for directory in [CACHE_DIR, RESULTS_DIR, PLOTS_DIR]:
 def read_significant_results(csv_path):
     """
     Read the significant results from CSV file.
-    Returns DataFrame of significant results (bonferroni_p_value < 0.05).
+    Returns DataFrame of significant results (corrected_p_value < 0.05).
     """
     try:
         df = pd.read_csv(csv_path)
         print(f"Read {len(df)} entries from {csv_path}")
         
         # Filter for significant results
-        significant = df[df['bonferroni_p_value'] < 0.05].sort_values('p_value')
-        print(f"Found {len(significant)} significant results (bonferroni_p_value < 0.05)")
+        significant = df[df['corrected_p_value'] < 0.05].sort_values('p_value')
+        print(f"Found {len(significant)} significant results (corrected_p_value < 0.05)")
         
         return significant
     except Exception as e:
@@ -291,7 +291,7 @@ def create_visualization(transcript_id, coordinates, stats, pickle_data, output_
 
     # Add P-value text inside the histogram subplot (top-right corner)
     p_value = stats.get('p_value', np.nan)
-    bonf_p_value = stats.get('bonferroni_p_value', np.nan)
+    bonf_p_value = stats.get('corrected_p_value', np.nan)
     effect_size = stats.get('effect_size', np.nan)
     
     # Determine effect direction
