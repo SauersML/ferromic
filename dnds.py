@@ -977,13 +977,14 @@ def parallel_handle_file(phy_file):
    basename = os.path.basename(phy_file)
    match = filename_pattern.match(basename)
    if not match:
-      if basename.startswith("combined_"):
-         group_num = -1
+      if basename.startswith("group_both_"):
+          group_num = -1
       else:
-         print(f"ERROR: Could not parse group number from filename: {basename}")
-         sys.exit(1)
+          print(f"ERROR: Could not parse group number from filename: {basename}")
+          sys.exit(1)
    else:
       group_num = int(match.group(1))
+
    
    if group_num == -1:
       sample_groups = {}
@@ -1462,7 +1463,7 @@ def main():
       basename = os.path.basename(phy_file)
       match = filename_pattern.match(basename)
       if not match:
-         if basename.startswith("combined_"):
+         if basename.startswith("group_both_"):
             group_num = -1
          else:
             print(f"ERROR: Could not parse group number from filename: {basename}")
