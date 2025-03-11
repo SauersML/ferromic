@@ -1201,7 +1201,7 @@ def main():
                 with open(combined_path, 'w') as outf:
                     outf.write(f"{total_sequences} {alignment_length}\n")
                     for sname, sseq in seq_map.items():
-                        outf.write(f"{sname} {sseq}\n")
+                        outf.write(f"{sname}{sseq}\n")
                 all_phy_filtered.append(combined_path)
 
     print(f"Found {len(valid_genes)} genes with files in both groups.")
