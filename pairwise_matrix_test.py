@@ -619,7 +619,12 @@ def analyze_transcript(args):
     # Perform statistical analysis on the transcript data
     analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
 
-    # Combine results into a comprehensive result dictionary
+    # Compute median and mean omega values for each group
+    median_0 = group_0_df['omega'].median()
+    mean_0 = group_0_df['omega'].mean()
+    median_1 = group_1_df['omega'].median()
+    mean_1 = group_1_df['omega'].mean()
+    
     result = {
         'transcript_id': transcript_id,
         'coordinates': coords_str,
@@ -635,8 +640,14 @@ def analyze_transcript(args):
         'failure_reason': analysis_result['failure_reason'],
         'matrix_0': matrix_0,
         'matrix_1': matrix_1,
-        'pairwise_comparisons': set(pairwise_dict.keys())
+        'pairwise_comparisons': set(pairwise_dict.keys()),
+        # Add median and mean for each group
+        'median_0': median_0,
+        'mean_0': mean_0,
+        'median_1': median_1,
+        'mean_1': mean_1
     }
+
 
     return result
 
@@ -813,9 +824,20 @@ def main():
     # Print detailed information for significant results
     if significant_count > 0:
         print("\nSignificant results after correction:")
-        print(f"{'Transcript/Coordinates':<50} {'P-value':<15} {'Corrected P':<15} {'Effect Size':<15} {'Gene':<15} {'Distance (kb)'}")
+        print(
+            f"{'Transcript/Coordinates':<50} "
+            f"{'P-value':<15} "
+            f"{'Corrected P':<15} "
+            f"{'Effect Size':<15} "
+            f"{'Median_0':<10} "
+            f"{'Mean_0':<10} "
+            f"{'Median_1':<10} "
+            f"{'Mean_1':<10} "
+            f"{'Gene':<15} "
+            f"{'Distance (kb)'}"
+        )
         print("-" * 160)
-        
+
         # Select and sort significant results
         sig_results = results_df[results_df['corrected_p_value'] < 0.05].sort_values('p_value')
         
