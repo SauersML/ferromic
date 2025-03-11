@@ -65,16 +65,16 @@ def read_and_preprocess_data(file_path):
     # Store original CDS as full_cds for reference and troubleshooting
     df['full_cds'] = df['CDS']
 
-    # Extract group assignment (0 or 1) from the CDS column prefix
-    def extract_group(x):
-        if x.startswith('group1_'):
-            return 1
-        elif x.startswith('group0_'):
-            return 0
-        else:
-            raise ValueError(f"Invalid group format in CDS: {x}")
-
-    df['group'] = df['CDS'].apply(extract_group)
+    # Determine comparison group based on Group1 and Group2 columns
+    df['group'] = None  # Initialize column
+    
+    # Within-group comparisons
+    df.loc[(df['Group1'] == 0) & (df['Group2'] == 0), 'group'] = 0  # Group 0 vs Group 0
+    df.loc[(df['Group1'] == 1) & (df['Group2'] == 1), 'group'] = 1  # Group 1 vs Group 1
+    
+    # Cross-group comparisons - used for better random effect estimation
+    df.loc[((df['Group1'] == 0) & (df['Group2'] == 1)) | 
+           ((df['Group1'] == 1) & (df['Group2'] == 0)), 'group'] = 2  # Cross-group
 
     # Extract genomic coordinates using regex pattern
     # Format expected: chrX_startNNN_endNNN where X is chromosome and NNN are positions
