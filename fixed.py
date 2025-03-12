@@ -43,7 +43,7 @@ def extract_gene_info(filename):
       group[0/1]_GENEID_chrX_startNNN_endMMM.fa
     Also extracts transcript ID if present, e.g. _ENST#########_ in the filename.
     """
-    gene_match = re.search(r'group\d+_([^_]+)_', filename)
+    gene_match = re.search(r'group\d+_(.+?)_chr', filename)
     gene_id = gene_match.group(1) if gene_match else ""
     
     full_id_match = re.search(r'group\d+_(.+?)\.fa', filename)
@@ -317,9 +317,7 @@ def process_file_pair(file_pair, gtf_file=None):
                     raise ValueError("No spliced mapping for position. The GTF-based mapping is missing this spliced coordinate.")
                 mapped_fixed.append((pos, spliced_map[pos], g0_nuc, g1_nuc))
             else:
-                # if no GTF or no transcript, we do not have a mapping
-                # we can just store pos as is
-                mapped_fixed.append((pos, start_pos + pos, g0_nuc, g1_nuc))
+                print("NO TRANSCRIPT")
         
         # create visualization only if there are fixed differences
         # build a visualization position map for all differences
@@ -330,8 +328,7 @@ def process_file_pair(file_pair, gtf_file=None):
                     raise ValueError("No spliced mapping for position in all_differences. The GTF-based mapping is missing this spliced coordinate.")
                 vis_positions[p] = spliced_map[p]
         else:
-            for p in all_diff.keys():
-                vis_positions[p] = start_pos + p
+            print("NO TRANSCRIPT")
         
         viz_file = ""
         if fixed_diff:
