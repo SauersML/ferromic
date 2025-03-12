@@ -1506,9 +1506,6 @@ fn process_chromosome_entries(
             }
         };
         
-        // Create a spinner for PCA data collection
-        let spinner = create_spinner(&format!("Collecting variants from chr{} for PCA", chr));
-        
         // Open VCF reader to get sample names
         let mut reader = open_vcf_reader(&vcf_file)?;
         let mut buffer = String::new();
@@ -1537,8 +1534,6 @@ fn process_chromosome_entries(
                 *names_storage = sample_names;
             }
         }
-        
-        spinner.finish_with_message("Collected data for PCA");
     }
 
     // Initialize progress for config entries
