@@ -1243,60 +1243,7 @@ pub fn process_config_entries(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::copy(&temp_csv, output_file)?;
-    
-    // Run PCA analysis if enabled
-    if args.enable_pca {
-        set_stage(ProcessingStage::PcaAnalysis);
-        log(LogLevel::Info, "Starting global PCA analysis across all chromosomes");
-        
-        // Get variants and sample names from storage
-        let variants_by_chr = global_filtered_variants.lock().clone();
-        let sample_names = global_sample_names.lock().clone();
-        
-        // Create output path for PCA results
-        let pca_output_path = Path::new(&args.pca_output);
-        
-        // Display PCA parameters
-        display_status_box(StatusBox {
-            title: "PCA Analysis Configuration".to_string(),
-            stats: vec![
-                ("Chromosomes".to_string(), variants_by_chr.len().to_string()),
-                ("Samples".to_string(), sample_names.len().to_string()),
-                ("Components".to_string(), args.pca_components.to_string()),
-                ("Output file".to_string(), args.pca_output.to_string()),
-            ],
-        });
-        
-        // Run PCA analysis
-        match pca::run_global_pca_analysis(
-            &variants_by_chr,
-            &sample_names,
-            pca_output_path,
-            args.pca_components,
-        ) {
-            Ok(_) => {
-                log(LogLevel::Info, &format!("PCA analysis completed successfully. Results saved to {}", args.pca_output));
-                display_status_box(StatusBox {
-                    title: "PCA Analysis Complete".to_string(),
-                    stats: vec![
-                        ("Status".to_string(), "Success".to_string()),
-                        ("Output file".to_string(), args.pca_output.to_string()),
-                    ],
-                });
-            },
-            Err(e) => {
-                log(LogLevel::Error, &format!("PCA analysis failed: {}", e));
-                display_status_box(StatusBox {
-                    title: "PCA Analysis Failed".to_string(),
-                    stats: vec![
-                        ("Status".to_string(), "Error".to_string()),
-                        ("Reason".to_string(), e.to_string()),
-                    ],
-                });
-            }
-        }
-    }
-    
+
     // Copy FASTA file
     let temp_fasta = temp_dir_path.join("per_site_output.falsta");
     if temp_fasta.exists() {
@@ -1575,9 +1522,8 @@ fn process_chromosome_entries(
         update_entry_progress((idx + 1) as u64, &format!("Global progress for region {}", region_desc));
     }
 
-
     finish_entry_progress(&format!("Processed {} regions on chr{}", entries.len(), chr));
-    
+
     display_status_box(StatusBox {
         title: format!("Chromosome {} Statistics", chr),
         stats: vec![
@@ -1586,6 +1532,39 @@ fn process_chromosome_entries(
             ("Skipped/failed".to_string(), (entries.len() - rows.len()).to_string()),
         ],
     });
+
+    if args.enable_pca {
+        let spinner_pca = create_spinner(&format!("Performing immediate PCA for chromosome {}", chr));
+        let sample_names_for_pca = {
+            let stored = global_sample_names.lock();
+            stored.clone()
+        };
+        let filtered_variants_for_chr = {
+            let stored = global_filtered_variants.lock();
+            stored.get(chr).cloned().unwrap_or_else(Vec::new)
+        };
+        log(LogLevel::Info, &format!(
+            "Running PCA immediately for chromosome {} with {} filtered variants",
+            chr, filtered_variants_for_chr.len()
+        ));
+        match crate::pca::compute_chromosome_pca(
+            &filtered_variants_for_chr,
+            &sample_names_for_pca,
+            args.pca_components,
+        ) {
+            Ok(pca_result) => {
+                let out_dir = Path::new("pca_per_chr_outputs");
+                if !out_dir.exists() {
+                    std::fs::create_dir_all(out_dir)?;
+                }
+                crate::pca::write_chromosome_pca_to_file(&pca_result, chr, out_dir)?;
+            }
+            Err(err) => {
+                log(LogLevel::Warning, &format!("Chromosome {} PCA error: {}", chr, err));
+            }
+        }
+        spinner_pca.finish_and_clear();
+    }
 
     Ok(rows)
 }
