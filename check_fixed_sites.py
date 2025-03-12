@@ -219,16 +219,180 @@ def find_vcf_file(chrom_name, vcf_dir):
     
     return None, clean_chrom
 
-def validate_positions(csv_file="fixed_differences.csv", vcf_dir="../vcfs"):
-    """Validate positions from fixed_differences.csv against VCF files."""
-    print(f"{Fore.BLUE}=== VCF Position Validator ==={Style.RESET_ALL}")
+def parse_gtf_for_cds_mappings(gtf_file):
+    """Parse the GTF file to build CDS-to-genome coordinate maps for all transcripts.
+    
+    Returns:
+        dict: A dictionary mapping transcript_ids to their CDS info
+        {
+            'transcript_id': {
+                'chromosome': 'chr15',
+                'gene_id': 'ENSG...',
+                'gene_name': 'GENE1',
+                'strand': '+',
+                'cds_segments': [(start1, end1), (start2, end2), ...],  # Genomic coordinates
+                'cds_length': total_length_of_cds
+            }
+        }
+    """
+    print(f"{Fore.BLUE}Parsing GTF file: {gtf_file}{Style.RESET_ALL}")
+    
+    # Store CDS information by transcript ID
+    transcript_cds_map = {}
+    
+    try:
+        # First pass: Collect all CDS regions by transcript
+        with open(gtf_file, 'r') as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                    
+                fields = line.strip().split('\t')
+                if len(fields) < 9 or fields[2] != 'CDS':
+                    continue
+                    
+                # Extract basic information
+                chromosome = fields[0]
+                feature_type = fields[2]
+                start = int(fields[3])  # 1-based inclusive
+                end = int(fields[4])    # 1-based inclusive
+                strand = fields[6]
+                attributes = fields[8]
+                
+                # Parse attributes to get transcript_id, gene_id, gene_name
+                transcript_id_match = re.search(r'transcript_id "([^"]+)"', attributes)
+                gene_id_match = re.search(r'gene_id "([^"]+)"', attributes)
+                gene_name_match = re.search(r'gene_name "([^"]+)"', attributes)
+                
+                if not transcript_id_match or not gene_id_match:
+                    continue  # Skip if missing required IDs
+                    
+                transcript_id = transcript_id_match.group(1)
+                gene_id = gene_id_match.group(1)
+                gene_name = gene_name_match.group(1) if gene_name_match else "Unknown"
+                
+                # Initialize transcript entry if not exists
+                if transcript_id not in transcript_cds_map:
+                    transcript_cds_map[transcript_id] = {
+                        'chromosome': chromosome,
+                        'gene_id': gene_id,
+                        'gene_name': gene_name,
+                        'strand': strand,
+                        'cds_segments': []
+                    }
+                
+                # Add this CDS segment
+                transcript_cds_map[transcript_id]['cds_segments'].append((start, end))
+                
+        # Second pass: Sort CDS segments and calculate CDS length
+        for transcript_id, info in transcript_cds_map.items():
+            # Sort segments by start position
+            info['cds_segments'].sort()
+            
+            # Calculate total CDS length
+            cds_length = 0
+            for start, end in info['cds_segments']:
+                cds_length += (end - start + 1)  # +1 because end is inclusive
+                
+            info['cds_length'] = cds_length
+            
+            # For negative strand transcripts, reverse the order of segments for easier coordinate conversion
+            if info['strand'] == '-':
+                info['cds_segments'].reverse()
+                
+        print(f"  Parsed CDS information for {len(transcript_cds_map)} transcripts")
+        return transcript_cds_map
+        
+    except Exception as e:
+        print(f"{Fore.RED}Error parsing GTF file: {str(e)}{Style.RESET_ALL}")
+        return {}
+
+def convert_cds_to_genomic(transcript_id, cds_position, cds_map):
+    """
+    Convert a CDS position (relative to the start of the CDS) to its genomic position.
+    
+    Args:
+        transcript_id: The transcript ID
+        cds_position: Position within the CDS (1-based)
+        cds_map: The CDS-to-genome mapping dictionary
+        
+    Returns:
+        tuple: (chromosome, genomic_position) or (None, None) if conversion fails
+    """
+    if transcript_id not in cds_map:
+        return None, None
+        
+    info = cds_map[transcript_id]
+    chromosome = info['chromosome']
+    strand = info['strand']
+    segments = info['cds_segments']  # List of (start, end) tuples in genomic coordinates
+    
+    # Validate CDS position
+    if cds_position < 1 or cds_position > info['cds_length']:
+        return chromosome, None
+        
+    # For each segment, check if the CDS position falls within it
+    current_pos = 0
+    
+    if strand == '+':
+        # Positive strand: segments are in ascending order
+        for start, end in segments:
+            segment_length = end - start + 1
+            if current_pos + segment_length >= cds_position:
+                # Position is in this segment
+                offset = cds_position - current_pos - 1  # -1 to convert to 0-based for calculation
+                genomic_pos = start + offset
+                return chromosome, genomic_pos
+            current_pos += segment_length
+    else:
+        # Negative strand: segments are in descending order (from 3' to 5')
+        for start, end in segments:
+            segment_length = end - start + 1
+            if current_pos + segment_length >= cds_position:
+                # Position is in this segment
+                offset = cds_position - current_pos - 1  # -1 to convert to 0-based for calculation
+                genomic_pos = end - offset  # For negative strand, count from the end
+                return chromosome, genomic_pos
+            current_pos += segment_length
+            
+    return chromosome, None  # Failed to find position
+    
+def extract_transcript_info(chromosome_field):
+    """Extract transcript ID from a chromosome field like 'chr15_ENST00123456_start24675868'."""
+    match = re.search(r'ENST\d+', chromosome_field)
+    if match:
+        return match.group(0)
+    return None
+
+def extract_gene_info(gene_field):
+    """Extract gene ID if present in gene field."""
+    if isinstance(gene_field, str) and gene_field.startswith('ENSG'):
+        return gene_field
+    return None
+
+def validate_positions(csv_file="fixed_differences.csv", vcf_dir="../vcfs", gtf_file="../gencode.v47.basic.annotation.gtf"):
+    """Validate positions from fixed_differences.csv against VCF files using GTF for coordinate mapping."""
+    print(f"{Fore.BLUE}=== VCF Position Validator (With GTF Coordinate Mapping) ==={Style.RESET_ALL}")
     print(f"Checking positions from {csv_file} against VCF files in {vcf_dir}\n")
+    print(f"Using GTF file {gtf_file} for CDS-to-genome coordinate mapping\n")
     
     # Make sure the CSV file exists
     if not os.path.exists(csv_file):
         print(f"{Fore.RED}Error: CSV file {csv_file} not found{Style.RESET_ALL}")
         return
+        
+    # Make sure the GTF file exists
+    if not os.path.exists(gtf_file):
+        print(f"{Fore.RED}Error: GTF file {gtf_file} not found{Style.RESET_ALL}")
+        return
     
+    # Parse the GTF file to build CDS-to-genome coordinate maps
+    transcript_cds_map = parse_gtf_for_cds_mappings(gtf_file)
+    
+    if not transcript_cds_map:
+        print(f"{Fore.RED}Error: Failed to build CDS-to-genome maps from GTF{Style.RESET_ALL}")
+        return
+        
     # Read the CSV file
     try:
         df = pd.read_csv(csv_file)
@@ -268,27 +432,56 @@ def validate_positions(csv_file="fixed_differences.csv", vcf_dir="../vcfs"):
             if not isinstance(chromosome, str) or chromosome.lower() == 'nan':
                 continue
                 
-            # Clean up chromosome and position if needed
+            # Clean up chromosome field to get just the chromosome name
             clean_chrom = extract_chromosome(chromosome)
             
             # For positions that might be encoded in the chromosome field
             if isinstance(position, str) and ("No fixed" in position or "Error" in position):
                 continue
                 
-            # Certain rows may have position embedded in the Chromosome field
-            if not isinstance(position, (int, float)) and not (isinstance(position, str) and position.isdigit()):
-                pos_from_chrom = extract_position_from_field(chromosome)
-                if pos_from_chrom:
-                    position = pos_from_chrom
-                    print(f"{Fore.YELLOW}Extracted position {position} from chromosome field{Style.RESET_ALL}")
+            # Step 1: Determine if we have a CDS position that needs conversion
+            # Extract transcript ID from chromosome field if present
+            transcript_id = extract_transcript_info(chromosome)
             
-            # Try to convert position to int
+            # If no transcript ID in chromosome, try to find it from gene field or use other identifiers
+            if not transcript_id:
+                gene_id = extract_gene_info(gene)
+                if gene_id:
+                    # Try to find transcript by gene ID
+                    matching_transcripts = [t_id for t_id, info in transcript_cds_map.items() 
+                                          if info['gene_id'] == gene_id]
+                    if matching_transcripts:
+                        transcript_id = matching_transcripts[0]
+                
+            # Try to convert position to int for further processing
             try:
                 position = int(position)
             except (ValueError, TypeError):
                 print(f"{Fore.RED}Invalid position {position} for {gene} on {clean_chrom}{Style.RESET_ALL}")
                 continue
+                
+            # Step 2: If we have a transcript ID, convert CDS position to genomic position
+            genomic_position = position  # Default to using the position as is
+            conversion_applied = False
             
+            if transcript_id and transcript_id in transcript_cds_map:
+                # Apply CDS-to-genome coordinate conversion
+                _, converted_pos = convert_cds_to_genomic(transcript_id, position, transcript_cds_map)
+                if converted_pos:
+                    print(f"{Fore.GREEN}Converted CDS position {position} to genomic position {converted_pos} for transcript {transcript_id}{Style.RESET_ALL}")
+                    genomic_position = converted_pos
+                    conversion_applied = True
+                else:
+                    print(f"{Fore.YELLOW}Failed to convert CDS position {position} for transcript {transcript_id} - position may be outside CDS{Style.RESET_ALL}")
+            else:
+                # If we couldn't find a transcript, extract position from chromosome field if needed
+                if not isinstance(position, (int, float)):
+                    pos_from_chrom = extract_position_from_field(chromosome)
+                    if pos_from_chrom:
+                        position = pos_from_chrom
+                        genomic_position = position
+                        print(f"{Fore.YELLOW}Extracted position {position} from chromosome field{Style.RESET_ALL}")
+                
             # Find the VCF file for this chromosome (only look it up once per chromosome)
             if clean_chrom in processed_chroms:
                 vcf_file, display_chrom = processed_chroms[clean_chrom]
@@ -300,7 +493,7 @@ def validate_positions(csv_file="fixed_differences.csv", vcf_dir="../vcfs"):
                 print(f"{Fore.RED}VCF file not found for {chromosome} (cleaned to {clean_chrom}){Style.RESET_ALL}")
                 continue
                 
-            # Only show the chromosome header once
+            # Only show the chromosome header once per chromosome
             if clean_chrom not in processed_chroms:
                 print(f"\n{Fore.BLUE}=== Checking positions on {display_chrom} ==={Style.RESET_ALL}")
                 print(f"Using VCF file: {os.path.basename(vcf_file)}")
@@ -313,11 +506,15 @@ def validate_positions(csv_file="fixed_differences.csv", vcf_dir="../vcfs"):
             # Process this position
             total_positions += 1
             
-            print(f"\n{Fore.CYAN}► Position {display_chrom}:{position} ({gene}){Style.RESET_ALL}")
+            position_description = f"{display_chrom}:{genomic_position}"
+            if conversion_applied:
+                position_description += f" (converted from CDS position {position})"
+                
+            print(f"\n{Fore.CYAN}► Position {position_description} ({gene}){Style.RESET_ALL}")
             print(f"  Fixed difference: Group0={Fore.GREEN}{g0_nuc}{Style.RESET_ALL}, Group1={Fore.RED}{g1_nuc}{Style.RESET_ALL}")
             
             # Check if position exists in VCF
-            found, exact, nearest_pos, distance, vcf_line = find_position_in_vcf(display_chrom, position, vcf_file)
+            found, exact, nearest_pos, distance, vcf_line = find_position_in_vcf(display_chrom, genomic_position, vcf_file)
             
             if found and exact:
                 print(f"  {Fore.GREEN}✓ Exact position found in VCF{Style.RESET_ALL}")
@@ -351,10 +548,13 @@ if __name__ == "__main__":
     # Get command line arguments if provided
     csv_file = "fixed_differences.csv"
     vcf_dir = "../vcfs"
+    gtf_file = "../gencode.v47.basic.annotation.gtf"
     
     if len(sys.argv) > 1:
         csv_file = sys.argv[1]
     if len(sys.argv) > 2:
         vcf_dir = sys.argv[2]
+    if len(sys.argv) > 3:
+        gtf_file = sys.argv[3]
         
-    validate_positions(csv_file, vcf_dir)
+    validate_positions(csv_file, vcf_dir, gtf_file)
