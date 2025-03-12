@@ -188,8 +188,8 @@ def plot_differences(gene_id, chr_info, start_pos, group0_sequences, group1_sequ
         plt.axvspan(idx-0.5, idx+0.5, color='yellow', alpha=0.3)
     
     # Add position labels on x-axis (genomic coordinates)
-    plt.xticks(range(len(diff_positions)), 
-               [genomic_positions.get(pos, start_pos + pos) for pos in diff_positions], 
+    plt.xticks(range(len(diff_positions)),
+               [genomic_positions[pos] for pos in diff_positions],
                rotation=90, fontsize=8)
     
     # Add group and sample labels on y-axis
@@ -379,16 +379,23 @@ def process_file_pair(file_pair, gtf_file=None):
                 # If strand is negative, print some diagnostic information
                 if strand == '-':
                     print(f"  Note: {gene_id} is on the negative strand")
-        
+
         # Map fixed differences to genomic coordinates
         genomic_fixed_differences = []
         for pos, g0_nuc, g1_nuc in fixed_differences:
-            # Get genomic position using the mapping if available, otherwise use start_pos + pos
-            genomic_pos = spliced_to_genomic.get(pos, start_pos + pos)
+            # Use only spliced_to_genomic; raise an error if missing
+            if pos not in spliced_to_genomic:
+                raise ValueError("No spliced mapping for position. The GTF-based mapping is missing this spliced coordinate.")
+            genomic_pos = spliced_to_genomic[pos]
             genomic_fixed_differences.append((pos, genomic_pos, g0_nuc, g1_nuc))
+
         
         # Create a mapping of spliced positions to genomic positions for visualization
-        genomic_positions = {pos: spliced_to_genomic.get(pos, start_pos + pos) for pos in all_differences.keys()}
+        genomic_positions = {}
+        for p in all_differences.keys():
+            if p not in spliced_to_genomic:
+                raise ValueError("No spliced mapping for position in all_differences. The GTF-based mapping is missing this spliced coordinate.")
+            genomic_positions[p] = spliced_to_genomic[p]
         
         # Only create visualization if there are fixed differences
         viz_file = ""
