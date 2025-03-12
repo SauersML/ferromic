@@ -74,7 +74,7 @@ pub fn compute_chromosome_pca(
     // Create data matrix efficiently
     let mut data_matrix = Array2::<f64>::zeros((n_haplotypes, valid_count));
     let mut positions = Vec::with_capacity(valid_count);
-    
+
     // Fill data matrix without collecting filtered variants first
     let mut valid_idx = 0;
     for variant in variants {
@@ -117,6 +117,30 @@ pub fn compute_chromosome_pca(
         }
     }
     
+    // Debug prints to investigate potential NaN causes:
+    log(LogLevel::Info, &format!(
+        "Debug PCA: final valid_idx = {}, total variants in 'variants' = {}",
+        valid_idx, variants.len()
+    ));
+    let row_count = data_matrix.nrows();
+    let col_count = data_matrix.ncols();
+    log(LogLevel::Info, &format!(
+        "Debug PCA: matrix dimensions = {} rows (haplotypes) x {} columns (sites)",
+        row_count, col_count
+    ));
+    if col_count > 0 {
+        let check_limit = if col_count < 5 { col_count } else { 5 };
+        for c in 0..check_limit {
+            let column_slice = data_matrix.slice(s![.., c]);
+            let min_val = column_slice.fold(f64::INFINITY, |acc, &x| if x < acc { x } else { acc });
+            let max_val = column_slice.fold(f64::NEG_INFINITY, |acc, &x| if x > acc { x } else { acc });
+            log(LogLevel::Info, &format!(
+                "Debug PCA: column {} => min={}, max={}",
+                c, min_val, max_val
+            ));
+        }
+    }
+
     spinner.finish_and_clear();
     
     // Apply PCA using the library
