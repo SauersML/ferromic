@@ -1534,36 +1534,40 @@ fn process_chromosome_entries(
     });
 
     if args.enable_pca {
-        let spinner_pca = create_spinner(&format!("Performing immediate PCA for chromosome {}", chr));
-        let sample_names_for_pca = {
-            let stored = global_sample_names.lock();
-            stored.clone()
-        };
-        let filtered_variants_for_chr = {
-            let stored = global_filtered_variants.lock();
-            stored.get(chr).cloned().unwrap_or_else(Vec::new)
-        };
-        log(LogLevel::Info, &format!(
-            "Running PCA immediately for chromosome {} with {} filtered variants",
-            chr, filtered_variants_for_chr.len()
-        ));
-        match crate::pca::compute_chromosome_pca(
-            &filtered_variants_for_chr,
-            &sample_names_for_pca,
-            args.pca_components,
-        ) {
-            Ok(pca_result) => {
-                let out_dir = Path::new("pca_per_chr_outputs");
-                if !out_dir.exists() {
-                    std::fs::create_dir_all(out_dir)?;
+        if let Some((filtered_variants_map, sample_names_storage)) = &pca_storage {
+            let spinner_pca = create_spinner(&format!("Performing immediate PCA for chromosome {}", chr));
+            let sample_names_for_pca = {
+                let stored = sample_names_storage.lock();
+                stored.clone()
+            };
+            let filtered_variants_for_chr = {
+                let stored = filtered_variants_map.lock();
+                stored.get(chr).cloned().unwrap_or_else(Vec::new)
+            };
+            log(LogLevel::Info, &format!(
+                "Running PCA immediately for chromosome {} with {} filtered variants",
+                chr, filtered_variants_for_chr.len()
+            ));
+            match crate::pca::compute_chromosome_pca(
+                &filtered_variants_for_chr,
+                &sample_names_for_pca,
+                args.pca_components,
+            ) {
+                Ok(pca_result) => {
+                    let out_dir = Path::new("pca_per_chr_outputs");
+                    if !out_dir.exists() {
+                        std::fs::create_dir_all(out_dir)?;
+                    }
+                    crate::pca::write_chromosome_pca_to_file(&pca_result, chr, out_dir)?;
                 }
-                crate::pca::write_chromosome_pca_to_file(&pca_result, chr, out_dir)?;
+                Err(err) => {
+                    log(LogLevel::Warning, &format!("Chromosome {} PCA error: {}", chr, err));
+                }
             }
-            Err(err) => {
-                log(LogLevel::Warning, &format!("Chromosome {} PCA error: {}", chr, err));
-            }
+            spinner_pca.finish_and_clear();
+        } else {
+            log(LogLevel::Warning, "PCA is enabled but pca_storage is None.");
         }
-        spinner_pca.finish_and_clear();
     }
 
     Ok(rows)
