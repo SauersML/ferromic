@@ -569,9 +569,7 @@ pub fn prepare_to_write_cds(
          * COORDINATES ARE 1-BASED:
          * ----------------------------------
          * 
-         *   Conversion transforms [start, end) in 0-based half-open to [start+1, end] in 1-based inclusive:
-         *    - For start: 0-based index 100 → 1-based position 101
-         *    - For end: 0-based exclusive 200 → 1-based inclusive 199
+         *   Conversion transforms [start, end) in 0-based half-open to [start+1, end] in 1-based inclusive.
          * 
          * WHAT THESE COORDINATES REPRESENT BIOLOGICALLY:
          * ---------------------------------------------
