@@ -343,7 +343,7 @@ def build_genomic_to_spliced_map(cds_regions, transcript_info):
                 # For negative strand, map in descending order
                 for i in range(segment_length):
                     genomic_pos = end - i
-                    transcript_map[genomic_pos] = spliced_pos + i
+                    transcript_map[genomic_pos] = spliced_pos + (segment_length - 1 - i)
                     
             spliced_pos += segment_length
             
