@@ -386,7 +386,7 @@ pub fn combine_chromosome_pca_results(
 
 /// Run memory-efficient PCA analysis on a per-chromosome basis
 /// keeping haplotypes separate
-pub fn run_memory_efficient_pca_analysis(
+pub fn run_global_pca_analysis(
     variants_by_chr: &HashMap<String, Vec<Variant>>,
     sample_names: &[String],
     output_dir: &Path,
