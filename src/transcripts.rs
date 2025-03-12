@@ -542,6 +542,70 @@ pub fn prepare_to_write_cds(
         
         // Create a filename-safe version of gene name
         let safe_gene_name = cds.gene_name.replace(|c: char| !c.is_alphanumeric(), "");
+
+        /**
+         * CDS SEGMENT COLLECTION:
+         * -----------------------
+         * 1. Transcript CDS regions are parsed from GTF files in parse_gtf_file() function
+         *    - Only features with type "CDS" are collected (proved in parse_gtf_file at line 
+         *    - Each transcript may have multiple CDS segments (representing coding exons)
+         *    
+         * 2. TranscriptAnnotationCDS.segments stores these as ZeroBasedHalfOpen intervals
+         *    - Segments are ordered by position for '+' strand 
+         *    - Or reverse-ordered for '-' strand (see parse_gtf_file: "if strand == '-' { segments.reverse(); }")
+         * 
+         * COORDINATE DETERMINATION ALGORITHM:
+         * ----------------------------------
+         * In prepare_to_write_cds(), coordinates for the filename are determined as follows:
+         * 
+         * 1. For '+' strand transcripts:
+         *    - cds_start = first segment's start_1based_inclusive()
+         *    - cds_end = last segment's end_1based_inclusive()
+         *    
+         * 2. For '-' strand transcripts:
+         *    - cds_start = last segment's start_1based_inclusive()
+         *    - cds_end = first segment's end_1based_inclusive()
+         * 
+         * COORDINATES ARE 1-BASED:
+         * ----------------------------------
+         * 
+         *   Conversion transforms [start, end) in 0-based half-open to [start+1, end] in 1-based inclusive:
+         *    - For start: 0-based index 100 → 1-based position 101
+         *    - For end: 0-based exclusive 200 → 1-based inclusive 199
+         * 
+         * WHAT THESE COORDINATES REPRESENT BIOLOGICALLY:
+         * ---------------------------------------------
+         * The coordinates in the filename represent the genomic boundaries of the CDS (Coding Sequence),
+         * NOT the transcript or gene boundaries.
+         * 
+         * 1. The TranscriptAnnotationCDS struct specifically stores CDS segments from the GTF file.
+         * 
+         * 2. The prepare_to_write_cds() function specifically builds spliced coding sequences.
+         * 
+         * 3. These coordinates span the full genomic range of the CDS, including introns between coding exons,
+         *    even though the introns themselves are not part of the actual coding sequence in the .phy file.
+         * 
+         * COMPLETE PIPELINE CONTEXT:
+         * -------------------------
+         * 1. parse_gtf_file() → Extracts CDS features from GTF file
+         * 2. filter_and_log_transcripts() → Identifies transcripts in region of interest
+         * 3. process_variants() → Processes variants and calls make_sequences()
+         * 4. make_sequences() → Assembles sequences and calls prepare_to_write_cds()
+         * 5. prepare_to_write_cds() → Creates .phy files with proper coordinates
+         * 
+         * FINAL FILENAME FORMAT:
+         * ---------------------
+         * "group{haplotype_group}_{gene_name}_{gene_id}_{transcript_id}_chr{chromosome}_start{cds_start}_end{cds_end}.phy"
+         * 
+         * Where:
+         * - haplotype_group: The group ID (0 or 1)
+         * - gene_name: Sanitized gene name (alphanumeric characters only)
+         * - gene_id: Gene identifier from GTF
+         * - transcript_id: Transcript identifier from GTF
+         * - chromosome: Chromosome name
+         * - cds_start: 1-based inclusive start coordinate of the CDS
+         * - cds_end: 1-based inclusive end coordinate of the CDS
+         */
         
         let filename = format!(
             "group{}_{}_{}_{}_chr{}_start{}_end{}.phy",
