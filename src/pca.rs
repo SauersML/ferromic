@@ -1,4 +1,5 @@
 use ndarray::Array2;
+use ndarray::s;
 use std::path::Path;
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
