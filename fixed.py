@@ -12,7 +12,10 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 def parse_fasta(fasta_file):
-    """Parse a FASTA file and return a dictionary of sequences."""
+    """
+    Parse a FASTA file and return a dictionary of sequences.
+    Keys: sequence headers (minus '>'), Values: full uppercase sequence strings.
+    """
     sequences = {}
     current_header = None
     current_sequence = ""
@@ -22,418 +25,353 @@ def parse_fasta(fasta_file):
             line = line.strip()
             if not line:
                 continue
-            
             if line.startswith('>'):
-                # Save the previous sequence if it exists
                 if current_header is not None:
                     sequences[current_header] = current_sequence
-                
-                current_header = line[1:]  # Remove the '>' character
+                current_header = line[1:]  # remove '>'
                 current_sequence = ""
             else:
-                current_sequence += line.upper()  # Convert to uppercase for consistency
-        
-        # Save the last sequence
+                current_sequence += line.upper()
         if current_header is not None:
             sequences[current_header] = current_sequence
     
     return sequences
 
 def extract_gene_info(filename):
-    """Extract gene ID and genomic coordinates from filename.
-    
-    Expected format: group[0/1]_GENE_ID_...chr[X]_start[N]_end[M].fa
     """
-    # Extract gene ID
+    Extract gene ID, plus additional info from a filename of format:
+      group[0/1]_GENEID_chrX_startNNN_endMMM.fa
+    Also extracts transcript ID if present, e.g. _ENST#########_ in the filename.
+    """
     gene_match = re.search(r'group\d+_([^_]+)_', filename)
     gene_id = gene_match.group(1) if gene_match else ""
     
-    # Extract full gene identifier (everything between groupX_ and .fa)
     full_id_match = re.search(r'group\d+_(.+?)\.fa', filename)
     full_id = full_id_match.group(1) if full_id_match else ""
     
-    # Extract chromosome information - properly separate chr from start
     chr_match = re.search(r'_(chr\w+)_', filename)
     chr_info = chr_match.group(1) if chr_match else ""
     
-    # Extract start position
     start_match = re.search(r'_start(\d+)_', filename)
     start_pos = int(start_match.group(1)) if start_match else 0
     
-    # Extract end position
     end_match = re.search(r'_end(\d+)\.fa', filename)
     end_pos = int(end_match.group(1)) if end_match else 0
     
-    # Extract transcript ID if present
     transcript_match = re.search(r'_(ENST\d+)_', filename)
     transcript_id = transcript_match.group(1) if transcript_match else ""
     
     return gene_id, full_id, chr_info, start_pos, end_pos, transcript_id
 
 def check_valid_dna(sequences):
-    """Check if all sequences contain only valid DNA letters (A, C, G, T).
-    Return a list of any invalid characters found."""
+    """
+    Check that each sequence in 'sequences' contains only A, C, G, T.
+    Returns a list of invalid characters found if any exist.
+    """
     invalid_chars = set()
-    
-    for header, sequence in sequences.items():
-        for char in set(sequence):  # Use set for efficiency - only check each unique character once
-            if char not in 'ACGT':
+    for header, seq in sequences.items():
+        for char in set(seq):
+            if char not in "ACGT":
                 invalid_chars.add(char)
-    
     return list(invalid_chars)
 
 def find_differences(group0_sequences, group1_sequences):
-    """Find both fixed and all differences between two groups efficiently.
-    
-    Returns:
-    - fixed_differences: list of tuples (position, group0_nuc, group1_nuc)
-    - all_differences: dict of all positions with differences
     """
-    # Get sequence length (assuming all sequences are the same length)
+    Compare two sets of sequences (group0, group1) that should be the same length.
+    Return:
+      fixed_differences: list of (pos, group0_nuc, group1_nuc)
+      all_differences: dict with pos -> { 'g0': set_of_nucs, 'g1': set_of_nucs }
+    """
     seq_length = len(next(iter(group0_sequences.values())))
-    
-    # Initialize data structures
     fixed_differences = []
     all_differences = {}
     
-    # Process sequence positions in chunks for better efficiency
     chunk_size = 1000
-    
     for chunk_start in range(0, seq_length, chunk_size):
-        chunk_end = min(chunk_start + chunk_size, seq_length)
-        
-        # Process each position in the chunk
+        chunk_end = min(seq_length, chunk_start + chunk_size)
         for pos in range(chunk_start, chunk_end):
-            # Collect nucleotides at this position for each group
             g0_nucs = set(seq[pos] for seq in group0_sequences.values() if pos < len(seq))
             g1_nucs = set(seq[pos] for seq in group1_sequences.values() if pos < len(seq))
-            
-            # Skip if both groups have identical nucleotide sets
             if g0_nucs == g1_nucs:
                 continue
-                
-            # Only include valid nucleotides
-            g0_valid = {n for n in g0_nucs if n in 'ACGT'}
-            g1_valid = {n for n in g1_nucs if n in 'ACGT'}
-            
-            # Skip if either group has no valid nucleotides
+            g0_valid = {n for n in g0_nucs if n in "ACGT"}
+            g1_valid = {n for n in g1_nucs if n in "ACGT"}
             if not g0_valid or not g1_valid:
                 continue
-                
-            # Record as a difference
-            all_differences[pos] = {'g0': g0_valid, 'g1': g1_valid}
-            
-            # Check if it's a fixed difference (each group has exactly one nucleotide)
+            all_differences[pos] = {"g0": g0_valid, "g1": g1_valid}
             if len(g0_valid) == 1 and len(g1_valid) == 1:
                 g0_nuc = next(iter(g0_valid))
                 g1_nuc = next(iter(g1_valid))
-                
                 if g0_nuc != g1_nuc:
                     fixed_differences.append((pos, g0_nuc, g1_nuc))
     
     return fixed_differences, all_differences
 
-def plot_differences(gene_id, chr_info, start_pos, group0_sequences, group1_sequences, all_differences, fixed_differences, genomic_positions):
-    """Create a visualization of the differences between the two groups."""
-    # Create a nucleotide color map
-    nuc_colors = {'A': 'green', 'C': 'blue', 'G': 'orange', 'T': 'red', '-': 'white', 'N': 'purple'}
+def parse_gtf_for_cds_regions(gtf_file, transcript_id):
+    """
+    Parse the GTF file for a specific transcript ID and gather all its CDS regions.
+    Return a sorted list of (start, end) for these CDS segments, plus the strand.
+    """
+    cds_regions = []
+    strand = None
+    try:
+        with open(gtf_file, "r") as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                fields = line.strip().split("\t")
+                if len(fields) < 9:
+                    continue
+                if fields[2] != "CDS":
+                    continue
+                attributes = fields[8]
+                if (f'transcript_id "{transcript_id}"' not in attributes and
+                        f'transcript_id "{transcript_id}.' not in attributes):
+                    continue
+                start = int(fields[3])
+                end = int(fields[4])
+                strand = fields[6]
+                cds_regions.append((start, end))
+    except Exception as e:
+        print(f"Error parsing GTF file for {transcript_id}: {str(e)}")
+        return [], None
     
-    # Convert fixed differences to a set of positions for quick lookup
-    fixed_pos = {pos for pos, _, _ in fixed_differences}
-    
-    # Get all sample IDs
+    cds_regions.sort()
+    return cds_regions, strand
+
+def build_spliced_to_genomic_map(cds_regions, strand):
+    """
+    Given a list of (start, end) CDS coordinates and the strand,
+    create a dictionary mapping from 0-based spliced positions to 1-based genomic positions.
+    """
+    spliced_to_genomic = {}
+    if not cds_regions:
+        return spliced_to_genomic
+    regions = list(cds_regions)
+    if strand == "-":
+        regions.reverse()
+    spliced_pos = 0
+    for start, end in regions:
+        length = end - start + 1
+        if strand == "+":
+            for i in range(length):
+                spliced_to_genomic[spliced_pos + i] = start + i
+        else:
+            # negative strand
+            for i in range(length):
+                spliced_to_genomic[spliced_pos + i] = end - i
+        spliced_pos += length
+    return spliced_to_genomic
+
+def plot_differences(gene_id, chr_info, start_pos, group0_sequences, group1_sequences,
+                     all_differences, fixed_differences, genomic_positions):
+    """
+    Create a heatmap-like visualization of differences.
+    X-axis: spliced positions (labeled with genomic_positions).
+    Y-axis: all samples from both groups.
+    """
+    nuc_to_idx = {"A": 0, "C": 1, "G": 2, "T": 3, "N": 4, "-": 5}
     g0_samples = list(group0_sequences.keys())
     g1_samples = list(group1_sequences.keys())
     all_samples = g0_samples + g1_samples
     
-    # Count number of samples
+    diff_positions = sorted(all_differences.keys())
+    fixed_pos = {p for p, _, _ in fixed_differences}
+    
     n_samples = len(all_samples)
+    n_diffs = len(diff_positions)
     
-    # Prepare the figure
-    fig_height = max(10, n_samples * 0.3)  # Adjust height based on sample count
+    fig_height = max(10, n_samples * 0.3)
     fig_width = 15
-    
     plt.figure(figsize=(fig_width, fig_height))
     
-    # Create an empty matrix for visualization
-    # Only include positions with differences to save space
-    diff_positions = sorted(all_differences.keys())
-    
-    # Create visualization matrix
-    n_diffs = len(diff_positions)
-    viz_matrix = np.ones((n_samples, n_diffs)) * -1  # -1 represents missing/invalid data
-    
-    # Fill in the matrix with nucleotide indices
-    nuc_to_idx = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': 4, '-': 5}
+    viz_matrix = np.ones((n_samples, n_diffs)) * -1
     
     for i, sample in enumerate(all_samples):
-        is_g0 = i < len(g0_samples)
-        sequence = group0_sequences[sample] if is_g0 else group1_sequences[sample]
-        
+        sequence = group0_sequences[sample] if i < len(g0_samples) else group1_sequences[sample]
         for j, pos in enumerate(diff_positions):
             if pos < len(sequence):
                 nuc = sequence[pos]
                 if nuc in nuc_to_idx:
                     viz_matrix[i, j] = nuc_to_idx[nuc]
     
-    # Create a custom colormap
-    cmap = ListedColormap(['green', 'blue', 'orange', 'red', 'purple', 'lightgrey'])
+    cmap = ListedColormap(["green", "blue", "orange", "red", "purple", "lightgrey"])
+    plt.imshow(viz_matrix, aspect="auto", cmap=cmap, interpolation="none")
     
-    # Create heatmap
-    plt.imshow(viz_matrix, aspect='auto', cmap=cmap, interpolation='none')
+    # highlight columns with fixed differences
+    for fx in fixed_pos:
+        if fx in diff_positions:
+            idx = diff_positions.index(fx)
+            plt.axvspan(idx - 0.5, idx + 0.5, color="yellow", alpha=0.3)
     
-    # Highlight fixed difference columns
-    fixed_indices = [diff_positions.index(pos) for pos in fixed_pos if pos in diff_positions]
-    for idx in fixed_indices:
-        plt.axvspan(idx-0.5, idx+0.5, color='yellow', alpha=0.3)
-    
-    # Add position labels on x-axis (genomic coordinates)
-    plt.xticks(range(len(diff_positions)),
-               [genomic_positions[pos] for pos in diff_positions],
-               rotation=90, fontsize=8)
-    
-    # Add group and sample labels on y-axis
+    plt.xticks(range(n_diffs), [genomic_positions[p] for p in diff_positions], rotation=90, fontsize=8)
     plt.yticks(range(n_samples), 
-               [f"G0: {s}" if i < len(g0_samples) else f"G1: {s}" 
-                for i, s in enumerate(all_samples)],
+               [f"G0: {sample}" if i < len(g0_samples) else f"G1: {sample}" 
+                for i, sample in enumerate(all_samples)],
                fontsize=8)
     
-    # Add a legend for nucleotides
-    legend_elements = [mpatches.Patch(color=c, label=n) for n, c in 
-                      [('A', 'green'), ('C', 'blue'), ('G', 'orange'), 
-                       ('T', 'red'), ('N', 'purple'), ('-', 'lightgrey')]]
+    legend_elements = [
+        mpatches.Patch(color="green", label="A"),
+        mpatches.Patch(color="blue", label="C"),
+        mpatches.Patch(color="orange", label="G"),
+        mpatches.Patch(color="red", label="T"),
+        mpatches.Patch(color="purple", label="N"),
+        mpatches.Patch(color="lightgrey", label="-")
+    ]
+    legend_elements.append(mpatches.Patch(color="yellow", alpha=0.3, label="Fixed Difference"))
     
-    # Add fixed difference to legend
-    legend_elements.append(mpatches.Patch(color='yellow', alpha=0.3, label='Fixed Difference'))
+    plt.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc="upper left")
     
-    plt.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left')
-    
-    # Add title and labels
     plt.title(f"{gene_id} ({chr_info}) - {len(fixed_differences)} Fixed Differences")
-    plt.xlabel("Genomic Position")
+    plt.xlabel("Genomic Position (spliced)")
     plt.ylabel("Sample")
-    
-    # Adjust layout
     plt.tight_layout()
     
-    # Save the figure
     output_file = f"{gene_id}_{chr_info}_differences.png"
-    plt.savefig(output_file, dpi=150, bbox_inches='tight')
+    plt.savefig(output_file, dpi=150, bbox_inches="tight")
     plt.close()
-    
     return output_file
 
 def find_file_pairs():
-    """Find all group0/group1 file pairs in the current directory."""
+    """
+    Look for files named group0_*.fa and group1_*.fa in the directory
+    and pair them based on replacing the 'group0_' prefix with 'group1_'.
+    """
     group0_files = glob.glob("group0_*.fa")
     file_pairs = []
-    
-    for group0_file in group0_files:
-        # Extract the gene info part
-        gene_part = group0_file.replace("group0_", "")
-        # Construct the expected group1 filename
-        group1_file = "group1_" + gene_part
-        
-        if os.path.exists(group1_file):
-            file_pairs.append((group0_file, group1_file))
-    
+    for g0 in group0_files:
+        gene_part = g0.replace("group0_", "")
+        g1 = "group1_" + gene_part
+        if os.path.exists(g1):
+            file_pairs.append((g0, g1))
     return file_pairs
 
-def parse_gtf_for_cds_regions(gtf_file, transcript_id):
-    """
-    Parse the GTF file to extract CDS regions for a specific transcript.
-    
-    Args:
-        gtf_file: Path to GTF file
-        transcript_id: Transcript ID to look for
-        
-    Returns:
-        List of (start, end) tuples for CDS regions, and strand (+ or -)
-    """
-    cds_regions = []
-    strand = None
-    
-    try:
-        with open(gtf_file, 'r') as f:
-            for line in f:
-                if line.startswith('#'):
-                    continue
-                    
-                fields = line.strip().split('\t')
-                if len(fields) < 9 or fields[2] != 'CDS':
-                    continue
-                    
-                # Check if this is the transcript we're looking for
-                if f'transcript_id "{transcript_id}"' not in fields[8] and f'transcript_id "{transcript_id}.' not in fields[8]:
-                    continue
-                    
-                # Extract CDS region coordinates
-                start = int(fields[3])  # 1-based inclusive
-                end = int(fields[4])    # 1-based inclusive
-                strand = fields[6]      # + or -
-                
-                # Add to the CDS regions list
-                cds_regions.append((start, end))
-        
-        # Sort the CDS regions by start position
-        cds_regions.sort()
-        
-        return cds_regions, strand
-    
-    except Exception as e:
-        print(f"Error parsing GTF file for transcript {transcript_id}: {str(e)}")
-        return [], None
-
-def build_spliced_to_genomic_map(cds_regions, strand):
-    """
-    Build a mapping from spliced CDS positions to genomic positions.
-    
-    Args:
-        cds_regions: List of (start, end) tuples for CDS regions
-        strand: '+' or '-' for gene strand
-        
-    Returns:
-        Dictionary mapping spliced positions (0-based) to genomic positions (1-based)
-    """
-    spliced_to_genomic = {}
-    
-    if not cds_regions:
-        return spliced_to_genomic
-        
-    # For negative strand, reverse the order of regions
-    regions_to_process = list(cds_regions)
-    if strand == '-':
-        regions_to_process.reverse()
-    
-    # Build the mapping
-    spliced_pos = 0  # 0-based for sequence positions
-    
-    for start, end in regions_to_process:
-        segment_length = end - start + 1
-        
-        if strand == '+':
-            # For positive strand, map in ascending order
-            for i in range(segment_length):
-                genomic_pos = start + i  # 1-based genomic position
-                spliced_to_genomic[spliced_pos + i] = genomic_pos
-        else:
-            # For negative strand, map in descending order
-            for i in range(segment_length):
-                genomic_pos = end - i  # 1-based genomic position
-                spliced_to_genomic[spliced_pos + i] = genomic_pos
-                
-        spliced_pos += segment_length
-        
-    return spliced_to_genomic
-
 def process_file_pair(file_pair, gtf_file=None):
-    """Process a single file pair and return results."""
+    """
+    Process one pair of group0 / group1 FASTA files:
+      1) Parse them
+      2) Ensure valid DNA
+      3) Ensure lengths match
+      4) Identify fixed differences
+      5) (If transcript_id is present and GTF is given) parse CDS
+         and verify spliced lengths match the .fa length
+      6) Build spliced->genomic mapping
+      7) Convert differences
+      8) Return results or error
+    """
     group0_file, group1_file = file_pair
-    
-    # Extract gene info from the filename
     gene_id, full_id, chr_info, start_pos, end_pos, transcript_id = extract_gene_info(group0_file)
     
     print(f"Processing {gene_id} ({chr_info}:{start_pos}-{end_pos})...")
-    
     try:
-        # Parse the FASTA files
-        group0_sequences = parse_fasta(group0_file)
-        group1_sequences = parse_fasta(group1_file)
-        
-        # Verify that sequences exist in each group
-        if not group0_sequences:
+        # parse FASTA
+        g0_seqs = parse_fasta(group0_file)
+        g1_seqs = parse_fasta(group1_file)
+        if not g0_seqs:
             raise ValueError(f"No valid sequences found in {group0_file}")
-        if not group1_sequences:
+        if not g1_seqs:
             raise ValueError(f"No valid sequences found in {group1_file}")
         
-        # Check for invalid DNA characters
-        g0_invalid = check_valid_dna(group0_sequences)
-        g1_invalid = check_valid_dna(group1_sequences)
-        
+        # check DNA validity
+        g0_invalid = check_valid_dna(g0_seqs)
+        g1_invalid = check_valid_dna(g1_seqs)
         if g0_invalid:
             raise ValueError(f"Invalid characters found in {group0_file}: {', '.join(g0_invalid)}")
         if g1_invalid:
             raise ValueError(f"Invalid characters found in {group1_file}: {', '.join(g1_invalid)}")
         
-        # Get sequence length (assuming all sequences are the same length)
-        group0_seq_length = len(next(iter(group0_sequences.values())))
-        group1_seq_length = len(next(iter(group1_sequences.values())))
+        # check lengths
+        g0_length = len(next(iter(g0_seqs.values())))
+        g1_length = len(next(iter(g1_seqs.values())))
+        if g0_length != g1_length:
+            raise ValueError(f"Sequence lengths differ: Group0={g0_length} vs Group1={g1_length}")
         
-        if group0_seq_length != group1_seq_length:
-            raise ValueError(f"Sequence lengths differ between groups: "
-                            f"Group 0 = {group0_seq_length}, Group 1 = {group1_seq_length}")
+        # find differences
+        fixed_diff, all_diff = find_differences(g0_seqs, g1_seqs)
         
-        # Find differences efficiently
-        fixed_differences, all_differences = find_differences(group0_sequences, group1_sequences)
-        
-        # Initialize mapping from spliced to genomic coordinates
-        spliced_to_genomic = {}
-        
-        # If GTF file and transcript ID are provided, build coordinate mapping
+        # parse GTF if transcript is known
+        spliced_map = {}
         if gtf_file and transcript_id:
             cds_regions, strand = parse_gtf_for_cds_regions(gtf_file, transcript_id)
             if cds_regions:
-                spliced_to_genomic = build_spliced_to_genomic_map(cds_regions, strand)
-                print(f"  Built coordinate mapping for {len(spliced_to_genomic)} positions")
-                
-                # If strand is negative, print some diagnostic information
-                if strand == '-':
+                # ensure the combined length of these CDS segments matches the FASTA length
+                total_cds_len = sum((end - start + 1) for start, end in cds_regions)
+                if total_cds_len != g0_length:
+                    raise ValueError(f"CDS length mismatch: sum(CDS)={total_cds_len} vs FASTA={g0_length}")
+                spliced_map = build_spliced_to_genomic_map(cds_regions, strand)
+                print(f"  Built mapping for {len(spliced_map)} spliced positions")
+                if strand == "-":
                     print(f"  Note: {gene_id} is on the negative strand")
-
-        # Map fixed differences to genomic coordinates
-        genomic_fixed_differences = []
-        for pos, g0_nuc, g1_nuc in fixed_differences:
-            # Use only spliced_to_genomic; raise an error if missing
-            if pos not in spliced_to_genomic:
-                raise ValueError("No spliced mapping for position. The GTF-based mapping is missing this spliced coordinate.")
-            genomic_pos = spliced_to_genomic[pos]
-            genomic_fixed_differences.append((pos, genomic_pos, g0_nuc, g1_nuc))
-
         
-        # Create a mapping of spliced positions to genomic positions for visualization
-        genomic_positions = {}
-        for p in all_differences.keys():
-            if p not in spliced_to_genomic:
-                raise ValueError("No spliced mapping for position in all_differences. The GTF-based mapping is missing this spliced coordinate.")
-            genomic_positions[p] = spliced_to_genomic[p]
+        # if mapping is empty but we do have a transcript, it might be missing in GTF
+        # that's not necessarily an error unless the user wants it to be
+        # but if we have differences and no way to map them, it's an error
+        if transcript_id and gtf_file and not spliced_map and fixed_diff:
+            raise ValueError("Could not map CDS for this transcript; GTF data may be missing or incomplete.")
         
-        # Only create visualization if there are fixed differences
+        # convert fixed differences to genomic coords
+        mapped_fixed = []
+        for pos, g0_nuc, g1_nuc in fixed_diff:
+            if transcript_id and spliced_map:
+                if pos not in spliced_map:
+                    raise ValueError("No spliced mapping for position. The GTF-based mapping is missing this spliced coordinate.")
+                mapped_fixed.append((pos, spliced_map[pos], g0_nuc, g1_nuc))
+            else:
+                # if no GTF or no transcript, we do not have a mapping
+                # we can just store pos as is
+                mapped_fixed.append((pos, start_pos + pos, g0_nuc, g1_nuc))
+        
+        # create visualization only if there are fixed differences
+        # build a visualization position map for all differences
+        vis_positions = {}
+        if transcript_id and spliced_map:
+            for p in all_diff.keys():
+                if p not in spliced_map:
+                    raise ValueError("No spliced mapping for position in all_differences. The GTF-based mapping is missing this spliced coordinate.")
+                vis_positions[p] = spliced_map[p]
+        else:
+            for p in all_diff.keys():
+                vis_positions[p] = start_pos + p
+        
         viz_file = ""
-        if fixed_differences:
-            viz_file = plot_differences(gene_id, chr_info, start_pos, group0_sequences, group1_sequences, 
-                                       all_differences, fixed_differences, genomic_positions)
+        if fixed_diff:
+            viz_file = plot_differences(gene_id, chr_info, start_pos,
+                                        g0_seqs, g1_seqs, all_diff, fixed_diff,
+                                        vis_positions)
             print(f"  Created visualization: {viz_file}")
         
-        # Prepare results
         results = {
-            'gene_id': gene_id,
-            'full_id': full_id,
-            'chr_info': chr_info,
-            'start_pos': start_pos,
-            'fixed_differences': genomic_fixed_differences,
-            'viz_file': viz_file,
-            'status': 'success'
+            "gene_id": gene_id,
+            "full_id": full_id,
+            "chr_info": chr_info,
+            "start_pos": start_pos,
+            "fixed_differences": mapped_fixed,
+            "viz_file": viz_file,
+            "status": "success"
         }
-        
-    except Exception as e:
-        results = {
-            'gene_id': gene_id,
-            'full_id': full_id,
-            'chr_info': chr_info,
-            'start_pos': start_pos,
-            'error': str(e),
-            'status': 'error'
-        }
-        print(f"  Error processing {gene_id}: {str(e)}")
+        return results
     
-    return results
+    except Exception as e:
+        print(f"  Error processing {gene_id}: {str(e)}")
+        return {
+            "gene_id": gene_id,
+            "full_id": full_id,
+            "chr_info": chr_info,
+            "start_pos": start_pos,
+            "error": str(e),
+            "status": "error"
+        }
 
 def main():
+    """
+    Main entry point. Searches for group0_*.fa and group1_*.fa pairs, optionally
+    accepts a GTF file as sys.argv[1]. Processes each pair to find differences,
+    map them to CDS coordinates if possible, and writes fixed_differences.csv.
+    """
     output_file = "fixed_differences.csv"
     start_time = time.time()
-    
-    # Check for GTF file argument
     gtf_file = None
+    
     if len(sys.argv) > 1:
         gtf_file = sys.argv[1]
         if not os.path.exists(gtf_file):
@@ -446,108 +384,67 @@ def main():
         print("Usage: python script.py [gtf_file]")
     
     try:
-        file_pairs = find_file_pairs()
-        
-        if not file_pairs:
-            print("No matching group0/group1 file pairs found in the current directory.")
+        pairs = find_file_pairs()
+        if not pairs:
+            print("No matching group0_*.fa / group1_*.fa pairs found.")
             return 1
         
-        print(f"Found {len(file_pairs)} group0/group1 file pairs to process.")
-        
-        # Process all file pairs
+        print(f"Found {len(pairs)} group0/group1 file pairs to process.")
         results = []
         
-        # Determine if we should use multiprocessing based on the number of file pairs
-        use_multiprocessing = len(file_pairs) > 4 and gtf_file is None
-        
+        use_multiprocessing = (len(pairs) > 4 and gtf_file is None)
         if use_multiprocessing:
-            # Use multiprocessing for efficiency (but only if not using GTF parsing)
             with ProcessPoolExecutor() as executor:
-                # Submit all tasks
-                future_to_pair = {executor.submit(process_file_pair, pair, gtf_file): pair for pair in file_pairs}
-                
-                # Collect results as they complete
-                for future in as_completed(future_to_pair):
+                future_map = {executor.submit(process_file_pair, pair, gtf_file): pair for pair in pairs}
+                for future in as_completed(future_map):
                     results.append(future.result())
         else:
-            # Process sequentially
-            for pair in file_pairs:
+            for pair in pairs:
                 results.append(process_file_pair(pair, gtf_file))
         
-        # Write results to CSV
-        with open(output_file, 'w', newline='') as csvfile:
-            csv_writer = csv.writer(csvfile)
+        with open(output_file, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["Gene", "FullGeneID", "Chromosome", "Position",
+                             "Group0_Nucleotide", "Group1_Nucleotide", "Visualization"])
             
-            # Write header
-            csv_writer.writerow(['Gene', 'FullGeneID', 'Chromosome', 'Position', 'Group0_Nucleotide', 'Group1_Nucleotide', 'Visualization'])
+            total_diff = 0
+            genes_with_diff = 0
+            genes_no_diff = 0
+            errors = 0
             
-            # Track statistics
-            total_differences = 0
-            genes_with_differences = 0
-            genes_without_differences = 0
-            error_count = 0
-            
-            # Write each result
-            for result in sorted(results, key=lambda x: x['gene_id']):
-                if result['status'] == 'error':
-                    # Write error entry
-                    csv_writer.writerow([
-                        result['gene_id'],
-                        result['full_id'],
-                        result['chr_info'],
-                        f"Error: {result['error']}",
-                        "",
-                        "",
-                        ""
-                    ])
-                    error_count += 1
-                elif not result.get('fixed_differences', []):
-                    # No fixed differences
-                    csv_writer.writerow([
-                        result['gene_id'],
-                        result['full_id'],
-                        result['chr_info'],
-                        "No fixed differences",
-                        "",
-                        "",
-                        ""
-                    ])
-                    genes_without_differences += 1
+            # sort by gene_id
+            for res in sorted(results, key=lambda x: x["gene_id"]):
+                if res["status"] == "error":
+                    writer.writerow([res["gene_id"], res["full_id"], res["chr_info"],
+                                     f"Error: {res['error']}", "", "", ""])
+                    errors += 1
                 else:
-                    # Write each fixed difference
-                    for i, (spliced_pos, genomic_pos, g0_nuc, g1_nuc) in enumerate(result['fixed_differences']):
-                        # Only include viz file on first row
-                        viz = result['viz_file'] if i == 0 else ""
-                        
-                        csv_writer.writerow([
-                            result['gene_id'],
-                            result['full_id'],
-                            result['chr_info'],
-                            genomic_pos,
-                            g0_nuc,
-                            g1_nuc,
-                            viz
-                        ])
-                    
-                    total_differences += len(result['fixed_differences'])
-                    genes_with_differences += 1
+                    fd = res.get("fixed_differences", [])
+                    if not fd:
+                        writer.writerow([res["gene_id"], res["full_id"], res["chr_info"],
+                                         "No fixed differences", "", "", ""])
+                        genes_no_diff += 1
+                    else:
+                        genes_with_diff += 1
+                        total_diff += len(fd)
+                        for i, (spliced_pos, genomic_pos, g0n, g1n) in enumerate(fd):
+                            viz = res["viz_file"] if i == 0 else ""
+                            writer.writerow([res["gene_id"], res["full_id"], res["chr_info"],
+                                             genomic_pos, g0n, g1n, viz])
         
-        # Calculate elapsed time
-        elapsed_time = time.time() - start_time
-        
-        print(f"Analysis complete in {elapsed_time:.2f} seconds.")
-        print(f"  Total genes processed: {len(file_pairs)}")
-        print(f"  Genes with fixed differences: {genes_with_differences}")
-        print(f"  Genes without fixed differences: {genes_without_differences}")
-        print(f"  Genes with errors: {error_count}")
-        print(f"  Total fixed differences found: {total_differences}")
+        elapsed = time.time() - start_time
+        print(f"Analysis complete in {elapsed:.2f} seconds.")
+        print(f"  Total genes processed: {len(pairs)}")
+        print(f"  Genes with fixed differences: {genes_with_diff}")
+        print(f"  Genes without fixed differences: {genes_no_diff}")
+        print(f"  Genes with errors: {errors}")
+        print(f"  Total fixed differences found: {total_diff}")
         print(f"Results saved to {output_file}")
-
+        
+        return 0
     except Exception as e:
         print(f"Error: {str(e)}")
         return 1
-    
-    return 0
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())
