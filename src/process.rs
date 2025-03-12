@@ -3,8 +3,6 @@ use crate::stats::{
     calculate_pi, calculate_watterson_theta, SiteDiversity,
 };
 
-use crate::pca;
-
 use crate::parse::{
     find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header,
 };
