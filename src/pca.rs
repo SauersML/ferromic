@@ -36,7 +36,7 @@ pub fn compute_chromosome_pca(
     let spinner = create_spinner(&format!("Computing PCA for {} variants", variants.len()));
     
     // Count valid variants without materializing them
-    let valid_count = variants.iter()
+    let mut valid_count = variants.iter()
         .filter(|v| v.genotypes.iter().all(|g| match g {
             None => false,
             Some(alleles) => alleles.len() >= 2
@@ -116,8 +116,62 @@ pub fn compute_chromosome_pca(
         if valid_idx < valid_count {
             data_matrix = data_matrix.slice(s![.., 0..valid_idx]).to_owned();
             positions.truncate(valid_idx);
+            valid_count = valid_idx; // Update valid_count to match actual size
         }
     }
+    
+    // Filter variants by Minor Allele Frequency to prevent numerical instability in PCA
+    log(LogLevel::Info, "Filtering variants by Minor Allele Frequency (MAF) for PCA stability");
+    let mut filtered_indices = Vec::new();
+    
+    for c in 0..valid_count {
+        // Get the current variant column from the data matrix
+        let column = data_matrix.slice(s![.., c]);
+        
+        // Count number of non-reference alleles (1s) in this column
+        let allele_count: f64 = column.iter().sum();
+        
+        // Calculate allele frequency (proportion of 1s)
+        let allele_freq = allele_count / column.len() as f64;
+        
+        // Calculate true Minor Allele Frequency - the frequency of the less common allele
+        // If allele_freq > 0.5, then ref allele (0) is minor, so MAF = 1 - allele_freq
+        // If allele_freq <= 0.5, then alt allele (1) is minor, so MAF = allele_freq
+        let maf = allele_freq.min(1.0 - allele_freq);
+        
+        // Keep only variants with MAF >= 5% to ensure numerical stability
+        if maf >= 0.05 {
+            filtered_indices.push(c);
+        }
+    }
+    
+    log(LogLevel::Info, &format!(
+        "Keeping {}/{} variants with MAF >= 5% for PCA",
+        filtered_indices.len(), valid_count
+    ));
+    
+    if filtered_indices.is_empty() {
+        return Err(VcfError::Parse("No variants with MAF >= 5% found for PCA".to_string()));
+    }
+    
+    // Create a new matrix containing only the variants with sufficient MAF
+    let mut filtered_matrix = Array2::<f64>::zeros((n_haplotypes, filtered_indices.len()));
+    let mut filtered_positions = Vec::with_capacity(filtered_indices.len());
+    
+    // Copy selected columns (variants) to the new filtered matrix
+    for (new_idx, &old_idx) in filtered_indices.iter().enumerate() {
+        // Copy all sample values for this variant
+        for r in 0..n_haplotypes {
+            filtered_matrix[[r, new_idx]] = data_matrix[[r, old_idx]];
+        }
+        
+        // Keep track of the genomic positions for these variants
+        filtered_positions.push(positions[old_idx]);
+    }
+    
+    // Replace the original data with the filtered data for subsequent processing
+    data_matrix = filtered_matrix;
+    positions = filtered_positions;
     
     // Debug prints to investigate potential NaN causes:
     log(LogLevel::Info, &format!(
