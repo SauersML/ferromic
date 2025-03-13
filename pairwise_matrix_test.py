@@ -267,7 +267,16 @@ def load_pca_data(pca_folder, n_pcs=3):
     # Find and process all PCA files
     pca_files = glob.glob(os.path.join(pca_folder, "pca_chr_*.tsv"))
     if not pca_files:
-        print(f"WARNING: No PCA files found in {pca_folder}")
+        print(f"ERROR: No PCA files found in {pca_folder}. Check folder path and file naming.")
+        print(f"Current working directory: {os.getcwd()}")
+        try:
+            if os.path.exists(pca_folder):
+                for f in os.listdir(pca_folder):
+                    print(f"  {f}")
+            else:
+                print(f"  Directory {pca_folder} does not exist!")
+        except Exception as e:
+            print(f"  Error listing directory: {e}")
         return pca_data
         
     for pca_file in pca_files:
@@ -1427,10 +1436,17 @@ def main():
     if ENABLE_PC_CORRECTION:
         pc_corrected_count = results_df['pc_corrected'].sum() if 'pc_corrected' in results_df.columns else 0
         total_transcripts = len(results_df)
+        
+        # Count transcripts with sufficient data for analysis
+        transcripts_with_data = results_df[results_df['failure_reason'].isna()].shape[0]
+        transcripts_with_insufficient_data = results_df[results_df['failure_reason'].str.contains('Insufficient sequences', na=False)].shape[0] if 'failure_reason' in results_df.columns else 0
+        
         print(f"\nPopulation structure correction summary:")
         print(f"  - PC correction enabled: {ENABLE_PC_CORRECTION}")
-        print(f"  - Transcripts with PC correction applied: {pc_corrected_count}/{total_transcripts} ({pc_corrected_count/total_transcripts*100:.1f}%)")
-        print(f"  - Number of PCs used for correction: {NUM_PCS_TO_USE}")
+        print(f"  - Transcripts with sufficient data for analysis: {transcripts_with_data}/{total_transcripts} ({transcripts_with_data/total_transcripts*100:.1f}%)")
+        print(f"  - Transcripts with insufficient sequence data: {transcripts_with_insufficient_data}/{total_transcripts} ({transcripts_with_insufficient_data/total_transcripts*100:.1f}%)")
+        print(f"  - Transcripts with PC correction applied: {pc_corrected_count}/{transcripts_with_data} ({pc_corrected_count/transcripts_with_data*100:.1f}% of valid transcripts)")
+        print(f"  - Number of PCs used per sequence: {NUM_PCS_TO_USE} (total of {NUM_PCS_TO_USE*2} PC covariates in the model)")
         
         # Calculate how PC correction affected significance
         if pc_corrected_count > 0:
