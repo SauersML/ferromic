@@ -25,6 +25,15 @@ warnings.filterwarnings('ignore')
 # CONFIGURATION PARAMETERS
 # =====================================================================
 
+# Path to folder containing PCA files
+PCA_FOLDER = "pca"
+
+# Number of PCs to use as covariates
+NUM_PCS_TO_USE = 5
+
+# Flag to enable PC correction for population structure
+ENABLE_PC_CORRECTION = True
+
 # Minimum number of sequences required in each group for valid analysis
 MIN_SEQUENCES_PER_GROUP = 10
 
@@ -47,6 +56,7 @@ def read_and_preprocess_data(file_path):
     3. Parses genomic coordinates (chromosome, start, end)
     4. Extracts transcript identifiers
     5. Validates omega values and handles special cases (-1, 99)
+    6. Extracts chromosome identifiers for PC matching
 
     
     Parameters:
@@ -63,6 +73,7 @@ def read_and_preprocess_data(file_path):
         - start: Start coordinate of the genomic region
         - end: End coordinate of the genomic region
         - transcript_id: Ensembl transcript identifier
+        - chromosome: Plain chromosome number for matching with PCA data
 
     Note:
     -----
@@ -144,8 +155,13 @@ def read_and_preprocess_data(file_path):
     df = df.dropna(subset=['omega'])
 
     # Report dataset dimensions after preprocessing
+    print("Extracting chromosome identifiers for PC matching...")
+    df['chromosome'] = df['CDS'].apply(extract_chromosome)
+    
+    # Report dataset dimensions after preprocessing
     print(f"Total comparisons (including all omega values): {len(df)}")
     print(f"Unique coordinates found: {df.groupby(['chrom', 'start', 'end']).ngroups}")
+    print(f"Unique chromosomes found: {df['chromosome'].nunique()}")
 
     # Load the inversion info CSV
     inv_info_df = pd.read_csv('inv_info.csv')
@@ -187,6 +203,120 @@ def get_pairwise_value(seq1, seq2, pairwise_dict):
     key = (seq1, seq2) if (seq1, seq2) in pairwise_dict else (seq2, seq1)
     val = pairwise_dict.get(key)
     return val
+
+def convert_full_name_to_short(full_name):
+    """
+    Convert PCA sample names to the format used in pairwise results.
+    
+    Parameters:
+    -----------
+    full_name : str
+        Sample name in PCA format (e.g., 'EUR_GBR_HG00096_L')
+        
+    Returns:
+    --------
+    str
+        Sample name in shortened format (e.g., 'EURGB93_L')
+    """
+    parts = full_name.split('_')
+    if len(parts) < 4:
+        return None
+        
+    # Extract components using the same logic as in the original code
+    first = parts[0][:3]
+    second = parts[1][:3]
+    hg_part = parts[-2]
+    group = parts[-1]  # L or R for left/right haplotype
+    
+    # Generate hash like in original code
+    md5_val = hashlib.md5(hg_part.encode('utf-8')).hexdigest()
+    hash_str = md5_val[:2]
+    
+    return f"{first}{second}{hash_str}_{group}"
+
+def load_pca_data(pca_folder, n_pcs=3):
+    """
+    Load PCA data for all chromosomes with name conversion.
+    
+    Parameters:
+    -----------
+    pca_folder : str
+        Path to folder containing PCA files
+    n_pcs : int
+        Number of principal components to use
+        
+    Returns:
+    --------
+    dict
+        Nested dictionary: {chr: {sample_name: [PC1, PC2, ...]}}
+    """
+    print(f"Loading PCA data from {pca_folder}...")
+    pca_data = {}  # Structure: {chr: {sample_name: [PC1, PC2, ...]}}
+    
+    # Find and process all PCA files
+    pca_files = glob.glob(os.path.join(pca_folder, "pca_chr_*.tsv"))
+    if not pca_files:
+        print(f"WARNING: No PCA files found in {pca_folder}")
+        return pca_data
+        
+    for pca_file in pca_files:
+        chr_name = os.path.basename(pca_file).replace("pca_chr_", "").replace(".tsv", "")
+        
+        try:
+            df = pd.read_csv(pca_file, sep='\t')
+            
+            # Create chromosome entry
+            pca_data[chr_name] = {}
+            
+            # Create PC column names
+            pc_cols = [f"PC{i+1}" for i in range(n_pcs)]
+            
+            if not all(pc in df.columns for pc in pc_cols):
+                print(f"WARNING: Not all required PCs ({pc_cols}) found in {pca_file}")
+                pc_cols = [col for col in pc_cols if col in df.columns]
+                
+            # Process each sample
+            conversion_count = 0
+            for _, row in df.iterrows():
+                full_name = row['Haplotype']
+                short_name = convert_full_name_to_short(full_name)
+                if short_name:
+                    # Store available principal components
+                    pca_data[chr_name][short_name] = row[pc_cols].values.tolist()
+                    conversion_count += 1
+                    
+            print(f"  Loaded {conversion_count} samples from chromosome {chr_name} with {len(pc_cols)} PCs")
+                
+        except Exception as e:
+            print(f"ERROR: Failed to process {pca_file}: {e}")
+    
+    # Count samples with PCA data
+    sample_count = sum(len(samples) for samples in pca_data.values())
+    chr_count = len(pca_data)
+    print(f"Successfully loaded PCA data for {chr_count} chromosomes and {sample_count} samples")
+    
+    return pca_data
+
+def extract_chromosome(cds_field):
+    """
+    Extract chromosome number from CDS field in pairwise results.
+    
+    Parameters:
+    -----------
+    cds_field : str
+        CDS field from pairwise results CSV
+        
+    Returns:
+    --------
+    str
+        Chromosome identifier (e.g., '1', 'X', etc.)
+    """
+    if pd.isna(cds_field):
+        return None
+    match = re.search(r'chr(\w+)_start', cds_field)
+    if match:
+        return match.group(1)
+    return None
 
 def categorize_omega(omega_value):
     """
@@ -584,7 +714,8 @@ def analysis_worker(args):
     Perform mixed-effects statistical analysis for a group of sequences.
     
     This worker function implements a crossed random effects model to compare
-    omega values between two groups while accounting for sequence-specific effects.
+    omega values between two groups while accounting for sequence-specific effects
+    and controlling for population structure using principal components.
     It's designed to be used with parallel processing.
     
     Parameters:
@@ -595,6 +726,9 @@ def analysis_worker(args):
         - pairwise_dict: Dictionary of pairwise omega values
         - sequences_0: List of sequence IDs in group 0
         - sequences_1: List of sequence IDs in group 1
+        - chromosome: Chromosome identifier for PCA matching
+        - pc_data: Dictionary of PC values by chromosome and sample
+        - enable_pc_correction: Flag to enable PC-based correction
         
     Returns:
     --------
@@ -606,13 +740,16 @@ def analysis_worker(args):
         - num_comp_group_0, num_comp_group_1: Number of comparisons in each group
         - std_err: Standard error of the effect size estimate
         - failure_reason: Description of analysis failure (if any)
+        - pc_corrected: Boolean indicating if PC correction was applied
         
     Note:
     -----
     - Uses mixed linear model with crossed random effects for sequence identities
+    - Includes PCs as covariates when PC data is available
     - Returns NaN for effect_size and p_value if analysis cannot be completed
     - Analysis may fail due to insufficient sequences, lack of variation, or model errors
     """
+    all_sequences, pairwise_dict, sequences_0, sequences_1, chromosome, pc_data, enable_pc_correction = args
     all_sequences, pairwise_dict, sequences_0, sequences_1 = args
     
     n0, n1 = len(sequences_0), len(sequences_1)
@@ -706,6 +843,9 @@ def analysis_worker(args):
     df['seq1_code'] = df['seq1'].map(seq_to_code)
     df['seq2_code'] = df['seq2'].map(seq_to_code)
 
+    # Whether PC correction was applied
+    pc_corrected = False
+    
     try:
         # Set up mixed model with crossed random effects for sequence identities
         # This controls for sequence-specific effects that might confound group differences
@@ -715,14 +855,58 @@ def analysis_worker(args):
             'seq2': '0 + C(seq2_code)'   # Random effect for second sequence
         }
         
-        # Fit mixed linear model with group as fixed effect and sequence IDs as random effect
         # Create dummy variables for each group explicitly
         df['is_group1'] = (df['group'] == 1).astype(int)
         df['is_group2'] = (df['group'] == 2).astype(int)  # Cross-group comparison
         
-        # Use these dummy variables in the model
+        # Determine if we need to apply PC correction
+        should_apply_pc = enable_pc_correction and pc_data is not None and chromosome in pc_data
+        
+        # If applying PC correction and data is available
+        if should_apply_pc:
+            # Get PC data for sequences in this analysis
+            print(f"Applying PC correction for chromosome {chromosome}")
+            pc_cols = []
+            
+            # Add PC covariates for each sequence
+            for seq_idx, seq in enumerate(['seq1', 'seq2']):
+                # Extract unique sequence IDs to add PC data
+                unique_seqs = df[seq].unique()
+                
+                # For each PC dimension
+                for pc_idx in range(NUM_PCS_TO_USE):
+                    pc_col_name = f"PC{pc_idx+1}_{seq}"
+                    pc_cols.append(pc_col_name)
+                    
+                    # Initialize with zeros (no correction)
+                    df[pc_col_name] = 0.0
+                    
+                    # Update with actual PC values where available
+                    for seq_name in unique_seqs:
+                        if seq_name in pc_data[chromosome]:
+                            # Get PC values, handling potential index errors
+                            pc_values = pc_data[chromosome][seq_name]
+                            if pc_idx < len(pc_values):
+                                pc_val = pc_values[pc_idx]
+                                # Set the PC value for all rows with this sequence
+                                df.loc[df[seq] == seq_name, pc_col_name] = pc_val
+            
+            # Build formula including PCs
+            formula = 'analysis_var ~ is_group1 + is_group2 + ' + ' + '.join(pc_cols)
+            pc_corrected = True
+            print(f"  Added {len(pc_cols)} PC covariates to the model")
+        else:
+            # Standard formula without PC correction
+            formula = 'analysis_var ~ is_group1 + is_group2'
+            if enable_pc_correction:
+                if pc_data is None:
+                    print("  No PC data available for correction")
+                elif chromosome not in pc_data:
+                    print(f"  No PC data available for chromosome {chromosome}")
+        
+        # Fit mixed linear model with appropriate formula
         model = MixedLM.from_formula(
-            'analysis_var ~ is_group1 + is_group2',  # Group 0 is reference
+            formula,
             groups='groups',
             vc_formula=vc,
             re_formula='0',
@@ -741,15 +925,16 @@ def analysis_worker(args):
         print(f"Model fitting failed with error: {str(e)}")
 
     return {
-        'effect_size': effect_size,
-        'p_value': p_value,
-        'n0': n0,
-        'n1': n1,
-        'std_err': std_err,
-        'num_comp_group_0': (df['group'] == 0).sum(),
-        'num_comp_group_1': (df['group'] == 1).sum(),
-        'failure_reason': failure_reason
-    }
+            'effect_size': effect_size,
+            'p_value': p_value,
+            'n0': n0,
+            'n1': n1,
+            'std_err': std_err,
+            'num_comp_group_0': (df['group'] == 0).sum(),
+            'num_comp_group_1': (df['group'] == 1).sum(),
+            'failure_reason': failure_reason,
+            'pc_corrected': pc_corrected
+        }
 
 
 def analyze_transcript(args):
@@ -758,7 +943,7 @@ def analyze_transcript(args):
     
     This function processes all pairwise comparisons for a single transcript,
     organizing sequences by group, performing statistical analysis, retrieving
-    gene annotations
+    gene annotations, and controlling for population structure via PCs.
     
     Parameters:
     -----------
@@ -766,6 +951,7 @@ def analyze_transcript(args):
         Tuple containing:
         - df_transcript: DataFrame subset for this transcript
         - transcript_id: Identifier of the transcript being analyzed
+        - pc_data: Dictionary of PC values by chromosome and sample
         
     Returns:
     --------
@@ -781,14 +967,16 @@ def analyze_transcript(args):
         - p_value: Statistical significance of the effect
         - std_err: Standard error of the effect size estimate
         - failure_reason: Description of analysis failure (if any)
+        - pc_corrected: Boolean indicating if PC correction was applied
         
     Note:
     -----
     - Creates pairwise dictionary of omega values for statistical analysis
     - Identifies gene annotations using UCSC and MyGene.info APIs
     - Delegates statistical analysis to analysis_worker function
+    - Controls for population structure using PCA data when available
     """
-    df_transcript, transcript_id = args
+    df_transcript, transcript_id, pc_data = args
 
     print(f"\nAnalyzing transcript: {transcript_id}")
 
@@ -824,8 +1012,12 @@ def analyze_transcript(args):
     # Get gene information directly from transcript ID
     gene_symbol, gene_name = get_gene_info_from_transcript(transcript_id)
     
-    # Perform statistical analysis on the transcript data
-    analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1))
+    # Get chromosome for this transcript to match with PCA data
+    chromosome = df_transcript['chromosome'].iloc[0] if not df_transcript.empty else None
+    
+    # Perform statistical analysis on the transcript data with PC correction
+    analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1, 
+                                      chromosome, pc_data, ENABLE_PC_CORRECTION))
 
     # Compute normal-only median and mean for each group (excluding -1 and 99)
     group_0_normal = group_0_df[(group_0_df['omega'] != -1) & (group_0_df['omega'] != 99)]
@@ -842,30 +1034,32 @@ def analyze_transcript(args):
     pct_nosyn_1 = 100.0 * (group_1_df['omega'] == 99).mean()
     
     result = {
-        'transcript_id': transcript_id,
-        'coordinates': coords_str,
-        'gene_symbol': gene_symbol,
-        'gene_name': gene_name,
-        'n0': len(sequences_0),
-        'n1': len(sequences_1),
-        'num_comp_group_0': analysis_result['num_comp_group_0'],
-        'num_comp_group_1': analysis_result['num_comp_group_1'],
-        'effect_size': analysis_result['effect_size'],
-        'p_value': analysis_result['p_value'],
-        'std_err': analysis_result['std_err'],
-        'failure_reason': analysis_result['failure_reason'],
-        'matrix_0': matrix_0,
-        'matrix_1': matrix_1,
-        'pairwise_comparisons': set(pairwise_dict.keys()),
-        'median_0_normal': median_0_normal,
-        'mean_0_normal': mean_0_normal,
-        'median_1_normal': median_1_normal,
-        'mean_1_normal': mean_1_normal,
-        'pct_identical_0': pct_identical_0,
-        'pct_nosyn_0': pct_nosyn_0,
-        'pct_identical_1': pct_identical_1,
-        'pct_nosyn_1': pct_nosyn_1
-    }
+            'transcript_id': transcript_id,
+            'coordinates': coords_str,
+            'chromosome': chromosome,
+            'gene_symbol': gene_symbol,
+            'gene_name': gene_name,
+            'n0': len(sequences_0),
+            'n1': len(sequences_1),
+            'num_comp_group_0': analysis_result['num_comp_group_0'],
+            'num_comp_group_1': analysis_result['num_comp_group_1'],
+            'effect_size': analysis_result['effect_size'],
+            'p_value': analysis_result['p_value'],
+            'std_err': analysis_result['std_err'],
+            'failure_reason': analysis_result['failure_reason'],
+            'pc_corrected': analysis_result.get('pc_corrected', False),
+            'matrix_0': matrix_0,
+            'matrix_1': matrix_1,
+            'pairwise_comparisons': set(pairwise_dict.keys()),
+            'median_0_normal': median_0_normal,
+            'mean_0_normal': mean_0_normal,
+            'median_1_normal': median_1_normal,
+            'mean_1_normal': mean_1_normal,
+            'pct_identical_0': pct_identical_0,
+            'pct_nosyn_0': pct_nosyn_0,
+            'pct_identical_1': pct_identical_1,
+            'pct_nosyn_1': pct_nosyn_1
+        }
 
     # Perform omega category analysis if enabled
     if PERFORM_OMEGA_CATEGORY_ANALYSIS:
@@ -888,11 +1082,12 @@ def main():
     
     This function orchestrates the entire analysis workflow:
     1. Reading and preprocessing input data
-    2. Organizing analysis by transcript
-    3. Performing parallel analysis across transcripts
-    4. Applying multiple testing correction
-    5. Generating summary statistics and reports
-    6. Saving results to CSV
+    2. Loading PCA data for population structure control
+    3. Organizing analysis by transcript
+    4. Performing parallel analysis across transcripts with PC correction
+    5. Applying multiple testing correction
+    6. Generating summary statistics and reports
+    7. Saving results to CSV
     
     Parameters:
     -----------
@@ -906,6 +1101,7 @@ def main():
     Note:
     -----
     - Uses parallel processing via ProcessPoolExecutor
+    - Controls for population structure using PCA data
     - Applies correction for multiple hypothesis testing
     - Outputs both comprehensive and significant result summaries
     - Tracks and reports analysis runtime
@@ -913,15 +1109,20 @@ def main():
     start_time = datetime.now()
     print(f"Analysis started at {start_time}")
 
+    # Load PCA data if enabled
+    pc_data = None
+    if ENABLE_PC_CORRECTION:
+        pc_data = load_pca_data(PCA_FOLDER, NUM_PCS_TO_USE)
+
     # Read and preprocess the input dataset
     df = read_and_preprocess_data('all_pairwise_results.csv')
     
     # Group the data by transcript for independent analysis
     transcript_groups = df.groupby('transcript_id')
     print(f"\nFound {len(transcript_groups)} unique transcripts")
-    
+
     # Prepare arguments for parallel processing of transcripts
-    transcript_args = [(transcript_group, transcript_id) for transcript_id, transcript_group in transcript_groups]
+    transcript_args = [(transcript_group, transcript_id, pc_data) for transcript_id, transcript_group in transcript_groups]
     
     # Process each transcript in parallel using all available CPU cores
     results = []
@@ -1125,6 +1326,7 @@ def main():
             f"{'P-value':<15} "
             f"{'Corrected P':<15} "
             f"{'Effect Size':<15} "
+            f"{'PC Corrected':<12} "
             f"{'Median_0':<10} "
             f"{'Mean_0':<10} "
             f"{'Median_1':<10} "
@@ -1174,11 +1376,16 @@ def main():
                 gene_info = f"{row['gene_symbol']}: {row['gene_name']}"
             gene_info = gene_info[:40]
             
+            # Add PC correction indicator
+            pc_corrected = row.get('pc_corrected', False)
+            pc_str = "Yes" if pc_corrected else "No"
+            
             print(
                 f"{chrom_str:<10} "
                 f"{p_value:<15} "
                 f"{corrected_p:<15} "
                 f"{effect_size:<15} "
+                f"{pc_str:<12} "
                 f"{median_0_str:<10} "
                 f"{mean_0_str:<10} "
                 f"{median_1_str:<10} "
@@ -1206,8 +1413,31 @@ def main():
         pickle.dump(cds_results, f)
     print(f"Saved results for {len(cds_results)} CDSs")
     
+    # Print summary of PC correction usage
+    if ENABLE_PC_CORRECTION:
+        pc_corrected_count = results_df['pc_corrected'].sum() if 'pc_corrected' in results_df.columns else 0
+        total_transcripts = len(results_df)
+        print(f"\nPopulation structure correction summary:")
+        print(f"  - PC correction enabled: {ENABLE_PC_CORRECTION}")
+        print(f"  - Transcripts with PC correction applied: {pc_corrected_count}/{total_transcripts} ({pc_corrected_count/total_transcripts*100:.1f}%)")
+        print(f"  - Number of PCs used for correction: {NUM_PCS_TO_USE}")
+        
+        # Calculate how PC correction affected significance
+        if pc_corrected_count > 0:
+            pc_corrected_df = results_df[results_df['pc_corrected'] == True]
+            pc_sig_count = (pc_corrected_df['corrected_p_value'] < 0.05).sum()
+            pc_sig_pct = pc_sig_count / len(pc_corrected_df) * 100 if len(pc_corrected_df) > 0 else 0
+            
+            non_pc_df = results_df[results_df['pc_corrected'] == False]
+            non_pc_sig_count = (non_pc_df['corrected_p_value'] < 0.05).sum()
+            non_pc_sig_pct = non_pc_sig_count / len(non_pc_df) * 100 if len(non_pc_df) > 0 else 0
+            
+            print(f"  - Significant results with PC correction: {pc_sig_count}/{len(pc_corrected_df)} ({pc_sig_pct:.1f}%)")
+            print(f"  - Significant results without PC correction: {non_pc_sig_count}/{len(non_pc_df)} ({non_pc_sig_pct:.1f}%)")
+
     # Print completion information and runtime
     print(f"\nAnalysis completed at {datetime.now()}")
     print(f"Total runtime: {datetime.now() - start_time}")
+
 if __name__ == "__main__":
     main()
