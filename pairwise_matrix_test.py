@@ -43,7 +43,7 @@ MIN_SEQUENCES_PER_GROUP = 10
 FILTER_SPECIAL_OMEGA_VALUES = False
 
 # Flag to determine whether to calculate omega manually from dN/dS
-CALCULATE_OMEGA_MANUALLY = False
+CALCULATE_OMEGA_MANUALLY = False // This should do nothing
 
 # Flag to enable Low-Middle-High omega categorization analysis
 PERFORM_OMEGA_CATEGORY_ANALYSIS = True
