@@ -1484,7 +1484,6 @@ def main():
             non_pc_sig_pct = non_pc_sig_count / len(non_pc_df) * 100 if len(non_pc_df) > 0 else 0
             
             print(f"  - Significant results with PC correction: {pc_sig_count}/{len(pc_corrected_df)} ({pc_sig_pct:.1f}%)")
-            print(f"  - Significant results without PC correction: {non_pc_sig_count}/{len(non_pc_df)} ({non_pc_sig_pct:.1f}%)")
 
     # Print completion information and runtime
     print(f"\nAnalysis completed at {datetime.now()}")
