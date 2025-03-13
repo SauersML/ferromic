@@ -543,7 +543,7 @@ pub fn prepare_to_write_cds(
         // Create a filename-safe version of gene name
         let safe_gene_name = cds.gene_name.replace(|c: char| !c.is_alphanumeric(), "");
 
-        /**
+        /*
          * CDS SEGMENT COLLECTION:
          * -----------------------
          * 1. Transcript CDS regions are parsed from GTF files in parse_gtf_file() function
