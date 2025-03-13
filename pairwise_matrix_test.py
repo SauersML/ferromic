@@ -752,7 +752,6 @@ def analysis_worker(args):
     - Analysis may fail due to insufficient sequences, lack of variation, or model errors
     """
     all_sequences, pairwise_dict, sequences_0, sequences_1, chromosome, pc_data, enable_pc_correction = args
-    all_sequences, pairwise_dict, sequences_0, sequences_1 = args
     
     n0, n1 = len(sequences_0), len(sequences_1)
     
