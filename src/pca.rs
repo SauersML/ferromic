@@ -1,5 +1,7 @@
 use ndarray::Array2;
 use ndarray::s;
+use efficient_pca::PCA;
+
 use std::path::Path;
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
@@ -146,7 +148,7 @@ pub fn compute_chromosome_pca(
     // Apply PCA using the library
     let spinner = create_spinner("Computing PCA");
     
-    let mut pca = pca::PCA::new();
+    let mut pca = PCA::new();
     
     // Use randomized SVD without cloning the data matrix
     if let Err(e) = pca.rfit(
