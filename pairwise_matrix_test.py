@@ -8,6 +8,7 @@ import os
 import json
 import pickle
 import glob
+import hashlib
 import colorama
 from colorama import Fore, Style
 colorama.init(autoreset=True)
