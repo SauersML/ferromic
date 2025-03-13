@@ -513,6 +513,10 @@ def parse_phy_file_once(filepath):
                 group = name_parts[-1]
                 md5_val = hashlib.md5(hg_part.encode('utf-8')).hexdigest()
                 hash_str = md5_val[:2]
+                # The first part is the first three letters of the first part of the name
+                # The second part is the first three letters of the second part of the name
+                # hg_part
+                # The final part is the group number
                 sample_name = f"{first}{second}{hash_str}_{group}"
 
                 # Validate sequence
@@ -522,7 +526,6 @@ def parse_phy_file_once(filepath):
                     validated_seq, stop_codon_found = VALIDATION_CACHE[cache_key]
                     print(f"Skipping validation for {sample_name}, found in cache.")
                 else:
-                    # Placeholder for validate_sequence; adjust as needed
                     validated_seq, stop_codon_found = validate_sequence(
                         sequence, filepath, sample_name, line
                     )
