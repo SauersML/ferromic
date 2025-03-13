@@ -224,17 +224,26 @@ def convert_full_name_to_short(full_name):
     if len(parts) < 4:
         return None
         
-    # Extract components using the same logic as in the original code
-    first = parts[0][:3]
-    second = parts[1][:3]
-    hg_part = parts[-2]
-    group = parts[-1]  # L or R for left/right haplotype
+    # Extract the population and subpopulation from the beginning
+    first = parts[0][:3] if len(parts) > 0 else "UNK"
+    second = parts[1][:3] if len(parts) > 1 else "UNK"
+    
+    # Extract the sample ID (which is typically the second-to-last part)
+    # and the haplotype indicator (L/R) which is the last part
+    hg_part = parts[-2] if len(parts) > 1 else "UNKWN"
+    group = parts[-1] if parts[-1] in ['L', 'R'] else "U"  # L or R for left/right haplotype
     
     # Generate hash like in original code
     md5_val = hashlib.md5(hg_part.encode('utf-8')).hexdigest()
     hash_str = md5_val[:2]
     
-    return f"{first}{second}{hash_str}_{group}"
+    short_name = f"{first}{second}{hash_str}_{group}"
+    
+    # Print sample name
+    if hash(full_name) % 100 == 0:  # Only print ~1% of conversions to avoid overwhelming output
+        print(f"Example sample name conversion: {full_name} -> {short_name}")
+    
+    return short_name
 
 def load_pca_data(pca_folder, n_pcs=3):
     """
