@@ -544,8 +544,20 @@ def create_matrices(sequences_0, sequences_1, pairwise_dict):
 
     return matrix_0, matrix_1
 
-# Cache to store gene information to avoid redundant API calls
+# Persistent cache to store gene information between runs
+os.makedirs('gene_cache', exist_ok=True)
+GENE_CACHE_FILE = 'gene_cache/gene_info_cache.pkl'
+
+# Load existing gene cache from file if it exists
 GENE_INFO_CACHE = {}
+if os.path.exists(GENE_CACHE_FILE):
+    try:
+        with open(GENE_CACHE_FILE, 'rb') as f:
+            GENE_INFO_CACHE = pickle.load(f)
+        print(f"Loaded {len(GENE_INFO_CACHE)} cached gene annotations")
+    except Exception as e:
+        print(f"Error loading gene cache: {e}")
+        GENE_INFO_CACHE = {}
 
 def get_gene_info(gene_symbol):
     """
@@ -566,10 +578,11 @@ def get_gene_info(gene_symbol):
     - Uses MyGene.info REST API with 10-second timeout
     - Returns "Unknown" on any exception (network error, parsing error, etc.)
     - Filters specifically for human genes
+    - Caches results persistently between runs
     """
     # Check cache first
     if gene_symbol in GENE_INFO_CACHE:
-        return GENE_INFO_CACHE['gene_symbol']
+        return GENE_INFO_CACHE[gene_symbol]
         
     try:
         # Query the MyGene.info API with the gene symbol, species constraint, and field selection
@@ -581,12 +594,18 @@ def get_gene_info(gene_symbol):
                 name = data['hits'][0].get('name', 'Unknown')
                 # Cache the result
                 GENE_INFO_CACHE[gene_symbol] = name
+                # Save updated cache to disk
+                with open(GENE_CACHE_FILE, 'wb') as f:
+                    pickle.dump(GENE_INFO_CACHE, f)
                 return name
     except Exception as e:
         print(f"Error fetching gene info: {str(e)}")
     
     # Cache the negative result too
     GENE_INFO_CACHE[gene_symbol] = 'Unknown'
+    # Save updated cache to disk, including negative results
+    with open(GENE_CACHE_FILE, 'wb') as f:
+        pickle.dump(GENE_INFO_CACHE, f)
     return 'Unknown'  # Default return value for any error case
 
 def get_gene_info_from_transcript(transcript_id):
@@ -609,6 +628,7 @@ def get_gene_info_from_transcript(transcript_id):
     - Removes version number from transcript ID (e.g., ENST00000519106.2 -> ENST00000519106)
     - Returns ("Unknown", "Unknown") on any exception (network error, parsing error, etc.)
     - Filters specifically for human genes
+    - Caches results persistently between runs
     """
     # Check cache first
     if transcript_id in GENE_INFO_CACHE:
@@ -629,6 +649,9 @@ def get_gene_info_from_transcript(transcript_id):
                 result = (hit.get('symbol', 'Unknown'), hit.get('name', 'Unknown'))
                 # Cache the result
                 GENE_INFO_CACHE[transcript_id] = result
+                # Save updated cache to disk
+                with open(GENE_CACHE_FILE, 'wb') as f:
+                    pickle.dump(GENE_INFO_CACHE, f)
                 return result
     except Exception as e:
         print(f"Error fetching gene info for transcript {transcript_id}: {str(e)}")
@@ -636,8 +659,10 @@ def get_gene_info_from_transcript(transcript_id):
     # Cache the negative result too
     result = ('Unknown', 'Unknown')
     GENE_INFO_CACHE[transcript_id] = result
+    # Save updated cache to disk, including negative results
+    with open(GENE_CACHE_FILE, 'wb') as f:
+        pickle.dump(GENE_INFO_CACHE, f)
     return result
-
 
 def get_gene_annotation(coordinates):
     """
