@@ -604,7 +604,6 @@ pub fn prepare_to_write_cds(
          * - cds_start: 1-based inclusive start coordinate of the CDS
          * - cds_end: 1-based inclusive end coordinate of the CDS
          */
-        
         let filename = format!(
             "group{}_{}_{}_{}_chr{}_start{}_end{}.phy",
             haplotype_group, safe_gene_name, cds.gene_id, cds.transcript_id, 
