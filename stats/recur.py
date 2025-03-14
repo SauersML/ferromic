@@ -93,11 +93,16 @@ dropped_with_recur = dropped_inv_info[dropped_inv_info['0_single_1_recur'].notna
 print("\nRows from inv_info that were dropped from the merge but have a 0_single_1_recur value:")
 print(dropped_with_recur)
 
-# Verify that every row in output_data is matched at least once
-matched_indices = merged['orig_index'].unique()
-if len(matched_indices) != len(output_data):
-    missing = set(range(len(output_data))) - set(matched_indices)
-    raise ValueError(f"ERROR: The following output.csv row indices were not matched: {missing}")
+# Verify that every row in inv_info is matched at least once
+matched_inv_indices = merged['orig_inv_index'].unique()
+if len(matched_inv_indices) != len(inv_info):
+    missing_inv = set(inv_info['orig_inv_index']) - set(matched_inv_indices)
+    missing_info = inv_info[inv_info['orig_inv_index'].isin(missing_inv)]
+    print("\nUnmatched rows from inv_info.csv:")
+    print(missing_info[['chr', 'region_start', 'region_end']].to_string())
+    raise ValueError(f"ERROR: {len(missing_inv)} rows from inv_info.csv were not matched")
+else:
+    print("\nAll rows from inv_info.csv were successfully matched")
 
 # Use the output_data's region_start and region_end as canonical keys
 merged['region_start'] = merged['region_start_out']
