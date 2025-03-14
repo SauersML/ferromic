@@ -1621,6 +1621,13 @@ fn process_single_config_entry(
     ));
 
     update_step_progress(1, "Preparing extended region");
+
+    if entry.seqname.contains("X") || entry.seqname.contains("x") {
+        log(LogLevel::Info, &format!(
+            "DEBUG X: Processing chrX region: {}:{}-{}", 
+            entry.seqname, entry.interval.start, entry.interval.end
+        ));
+    }
     
     let chr_length = ref_sequence.len() as i64;
     let extended_region = ZeroBasedHalfOpen::from_1based_inclusive(
@@ -1861,16 +1868,19 @@ fn process_single_config_entry(
         finish_step_progress("No matching haplotypes found");
         return Ok(None);
     }
-
-    // Extract all results
-    let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f, site_divs_0_f) =
-        results[0].take().unwrap();
-    let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f, site_divs_1_f) =
-        results[1].take().unwrap();
-    let (num_segsites_0_u, w_theta_0_u, pi_0_u, n_hap_0_u, site_divs_0_u) =
-        results[2].take().unwrap();
-    let (num_segsites_1_u, w_theta_1_u, pi_1_u, n_hap_1_u, site_divs_1_u) =
-        results[3].take().unwrap();
+    
+    // Extract all results with default values for missing ones
+    let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f, site_divs_0_f) = 
+        results[0].take().unwrap_or((0, 0.0, 0.0, 0, Vec::new()));
+        
+    let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f, site_divs_1_f) = 
+        results[1].take().unwrap_or((0, 0.0, 0.0, 0, Vec::new()));
+        
+    let (num_segsites_0_u, w_theta_0_u, pi_0_u, n_hap_0_u, site_divs_0_u) = 
+        results[2].take().unwrap_or((0, 0.0, 0.0, 0, Vec::new()));
+        
+    let (num_segsites_1_u, w_theta_1_u, pi_1_u, n_hap_1_u, site_divs_1_u) = 
+        results[3].take().unwrap_or((0, 0.0, 0.0, 0, Vec::new()));
 
     // Calculate inversion frequencies
     log(LogLevel::Info, "Calculating inversion frequencies");
