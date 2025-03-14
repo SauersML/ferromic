@@ -7,14 +7,15 @@ from pathlib import Path
 import logging
 import sys
 import time
-from scipy.stats import ttest_rel, wilcoxon, shapiro
+from scipy.stats import shapiro
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
+
 logger = logging.getLogger('pi_flanking_analysis')
 
 # Constants
@@ -495,6 +496,17 @@ def create_bar_plot(categories):
             'Count': len(categories['single_event_direct'])
         }
     }
+
+    # Overall category by combining all sequences
+    all_sequences = (categories['recurrent_inverted'] + categories['recurrent_direct'] +
+                     categories['single_event_inverted'] + categories['single_event_direct'])
+    overall_flanking = np.nanmean([np.nanmean([seq['beginning_mean'], seq['ending_mean']]) for seq in all_sequences]) if all_sequences else np.nan
+    overall_middle = np.nanmean([seq['middle_mean'] for seq in all_sequences]) if all_sequences else np.nan
+    category_means['Overall'] = {
+            'Flanking': overall_flanking,
+            'Middle': overall_middle,
+            'Count': len(all_sequences)
+    }
     
     # Print the calculated means
     for category, data in category_means.items():
@@ -505,7 +517,7 @@ def create_bar_plot(categories):
     fig, ax = plt.subplots(figsize=(14, 8))
     
     # Define category order and labels
-    category_order = ['Recurrent Inverted', 'Recurrent Direct', 'Single-event Inverted', 'Single-event Direct']
+    category_order = ['Recurrent Inverted', 'Recurrent Direct', 'Single-event Inverted', 'Single-event Direct', 'Overall']
     x = np.arange(len(category_order))
     width = 0.35
     
@@ -540,8 +552,12 @@ def create_bar_plot(categories):
     }
 
     for i, cat in enumerate(category_order):
-        key = cat_mapping[cat]
-        seq_list = categories[key]
+        if cat == "Overall":
+            seq_list = categories["recurrent_inverted"] + categories["recurrent_direct"] + categories["single_event_inverted"] + categories["single_event_direct"]
+        else:
+            key = cat_mapping[cat]
+            seq_list = categories[key]
+
 
         flanking_vals = [
             np.nanmean([seq['beginning_mean'], seq['ending_mean']])
@@ -586,35 +602,25 @@ def create_bar_plot(categories):
             differences = np.array(paired_flanking) - np.array(paired_middle)
             norm_stat, norm_p = shapiro(differences)
             logger.info(f"Normality test: stat = {norm_stat:.3g}, p = {norm_p:.3g}")
-            stat, wilcoxon_p_value = wilcoxon(
-                paired_middle,
-                paired_flanking,
-                alternative='two-sided'
-            )
             perm_p_value = paired_permutation_test(
                 np.array(paired_middle),
                 np.array(paired_flanking),
-                num_permutations=10000
+                num_permutations=20000
             )
-            test_used = "Wilcoxon & Permutation tests"
-        else:
-            wilcoxon_p_value = np
 
-
-        bar_max = max(flanking_means[i], middle_means[i])
-        y_pos = bar_max + 0.00005 * (1 if not np.isnan(bar_max) else 1)
-        if not np.isnan(wilcoxon_p_value) and not np.isnan(perm_p_value):
+        # Global maximum value from all bars
+        global_max = max(flanking_means + middle_means)
+        y_pos = global_max * 1.1  # Position annotations at 110% of the global maximum
+        if not np.isnan(perm_p_value):
             ax.text(
                 i,
                 y_pos,
-                f"{cat}\nWilcoxon p={wilcoxon_p_value:.3g}\nPermutation p={perm_p_value:.3g}\nNormality p={norm_p:.3g}",
+                f"Permutation p={perm_p_value:.3g}\nNormality p={norm_p:.3g}",
                 ha='center',
                 va='bottom',
-                color='red',
                 fontsize=10,
                 fontweight='bold'
             )
-
 
     # Adjust layout
     plt.tight_layout()
@@ -674,6 +680,21 @@ def main():
         
         # Categorize sequences into the four required groups
         categories = categorize_sequences(flanking_means, recurrent_regions, single_event_regions)
+
+        # Combine overall paired data from all sequences (ignoring categories)
+        overall_flanking = []
+        overall_middle = []
+        for seq in flanking_means:
+            # Compute the overall flanking mean (average of beginning and ending)
+            f_val = np.nanmean([seq['beginning_mean'], seq['ending_mean']])
+            m_val = seq['middle_mean']
+            if not np.isnan(f_val) and not np.isnan(m_val):
+                 overall_flanking.append(f_val)
+                 overall_middle.append(m_val)
+        
+        if len(overall_flanking) >= 2:
+            overall_perm_p = paired_permutation_test(np.array(overall_middle), np.array(overall_flanking), num_permutations=20000)
+            logger.info(f"OVERALL test results: Permutation p={overall_perm_p:.3g}")
         
         # Create bar plot
         fig = create_bar_plot(categories)
