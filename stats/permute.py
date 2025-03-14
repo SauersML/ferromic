@@ -418,6 +418,9 @@ def main():
     n_tx = df['transcript_id'].nunique()
     print(f"Found {n_tx} transcripts.\n")
 
+    # Group by transcript_id
+    grouped = df.groupby('transcript_id')
+    
     tasks = []
     for tx_id, df_tx in grouped:
         tasks.append((tx_id, df_tx, NUM_PERMUTATIONS))
