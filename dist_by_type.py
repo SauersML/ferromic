@@ -607,6 +607,7 @@ def create_bar_plot(categories):
                 np.array(paired_flanking),
                 num_permutations=20000
             )
+            logger.info(f"Category '{cat}': permutation p-value = {perm_p_value:.4g}")
 
         # Global maximum value from all bars
         global_max = max(flanking_means + middle_means)
