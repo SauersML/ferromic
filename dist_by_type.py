@@ -27,6 +27,13 @@ PI_DATA_FILE = 'per_site_output.falsta'
 INVERSION_FILE = 'inv_info.csv'
 OUTPUT_PLOT = 'pi_flanking_regions_bar_plot.png'
 
+cat_mapping = {
+    'Recurrent Inverted': 'recurrent_inverted',
+    'Recurrent Direct': 'recurrent_direct',
+    'Single-event Inverted': 'single_event_inverted',
+    'Single-event Direct': 'single_event_direct'
+}
+
 def normalize_chromosome(chrom):
     """
     Normalize chromosome name to consistent format.
@@ -544,13 +551,6 @@ def create_bar_plot(categories):
         color='#fc8d62'
     )
 
-    cat_mapping = {
-        'Recurrent Inverted': 'recurrent_inverted',
-        'Recurrent Direct': 'recurrent_direct',
-        'Single-event Inverted': 'single_event_inverted',
-        'Single-event Direct': 'single_event_direct'
-    }
-
     for i, cat in enumerate(category_order):
         if cat == "Overall":
             seq_list = categories["recurrent_inverted"] + categories["recurrent_direct"] + categories["single_event_inverted"] + categories["single_event_direct"]
@@ -709,6 +709,54 @@ def main():
         
         total_elapsed_time = time.time() - total_start_time
         logger.info(f"Analysis completed successfully in {total_elapsed_time:.2f} seconds")
+
+        logger.info("\n==== SUMMARY OF RESULTS ====")
+        logger.info("Category\tDirection of Effect\tP-value")
+        
+        for cat in ['Recurrent Inverted', 'Recurrent Direct', 'Single-event Inverted', 'Single-event Direct']:
+            cat_key = cat_mapping[cat]
+            seq_list = categories[cat_key]
+            
+            paired_flanking, paired_middle = [], []
+            for seq in seq_list:
+                f_val = np.nanmean([seq['beginning_mean'], seq['ending_mean']])
+                m_val = seq['middle_mean']
+                if not np.isnan(f_val) and not np.isnan(m_val):
+                    paired_flanking.append(f_val)
+                    paired_middle.append(m_val)
+            
+            if len(paired_flanking) >= 2:
+                flanking_mean = np.mean(paired_flanking)
+                middle_mean = np.mean(paired_middle)
+                direction = "Flanking > Middle" if flanking_mean > middle_mean else "Middle > Flanking"
+                
+                perm_p_value = paired_permutation_test(
+                    np.array(paired_middle),
+                    np.array(paired_flanking),
+                    num_permutations=20000
+                )
+                
+                logger.info(f"{cat}\t{direction}\t{perm_p_value:.4g}")
+            else:
+                logger.info(f"{cat}\tNot enough data\tN/A")
+        
+        # Add overall results
+        if len(overall_flanking) >= 2:
+            overall_flanking_mean = np.mean(overall_flanking)
+            overall_middle_mean = np.mean(overall_middle)
+            overall_direction = "Flanking > Middle" if overall_flanking_mean > overall_middle_mean else "Middle > Flanking"
+            
+            overall_perm_p = paired_permutation_test(
+                np.array(overall_middle),
+                np.array(overall_flanking),
+                num_permutations=20000
+            )
+            
+            logger.info(f"Overall\t{overall_direction}\t{overall_perm_p:.4g}")
+        else:
+            logger.info(f"Overall\tNot enough data\tN/A")
+        
+        logger.info("===========================")
         
     except Exception as e:
         logger.error(f"Error during analysis: {e}")
