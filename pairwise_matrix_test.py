@@ -43,7 +43,7 @@ MIN_SEQUENCES_PER_GROUP = 10
 FILTER_SPECIAL_OMEGA_VALUES = False
 
 # Flag to determine whether to calculate omega manually from dN/dS
-CALCULATE_OMEGA_MANUALLY = False // This should do nothing
+CALCULATE_OMEGA_MANUALLY = False # This should do nothing
 
 # Flag to enable Low-Middle-High omega categorization analysis
 PERFORM_OMEGA_CATEGORY_ANALYSIS = True
@@ -113,7 +113,7 @@ def read_and_preprocess_data(file_path):
 
     # Convert omega to numeric values, coercing non-numeric entries to NaN
     # Omega is the ratio of non-synonymous to synonymous substitution rates
-    df['omega'] = pd.to_numeric(df['omega'], errors='coerce')
+    df['omega'] = pd.to_numeric(df['omega'], errors='coerce').replace(-1, -1.0)
     df['dN'] = pd.to_numeric(df['dN'], errors='coerce')
     df['dS'] = pd.to_numeric(df['dS'], errors='coerce')
     
@@ -125,10 +125,11 @@ def read_and_preprocess_data(file_path):
         
         # Calculate omega as dN/dS with special case handling
         # Case 1: dN = 0, dS = 0 -> omega = -1 (identical sequences)
+        # Identical sequences can be indicative of strong purifying selection
         # Case 2: dN = any value, dS = 0 -> omega = 99 (infinite/undefined)
         # Case 3: Normal case -> omega = dN/dS
         df['omega'] = df.apply(
-            lambda row: -1.0 if row['dN'] == 0 and row['dS'] == 0 else
+            lambda row: 0.0 if row['dN'] == 0 and row['dS'] == 0 else
                        (99.0 if row['dS'] == 0 else row['dN'] / row['dS']),
             axis=1
         )
@@ -148,9 +149,9 @@ def read_and_preprocess_data(file_path):
     # Filter out special omega values if flag is set
     if FILTER_SPECIAL_OMEGA_VALUES:
         original_len = len(df)
-        df = df[(df['omega'] != -1) & (df['omega'] != 99)]
+        df = df[(df['omega'] != 99)]
         filtered_count = original_len - len(df)
-        print(f"Filtered out {filtered_count} rows with special omega values (-1 or 99)")
+        print(f"Filtered out {filtered_count} rows with special omega values (99)")
     
     # Keep all valid omega values, only dropping NaN entries
     # This preserves special codes while ensuring numeric analysis
