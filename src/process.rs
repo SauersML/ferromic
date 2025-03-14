@@ -910,6 +910,8 @@ pub fn get_haplotype_indices_for_group(
     vcf_sample_id_to_index: &HashMap<&str, usize>,
 ) -> Result<Vec<(usize, HaplotypeSide)>, VcfError> {
     let mut haplotype_indices = Vec::new();
+    let mut missing_samples = Vec::new();
+    
     for (sample_name, &(left_tsv, right_tsv)) in sample_filter {
         match vcf_sample_id_to_index.get(sample_name.as_str()) {
             Some(&idx) => {
@@ -921,13 +923,24 @@ pub fn get_haplotype_indices_for_group(
                 }
             }
             None => {
-                return Err(VcfError::Parse(format!(
-                    "Sample '{}' from config not found in VCF",
+                missing_samples.push(sample_name.clone());
+                // Log warning instead of returning error
+                log(LogLevel::Warning, &format!(
+                    "Sample '{}' from config not found in VCF - skipping (haplotype indices)",
                     sample_name
-                )));
+                ));
             }
         }
     }
+    
+    if !missing_samples.is_empty() {
+        log(LogLevel::Warning, &format!(
+            "Missing {} samples when getting haplotype indices: {}",
+            missing_samples.len(),
+            missing_samples.join(", ")
+        ));
+    }
+    
     Ok(haplotype_indices)
 }
 
