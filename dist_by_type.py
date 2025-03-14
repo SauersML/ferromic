@@ -571,7 +571,7 @@ def create_bar_plot(categories):
             ax.text(
                 i,
                 y_pos,
-                f"p={p_value:.3g}",
+                f"{cat}\np={p_value:.3g}",
                 ha='center',
                 va='bottom',
                 color='red',
