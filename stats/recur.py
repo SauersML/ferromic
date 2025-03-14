@@ -39,18 +39,6 @@ print("Inv_info data columns:", inv_info.columns.tolist())
 # Check for recurrence column in inv_info
 if '0_single_1_recur' in inv_info.columns:
     print(f"\nRecurrence column found. Values: {inv_info['0_single_1_recur'].value_counts().to_dict()}")
-else:
-    print("\nWARNING: '0_single_1_recur' column not found in inv_info.csv")
-    possible_recur_cols = [col for col in inv_info.columns if 'recur' in col.lower()]
-    print(f"Possible recurrence columns: {possible_recur_cols}")
-    # If we can identify another column, use it
-    if possible_recur_cols:
-        recur_col = possible_recur_cols[0]
-        print(f"Using '{recur_col}' as recurrence indicator")
-        inv_info['0_single_1_recur'] = inv_info[recur_col].astype(str).str.contains('TRUE', case=False, na=False).astype(int)
-    elif 'Number_recurrent_events' in inv_info.columns:
-        print("Using 'Number_recurrent_events' to determine recurrence")
-        inv_info['0_single_1_recur'] = (inv_info['Number_recurrent_events'] > 1).astype(int)
 
 # Perform the merge with more diagnostics
 print("\nPerforming merge on chr, region_start, region_end...")
@@ -79,28 +67,7 @@ overlap = output_keys.intersection(inv_info_keys)
 print(f"Key overlap: {len(overlap)} out of {len(output_keys)} output keys and {len(inv_info_keys)} inv_info keys")
 
 if len(overlap) == 0:
-    print("No key overlap! Checking first few keys from each dataset:")
-    print("Output data keys (first 5):")
-    for i, (chr, start, end) in enumerate(list(output_keys)[:5]):
-        print(f"  {i+1}. {chr}, {start}, {end}")
-    print("Inv_info keys (first 5):")
-    for i, (chr, start, end) in enumerate(list(inv_info_keys)[:5]):
-        print(f"  {i+1}. {chr}, {start}, {end}")
-    
-    # Try alternative merge approaches
-    print("\nTrying alternative merge with just chromosome and region_start...")
-    alt_overlap = set(zip(output_data['chr'], output_data['region_start'])).intersection(
-                    set(zip(inv_info['chr'], inv_info['region_start'])))
-    print(f"Alternative key overlap: {len(alt_overlap)}")
-    
-    if len(alt_overlap) > 0:
-        print("Using alternative merge keys: chr and region_start")
-        merge_keys = ['chr', 'region_start']
-    else:
-        print("ERROR: Cannot find overlapping keys between datasets")
-        # As a last resort, use chromosomes only
-        print("Using chr column only for merge (may produce incorrect results)")
-        merge_keys = ['chr']
+    raise ValueError("ERROR: No key overlap found using exact match of chr, region_start, and region_end between datasets.")
 else:
     merge_keys = ['chr', 'region_start', 'region_end']
 
@@ -114,47 +81,7 @@ print(f"After merge: {len(data)} rows")
 if '0_single_1_recur' in data.columns:
     na_count = data['0_single_1_recur'].isna().sum()
     print(f"Rows with NaN in recurrence column after merge: {na_count} ({na_count/len(data)*100:.1f}%)")
-    
-    if na_count > 0:
-        # Try an alternative approach - match closest positions
-        print("\nTrying a fuzzy matching approach since exact merge failed...")
-        # Create a mapping dictionary from inv_info
-        recurrence_map = {}
-        
-        for _, row in inv_info.iterrows():
-            chr_key = row['chr']
-            if not chr_key.startswith('chr'):
-                chr_key = 'chr' + str(chr_key)
-            start = row['region_start']
-            end = row['region_end']
-            if '0_single_1_recur' in row:
-                recurrence_map[(chr_key, start, end)] = row['0_single_1_recur']
-        
-        # Function to find the closest match
-        def find_closest_match(chr, start, end):
-            if not chr.startswith('chr'):
-                chr = 'chr' + str(chr)
-            
-            matches = [(abs(k[1] - start) + abs(k[2] - end), k) for k in recurrence_map.keys() if k[0] == chr]
-            if matches:
-                # Return the value from the closest match
-                closest = min(matches, key=lambda x: x[0])
-                return recurrence_map[closest[1]]
-            return 0  # Default to non-recurrent if no match found
-        
-        # Apply the fuzzy matching to rows with NaN
-        mask = data['0_single_1_recur'].isna()
-        for idx in data[mask].index:
-            chr_val = data.loc[idx, 'chr']
-            start_val = data.loc[idx, 'region_start']
-            end_val = data.loc[idx, 'region_end']
-            data.loc[idx, '0_single_1_recur'] = find_closest_match(chr_val, start_val, end_val)
-        
-        print(f"After fuzzy matching, rows with NaN: {data['0_single_1_recur'].isna().sum()}")
-    
-    # Fill any remaining NaNs with 0
-    data['0_single_1_recur'] = data['0_single_1_recur'].fillna(0).astype(int)
-    print(f"Recurrence classification summary: {data['0_single_1_recur'].value_counts().to_dict()}")
+    print(f"Recurrence classification summary: {data['0_single_1_recur'].value_counts(dropna=False).to_dict()}")
 else:
     print("ERROR: Recurrence column not found after merge!")
 
