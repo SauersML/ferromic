@@ -835,6 +835,13 @@ fn process_variants(
             cds_regions.len(), haplotype_group
         ));
         
+        if chromosome.contains("X") || chromosome.contains("x") {
+            log(LogLevel::Info, &format!(
+                "DEBUG X: Processing sequence files for chrX:{}-{}, group {}, with {} CDS regions", 
+                region_start, region_end, haplotype_group, cds_regions.len()
+            ));
+        }
+        
         let spinner = create_spinner(&format!(
             "Creating sequences for group {} haplotypes", haplotype_group
         ));
@@ -2286,6 +2293,13 @@ pub fn process_vcf(
         "VCF processing complete for chr{}:{}-{}: {} variants loaded, {} filtered",
         chr, region.start, region.end, final_unfiltered.len(), final_filtered.len()
     ));
+    
+    if chr.contains("X") || chr.contains("x") {
+        log(LogLevel::Info, &format!(
+            "DEBUG X: chrX VCF processing complete with {} unfiltered and {} filtered variants",
+            final_unfiltered.len(), final_filtered.len()
+        ));
+    }
     
     log(LogLevel::Info, &format!(
         "VCF statistics: missing data points: {}/{} ({:.2}%)",
