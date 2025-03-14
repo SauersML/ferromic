@@ -7,6 +7,7 @@ from pathlib import Path
 import logging
 import sys
 import time
+from scipy.stats import ttest_rel
 
 # Configure logging
 logging.basicConfig(
@@ -487,75 +488,103 @@ def create_bar_plot(categories):
     middle_means = [category_means[cat]['Middle'] for cat in category_order]
     counts = [category_means[cat]['Count'] for cat in category_order]
     
-    # Create bars
-    rects1 = ax.bar(x - width/2, flanking_means, width, label='Flanking Regions (100K each end)', color='skyblue')
+    # ------------------- NEW CODE BLOCK STARTS HERE ------------------- #
 
-    # Create bar for Middle Region:
-    rects2 = ax.bar(x + width/2, middle_means, width,
-                    label='Middle Region',
-                    color='forestgreen')
-    
-    # Map the human-readable category labels to the keys in `categories`
+    # Create bars, as before
+    rects1 = ax.bar(
+        x - width/2,
+        flanking_means,
+        width,
+        label='Flanking Regions (100K each end)',
+        color='#66c2a5'
+    )
+    rects2 = ax.bar(
+        x + width/2,
+        middle_means,
+        width,
+        label='Middle Region',
+        color='#fc8d62'
+    )
+
     cat_mapping = {
         'Recurrent Inverted': 'recurrent_inverted',
         'Recurrent Direct': 'recurrent_direct',
         'Single-event Inverted': 'single_event_inverted',
         'Single-event Direct': 'single_event_direct'
     }
-    
-    # Overlay individual data points (one scatter per bar)
+
     for i, cat in enumerate(category_order):
         key = cat_mapping[cat]
         seq_list = categories[key]
-        
-        # Calculate flanking and middle means for each sequence in this category
+
         flanking_vals = [
             np.nanmean([seq['beginning_mean'], seq['ending_mean']])
             for seq in seq_list
+            if not np.isnan(seq['beginning_mean']) and not np.isnan(seq['ending_mean'])
         ]
-        middle_vals = [seq['middle_mean'] for seq in seq_list]
-    
-        # Slight horizontal jitter
-        jitter_flank = -width/2
-        jitter_middle = +width/2
-        
-        # Plot each flanking data point as a blue scatter
+        middle_vals = [
+            seq['middle_mean']
+            for seq in seq_list
+            if not np.isnan(seq['middle_mean'])
+        ]
+
+        paired_flanking, paired_middle = [], []
+        for seq in seq_list:
+            f_val = np.nanmean([seq['beginning_mean'], seq['ending_mean']])
+            m_val = seq['middle_mean']
+            if not np.isnan(f_val) and not np.isnan(m_val):
+                paired_flanking.append(f_val)
+                paired_middle.append(m_val)
+
+        jitter_flanking_x = np.random.normal(0, 0.03, size=len(paired_flanking)) + (i - width/2)
         ax.scatter(
-            [i + jitter_flank] * len(flanking_vals),  # x positions
-            flanking_vals,                            # y values
-            color='blue', alpha=0.6, s=20, edgecolors='none'
-        )
-        
-        # Plot each middle data point as a green scatter
-        ax.scatter(
-            [i + jitter_middle] * len(middle_vals),   # x positions
-            middle_vals,                              # y values
-            color='green', alpha=0.6, s=20, edgecolors='none'
+            jitter_flanking_x,
+            paired_flanking,
+            color='#66c2a5',
+            edgecolors='black',
+            alpha=0.7,
+            s=30
         )
 
-    # Add labels and title
-    ax.set_xlabel('Inversion Type and Haplotype', fontsize=14)
-    ax.set_ylabel('Mean Pi Value', fontsize=14)
-    ax.set_title('Mean Pi Values by Region and Inversion Type', fontsize=16, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"{cat}\n(n={count})" for cat, count in zip(category_order, counts)], fontsize=12)
-    ax.legend(fontsize=12)
-    
-    # Add value labels on bars
-    def autolabel(rects, values):
-        """Add value labels above the bars."""
-        for rect, value in zip(rects, values):
-            if not np.isnan(value):
-                height = rect.get_height()
-                ax.annotate(f'{value:.6f}',
-                           xy=(rect.get_x() + rect.get_width()/2, height),
-                           xytext=(0, 3),  # 3 points vertical offset
-                           textcoords="offset points",
-                           ha='center', va='bottom',
-                           fontsize=10)
-    
-    autolabel(rects1, flanking_means)
-    autolabel(rects2, middle_means)
+        jitter_middle_x = np.random.normal(0, 0.03, size=len(paired_middle)) + (i + width/2)
+        ax.scatter(
+            jitter_middle_x,
+            paired_middle,
+            color='#fc8d62',
+            edgecolors='black',
+            alpha=0.7,
+            s=30
+        )
+
+        if len(paired_flanking) >= 2:
+            stat, p_value = ttest_rel(
+                paired_middle,
+                paired_flanking,
+                alternative='two-sided'
+            )
+        else:
+            p_value = np.nan
+
+        bar_max = max(flanking_means[i], middle_means[i])
+        y_pos = bar_max + 0.00005 * (1 if not np.isnan(bar_max) else 1)
+        if not np.isnan(p_value):
+            ax.text(
+                i,
+                y_pos,
+                f"p={p_value:.3g}",
+                ha='center',
+                va='bottom',
+                color='red',
+                fontsize=10,
+                fontweight='bold'
+            )
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save plot
+    plt.savefig(OUTPUT_PLOT, dpi=300)
+    logger.info(f"Saved plot to {OUTPUT_PLOT}")
     
     # Add a dashed line for better comparison
     if any(~np.isnan(flanking_means)) or any(~np.isnan(middle_means)):
