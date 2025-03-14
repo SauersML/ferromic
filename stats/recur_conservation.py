@@ -108,11 +108,7 @@ def calculate_sequence_median_omega(pairwise_df):
     return median_df
 
 def run_statistical_test(table):
-    """Run Fisher's exact test - robust for small counts and no distributional assumptions."""
-    # Fisher's exact test is most appropriate here:
-    # 1. No assumptions about sample size or distribution
-    # 2. Directly calculates exact probability rather than approximation
-    # 3. Appropriate for 2x2 contingency tables
+    """Run Fisher's exact test"""
     odds_ratio, p_value = stats.fisher_exact(table)
     
     return {
@@ -150,6 +146,7 @@ def conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds):
     # Perform leave-one-out analysis
     results = []
     all_p_values = []
+    all_effect_sizes = []
     
     # Baseline result
     baseline_result = {
@@ -163,11 +160,13 @@ def conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds):
         'single_identical': baseline_stats['single_identical'],
         'single_pct': baseline_stats['single_pct'],
         'p_value': baseline_stats['test_results']['p_value'],
-        'odds_ratio': baseline_stats['test_results']['odds_ratio']
+        'odds_ratio': baseline_stats['test_results']['odds_ratio'],
+        'effect_size': baseline_stats['single_pct'] - baseline_stats['recurrent_pct']
     }
     
     results.append(baseline_result)
     all_p_values.append(baseline_stats['test_results']['p_value'])
+    all_effect_sizes.append(baseline_result['effect_size'])
     
     # Leave-one-out for each large inversion
     for _, row in large_inversions.iterrows():
@@ -186,6 +185,9 @@ def conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds):
         # Count excluded sequences
         excluded_count = valid_df[valid_df['CDS'].isin(cds_list)].shape[0]
         
+        # Calculate effect size (difference in percentages)
+        effect_size = filtered_stats['single_pct'] - filtered_stats['recurrent_pct']
+        
         # Add result
         result = {
             'inversion_excluded': inv_id,
@@ -198,11 +200,13 @@ def conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds):
             'single_identical': filtered_stats['single_identical'],
             'single_pct': filtered_stats['single_pct'],
             'p_value': filtered_stats['test_results']['p_value'],
-            'odds_ratio': filtered_stats['test_results']['odds_ratio']
+            'odds_ratio': filtered_stats['test_results']['odds_ratio'],
+            'effect_size': effect_size
         }
         
         results.append(result)
         all_p_values.append(filtered_stats['test_results']['p_value'])
+        all_effect_sizes.append(effect_size)
     
     # Create results dataframe and sort by p-value
     results_df = pd.DataFrame(results)
@@ -212,6 +216,7 @@ def conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds):
     # This is more conservative than taking the baseline p-value alone
     median_p_value = np.median(all_p_values)
     max_p_value = np.max(all_p_values)
+    median_effect_size = np.median(all_effect_sizes)
     
     # Save results
     results_df.to_csv(OUTPUT_RESULTS, index=False)
@@ -221,7 +226,9 @@ def conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds):
     print("-------------------------------")
     print(f"Total inversions analyzed: {len(large_inversions)}")
     print(f"Baseline p-value: {baseline_result['p_value']:.8e}")
+    print(f"Baseline effect size: {baseline_result['effect_size']:.2f}% (Single-event minus Recurrent)")
     print(f"ROBUST FINAL P-VALUE (median of all leave-one-out tests): {median_p_value:.8e}")
+    print(f"ROBUST EFFECT SIZE: {median_effect_size:.2f}% (Single-event minus Recurrent)")
     print(f"Most conservative p-value (maximum of all tests): {max_p_value:.8e}")
     
     print("\nTop 5 results by p-value:")
@@ -232,13 +239,14 @@ def conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds):
         p_value = row['p_value']
         rec_pct = row['recurrent_pct']
         single_pct = row['single_pct']
+        effect = row['effect_size']
         
         if excluded == 'None':
-            print(f"BASELINE: p={p_value:.8e}, Recurrent={rec_pct:.1f}%, Single={single_pct:.1f}%")
+            print(f"BASELINE: p={p_value:.8e}, Recurrent={rec_pct:.1f}%, Single={single_pct:.1f}%, Effect={effect:.2f}%")
         else:
             inv_type = row['inv_type']
             count = row['excluded_count']
-            print(f"Excluding {inv_type} inversion {excluded} ({count} sequences): p={p_value:.8e}, Recurrent={rec_pct:.1f}%, Single={single_pct:.1f}%")
+            print(f"Excluding {inv_type} inversion {excluded} ({count} sequences): p={p_value:.8e}, Recurrent={rec_pct:.1f}%, Single={single_pct:.1f}%, Effect={effect:.2f}%")
     
     print("\nMost influential inversions (largest p-value change):")
     results_df['p_change'] = results_df['p_value'] - baseline_result['p_value']
@@ -250,14 +258,18 @@ def conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds):
         p_value = row['p_value']
         p_change = row['p_change']
         count = row['excluded_count']
+        effect = row['effect_size']
         
         change_direction = "increased" if p_change > 0 else "decreased"
-        print(f"Inversion {excluded} ({inv_type}, {count} sequences): p-value {change_direction} by {abs(p_change):.8e} to {p_value:.8e}")
+        print(f"Inversion {excluded} ({inv_type}, {count} sequences): p-value {change_direction} by {abs(p_change):.8e} to {p_value:.8e}, Effect size={effect:.2f}%")
     
-    # Determine final conclusion based on median p-value
+    # Determine final conclusion based on median p-value and effect direction
     alpha = 0.05
-    conclusion = "SIGNIFICANT difference" if median_p_value < alpha else "NO significant difference"
-    print(f"\nFINAL CONCLUSION: There is a {conclusion} in conservation between recurrent and single-event inversions (p={median_p_value:.8e}, α={alpha})")
+    significance = "SIGNIFICANT difference" if median_p_value < alpha else "NO significant difference"
+    more_conserved = "SINGLE-EVENT inversions are more conserved than RECURRENT inversions" if median_effect_size > 0 else "RECURRENT inversions are more conserved than SINGLE-EVENT inversions"
+    
+    print(f"\nFINAL CONCLUSION: There is a {significance} in conservation between recurrent and single-event inversions (p={median_p_value:.8e}, α={alpha})")
+    print(f"DIRECTION: {more_conserved} (difference of {abs(median_effect_size):.2f}% in identical sequences)")
     
     return results_df, median_p_value
 
@@ -346,15 +358,17 @@ def main():
         return
     
     # Map CDS to inversions
+    global inversion_to_cds  # Make sure this is available to all functions
     cds_to_type, cds_to_inversion_id, inversion_to_cds = map_cds_to_inversions(pairwise_df, inversion_df)
     
     # Calculate median omega
     median_df = calculate_sequence_median_omega(pairwise_df)
     
     # Conduct leave-one-out analysis
-    conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds)
+    _, final_p_value = conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds)
     
     print(f"\nAnalysis complete. Full results saved to {OUTPUT_RESULTS}")
+    print(f"FINAL P-VALUE: {final_p_value:.8e}")
 
 # Global variable for inversion_to_cds mapping (needed across functions)
 inversion_to_cds = {}
