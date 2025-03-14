@@ -1846,9 +1846,20 @@ fn process_single_config_entry(
                 "No haplotypes found for {} in region {}-{}",
                 label, region_start, region_end
             ));
-            finish_step_progress("No matching haplotypes found");
-            return Ok(None);
+            // finish_step_progress("No matching haplotypes found");
+            // return Ok(None);
+            // Not returning here in case some of the groups succeed
         }
+    }
+
+    // After the loop, check if ANY groups had results
+    if results.iter().all(|r| r.is_none()) {
+        log(LogLevel::Warning, &format!(
+            "No haplotypes found for any group in region {}-{}",
+            entry.interval.start, entry.interval.end
+        ));
+        finish_step_progress("No matching haplotypes found");
+        return Ok(None);
     }
 
     // Extract all results
