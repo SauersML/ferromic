@@ -7,7 +7,7 @@ from pathlib import Path
 import logging
 import sys
 import time
-from scipy.stats import ttest_rel
+from scipy.stats import ttest_rel, wilcoxon, shapiro
 
 # Configure logging
 logging.basicConfig(
@@ -224,6 +224,32 @@ def determine_inversion_type(coords, recurrent_regions, single_event_regions):
         return 'ambiguous'
     else:
         return 'unknown'
+
+
+def paired_permutation_test(x, y, num_permutations=10000):
+    """
+    Perform a paired permutation test.
+    
+    Parameters:
+    x : array-like, sample values for group 1.
+    y : array-like, sample values for group 2.
+    num_permutations : int, number of permutations to perform.
+    
+    Returns:
+    p_value : float, the p-value of the test.
+    """
+    differences = np.array(x) - np.array(y)
+    observed_mean = np.mean(differences)
+    count = 0
+    for _ in range(num_permutations):
+        signs = np.random.choice([1, -1], size=len(differences))
+        permuted = differences * signs
+        permuted_mean = np.mean(permuted)
+        if abs(permuted_mean) >= abs(observed_mean):
+            count += 1
+    p_value = count / num_permutations
+    return p_value
+
 
 def load_pi_data(file_path):
     """Load filtered pi data from file, counting ACTUAL data length."""
@@ -557,27 +583,38 @@ def create_bar_plot(categories):
         )
 
         if len(paired_flanking) >= 2:
-            stat, p_value = ttest_rel(
+            differences = np.array(paired_flanking) - np.array(paired_middle)
+            norm_stat, norm_p = shapiro(differences)
+            logger.info(f"Normality test: stat = {norm_stat:.3g}, p = {norm_p:.3g}")
+            stat, wilcoxon_p_value = wilcoxon(
                 paired_middle,
                 paired_flanking,
                 alternative='two-sided'
             )
+            perm_p_value = paired_permutation_test(
+                np.array(paired_middle),
+                np.array(paired_flanking),
+                num_permutations=10000
+            )
+            test_used = "Wilcoxon & Permutation tests"
         else:
-            p_value = np.nan
+            wilcoxon_p_value = np
+
 
         bar_max = max(flanking_means[i], middle_means[i])
         y_pos = bar_max + 0.00005 * (1 if not np.isnan(bar_max) else 1)
-        if not np.isnan(p_value):
+        if not np.isnan(wilcoxon_p_value) and not np.isnan(perm_p_value):
             ax.text(
                 i,
                 y_pos,
-                f"{cat}\np={p_value:.3g}",
+                f"{cat}\nWilcoxon p={wilcoxon_p_value:.3g}\nPermutation p={perm_p_value:.3g}\nNormality p={norm_p:.3g}",
                 ha='center',
                 va='bottom',
                 color='red',
                 fontsize=10,
                 fontweight='bold'
             )
+
 
     # Adjust layout
     plt.tight_layout()
@@ -592,6 +629,7 @@ def create_bar_plot(categories):
         if all_values:
             max_y = max(all_values)
             ax.axhline(y=max_y/2, color='gray', linestyle='--', alpha=0.5)
+    ax.legend(title="Regions")
     
     # Adjust layout
     plt.tight_layout()
