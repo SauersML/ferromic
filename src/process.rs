@@ -619,6 +619,7 @@ fn process_variants(
 
     // List of haplotype indices and their sides (left or right) for the given haplotype_group
     let mut group_haps: Vec<(usize, HaplotypeSide)> = Vec::new();
+    let mut missing_samples = Vec::new();
     for (config_sample_name, &(left_side, right_side)) in sample_filter {
         match index_map.get(config_sample_name.as_str()) {
             Some(&mapped_index) => {
@@ -630,18 +631,24 @@ fn process_variants(
                 }
             }
             None => {
-                log(LogLevel::Error, &format!(
-                    "Sample '{}' from config not found in VCF",
+                missing_samples.push(config_sample_name.clone());
+                log(LogLevel::Warning, &format!(
+                    "Sample '{}' from config not found in VCF - skipping",
                     config_sample_name
                 ));
-                finish_step_progress("Error: sample mapping failed");
-                return Err(VcfError::Parse(format!(
-                    "Sample '{}' from config not found in VCF",
-                    config_sample_name
-                )));
             }
         }
     }
+    
+    if !missing_samples.is_empty() {
+        log(LogLevel::Warning, &format!(
+            "Missing {} samples for chromosome {}: {}",
+            missing_samples.len(),
+            chromosome,
+            missing_samples.join(", ")
+        ));
+    }
+    
     if group_haps.is_empty() {
         log(LogLevel::Warning, &format!("No haplotypes found for group {}", haplotype_group));
         finish_step_progress("No haplotypes found");
