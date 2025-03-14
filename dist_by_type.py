@@ -489,8 +489,50 @@ def create_bar_plot(categories):
     
     # Create bars
     rects1 = ax.bar(x - width/2, flanking_means, width, label='Flanking Regions (100K each end)', color='skyblue')
-    rects2 = ax.bar(x + width/2, middle_means, width, label='Middle Region', color='forestgreen')
+
+    # Create bar for Middle Region:
+    rects2 = ax.bar(x + width/2, middle_means, width,
+                    label='Middle Region',
+                    color='forestgreen')
     
+    # Map the human-readable category labels to the keys in `categories`
+    cat_mapping = {
+        'Recurrent Inverted': 'recurrent_inverted',
+        'Recurrent Direct': 'recurrent_direct',
+        'Single-event Inverted': 'single_event_inverted',
+        'Single-event Direct': 'single_event_direct'
+    }
+    
+    # Overlay individual data points (one scatter per bar)
+    for i, cat in enumerate(category_order):
+        key = cat_mapping[cat]
+        seq_list = categories[key]
+        
+        # Calculate flanking and middle means for each sequence in this category
+        flanking_vals = [
+            np.nanmean([seq['beginning_mean'], seq['ending_mean']])
+            for seq in seq_list
+        ]
+        middle_vals = [seq['middle_mean'] for seq in seq_list]
+    
+        # Slight horizontal jitter
+        jitter_flank = -width/2
+        jitter_middle = +width/2
+        
+        # Plot each flanking data point as a blue scatter
+        ax.scatter(
+            [i + jitter_flank] * len(flanking_vals),  # x positions
+            flanking_vals,                            # y values
+            color='blue', alpha=0.6, s=20, edgecolors='none'
+        )
+        
+        # Plot each middle data point as a green scatter
+        ax.scatter(
+            [i + jitter_middle] * len(middle_vals),   # x positions
+            middle_vals,                              # y values
+            color='green', alpha=0.6, s=20, edgecolors='none'
+        )
+
     # Add labels and title
     ax.set_xlabel('Inversion Type and Haplotype', fontsize=14)
     ax.set_ylabel('Mean Pi Value', fontsize=14)
