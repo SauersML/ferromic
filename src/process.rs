@@ -846,7 +846,7 @@ fn process_variants(
             "Creating sequences for group {} haplotypes", haplotype_group
         ));
         
-        make_sequences(
+        if let Err(e) = make_sequences(
             variants,
             sample_names,
             haplotype_group,
@@ -856,7 +856,13 @@ fn process_variants(
             cds_regions,
             position_allele_map.clone(),
             &chromosome,
-        )?;
+        ) {
+            log(LogLevel::Warning, &format!(
+                "ERROR generating sequences for group {} on {}: {}", 
+                haplotype_group, chromosome, e
+            ));
+            // Continue processing - don't let sequence generation errors affect main analysis
+        }
         
         spinner.finish_and_clear();
         log(LogLevel::Info, &format!(
