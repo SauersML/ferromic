@@ -963,6 +963,22 @@ pub fn process_config_entries(
 
     // Group config entries by chromosome for efficiency
     let grouped = group_config_entries_by_chr(config_entries);
+    
+    // Log the count of entries per chromosome
+    log(LogLevel::Info, "STATISTICS: Input regions by chromosome:");
+    for (chr, entries) in &grouped {
+        log(LogLevel::Info, &format!("  - {}: {} regions", chr, entries.len()));
+        
+        if chr.contains("X") || chr.contains("x") {
+            for (i, entry) in entries.iter().enumerate() {
+                log(LogLevel::Info, &format!(
+                    "DEBUG X: chrX input region {}: {}:{}-{} ({} filtered samples, {} unfiltered samples)",
+                    i+1, entry.seqname, entry.interval.start, entry.interval.end, 
+                    entry.samples_filtered.len(), entry.samples_unfiltered.len()
+                ));
+            }
+        }
+    }
 
     // We will process each chromosome in parallel (for speed),
     // then flatten the per-chromosome results in the order we get them.
@@ -997,9 +1013,29 @@ pub fn process_config_entries(
         .map(|(csv_row, _sites)| csv_row.clone())
         .collect();
 
+    // Create a count of rows by chromosome
+    let mut chr_counts = HashMap::new();
+    for row in &all_results {
+        *chr_counts.entry(row.seqname.clone()).or_insert(0) += 1;
+    }
+    
+    // Log the count by chromosome
+    log(LogLevel::Info, "STATISTICS: Regions in final output by chromosome:");
+    for (chr, count) in &chr_counts {
+        log(LogLevel::Info, &format!("  - {}: {} regions", chr, count));
+    }
+    
     // Write all rows to the CSV file
+    log(LogLevel::Info, &format!("Writing {} total rows to CSV", all_results.len()));
     for row_data in all_results {
         write_csv_row(&mut writer, &row_data)?;
+        
+        if row_data.seqname.contains("X") || row_data.seqname.contains("x") {
+            log(LogLevel::Info, &format!(
+                "DEBUG X: Wrote chrX region {}:{}-{} to output CSV",
+                row_data.seqname, row_data.region_start, row_data.region_end
+            ));
+        }
     }
 
     // Now write per-site statistics in wide format to a single CSV file.
@@ -1505,7 +1541,7 @@ fn process_chromosome_entries(
         let region_desc = format!("{}:{}-{}", chr, entry.interval.start, entry.interval.end);
         update_entry_progress(idx as u64, &format!("Processing region {}", region_desc));
         
-        match process_single_config_entry(
+        let result = process_single_config_entry(
             entry.clone(),
             &vcf_file,
             min_gq,
@@ -1516,18 +1552,41 @@ fn process_chromosome_entries(
             chr,
             args,
             pca_storage.as_ref(),
-        ) {
+        );
+        
+        match result {
             Ok(Some(row_data)) => {
                 rows.push(row_data);
                 log(LogLevel::Info, &format!("Successfully processed region {}", region_desc));
+                
+                if entry.seqname.contains("X") || entry.seqname.contains("x") {
+                    log(LogLevel::Info, &format!(
+                        "DEBUG X: ADDED chrX region {} to output rows (now {} rows)",
+                        region_desc, rows.len()
+                    ));
+                }
             }
             Ok(None) => {
                 log(LogLevel::Warning, &format!(
-                    "Skipped region {} (no matching haplotypes)", region_desc
+                    "DROPPED: Region {} was skipped (no matching haplotypes)", region_desc
                 ));
+                
+                if entry.seqname.contains("X") || entry.seqname.contains("x") {
+                    log(LogLevel::Warning, &format!(
+                        "DEBUG X: DROPPED chrX region {} from output (returned Ok(None))",
+                        region_desc
+                    ));
+                }
             }
             Err(e) => {
-                log(LogLevel::Error, &format!("Error processing region {}: {}", region_desc, e));
+                log(LogLevel::Error, &format!("DROPPED: Error processing region {}: {}", region_desc, e));
+                
+                if entry.seqname.contains("X") || entry.seqname.contains("x") {
+                    log(LogLevel::Error, &format!(
+                        "DEBUG X: DROPPED chrX region {} due to error: {}",
+                        region_desc, e
+                    ));
+                }
             }
         }
     
@@ -1872,6 +1931,24 @@ fn process_single_config_entry(
             "No haplotypes found for any group in region {}-{}",
             entry.interval.start, entry.interval.end
         ));
+        
+        // Calculate detailed statistics about why regions failed
+        let mut reasons = Vec::new();
+        if entry.samples_filtered.is_empty() {
+            reasons.push("No filtered samples in config");
+        }
+        if entry.samples_unfiltered.is_empty() {
+            reasons.push("No unfiltered samples in config");
+        }
+        
+        if entry.seqname.contains("X") || entry.seqname.contains("x") {
+            log(LogLevel::Warning, &format!(
+                "DEBUG X: DROPPED chrX region {}:{}-{} - ALL groups had no haplotypes. Reasons: {}",
+                entry.seqname, entry.interval.start, entry.interval.end,
+                if reasons.is_empty() { "Unknown".to_string() } else { reasons.join(", ") }
+            ));
+        }
+        
         finish_step_progress("No matching haplotypes found");
         return Ok(None);
     }
