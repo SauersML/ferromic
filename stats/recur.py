@@ -19,6 +19,7 @@ inv_info = pd.read_csv(inv_info_path)
 print(f"Loaded {len(inv_info)} rows from inv_info.csv")
 print("Inv_info data chromosome format examples:")
 print(inv_info['chr'].head().tolist())
+inv_info['orig_inv_index'] = inv_info.index
 
 # Check and standardize chromosome format
 # If output_data uses numbers (1, 2, 3) and inv_info uses 'chr' prefix (chr1, chr2, chr3)
@@ -60,21 +61,53 @@ for key in ['region_start', 'region_end']:
         output_data[key] = output_data[key].astype(np.int64)
         inv_info[key] = inv_info[key].astype(np.int64)
 
-# Check for key overlap before merging
-output_keys = set(zip(output_data['chr'], output_data['region_start'], output_data['region_end']))
-inv_info_keys = set(zip(inv_info['chr'], inv_info['region_start'], inv_info['region_end']))
-overlap = output_keys.intersection(inv_info_keys)
-print(f"Key overlap: {len(overlap)} out of {len(output_keys)} output keys and {len(inv_info_keys)} inv_info keys")
+# Add an original index to output_data so we can verify every row gets matched
+output_data['orig_index'] = np.arange(len(output_data))
 
-if len(overlap) == 0:
-    raise ValueError("ERROR: No key overlap found using exact match of chr, region_start, and region_end between datasets.")
-else:
-    merge_keys = ['chr', 'region_start', 'region_end']
+# First, merge on 'chr' only
+merged_temp = pd.merge(
+    output_data,
+    inv_info[['orig_inv_index', 'chr', 'region_start', 'region_end', '0_single_1_recur']],
+    on='chr',
+    how='inner',
+    suffixes=('_out', '_inv')
+)
 
-# Perform the merge
-data = pd.merge(output_data, inv_info[merge_keys + ['0_single_1_recur']], 
-                on=merge_keys, 
-                how='left')
+print(f"Preliminary merge on 'chr' only: {len(merged_temp)} rows")
+
+# Filter for rows where region_start and region_end differ by at most one
+mask = (
+    (abs(merged_temp['region_start_out'] - merged_temp['region_start_inv']) <= 1) &
+    (abs(merged_temp['region_end_out'] - merged_temp['region_end_inv']) <= 1)
+)
+merged = merged_temp[mask].copy()
+print(f"After filtering for one-off differences: {len(merged)} matching rows found")
+
+if len(merged) == 0:
+    raise ValueError("ERROR: No key overlap found allowing a one-off difference for region_start and region_end between datasets.")
+
+# Identify and print inv_info rows that were dropped from the merge with a non-null recurrence value
+matched_inv_indices = merged['orig_inv_index'].unique()
+dropped_inv_info = inv_info[~inv_info['orig_inv_index'].isin(matched_inv_indices)]
+dropped_with_recur = dropped_inv_info[dropped_inv_info['0_single_1_recur'].notna()]
+print("\nRows from inv_info that were dropped from the merge but have a 0_single_1_recur value:")
+print(dropped_with_recur)
+
+# Verify that every row in output_data is matched at least once
+matched_indices = merged['orig_index'].unique()
+if len(matched_indices) != len(output_data):
+    missing = set(range(len(output_data))) - set(matched_indices)
+    raise ValueError(f"ERROR: The following output.csv row indices were not matched: {missing}")
+
+# Use the output_data's region_start and region_end as canonical keys
+merged['region_start'] = merged['region_start_out']
+merged['region_end'] = merged['region_end_out']
+
+# drop the redundant columns from inv_info
+merged.drop(columns=['region_start_inv', 'region_end_inv'], inplace=True)
+
+data = merged
+
 print(f"After merge: {len(data)} rows")
 
 # Check for NaN values in recurrence column after merge
@@ -103,22 +136,8 @@ print(f"\nTotal inversions: {len(data)}")
 print(f"Recurrent inversions: {len(recurrent)}")
 print(f"Non-recurrent inversions: {len(non_recurrent)}")
 
-# Force classification if needed
 if len(recurrent) == 0:
-    print("\nNo recurrent inversions found after merge - using frequency-based classification")
-    # Use inversion frequency as a proxy for recurrence
-    if 'inversion_freq_filter' in data.columns:
-        # Choose top 20% by frequency as "recurrent"
-        threshold = data['inversion_freq_filter'].quantile(0.8)
-        print(f"Using threshold frequency > {threshold:.4f} to designate recurrent inversions")
-        data['0_single_1_recur'] = (data['inversion_freq_filter'] > threshold).astype(int)
-        # Redefine the groups
-        recurrent = data[data['0_single_1_recur'] == 1]
-        non_recurrent = data[data['0_single_1_recur'] == 0]
-        print(f"After reclassification: {len(recurrent)} recurrent, {len(non_recurrent)} non-recurrent")
-    else:
-        print("ERROR: Cannot classify recurrent inversions!")
-        exit(1)
+    raise ValueError("ERROR: No recurrent inversions found after merge.")
 
 # Calculate descriptive statistics
 print("\nDescriptive Statistics:")
@@ -189,69 +208,6 @@ if dup_count > 0:
 else:
     print("No duplicate rows found.")
     data_unique = data
-
-# Wilcoxon signed-rank tests (paired direct vs inverted)
-print("\nWilcoxon Signed-Rank Tests (Direct vs Inverted):")
-for group_name, group_data in [("Recurrent", recurrent), ("Non-recurrent", non_recurrent)]:
-    print(f"\n{group_name} Inversions:")
-    
-    # For Theta
-    valid_rows_theta = group_data[
-        ~group_data['0_w_theta_filtered'].replace([np.inf, -np.inf], np.nan).isna() & 
-        ~group_data['1_w_theta_filtered'].replace([np.inf, -np.inf], np.nan).isna()
-    ]
-    
-    print(f"  Theta comparison - valid pairs: {len(valid_rows_theta)}")
-    
-    if len(valid_rows_theta) > 5:  # Ensure we have enough paired data
-        try:
-            # Theta comparison
-            w_theta, p_theta = stats.wilcoxon(
-                valid_rows_theta['0_w_theta_filtered'].values,
-                valid_rows_theta['1_w_theta_filtered'].values
-            )
-            results_table.append({
-                'Comparison': f"Theta Direct vs Inverted ({group_name})",
-                'Test': 'Wilcoxon signed-rank',
-                'n': len(valid_rows_theta),
-                'Statistic': w_theta,
-                'P-value': p_theta,
-                'Significant (p<0.05)': p_theta < 0.05
-            })
-            print(f"  Theta result: W={w_theta}, p={p_theta:.6f}, {'Significant' if p_theta < 0.05 else 'Not significant'}")
-        except Exception as e:
-            print(f"  Error in Wilcoxon test for Theta: {e}")
-    else:
-        print("  Insufficient paired data for Theta test")
-    
-    # For Pi
-    valid_rows_pi = group_data[
-        ~group_data['0_pi_filtered'].replace([np.inf, -np.inf], np.nan).isna() & 
-        ~group_data['1_pi_filtered'].replace([np.inf, -np.inf], np.nan).isna()
-    ]
-    
-    print(f"  Pi comparison - valid pairs: {len(valid_rows_pi)}")
-    
-    if len(valid_rows_pi) > 5:
-        try:
-            # Pi comparison
-            w_pi, p_pi = stats.wilcoxon(
-                valid_rows_pi['0_pi_filtered'].values,
-                valid_rows_pi['1_pi_filtered'].values
-            )
-            results_table.append({
-                'Comparison': f"Pi Direct vs Inverted ({group_name})",
-                'Test': 'Wilcoxon signed-rank',
-                'n': len(valid_rows_pi),
-                'Statistic': w_pi,
-                'P-value': p_pi,
-                'Significant (p<0.05)': p_pi < 0.05
-            })
-            print(f"  Pi result: W={w_pi}, p={p_pi:.6f}, {'Significant' if p_pi < 0.05 else 'Not significant'}")
-        except Exception as e:
-            print(f"  Error in Wilcoxon test for Pi: {e}")
-    else:
-        print("  Insufficient paired data for Pi test")
 
 # Save results to CSV
 if results_table:
