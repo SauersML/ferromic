@@ -1,12 +1,15 @@
 use crate::process::{Variant, ZeroBasedPosition, HaplotypeSide, ZeroBasedHalfOpen, QueryRegion};
 use crate::progress::{
-    log, LogLevel, init_step_progress, update_step_progress, 
+    log, LogLevel, init_step_progress, update_step_progress, VcfError,
     finish_step_progress, create_spinner, display_status_box, StatusBox, set_stage, ProcessingStage
 };
 use rayon::iter::IntoParallelIterator;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
 
 // Define a struct to hold diversity metrics for each genomic site
 #[derive(Debug)]
