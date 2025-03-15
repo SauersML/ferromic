@@ -1787,7 +1787,7 @@ fn process_single_config_entry(
     update_step_progress(1, "Analyzing variant statistics");
 
     // Calculate FST if enabled
-    let fst_results_filtered = if args.enable_fst {
+    let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
         let spinner = create_spinner("Calculating FST statistics");
     
         // Define the region as a QueryRegion (zero-based inclusive)
