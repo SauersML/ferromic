@@ -1095,7 +1095,7 @@ pub fn process_config_entries(
     }
 
     // Populate our all_columns map with the data from each region–group combo.
-    for (csv_row, per_site_diversity_vec) in &all_pairs {
+    for (csv_row, per_site_diversity_vec, _fst_data) in &all_pairs {
         // We'll produce 4 columns for each region+group combo.
         // We want to fill these columns for each entry in per_site_diversity_vec:
         // If is_filtered=false, we fill the "unfiltered_pi_" and "unfiltered_theta_" columns.
@@ -1188,7 +1188,7 @@ pub fn process_config_entries(
     // The site records contain (position, pi, watterson_theta, group_id, is_filtered).
     // We do this for each region row in all_pairs.
 
-    for (csv_row, per_site_diversity_vec) in &all_pairs {
+    for (csv_row, per_site_diversity_vec, _fst_data) in &all_pairs {
         let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
         let region_len = region.len();
 
@@ -2014,7 +2014,14 @@ fn process_single_config_entry(
                 Path::new(pop_csv),
                 region
             ) {
-                Ok(results) => Some(results),
+                Ok(results) => {
+                    // Log successful population FST calculation
+                    log(LogLevel::Info, &format!(
+                        "Successfully calculated population FST with {} populations and {} sites",
+                        results.pairwise_fst.len(), results.site_fst.len()
+                    ));
+                    Some(results)
+                },
                 Err(e) => {
                     log(LogLevel::Error, &format!("Error calculating population FST: {}", e));
                     None
@@ -2327,12 +2334,22 @@ fn process_single_config_entry(
 
     // Collect per-site FST records
     let mut per_site_fst_records = Vec::new();
+    
+    // Add haplotype group FST data
     if let Some(fst_results) = &fst_results_filtered {
         // Access site FST data directly from the vector
         for site in &fst_results.site_fst {
             let pair_fst = site.pairwise_fst.get("0_vs_1").unwrap_or(&0.0);
             per_site_fst_records.push((site.position, site.overall_fst, *pair_fst));
         }
+    }
+    
+    // Add population FST data if available
+    if let Some(pop_fst_results) = &fst_results_pop_filtered {
+        log(LogLevel::Info, &format!(
+            "Including {} sites of population FST data", 
+            pop_fst_results.site_fst.len()
+        ));
     }
     
     log(LogLevel::Info, &format!(
