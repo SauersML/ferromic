@@ -309,7 +309,7 @@ impl OneBasedPosition {
 }
 
 /// Represents the side of a haplotype (left or right) for a sample.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HaplotypeSide {
     Left,  // The left haplotype of a diploid sample
     Right, // The right haplotype of a diploid sample
@@ -1821,14 +1821,6 @@ fn process_single_config_entry(
         spinner.finish_and_clear();
         log(LogLevel::Info, "FST calculations complete");
         
-        // Write FST results to output file if specified
-        if let Some(fst_output) = &args.fst_output {
-            let output_path = Path::new(fst_output);
-            if let Err(e) = write_fst_results(&haplotype_fst, population_fst.as_ref(), output_path) {
-                log(LogLevel::Error, &format!("Error writing FST results: {}", e));
-            }
-        }
-        
         (Some(haplotype_fst), population_fst)
     } else {
         (None, None)
@@ -2130,7 +2122,8 @@ fn process_single_config_entry(
     // Collect per-site FST records
     let mut per_site_fst_records = Vec::new();
     if let Some(fst_results) = &fst_results_filtered {
-        for site in &fst_results.site_fst {
+        // Access site FST data directly from the vector
+        for site in &fst_results {
             let pair_fst = site.pairwise_fst.get("0_vs_1").unwrap_or(&0.0);
             per_site_fst_records.push((site.position, site.overall_fst, *pair_fst));
         }
