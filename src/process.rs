@@ -1,5 +1,5 @@
 use crate::stats::{
-    calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site,
+    calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site_diversity,
     calculate_pi, calculate_watterson_theta, SiteDiversity,
 };
 
@@ -876,7 +876,7 @@ fn process_variants(
     // Convert from 1-based inclusive to QueryRegion using type conversions
     let region_zero_based = ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end)
         .to_zero_based_inclusive();
-    let site_diversities = calculate_per_site(variants, &group_haps, region_zero_based.into());
+    let site_diversities = calculate_per_site_diversity(variants, &group_haps, region_zero_based.into());
     spinner.finish_and_clear();
     log(LogLevel::Info, &format!(
         "Calculated diversity for {} sites",
@@ -1079,14 +1079,14 @@ pub fn process_config_entries(
     }
 
     // Populate our all_columns map with the data from each region–group combo.
-    for (csv_row, per_site_vec) in &all_pairs {
+    for (csv_row, per_site_diversity_vec) in &all_pairs {
         // We'll produce 4 columns for each region+group combo.
-        // We want to fill these columns for each entry in per_site_vec:
+        // We want to fill these columns for each entry in per_site_diversity_vec:
         // If is_filtered=false, we fill the "unfiltered_pi_" and "unfiltered_theta_" columns.
         // If is_filtered=true, we fill "filtered_pi_" and "filtered_theta_" columns.
         // The relative position is (pos - region_start + 1).
 
-        for &(pos, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
+        for &(pos, pi_val, theta_val, group_id, is_filtered) in per_site_diversity_vec {
             // Compute a 0-based region from csv_row.region_start and csv_row.region_end
             let region = ZeroBasedHalfOpen::from_0based_inclusive(csv_row.region_start, csv_row.region_end);
             let pos_zero_based = pos;
@@ -1137,7 +1137,7 @@ pub fn process_config_entries(
     let temp_fasta_path = {
         let locked_opt = TEMP_DIR.lock();
         if let Some(dir) = locked_opt.as_ref() {
-            dir.path().join("per_site_output.falsta")
+            dir.path().join("per_site_diversity_output.falsta")
         } else {
             return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
         }
@@ -1147,7 +1147,7 @@ pub fn process_config_entries(
 
     // We will map each distinct (prefix, row.seqname, row.region_start, row.region_end, group_id)
     // to a vector of values for positions from row.region_start..=row.region_end.
-    // The positions are stored 1-based, but we have them in the per_site_vec as 1-based positions already.
+    // The positions are stored 1-based, but we have them in the per_site_diversity_vec as 1-based positions already.
 
     // We define a helper to build the full FASTA-style header.
     fn build_fasta_header(prefix: &str, row: &CsvRowData, group_id: u8) -> String {
@@ -1172,14 +1172,14 @@ pub fn process_config_entries(
     // The site records contain (position, pi, watterson_theta, group_id, is_filtered).
     // We do this for each region row in all_pairs.
 
-    for (csv_row, per_site_vec) in &all_pairs {
+    for (csv_row, per_site_diversity_vec) in &all_pairs {
         let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
         let region_len = region.len();
 
         // We store 4 possible keys: "unfiltered_pi", "unfiltered_theta", "filtered_pi", "filtered_theta".
         // Each key maps to a vector of the same length as region_len, initially None.
         let mut group_ids = Vec::new();
-        for &(_, _, _, group_id, _) in per_site_vec {
+        for &(_, _, _, group_id, _) in per_site_diversity_vec {
             if !group_ids.contains(&group_id) {
                 group_ids.push(group_id);
             }
@@ -1192,9 +1192,9 @@ pub fn process_config_entries(
             records_map.insert(format!("filtered_theta_group_{}", grp), vec![None; region_len]);
         }
 
-        // Fill in data from per_site_vec
+        // Fill in data from per_site_diversity_vec
         let region = ZeroBasedHalfOpen { start: csv_row.region_start as usize, end: csv_row.region_end as usize };
-        for &(pos_1based, pi_val, theta_val, group_id, is_filtered) in per_site_vec {
+        for &(pos_1based, pi_val, theta_val, group_id, is_filtered) in per_site_diversity_vec {
             if let Some(rel_pos) = region.relative_position_1based_inclusive(pos_1based) {
                 let idx_0based = rel_pos - 1;
                 let key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
@@ -1221,9 +1221,9 @@ pub fn process_config_entries(
             }
         }
 
-        // We'll find all distinct group_ids in per_site_vec. Then we produce separate FASTA blocks for each group.
+        // We'll find all distinct group_ids in per_site_diversity_vec. Then we produce separate FASTA blocks for each group.
         let mut group_ids_found = HashSet::new();
-        for &(_, _, _, grp, _) in per_site_vec {
+        for &(_, _, _, grp, _) in per_site_diversity_vec {
             group_ids_found.insert(grp);
         }
 
@@ -1289,7 +1289,7 @@ pub fn process_config_entries(
     fasta_writer.flush()?;
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
-    println!("Wrote FASTA-style per-site data to per_site_output.falsta");
+    println!("Wrote FASTA-style per-site data to per_site_diversity_output.falsta");
     println!(
         "Processing complete. Check the output file: {:?}",
         output_file
@@ -1312,9 +1312,9 @@ pub fn process_config_entries(
     std::fs::copy(&temp_csv, output_file)?;
 
     // Copy FASTA file
-    let temp_fasta = temp_dir_path.join("per_site_output.falsta");
+    let temp_fasta = temp_dir_path.join("per_site_diversity_output.falsta");
     if temp_fasta.exists() {
-        std::fs::copy(&temp_fasta, std::path::Path::new("per_site_output.falsta"))?;
+        std::fs::copy(&temp_fasta, std::path::Path::new("per_site_diversity_output.falsta"))?;
     }
     
     // Copy PHYLIP files
@@ -2048,26 +2048,26 @@ fn process_single_config_entry(
 
     // Collect per-site diversity records
     log(LogLevel::Info, "Collecting per-site diversity statistics");
-    let mut per_site_records = Vec::new();
+    let mut per_site_diversity_records = Vec::new();
     for sd in site_divs_0_u {
-        per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 0, false));
+        per_site_diversity_records.push((sd.position, sd.pi, sd.watterson_theta, 0, false));
     }
     for sd in site_divs_1_u {
-        per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 1, false));
+        per_site_diversity_records.push((sd.position, sd.pi, sd.watterson_theta, 1, false));
     }
     for sd in site_divs_0_f {
-        per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 0, true));
+        per_site_diversity_records.push((sd.position, sd.pi, sd.watterson_theta, 0, true));
     }
     for sd in site_divs_1_f {
-        per_site_records.push((sd.position, sd.pi, sd.watterson_theta, 1, true));
+        per_site_diversity_records.push((sd.position, sd.pi, sd.watterson_theta, 1, true));
     }
     
     log(LogLevel::Info, &format!(
         "Collected {} per-site diversity records for {}",
-        per_site_records.len(), region_desc
+        per_site_diversity_records.len(), region_desc
     ));
 
-    Ok(Some((row_data, per_site_records)))
+    Ok(Some((row_data, per_site_diversity_records)))
 }
 
 // Function to process a VCF file
