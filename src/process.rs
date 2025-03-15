@@ -59,56 +59,67 @@ pub fn create_temp_dir() -> Result<TempDir, VcfError> {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    // Folder containing VCF files
+    /// Folder containing VCF files
     #[arg(short, long = "vcf_folder")]
     pub vcf_folder: String,
 
-    // Chromosome to process
+    /// Chromosome to process
     #[arg(short, long = "chr")]
     pub chr: Option<String>,
 
-    // Region to process (start-end)
+    /// Region to process (start-end)
     #[arg(short, long = "region")]
     pub region: Option<String>,
 
-    // Configuration file
+    /// Configuration file
     #[arg(long = "config_file")]
     pub config_file: Option<String>,
 
-    // Output file
+    /// Output file
     #[arg(short, long = "output_file")]
     pub output_file: Option<String>,
 
-    // Minimum genotype quality
+    /// Minimum genotype quality
     #[arg(long = "min_gq", default_value = "30")]
     pub min_gq: u16,
 
-    // Mask file (regions to exclude)
+    /// Mask file (regions to exclude)
     #[arg(long = "mask_file")]
     pub mask_file: Option<String>,
 
-    // Allow file (regions to include)
+    /// Allow file (regions to include)
     #[arg(long = "allow_file")]
     pub allow_file: Option<String>,
 
+    /// Reference genome .fa file
     #[arg(long = "reference")]
     pub reference_path: String,
 
-    // GTF or GFF
+    /// GTF or GFF
     #[arg(long = "gtf")]
     pub gtf_path: String,
 
-    // Enable PCA analysis on all haplotypes
+    /// Enable PCA analysis on all haplotypes
     #[arg(long = "pca", help = "Perform PCA analysis on all haplotypes")]
     pub enable_pca: bool,
     
-    // Number of principal components to compute
+    /// Number of principal components to compute
     #[arg(long = "pca_components", default_value = "10", help = "Number of principal components to compute")]
     pub pca_components: usize,
     
-    // Output file for PCA results
+    /// Output file for PCA results
     #[arg(long = "pca_output", default_value = "pca_results.tsv", help = "Output file for PCA results")]
     pub pca_output: String,
+
+    /// Enable FST calculation
+    #[arg(long = "fst", help = "Calculate FST")]
+    pub enable_fst: bool,
+
+    /// Path to CSV file defining population groups for FST calculation
+    #[arg(long = "fst_populations", help = "Path to CSV file defining population groups for FST calculation")]
+    pub fst_populations: Option<String>,
+
+    // Combine enable_fst and fst_populations args?
 }
 
 /// ZeroBasedHalfOpen represents a half-open interval [start..end).
@@ -1686,7 +1697,7 @@ fn process_single_config_entry(
     chr: &str,
     args: &Args,
     pca_storage: Option<&(Arc<Mutex<HashMap<String, Vec<Variant>>>>, Arc<Mutex<Vec<String>>>)>,
-) -> Result<Option<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)>, VcfError> {
+) -> Result<Option<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, VcfError> {
     set_stage(ProcessingStage::ConfigEntry);
     let region_desc = format!("{}:{}-{}", 
         entry.seqname, entry.interval.start, entry.interval.end);
@@ -1768,6 +1779,60 @@ fn process_single_config_entry(
     };
     
     update_step_progress(1, "Analyzing variant statistics");
+
+    // Calculate FST if enabled
+    let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
+        let spinner = create_spinner("Calculating FST statistics");
+    
+        // Define the region as a QueryRegion (zero-based inclusive)
+        let region = QueryRegion {
+            start: entry.interval.start as i64,
+            end: entry.interval.end as i64,
+        };
+        
+        // FST between haplotype groups (0 vs 1)
+        log(LogLevel::Info, "Calculating FST between haplotype groups (0 vs 1)");
+        let haplotype_fst = calculate_fst_between_groups(
+            &filtered_variants,
+            &sample_names,
+            &entry.samples_filtered,
+            region
+        );
+        
+        // FST between population groups if CSV is provided
+        let population_fst = if let Some(pop_csv) = &args.fst_populations {
+            log(LogLevel::Info, &format!("Calculating FST between population groups from {}", pop_csv));
+            match calculate_fst_from_csv(
+                &filtered_variants,
+                &sample_names,
+                Path::new(pop_csv),
+                region
+            ) {
+                Ok(results) => Some(results),
+                Err(e) => {
+                    log(LogLevel::Error, &format!("Error calculating population FST: {}", e));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
+        spinner.finish_and_clear();
+        log(LogLevel::Info, "FST calculations complete");
+        
+        // Write FST results to output file if specified
+        if let Some(fst_output) = &args.fst_output {
+            let output_path = Path::new(fst_output);
+            if let Err(e) = write_fst_results(&haplotype_fst, population_fst.as_ref(), output_path) {
+                log(LogLevel::Error, &format!("Error writing FST results: {}", e));
+            }
+        }
+        
+        (Some(haplotype_fst), population_fst)
+    } else {
+        (None, None)
+    };
     
     // Store filtered variants for PCA if enabled and the pca_storage is provided
     if let Some((variants_storage, sample_names_storage)) = &pca_storage {
@@ -2061,13 +2126,26 @@ fn process_single_config_entry(
     for sd in site_divs_1_f {
         per_site_diversity_records.push((sd.position, sd.pi, sd.watterson_theta, 1, true));
     }
+
+    // Collect per-site FST records
+    let mut per_site_fst_records = Vec::new();
+    if let Some(fst_results) = &fst_results_filtered {
+        for site in &fst_results.site_fst {
+            let pair_fst = site.pairwise_fst.get("0_vs_1").unwrap_or(&0.0);
+            per_site_fst_records.push((site.position, site.overall_fst, *pair_fst));
+        }
+    }
     
     log(LogLevel::Info, &format!(
         "Collected {} per-site diversity records for {}",
         per_site_diversity_records.len(), region_desc
     ));
 
-    Ok(Some((row_data, per_site_diversity_records)))
+    Ok(Some((
+        row_data,
+        per_site_diversity_records,
+        per_site_fst_records,
+    )))
 }
 
 // Function to process a VCF file
