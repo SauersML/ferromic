@@ -1,6 +1,6 @@
 use crate::stats::{
     calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site_diversity,
-    calculate_pi, calculate_watterson_theta, SiteDiversity,
+    calculate_pi, calculate_watterson_theta, calculate_fst_between_groups, calculate_fst_from_csv, SiteDiversity,
 };
 
 use crate::parse::{
