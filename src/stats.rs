@@ -405,7 +405,7 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
 
 
 // Calculate per-site diversity metrics (π and Watterson's θ) across a genomic region
-pub fn calculate_per_site(
+pub fn calculate_per_site_diversity(
     variants: &[Variant], 
     haplotypes_in_group: &[(usize, HaplotypeSide)], 
     region: QueryRegion, // Inclusive range [start..end] in 0-based coordinates
