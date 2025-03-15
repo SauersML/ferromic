@@ -1677,8 +1677,14 @@ fn process_chromosome_entries(
             log(LogLevel::Warning, "PCA is enabled but pca_storage is None.");
         }
     }
-
-    Ok(rows)
+    // Convert 3-element tuples (CsvRowData, site_data, fst_data) to 2-element tuples (CsvRowData, site_data)
+    // to match the function's expected return type - we keep the CSV and diversity data but discard FST data
+    // Fix later
+    let mut result_rows = Vec::with_capacity(rows.len());
+    for (csv_data, site_data, _) in rows {
+        result_rows.push((csv_data, site_data));
+    }
+    Ok(result_rows)
 }
 
 /// Processes a single config entry's region and sample sets for a given chromosome.
@@ -2123,7 +2129,7 @@ fn process_single_config_entry(
     let mut per_site_fst_records = Vec::new();
     if let Some(fst_results) = &fst_results_filtered {
         // Access site FST data directly from the vector
-        for site in &fst_results {
+        for site in &fst_results.site_fst {
             let pair_fst = site.pairwise_fst.get("0_vs_1").unwrap_or(&0.0);
             per_site_fst_records.push((site.position, site.overall_fst, *pair_fst));
         }
