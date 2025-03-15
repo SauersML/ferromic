@@ -1012,7 +1012,7 @@ pub fn process_config_entries(
 
     // We will process each chromosome in parallel (for speed),
     // then flatten the per-chromosome results in the order we get them.
-    let all_pairs: Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)> = grouped
+    let all_pairs: Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)> = grouped
         .into_par_iter()
         .flat_map(|(chr, chr_entries)| {
             match process_chromosome_entries(
@@ -1040,7 +1040,7 @@ pub fn process_config_entries(
 
     let all_results: Vec<CsvRowData> = all_pairs
         .iter()
-        .map(|(csv_row, _sites)| csv_row.clone())
+        .map(|(csv_row, _sites, _fst)| csv_row.clone())
         .collect();
 
     // Create a count of rows by chromosome
@@ -1391,7 +1391,7 @@ fasta_writer.flush()?;
                 })
                 .collect::<Vec<_>>();
                 
-            for (csv_row, _, fst_data) in entries_with_pop_fst {
+            for &(csv_row, _, fst_data) in entries_with_pop_fst {
                 // For each population pair, create a record
                 let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
                 
@@ -1879,7 +1879,7 @@ fn process_chromosome_entries(
             log(LogLevel::Warning, "PCA is enabled but pca_storage is None.");
         }
     }
-    // Keep all data including FST data in the output
+
     let mut result_rows = Vec::with_capacity(rows.len());
     for (csv_data, site_data, fst_data) in rows {
         result_rows.push((csv_data, site_data, fst_data));
