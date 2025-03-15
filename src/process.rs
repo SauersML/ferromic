@@ -1068,7 +1068,12 @@ pub fn process_config_entries(
         }
     }
 
+    // Now write per-site statistics in wide format to multiple FASTA-like files:
+    // 1. Diversity statistics (pi, theta)
+    // 2. FST statistics between groups 0 and 1 (0_vs_1)
+    // 3. FST statistics between populations from CSV file
     // Now write per-site statistics in wide format to a single CSV file.
+    // For diversity:
     // Each row is a relative_position (1-based), and each set of columns corresponds to
     // (unfiltered_pi_, unfiltered_theta_, filtered_pi_, filtered_theta_) for a region+group.
 
@@ -1297,14 +1302,206 @@ pub fn process_config_entries(
         }
     }
 
-    fasta_writer.flush()?;
+fasta_writer.flush()?;
+
+    // Create a separate FASTA-style file for FST values
+    let temp_fst_fasta_path = {
+        let locked_opt = TEMP_DIR.lock();
+        if let Some(dir) = locked_opt.as_ref() {
+            dir.path().join("per_site_fst_output.falsta")
+        } else {
+            return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
+        }
+    };
+    let fst_fasta_file = File::create(&temp_fst_fasta_path)?;
+    let mut fst_fasta_writer = BufWriter::new(fst_fasta_file);
+    
+    // Process FST data for each region
+    for (csv_row, _, fst_data) in &all_pairs {
+        // Process FST data between groups 0 and 1
+        if !fst_data.is_empty() {
+            // Group FST data by region to write in FASTA format
+            let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+            
+            // Write header for 0_vs_1 FST
+            let header = format!(">fst_0vs1_chr_{}_start_{}_end_{}", 
+                csv_row.seqname, csv_row.region_start, csv_row.region_end);
+            writeln!(fst_fasta_writer, "{}", header)?;
+            
+            // Format FST values as comma-separated list
+            let mut values = Vec::with_capacity(fst_data.len());
+            for &(pos, overall_fst, pairwise_fst) in fst_data {
+                if pos >= csv_row.region_start && pos <= csv_row.region_end {
+                    // Add to the right position (1-based offset)
+                    let rel_pos = pos - csv_row.region_start;
+                    while values.len() < rel_pos as usize {
+                        values.push("NA".to_string());
+                    }
+                    
+                    // Use overall FST as the value for each position
+                    if overall_fst == 0.0 {
+                        values.push("0".to_string());
+                    } else {
+                        values.push(format!("{:.6}", overall_fst));
+                    }
+                }
+            }
+            
+            writeln!(fst_fasta_writer, "{}", values.join(","))?;
+            
+            // Write header for pairwise FST
+            let header = format!(">fst_0vs1_pairwise_chr_{}_start_{}_end_{}", 
+                csv_row.seqname, csv_row.region_start, csv_row.region_end);
+            writeln!(fst_fasta_writer, "{}", header)?;
+            
+            // Format pairwise FST values
+            let mut pairwise_values = Vec::with_capacity(fst_data.len());
+            for &(pos, _, pairwise_fst) in fst_data {
+                if pos >= csv_row.region_start && pos <= csv_row.region_end {
+                    // Add to the right position (1-based offset)
+                    let rel_pos = pos - csv_row.region_start;
+                    while pairwise_values.len() < rel_pos as usize {
+                        pairwise_values.push("NA".to_string());
+                    }
+                    
+                    if pairwise_fst == 0.0 {
+                        pairwise_values.push("0".to_string());
+                    } else {
+                        pairwise_values.push(format!("{:.6}", pairwise_fst));
+                    }
+                }
+            }
+            
+            writeln!(fst_fasta_writer, "{}", pairwise_values.join(","))?;
+        }
+    }
+    
+    // Write population FST data if available
+    if args.enable_fst && args.fst_populations.is_some() {
+        // For each chromosome's data, write population FST records
+        for (chr_name, entries) in &grouped {
+            let entries_with_pop_fst = entries.iter()
+                .filter_map(|e| {
+                    // Find matching row in all_pairs
+                    all_pairs.iter().find(|(row_data, _, _)| {
+                        row_data.seqname == e.seqname && 
+                        row_data.region_start == e.interval.start as i64 && 
+                        row_data.region_end == e.interval.end as i64
+                    })
+                })
+                .collect::<Vec<_>>();
+                
+            for (csv_row, _, fst_data) in entries_with_pop_fst {
+                // For each population pair, create a record
+                let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+                
+                // Use processed variants to extract population FST data
+                if let Ok(vcf_file) = find_vcf_file(vcf_folder, chr_name) {
+                    if let Ok((unfiltered, filtered, sample_names, _, _, _)) = 
+                        process_vcf(
+                            &vcf_file,
+                            Path::new(&args.reference_path),
+                            chr_name.clone(),
+                            region,
+                            min_gq,
+                            mask.clone(),
+                            allow.clone(),
+                            Arc::new(Mutex::new(Vec::new())),
+                            Arc::new(Mutex::new(Vec::new())),
+                            Arc::new(Mutex::new(HashMap::new())),
+                            Arc::new(Mutex::new(HashMap::new())),
+                        ) 
+                    {
+                        if let Some(pop_csv) = &args.fst_populations {
+                            // Define the region
+                            let query_region = QueryRegion {
+                                start: csv_row.region_start,
+                                end: csv_row.region_end,
+                            };
+                            
+                            // Calculate population FST
+                            if let Ok(pop_fst_results) = calculate_fst_from_csv(
+                                &filtered,
+                                &sample_names,
+                                Path::new(pop_csv),
+                                query_region
+                            ) {
+                                // Write population overall FST
+                                let header = format!(">fst_pop_overall_chr_{}_start_{}_end_{}", 
+                                    csv_row.seqname, csv_row.region_start, csv_row.region_end);
+                                writeln!(fst_fasta_writer, "{}", header)?;
+                                
+                                let mut pop_overall_values = Vec::with_capacity(pop_fst_results.site_fst.len());
+                                for site in &pop_fst_results.site_fst {
+                                    if site.position >= csv_row.region_start && site.position <= csv_row.region_end {
+                                        let rel_pos = site.position - csv_row.region_start;
+                                        while pop_overall_values.len() < rel_pos as usize {
+                                            pop_overall_values.push("NA".to_string());
+                                        }
+                                        
+                                        if site.overall_fst == 0.0 {
+                                            pop_overall_values.push("0".to_string());
+                                        } else {
+                                            pop_overall_values.push(format!("{:.6}", site.overall_fst));
+                                        }
+                                    }
+                                }
+                                
+                                writeln!(fst_fasta_writer, "{}", pop_overall_values.join(","))?;
+                                
+                                // For each population pair, write a record
+                                if !pop_fst_results.site_fst.is_empty() {
+                                    // Find all population pairs
+                                    let all_pairs: HashSet<_> = pop_fst_results.site_fst.iter()
+                                        .flat_map(|site| site.pairwise_fst.keys().cloned())
+                                        .collect();
+                                    
+                                    for pair in all_pairs {
+                                        let header = format!(">fst_pop_pair_{}_chr_{}_start_{}_end_{}", 
+                                            pair, csv_row.seqname, csv_row.region_start, csv_row.region_end);
+                                        writeln!(fst_fasta_writer, "{}", header)?;
+                                        
+                                        let mut pair_values = Vec::new();
+                                        for site in &pop_fst_results.site_fst {
+                                            if site.position >= csv_row.region_start && site.position <= csv_row.region_end {
+                                                let rel_pos = site.position - csv_row.region_start;
+                                                while pair_values.len() < rel_pos as usize {
+                                                    pair_values.push("NA".to_string());
+                                                }
+                                                
+                                                if let Some(&fst) = site.pairwise_fst.get(&pair) {
+                                                    if fst == 0.0 {
+                                                        pair_values.push("0".to_string());
+                                                    } else {
+                                                        pair_values.push(format!("{:.6}", fst));
+                                                    }
+                                                } else {
+                                                    pair_values.push("NA".to_string());
+                                                }
+                                            }
+                                        }
+                                        
+                                        writeln!(fst_fasta_writer, "{}", pair_values.join(","))?;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    fst_fasta_writer.flush()?;
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
-    println!("Wrote FASTA-style per-site data to per_site_diversity_output.falsta");
+    println!("Wrote FASTA-style per-site diversity data to per_site_diversity_output.falsta");
+    println!("Wrote FASTA-style per-site FST data to per_site_fst_output.falsta");
     println!(
         "Processing complete. Check the output file: {:?}",
         output_file
     );
+    
     // Copy files from temporary directory to final destinations
     let temp_dir_path = {
         let locked_opt = TEMP_DIR.lock();
@@ -1322,10 +1519,15 @@ pub fn process_config_entries(
     }
     std::fs::copy(&temp_csv, output_file)?;
 
-    // Copy FASTA file
+    // Copy FASTA files
     let temp_fasta = temp_dir_path.join("per_site_diversity_output.falsta");
     if temp_fasta.exists() {
         std::fs::copy(&temp_fasta, std::path::Path::new("per_site_diversity_output.falsta"))?;
+    }
+    
+    let temp_fst_fasta = temp_dir_path.join("per_site_fst_output.falsta");
+    if temp_fst_fasta.exists() {
+        std::fs::copy(&temp_fst_fasta, std::path::Path::new("per_site_fst_output.falsta"))?;
     }
     
     // Copy PHYLIP files
@@ -1454,7 +1656,7 @@ fn process_chromosome_entries(
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
     pca_storage: Option<(Arc<Mutex<HashMap<String, Vec<Variant>>>>, Arc<Mutex<Vec<String>>>)>,
-) -> Result<Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>)>, VcfError> {
+) -> Result<Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, VcfError> {
     set_stage(ProcessingStage::ConfigEntry);
     log(LogLevel::Info, &format!("Processing chromosome: {}", chr));
     
@@ -1677,12 +1879,10 @@ fn process_chromosome_entries(
             log(LogLevel::Warning, "PCA is enabled but pca_storage is None.");
         }
     }
-    // Convert 3-element tuples (CsvRowData, site_data, fst_data) to 2-element tuples (CsvRowData, site_data)
-    // to match the function's expected return type - we keep the CSV and diversity data but discard FST data
-    // Fix later
+    // Keep all data including FST data in the output
     let mut result_rows = Vec::with_capacity(rows.len());
-    for (csv_data, site_data, _) in rows {
-        result_rows.push((csv_data, site_data));
+    for (csv_data, site_data, fst_data) in rows {
+        result_rows.push((csv_data, site_data, fst_data));
     }
     Ok(result_rows)
 }
