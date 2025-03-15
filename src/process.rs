@@ -1013,10 +1013,10 @@ pub fn process_config_entries(
     // We will process each chromosome in parallel (for speed),
     // then flatten the per-chromosome results in the order we get them.
     let all_pairs: Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)> = grouped
-        .into_par_iter()
+        .par_iter()
         .flat_map(|(chr, chr_entries)| {
             match process_chromosome_entries(
-                &chr,
+                chr,
                 chr_entries,
                 vcf_folder,
                 min_gq,
@@ -1302,7 +1302,7 @@ pub fn process_config_entries(
         }
     }
 
-fasta_writer.flush()?;
+    fasta_writer.flush()?;
 
     // Create a separate FASTA-style file for FST values
     let temp_fst_fasta_path = {
@@ -1319,10 +1319,7 @@ fasta_writer.flush()?;
     // Process FST data for each region
     for (csv_row, _, fst_data) in &all_pairs {
         // Process FST data between groups 0 and 1
-        if !fst_data.is_empty() {
-            // Group FST data by region to write in FASTA format
-            let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
-            
+        if !fst_data.is_empty() {            
             // Write header for 0_vs_1 FST
             let header = format!(">fst_0vs1_chr_{}_start_{}_end_{}", 
                 csv_row.seqname, csv_row.region_start, csv_row.region_end);
@@ -1330,7 +1327,7 @@ fasta_writer.flush()?;
             
             // Format FST values as comma-separated list
             let mut values = Vec::with_capacity(fst_data.len());
-            for &(pos, overall_fst, pairwise_fst) in fst_data {
+            for &(pos, overall_fst, _) in fst_data {
                 if pos >= csv_row.region_start && pos <= csv_row.region_end {
                     // Add to the right position (1-based offset)
                     let rel_pos = pos - csv_row.region_start;
@@ -1376,121 +1373,6 @@ fasta_writer.flush()?;
         }
     }
     
-    // Write population FST data if available
-    if args.enable_fst && args.fst_populations.is_some() {
-        // For each chromosome's data, write population FST records
-        for (chr_name, entries) in &grouped {
-            let entries_with_pop_fst = entries.iter()
-                .filter_map(|e| {
-                    // Find matching row in all_pairs
-                    all_pairs.iter().find(|(row_data, _, _)| {
-                        row_data.seqname == e.seqname && 
-                        row_data.region_start == e.interval.start as i64 && 
-                        row_data.region_end == e.interval.end as i64
-                    })
-                })
-                .collect::<Vec<_>>();
-                
-            for &(csv_row, _, fst_data) in entries_with_pop_fst {
-                // For each population pair, create a record
-                let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
-                
-                // Use processed variants to extract population FST data
-                if let Ok(vcf_file) = find_vcf_file(vcf_folder, chr_name) {
-                    if let Ok((unfiltered, filtered, sample_names, _, _, _)) = 
-                        process_vcf(
-                            &vcf_file,
-                            Path::new(&args.reference_path),
-                            chr_name.clone(),
-                            region,
-                            min_gq,
-                            mask.clone(),
-                            allow.clone(),
-                            Arc::new(Mutex::new(Vec::new())),
-                            Arc::new(Mutex::new(Vec::new())),
-                            Arc::new(Mutex::new(HashMap::new())),
-                            Arc::new(Mutex::new(HashMap::new())),
-                        ) 
-                    {
-                        if let Some(pop_csv) = &args.fst_populations {
-                            // Define the region
-                            let query_region = QueryRegion {
-                                start: csv_row.region_start,
-                                end: csv_row.region_end,
-                            };
-                            
-                            // Calculate population FST
-                            if let Ok(pop_fst_results) = calculate_fst_from_csv(
-                                &filtered,
-                                &sample_names,
-                                Path::new(pop_csv),
-                                query_region
-                            ) {
-                                // Write population overall FST
-                                let header = format!(">fst_pop_overall_chr_{}_start_{}_end_{}", 
-                                    csv_row.seqname, csv_row.region_start, csv_row.region_end);
-                                writeln!(fst_fasta_writer, "{}", header)?;
-                                
-                                let mut pop_overall_values = Vec::with_capacity(pop_fst_results.site_fst.len());
-                                for site in &pop_fst_results.site_fst {
-                                    if site.position >= csv_row.region_start && site.position <= csv_row.region_end {
-                                        let rel_pos = site.position - csv_row.region_start;
-                                        while pop_overall_values.len() < rel_pos as usize {
-                                            pop_overall_values.push("NA".to_string());
-                                        }
-                                        
-                                        if site.overall_fst == 0.0 {
-                                            pop_overall_values.push("0".to_string());
-                                        } else {
-                                            pop_overall_values.push(format!("{:.6}", site.overall_fst));
-                                        }
-                                    }
-                                }
-                                
-                                writeln!(fst_fasta_writer, "{}", pop_overall_values.join(","))?;
-                                
-                                // For each population pair, write a record
-                                if !pop_fst_results.site_fst.is_empty() {
-                                    // Find all population pairs
-                                    let all_pairs: HashSet<_> = pop_fst_results.site_fst.iter()
-                                        .flat_map(|site| site.pairwise_fst.keys().cloned())
-                                        .collect();
-                                    
-                                    for pair in all_pairs {
-                                        let header = format!(">fst_pop_pair_{}_chr_{}_start_{}_end_{}", 
-                                            pair, csv_row.seqname, csv_row.region_start, csv_row.region_end);
-                                        writeln!(fst_fasta_writer, "{}", header)?;
-                                        
-                                        let mut pair_values = Vec::new();
-                                        for site in &pop_fst_results.site_fst {
-                                            if site.position >= csv_row.region_start && site.position <= csv_row.region_end {
-                                                let rel_pos = site.position - csv_row.region_start;
-                                                while pair_values.len() < rel_pos as usize {
-                                                    pair_values.push("NA".to_string());
-                                                }
-                                                
-                                                if let Some(&fst) = site.pairwise_fst.get(&pair) {
-                                                    if fst == 0.0 {
-                                                        pair_values.push("0".to_string());
-                                                    } else {
-                                                        pair_values.push(format!("{:.6}", fst));
-                                                    }
-                                                } else {
-                                                    pair_values.push("NA".to_string());
-                                                }
-                                            }
-                                        }
-                                        
-                                        writeln!(fst_fasta_writer, "{}", pair_values.join(","))?;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
     
     fst_fasta_writer.flush()?;
 
@@ -1649,7 +1531,7 @@ fn group_config_entries_by_chr(
 /// each config entry for that chromosome. Returns a Vec of row data for each entry.
 fn process_chromosome_entries(
     chr: &str,
-    entries: Vec<ConfigEntry>,
+    entries: &[ConfigEntry],
     vcf_folder: &str,
     min_gq: u16,
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
