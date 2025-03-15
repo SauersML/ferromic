@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, BufRead};
 use std::path::Path;
 
 // Define a struct to hold diversity metrics for each genomic site
