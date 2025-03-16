@@ -76,7 +76,7 @@ pub fn calculate_fst_between_groups(
 ) -> FSTResults {
     // Create a more descriptive progress spinner
     let spinner = create_spinner(&format!(
-        "Calculating FST between haplotype groups for region {}:{}-{}",
+        "Calculating FST between haplotype groups for region {}-{} of length {}",
         region.start, region.end, region.len()
     ));
     
