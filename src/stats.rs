@@ -708,9 +708,18 @@ fn calculate_variance_components(
     };
 
     let a_num = s_squared
-        - (global_p * (1.0 - global_p) - ((r - 1.0) * s_squared / r)) / n_bar;
-    let a = if (n_bar - 1.0) > 0.0 {
-        (n_bar / (n_bar - 1.0)) * a_num
+        - (
+            global_p * (1.0 - global_p)
+            - ((r - 1.0) / r) * s_squared
+          )
+          / (n_bar - 1.0);
+    
+    let denom_factor = 1.0 - (c2 / r);
+    
+    // If either (n_bar - 1.0) <= 0 or denom_factor <= 0, set a = 0.0 as a fallback
+    // (this avoids negative or undefined denominators)
+    let a = if (n_bar - 1.0) > 0.0 && denom_factor > 0.0 {
+        a_num / denom_factor
     } else {
         0.0
     };
