@@ -183,9 +183,15 @@ pub fn calculate_fst_between_groups(
                 pairwise_variance_components: site_result.4,
             });
         } else {
-            // No variant at this position (monomorphic site)
+            // No variant at this position (monomorphic site): we store FST as NaN
+            // "Notice that if the same allele is fixed in all samples, then (1) provides θ = a⁄a,
+            // so that the estimate is undefined. We feel that this is an appropriate outcome since
+            // there is no way of knowing from presently observed homozygosity whether the different
+            // populations have just become homozygous or have been homozygous for some time that may
+            // have extended back to the founding population..."
+
             let mut empty_pairwise = HashMap::new();
-            empty_pairwise.insert("0_vs_1".to_string(), 0.0);
+            empty_pairwise.insert("0_vs_1".to_string(), f64::NAN);
             
             let mut empty_sizes = HashMap::new();
             empty_sizes.insert("0".to_string(), 0);
@@ -193,10 +199,11 @@ pub fn calculate_fst_between_groups(
             
             site_fst_values.push(SiteFST {
                 position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: 0.0,
+                overall_fst: f64::NAN,
                 pairwise_fst: empty_pairwise,
                 variance_components: (0.0, 0.0),
                 population_sizes: empty_sizes,
+                pairwise_variance_components: HashMap::new(),
             });
         }
     }
