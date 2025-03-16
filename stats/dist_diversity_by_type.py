@@ -19,8 +19,8 @@ logging.basicConfig(
 logger = logging.getLogger('pi_flanking_analysis')
 
 # Constants
-MIN_LENGTH = 300_000  # Minimum sequence length (300K bp)
-FLANK_SIZE = 100_000  # Size of flanking regions (100K bp)
+MIN_LENGTH = 150_000  # Minimum sequence length (300K bp)
+FLANK_SIZE = 50_000  # Size of flanking regions (100K bp)
 
 # File paths
 PI_DATA_FILE = 'per_site_output.falsta'
