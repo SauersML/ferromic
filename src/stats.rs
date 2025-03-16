@@ -583,7 +583,10 @@ fn calculate_fst_at_site_general(
     }
     let threshold = 1e-12;
     if max_diff < threshold {
-        return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
+        // If subpop frequencies are (practically) identical,
+        // this site does not provide a defined Fst. Mark as NaN:
+        let mut empty_map = HashMap::new();
+        return (f64::NAN, empty_map, (0.0, 0.0), pop_sizes, HashMap::new());
     }
 
     // 4. Compute overall (a,b), overall_fst
