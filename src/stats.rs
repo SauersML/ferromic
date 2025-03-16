@@ -24,20 +24,24 @@ pub struct SiteDiversity {
 pub struct SiteFST {
     /// Position (1-based coordinate)
     pub position: i64,
-    
+
     /// Overall FST value across all populations
     pub overall_fst: f64,
-    
+
     /// Pairwise FST values between populations
     /// Keys are (pop_id1, pop_id2) where pop_id1 < pop_id2
     pub pairwise_fst: HashMap<String, f64>,
-    
+
     /// Variance components (a, b) from Weir & Cockerham
     pub variance_components: (f64, f64),
-    
+
     /// Number of samples in each population group
     pub population_sizes: HashMap<String, usize>,
+
+    /// Pairwise variance components for each subpopulation pair (a_xy, b_xy)
+    pub pairwise_variance_components: HashMap<String, (f64, f64)>,
 }
+
 
 /// FST results for a genomic region
 #[derive(Debug, Clone)]
@@ -47,6 +51,10 @@ pub struct FSTResults {
     
     /// Pairwise FST values
     pub pairwise_fst: HashMap<String, f64>,
+
+    /// Pairwise variance components for each subpopulation pair
+    /// Keys match those in `pairwise_fst`, storing (a_xy, b_xy) for that pair at this site
+    pub pairwise_variance_components: HashMap<String, (f64, f64)>,
     
     /// Per-site FST values
     pub site_fst: Vec<SiteFST>,
@@ -195,6 +203,9 @@ pub fn calculate_fst_from_csv(
     csv_path: &Path,
     region: QueryRegion,
 ) -> Result<FSTResults, VcfError> {
+    // The code that calls calculate_fst_at_site_by_population now expects
+    // a 5-tuple from that function. We handle the new pairwise (a,b) map when building SiteFST.
+
     let spinner = create_spinner(&format!(
         "Calculating FST between population groups for region {}:{}-{}",
         region.start, region.end, region.len()
@@ -253,6 +264,7 @@ pub fn calculate_fst_from_csv(
                 pairwise_fst: HashMap::new(),
                 variance_components: (0.0, 0.0),
                 population_sizes: HashMap::new(),
+                pairwise_variance_components: HashMap::new(),
             });
         }
     }
@@ -437,14 +449,38 @@ fn map_samples_to_populations(
 fn calculate_fst_at_site_by_group(
     variant: &Variant,
     haplotype_to_group: &HashMap<(usize, HaplotypeSide), String>
-) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>) {
-    // We do a similar approach as with population, but now the "pop_id" is the haplotype group ID.
-    let mut group_counts = HashMap::new();
-    for (&(sample_idx, side), group_id) in haplotype_to_group {
+) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
+    // We delegate to the new general function with an is_population flag = false
+    // Then we parse out the returned data
+    calculate_fst_at_site_general(variant, haplotype_to_group)
+}
+
+/// Calculate FST at a single site using population assignments
+///
+/// Similar to calculate_fst_at_site_by_group but handles multiple population groups
+fn calculate_fst_at_site_by_population(
+    variant: &Variant,
+    sample_to_pop: &HashMap<(usize, HaplotypeSide), String>
+) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
+    // We delegate to the new general function with an is_population flag = true
+    // Then we parse out the returned data
+    calculate_fst_at_site_general(variant, sample_to_pop)
+}
+
+fn calculate_fst_at_site_general(
+    variant: &Variant,
+    map_subpop: &HashMap<(usize, HaplotypeSide), String>
+) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
+    // This single function computes the at-site FST for an arbitrary subpop mapping
+    // Then returns overall_fst, pairwise_fst, (a,b), population_sizes, plus the pairwise (a_xy,b_xy).
+
+    // 1. Count alt vs ref per subpopulation
+    let mut allele_counts = HashMap::new();
+    for (&(sample_idx, side), pop_id) in map_subpop {
         if let Some(genotypes) = variant.genotypes.get(sample_idx) {
             if let Some(genotypes_vec) = genotypes {
                 if let Some(&allele_code) = genotypes_vec.get(side as usize) {
-                    let entry = group_counts.entry(group_id.clone()).or_insert((0_usize, 0_usize));
+                    let entry = allele_counts.entry(pop_id.clone()).or_insert((0_usize, 0_usize));
                     entry.0 += 1;
                     if allele_code != 0 {
                         entry.1 += 1;
@@ -454,22 +490,21 @@ fn calculate_fst_at_site_by_group(
         }
     }
 
-    // Build stats
+    // 2. Build pop_stats (sample_size, freq)
     let mut pop_stats = HashMap::new();
     let mut pop_sizes = HashMap::new();
-    for (group_id, (size, alt_count)) in group_counts {
-        if size > 0 {
-            let freq = alt_count as f64 / size as f64;
-            pop_stats.insert(group_id.clone(), (size, freq));
-            pop_sizes.insert(group_id, size);
+    for (pop_id, (sz, alt_ct)) in allele_counts {
+        if sz > 0 {
+            let freq = alt_ct as f64 / sz as f64;
+            pop_stats.insert(pop_id.clone(), (sz, freq));
+            pop_sizes.insert(pop_id, sz);
         }
     }
-
     if pop_stats.len() < 2 {
-        return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes);
+        return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
     }
 
-    // Check for global monomorphism
+    // 3. Check global monomorphism
     let mut distinct_freqs = HashSet::new();
     for (_, (sz, fval)) in &pop_stats {
         if *fval > 0.0 && *fval < 1.0 {
@@ -479,136 +514,59 @@ fn calculate_fst_at_site_by_group(
         }
     }
     if distinct_freqs.len() == 1 {
-        // monomorphic across groups
-        return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes);
+        return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
     }
 
-    let total_samples: usize = pop_stats.values().map(|(size, _)| *size).sum();
+    // 4. Compute overall (a,b), overall_fst
+    let total_samples: usize = pop_stats.values().map(|(sz, _)| *sz).sum();
     let mut freq_sum = 0.0;
-    for (_, (sz, fval)) in pop_stats.iter() {
-        freq_sum += (*sz as f64) * fval;
+    for (_, (sz, fv)) in &pop_stats {
+        freq_sum += (*sz as f64) * fv;
     }
-    let weighted_freq = freq_sum / (total_samples as f64);
-
-    let (a, b) = calculate_variance_components(&pop_stats, weighted_freq);
-    let overall_fst = if (a + b) > 0.0 { a / (a + b) } else { 0.0 };
-
-    // For pairwise group FST, we only do "0" vs "1" if both exist.
-    // If "0" and "1" are present, compute a/b from that subset. If not present, store 0.0.
-    let mut pairwise_fst = HashMap::new();
-    if pop_stats.contains_key("0") && pop_stats.contains_key("1") {
-        let mut submap = HashMap::new();
-        submap.insert("0".to_string(), pop_stats["0"]);
-        submap.insert("1".to_string(), pop_stats["1"]);
-
-        let n_sub = (pop_stats["0"].0 + pop_stats["1"].0) as f64;
-        let freq_sub = ((pop_stats["0"].0 as f64) * pop_stats["0"].1 + (pop_stats["1"].0 as f64) * pop_stats["1"].1) / n_sub;
-        let (sub_a, sub_b) = calculate_variance_components(&submap, freq_sub);
-        let sub_fst = if (sub_a + sub_b) > 0.0 { sub_a / (sub_a + sub_b) } else { 0.0 };
-        pairwise_fst.insert("0_vs_1".to_string(), sub_fst);
+    let global_freq = freq_sum / (total_samples as f64);
+    let (a, b) = calculate_variance_components(&pop_stats, global_freq);
+    let overall_fst = if (a + b) > 0.0 {
+        a / (a + b)
     } else {
-        pairwise_fst.insert("0_vs_1".to_string(), 0.0); // Correct?
-    }
+        0.0
+    };
 
-    (overall_fst, pairwise_fst, (a, b), pop_sizes)
-}
-
-/// Calculate FST at a single site using population assignments
-///
-/// Similar to calculate_fst_at_site_by_group but handles multiple population groups
-fn calculate_fst_at_site_by_population(
-    variant: &Variant,
-    sample_to_pop: &HashMap<(usize, HaplotypeSide), String>
-) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>) {
-    // We count each subpopulation's total haplotype sample size and alt count.
-    // Then we skip if fewer than 2 subpopulations or if the site is globally monomorphic.
-    let mut pop_allele_counts = HashMap::new();
-    for (&(sample_idx, side), pop_id) in sample_to_pop {
-        if let Some(genotypes) = variant.genotypes.get(sample_idx) {
-            if let Some(genotypes_vec) = genotypes {
-                if let Some(&allele_code) = genotypes_vec.get(side as usize) {
-                    let entry = pop_allele_counts.entry(pop_id.clone()).or_insert((0_usize, 0_usize));
-                    entry.0 += 1;
-                    // Site is biallelic for alt-code=1
-                    if allele_code != 0 {
-                        entry.1 += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    // Build pop_stats: (sample_size, allele_frequency)
-    let mut pop_stats = HashMap::new();
-    let mut pop_sizes = HashMap::new();
-    for (pop_id, (sample_size, alt_count)) in pop_allele_counts {
-        if sample_size > 0 {
-            let freq = alt_count as f64 / sample_size as f64;
-            pop_stats.insert(pop_id.clone(), (sample_size, freq));
-            pop_sizes.insert(pop_id, sample_size);
-        }
-    }
-
-    // If fewer than 2 subpopulations, we cannot compute FST
-    if pop_stats.len() < 2 {
-        return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes);
-    }
-
-    // Determine if this site is globally monomorphic across all subpops
-    // We can check if all subpops share the same frequency = 0 or 1
-    // If every freq is 0.0 or 1.0 and they do not differ, we skip.
-    let mut distinct_freqs = HashSet::new();
-    for (_pid, (sz, fval)) in &pop_stats {
-        if *fval > 0.0 && *fval < 1.0 {
-            distinct_freqs.insert(fval.to_string());
-        } else {
-            distinct_freqs.insert(format!("{:.5}", fval));
-        }
-    }
-    if distinct_freqs.len() == 1 {
-        // This means the site is monomorphic across these subpops
-        return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes);
-    }
-
-    // Compute overall variance components
-    let total_samples: usize = pop_stats.values().map(|(size, _)| *size).sum();
-    let mut freq_sum = 0.0;
-    for (_, (size, fval)) in pop_stats.iter() {
-        freq_sum += (*size as f64) * fval;
-    }
-    let weighted_freq = freq_sum / (total_samples as f64);
-
-    let (a, b) = calculate_variance_components(&pop_stats, weighted_freq);
-    let overall_fst = if (a + b) > 0.0 { a / (a + b) } else { 0.0 };
-
-    // Pairwise subpop analysis: For each pair, we do a separate "2-pop" approach
-    let mut pairwise_fst = HashMap::new();
+    // 5. Compute pairwise: sum up a_xy,b_xy for each pair
+    let mut pairwise_fst_map = HashMap::new();
+    let mut pairwise_ab_map = HashMap::new();
     let pop_list: Vec<_> = pop_stats.keys().cloned().collect();
     for i in 0..pop_list.len() {
-        for j in (i + 1)..pop_list.len() {
+        for j in (i+1)..pop_list.len() {
             let p1 = &pop_list[i];
             let p2 = &pop_list[j];
-            let mut pair_stats = HashMap::new();
-            pair_stats.insert(p1.clone(), pop_stats[p1]);
-            pair_stats.insert(p2.clone(), pop_stats[p2]);
-
-            // Check if monomorphic across these two
             let freq1 = pop_stats[p1].1;
             let freq2 = pop_stats[p2].1;
             if (freq1 - freq2).abs() < 1e-12 {
-                // Then no difference, effectively monomorphic for the pair
-                pairwise_fst.insert(format!("{}_vs_{}", p1, p2), 0.0);
+                pairwise_fst_map.insert(format!("{}_vs_{}", p1, p2), 0.0);
+                pairwise_ab_map.insert(format!("{}_vs_{}", p1, p2), (0.0, 0.0));
                 continue;
             }
-            let pair_total = (pop_stats[p1].0 + pop_stats[p2].0) as f64;
-            let pair_weighted_freq = ((pop_stats[p1].0 as f64) * freq1 + (pop_stats[p2].0 as f64) * freq2) / pair_total;
-            let (pair_a, pair_b) = calculate_variance_components(&pair_stats, pair_weighted_freq);
-            let this_fst = if (pair_a + pair_b) > 0.0 { pair_a / (pair_a + pair_b) } else { 0.0 };
-            pairwise_fst.insert(format!("{}_vs_{}", p1, p2), this_fst);
+            let mut pair_stats = HashMap::new();
+            pair_stats.insert(p1.clone(), pop_stats[p1]);
+            pair_stats.insert(p2.clone(), pop_stats[p2]);
+            let pair_sum = pop_stats[p1].0 + pop_stats[p2].0;
+            let mut freq_pair_sum = 0.0;
+            for (k, (sz2, fv2)) in &pair_stats {
+                freq_pair_sum += (*sz2 as f64) * fv2;
+            }
+            let pair_freq = freq_pair_sum / (pair_sum as f64);
+            let (a_xy, b_xy) = calculate_variance_components(&pair_stats, pair_freq);
+            let f_xy = if (a_xy + b_xy) > 0.0 {
+                a_xy / (a_xy + b_xy)
+            } else {
+                0.0
+            };
+            pairwise_fst_map.insert(format!("{}_vs_{}", p1, p2), f_xy);
+            pairwise_ab_map.insert(format!("{}_vs_{}", p1, p2), (a_xy, b_xy));
         }
     }
 
-    (overall_fst, pairwise_fst, (a, b), pop_sizes)
+    (overall_fst, pairwise_fst_map, (a, b), pop_sizes, pairwise_ab_map)
 }
 
 /// Calculate variance components for the Weir & Cockerham (1984) FST estimator
@@ -706,9 +664,7 @@ fn calculate_variance_components(
 /// # Returns
 /// (overall_fst, pairwise_fst)
 fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f64>) {
-    // We skip globally monomorphic sites. Specifically, we only include sites that had a > 0 or b > 0.
-    // If a site is globally monomorphic across all subpopulations, its a and b are 0 and does not contribute.
-
+    // We gather all informative sites (a+b>0) to compute the overall (a,b).
     let mut informative_sites = Vec::new();
     for site in site_fst_values.iter() {
         let (a, b) = site.variance_components;
@@ -716,44 +672,60 @@ fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f
             informative_sites.push(site);
         }
     }
-
-    // If no site is informative, return 0.0
     if informative_sites.is_empty() {
         return (0.0, HashMap::new());
     }
 
-    // Sum the variance components over all informative sites for the overall FST
-    let mut sum_a = 0.0;
-    let mut sum_b = 0.0;
-    for site in informative_sites.iter() {
-        let (a, b) = site.variance_components;
-        sum_a += a;
-        sum_b += b;
+    // Sum the global a, b for overall FST
+    let mut sum_a_total = 0.0;
+    let mut sum_b_total = 0.0;
+    for site in &informative_sites {
+        sum_a_total += site.variance_components.0;
+        sum_b_total += site.variance_components.1;
     }
-
-    let overall_fst = if (sum_a + sum_b) > 0.0 {
-        sum_a / (sum_a + sum_b)
+    let raw_overall = if (sum_a_total + sum_b_total) > 0.0 {
+        sum_a_total / (sum_a_total + sum_b_total)
     } else {
         0.0
     };
+    let overall_fst = if raw_overall < 0.0 {
+        0.0
+    } else if raw_overall > 1.0 {
+        1.0
+    } else {
+        raw_overall
+    };
 
-    // Now compute pairwise FST.
-    // This should likely NOT be zero, and should be fixed.
-
-    let mut pairs_encountered = HashSet::new();
-    for site in informative_sites.iter() {
-        for pair in site.pairwise_fst.keys() {
-            pairs_encountered.insert(pair.clone());
+    // Now aggregate pairwise a,b across all sites, then compute final pairwise FST per pair
+    let mut pairwise_ab_sums: HashMap<String, (f64, f64)> = HashMap::new();
+    for site in &informative_sites {
+        for (pair_key, &(a_xy, b_xy)) in site.pairwise_variance_components.iter() {
+            let entry = pairwise_ab_sums.entry(pair_key.clone()).or_insert((0.0, 0.0));
+            entry.0 += a_xy;
+            entry.1 += b_xy;
         }
     }
 
     let mut pairwise_fst = HashMap::new();
-    for pair_id in pairs_encountered {
-        pairwise_fst.insert(pair_id, 0.0);
+    for (pair_key, (a_sum, b_sum)) in pairwise_ab_sums {
+        let ratio = if (a_sum + b_sum) > 0.0 {
+            a_sum / (a_sum + b_sum)
+        } else {
+            0.0
+        };
+        let clamp_ratio = if ratio < 0.0 {
+            0.0
+        } else if ratio > 1.0 {
+            1.0
+        } else {
+            ratio
+        };
+        pairwise_fst.insert(pair_key, clamp_ratio);
     }
 
     (overall_fst, pairwise_fst)
 }
+
 
 // Calculate the effective sequence length after adjusting for allowed and masked regions
 pub fn calculate_adjusted_sequence_length(
