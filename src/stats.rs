@@ -677,7 +677,7 @@ fn calculate_variance_components(
 
     let mut n_values = Vec::with_capacity(pop_stats.len());
     let mut total_samples = 0_usize;
-    for (_pop_id, (size, freq)) in pop_stats.iter() {
+    for (_pop_id, (size, _freq)) in pop_stats.iter() {
         n_values.push(*size as f64);
         total_samples += *size;
     }
@@ -697,7 +697,7 @@ fn calculate_variance_components(
     let c2 = sum_sq_diff / (r * n_bar * n_bar);
 
     let mut numerator_s2 = 0.0;
-    for (_pop_id, (size, freq)) in pop_stats.iter() {
+    for (_pop_id, (size, _freq)) in pop_stats.iter() {
         let diff = *freq - global_p;
         numerator_s2 += (*size as f64) * diff * diff;
     }
