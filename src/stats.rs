@@ -585,7 +585,7 @@ fn calculate_fst_at_site_general(
     if max_diff < threshold {
         // If subpop frequencies are (practically) identical,
         // this site does not provide a defined Fst. Mark as NaN:
-        let mut empty_map = HashMap::new();
+        let empty_map = HashMap::new();
         return (f64::NAN, empty_map, (0.0, 0.0), pop_sizes, HashMap::new());
     }
 
