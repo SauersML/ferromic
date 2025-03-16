@@ -1,10 +1,10 @@
 use crate::stats::{
     calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site_diversity,
-    calculate_pi, calculate_watterson_theta, calculate_fst_between_groups, calculate_fst_from_csv, SiteDiversity,
+    calculate_pi, calculate_watterson_theta, calculate_fst_between_groups, calculate_fst_from_csv, SiteDiversity, FSTResults
 };
 
 use crate::parse::{
-    find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header,
+    find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header
 };
 
 use crate::progress::{
