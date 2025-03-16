@@ -1321,10 +1321,16 @@ pub fn process_config_entries(
     for (csv_row, _, fst_data) in &all_pairs {
         // Process FST data between groups 0 and 1
         if !fst_data.is_empty() {            
-            // Write header for 0_vs_1 FST
-            let header = format!(">fst_0vs1_overall_chr_{}_start_{}_end_{}", 
-                csv_row.seqname, csv_row.region_start, csv_row.region_end);
+            // Write header for overall FST (Haplotype or Population based)
+            let header = if fst_type == "haplotype_groups" {
+                format!(">fst_haplotype_overall_chr_{}_start_{}_end_{}", 
+                    csv_row.seqname, csv_row.region_start, csv_row.region_end)
+            } else {
+                format!(">fst_population_overall_chr_{}_start_{}_end_{}", 
+                    csv_row.seqname, csv_row.region_start, csv_row.region_end)
+            };
             writeln!(fst_fasta_writer, "{}", header)?;
+
             
             // Format FST values as comma-separated list
             let mut values = Vec::with_capacity(fst_data.len());
@@ -1355,12 +1361,12 @@ pub fn process_config_entries(
             
             writeln!(fst_fasta_writer, "{}", values.join(","))?;
     
-            // Write header for 0_vs_1 pairwise FST
-            let header = format!(">fst_0vs1_pairwise_chr_{}_start_{}_end_{}", 
+            // Write header for pairwise FST for the population comparisons
+            let header = format!(">fst_population_pairwise_chr_{}_start_{}_end_{}", 
                 csv_row.seqname, csv_row.region_start, csv_row.region_end);
             writeln!(fst_fasta_writer, "{}", header)?;
             
-            // Format 0_vs_1 pairwise FST values
+            // Format population pairwise FST values
             let mut pairwise_values = Vec::with_capacity(fst_data.len());
             for &(pos, _, pairwise_fst) in fst_data {
                 if pos >= csv_row.region_start && pos <= csv_row.region_end {
@@ -1403,10 +1409,10 @@ pub fn process_config_entries(
                     let header = format!(">fst_pop_{}_{}_start_{}_end_{}", 
                         pair_name, csv_row.seqname, csv_row.region_start, csv_row.region_end);
                     writeln!(fst_fasta_writer, "{}", header)?;
-                    
+                
                     // Format values for this pair
                     let mut pair_values = vec!["NA".to_string(); region_length];
-                    
+                
                     for site in &pop_results.site_fst {
                         if site.position >= csv_row.region_start && site.position <= csv_row.region_end {
                             let rel_pos = (site.position - csv_row.region_start) as usize;
@@ -1425,6 +1431,7 @@ pub fn process_config_entries(
                         }
                     }
                     
+                    // Write the pairwise FST values to the FASTA file
                     writeln!(fst_fasta_writer, "{}", pair_values.join(","))?;
                 }
             }
