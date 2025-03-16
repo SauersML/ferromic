@@ -63,6 +63,57 @@ pub struct FSTResults {
     pub fst_type: String,
 }
 
+/*
+    Weir & Cockerham (1984) define F-statistics (F, Θ, f) as correlations
+    of alleles at different levels: within individuals, among individuals
+    within subpopulations, and among subpopulations. The key parameters
+    can be estimated by partitioning the total allelic variance into
+    hierarchical components usually denoted a, b, c.
+
+    In the standard diploid random-mating model, the parameter F (F_IS) measures
+    correlation of genes within individuals, while Θ (F_ST) measures correlation
+    of genes among subpopulations.
+    
+    The model also allows a “within-individual” term c.
+
+    However, if we treat each haplotype independently and assume random union
+    of gametes (no within-individual correlation), then effectively c=0
+    and we can use simplified "haploid" forms of the Weir & Cockerham (W&C)
+    variance-component estimators. In this scenario, a is the among-subpopulation
+    variance component, and b is the within-subpopulation variance component.
+
+    For a single site with subpopulations i = 1..r:
+       - Let p_i be the allele frequency in subpopulation i,
+       - Let n_i be the number of haplotypes sampled in subpopulation i,
+       - Let p̄ = (Σ n_i p_i) / (Σ n_i) be the global (pooled) frequency,
+       - Let S² = [ Σ n_i (p_i - p̄)² ] / [ (r-1)*n̄ ]  (a weighted variance)
+         where n̄ = (Σ n_i) / r is the average sample size,
+       - Let c² = [ Σ (n_i - n̄)² ] / [ r n̄² ] measure the squared CV of n_i.
+
+    The W&C 1984 "haploid ignoring c term" formulas for a, b (equations 5–7 in the text,
+    specialized to random union of gametes) look like:
+
+       a = [n̄ / (n̄ - 1)] * [ S² - { p̄(1-p̄) - ((r-1)/r) S² } / n̄ ],
+       b = [n̄ / (n̄ - 1)] * [ p̄(1 - p̄) + (some c² adjustments) - ((r-1)/r)*S² - ...].
+
+    Conceptually, "a" is the among-subpopulations variance component, and "b"
+    is the residual within-subpop variance. The Fst at that site is then
+
+       Fst(site) = a / (a + b).
+
+    We repeat for each site and sum the a_i and b_i across sites i to obtain an overall Fst:
+
+       Fst(overall) = ( Σ_i a_i ) / ( Σ_i (a_i + b_i) ).
+
+    Pairwise subpopulation Fst can be done by restricting the above to only the
+    two subpops of interest (i.e., r=2).
+
+    In our “haplotype-based” version, each diploid sample contributes two
+    haplotypes (assuming no inbreeding parameter), so we treat them as
+    independent. We omit W&C’s “c” term for within-individual correlation.
+*/
+
+
 /// Calculate FST between haplotype groups (0 vs 1) for a region
 ///
 /// This implements the Weir & Cockerham (1984) estimator for FST calculation.
