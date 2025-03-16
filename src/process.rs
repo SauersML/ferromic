@@ -1370,7 +1370,7 @@ pub fn process_config_entries(
                     }
                     
                     if pairwise_fst.is_nan() {
-                        pairwise_values.push("NA".to_string()); // Use NA for undefined values
+                        pairwise_values.push("NA".to_string()); // Use NA for undefined values 
                     } else if pairwise_fst == 0.0 {
                         pairwise_values.push("0".to_string());
                     } else {
