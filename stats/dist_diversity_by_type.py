@@ -533,8 +533,6 @@ def create_bar_plot(categories):
     middle_means = [category_means[cat]['Middle'] for cat in category_order]
     counts = [category_means[cat]['Count'] for cat in category_order]
     
-    # ------------------- NEW CODE BLOCK STARTS HERE ------------------- #
-
     # Create bars, as before
     rects1 = ax.bar(
         x - width/2,
