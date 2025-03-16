@@ -1370,7 +1370,7 @@ pub fn process_config_entries(
                     }
                     
                     if pairwise_fst.is_nan() {
-                        pairwise_values.push("NA".to_string()); // Use NA for undefined values 
+                        pairwise_values.push("NA".to_string()); // Use NA for undefined values
                     } else if pairwise_fst == 0.0 {
                         pairwise_values.push("0".to_string());
                     } else {
@@ -2290,14 +2290,13 @@ fn process_single_config_entry(
             pop_fst_results.site_fst.len()
         ));
         
-        // Add population FST data to records
+        // Add each population FST site to records
         for site in &pop_fst_results.site_fst {
             // Get an average of the pairwise FST values if multiple populations
-            // Fix later
             let avg_pairwise_fst = if !site.pairwise_fst.is_empty() {
                 site.pairwise_fst.values().sum::<f64>() / site.pairwise_fst.len() as f64
             } else {
-                f64::NAN  // Use NaN for undefined FST values per Weir & Cockerham
+                f64::NAN  // Use NaN for undefined FST values
             };
             
             per_site_fst_records.push((site.position, site.overall_fst, avg_pairwise_fst));
