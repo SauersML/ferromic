@@ -2234,7 +2234,7 @@ fn process_single_config_entry(
         n_hap_1_f,
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
-        population_fst_results: fst_results_pop_filtered,
+        population_fst_results: fst_results_pop_filtered.clone(),
     };
     
     // Display summary of results
