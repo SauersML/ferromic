@@ -1344,8 +1344,14 @@ pub fn process_config_entries(
                 }
             }
             
-            writeln!(fst_fasta_writer, "{}", values.join(","))?;
+            // Make sure all positions in the region have values
+            let region_length = (csv_row.region_end - csv_row.region_start) as usize;
+            while values.len() < region_length {
+                values.push("NA".to_string());
+            }
             
+            writeln!(fst_fasta_writer, "{}", values.join(","))?;          
+
             // Write header for pairwise FST
             let header = format!(">fst_0vs1_pairwise_chr_{}_start_{}_end_{}", 
                 csv_row.seqname, csv_row.region_start, csv_row.region_end);
@@ -2232,6 +2238,19 @@ fn process_single_config_entry(
             "Including {} sites of population FST data", 
             pop_fst_results.site_fst.len()
         ));
+        
+        // Add population FST data to records
+        for site in &pop_fst_results.site_fst {
+            // Get an average of the pairwise FST values if multiple populations
+            // Fix later
+            let avg_pairwise_fst = if !site.pairwise_fst.is_empty() {
+                site.pairwise_fst.values().sum::<f64>() / site.pairwise_fst.len() as f64
+            } else {
+                0.0
+            };
+            
+            per_site_fst_records.push((site.position, site.overall_fst, avg_pairwise_fst));
+        }
     }
     
     log(LogLevel::Info, &format!(
