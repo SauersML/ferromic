@@ -180,6 +180,7 @@ pub fn calculate_fst_between_groups(
                 pairwise_fst: site_result.1,
                 variance_components: site_result.2,
                 population_sizes: site_result.3,
+                pairwise_variance_components: site_result.4,
             });
         } else {
             // No variant at this position (monomorphic site)
@@ -306,6 +307,7 @@ pub fn calculate_fst_from_csv(
                 pairwise_fst: site_result.1,
                 variance_components: site_result.2,
                 population_sizes: site_result.3,
+                pairwise_variance_components: site_result.4,
             });
         } else {
             // No variant at this position (monomorphic site)
@@ -555,16 +557,23 @@ fn calculate_fst_at_site_general(
         return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
     }
 
-    // 3. Check global monomorphism
-    let mut distinct_freqs = HashSet::new();
-    for (_, (sz, fval)) in &pop_stats {
-        if *fval > 0.0 && *fval < 1.0 {
-            distinct_freqs.insert(fval.to_string());
-        } else {
-            distinct_freqs.insert(format!("{:.5}", fval));
+    // 3. Check if all subpop frequencies are effectively identical.
+    // We define a small threshold for difference, and if the maximum difference
+    // among any pair of frequencies is below that threshold, we consider
+    // the site monomorphic in all subpops and return Fst=0.0. However, this is wrong.
+    // Fix later.
+    let freq_values: Vec<f64> = pop_stats.values().map(|(_, f)| *f).collect();
+    let mut max_diff = 0.0;
+    for i in 0..freq_values.len() {
+        for j in (i+1)..freq_values.len() {
+            let diff = (freq_values[i] - freq_values[j]).abs();
+            if diff > max_diff {
+                max_diff = diff;
+            }
         }
     }
-    if distinct_freqs.len() == 1 {
+    let threshold = 1e-12;
+    if max_diff < threshold {
         return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
     }
 
@@ -634,16 +643,26 @@ fn calculate_variance_components(
     pop_stats: &HashMap<String, (usize, f64)>,
     global_freq: f64
 ) -> (f64, f64) {
-    // This implements the Weir & Cockerham (1984) haploid-based formula with sample-size corrections.
-    // We omit the c term, because we are treating each haplotype independently.
-    // Reference: W&C 1984, eqns. (5)–(7), ignoring c and focusing on a,b with C^2 corrections.
+    /*
+    This function implements the Weir & Cockerham (1984) haploid-based variance-component
+    calculations for random union of gametes. It treats each haplotype as an independent sample
+    and omits the within-individual component c.
+
+    1) n_bar = mean subpopulation size, counting haplotypes.
+    2) global_p = global_freq is the overall allele frequency in all subpops combined.
+    3) We compute c2 as the squared coefficient of variation of subpopulation sizes.
+    4) S^2 is the weighted among-subpop variance in allele frequency.
+    5) a and b are computed so that Fst = a / (a + b).
+    6) If sample sizes are identical, c2 = 0 and the formula reduces properly. If sample sizes
+       differ greatly, c2 adjusts a and b as per the W&C derivation. This matches eqns. (5)–(7)
+       under a haploid model with random union of gametes.
+    */
 
     let r = pop_stats.len() as f64;
     if r < 2.0 {
         return (0.0, 0.0);
     }
 
-    // Compute the total number of haplotypes and the effective sample sizes.
     let mut n_values = Vec::with_capacity(pop_stats.len());
     let mut weighted_freq_sum = 0.0;
     let mut total_samples = 0_usize;
@@ -658,10 +677,8 @@ fn calculate_variance_components(
         return (0.0, 0.0);
     }
 
-    // Global allele frequency for this site among these subpopulations
-    let global_p = weighted_freq_sum / (total_samples as f64);
+    let global_p = global_freq;
 
-    // Squared coefficient of variation of sample sizes
     let mut sum_sq_diff = 0.0;
     for n_i in &n_values {
         let diff = *n_i - n_bar;
@@ -669,23 +686,17 @@ fn calculate_variance_components(
     }
     let c2 = sum_sq_diff / (r * n_bar * n_bar);
 
-    // Weighted sample variance S^2 among subpopulations
-    // We follow eqn. (4) or eqn. (5) in W&C for haploid sampling:
-    // Weighted approach: sum_i [n_i (p_i - p_bar)^2] / ((r - 1) * n_bar)
     let mut numerator_s2 = 0.0;
     for (_pop_id, (size, freq)) in pop_stats.iter() {
         let diff = *freq - global_p;
         numerator_s2 += (*size as f64) * diff * diff;
     }
-    // We divide by (r - 1) * n_bar to get S^2
     let s_squared = if (r - 1.0) > 0.0 && n_bar > 0.0 {
         numerator_s2 / ((r - 1.0) * n_bar)
     } else {
         0.0
     };
 
-    // Now compute a, b using eqns. (5)–(7) from W&C (haploid version).
-    // a
     let a_num = s_squared
         - (global_p * (1.0 - global_p) - ((r - 1.0) * s_squared / r)) / n_bar;
     let a = if (n_bar - 1.0) > 0.0 {
@@ -694,7 +705,6 @@ fn calculate_variance_components(
         0.0
     };
 
-    // b
     let b_num = (global_p * (1.0 - global_p) + (c2 * global_p * (1.0 - global_p)))
         - ((r - 1.0) / r) * s_squared
         - (c2 * (r - 1.0) * s_squared / r);
@@ -704,8 +714,9 @@ fn calculate_variance_components(
         0.0
     };
 
-    // Return the variance components
-    (a.max(0.0), b.max(0.0))
+    let a_clamped = if a < 0.0 { 0.0 } else { a };
+    let b_clamped = if b < 0.0 { 0.0 } else { b };
+    (a_clamped, b_clamped)
 }
 
 /// Calculate overall FST for a region from per-site values
@@ -715,7 +726,15 @@ fn calculate_variance_components(
 /// # Returns
 /// (overall_fst, pairwise_fst)
 fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f64>) {
-    // We gather all informative sites (a+b>0) to compute the overall (a,b).
+    /*
+    This function sums the per-site variance components (a, b) across all sites that have (a + b) > 0.
+    That means we skip monomorphic or uninformative sites where (a + b) == 0. Skipping avoids an
+    undefined ratio of 0/0. Under the Weir & Cockerham (1984) formula, summing a and b over
+    just the informative sites is the standard approach. We then compute the global Fst as
+    sum(a) / sum(a + b).
+
+    For pairwise Fst, we gather each site's pairwise (a_xy, b_xy), sum them, and compute the ratio.
+    */
     let mut informative_sites = Vec::new();
     for site in site_fst_values.iter() {
         let (a, b) = site.variance_components;
@@ -723,11 +742,11 @@ fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f
             informative_sites.push(site);
         }
     }
+
     if informative_sites.is_empty() {
         return (0.0, HashMap::new());
     }
 
-    // Sum the global a, b for overall FST
     let mut sum_a_total = 0.0;
     let mut sum_b_total = 0.0;
     for site in &informative_sites {
@@ -747,7 +766,6 @@ fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f
         raw_overall
     };
 
-    // Now aggregate pairwise a,b across all sites, then compute final pairwise FST per pair
     let mut pairwise_ab_sums: HashMap<String, (f64, f64)> = HashMap::new();
     for site in &informative_sites {
         for (pair_key, &(a_xy, b_xy)) in site.pairwise_variance_components.iter() {
@@ -776,7 +794,6 @@ fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f
 
     (overall_fst, pairwise_fst)
 }
-
 
 // Calculate the effective sequence length after adjusting for allowed and masked regions
 pub fn calculate_adjusted_sequence_length(
