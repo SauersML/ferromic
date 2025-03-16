@@ -1322,7 +1322,7 @@ pub fn process_config_entries(
         // Process FST data between groups 0 and 1
         if !fst_data.is_empty() {            
             // Write header for overall FST (Haplotype or Population based)
-            let header = if fst_type == "haplotype_groups" {
+            let header = if fst_results.fst_type == "haplotype_groups" {
                 format!(">fst_haplotype_overall_chr_{}_start_{}_end_{}", 
                     csv_row.seqname, csv_row.region_start, csv_row.region_end)
             } else {
