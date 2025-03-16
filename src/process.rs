@@ -1321,7 +1321,7 @@ pub fn process_config_entries(
         // Process FST data between groups 0 and 1
         if !fst_data.is_empty() {            
             // Write header for 0_vs_1 FST
-            let header = format!(">fst_0vs1_chr_{}_start_{}_end_{}", 
+            let header = format!(">fst_0vs1_overall_chr_{}_start_{}_end_{}", 
                 csv_row.seqname, csv_row.region_start, csv_row.region_end);
             writeln!(fst_fasta_writer, "{}", header)?;
             
@@ -1336,7 +1336,9 @@ pub fn process_config_entries(
                     }
                     
                     // Use overall FST as the value for each position
-                    if overall_fst == 0.0 {
+                    if overall_fst.is_nan() {
+                        values.push("NA".to_string()); // Use NA for undefined values
+                    } else if overall_fst == 0.0 {
                         values.push("0".to_string());
                     } else {
                         values.push(format!("{:.6}", overall_fst));
@@ -1350,14 +1352,14 @@ pub fn process_config_entries(
                 values.push("NA".to_string());
             }
             
-            writeln!(fst_fasta_writer, "{}", values.join(","))?;          
-
-            // Write header for pairwise FST
+            writeln!(fst_fasta_writer, "{}", values.join(","))?;
+    
+            // Write header for 0_vs_1 pairwise FST
             let header = format!(">fst_0vs1_pairwise_chr_{}_start_{}_end_{}", 
                 csv_row.seqname, csv_row.region_start, csv_row.region_end);
             writeln!(fst_fasta_writer, "{}", header)?;
             
-            // Format pairwise FST values
+            // Format 0_vs_1 pairwise FST values
             let mut pairwise_values = Vec::with_capacity(fst_data.len());
             for &(pos, _, pairwise_fst) in fst_data {
                 if pos >= csv_row.region_start && pos <= csv_row.region_end {
@@ -1367,7 +1369,9 @@ pub fn process_config_entries(
                         pairwise_values.push("NA".to_string());
                     }
                     
-                    if pairwise_fst == 0.0 {
+                    if pairwise_fst.is_nan() {
+                        pairwise_values.push("NA".to_string()); // Use NA for undefined values
+                    } else if pairwise_fst == 0.0 {
                         pairwise_values.push("0".to_string());
                     } else {
                         pairwise_values.push(format!("{:.6}", pairwise_fst));
@@ -1375,7 +1379,54 @@ pub fn process_config_entries(
                 }
             }
             
+            // Make sure all positions in the region have values
+            while pairwise_values.len() < region_length {
+                pairwise_values.push("NA".to_string());
+            }
+            
             writeln!(fst_fasta_writer, "{}", pairwise_values.join(","))?;
+            
+            // Process and write population pairwise FST data if available
+            if let Some(ref pop_results) = csv_row.population_fst_results {
+                // Create a map of all pairwise comparisons across all sites
+                let mut all_pairs = HashSet::new();
+                for site in &pop_results.site_fst {
+                    for pair_name in site.pairwise_fst.keys() {
+                        all_pairs.insert(pair_name.clone());
+                    }
+                }
+                
+                // For each population pair, create a separate record
+                for pair_name in all_pairs {
+                    // Write header for this population pair
+                    let header = format!(">fst_pop_{}_{}_start_{}_end_{}", 
+                        pair_name, csv_row.seqname, csv_row.region_start, csv_row.region_end);
+                    writeln!(fst_fasta_writer, "{}", header)?;
+                    
+                    // Format values for this pair
+                    let mut pair_values = vec!["NA".to_string(); region_length];
+                    
+                    for site in &pop_results.site_fst {
+                        if site.position >= csv_row.region_start && site.position <= csv_row.region_end {
+                            let rel_pos = (site.position - csv_row.region_start) as usize;
+                            if rel_pos < region_length {
+                                // Get this pair's FST value if it exists
+                                if let Some(&pair_fst) = site.pairwise_fst.get(&pair_name) {
+                                    if pair_fst.is_nan() {
+                                        pair_values[rel_pos] = "NA".to_string();
+                                    } else if pair_fst == 0.0 {
+                                        pair_values[rel_pos] = "0".to_string();
+                                    } else {
+                                        pair_values[rel_pos] = format!("{:.6}", pair_fst);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    writeln!(fst_fasta_writer, "{}", pair_values.join(","))?;
+                }
+            }
         }
     }
     
@@ -2246,7 +2297,7 @@ fn process_single_config_entry(
             let avg_pairwise_fst = if !site.pairwise_fst.is_empty() {
                 site.pairwise_fst.values().sum::<f64>() / site.pairwise_fst.len() as f64
             } else {
-                0.0
+                f64::NAN  // Use NaN for undefined FST values per Weir & Cockerham
             };
             
             per_site_fst_records.push((site.position, site.overall_fst, avg_pairwise_fst));
