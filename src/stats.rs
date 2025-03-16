@@ -241,6 +241,7 @@ pub fn calculate_fst_between_groups(
     FSTResults {
         overall_fst,
         pairwise_fst,
+        pairwise_variance_components: HashMap::new(),
         site_fst: site_fst_values,
         fst_type: "haplotype_groups".to_string(),
     }
@@ -317,10 +318,10 @@ pub fn calculate_fst_from_csv(
                 pairwise_variance_components: site_result.4,
             });
         } else {
-            // No variant at this position (monomorphic site)
+            // No variant at this position (monomorphic site): we store FST as NaN
             site_fst_values.push(SiteFST {
                 position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: 0.0,
+                overall_fst: f64::NAN,
                 pairwise_fst: HashMap::new(),
                 variance_components: (0.0, 0.0),
                 population_sizes: HashMap::new(),
@@ -364,6 +365,7 @@ pub fn calculate_fst_from_csv(
     Ok(FSTResults {
         overall_fst,
         pairwise_fst,
+        pairwise_variance_components: HashMap::new(),
         site_fst: site_fst_values,
         fst_type: "population_groups".to_string(),
     })
@@ -618,7 +620,7 @@ fn calculate_fst_at_site_general(
             pair_stats.insert(p2.clone(), pop_stats[p2]);
             let pair_sum = pop_stats[p1].0 + pop_stats[p2].0;
             let mut freq_pair_sum = 0.0;
-            for (k, (sz2, fv2)) in &pair_stats {
+            for (_, (sz2, fv2)) in &pair_stats {
                 freq_pair_sum += (*sz2 as f64) * fv2;
             }
             let pair_freq = freq_pair_sum / (pair_sum as f64);
@@ -671,7 +673,6 @@ fn calculate_variance_components(
     }
 
     let mut n_values = Vec::with_capacity(pop_stats.len());
-    let mut weighted_freq_sum = 0.0;
     let mut total_samples = 0_usize;
     for (_pop_id, (size, freq)) in pop_stats.iter() {
         n_values.push(*size as f64);
