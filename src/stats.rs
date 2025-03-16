@@ -614,8 +614,8 @@ fn calculate_fst_at_site_general(
             let freq1 = pop_stats[p1].1;
             let freq2 = pop_stats[p2].1;
             if (freq1 - freq2).abs() < 1e-12 {
-                pairwise_fst_map.insert(format!("{}_vs_{}", p1, p2), 0.0);
-                pairwise_ab_map.insert(format!("{}_vs_{}", p1, p2), (0.0, 0.0));
+                pairwise_fst_map.insert(format!("{}_vs_{}", p1, p2), f64::NAN);
+                pairwise_ab_map.insert(format!("{}_vs_{}", p1, p2), (0.0, 0.0)); // Double-check
                 continue;
             }
             let mut pair_stats = HashMap::new();
@@ -797,9 +797,11 @@ fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f
         let ratio = if (a_sum + b_sum) > 0.0 {
             a_sum / (a_sum + b_sum)
         } else {
-            0.0
+            f64::NAN
         };
-        let clamp_ratio = if ratio < 0.0 {
+        let clamp_ratio = if ratio.is_nan() {
+            f64::NAN
+        } else if ratio < 0.0 {
             0.0
         } else if ratio > 1.0 {
             1.0
