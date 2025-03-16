@@ -600,7 +600,7 @@ fn calculate_fst_at_site_general(
     let overall_fst = if (a + b) > 0.0 {
         a / (a + b)
     } else {
-        0.0
+        f64::NAN  // Undefined as per Weir & Cockerham
     };
 
     // 5. Compute pairwise: sum up a_xy,b_xy for each pair
@@ -773,7 +773,7 @@ fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f
     let raw_overall = if (sum_a_total + sum_b_total) > 0.0 {
         sum_a_total / (sum_a_total + sum_b_total)
     } else {
-        0.0
+        f64::NAN  // Undefined as per Weir & Cockerham
     };
     let overall_fst = if raw_overall < 0.0 {
         0.0
