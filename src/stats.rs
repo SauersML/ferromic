@@ -724,9 +724,7 @@ fn calculate_variance_components(
         0.0
     };
 
-    let a_clamped = if a < 0.0 { 0.0 } else { a };
-    let b_clamped = if b < 0.0 { 0.0 } else { b };
-    (a_clamped, b_clamped)
+    (a, b) // do not clamp negative estimates for downstream estimate
 }
 
 /// Calculate overall FST for a region from per-site values
