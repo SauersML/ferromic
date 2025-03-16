@@ -676,7 +676,6 @@ fn calculate_variance_components(
     let mut total_samples = 0_usize;
     for (_pop_id, (size, freq)) in pop_stats.iter() {
         n_values.push(*size as f64);
-        weighted_freq_sum += (*size as f64) * freq;
         total_samples += *size;
     }
 
