@@ -135,7 +135,7 @@ def categorize_sequences(means, recurrent_regions, single_event_regions):
     for seq in means:
         inv_type = determine_inversion_type(seq['coords'], recurrent_regions, single_event_regions)
         if inv_type in ['recurrent', 'single_event']:
-            key = f"{inv_type}_direct"
+            key = f"{inv_type}"
             categories[key].append(seq)
     return categories
 
