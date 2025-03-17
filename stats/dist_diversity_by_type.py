@@ -146,7 +146,7 @@ def map_regions_to_inversions(inversion_df):
     
     # Process recurrent inversions
     for _, row in recurrent_inv.iterrows():
-        if pd.isna(row['region_start']) or pd.isna(row['region_end']):
+        if pd.isna(row['Start']) or pd.isna(row['End']):
             continue
             
         # Normalize chromosome name
@@ -161,7 +161,7 @@ def map_regions_to_inversions(inversion_df):
         
     # Process single-event inversions
     for _, row in single_event_inv.iterrows():
-        if pd.isna(row['region_start']) or pd.isna(row['region_end']):
+        if pd.isna(row['Start']) or pd.isna(row['End']):
             continue
             
         # Normalize chromosome name
