@@ -55,8 +55,8 @@ def map_regions_to_inversions(inversion_df):
     recurrent_regions = {}
     single_event_regions = {}
     for _, row in inversion_df.iterrows():
-        chrom = normalize_chromosome(str(row['chr']))
-        start, end = int(row['region_start']), int(row['region_end'])
+        chrom = normalize_chromosome(str(row['Chromosome']))
+        start, end = int(row['Start']), int(row['End'])
         if row['0_single_1_recur'] == 1:
             recurrent_regions.setdefault(chrom, []).append((start, end))
         else:
