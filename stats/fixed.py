@@ -58,7 +58,7 @@ def extract_gene_info(filename):
     end_match = re.search(r'_end(\d+)\.fa', filename)
     end_pos = int(end_match.group(1)) if end_match else 0
     
-    transcript_match = re.search(r'_(ENST\d+)_', filename)
+    transcript_match = re.search(r'_(ENST\d+\.\d+)_', filename)
     transcript_id = transcript_match.group(1) if transcript_match else ""
     
     return gene_id, full_id, chr_info, start_pos, end_pos, transcript_id
@@ -125,8 +125,9 @@ def parse_gtf_for_cds_regions(gtf_file, transcript_id):
                 if fields[2] != "CDS":
                     continue
                 attributes = fields[8]
-                if (f'transcript_id "{transcript_id}"' not in attributes and
-                        f'transcript_id "{transcript_id}.' not in attributes):
+                transcript_base = transcript_id.split('.')[0]
+                if not (f'transcript_id "{transcript_id}"' in attributes or 
+                        f'transcript_id "{transcript_base}"' in attributes):
                     continue
                 start = int(fields[3])
                 end = int(fields[4])
@@ -302,40 +303,42 @@ def process_file_pair(file_pair, gtf_file=None):
                 print(f"  Built mapping for {len(spliced_map)} spliced positions")
                 if strand == "-":
                     print(f"  Note: {gene_id} is on the negative strand")
-        
+
+        # Check sequence similarity between representatives
+        g0_seq = next(iter(g0_seqs.values()))
+        g1_seq = next(iter(g1_seqs.values()))
+        similarity = calculate_similarity(g0_seq, g1_seq)
+        if similarity < 0.9:
+            raise ValueError(f"Sequences are only {similarity:.2%} similar, which is below the 90% threshold")
+    
         # if mapping is empty but we do have a transcript, it might be missing in GTF
-        # that's not necessarily an error unless the user wants it to be
-        # but if we have differences and no way to map them, it's an error
         if transcript_id and gtf_file and not spliced_map and fixed_diff:
             raise ValueError("Could not map CDS for this transcript; GTF data may be missing or incomplete.")
         
         # convert fixed differences to genomic coords
         mapped_fixed = []
         for pos, g0_nuc, g1_nuc in fixed_diff:
-            if transcript_id and spliced_map:
-                if pos not in spliced_map:
-                    raise ValueError("No spliced mapping for position. The GTF-based mapping is missing this spliced coordinate.")
-                mapped_fixed.append((pos, spliced_map[pos], g0_nuc, g1_nuc))
-            else:
+            # Always record the difference with the position in the original sequence
+            mapped_fixed.append((pos, pos, g0_nuc, g1_nuc))
+            # Debug message if needed
+            if not (transcript_id and spliced_map):
                 print("NO TRANSCRIPT")
         
         # create visualization only if there are fixed differences
         # build a visualization position map for all differences
         vis_positions = {}
-        if transcript_id and spliced_map:
-            for p in all_diff.keys():
-                if p not in spliced_map:
-                    raise ValueError("No spliced mapping for position in all_differences. The GTF-based mapping is missing this spliced coordinate.")
-                vis_positions[p] = spliced_map[p]
-        else:
-            print("NO TRANSCRIPT")
+        for p in all_diff.keys():
+            vis_positions[p] = p  # Just use positions in sequence
         
         viz_file = ""
         if fixed_diff:
-            viz_file = plot_differences(gene_id, chr_info, start_pos,
-                                        g0_seqs, g1_seqs, all_diff, fixed_diff,
-                                        vis_positions)
-            print(f"  Created visualization: {viz_file}")
+            try:
+                viz_file = plot_differences(gene_id, chr_info, start_pos,
+                                           g0_seqs, g1_seqs, all_diff, fixed_diff,
+                                           vis_positions)
+                print(f"  Created visualization: {viz_file}")
+            except Exception as e:
+                print(f"  Warning: Couldn't create visualization: {str(e)}")
         
         results = {
             "gene_id": gene_id,
@@ -349,7 +352,10 @@ def process_file_pair(file_pair, gtf_file=None):
         return results
     
     except Exception as e:
-        print(f"  Error processing {gene_id}: {str(e)}")
+        error_context = ""
+        if 'pos' in locals():
+            error_context = f" (at position {pos})"
+        print(f"  Error processing {gene_id}{error_context}: {str(e)}")
         return {
             "gene_id": gene_id,
             "full_id": full_id,
@@ -358,6 +364,14 @@ def process_file_pair(file_pair, gtf_file=None):
             "error": str(e),
             "status": "error"
         }
+
+def calculate_similarity(seq1, seq2):
+    """Calculate the percentage of matching positions between two sequences."""
+    if len(seq1) != len(seq2):
+        return 0.0
+    
+    matches = sum(1 for a, b in zip(seq1, seq2) if a == b)
+    return matches / len(seq1)
 
 def main():
     """
