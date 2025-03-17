@@ -79,8 +79,23 @@ mask = (
     (abs(merged_temp['region_start_out'] - merged_temp['region_start_inv']) <= 1) &
     (abs(merged_temp['region_end_out'] - merged_temp['region_end_inv']) <= 1)
 )
+
 merged = merged_temp[mask].copy()
 print(f"After filtering for one-off differences: {len(merged)} matching rows found")
+
+# Check for ambiguous matches (one output entry matching multiple inv_info entries)
+duplicate_matches = merged.duplicated(subset=['orig_index'], keep=False)
+if duplicate_matches.any():
+    print(f"WARNING: {duplicate_matches.sum()} rows have ambiguous matches!")
+    print("The following output entries match multiple inv_info entries:")
+    ambiguous_indices = merged[duplicate_matches]['orig_index'].unique()
+    for idx in ambiguous_indices:
+        matches = merged[merged['orig_index'] == idx]
+        print(f"  Output index {idx} matches {len(matches)} inv_info entries:")
+        for _, match in matches.iterrows():
+            print(f"    inv_info index: {match['orig_inv_index']}, chr: {match['chr']}, " +
+                  f"region: {match['region_start_inv']}-{match['region_end_inv']}, " +
+                  f"recurrence: {match['0_single_1_recur']}")
 
 if len(merged) == 0:
     raise ValueError("ERROR: No key overlap found allowing a one-off difference for region_start and region_end between datasets.")
@@ -115,6 +130,23 @@ for col in ['0_pi_filtered', '1_pi_filtered']:
 # Split data into recurrent and non-recurrent
 recurrent = data[data['0_single_1_recur'] == 1]
 non_recurrent = data[data['0_single_1_recur'] == 0]
+
+# Check if any entries appear in both categories
+recurrent_indices = set(recurrent['orig_index'])
+non_recurrent_indices = set(non_recurrent['orig_index'])
+overlap_indices = recurrent_indices.intersection(non_recurrent_indices)
+
+if overlap_indices:
+    print(f"WARNING: {len(overlap_indices)} entries classified as both recurrent AND non-recurrent!")
+    print("The following entries appear in both categories:")
+    for idx in list(overlap_indices)[:10]:  # Show first 10 examples if many
+        rec_match = recurrent[recurrent['orig_index'] == idx].iloc[0]
+        nonrec_match = non_recurrent[non_recurrent['orig_index'] == idx].iloc[0]
+        print(f"  Output index {idx}, chr: {rec_match['chr']}, region: {rec_match['region_start']}-{rec_match['region_end']}")
+        print(f"    Matched to RECURRENT entry (inv_info idx: {rec_match['orig_inv_index']})")
+        print(f"    Matched to NON-RECURRENT entry (inv_info idx: {nonrec_match['orig_inv_index']})")
+    if len(overlap_indices) > 10:
+        print(f"    ... and {len(overlap_indices) - 10} more")
 
 # Descriptive Statistics
 print("\nDescriptive Statistics:")
