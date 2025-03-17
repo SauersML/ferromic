@@ -64,8 +64,18 @@ def map_regions_to_inversions(inversion_df):
     return recurrent_regions, single_event_regions
 
 def is_overlapping(region1, region2):
-    """Check if two genomic regions overlap."""
-    return region1[0] <= region2[1] and region1[1] >= region2[0]
+    """Check if two genomic regions match exactly with at most 1bp difference at start or end."""
+    start1, end1 = region1
+    start2, end2 = region2
+    
+    # Check if starts match exactly or are off by one
+    start_match = (start1 == start2) or (abs(start1 - start2) == 1)
+    
+    # Check if ends match exactly or are off by one
+    end_match = (end1 == end2) or (abs(end1 - end2) == 1)
+    
+    # Both conditions must be true for a match
+    return start_match and end_match
 
 def determine_inversion_type(coords, recurrent_regions, single_event_regions):
     """Determine if a region is recurrent, single-event, ambiguous, or unknown."""
