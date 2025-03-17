@@ -1099,17 +1099,17 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
 /// handling missing data by only considering sites where both haplotypes have alleles.
 ///
 /// # Returns
-/// * f64::INFINITY if fewer than 2 haplotypes
+/// * f64::NAN if fewer than 2 haplotypes
 /// * f64::NAN if no valid pairs exist
 /// * Otherwise, the average π across all sites
 pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, HaplotypeSide)], seq_length: i64) -> f64 {
     if haplotypes_in_group.len() <= 1 {
-        // Need at least 2 haplotypes to compute diversity; return infinity if not
+        // Need at least 2 haplotypes to compute diversity; return NaN if not
         log(LogLevel::Warning, &format!(
             "Cannot calculate pi: insufficient haplotypes ({})", 
             haplotypes_in_group.len()
         ));
-        return f64::INFINITY;
+        return f64::NAN;
     }
 
     // Calculate total possible pairs: n * (n-1) / 2
@@ -1125,7 +1125,7 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
             "Cannot calculate pi: invalid sequence length ({})",
             seq_length
         ));
-        return f64::INFINITY;
+        return f64::NAN;
     }
     
     let spinner = create_spinner(&format!(
