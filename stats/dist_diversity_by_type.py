@@ -233,27 +233,38 @@ def determine_inversion_type(coords, recurrent_regions, single_event_regions):
         return 'unknown'
 
 
-def paired_permutation_test(x, y, num_permutations=10000):
+def paired_permutation_test(x, y, num_permutations=10000, use_median=False):
     """
-    Perform a paired permutation test.
+    Perform a paired permutation test using either mean or median.
     
     Parameters:
     x : array-like, sample values for group 1.
     y : array-like, sample values for group 2.
     num_permutations : int, number of permutations to perform.
+    use_median : bool, whether to use median instead of mean for the test statistic.
     
     Returns:
     p_value : float, the p-value of the test.
     """
     differences = np.array(x) - np.array(y)
-    observed_mean = np.mean(differences)
+    if use_median:
+        observed_stat = np.percentile(differences, 99.99)
+    else:
+        observed_stat = np.mean(differences)
+    
     count = 0
     for _ in range(num_permutations):
         signs = np.random.choice([1, -1], size=len(differences))
         permuted = differences * signs
-        permuted_mean = np.mean(permuted)
-        if abs(permuted_mean) >= abs(observed_mean):
+        
+        if use_median:
+            permuted_stat = np.percentile(permuted, 99.99)
+        else:
+            permuted_stat = np.mean(permuted)
+            
+        if abs(permuted_stat) >= abs(observed_stat):
             count += 1
+            
     p_value = count / num_permutations
     return p_value
 
@@ -356,9 +367,9 @@ def load_pi_data(file_path):
     
     return pi_sequences
 
-def calculate_flanking_means(pi_sequences):
-    """Calculate mean pi for beginning, middle, and ending regions."""
-    logger.info(f"Calculating flanking and middle means for {len(pi_sequences)} pi sequences")
+def calculate_flanking_avg(pi_sequences):
+    """Calculate mean and median pi for beginning, middle, and ending regions."""
+    logger.info(f"Calculating flanking and middle statistics for {len(pi_sequences)} pi sequences")
     start_time = time.time()
     
     results = []
@@ -380,6 +391,11 @@ def calculate_flanking_means(pi_sequences):
         ending_mean = np.nanmean(ending_flank)
         middle_mean = np.nanmean(middle_region)
         
+        # Calculate medians, excluding NaN
+        beginning_median = np.nanpercentile(beginning_flank, 99.99)
+        ending_median = np.nanpercentile(ending_flank, 99.99)
+        middle_median = np.nanpercentile(middle_region, 99.99)
+        
         # Add to results with coordinates and inverted status
         results.append({
             'header': seq['header'],
@@ -387,19 +403,15 @@ def calculate_flanking_means(pi_sequences):
             'beginning_mean': beginning_mean,
             'middle_mean': middle_mean,
             'ending_mean': ending_mean,
+            'beginning_median': beginning_median,
+            'middle_median': middle_median,
+            'ending_median': ending_median,
             'is_inverted': seq['is_inverted']
         })
-        
-        if (i + 1) % 100 == 0:
-            logger.info(f"Processed {i+1}/{len(pi_sequences)} sequences...")
-    
-    # Count inverted and direct sequences
-    inverted_count = sum(1 for res in results if res['is_inverted'])
-    direct_count = len(results) - inverted_count
-    logger.info(f"Flanking means calculated: {inverted_count} inverted sequences, {direct_count} direct sequences")
     
     elapsed_time = time.time() - start_time
-    logger.info(f"Calculated means for {len(results)} sequences in {elapsed_time:.2f} seconds")
+    logger.info(f"Calculated statistics for {len(results)} sequences in {elapsed_time:.2f} seconds")
+    
     return results
 
 def categorize_sequences(flanking_means, recurrent_regions, single_event_regions):
@@ -473,32 +485,43 @@ def categorize_sequences(flanking_means, recurrent_regions, single_event_regions
     
     return categories
 
-def create_bar_plot(categories):
-    """Create bar plot comparing mean pi values by category."""
-    logger.info("Creating bar plot...")
+def create_bar_plot(categories, stat_type="mean"):
+    """
+    Create bar plot comparing pi values by category.
+    
+    Parameters:
+    categories: Dictionary with categorized sequences
+    stat_type: Type of statistic to use - "mean" or "median"
+    """
+    logger.info(f"Creating bar plot for {stat_type}...")
     start_time = time.time()
     
-    # Calculate means for each category and region
+    # Determine which fields to use based on stat_type
+    beginning_field = f"beginning_{stat_type}"
+    middle_field = f"middle_{stat_type}"
+    ending_field = f"ending_{stat_type}"
+    
+    # Calculate statistics for each category and region
     # For flanking regions, combine beginning and ending values
-    category_means = {
+    category_stats = {
         'Recurrent Inverted': {
-            'Flanking': np.nanmean([np.nanmean([seq['beginning_mean'], seq['ending_mean']]) for seq in categories['recurrent_inverted']]) if categories['recurrent_inverted'] else np.nan,
-            'Middle': np.nanmean([seq['middle_mean'] for seq in categories['recurrent_inverted']]) if categories['recurrent_inverted'] else np.nan,
+            'Flanking': np.nanmean([np.nanmean([seq[beginning_field], seq[ending_field]]) for seq in categories['recurrent_inverted']]) if categories['recurrent_inverted'] else np.nan,
+            'Middle': np.nanmean([seq[middle_field] for seq in categories['recurrent_inverted']]) if categories['recurrent_inverted'] else np.nan,
             'Count': len(categories['recurrent_inverted'])
         },
         'Recurrent Direct': {
-            'Flanking': np.nanmean([np.nanmean([seq['beginning_mean'], seq['ending_mean']]) for seq in categories['recurrent_direct']]) if categories['recurrent_direct'] else np.nan,
-            'Middle': np.nanmean([seq['middle_mean'] for seq in categories['recurrent_direct']]) if categories['recurrent_direct'] else np.nan,
+            'Flanking': np.nanmean([np.nanmean([seq[beginning_field], seq[ending_field]]) for seq in categories['recurrent_direct']]) if categories['recurrent_direct'] else np.nan,
+            'Middle': np.nanmean([seq[middle_field] for seq in categories['recurrent_direct']]) if categories['recurrent_direct'] else np.nan,
             'Count': len(categories['recurrent_direct'])
         },
         'Single-event Inverted': {
-            'Flanking': np.nanmean([np.nanmean([seq['beginning_mean'], seq['ending_mean']]) for seq in categories['single_event_inverted']]) if categories['single_event_inverted'] else np.nan,
-            'Middle': np.nanmean([seq['middle_mean'] for seq in categories['single_event_inverted']]) if categories['single_event_inverted'] else np.nan,
+            'Flanking': np.nanmean([np.nanmean([seq[beginning_field], seq[ending_field]]) for seq in categories['single_event_inverted']]) if categories['single_event_inverted'] else np.nan,
+            'Middle': np.nanmean([seq[middle_field] for seq in categories['single_event_inverted']]) if categories['single_event_inverted'] else np.nan,
             'Count': len(categories['single_event_inverted'])
         },
         'Single-event Direct': {
-            'Flanking': np.nanmean([np.nanmean([seq['beginning_mean'], seq['ending_mean']]) for seq in categories['single_event_direct']]) if categories['single_event_direct'] else np.nan,
-            'Middle': np.nanmean([seq['middle_mean'] for seq in categories['single_event_direct']]) if categories['single_event_direct'] else np.nan,
+            'Flanking': np.nanmean([np.nanmean([seq[beginning_field], seq[ending_field]]) for seq in categories['single_event_direct']]) if categories['single_event_direct'] else np.nan,
+            'Middle': np.nanmean([seq[middle_field] for seq in categories['single_event_direct']]) if categories['single_event_direct'] else np.nan,
             'Count': len(categories['single_event_direct'])
         }
     }
@@ -506,17 +529,17 @@ def create_bar_plot(categories):
     # Overall category by combining all sequences
     all_sequences = (categories['recurrent_inverted'] + categories['recurrent_direct'] +
                      categories['single_event_inverted'] + categories['single_event_direct'])
-    overall_flanking = np.nanmean([np.nanmean([seq['beginning_mean'], seq['ending_mean']]) for seq in all_sequences]) if all_sequences else np.nan
-    overall_middle = np.nanmean([seq['middle_mean'] for seq in all_sequences]) if all_sequences else np.nan
-    category_means['Overall'] = {
+    overall_flanking = np.nanmean([np.nanmean([seq[beginning_field], seq[ending_field]]) for seq in all_sequences]) if all_sequences else np.nan
+    overall_middle = np.nanmean([seq[middle_field] for seq in all_sequences]) if all_sequences else np.nan
+    category_stats['Overall'] = {
             'Flanking': overall_flanking,
             'Middle': overall_middle,
             'Count': len(all_sequences)
     }
     
-    # Print the calculated means
-    for category, data in category_means.items():
-        logger.info(f"{category}: Flanking={data['Flanking']:.6f}, Middle={data['Middle']:.6f}, Count={data['Count']}")
+    # Print the calculated statistics
+    for category, data in category_stats.items():
+        logger.info(f"{category} ({stat_type}): Flanking={data['Flanking']:.6f}, Middle={data['Middle']:.6f}, Count={data['Count']}")
     
     # Set up figure
     plt.style.use('seaborn-v0_8-whitegrid')
@@ -528,23 +551,23 @@ def create_bar_plot(categories):
     width = 0.35
     
     # Extract means for plotting
-    flanking_means = [category_means[cat]['Flanking'] for cat in category_order]
-    middle_means = [category_means[cat]['Middle'] for cat in category_order]
-    counts = [category_means[cat]['Count'] for cat in category_order]
+    flanking_stats_values = [category_stats[cat]['Flanking'] for cat in category_order]
+    middle_stats_values = [category_stats[cat]['Middle'] for cat in category_order]
+    counts = [category_stats[cat]['Count'] for cat in category_order]
     
-    # Create bars, as before
+    # Create bars
     rects1 = ax.bar(
         x - width/2,
-        flanking_means,
+        flanking_stats_values,
         width,
-        label='Flanking Regions (100K each end)',
+        label=f'Flanking Regions (50K each end) - {stat_type.capitalize()}',
         color='#66c2a5'
     )
     rects2 = ax.bar(
         x + width/2,
-        middle_means,
+        middle_stats_values,
         width,
-        label='Middle Region',
+        label=f'Middle Region - {stat_type.capitalize()}',
         color='#fc8d62'
     )
 
@@ -557,20 +580,20 @@ def create_bar_plot(categories):
 
 
         flanking_vals = [
-            np.nanmean([seq['beginning_mean'], seq['ending_mean']])
+            np.nanmean([seq[beginning_field], seq[ending_field]])
             for seq in seq_list
-            if not np.isnan(seq['beginning_mean']) and not np.isnan(seq['ending_mean'])
+            if not np.isnan(seq[beginning_field]) and not np.isnan(seq[ending_field])
         ]
         middle_vals = [
-            seq['middle_mean']
+            seq[middle_field]
             for seq in seq_list
-            if not np.isnan(seq['middle_mean'])
+            if not np.isnan(seq[middle_field])
         ]
 
         paired_flanking, paired_middle = [], []
         for seq in seq_list:
-            f_val = np.nanmean([seq['beginning_mean'], seq['ending_mean']])
-            m_val = seq['middle_mean']
+            f_val = np.nanmean([seq[beginning_field], seq[ending_field]])
+            m_val = seq[middle_field]
             if not np.isnan(f_val) and not np.isnan(m_val):
                 paired_flanking.append(f_val)
                 paired_middle.append(m_val)
@@ -607,7 +630,7 @@ def create_bar_plot(categories):
             logger.info(f"Category '{cat}': permutation p-value = {perm_p_value:.4g}")
 
         # Global maximum value from all bars
-        global_max = max(flanking_means + middle_means)
+        global_max = max([v for v in (flanking_stats_values + middle_stats_values) if not np.isnan(v)]) if any(~np.isnan(flanking_stats_values + middle_stats_values)) else 0
         y_pos = global_max * 1.1  # Position annotations at 110% of the global maximum
         if not np.isnan(perm_p_value):
             ax.text(
@@ -628,8 +651,8 @@ def create_bar_plot(categories):
     logger.info(f"Saved plot to {OUTPUT_PLOT}")
     
     # Add a dashed line for better comparison
-    if any(~np.isnan(flanking_means)) or any(~np.isnan(middle_means)):
-        all_values = [v for v in flanking_means + middle_means if not np.isnan(v)]
+    if any(~np.isnan(flanking_stats_values)) or any(~np.isnan(middle_stats_values)):
+        all_values = [v for v in flanking_stats_values + middle_stats_values if not np.isnan(v)]
         if all_values:
             max_y = max(all_values)
             ax.axhline(y=max_y/2, color='gray', linestyle='--', alpha=0.5)
@@ -639,8 +662,9 @@ def create_bar_plot(categories):
     plt.tight_layout()
     
     # Save plot
-    plt.savefig(OUTPUT_PLOT, dpi=300)
-    logger.info(f"Saved plot to {OUTPUT_PLOT}")
+    output_file = f"pi_flanking_regions_{stat_type}_bar_plot.png"
+    plt.savefig(output_file, dpi=300)
+    logger.info(f"Saved {stat_type} plot to {output_file}")
     
     elapsed_time = time.time() - start_time
     logger.info(f"Created bar plot in {elapsed_time:.2f} seconds")
@@ -673,36 +697,66 @@ def main():
             logger.error("No pi sequences loaded. Exiting.")
             return
         
-        # Calculate flanking means (100K from each edge)
-        flanking_means = calculate_flanking_means(pi_sequences)
+        # Calculate flanking means/medians (100K from each edge)
+        flanking_stats = calculate_flanking_avg(pi_sequences)
         
         # Categorize sequences into the four required groups
-        categories = categorize_sequences(flanking_means, recurrent_regions, single_event_regions)
+        categories = categorize_sequences(flanking_stats, recurrent_regions, single_event_regions)
 
-        # Combine overall paired data from all sequences (ignoring categories)
-        overall_flanking = []
-        overall_middle = []
-        for seq in flanking_means:
+        # Process mean values
+        logger.info("Processing and testing mean values...")
+        overall_flanking_mean = []
+        overall_middle_mean = []
+        for seq in flanking_stats:
             # Compute the overall flanking mean (average of beginning and ending)
             f_val = np.nanmean([seq['beginning_mean'], seq['ending_mean']])
             m_val = seq['middle_mean']
             if not np.isnan(f_val) and not np.isnan(m_val):
-                 overall_flanking.append(f_val)
-                 overall_middle.append(m_val)
+                 overall_flanking_mean.append(f_val)
+                 overall_middle_mean.append(m_val)
         
-        if len(overall_flanking) >= 2:
-            overall_perm_p = paired_permutation_test(np.array(overall_middle), np.array(overall_flanking), num_permutations=20000)
-            logger.info(f"OVERALL test results: Permutation p={overall_perm_p:.3g}")
+        # Process median values
+        logger.info("Processing and testing median values...")
+        overall_flanking_median = []
+        overall_middle_median = []
+        for seq in flanking_stats:
+            # Compute the overall flanking median (average of beginning and ending)
+            f_val = np.nanmean([seq['beginning_median'], seq['ending_median']])
+            m_val = seq['middle_median']
+            if not np.isnan(f_val) and not np.isnan(m_val):
+                 overall_flanking_median.append(f_val)
+                 overall_middle_median.append(m_val)
         
-        # Create bar plot
-        fig = create_bar_plot(categories)
+        # Test mean values
+        if len(overall_flanking_mean) >= 2:
+            overall_mean_perm_p = paired_permutation_test(np.array(overall_middle_mean), np.array(overall_flanking_mean), num_permutations=20000)
+            logger.info(f"OVERALL MEAN test results: Permutation p={overall_mean_perm_p:.3g}")
         
-        # Display plot if running in interactive environment
+        # Test median values
+        if len(overall_flanking_median) >= 2:
+            overall_median_perm_p = paired_permutation_test(np.array(overall_middle_median), np.array(overall_flanking_median), num_permutations=20000, use_median=True)
+            logger.info(f"OVERALL MEDIAN test results: Permutation p={overall_median_perm_p:.3g}")
+        
+        # Create bar plots for both mean and median
+        fig_mean = create_bar_plot(categories, stat_type="mean")
+        plt.savefig("pi_flanking_regions_mean_bar_plot.png", dpi=300)
+        logger.info("Saved mean plot to pi_flanking_regions_mean_bar_plot.png")
+        
+        fig_median = create_bar_plot(categories, stat_type="median")
+        plt.savefig("pi_flanking_regions_median_bar_plot.png", dpi=300)
+        logger.info("Saved median plot to pi_flanking_regions_median_bar_plot.png")
+        
+        # Display plots
+        mean_plot = "pi_flanking_regions_mean_bar_plot.png"
+        median_plot = "pi_flanking_regions_median_bar_plot.png"
+        
         if os.name == 'nt':  # Windows
-            os.startfile(OUTPUT_PLOT)
+            os.startfile(mean_plot)
+            os.startfile(median_plot)
         elif os.name == 'posix':  # MacOS/Linux
             cmd = 'open' if 'darwin' in os.sys.platform else 'xdg-open'
-            os.system(f'{cmd} "{OUTPUT_PLOT}"')
+            os.system(f'{cmd} "{mean_plot}"')
+            os.system(f'{cmd} "{median_plot}"')
         
         total_elapsed_time = time.time() - total_start_time
         logger.info(f"Analysis completed successfully in {total_elapsed_time:.2f} seconds")
@@ -737,20 +791,38 @@ def main():
             else:
                 logger.info(f"{cat}\tNot enough data\tN/A")
         
-        # Add overall results
-        if len(overall_flanking) >= 2:
-            overall_flanking_mean = np.mean(overall_flanking)
-            overall_middle_mean = np.mean(overall_middle)
-            overall_direction = "Flanking > Middle" if overall_flanking_mean > overall_middle_mean else "Middle > Flanking"
+        # Add overall mean results
+        if len(overall_flanking_mean) >= 2:
+            mean_flanking_avg = np.mean(overall_flanking_mean)
+            mean_middle_avg = np.mean(overall_middle_mean)
+            mean_direction = "Flanking > Middle" if mean_flanking_avg > mean_middle_avg else "Middle > Flanking"
             
-            overall_perm_p = paired_permutation_test(
-                np.array(overall_middle),
-                np.array(overall_flanking),
+            mean_perm_p = paired_permutation_test(
+                np.array(overall_middle_mean),
+                np.array(overall_flanking_mean),
                 num_permutations=20000
             )
             
-            logger.info(f"Overall\t{overall_direction}\t{overall_perm_p:.4g}")
+            logger.info(f"Overall (MEAN)\t{mean_direction}\t{mean_perm_p:.4g}")
         else:
+            logger.info(f"Overall (MEAN)\tNot enough data\tN/A")
+            
+        # Add overall median results
+        if len(overall_flanking_median) >= 2:
+            median_flanking_avg = np.median(overall_flanking_median)
+            median_middle_avg = np.median(overall_middle_median)
+            median_direction = "Flanking > Middle" if median_flanking_avg > median_middle_avg else "Middle > Flanking"
+            
+            median_perm_p = paired_permutation_test(
+                np.array(overall_middle_median),
+                np.array(overall_flanking_median),
+                num_permutations=20000,
+                use_median=True
+            )
+            
+            logger.info(f"Overall (MEDIAN)\t{median_direction}\t{median_perm_p:.4g}")
+        else:
+            logger.info(f"Overall (MEDIAN)\tNot enough data\tN/A")
             logger.info(f"Overall\tNot enough data\tN/A")
         
         logger.info("===========================")
