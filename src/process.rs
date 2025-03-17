@@ -728,7 +728,7 @@ fn process_variants(
 
     let final_length = adjusted_sequence_length.unwrap_or(region.len() as i64);
     let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, final_length);
-    let final_pi = calculate_pi(variants, &group_haps, final_length);
+    let final_pi = calculate_pi(&variants_in_region, &group_haps, final_length);
     
     log(LogLevel::Info, &format!(
         "Group {} ({}): θ={:.6}, π={:.6}, with {} segregating sites across {} haplotypes",
