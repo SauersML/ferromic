@@ -19,6 +19,14 @@ print(output_data['chr'].head().tolist())
 # Load inv_info.csv
 inv_info = pd.read_csv(inv_info_path)
 print(f"Loaded {len(inv_info)} rows from inv_info.csv")
+
+# Rename columns to match expected format
+inv_info = inv_info.rename(columns={
+    'Chromosome': 'chr',
+    'Start': 'region_start',
+    'End': 'region_end'
+})
+
 print("Inv_info data chromosome format examples:")
 print(inv_info['chr'].head().tolist())
 inv_info['orig_inv_index'] = inv_info.index
