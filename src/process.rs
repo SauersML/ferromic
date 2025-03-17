@@ -685,8 +685,9 @@ fn process_variants(
         end: region_end as usize,
     };
     
-    let variants_in_region: Vec<_> = variants.iter()
+    let variants_in_region: Vec<Variant> = variants.iter()
         .filter(|v| region_interval.contains(ZeroBasedPosition(v.position)))
+        .cloned()
         .collect();
     
     init_variant_progress(&format!("Analyzing {} variants in region", variants_in_region.len()), 
