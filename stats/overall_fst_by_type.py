@@ -139,12 +139,13 @@ def create_combined_plot(categories):
         fst_values = categories[cat]
         if fst_values:
             mean_fst = np.mean(fst_values)
+            median_fst = np.median(fst_values)
             std_fst = np.std(fst_values, ddof=1) if len(fst_values) > 1 else 0
             se_fst = std_fst / np.sqrt(len(fst_values))
             means.append(mean_fst)
             ses.append(se_fst)
             individual_points.append(fst_values)
-            logger.info(f"{label}: Mean Fst = {mean_fst:.4f}, N = {len(fst_values)}")
+            logger.info(f"{label}: Mean Fst = {mean_fst:.4f}, Median Fst = {median_fst:.4f}, N = {len(fst_values)}")
         else:
             means.append(np.nan)
             ses.append(0)
@@ -196,6 +197,16 @@ def main():
     recurrent_regions, single_event_regions = map_regions_to_inversions(inversion_df)
     fst_sequences = load_fst_data(FST_DATA_FILE)
     sequence_means = calculate_sequence_means(fst_sequences)
+    
+    # Calculate overall mean and median FST
+    all_fst_values = [seq['mean_fst'] for seq in sequence_means]
+    if all_fst_values:
+        overall_mean_fst = np.mean(all_fst_values)
+        overall_median_fst = np.median(all_fst_values)
+        logger.info(f"Overall: Mean Fst = {overall_mean_fst:.4f}, Median Fst = {overall_median_fst:.4f}, N = {len(all_fst_values)}")
+    else:
+        logger.info("No valid sequences found")
+    
     categories = categorize_sequences(sequence_means, recurrent_regions, single_event_regions)
     create_combined_plot(categories)
     
