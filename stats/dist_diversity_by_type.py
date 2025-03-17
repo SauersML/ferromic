@@ -130,9 +130,8 @@ def map_regions_to_inversions(inversion_df):
     """
     logger.info("Creating inversion region mappings...")
     
-    # Ensure numeric columns are properly typed
-    inversion_df['region_start'] = pd.to_numeric(inversion_df['region_start'], errors='coerce')
-    inversion_df['region_end'] = pd.to_numeric(inversion_df['region_end'], errors='coerce')
+    inversion_df['Start'] = pd.to_numeric(inversion_df['Start'], errors='coerce')
+    inversion_df['End'] = pd.to_numeric(inversion_df['End'], errors='coerce')
     inversion_df['0_single_1_recur'] = pd.to_numeric(inversion_df['0_single_1_recur'], errors='coerce')
     
     # Split inversion df by type
@@ -151,9 +150,9 @@ def map_regions_to_inversions(inversion_df):
             continue
             
         # Normalize chromosome name
-        chrom = normalize_chromosome(str(row['chr']))
-        start = int(row['region_start'])
-        end = int(row['region_end'])
+        chrom = normalize_chromosome(str(row['Chromosome']))
+        start = int(row['Start'])
+        end = int(row['End'])
         
         if chrom not in recurrent_regions:
             recurrent_regions[chrom] = []
@@ -166,9 +165,9 @@ def map_regions_to_inversions(inversion_df):
             continue
             
         # Normalize chromosome name
-        chrom = normalize_chromosome(str(row['chr']))
-        start = int(row['region_start'])
-        end = int(row['region_end'])
+        chrom = normalize_chromosome(str(row['Chromosome']))
+        start = int(row['Start'])
+        end = int(row['End'])
         
         if chrom not in single_event_regions:
             single_event_regions[chrom] = []
@@ -662,7 +661,7 @@ def main():
         # Display first few rows of inversion_df for debugging
         logger.info("First few rows of inversion_df:")
         for i, row in inversion_df.head(3).iterrows():
-            logger.info(f"  Row {i}: chr={row['chr']}, region_start={row['region_start']}, region_end={row['region_end']}, type={row['0_single_1_recur']}")
+            logger.info(f"  Row {i}: chr={row['Chromosome']}, region_start={row['Start']}, region_end={row['End']}, type={row['0_single_1_recur']}")
         
         # Map regions to inversions
         recurrent_regions, single_event_regions = map_regions_to_inversions(inversion_df)
