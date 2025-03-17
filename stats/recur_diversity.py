@@ -226,4 +226,110 @@ if results_table:
     results_df.to_csv('inversion_statistical_results.csv', index=False)
     print("\nStatistical test results saved to 'inversion_statistical_results.csv'")
 
+# Add violin plots comparing recurrent vs. single-event inversions
+plt.figure(figsize=(12, 6))
+
+# Subplot for direct haplotypes (0_pi_filtered)
+
+# Subplot for direct haplotypes (0_pi_filtered)
+plt.subplot(1, 2, 1)
+direct_data = [
+    non_recurrent['0_pi_filtered'].replace([np.inf, -np.inf], np.nan).dropna().values,
+    recurrent['0_pi_filtered'].replace([np.inf, -np.inf], np.nan).dropna().values
+]
+violin_parts = plt.violinplot(direct_data, showmeans=False, showmedians=False, showextrema=False)
+
+# Add styling to violin plot
+for pc in violin_parts['bodies']:
+    pc.set_facecolor('#2196F3')
+    pc.set_edgecolor('black')
+    pc.set_alpha(0.6)  # Slightly more transparent to see points
+
+# Add jittered data points
+for i, dataset in enumerate(direct_data):
+    # Create jitter
+    x = np.random.normal(i+1, 0.05, size=len(dataset))
+    plt.scatter(x, dataset, s=20, alpha=0.6, c='#0D47A1', edgecolor='white', linewidth=0.5)
+
+# Add medians as horizontal lines
+medians = []
+for dataset in direct_data:
+    if len(dataset) > 0:
+        medians.append(np.median(dataset))
+    else:
+        medians.append(np.nan)
+
+plt.hlines(medians, [0.8, 1.8], [1.2, 2.2], colors='black', linestyles='solid', lw=2)
+
+plt.xticks([1, 2], ['Single-event', 'Recurrent'])
+plt.title('Direct Haplotypes (Pi)')
+plt.ylabel('Pi Value')
+
+# Subplot for inverted haplotypes (1_pi_filtered)
+plt.subplot(1, 2, 2)
+inverted_data = [
+    non_recurrent['1_pi_filtered'].replace([np.inf, -np.inf], np.nan).dropna().values,
+    recurrent['1_pi_filtered'].replace([np.inf, -np.inf], np.nan).dropna().values
+]
+violin_parts = plt.violinplot(inverted_data, showmeans=False, showmedians=False, showextrema=False)
+
+# Add styling to violin plot
+for pc in violin_parts['bodies']:
+    pc.set_facecolor('#F44336')
+    pc.set_edgecolor('black')
+    pc.set_alpha(0.6)  # Slightly more transparent to see points
+
+# Add jittered data points
+for i, dataset in enumerate(inverted_data):
+    # Create jitter
+    x = np.random.normal(i+1, 0.05, size=len(dataset))
+    plt.scatter(x, dataset, s=20, alpha=0.6, c='#B71C1C', edgecolor='white', linewidth=0.5)
+
+# Add medians as horizontal lines
+medians = []
+for dataset in inverted_data:
+    if len(dataset) > 0:
+        medians.append(np.median(dataset))
+    else:
+        medians.append(np.nan)
+
+plt.hlines(medians, [0.8, 1.8], [1.2, 2.2], colors='black', linestyles='solid', lw=2)
+
+plt.xticks([1, 2], ['Single-event', 'Recurrent'])
+plt.title('Inverted Haplotypes (Pi)')
+plt.ylabel('Pi Value')
+
+# Subplot for inverted haplotypes (1_pi_filtered)
+plt.subplot(1, 2, 2)
+inverted_data = [
+    non_recurrent['1_pi_filtered'].replace([np.inf, -np.inf], np.nan).dropna().values,
+    recurrent['1_pi_filtered'].replace([np.inf, -np.inf], np.nan).dropna().values
+]
+violin_parts = plt.violinplot(inverted_data, showmeans=False, showmedians=False, showextrema=False)
+
+# Add styling to violin plot
+for pc in violin_parts['bodies']:
+    pc.set_facecolor('#F44336')
+    pc.set_edgecolor('black')
+    pc.set_alpha(0.7)
+
+# Add medians as horizontal lines
+medians = []
+for dataset in inverted_data:
+    if len(dataset) > 0:
+        medians.append(np.median(dataset))
+    else:
+        medians.append(np.nan)
+
+plt.hlines(medians, [0.8, 1.8], [1.2, 2.2], colors='black', linestyles='solid', lw=2)
+
+plt.xticks([1, 2], ['Single-event', 'Recurrent'])
+plt.title('Inverted Haplotypes (Pi)')
+plt.ylabel('Pi Value')
+
+plt.tight_layout()
+plt.savefig('inversion_pi_violins.png', dpi=300)
+plt.close()
+print("\nViolin plots saved to 'inversion_pi_violins.png'")
+
 print("\nAnalysis complete!")
