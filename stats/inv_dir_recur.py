@@ -629,24 +629,41 @@ if result:
         color_palette_orient = sns.color_palette("Set2", n_colors=2)
         color_palette_recur = sns.color_palette("viridis", n_colors=2)
 
-        # Boxplot (Enhanced)
+        # Boxplot with transparent fill
         plt.figure(figsize=(9, 7))
+        
+        # Create the boxplot with custom properties
         ax_box = sns.boxplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
-                         palette=color_palette_orient, showfliers=False,
+                         showfliers=False, 
                          hue_order=['Direct', 'Inverted'],
                          order=['Single-event', 'Recurrent'])
+        
+        # Make the boxes transparent but keep colored outlines
+        for patch in ax_box.patches:
+            # Set the face color to transparent (alpha=0)
+            patch.set_alpha(0)
+            # Make the edge lines a bit thicker for better visibility
+            patch.set_linewidth(1.5)
+        
+        # Add the strip plot on top for data points
         sns.stripplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
-                      palette=color_palette_orient, dodge=True, size=3, alpha=0.5, jitter=True,
+                      palette=color_palette_orient, dodge=True, size=3, alpha=0.7, jitter=True,
                       legend=False, hue_order=['Direct', 'Inverted'], order=['Single-event', 'Recurrent'])
+        
+        # Set titles and labels
         ax_box.set_title('Nucleotide Diversity (π) by Inversion Type and Orientation', fontsize=16, pad=15)
         ax_box.set_xlabel('Inversion Recurrence Type', fontsize=12)
         ax_box.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
         ax_box.tick_params(axis='both', which='major', labelsize=10)
         ax_box.legend(title='Orientation', title_fontsize='11', fontsize='10', loc='upper right')
+        
+        #  grid for better readability with transparent boxes
+        ax_box.grid(axis='y', linestyle='--', alpha=0.3)
+        
         plt.tight_layout()
         plt.savefig(BOXPLOT_PATH, dpi=300, bbox_inches='tight')
         plt.close()
-        logger.info(f"Boxplot saved to {BOXPLOT_PATH}")
+        logger.info(f"Boxplot with transparent boxes saved to {BOXPLOT_PATH}")
 
         # Interaction Plot
         plt.figure(figsize=(8, 6))
