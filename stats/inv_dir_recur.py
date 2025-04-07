@@ -621,6 +621,31 @@ if result:
     except Exception as e:
         logger.error(f"Failed to save model summary: {e}")
 
+    # Print raw nucleotide diversity values per group
+    print("\n--- Nucleotide Diversity by Group (Raw Values) ---")
+    group_stats = data_long.groupby(['Orientation', 'Recurrence'])['PiValue'].agg(['median', 'mean', 'count'])
+    print(group_stats)
+    
+    # Print median values in scientific notation
+    print("\n--- Group Median Values (Scientific Notation) ---")
+    for idx, row in group_stats.iterrows():
+        print(f"{idx[0]}/{idx[1]}: median π = {row['median']:.6e} (n={int(row['count'])})")
+    
+    # Calculate fold differences between groups
+    direct_single_median = group_stats.loc[('Direct', 'Single-event'), 'median']
+    direct_recur_median = group_stats.loc[('Direct', 'Recurrent'), 'median']
+    inverted_single_median = group_stats.loc[('Inverted', 'Single-event'), 'median']
+    inverted_recur_median = group_stats.loc[('Inverted', 'Recurrent'), 'median']
+    
+    # Print fold differences
+    print("\n--- Fold Differences Between Groups (Using Medians) ---")
+    print(f"Inverted/Recurrent vs Inverted/Single-event: {inverted_recur_median/inverted_single_median:.2f}-fold")
+    print(f"Direct/Recurrent vs Direct/Single-event: {direct_recur_median/direct_single_median:.2f}-fold")
+    print(f"Direct/Single-event vs Inverted/Single-event: {direct_single_median/inverted_single_median:.2f}-fold")
+    print(f"Direct/Recurrent vs Inverted/Recurrent: {direct_recur_median/inverted_recur_median:.2f}-fold")
+    
+
+    
     # Generate Visualizations
     logger.info("Generating visualizations...")
     try:
