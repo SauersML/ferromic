@@ -775,13 +775,9 @@ fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f
     } else {
         f64::NAN  // Undefined as per Weir & Cockerham
     };
-    let overall_fst = if raw_overall < 0.0 {
-        0.0
-    } else if raw_overall > 1.0 {
-        1.0
-    } else {
-        raw_overall
-    };
+    // Assign the raw overall FST calculation directly, preserving potential negative values.
+    // NaN is handled by the raw_overall calculation itself if the denominator is zero.
+    let overall_fst = raw_overall;
 
     let mut pairwise_ab_sums: HashMap<String, (f64, f64)> = HashMap::new();
     for site in &informative_sites {
@@ -799,16 +795,10 @@ fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f
         } else {
             f64::NAN
         };
-        let clamp_ratio = if ratio.is_nan() {
-            f64::NAN
-        } else if ratio < 0.0 {
-            0.0
-        } else if ratio > 1.0 {
-            1.0
-        } else {
-            ratio
-        };
-        pairwise_fst.insert(pair_key, clamp_ratio);
+        // Assign the raw pairwise FST calculation directly, preserving potential negative values.
+        // NaN is handled by the ratio calculation itself if the denominator is zero.
+        let pairwise_ratio = ratio;
+        pairwise_fst.insert(pair_key, pairwise_ratio);
     }
 
     (overall_fst, pairwise_fst)
