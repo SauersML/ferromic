@@ -761,12 +761,12 @@ if result:
                        inner='quartile', linewidth=1.2, # Slightly thinner lines
                        width=violin_width, cut=0, dodge=dodge_sep,
                        scale='width', # Make violins same width regardless of N
-                       alpha=0.85, # Add transparency
+                       alpha=0.2, # Add transparency
                        ax=ax_viol, zorder=10) # Drawn over points
 
         # 6. Draw the pairing lines (High zorder - drawn over violins)
-        line_alpha = 0.5 # Adjust alpha for visibility on top
-        line_lw = 0.8 # Slightly thicker lines
+        line_alpha = 0.8 #  alpha for visibility on top
+        line_lw = 0.95 #  thicker lines
         for _, row in paired_data.iterrows():
             l2fc_val = row['L2FC']
             if pd.notna(l2fc_val):
