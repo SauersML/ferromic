@@ -12,6 +12,8 @@ import logging
 import sys
 import time
 from typing import Dict, List, Tuple, Optional
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
 
 # =====================================================================
 # Configuration
@@ -601,6 +603,10 @@ except Exception as e:
 # --- Step 9: Output Results and Visualizations ---
 logger.info("--- Step 9: Saving Results and Generating Visualizations ---")
 
+# Define file paths for the new plots
+VIOLIN_PLOT_PATH = os.path.join(OUTPUT_DIR, 'pi_violin_plot_grouped_paired.png')
+INTERACTION_PLOT_WITH_DATA_PATH = os.path.join(OUTPUT_DIR, 'pi_interaction_plot_with_data.png')
+
 if result:
     # Save Model Summary
     logger.info("Saving model summary...")
@@ -623,94 +629,230 @@ if result:
 
     # Print raw nucleotide diversity values per group
     print("\n--- Nucleotide Diversity by Group (Raw Values) ---")
-    group_stats = data_long.groupby(['Orientation', 'Recurrence'])['PiValue'].agg(['median', 'mean', 'count'])
-    print(group_stats)
-    
+    try:
+        # Use observed=False for categorical grouping consistency if needed
+        group_stats = data_long.groupby(['Orientation', 'Recurrence'], observed=False)['PiValue'].agg(['median', 'mean', 'std', 'count'])
+        print(group_stats)
+    except Exception as e:
+        logger.error(f"Failed to calculate group stats: {e}")
+        group_stats = None # Ensure it's None if calculation fails
+
     # Print median values in scientific notation
     print("\n--- Group Median Values (Scientific Notation) ---")
-    for idx, row in group_stats.iterrows():
-        print(f"{idx[0]}/{idx[1]}: median π = {row['median']:.6e} (n={int(row['count'])})")
-    
-    # Calculate fold differences between groups
-    direct_single_median = group_stats.loc[('Direct', 'Single-event'), 'median']
-    direct_recur_median = group_stats.loc[('Direct', 'Recurrent'), 'median']
-    inverted_single_median = group_stats.loc[('Inverted', 'Single-event'), 'median']
-    inverted_recur_median = group_stats.loc[('Inverted', 'Recurrent'), 'median']
-    
-    # Print fold differences
-    print("\n--- Fold Differences Between Groups (Using Medians) ---")
-    print(f"Inverted/Recurrent vs Inverted/Single-event: {inverted_recur_median/inverted_single_median:.2f}-fold")
-    print(f"Direct/Recurrent vs Direct/Single-event: {direct_recur_median/direct_single_median:.2f}-fold")
-    print(f"Direct/Single-event vs Inverted/Single-event: {direct_single_median/inverted_single_median:.2f}-fold")
-    print(f"Direct/Recurrent vs Inverted/Recurrent: {direct_recur_median/inverted_recur_median:.2f}-fold")
-    
+    if group_stats is not None:
+        for idx, row in group_stats.iterrows():
+            if isinstance(idx, tuple) and len(idx) == 2:
+                 print(f"{idx[0]}/{idx[1]}: median π = {row['median']:.6e} (n={int(row['count'])})")
+            else:
+                 print(f"Index: {idx}, Data: median π = {row['median']:.6e} (n={int(row['count'])})")
+    else:
+        print("Group stats calculation failed, cannot print medians.")
 
-    
+
+    # Calculate fold differences between groups using medians
+    print("\n--- Fold Differences Between Groups (Using Medians) ---")
+    if group_stats is not None:
+        try:
+            median_vals = group_stats['median'].unstack(level='Recurrence')
+
+            def safe_divide(numerator, denominator):
+                if pd.isna(numerator) or pd.isna(denominator): return np.nan
+                if denominator == 0: return np.inf if numerator > 0 else (-np.inf if numerator < 0 else np.nan)
+                if numerator == 0: return 0.0
+                return numerator / denominator
+
+            required_indices = ['Direct', 'Inverted']
+            required_columns = ['Single-event', 'Recurrent']
+            median_vals_present = True
+            if not all(idx in median_vals.index for idx in required_indices):
+                logger.warning(f"Missing required Orientation indices in median_vals: {required_indices}.")
+                median_vals_present = False
+            if not all(col in median_vals.columns for col in required_columns):
+                logger.warning(f"Missing required Recurrence columns in median_vals: {required_columns}.")
+                median_vals_present = False
+
+            inv_rec, inv_sing, dir_rec, dir_sing = np.nan, np.nan, np.nan, np.nan
+            if median_vals_present:
+                inv_rec = median_vals.loc['Inverted', 'Recurrent']
+                inv_sing = median_vals.loc['Inverted', 'Single-event']
+                dir_rec = median_vals.loc['Direct', 'Recurrent']
+                dir_sing = median_vals.loc['Direct', 'Single-event']
+
+            inv_rec_vs_inv_sing = safe_divide(inv_rec, inv_sing)
+            dir_rec_vs_dir_sing = safe_divide(dir_rec, dir_sing)
+            dir_sing_vs_inv_sing = safe_divide(dir_sing, inv_sing)
+            dir_rec_vs_inv_rec = safe_divide(dir_rec, inv_rec)
+
+            print(f"Inverted/Recurrent vs Inverted/Single-event: {inv_rec_vs_inv_sing:.2f}-fold")
+            print(f"Direct/Recurrent vs Direct/Single-event: {dir_rec_vs_dir_sing:.2f}-fold")
+            print(f"Direct/Single-event vs Inverted/Single-event: {dir_sing_vs_inv_sing:.2f}-fold")
+            print(f"Direct/Recurrent vs Inverted/Recurrent: {dir_rec_vs_inv_rec:.2f}-fold")
+        except KeyError as e:
+             logger.error(f"KeyError during fold difference calculation. Missing group? {e}. Median Values:\n{median_vals}")
+        except Exception as e:
+            logger.error(f"Could not calculate fold differences: {e}", exc_info=True)
+    else:
+        print("Group stats calculation failed, cannot calculate fold differences.")
+
+
     # Generate Visualizations
     logger.info("Generating visualizations...")
     try:
-        # Set seaborn style
         sns.set_theme(style="whitegrid", palette="muted")
-        color_palette_orient = sns.color_palette("Set2", n_colors=2)
-        color_palette_recur = sns.color_palette("viridis", n_colors=2)
-        
-        # Boxplot with semi-transparent boxes for clarity
-        plt.figure(figsize=(9, 7))
-        
-        # Create the boxplot with custom properties
-        ax_box = sns.boxplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
-                         palette=color_palette_orient, showfliers=False, 
-                         hue_order=['Direct', 'Inverted'],
-                         order=['Single-event', 'Recurrent'])
-        
-        # Make the boxes semi-transparent for better clarity
-        for patch in ax_box.patches:
-            # Get current color
-            current_color = patch.get_facecolor()
-            # Set transparency to 40% (0.4) - visible but subtle
-            patch.set_facecolor((*current_color[:3], 0.4))
-            # Make the edge lines a bit thicker for better visibility
-            patch.set_linewidth(1.5)
-        
-        # Add the strip plot on top for data points
-        sns.stripplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
-                      palette=color_palette_orient, dodge=True, size=3, alpha=0.7, jitter=True,
-                      legend=False, hue_order=['Direct', 'Inverted'], order=['Single-event', 'Recurrent'])
-        
-        # Set titles and labels
-        ax_box.set_title('Nucleotide Diversity (π) by Inversion Type and Orientation', fontsize=16, pad=15)
-        ax_box.set_xlabel('Inversion Recurrence Type', fontsize=12)
-        ax_box.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
-        ax_box.tick_params(axis='both', which='major', labelsize=10)
-        ax_box.legend(title='Orientation', title_fontsize='11', fontsize='10', loc='upper right')
-        
-        plt.tight_layout()
-        plt.savefig(BOXPLOT_PATH, dpi=300, bbox_inches='tight')
-        plt.close()
-        logger.info(f"Boxplot with semi-transparent boxes saved to {BOXPLOT_PATH}")
+        orient_palette = {'Direct': sns.color_palette("Set2", n_colors=2)[0],
+                          'Inverted': sns.color_palette("Set2", n_colors=2)[1]}
+        recur_palette = {'Single-event': sns.color_palette("viridis", n_colors=2)[0],
+                         'Recurrent': sns.color_palette("viridis", n_colors=2)[1]}
+        recur_markers = {'Single-event': 'o', 'Recurrent': 'X'}
+        recur_lines = {'Single-event': '-', 'Recurrent': ':'}
 
-        # Interaction Plot
-        plt.figure(figsize=(8, 6))
-        ax_int = sns.pointplot(x='Orientation', y='PiValue', hue='Recurrence', data=data_long,
-                               palette=color_palette_recur, markers=["o", "^"], linestyles=["-", "--"],
-                               dodge=0.1, errorbar=('ci', 95), capsize=.1,
-                               hue_order=['Single-event', 'Recurrent'], order=['Direct', 'Inverted'])
-        ax_int.set_title('Interaction Plot: Mean π by Orientation and Recurrence', fontsize=16, pad=15)
+        # --- Violin Plot with Paired Lines ---
+        logger.info("Generating Violin Plot with Paired Lines...")
+        fig_viol, ax_viol = plt.subplots(figsize=(12, 8))
+
+        # 1. Prepare data for pairing lines
+        paired_data = data_long.pivot_table(index=['InversionRegionID_geno', 'Recurrence'], columns='Orientation', values='PiValue', observed=False).reset_index()
+        paired_data = paired_data.dropna(subset=['Direct', 'Inverted'])
+
+        # --- Robust L2FC Calculation ---
+        # Create masks for valid calculations
+        valid_direct = paired_data['Direct'] > 0
+        valid_inverted = paired_data['Inverted'] > 0
+        valid_both = valid_direct & valid_inverted
+
+        # Initialize L2FC column with NaN
+        paired_data['L2FC'] = np.nan
+
+        # Calculate ratio only where valid
+        ratio = paired_data.loc[valid_both, 'Direct'] / paired_data.loc[valid_both, 'Inverted']
+
+        # Apply log2 to the valid ratios
+        paired_data.loc[valid_both, 'L2FC'] = np.log2(ratio)
+        # --- End Robust L2FC Calculation ---
+
+
+        # 2. Define coordinates for pairing lines
+        recurrence_categories = ['Single-event', 'Recurrent']
+        orientation_categories = ['Direct', 'Inverted']
+        recurrence_map_pos = {cat: i for i, cat in enumerate(recurrence_categories)}
+
+        paired_data['x_recurrence_num'] = paired_data['Recurrence'].map(recurrence_map_pos).astype(float)
+
+        n_hues = len(orientation_categories)
+        violin_width = 0.8
+        dodge_sep = 0.02
+        total_dodge_width = violin_width + dodge_sep
+        orient_offsets = {
+            'Direct': -total_dodge_width / 4,
+            'Inverted': total_dodge_width / 4
+        }
+        paired_data['x_direct'] = paired_data['x_recurrence_num'] + orient_offsets['Direct']
+        paired_data['x_inverted'] = paired_data['x_recurrence_num'] + orient_offsets['Inverted']
+
+        # 3. Set up colormap for L2FC lines
+        l2fc_values = paired_data['L2FC'].dropna()
+        if not l2fc_values.empty:
+            vmin, vmax = l2fc_values.min(), l2fc_values.max()
+            max_abs = max(abs(vmin), abs(vmax), 1e-9)
+            norm = mcolors.Normalize(vmin=-max_abs, vmax=max_abs)
+        else:
+            norm = mcolors.Normalize(vmin=-1, vmax=1)
+
+        cmap = cm.coolwarm
+        scalar_mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
+
+        # 4. Create the main Violin plot
+        sns.violinplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
+                       palette=orient_palette, hue_order=orientation_categories, order=recurrence_categories,
+                       inner='quartile', linewidth=1.5, width=violin_width, cut=0, dodge=dodge_sep,
+                       ax=ax_viol, zorder=10)
+
+        # 5. Add the transparent strip plot
+        sns.stripplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
+                      palette=orient_palette, dodge=True, size=3, alpha=0.4, jitter=0.1,
+                      legend=False, hue_order=orientation_categories, order=recurrence_categories,
+                      ax=ax_viol, zorder=5)
+
+        # 6. Draw the pairing lines
+        line_alpha = 0.6
+        line_lw = 0.75
+        for _, row in paired_data.iterrows():
+            l2fc_val = row['L2FC']
+            if pd.notna(l2fc_val): # Only plot if L2FC is a valid number
+                line_color = scalar_mappable.to_rgba(l2fc_val)
+                ax_viol.plot([row['x_direct'], row['x_inverted']], [row['Direct'], row['Inverted']],
+                             color=line_color, alpha=line_alpha, lw=line_lw, zorder=8)
+
+        # 7. Add Colorbar
+        cbar = fig_viol.colorbar(scalar_mappable, ax=ax_viol, pad=0.01, aspect=30, shrink=0.8)
+        cbar.set_label('Log2 (π Direct / π Inverted)', rotation=270, labelpad=18, fontsize=11)
+        cbar.ax.tick_params(labelsize=9)
+        cbar.outline.set_visible(False)
+
+        # 8. Set titles and labels
+        title_text = "Nucleotide Diversity (π) by Inversion Type and Orientation"
+        ax_viol.set_title(title_text, fontsize=14, pad=25)
+        ax_viol.text(0.5, 1.02, caption_text, ha="center", va="bottom", fontsize=9, alpha=0.8, transform=ax_viol.transAxes)
+        ax_viol.set_xlabel('Inversion Recurrence Type', fontsize=12)
+        ax_viol.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
+        ax_viol.tick_params(axis='both', which='major', labelsize=10)
+        ax_viol.set_xticks(range(len(recurrence_categories)))
+        ax_viol.set_xticklabels(recurrence_categories)
+        orient_legend_handles = [plt.Rectangle((0,0),1,1, color=orient_palette[label]) for label in orientation_categories]
+        ax_viol.legend(orient_legend_handles, orientation_categories,
+                       title='Haplotype Orientation', title_fontsize='11', fontsize='10', loc='upper left', bbox_to_anchor=(1.02, 1))
+
+        fig_viol.tight_layout(rect=[0, 0, 0.9, 0.95])
+        plt.savefig(VIOLIN_PLOT_PATH, dpi=300, bbox_inches='tight')
+        plt.close(fig_viol)
+        logger.info(f"Violin plot with pairing lines saved to {VIOLIN_PLOT_PATH}")
+        logger.info("Violin Plot Details: Points = π per inversion/orientation. Lines connect paired values, color = Log2(Direct/Inverted). LMM models pairing via random effects.")
+
+
+        # --- Interaction Plot with Raw Data Points ---
+        logger.info("Generating Interaction Plot...")
+        fig_int, ax_int = plt.subplots(figsize=(8, 6))
+        point_dodge = 0.15
+
+        # 1. Plot transparent raw data points first
+        sns.stripplot(x='Orientation', y='PiValue', hue='Recurrence', data=data_long,
+                      palette=recur_palette, hue_order=['Single-event', 'Recurrent'], order=['Direct', 'Inverted'],
+                      dodge=point_dodge, size=3.5, alpha=0.35, jitter=0.1, legend=False,
+                      ax=ax_int, zorder=1)
+
+        # 2. Plot the interaction plot (means and CIs) on top
+        sns.pointplot(x='Orientation', y='PiValue', hue='Recurrence', data=data_long,
+                      palette=recur_palette,
+                      markers=[recur_markers[cat] for cat in ['Single-event', 'Recurrent']],
+                      linestyles=[recur_lines[cat] for cat in ['Single-event', 'Recurrent']],
+                      hue_order=['Single-event', 'Recurrent'], order=['Direct', 'Inverted'],
+                      dodge=point_dodge, errorbar=('ci', 95), capsize=.08,
+                      ax=ax_int, zorder=10)
+
+        # 3. Set titles and labels
+        title_text_int = "Interaction Plot: Mean Nucleotide Diversity (π)"
+        caption_text_int = "Lines: Group Means ± 95% CI. Points: Raw Data per Inversion/Orientation."
+        ax_int.set_title(title_text_int, fontsize=14, pad=25)
+        ax_int.text(0.5, 1.02, caption_text_int, ha="center", va="bottom", fontsize=9, alpha=0.8, transform=ax_int.transAxes)
         ax_int.set_xlabel('Haplotype Orientation', fontsize=12)
-        ax_int.set_ylabel('Estimated Mean Nucleotide Diversity (π) [95% CI]', fontsize=12)
+        ax_int.set_ylabel('Mean Nucleotide Diversity (π) [95% CI]', fontsize=12)
         ax_int.tick_params(axis='both', which='major', labelsize=10)
-        ax_int.legend(title='Recurrence Type', title_fontsize='11', fontsize='10', loc='best')
+        handles, labels = ax_int.get_legend_handles_labels()
+        num_recur_cats = len(recur_palette)
+        ax_int.legend(handles[:num_recur_cats], labels[:num_recur_cats],
+                      title='Recurrence Type', title_fontsize='11', fontsize='10', loc='best')
         ax_int.grid(True, axis='y', linestyle=':', alpha=0.6)
-        plt.tight_layout()
-        plt.savefig(INTERACTION_PLOT_PATH, dpi=300, bbox_inches='tight')
-        plt.close()
-        logger.info(f"Interaction plot saved to {INTERACTION_PLOT_PATH}")
+
+        fig_int.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.savefig(INTERACTION_PLOT_WITH_DATA_PATH, dpi=300, bbox_inches='tight')
+        plt.close(fig_int)
+        logger.info(f"Interaction plot with raw data points saved to {INTERACTION_PLOT_WITH_DATA_PATH}")
+        logger.info("Interaction Plot Details: Shows group means +/- 95% CI over raw data points.")
 
     except Exception as e:
         logger.error(f"Failed to generate visualizations: {e}", exc_info=True)
 else:
     logger.error("Model fitting failed, cannot generate summary or plots.")
-
 
 main_end_time = time.time()
 logger.info(f"\n--- Analysis Complete ---")
