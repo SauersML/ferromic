@@ -698,9 +698,11 @@ if result:
     # Generate Visualizations
     logger.info("Generating visualizations...")
     try:
-        sns.set_theme(style="whitegrid", palette="muted")
-        orient_palette = {'Direct': sns.color_palette("Set2", n_colors=2)[0],
-                          'Inverted': sns.color_palette("Set2", n_colors=2)[1]}
+        # Set cleaner style and define specific, non-orange palettes
+        sns.set_style("ticks") # Cleaner background than whitegrid
+        orient_palette = {'Direct': '#0072B2', # A medium blue
+                          'Inverted': '#009E73'} # A teal/green
+        # Keep viridis for recurrence, it's generally well-perceived
         recur_palette = {'Single-event': sns.color_palette("viridis", n_colors=2)[0],
                          'Recurrent': sns.color_palette("viridis", n_colors=2)[1]}
         recur_markers = {'Single-event': 'o', 'Recurrent': 'X'}
@@ -708,48 +710,35 @@ if result:
 
         # --- Violin Plot with Paired Lines ---
         logger.info("Generating Violin Plot with Paired Lines...")
-        fig_viol, ax_viol = plt.subplots(figsize=(12, 8))
+        fig_viol, ax_viol = plt.subplots(figsize=(11, 7)) # Slightly adjusted size
 
-        # 1. Prepare data for pairing lines
+        # 1. Prepare data for pairing lines (same as before)
         paired_data = data_long.pivot_table(index=['InversionRegionID_geno', 'Recurrence'], columns='Orientation', values='PiValue', observed=False).reset_index()
         paired_data = paired_data.dropna(subset=['Direct', 'Inverted'])
 
-        # --- Robust L2FC Calculation ---
-        # Create masks for valid calculations
+        # --- Robust L2FC Calculation (same as before) ---
         valid_direct = paired_data['Direct'] > 0
         valid_inverted = paired_data['Inverted'] > 0
         valid_both = valid_direct & valid_inverted
-
-        # Initialize L2FC column with NaN
         paired_data['L2FC'] = np.nan
-
-        # Calculate ratio only where valid
         ratio = paired_data.loc[valid_both, 'Direct'] / paired_data.loc[valid_both, 'Inverted']
-
-        # Apply log2 to the valid ratios
         paired_data.loc[valid_both, 'L2FC'] = np.log2(ratio)
         # --- End Robust L2FC Calculation ---
 
-
-        # 2. Define coordinates for pairing lines
+        # 2. Define coordinates for pairing lines (same as before)
         recurrence_categories = ['Single-event', 'Recurrent']
         orientation_categories = ['Direct', 'Inverted']
         recurrence_map_pos = {cat: i for i, cat in enumerate(recurrence_categories)}
-
         paired_data['x_recurrence_num'] = paired_data['Recurrence'].map(recurrence_map_pos).astype(float)
-
         n_hues = len(orientation_categories)
         violin_width = 0.8
         dodge_sep = 0.02
         total_dodge_width = violin_width + dodge_sep
-        orient_offsets = {
-            'Direct': -total_dodge_width / 4,
-            'Inverted': total_dodge_width / 4
-        }
+        orient_offsets = {'Direct': -total_dodge_width / 4, 'Inverted': total_dodge_width / 4}
         paired_data['x_direct'] = paired_data['x_recurrence_num'] + orient_offsets['Direct']
         paired_data['x_inverted'] = paired_data['x_recurrence_num'] + orient_offsets['Inverted']
 
-        # 3. Set up colormap for L2FC lines
+        # 3. Set up colormap for L2FC lines (same as before)
         l2fc_values = paired_data['L2FC'].dropna()
         if not l2fc_values.empty:
             vmin, vmax = l2fc_values.min(), l2fc_values.max()
@@ -757,52 +746,72 @@ if result:
             norm = mcolors.Normalize(vmin=-max_abs, vmax=max_abs)
         else:
             norm = mcolors.Normalize(vmin=-1, vmax=1)
-
         cmap = cm.coolwarm
         scalar_mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
 
-        # 4. Create the main Violin plot
+        # 4. Add the transparent strip plot (Low zorder - drawn first)
+        sns.stripplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
+                      palette=orient_palette, dodge=True, size=3.0, alpha=0.35, # Slightly smaller alpha
+                      jitter=0.1, legend=False, hue_order=orientation_categories, order=recurrence_categories,
+                      ax=ax_viol, zorder=5) # Drawn first
+
+        # 5. Create the main Violin plot (Mid zorder - drawn over points)
         sns.violinplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
                        palette=orient_palette, hue_order=orientation_categories, order=recurrence_categories,
-                       inner='quartile', linewidth=1.5, width=violin_width, cut=0, dodge=dodge_sep,
-                       ax=ax_viol, zorder=10)
+                       inner='quartile', linewidth=1.2, # Slightly thinner lines
+                       width=violin_width, cut=0, dodge=dodge_sep,
+                       scale='width', # Make violins same width regardless of N
+                       alpha=0.85, # Add transparency
+                       ax=ax_viol, zorder=10) # Drawn over points
 
-        # 5. Add the transparent strip plot
-        sns.stripplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
-                      palette=orient_palette, dodge=True, size=3, alpha=0.4, jitter=0.1,
-                      legend=False, hue_order=orientation_categories, order=recurrence_categories,
-                      ax=ax_viol, zorder=5)
-
-        # 6. Draw the pairing lines
-        line_alpha = 0.6
-        line_lw = 0.75
+        # 6. Draw the pairing lines (High zorder - drawn over violins)
+        line_alpha = 0.5 # Adjust alpha for visibility on top
+        line_lw = 0.8 # Slightly thicker lines
         for _, row in paired_data.iterrows():
             l2fc_val = row['L2FC']
-            if pd.notna(l2fc_val): # Only plot if L2FC is a valid number
+            if pd.notna(l2fc_val):
                 line_color = scalar_mappable.to_rgba(l2fc_val)
                 ax_viol.plot([row['x_direct'], row['x_inverted']], [row['Direct'], row['Inverted']],
-                             color=line_color, alpha=line_alpha, lw=line_lw, zorder=8)
+                             color=line_color, alpha=line_alpha, lw=line_lw, zorder=15) # Drawn last
 
-        # 7. Add Colorbar
-        cbar = fig_viol.colorbar(scalar_mappable, ax=ax_viol, pad=0.01, aspect=30, shrink=0.8)
-        cbar.set_label('Log2 (π Direct / π Inverted)', rotation=270, labelpad=18, fontsize=11)
-        cbar.ax.tick_params(labelsize=9)
+        # 7. Add Colorbar (Smaller)
+        cbar = fig_viol.colorbar(scalar_mappable, ax=ax_viol, pad=0.02, aspect=25, # Adjust aspect for ratio
+                                 shrink=0.65) # Make colorbar smaller
+        cbar.set_label('Log2 (π Direct / π Inverted)', rotation=270, labelpad=18, fontsize=10) # Adjust font size
+        cbar.ax.tick_params(labelsize=8) # Adjust tick label size
         cbar.outline.set_visible(False)
 
-        # 8. Set titles and labels
+        # 8. Set titles, labels, and aesthetics
         title_text = "Nucleotide Diversity (π) by Inversion Type and Orientation"
         ax_viol.set_title(title_text, fontsize=14, pad=25)
-        ax_viol.text(0.5, 1.02, caption_text, ha="center", va="bottom", fontsize=9, alpha=0.8, transform=ax_viol.transAxes)
+        # Use figtext for caption relative to figure, better with tight_layout
+        fig_viol.text(0.5, 0.96, caption_text, ha="center", va="bottom", fontsize=9, alpha=0.8, wrap=True)
+
         ax_viol.set_xlabel('Inversion Recurrence Type', fontsize=12)
         ax_viol.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
-        ax_viol.tick_params(axis='both', which='major', labelsize=10)
+        ax_viol.tick_params(axis='both', which='major', labelsize=10, length=4) # Shorter ticks
         ax_viol.set_xticks(range(len(recurrence_categories)))
         ax_viol.set_xticklabels(recurrence_categories)
-        orient_legend_handles = [plt.Rectangle((0,0),1,1, color=orient_palette[label]) for label in orientation_categories]
-        ax_viol.legend(orient_legend_handles, orientation_categories,
-                       title='Haplotype Orientation', title_fontsize='11', fontsize='10', loc='upper left', bbox_to_anchor=(1.02, 1))
 
-        fig_viol.tight_layout(rect=[0, 0, 0.9, 0.95])
+        # Add subtle gridlines and remove top/right spines
+        ax_viol.yaxis.grid(True, linestyle=':', linewidth=0.6, alpha=0.7)
+        sns.despine(ax=ax_viol, offset=5) # Remove top/right spines
+
+        # Handle legend
+        handles, labels = ax_viol.get_legend_handles_labels()
+        # Filter to get only handles corresponding to orientation (e.g., first two)
+        orient_legend_handles = handles[:len(orientation_categories)]
+        orient_legend_labels = labels[:len(orientation_categories)]
+        # Create custom handles if necessary (e.g., if violinplot returns complex handles)
+        # orient_legend_handles = [plt.Rectangle((0,0),1,1, color=orient_palette[label]) for label in orientation_categories]
+
+        ax_viol.legend(orient_legend_handles, orient_legend_labels,
+                       title='Haplotype Orientation', title_fontsize='10', fontsize='9', # Adjust font sizes
+                       loc='upper left', bbox_to_anchor=(1.03, 1), frameon=False) # Place legend outside, no frame
+
+        # Adjust layout AFTER placing elements like legend/colorbar outside
+        fig_viol.tight_layout(rect=[0.02, 0.02, 0.88, 0.94]) # Fine-tune Rect [left, bottom, right, top]
+
         plt.savefig(VIOLIN_PLOT_PATH, dpi=300, bbox_inches='tight')
         plt.close(fig_viol)
         logger.info(f"Violin plot with pairing lines saved to {VIOLIN_PLOT_PATH}")
@@ -811,13 +820,14 @@ if result:
 
         # --- Interaction Plot with Raw Data Points ---
         logger.info("Generating Interaction Plot...")
-        fig_int, ax_int = plt.subplots(figsize=(8, 6))
+        fig_int, ax_int = plt.subplots(figsize=(7, 5.5)) # Slightly adjusted size
         point_dodge = 0.15
 
         # 1. Plot transparent raw data points first
         sns.stripplot(x='Orientation', y='PiValue', hue='Recurrence', data=data_long,
                       palette=recur_palette, hue_order=['Single-event', 'Recurrent'], order=['Direct', 'Inverted'],
-                      dodge=point_dodge, size=3.5, alpha=0.35, jitter=0.1, legend=False,
+                      dodge=point_dodge, size=3.5, alpha=0.3, # More transparent
+                      jitter=0.1, legend=False,
                       ax=ax_int, zorder=1)
 
         # 2. Plot the interaction plot (means and CIs) on top
@@ -827,23 +837,30 @@ if result:
                       linestyles=[recur_lines[cat] for cat in ['Single-event', 'Recurrent']],
                       hue_order=['Single-event', 'Recurrent'], order=['Direct', 'Inverted'],
                       dodge=point_dodge, errorbar=('ci', 95), capsize=.08,
+                      linewidth=1.5, # Make lines slightly thicker if needed
                       ax=ax_int, zorder=10)
 
-        # 3. Set titles and labels
+        # 3. Set titles, labels, and aesthetics
         title_text_int = "Interaction Plot: Mean Nucleotide Diversity (π)"
         caption_text_int = "Lines: Group Means ± 95% CI. Points: Raw Data per Inversion/Orientation."
-        ax_int.set_title(title_text_int, fontsize=14, pad=25)
-        ax_int.text(0.5, 1.02, caption_text_int, ha="center", va="bottom", fontsize=9, alpha=0.8, transform=ax_int.transAxes)
-        ax_int.set_xlabel('Haplotype Orientation', fontsize=12)
-        ax_int.set_ylabel('Mean Nucleotide Diversity (π) [95% CI]', fontsize=12)
-        ax_int.tick_params(axis='both', which='major', labelsize=10)
+        ax_int.set_title(title_text_int, fontsize=13, pad=20) # Adjust size/pad
+        fig_int.text(0.5, 0.95, caption_text_int, ha="center", va="bottom", fontsize=9, alpha=0.8, wrap=True)
+
+        ax_int.set_xlabel('Haplotype Orientation', fontsize=11)
+        ax_int.set_ylabel('Mean Nucleotide Diversity (π) [95% CI]', fontsize=11)
+        ax_int.tick_params(axis='both', which='major', labelsize=9, length=4)
+
+        # Add subtle gridlines and remove top/right spines
+        ax_int.yaxis.grid(True, linestyle=':', linewidth=0.6, alpha=0.7)
+        sns.despine(ax=ax_int, offset=5)
+
         handles, labels = ax_int.get_legend_handles_labels()
         num_recur_cats = len(recur_palette)
         ax_int.legend(handles[:num_recur_cats], labels[:num_recur_cats],
-                      title='Recurrence Type', title_fontsize='11', fontsize='10', loc='best')
-        ax_int.grid(True, axis='y', linestyle=':', alpha=0.6)
+                      title='Recurrence Type', title_fontsize='10', fontsize='9', loc='best', frameon=False) # No frame
 
-        fig_int.tight_layout(rect=[0, 0, 1, 0.95])
+        fig_int.tight_layout(rect=[0.02, 0.02, 0.98, 0.93]) # Fine-tune Rect
+
         plt.savefig(INTERACTION_PLOT_WITH_DATA_PATH, dpi=300, bbox_inches='tight')
         plt.close(fig_int)
         logger.info(f"Interaction plot with raw data points saved to {INTERACTION_PLOT_WITH_DATA_PATH}")
