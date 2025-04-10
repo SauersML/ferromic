@@ -648,52 +648,130 @@ if result:
     else:
         print("Group stats calculation failed, cannot print medians.")
 
-
-    # Calculate fold differences between groups using medians
-    print("\n--- Fold Differences Between Groups (Using Medians) ---")
-    if group_stats is not None:
-        try:
-            median_vals = group_stats['median'].unstack(level='Recurrence')
-
-            def safe_divide(numerator, denominator):
-                if pd.isna(numerator) or pd.isna(denominator): return np.nan
-                if denominator == 0: return np.inf if numerator > 0 else (-np.inf if numerator < 0 else np.nan)
-                if numerator == 0: return 0.0
-                return numerator / denominator
-
-            required_indices = ['Direct', 'Inverted']
-            required_columns = ['Single-event', 'Recurrent']
-            median_vals_present = True
-            if not all(idx in median_vals.index for idx in required_indices):
-                logger.warning(f"Missing required Orientation indices in median_vals: {required_indices}.")
-                median_vals_present = False
-            if not all(col in median_vals.columns for col in required_columns):
-                logger.warning(f"Missing required Recurrence columns in median_vals: {required_columns}.")
-                median_vals_present = False
-
-            inv_rec, inv_sing, dir_rec, dir_sing = np.nan, np.nan, np.nan, np.nan
-            if median_vals_present:
-                inv_rec = median_vals.loc['Inverted', 'Recurrent']
-                inv_sing = median_vals.loc['Inverted', 'Single-event']
-                dir_rec = median_vals.loc['Direct', 'Recurrent']
-                dir_sing = median_vals.loc['Direct', 'Single-event']
-
-            inv_rec_vs_inv_sing = safe_divide(inv_rec, inv_sing)
-            dir_rec_vs_dir_sing = safe_divide(dir_rec, dir_sing)
-            dir_sing_vs_inv_sing = safe_divide(dir_sing, inv_sing)
-            dir_rec_vs_inv_rec = safe_divide(dir_rec, inv_rec)
-
-            print(f"Inverted/Recurrent vs Inverted/Single-event: {inv_rec_vs_inv_sing:.2f}-fold")
-            print(f"Direct/Recurrent vs Direct/Single-event: {dir_rec_vs_dir_sing:.2f}-fold")
-            print(f"Direct/Single-event vs Inverted/Single-event: {dir_sing_vs_inv_sing:.2f}-fold")
-            print(f"Direct/Recurrent vs Inverted/Recurrent: {dir_rec_vs_inv_rec:.2f}-fold")
-        except KeyError as e:
-             logger.error(f"KeyError during fold difference calculation. Missing group? {e}. Median Values:\n{median_vals}")
-        except Exception as e:
-            logger.error(f"Could not calculate fold differences: {e}", exc_info=True)
+    
+    def safe_divide(numerator, denominator):
+        # Returns NaN for division by zero or NaN inputs. Essential for Ratio of Aggregates.
+        if pd.isna(numerator) or pd.isna(denominator):
+            return np.nan
+        if np.isclose(denominator, 0):
+             return np.nan
+        return numerator / denominator
+    
+    print("\n--- Fold Difference Calculations ---")
+    
+    # --- Preparations ---
+    # Ensure group_stats (with medians) exists from earlier code block
+    if 'group_stats' not in locals() or group_stats is None:
+        logger.error("Dependency Error: 'group_stats' DataFrame not found. Cannot calculate Ratio of Medians.")
+        # Fallback: Create group_stats if absolutely necessary, but indicates a potential flow issue
+        group_stats = data_long.groupby(['Orientation', 'Recurrence'], observed=False)['PiValue'].agg(['median', 'mean', 'std', 'count'])
+    
+    # Ensure paired_data exists (created from pivot for violin plot or explicitly here)
+    if 'paired_data' not in locals() or not isinstance(paired_data, pd.DataFrame) or paired_data.empty:
+         # This line previously logged a warning. Removed per instruction.
+         paired_data = data_long.pivot_table(index=['InversionRegionID_geno', 'Recurrence'], columns='Orientation', values='PiValue', observed=False).reset_index()
+         paired_data = paired_data.dropna(subset=['Direct', 'Inverted']) # Still need pairs with BOTH values non-NaN
+    
+    # --- 1. Fold Difference of Group Aggregates (Ratio of Aggregates) ---
+    # Uses safe_divide (NaN for 0 denominator) for both mean and median ratios.
+    print("\n1. Fold Difference of Group Aggregates (Direct Aggregate / Inverted Aggregate):")
+    
+    # 1a. Ratio of MEANS
+    print("  - Ratio of Means:")
+    overall_means_df = data_long.groupby('Orientation', observed=False)['PiValue'].agg(['mean', 'count'])
+    overall_direct_mean = overall_means_df.loc['Direct', 'mean'] if 'Direct' in overall_means_df.index else np.nan
+    overall_inverted_mean = overall_means_df.loc['Inverted', 'mean'] if 'Inverted' in overall_means_df.index else np.nan
+    overall_direct_n = int(overall_means_df.loc['Direct', 'count']) if 'Direct' in overall_means_df.index else 0
+    overall_inverted_n = int(overall_means_df.loc['Inverted', 'count']) if 'Inverted' in overall_means_df.index else 0
+    overall_fold_diff_means = safe_divide(overall_direct_mean, overall_inverted_mean)
+    print(f"    Overall: {overall_fold_diff_means:.4f} (n_Dir={overall_direct_n}, n_Inv={overall_inverted_n})")
+    
+    group_means_df = data_long.groupby(['Orientation', 'Recurrence'], observed=False)['PiValue'].agg(['mean', 'count'])
+    dir_sing_mean = group_means_df.loc[('Direct', 'Single-event'), 'mean'] if ('Direct', 'Single-event') in group_means_df.index else np.nan
+    inv_sing_mean = group_means_df.loc[('Inverted', 'Single-event'), 'mean'] if ('Inverted', 'Single-event') in group_means_df.index else np.nan
+    dir_rec_mean = group_means_df.loc[('Direct', 'Recurrent'), 'mean'] if ('Direct', 'Recurrent') in group_means_df.index else np.nan
+    inv_rec_mean = group_means_df.loc[('Inverted', 'Recurrent'), 'mean'] if ('Inverted', 'Recurrent') in group_means_df.index else np.nan
+    sing_n_direct = int(group_means_df.loc[('Direct', 'Single-event'), 'count']) if ('Direct', 'Single-event') in group_means_df.index else 0
+    sing_n_inverted = int(group_means_df.loc[('Inverted', 'Single-event'), 'count']) if ('Inverted', 'Single-event') in group_means_df.index else 0
+    rec_n_direct = int(group_means_df.loc[('Direct', 'Recurrent'), 'count']) if ('Direct', 'Recurrent') in group_means_df.index else 0
+    rec_n_inverted = int(group_means_df.loc[('Inverted', 'Recurrent'), 'count']) if ('Inverted', 'Recurrent') in group_means_df.index else 0
+    sing_fold_diff_means = safe_divide(dir_sing_mean, inv_sing_mean)
+    rec_fold_diff_means = safe_divide(dir_rec_mean, inv_rec_mean)
+    print(f"    Single-event: {sing_fold_diff_means:.4f} (n_Dir={sing_n_direct}, n_Inv={sing_n_inverted})")
+    print(f"    Recurrent: {rec_fold_diff_means:.4f} (n_Dir={rec_n_direct}, n_Inv={rec_n_inverted})")
+    
+    # 1b. Ratio of MEDIANS
+    print("  - Ratio of Medians:")
+    overall_medians_df = data_long.groupby('Orientation', observed=False)['PiValue'].agg(['median', 'count'])
+    overall_direct_median = overall_medians_df.loc['Direct', 'median'] if 'Direct' in overall_medians_df.index else np.nan
+    overall_inverted_median = overall_medians_df.loc['Inverted', 'median'] if 'Inverted' in overall_medians_df.index else np.nan
+    overall_fold_diff_medians = safe_divide(overall_direct_median, overall_inverted_median)
+    print(f"    Overall: {overall_fold_diff_medians:.4f} (n_Dir={overall_direct_n}, n_Inv={overall_inverted_n})")
+    
+    if 'group_stats' in locals() and group_stats is not None:
+        dir_sing_median = group_stats.loc[('Direct', 'Single-event'), 'median'] if ('Direct', 'Single-event') in group_stats.index else np.nan
+        inv_sing_median = group_stats.loc[('Inverted', 'Single-event'), 'median'] if ('Inverted', 'Single-event') in group_stats.index else np.nan
+        dir_rec_median = group_stats.loc[('Direct', 'Recurrent'), 'median'] if ('Direct', 'Recurrent') in group_stats.index else np.nan
+        inv_rec_median = group_stats.loc[('Inverted', 'Recurrent'), 'median'] if ('Inverted', 'Recurrent') in group_stats.index else np.nan
+        sing_fold_diff_medians = safe_divide(dir_sing_median, inv_sing_median)
+        rec_fold_diff_medians = safe_divide(dir_rec_median, inv_rec_median)
+        print(f"    Single-event: {sing_fold_diff_medians:.4f} (n_Dir={sing_n_direct}, n_Inv={sing_n_inverted})")
+        print(f"    Recurrent: {rec_fold_diff_medians:.4f} (n_Dir={rec_n_direct}, n_Inv={rec_n_inverted})")
     else:
-        print("Group stats calculation failed, cannot calculate fold differences.")
+        print("    Could not calculate Ratio of Medians for subgroups ('group_stats' missing).")
+    
+    
+    # --- 2. Aggregate of Individual Paired Fold Differences (Aggregate of Ratios) ---
+    print("\n2. Aggregate of Individual Paired Fold Differences (Aggregate[Direct π / Inverted π]):")
+    
+    # Prepare base DataFrame for ratio calculation (all pairs where Direct/Inverted are not NaN)
+    calc_df_ratios = paired_data.copy()
+    calc_df_ratios = calc_df_ratios.rename(columns={'Direct': 'pi_direct', 'Inverted': 'pi_inverted'})
+    calc_df_ratios = calc_df_ratios.dropna(subset=['pi_direct', 'pi_inverted']) # Ensure both values exist
+    
+    # Calculate ratios, allowing division by zero (results in inf/nan)
+    # Suppress division warnings temporarily for this calculation block if desired
+    with np.errstate(divide='ignore', invalid='ignore'):
+        calc_df_ratios['paired_fold_diff'] = calc_df_ratios['pi_direct'] / calc_df_ratios['pi_inverted']
+    # Replace potential -inf with inf for consistency if needed, although median usually handles them ok
+    # calc_df_ratios['paired_fold_diff'] = calc_df_ratios['paired_fold_diff'].replace(-np.inf, np.inf)
+    
+    
+    # 2a. MEAN of Ratios (Filter out non-finite ratios AFTER calculation)
+    print("  - Mean of Ratios (excludes pairs with Inverted π=0):")
+    # Filter AFTER calculating ratio: keep only finite ratios for the mean
+    finite_ratios_mask = np.isfinite(calc_df_ratios['paired_fold_diff'])
+    calc_df_valid_mean = calc_df_ratios[finite_ratios_mask]
+    n_mean_pairs = len(calc_df_valid_mean)
+    
+    if n_mean_pairs > 0:
+        mean_overall_paired_fd = calc_df_valid_mean['paired_fold_diff'].mean()
+        print(f"    Overall: {mean_overall_paired_fd:.4f} (n={n_mean_pairs} valid pairs)")
+    
+        mean_paired_fd_by_recurrence = calc_df_valid_mean.groupby('Recurrence', observed=False)['paired_fold_diff'].agg(['mean', 'count'])
+        for idx, row in mean_paired_fd_by_recurrence.iterrows():
+            print(f"    {idx}: {row['mean']:.4f} (n={int(row['count'])} valid pairs)")
+    else:
+        print("    No pairs with finite ratios found for Mean of Ratios calculation.")
+    
+    # 2b. MEDIAN of Ratios (Includes non-finite ratios in calculation, median often ignores NaN/inf)
+    print("  - Median of Ratios (includes pairs with Inverted π=0):")
+    n_median_pairs = len(calc_df_ratios) # Total pairs where ratio could be calculated (incl. inf/nan)
+    
+    if n_median_pairs > 0:
+        # Calculate median directly on the potentially non-finite ratios series
+        # pandas median typically ignores NaN, treatement of Inf varies but often ignored too
+        median_overall_paired_fd = calc_df_ratios['paired_fold_diff'].median()
+        print(f"    Overall: {median_overall_paired_fd:.4f} (n={n_median_pairs} pairs considered)")
+    
+        # Group by recurrence and calculate median on potentially non-finite ratios
+        median_paired_fd_by_recurrence = calc_df_ratios.groupby('Recurrence', observed=False)['paired_fold_diff'].agg(['median', 'count'])
+        for idx, row in median_paired_fd_by_recurrence.iterrows():
+            print(f"    {idx}: {row['median']:.4f} (n={int(row['count'])} pairs considered)")
+    else:
+         print("    No pairs found to calculate Median of Ratios.")
 
+    
 
     # Generate Visualizations
     logger.info("Generating visualizations...")
