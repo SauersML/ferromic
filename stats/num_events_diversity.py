@@ -9,6 +9,14 @@ import re
 import os
 import warnings
 
+"""
+Each 'InversionRegionID' group contains only a single observation (N=1). This
+data structure prevents the LMM from properly estimating the random effect variance.
+Consequently, while fixed effect coefficients might be estimated, the calculation
+of their standard errors, p-values, and confidence intervals within the 'mixedlm'
+framework under these specific N=1 conditions can be hard to interpret.
+"""
+
 # --- Configuration ---
 PI_DATA_PATH = 'output.csv'        # Pi values per orientation (0_pi_filtered, 1_pi_filtered)
 INV_INFO_PATH = 'inv_info.csv'     # Inversion info (Recurrence, Num events string, coords)
