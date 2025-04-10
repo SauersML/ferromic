@@ -421,7 +421,9 @@ struct CsvRowData {
     n_hap_1_f: usize,
     inv_freq_no_filter: f64,
     inv_freq_filter: f64,
-    population_fst_results: Option<FSTResults>,
+    population_fst_results: Option<FSTResults>, // FST results based on population CSV file
+    haplotype_overall_fst: f64, // Region-wide FST (unclamped, Sum(a)/Sum(a+b)) between haplotype groups 0 and 1 (filtered variants)
+    population_overall_fst: f64, // Region-wide FST (unclamped, Sum(a)/Sum(a+b)) across all populations from CSV (filtered variants)
 }
 
 // Custom error types
@@ -1536,6 +1538,8 @@ fn write_csv_header<W: Write>(writer: &mut csv::Writer<W>) -> Result<(), VcfErro
             "1_num_hap_filter",
             "inversion_freq_no_filter",
             "inversion_freq_filter",
+            "haplotype_overall_fst",
+            "population_overall_fst",
         ])
         .map_err(|e| VcfError::Io(e.into()))?;
     Ok(())
@@ -1570,9 +1574,22 @@ fn write_csv_row<W: Write>(writer: &mut csv::Writer<W>, row: &CsvRowData) -> Res
             &row.n_hap_1_f.to_string(),
             &format!("{:.6}", row.inv_freq_no_filter),
             &format!("{:.6}", row.inv_freq_filter),
+            // Write the new FST values using the helper function
+            &format_float_or_na(row.haplotype_overall_fst),
+            &format_float_or_na(row.population_overall_fst),
         ])
         .map_err(|e| VcfError::Io(e.into()))?;
     Ok(())
+}
+
+/// Helper function to format f64 values for CSV output, handling NaN.
+fn format_float_or_na(value: f64) -> String {
+    if value.is_nan() {
+        "NA".to_string()
+    } else {
+        // Use a reasonable number of decimal places, scientific notation for very small/large
+        format!("{:.8e}", value)
+    }
 }
 
 /// Groups `ConfigEntry` objects by chromosome name.
@@ -2239,6 +2256,11 @@ fn process_single_config_entry(
         n_hap_1_f,
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
+        // Store the region-wide FST calculation results (unclamped)
+        // Use NaN if FST calculation was disabled or failed
+        haplotype_overall_fst: fst_results_filtered.as_ref().map_or(f64::NAN, |res| res.overall_fst),
+        population_overall_fst: fst_results_pop_filtered.as_ref().map_or(f64::NAN, |res| res.overall_fst),
+        // Keep the full population results struct if needed elsewhere, but overall value is now redundant
         population_fst_results: fst_results_pop_filtered.clone(),
     };
     
