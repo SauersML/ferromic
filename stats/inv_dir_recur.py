@@ -785,7 +785,7 @@ if result:
         title_text = "Nucleotide Diversity (π) by Inversion Type and Orientation"
         ax_viol.set_title(title_text, fontsize=14, pad=25)
         # Use figtext for caption relative to figure, better with tight_layout
-        fig_viol.text(0.5, 0.96, caption_text, ha="center", va="bottom", fontsize=9, alpha=0.8, wrap=True)
+        fig_viol.text(0.5, 0.96, ha="center", va="bottom", fontsize=9, alpha=0.8, wrap=True)
 
         ax_viol.set_xlabel('Inversion Recurrence Type', fontsize=12)
         ax_viol.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
