@@ -785,7 +785,6 @@ if result:
         title_text = "Nucleotide Diversity (π) by Inversion Type and Orientation"
         ax_viol.set_title(title_text, fontsize=14, pad=25)
         # Use figtext for caption relative to figure, better with tight_layout
-        fig_viol.text(0.5, 0.96, ha="center", va="bottom", fontsize=9, alpha=0.8, wrap=True)
 
         ax_viol.set_xlabel('Inversion Recurrence Type', fontsize=12)
         ax_viol.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
@@ -815,8 +814,6 @@ if result:
         plt.savefig(VIOLIN_PLOT_PATH, dpi=300, bbox_inches='tight')
         plt.close(fig_viol)
         logger.info(f"Violin plot with pairing lines saved to {VIOLIN_PLOT_PATH}")
-        logger.info("Violin Plot Details: Points = π per inversion/orientation. Lines connect paired values, color = Log2(Direct/Inverted). LMM models pairing via random effects.")
-
 
         # --- Interaction Plot with Raw Data Points ---
         logger.info("Generating Interaction Plot...")
