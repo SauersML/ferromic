@@ -69,7 +69,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # =====================================================================
-# Helper Functions (Adapted from provided examples)
+# Helper Functions
 # =====================================================================
 
 def normalize_chromosome(chrom: str) -> str:
@@ -484,7 +484,7 @@ if not ambiguous_matches_final.empty:
 # Select final columns needed before reshaping
 combined_data_wide = combined_data_wide[[
     'InversionRegionID_geno', 'pi_direct', 'pi_inverted', 'RecurrenceCode'
-]].drop_duplicates(subset=['InversionRegionID_geno']) # Ensure one row per geno region ID
+]].drop_duplicates(subset=['InversionRegionID_geno']) # inner=None,one row per geno region ID
 
 logger.info(f"Successfully linked Pi/Recurrence data to {len(combined_data_wide)} unique Genotype file regions.")
 combined_data_wide.to_csv(MERGED_WIDE_DATA_PATH, index=False)
@@ -595,10 +595,10 @@ except np.linalg.LinAlgError:
         logger.info("Model fitting successful with CG optimizer.")
     except Exception as e_cg:
         logger.error(f"Model fitting failed even with CG optimizer: {e_cg}", exc_info=True)
-        result = None # Ensure result is None if fitting failed completely
+        result = None # inner=None,result is None if fitting failed completely
 except Exception as e:
     logger.error(f"ERROR: Model fitting failed: {e}", exc_info=True)
-    result = None # Ensure result is None if fitting failed
+    result = None # inner=None,result is None if fitting failed
 
 # --- Step 9: Output Results and Visualizations ---
 logger.info("--- Step 9: Saving Results and Generating Visualizations ---")
@@ -635,7 +635,7 @@ if result:
         print(group_stats)
     except Exception as e:
         logger.error(f"Failed to calculate group stats: {e}")
-        group_stats = None # Ensure it's None if calculation fails
+        group_stats = None # it's None if calculation fails
 
     # Print median values in scientific notation
     print("\n--- Group Median Values (Scientific Notation) ---")
@@ -660,13 +660,13 @@ if result:
     print("\n--- Fold Difference Calculations ---")
     
     # --- Preparations ---
-    # Ensure group_stats (with medians) exists from earlier code block
+    # inner=None,group_stats (with medians) exists from earlier code block
     if 'group_stats' not in locals() or group_stats is None:
         logger.error("Dependency Error: 'group_stats' DataFrame not found. Cannot calculate Ratio of Medians.")
         # Fallback: Create group_stats if absolutely necessary, but indicates a potential flow issue
         group_stats = data_long.groupby(['Orientation', 'Recurrence'], observed=False)['PiValue'].agg(['median', 'mean', 'std', 'count'])
     
-    # Ensure paired_data exists (created from pivot for violin plot or explicitly here)
+    # inner=None,paired_data exists (created from pivot for violin plot or explicitly here)
     if 'paired_data' not in locals() or not isinstance(paired_data, pd.DataFrame) or paired_data.empty:
          # This line previously logged a warning. Removed per instruction.
          paired_data = data_long.pivot_table(index=['InversionRegionID_geno', 'Recurrence'], columns='Orientation', values='PiValue', observed=False).reset_index()
@@ -727,7 +727,7 @@ if result:
     # Prepare base DataFrame for ratio calculation (all pairs where Direct/Inverted are not NaN)
     calc_df_ratios = paired_data.copy()
     calc_df_ratios = calc_df_ratios.rename(columns={'Direct': 'pi_direct', 'Inverted': 'pi_inverted'})
-    calc_df_ratios = calc_df_ratios.dropna(subset=['pi_direct', 'pi_inverted']) # Ensure both values exist
+    calc_df_ratios = calc_df_ratios.dropna(subset=['pi_direct', 'pi_inverted']) # inner=None,both values exist
     
     # Calculate ratios, allowing division by zero (results in inf/nan)
     # Suppress division warnings temporarily for this calculation block if desired
@@ -833,15 +833,46 @@ if result:
                       jitter=0.1, legend=False, hue_order=orientation_categories, order=recurrence_categories,
                       ax=ax_viol, zorder=5) # Drawn first
 
-        # 5. Create the main Violin plot (Mid zorder - drawn over points)
+        # 5. Create the main Violin plot 
         sns.violinplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
                        palette=orient_palette, hue_order=orientation_categories, order=recurrence_categories,
-                       inner='quartile', linewidth=1.2, # Slightly thinner lines
+                       inner=None, 
+                       linewidth=1.2,
                        width=violin_width, cut=0, dodge=dodge_sep,
-                       scale='width', # Make violins same width regardless of N
-                       alpha=0.2, # Add transparency
-                       ax=ax_viol, zorder=10) # Drawn over points
+                       scale='width',
+                       alpha=0.2,
+                       ax=ax_viol, zorder=10)
 
+        # Calculate medians for each group plotted
+        median_values = data_long.groupby(['Recurrence', 'Orientation'], observed=False)['PiValue'].median()
+
+        # Define visual properties for the median line segments
+        median_line_width_on_plot = 0.15 # Controls the horizontal width of the line segment
+        median_line_color = 'k'          # Black color
+        median_line_style = '-'          # Solid line
+        median_line_lw = 1.5             # Thickness
+        median_line_zorder = 12          # Draw above violin fill, below pairing lines
+
+        # Iterate through calculated medians and draw the lines
+        for group_index, median_val in median_values.items():
+            # group_index is like ('Single-event', 'Direct')
+            recurrence_cat, orientation_cat = group_index
+
+            # Calculate the center x-coordinate for this violin segment using pre-defined mappings
+            x_center = recurrence_map_pos[recurrence_cat] + orient_offsets[orientation_cat]
+
+            # Calculate the start and end x-coordinates for the horizontal line segment
+            xmin = x_center - median_line_width_on_plot / 2
+            xmax = x_center + median_line_width_on_plot / 2
+
+            # Draw the horizontal median line segment
+            ax_viol.hlines(y=median_val, xmin=xmin, xmax=xmax,
+                           color=median_line_color,
+                           linestyle=median_line_style,
+                           linewidth=median_line_lw,
+                           zorder=median_line_zorder,
+                           alpha=0.5)
+    
         # 6. Draw the pairing lines (High zorder - drawn over violins)
         line_alpha = 0.8 #  alpha for visibility on top
         line_lw = 0.95 #  thicker lines
