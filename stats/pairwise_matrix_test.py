@@ -48,6 +48,8 @@ CALCULATE_OMEGA_MANUALLY = False # This should do nothing
 # Flag to enable Low-Middle-High omega categorization analysis
 PERFORM_OMEGA_CATEGORY_ANALYSIS = True
 
+FILTER_ON_CROSS_GROUP_OMEGA = False
+
 def read_and_preprocess_data(file_path):
     """
     Read and preprocess the evolutionary rate data from a CSV file.
@@ -1059,13 +1061,53 @@ def analyze_transcript(args):
     
     # Get chromosome for this transcript to match with PCA data
     chromosome = df_transcript['chromosome'].iloc[0] if not df_transcript.empty else None
-    
-    # Perform statistical analysis on the transcript data with PC correction
-    analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1, 
-                                      chromosome, pc_data, ENABLE_PC_CORRECTION))
 
-    # Compute normal-only median and mean for each group (excluding -1 and 99)
-    group_0_normal = group_0_df[(group_0_df['omega'] != -1) & (group_0_df['omega'] != 99)]
+    # --- Apply Filter Logic (if global flag is True) ---
+    perform_main_analysis = True # Default: perform analysis
+    skip_reason = None
+    # Calculate cross-group median omega
+    cross_group_df = df_transcript[df_transcript['group'] == 2]
+    num_comp_cross_group = len(cross_group_df)
+    median_cross_group_omega = np.nan
+    if not cross_group_df.empty:
+        median_cross_group_omega = cross_group_df['omega'].median() # Includes -1, 99
+
+    if FILTER_ON_CROSS_GROUP_OMEGA:
+        if num_comp_cross_group == 0:
+            perform_main_analysis = False
+            skip_reason = 'Skipped (Filter Active): No cross-group comparisons'
+        elif pd.isna(median_cross_group_omega): # Handles edge case if all cross-group omegas were NaN initially
+             perform_main_analysis = False
+             skip_reason = 'Skipped (Filter Active): Median cross-group omega is NaN'
+        elif median_cross_group_omega <= 0.0:
+            perform_main_analysis = False
+            skip_reason = f'Skipped (Filter Active): Median cross-group omega ({median_cross_group_omega:.4f}) <= 0.0'
+
+        if not perform_main_analysis:
+             print(f"  {skip_reason} for {transcript_id}.")
+        else:
+             # Only print proceed message if filter was active and passed
+             print(f"  Proceeding with main analysis for {transcript_id}: Median cross-group omega ({median_cross_group_omega:.4f}) > 0.0.")
+
+    # --- Perform Main Statistical Analysis (if not skipped) ---
+    if perform_main_analysis:
+        # Call the worker function for the main statistical test
+        analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1,
+                                          chromosome, pc_data, ENABLE_PC_CORRECTION))
+    else:
+        # If skipped, create a placeholder analysis_result dictionary with NaNs and the skip reason
+        analysis_result = {
+            'effect_size': np.nan, 'p_value': np.nan, 'std_err': np.nan,
+            'failure_reason': skip_reason, # Use the reason determined by the filter
+            'pc_corrected': False,
+            # Ensure keys expected downstream exist, even if NaN
+             'num_comp_group_0': len(group_0_df), # Use counts calculated earlier
+             'num_comp_group_1': len(group_1_df)
+        }
+
+
+    # Compute normal-only median and mean for each group (excluding -1 and 99) - for reporting
+    group_0_normal = group_0_df[(group_0_df['omega'] > -1) & (group_0_df['omega'] < 99)]
     median_0_normal = group_0_normal['omega'].median()
     mean_0_normal = group_0_normal['omega'].mean()
     group_1_normal = group_1_df[(group_1_df['omega'] != -1) & (group_1_df['omega'] != 99)]
@@ -1103,7 +1145,9 @@ def analyze_transcript(args):
             'pct_identical_0': pct_identical_0,
             'pct_nosyn_0': pct_nosyn_0,
             'pct_identical_1': pct_identical_1,
-            'pct_nosyn_1': pct_nosyn_1
+            'pct_nosyn_1': pct_nosyn_1,
+            'num_comp_cross_group': num_comp_cross_group,
+            'median_cross_group_omega': median_cross_group_omega
         }
 
     # Perform omega category analysis if enabled
@@ -1224,7 +1268,8 @@ def main():
         # Cap adjusted p-values at 1.0
         results_df['corrected_p_value'] = results_df['corrected_p_value'].clip(upper=1.0)
     else:
-        results_df['corrected_p_value'] = results_df['p_value']
+        # If no valid tests were performed (num_valid_tests is 0), set corrected p-value to NaN for all
+        results_df['corrected_p_value'] = np.nan
     
     # Apply the same procedure to category p-values if category analysis was performed
     if PERFORM_OMEGA_CATEGORY_ANALYSIS:
@@ -1320,9 +1365,18 @@ def main():
     print("-" * 160)
     print(f"{'TOTAL':<50} {total_group_0:<10} {total_group_1:<10} {total_group_0 + total_group_1:<10}")
     
-    # Summarize significant results after multiple testing correction
+    # Summarize significant results after multiple testing correction for the main analysis
     significant_count = (results_df['corrected_p_value'] < 0.05).sum()
-    print(f"\nSignificant results after correction (p < 0.05): {significant_count}")
+    # Use num_valid_tests calculated during BH correction
+    print(f"\nSignificant results (main analysis) after correction (corrected p < 0.05): {significant_count} out of {num_valid_tests} tested transcripts")
+    
+    # Summarize filtering impact based on the global flag
+    print(f"Filter Status (FILTER_ON_CROSS_GROUP_OMEGA): {'ENABLED' if FILTER_ON_CROSS_GROUP_OMEGA else 'DISABLED'}")
+    if FILTER_ON_CROSS_GROUP_OMEGA:
+        # Count skips specifically due to the filter logic
+        skipped_filter_count = (results_df['failure_reason'].str.startswith('Skipped (Filter Active)', na=False)).sum()
+        total_transcripts_initial = len(results_df) # Total transcripts initially processed
+        print(f"  Transcripts skipped by cross-group omega filter: {skipped_filter_count} out of {total_transcripts_initial}")
     
     # Summarize significant results from category analysis
     if PERFORM_OMEGA_CATEGORY_ANALYSIS:
