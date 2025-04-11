@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Analyzes nucleotide diversity (pi) in flanking regions vs. middle regions
 of genomic segments, categorized by inversion type and haplotype status,
@@ -612,6 +611,212 @@ def perform_statistical_tests(categories: dict, all_sequences_stats: list[dict])
 
     return test_results
 
+def diagnose_single_event_discrepancy(
+    pi_file_path: str | Path,
+    single_event_regions: dict,
+    min_length: int,
+    inv_info_path: str | Path # Added for context
+    ) -> None:
+    """
+    Diagnoses why counts for single-event direct vs inverted might differ.
+
+    Checks each defined single-event region against the pi data headers
+    to see if direct/inverted sequences are found and why they might be
+    filtered out *before* categorization (Not Found, Too Short, Not 'filtered_pi').
+
+    Args:
+        pi_file_path: Path to the per_site_output.falsta file.
+        single_event_regions: Dict mapping {chrom: [(start, end), ...]} for SINGLE events.
+        min_length: The minimum sequence length threshold used in load_pi_data.
+        inv_info_path: Path to the inversion info file (for logging context).
+    """
+    logger.info("--- STARTING DIAGNOSIS: Single-Event Discrepancy ---")
+    logger.info(f"Analyzing Pi file: {pi_file_path}")
+    logger.info(f"Based on Single-Event regions from: {inv_info_path}")
+    logger.info(f"Minimum Length Threshold: {min_length}")
+
+    if not single_event_regions:
+        logger.warning("DIAGNOSIS: No single-event regions were defined. Skipping diagnosis.")
+        logger.info("--- ENDING DIAGNOSIS ---")
+        return
+
+    # Initialize tracking for each defined single-event region
+    # Key: tuple (chrom, start, end)
+    # Value: dict {'direct_status': 'Not Found', 'inverted_status': 'Not Found',
+    #             'direct_details': '', 'inverted_details': ''}
+    region_status = {}
+    defined_region_count = 0
+    for chrom, regions in single_event_regions.items():
+        for start, end in regions:
+            region_key = (chrom, start, end)
+            region_status[region_key] = {
+                'direct_status': 'Not Found', 'inverted_status': 'Not Found',
+                'direct_details': '', 'inverted_details': ''
+            }
+            defined_region_count += 1
+    logger.info(f"Tracking {defined_region_count} defined single-event regions.")
+
+    processed_headers = 0
+    potential_matches = 0
+    try:
+        with open(pi_file_path, 'r') as f:
+            current_header = None
+            line_num = 0
+            while True: # Read header and associated data line
+                line = f.readline()
+                line_num += 1
+                if not line: # End of file
+                     break
+                line = line.strip()
+                if not line:
+                    continue
+
+                if line.startswith('>'):
+                    current_header = line
+                    processed_headers += 1
+
+                    # Now, attempt to parse this header and see if it *could* match a single-event region
+                    coords = extract_coordinates_from_header(current_header)
+                    if not coords or coords.get('group') is None:
+                        # Cannot evaluate this header for matching regions if coords/group invalid
+                        continue
+
+                    header_chrom = coords['chrom']
+                    header_start = coords['start']
+                    header_end = coords['end']
+                    header_group = coords['group'] # 0 or 1
+
+                    # Read the *next* line to determine length (simplification: assumes data on one line)
+                    data_line = f.readline()
+                    line_num += 1
+                    if not data_line: # Unexpected EOF after header
+                         logger.warning(f"DIAGNOSIS: Unexpected EOF after header: {current_header[:70]}...")
+                         continue
+                    data_line = data_line.strip()
+                    try:
+                        # Mimic part of parse_pi_data_line for length check
+                        values = data_line.split(',')
+                        # Count actual numeric values, excluding empty strings or 'NA'
+                        actual_length = sum(1 for x in values if x.strip() and x.strip().upper() != 'NA')
+                    except Exception as e:
+                        logger.warning(f"DIAGNOSIS: Error parsing data line for length check below header {current_header[:70]}... Error: {e}")
+                        actual_length = 0 # Cannot determine length
+
+                    # Check if this header corresponds to any defined single-event region
+                    matched = False
+                    if header_chrom in single_event_regions:
+                        for region_start, region_end in single_event_regions[header_chrom]:
+                            if is_overlapping(header_start, header_end, region_start, region_end):
+                                potential_matches += 1
+                                matched = True
+                                region_key = (header_chrom, region_start, region_end)
+
+                                # Determine the status based on filters applied in load_pi_data
+                                status = "Error (Should not happen)"
+                                details = f"Header: {current_header[:70]}... Len={actual_length}"
+                                if 'filtered_pi' not in current_header.lower():
+                                    status = "Filtered (Not 'filtered_pi')"
+                                elif actual_length < min_length:
+                                    status = f"Filtered (Too Short: {actual_length})"
+                                else:
+                                    status = "Found & Passed Filters" # Passed primary filters relevant here
+
+                                # Update the status for the matched DEFINED region
+                                target_status_key = 'direct_status' if header_group == 0 else 'inverted_status'
+                                target_details_key = 'direct_details' if header_group == 0 else 'inverted_details'
+
+                                # Only update if 'Not Found' or if a new reason is found (e.g., found header but filtered)
+                                # We prioritize 'Found & Passed Filters' if multiple headers match a region
+                                current_region_s = region_status[region_key][target_status_key]
+                                if current_region_s == 'Not Found' or status == "Found & Passed Filters":
+                                     region_status[region_key][target_status_key] = status
+                                     region_status[region_key][target_details_key] = details
+                                # Important: If multiple headers overlap the same defined region, this logic
+                                # might slightly simplify, but focuses on whether *at least one* passed filters.
+
+                                break # Assume header maps to only one defined region for simplicity
+
+    except FileNotFoundError:
+        logger.error(f"DIAGNOSIS: Pi data file not found at {pi_file_path}")
+        logger.info("--- ENDING DIAGNOSIS ---")
+        return
+    except Exception as e:
+        logger.error(f"DIAGNOSIS: An error occurred reading {pi_file_path}: {e}", exc_info=True)
+        logger.info("--- ENDING DIAGNOSIS ---")
+        return
+
+    logger.info(f"Processed {processed_headers} headers from Pi file.")
+    logger.info(f"Found {potential_matches} headers potentially overlapping defined single-event regions.")
+
+    # Summarize the findings
+    summary_counts = {
+        'direct': {'Not Found': 0, "Filtered (Not 'filtered_pi')": 0, 'Filtered (Too Short)': 0, 'Found & Passed Filters': 0, 'Other Filtered': 0},
+        'inverted': {'Not Found': 0, "Filtered (Not 'filtered_pi')": 0, 'Filtered (Too Short)': 0, 'Found & Passed Filters': 0, 'Other Filtered': 0}
+    }
+    detailed_examples = {'direct_filtered_short': [], 'inverted_filtered_short': []}
+
+    for region_key, status_dict in region_status.items():
+        # Direct status
+        d_stat = status_dict['direct_status']
+        d_details = status_dict['direct_details']
+        if d_stat == 'Not Found':
+            summary_counts['direct']['Not Found'] += 1
+        elif "Filtered (Not 'filtered_pi')" in d_stat:
+             summary_counts['direct']["Filtered (Not 'filtered_pi')"] += 1
+        elif "Filtered (Too Short" in d_stat:
+             summary_counts['direct']['Filtered (Too Short)'] += 1
+             if len(detailed_examples['direct_filtered_short']) < 5: # Log few examples
+                 detailed_examples['direct_filtered_short'].append(f"{region_key}: {d_details}")
+        elif d_stat == "Found & Passed Filters":
+             summary_counts['direct']['Found & Passed Filters'] += 1
+        else: # Catch any other filtered status if logic expands
+             summary_counts['direct']['Other Filtered'] += 1
+
+        # Inverted status
+        i_stat = status_dict['inverted_status']
+        i_details = status_dict['inverted_details']
+        if i_stat == 'Not Found':
+            summary_counts['inverted']['Not Found'] += 1
+        elif "Filtered (Not 'filtered_pi')" in i_stat:
+             summary_counts['inverted']["Filtered (Not 'filtered_pi')"] += 1
+        elif "Filtered (Too Short" in i_stat:
+             summary_counts['inverted']['Filtered (Too Short)'] += 1
+             if len(detailed_examples['inverted_filtered_short']) < 5: # Log few examples
+                 detailed_examples['inverted_filtered_short'].append(f"{region_key}: {i_details}")
+        elif i_stat == "Found & Passed Filters":
+             summary_counts['inverted']['Found & Passed Filters'] += 1
+        else: # Catch any other filtered status
+             summary_counts['inverted']['Other Filtered'] += 1
+
+    logger.info("\n--- DIAGNOSIS SUMMARY ---")
+    logger.info(f"Total Defined Single-Event Regions: {defined_region_count}")
+    logger.info("\nStatus Counts (Direct Haplotype):")
+    for status, count in summary_counts['direct'].items():
+        logger.info(f"  {status}: {count}")
+    logger.info("\nStatus Counts (Inverted Haplotype):")
+    for status, count in summary_counts['inverted'].items():
+        logger.info(f"  {status}: {count}")
+
+    logger.info(f"\nExpected 'Single-event Direct' count (Found & Passed Filters): {summary_counts['direct']['Found & Passed Filters']}")
+    logger.info(f"Expected 'Single-event Inverted' count (Found & Passed Filters): {summary_counts['inverted']['Found & Passed Filters']}")
+
+    if summary_counts['direct']['Filtered (Too Short)'] > 0 or summary_counts['inverted']['Filtered (Too Short)'] > 0:
+        logger.info("\nExamples of sequences Filtered (Too Short):")
+        if detailed_examples['direct_filtered_short']:
+             logger.info("  Direct:")
+             for ex in detailed_examples['direct_filtered_short']: logger.info(f"    {ex}")
+        if detailed_examples['inverted_filtered_short']:
+             logger.info("  Inverted:")
+             for ex in detailed_examples['inverted_filtered_short']: logger.info(f"    {ex}")
+
+    if summary_counts['direct']['Found & Passed Filters'] != summary_counts['inverted']['Found & Passed Filters']:
+        logger.warning("DIAGNOSIS: Counts for 'Found & Passed Filters' DIFFER between Direct and Inverted.")
+        logger.warning("DIAGNOSIS: Primary reasons likely: 'Not Found' in Pi file OR 'Filtered (Too Short)' OR 'Filtered (Not 'filtered_pi')'. Check counts above.")
+    else:
+        logger.info("DIAGNOSIS: Counts for 'Found & Passed Filters' MATCH. If final category counts differ, the issue might be later (e.g., NaN stats - check main logs) or in categorization logic itself.")
+
+    logger.info("--- ENDING DIAGNOSIS ---")
+
 # --- Plotting ---
 
 def format_p_value(p_value: float) -> str:
@@ -794,6 +999,17 @@ def main():
     except Exception as e:
         logger.error(f"Failed to load or process inversion file {inv_file_path}: {e}", exc_info=True)
         return
+
+    # Make sure single_event_regions exists and has data before calling
+    if single_event_regions:
+         diagnose_single_event_discrepancy(
+             pi_file_path=Path(PI_DATA_FILE), # PI_DATA_FILE is defined before this point
+             single_event_regions=single_event_regions,
+             min_length=MIN_LENGTH, # MIN_LENGTH is defined
+             inv_info_path=inv_file_path
+         )
+    else:
+         logger.warning("Skipping single-event discrepancy diagnosis as no single-event regions were loaded/mapped.")
 
     # --- 2. Load Pi Data ---
     pi_file_path = Path(PI_DATA_FILE)
