@@ -999,227 +999,217 @@ def format_p_value(p_value: float) -> str:
          return f"p = {p_value:.2e}"
     else:
         return f"p = {p_value:.3g}"
+def filter_sequences_by_region_completeness(
+    flanking_stats_input: list[dict],
+    recurrent_regions: dict,
+    single_event_regions: dict
+) -> list[dict]:
+    logger.info("Applying filter: Removing sequences from regions lacking both haplotypes...")
+    start_time = time.time()
 
-# --- Main Execution ---
+    def _find_overlapping_region_key(coords: dict, rec_regions: dict, se_regions: dict) -> tuple | None:
+        chrom = coords.get('chrom')
+        start = coords.get('start')
+        end = coords.get('end')
+        if not all([chrom, isinstance(start, int), isinstance(end, int)]): return None
+        overlapping_keys = []
+        if chrom in rec_regions:
+            for r_start, r_end in rec_regions[chrom]:
+                if is_overlapping(start, end, r_start, r_end):
+                    overlapping_keys.append(('recurrent', chrom, r_start, r_end))
+        if chrom in se_regions:
+            for r_start, r_end in se_regions[chrom]:
+                if is_overlapping(start, end, r_start, r_end):
+                    overlapping_keys.append(('single_event', chrom, r_start, r_end))
+        return overlapping_keys[0] if len(overlapping_keys) == 1 else None
+
+    region_haplotype_status = {}
+    temp_flanking_stats = []
+
+    for seq_stats in flanking_stats_input:
+        coords = seq_stats.get('coords')
+        is_inverted = seq_stats.get('is_inverted')
+        region_key = None
+
+        if coords and is_inverted is not None:
+            region_key = _find_overlapping_region_key(coords, recurrent_regions, single_event_regions)
+            if region_key:
+                if region_key not in region_haplotype_status:
+                    region_haplotype_status[region_key] = {'has_direct': False, 'has_inverted': False}
+                if is_inverted:
+                    region_haplotype_status[region_key]['has_inverted'] = True
+                else:
+                    region_haplotype_status[region_key]['has_direct'] = True
+        temp_flanking_stats.append({'stats': seq_stats, 'key': region_key})
+
+    logger.info(f"Filter Pass 1: Analyzed {len(flanking_stats_input)} sequences, found {len(region_haplotype_status)} unique defined regions represented.")
+
+    regions_to_remove = set()
+    for region_key, status in region_haplotype_status.items():
+        if not (status['has_direct'] and status['has_inverted']):
+            regions_to_remove.add(region_key)
+
+    logger.info(f"Filter Pass 2: Identified {len(regions_to_remove)} defined regions missing at least one haplotype.")
+    if regions_to_remove:
+         logger.debug(f"  Regions to be removed: {regions_to_remove}")
+
+    filtered_flanking_stats = []
+    sequences_filtered_out = 0
+    for item in temp_flanking_stats:
+        region_key = item['key']
+        if region_key is None or region_key not in regions_to_remove:
+            filtered_flanking_stats.append(item['stats'])
+        else:
+            sequences_filtered_out += 1
+
+    elapsed_time = time.time() - start_time
+    logger.info(f"Filter applied in {elapsed_time:.2f} seconds.")
+    logger.info(f"Sequences remaining after filter: {len(filtered_flanking_stats)} (Removed {sequences_filtered_out})")
+
+    if len(filtered_flanking_stats) == 0:
+        logger.error("FILTERING ERROR: No sequences remained after applying the haplotype completeness filter. Check input data and region definitions.")
+
+    return filtered_flanking_stats
 
 def main():
-    """Main function to run the analysis pipeline."""
     total_start_time = time.time()
     logger.info("--- Starting Pi Flanking Regions Analysis (mean Focus) ---")
 
-    # --- 1. Load Inversion Data ---
-    # Specifies the path to the file containing information about inversions.
     inv_file_path = Path(INVERSION_FILE)
-    # Checks if the inversion file actually exists before proceeding.
     if not inv_file_path.is_file():
         logger.error(f"Inversion info file not found: {inv_file_path}. Cannot proceed.")
         return
     logger.info(f"Loading inversion info from {inv_file_path}")
     try:
-        # Reads the inversion information from the CSV file into a pandas DataFrame.
         inversion_df = pd.read_csv(inv_file_path)
         logger.info(f"Loaded {inversion_df.shape[0]} rows from inversion file.")
-        # Processes the DataFrame to create dictionaries mapping chromosomes to region coordinates
-        # for both recurrent and single-event inversions.
         recurrent_regions, single_event_regions = map_regions_to_inversions(inversion_df)
     except Exception as e:
-        # Catches potential errors during file reading or processing.
         logger.error(f"Failed to load or process inversion file {inv_file_path}: {e}", exc_info=True)
         return
 
-    # Define pi_file_path early for use in diagnostics and main loading.
-    # Specifies the path to the file containing per-site nucleotide diversity (pi) data.
     pi_file_path = Path(PI_DATA_FILE)
-    # Checks if the pi data file actually exists.
     if not pi_file_path.is_file():
          logger.error(f"Pi data file not found: {pi_file_path}. Cannot run diagnostics or analysis.")
          return
 
-    # --- Quick Raw File Header Scan ---
-    # This scan checks the input pi file *before* applying the main script's filters
-    # (like 'filtered_pi' tag or MIN_LENGTH) to get a baseline count of headers
-    # that geographically overlap defined single-event regions for each haplotype.
-    # This helps determine if an imbalance in final counts originates from the raw input.
     logger.info("--- STARTING Quick Raw File Header Scan (Single-Event) ---")
-    raw_se_direct_headers = 0     # Counter for headers matching direct single-event regions.
-    raw_se_inverted_headers = 0   # Counter for headers matching inverted single-event regions.
-    headers_checked_raw = 0       # Counter for total headers processed in this scan.
+    raw_se_direct_headers = 0
+    raw_se_inverted_headers = 0
+    headers_checked_raw = 0
     try:
-        # Only perform the scan if single-event regions were successfully loaded.
         if single_event_regions:
-            # Opens the pi data file for reading.
             with open(pi_file_path, 'r') as f_raw:
-                # Iterates through each line in the pi data file.
                 for line in f_raw:
-                    # Process only header lines (starting with '>').
                     if line.startswith('>'):
                         headers_checked_raw += 1
-                        # Attempt to extract coordinates and group info using the existing helper function.
                         coords = extract_coordinates_from_header(line)
-                        # Proceed only if coordinates and group were successfully extracted.
                         if coords and coords.get('group') is not None:
                             header_chrom = coords['chrom']
                             header_start = coords['start']
                             header_end = coords['end']
-                            header_group = coords['group'] # Expected to be 0 (direct) or 1 (inverted).
-
-                            # Check if the header's chromosome exists in the single-event regions map.
+                            header_group = coords['group']
                             if header_chrom in single_event_regions:
-                                # Iterate through defined single-event regions on that chromosome.
                                 for r_start, r_end in single_event_regions[header_chrom]:
-                                    # Use the existing helper function to check for coordinate overlap.
                                     if is_overlapping(header_start, header_end, r_start, r_end):
-                                        # Increment the appropriate counter based on the haplotype group.
                                         if header_group == 0:
                                             raw_se_direct_headers += 1
                                         elif header_group == 1:
                                             raw_se_inverted_headers += 1
-                                        # Important: Stop checking regions for this header once an overlap is found.
-                                        # This prevents counting the same header multiple times if it spans
-                                        # multiple defined single-event regions.
                                         break
         else:
-            # Log a warning if no single-event regions were loaded from the inversion file.
             logger.warning("RAW SCAN: No single-event regions defined, skipping raw header count.")
 
     except FileNotFoundError:
-        # Handle the error if the pi data file cannot be found during the scan.
         logger.error(f"RAW SCAN ERROR: Pi file not found at {pi_file_path}")
     except Exception as e:
-        # Catch any other potential errors during the raw file scan.
         logger.error(f"RAW SCAN ERROR: Error reading {pi_file_path}: {e}")
 
-    # Log the results derived from the raw file scan.
     logger.info(f"Raw Scan Results ({headers_checked_raw} headers checked):")
     logger.info(f"  Headers overlapping ANY defined Single-Event region (Direct, group=0): {raw_se_direct_headers}")
     logger.info(f"  Headers overlapping ANY defined Single-Event region (Inverted, group=1): {raw_se_inverted_headers}")
-    # Issue a warning if the raw counts for direct and inverted headers differ.
     if raw_se_direct_headers != raw_se_inverted_headers:
         logger.warning("RAW SCAN: Imbalance detected in the number of headers present for single-event regions.")
     else:
         logger.info("RAW SCAN: Header counts for single-event regions appear balanced in the raw file.")
     logger.info("--- ENDING Quick Raw File Header Scan ---")
-    # --- End of Raw File Scan Block ---
 
-
-    # --- Run Original Post-Filter Diagnosis ---
-    # This diagnosis remains useful. It checks how many *defined* single-event regions
-    # have corresponding headers in the pi file that meet the specific criteria
-    # applied later by the `load_pi_data` function (e.g., must contain 'filtered_pi',
-    # must meet MIN_LENGTH). This helps differentiate between raw file absence and
-    # filtering effects within this script.
     if single_event_regions:
-         # Calls the original diagnostic function.
          diagnose_single_event_discrepancy(
-             pi_file_path=pi_file_path, # Use the already defined pi_file_path
+             pi_file_path=pi_file_path,
              single_event_regions=single_event_regions,
              min_length=MIN_LENGTH,
              inv_info_path=inv_file_path
          )
     else:
-         # Skips this diagnosis if no single-event regions were loaded.
          logger.warning("Skipping single-event discrepancy diagnosis as no single-event regions were loaded/mapped.")
 
-
-    # --- 2. Load Pi Data ---
-    # This step loads the actual pi data sequences, applying filters.
-    # It specifically looks for headers containing 'filtered_pi' and sequences
-    # meeting the MIN_LENGTH requirement. It uses the pi_file_path defined earlier.
-    # The function includes its own internal error handling and logging.
     pi_sequences = load_pi_data(pi_file_path)
-    # Checks if any sequences actually passed the loading and filtering steps.
     if not pi_sequences:
         logger.error("No valid pi sequences loaded after filtering by `load_pi_data`. Exiting.")
         return
 
-    # --- 3. Calculate Statistics ---
-    # Calculates statistics (mean/median pi) for flanking and middle regions
-    # for each loaded sequence.
-    # This function also includes internal error handling, potentially skipping
-    # sequences that are too short for flanking analysis or have NaN stats.
     flanking_stats = calculate_flanking_stats(pi_sequences)
-    # Checks if any sequences remained after calculating statistics.
     if not flanking_stats:
         logger.error("No sequences remained after calculating flanking statistics (check logs for NaN/length issues). Exiting.")
         return
 
-    # --- 4. Categorize Sequences ---
-    # Assigns each sequence (with its calculated stats) into categories based on
-    # overlap with defined inversion regions (recurrent/single-event) and
-    # haplotype status (direct/inverted).
-    # This function includes internal error handling.
-    categories = categorize_sequences(flanking_stats, recurrent_regions, single_event_regions)
+    filtered_flanking_stats = filter_sequences_by_region_completeness(
+        flanking_stats,
+        recurrent_regions,
+        single_event_regions
+    )
+    if not filtered_flanking_stats:
+        logger.error("No sequences remained after applying the region haplotype completeness filter. Analysis cannot proceed.")
+        return
 
-    # --- 5. Perform Statistical Tests (mean focus + Normality logging) ---
-    # Performs statistical tests (paired permutation test for mean differences,
-    # Shapiro-Wilk normality test on differences) comparing middle vs. flanking regions
-    # for each category and overall.
-    # This function includes internal error handling.
-    test_results = perform_statistical_tests(categories, flanking_stats)
+    categories = categorize_sequences(filtered_flanking_stats, recurrent_regions, single_event_regions)
 
-    # --- 6. Create mean Plot ---
-    # Generates a bar plot visualizing the mean pi values for middle vs. flanking regions
-    # across the different categories, overlaying individual data points and p-values.
-    # This function includes internal error handling.
-    fig_mean = create_kde_plot(flanking_stats, test_results)
-    # Note: No median plot is created in this version.
+    test_results = perform_statistical_tests(categories, filtered_flanking_stats)
 
-    # --- 7. Summary Report (mean Focus) ---
-    # Logs a formatted summary table of the analysis results to the console.
-    logger.info("\n--- Analysis Summary (mean Focus) ---")
+    fig_mean = create_kde_plot(filtered_flanking_stats, test_results)
+
+    logger.info("\n--- Analysis Summary (mean Focus - AFTER Haplotype Completeness Filter) ---")
     logger.info(f"Input Pi File: {PI_DATA_FILE}")
     logger.info(f"Input Inversion File: {INVERSION_FILE}")
     logger.info(f"Min Sequence Length Filter (load_pi_data): {MIN_LENGTH}, Flank Size: {FLANK_SIZE}")
-    logger.info(f"Total Sequences Used in Final Analysis (after all filters & stat calcs): {len(flanking_stats)}")
+    logger.info(f"Total Sequences Used in Final Analysis (after ALL filters): {len(filtered_flanking_stats)}")
 
     logger.info("\nPaired Test Results (Middle vs Flanking - mean):")
     logger.info("-" * 80)
     logger.info(f"{'Category':<25} {'N Valid Pairs':<15} {'mean Diff (M-F)':<18} {'Permutation p':<15} {'Normality p':<15}")
     logger.info("-" * 80)
 
-    # Prepare data for saving to a CSV file.
     summary_data = []
-
-    # Iterate through the defined categories plus 'Overall'.
     for cat in CATEGORY_ORDER_WITH_OVERALL:
-        # Get the list of sequences for the current category.
         if cat == 'Overall':
-            seq_list = flanking_stats
+            seq_list = filtered_flanking_stats
         else:
             internal_cat = CAT_MAPPING[cat]
             seq_list = categories.get(internal_cat, [])
 
-        # Recalculate N valid pairs and mean difference for summary accuracy,
-        # ensuring consistency with the values used in tests.
         n_valid_pairs = 0
         mean_diff = np.nan
-        if seq_list: # Ensure the list is not empty
-            # Extract mean values for middle and flanking regions.
+        if seq_list:
             m_means = np.array([s['middle_mean'] for s in seq_list])
             f_means = np.array([s['flanking_mean'] for s in seq_list])
-            # Identify pairs where both middle and flanking means are valid (not NaN).
             valid_indices = ~np.isnan(m_means) & ~np.isnan(f_means)
-            n_valid_pairs = int(np.sum(valid_indices)) # Get the count of valid pairs.
-            # Calculate the mean difference only if valid pairs exist.
+            n_valid_pairs = int(np.sum(valid_indices))
             if n_valid_pairs > 0:
                 mean_diff = np.mean(m_means[valid_indices] - f_means[valid_indices])
 
-        # Retrieve pre-calculated p-values from the test results dictionary.
         mean_p = test_results.get(cat, {}).get('mean_p', np.nan)
-        norm_p = test_results.get(cat, {}).get('mean_normality_p', np.nan) # Normality p-value for mean differences.
+        norm_p = test_results.get(cat, {}).get('mean_normality_p', np.nan)
 
-        # Format the results for display.
         n_str = str(n_valid_pairs)
         mean_diff_str = f"{mean_diff:.4g}" if not np.isnan(mean_diff) else "N/A"
-        mean_p_str = format_p_value(mean_p) # Use helper function for p-value formatting.
+        mean_p_str = format_p_value(mean_p)
         norm_p_str = f"{norm_p:.3g}" if not np.isnan(norm_p) else "N/A"
 
-        # Log the formatted results for the current category.
         logger.info(f"{cat:<25} {n_str:<15} {mean_diff_str:<18} {mean_p_str:<15} {norm_p_str:<15}")
-        # Append the results to the list for CSV export.
         summary_data.append({
             'Category': cat,
-            'N_Valid_Pairs': n_valid_pairs, # Number of pairs used in the test for this category.
+            'N_Valid_Pairs': n_valid_pairs,
             'mean_Difference_Middle_Minus_Flanking': mean_diff,
             'mean_Permutation_p_value': mean_p,
             'mean_Diff_Normality_p_value': norm_p
@@ -1227,22 +1217,17 @@ def main():
 
     logger.info("-" * 80)
 
-    # Save the summary data to a CSV file in the specified output directory.
     summary_df = pd.DataFrame(summary_data)
-    summary_csv_path = OUTPUT_DIR / "pi_analysis_mean_summary.csv"
+    summary_csv_path = OUTPUT_DIR / "pi_analysis_mean_summary_filtered.csv"
     try:
-        # Writes the DataFrame to CSV, formatting floats and omitting the index.
         summary_df.to_csv(summary_csv_path, index=False, float_format='%.5g')
-        logger.info(f"Analysis summary saved to {summary_csv_path}")
+        logger.info(f"Analysis summary (filtered) saved to {summary_csv_path}")
     except Exception as e:
-        # Catches potential errors during CSV writing.
-        logger.error(f"Failed to save summary CSV to {summary_csv_path}: {e}")
+        logger.error(f"Failed to save filtered summary CSV to {summary_csv_path}: {e}")
 
-    # Calculate and log the total execution time of the script.
     total_elapsed_time = time.time() - total_start_time
     logger.info(f"--- Analysis finished in {total_elapsed_time:.2f} seconds ---")
 
-    # Close the matplotlib plot figure if it was generated to free resources.
     if fig_mean:
         plt.close(fig_mean)
 
