@@ -864,7 +864,7 @@ def format_p_value(p_value: float) -> str:
         return f"p = {p_value:.2g}" if p_value >= 0.01 else f"p = {p_value:.3f}"
 
 
-def create_kdr_plot(all_sequences_stats: list[dict], test_results: dict) -> plt.Figure | None:
+def create_kde_plot(all_sequences_stats: list[dict], test_results: dict) -> plt.Figure | None:
     """
     Creates an overlaid Kernel Density Estimate (KDE) plot comparing the overall
     distribution of mean Pi values between Middle and Flanking regions across all valid sequences.
