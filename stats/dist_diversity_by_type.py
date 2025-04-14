@@ -1077,6 +1077,90 @@ def filter_sequences_by_region_completeness(
 
     return filtered_flanking_stats
 
+
+def find_and_filter_strict_pairs(flanking_stats_input, recurrent_regions, single_event_regions):
+    print("INFO: Applying strict 1:1 filter: Keeping only regions with exactly one direct and one inverted entry...")
+
+    def _find_overlapping_region_key(coords, rec_regions, se_regions):
+        chrom = coords.get('chrom')
+        start = coords.get('start')
+        end = coords.get('end')
+        if not (chrom and isinstance(start, int) and isinstance(end, int)):
+             return None
+
+        overlapping_keys = []
+        for r_start, r_end in rec_regions.get(chrom, []):
+             if is_overlapping(start, end, r_start, r_end):
+                 overlapping_keys.append(('recurrent', chrom, r_start, r_end))
+        for r_start, r_end in se_regions.get(chrom, []):
+             if is_overlapping(start, end, r_start, r_end):
+                 overlapping_keys.append(('single_event', chrom, r_start, r_end))
+
+        key_to_return = None
+        if len(overlapping_keys) == 1:
+             key_to_return = overlapping_keys[0]
+
+        return key_to_return
+
+    sequences_by_region = {}
+    sequences_without_region = []
+    sequences_with_issues = 0
+
+    for seq_stats in flanking_stats_input:
+        coords = seq_stats.get('coords')
+        is_inverted_status = seq_stats.get('is_inverted')
+
+        if coords is None or is_inverted_status is None:
+            sequences_without_region.append(seq_stats)
+            sequences_with_issues += 1
+            continue
+
+        region_key = _find_overlapping_region_key(coords, recurrent_regions, single_event_regions)
+
+        if region_key:
+            sequences_by_region.setdefault(region_key, []).append(seq_stats)
+        else:
+            sequences_without_region.append(seq_stats)
+
+    if sequences_with_issues > 0:
+        print(f"WARNING: Strict Pair Filter: {sequences_with_issues} sequences lacked coordinates or inversion status.")
+    print(f"INFO: Strict Pair Filter: Grouped sequences into {len(sequences_by_region)} potential region groups.")
+
+    strictly_paired_stats = []
+    regions_passed = 0
+    regions_failed_count = 0
+    regions_failed_duplicates = 0
+
+    for region_key, seq_list in sequences_by_region.items():
+        direct_sequences = [s for s in seq_list if s.get('is_inverted') == False]
+        inverted_sequences = [s for s in seq_list if s.get('is_inverted') == True]
+
+        if len(direct_sequences) == 1 and len(inverted_sequences) == 1:
+            strictly_paired_stats.extend(direct_sequences)
+            strictly_paired_stats.extend(inverted_sequences)
+            regions_passed += 1
+        else:
+            regions_failed_count += 1
+            if len(direct_sequences) > 1 or len(inverted_sequences) > 1:
+                 regions_failed_duplicates += 1
+                 print(f"CRITICAL ERROR: Strict Pair Filter: Region {region_key} FAILED (Duplicates Found - Direct: {len(direct_sequences)}, Inverted: {len(inverted_sequences)}).")
+
+    strictly_paired_stats.extend(sequences_without_region)
+    num_non_region_kept = len(sequences_without_region)
+
+    print(f"INFO: Strict 1:1 filter complete.")
+    print(f"  Regions passing 1:1 check: {regions_passed}")
+    print(f"  Regions failing check (any reason): {regions_failed_count}")
+    if regions_failed_duplicates > 0:
+         print(f"  WARNING: Regions failed due to DUPLICATES: {regions_failed_duplicates} << CHECK INPUT DATA")
+    print(f"  Sequences kept (not in defined regions): {num_non_region_kept}")
+    print(f"  Total sequences returned: {len(strictly_paired_stats)}")
+
+    if len(strictly_paired_stats) == 0 and len(flanking_stats_input) > 0 :
+        print("ERROR: FILTERING ERROR: No sequences remained after applying the strict 1:1 pairing filter.")
+
+    return strictly_paired_stats
+
 def main():
     total_start_time = time.time()
     logger.info("--- Starting Pi Flanking Regions Analysis (mean Focus) ---")
@@ -1160,26 +1244,26 @@ def main():
         logger.error("No sequences remained after calculating flanking statistics (check logs for NaN/length issues). Exiting.")
         return
 
-    filtered_flanking_stats = filter_sequences_by_region_completeness(
+    strict_paired_stats = find_and_filter_strict_pairs(
         flanking_stats,
         recurrent_regions,
         single_event_regions
     )
-    if not filtered_flanking_stats:
-        logger.error("No sequences remained after applying the region haplotype completeness filter. Analysis cannot proceed.")
+    if not strict_paired_stats:
+        logger.error("No sequences remained after applying the strict 1:1 pairing filter. Analysis cannot proceed.")
         return
 
-    categories = categorize_sequences(filtered_flanking_stats, recurrent_regions, single_event_regions)
+    categories = categorize_sequences(strict_paired_stats, recurrent_regions, single_event_regions)
 
-    test_results = perform_statistical_tests(categories, filtered_flanking_stats)
+    test_results = perform_statistical_tests(categories, strict_paired_stats)
 
-    fig_mean = create_kde_plot(filtered_flanking_stats, test_results)
+    fig_mean = create_kde_plot(strict_paired_stats, test_results)
 
-    logger.info("\n--- Analysis Summary (mean Focus - AFTER Haplotype Completeness Filter) ---")
+    logger.info("\n--- Analysis Summary (mean Focus - AFTER STRICT 1:1 REGION PAIRING) ---")
     logger.info(f"Input Pi File: {PI_DATA_FILE}")
     logger.info(f"Input Inversion File: {INVERSION_FILE}")
     logger.info(f"Min Sequence Length Filter (load_pi_data): {MIN_LENGTH}, Flank Size: {FLANK_SIZE}")
-    logger.info(f"Total Sequences Used in Final Analysis (after ALL filters): {len(filtered_flanking_stats)}")
+    logger.info(f"Total Sequences Used in Final Analysis (after ALL filters & strict pairing): {len(strict_paired_stats)}")
 
     logger.info("\nPaired Test Results (Middle vs Flanking - mean):")
     logger.info("-" * 80)
@@ -1189,7 +1273,7 @@ def main():
     summary_data = []
     for cat in CATEGORY_ORDER_WITH_OVERALL:
         if cat == 'Overall':
-            seq_list = filtered_flanking_stats
+            seq_list = strict_paired_stats
         else:
             internal_cat = CAT_MAPPING[cat]
             seq_list = categories.get(internal_cat, [])
@@ -1224,12 +1308,12 @@ def main():
     logger.info("-" * 80)
 
     summary_df = pd.DataFrame(summary_data)
-    summary_csv_path = OUTPUT_DIR / "pi_analysis_mean_summary_filtered.csv"
+    summary_csv_path = OUTPUT_DIR / "pi_analysis_mean_summary_strict_pairs.csv"
     try:
         summary_df.to_csv(summary_csv_path, index=False, float_format='%.5g')
-        logger.info(f"Analysis summary (filtered) saved to {summary_csv_path}")
+        logger.info(f"Analysis summary (strict pairing) saved to {summary_csv_path}")
     except Exception as e:
-        logger.error(f"Failed to save filtered summary CSV to {summary_csv_path}: {e}")
+        logger.error(f"Failed to save strictly paired summary CSV to {summary_csv_path}: {e}")
 
     total_elapsed_time = time.time() - total_start_time
     logger.info(f"--- Analysis finished in {total_elapsed_time:.2f} seconds ---")
