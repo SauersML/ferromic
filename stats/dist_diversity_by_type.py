@@ -1168,7 +1168,7 @@ def main():
     # Generates a bar plot visualizing the mean pi values for middle vs. flanking regions
     # across the different categories, overlaying individual data points and p-values.
     # This function includes internal error handling.
-    fig_mean = create_kdr_plot(categories, flanking_stats, test_results)
+    fig_mean = create_kde_plot(flanking_stats, test_results)
     # Note: No median plot is created in this version.
 
     # --- 7. Summary Report (mean Focus) ---
