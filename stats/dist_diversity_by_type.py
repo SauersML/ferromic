@@ -187,10 +187,16 @@ def map_regions_to_inversions(inversion_df: pd.DataFrame) -> tuple[dict, dict]:
     return recurrent_regions, single_event_regions
 
 def is_overlapping(region1_start: int, region1_end: int, region2_start: int, region2_end: int) -> bool:
-    """Check if two genomic regions overlap (inclusive coordinates)."""
-    # Assumes coordinates are 1-based inclusive, typical in biology
-    # Overlap exists if one region starts before the other ends, and vice versa
-    return region1_start <= region2_end and region1_end >= region2_start
+    """
+    Check if two genomic regions overlap or are separated by at most 1 base pair
+    (inclusive coordinates). Returns True if they overlap, are adjacent,
+    or have exactly a 1 bp gap between them.
+    """
+    # Assumes coordinates are 1-based inclusive.
+    # Condition checks if region 1 doesn't end more than 1 bp before region 2 starts,
+    # AND if region 2 doesn't end more than 1 bp before region 1 starts.
+    # This covers actual overlap, adjacency (0 bp gap), and a 1 bp gap.
+    return (region1_end + 2) >= region2_start and (region2_end + 2) >= region1_start
 
 def determine_inversion_type(coords: dict, recurrent_regions: dict, single_event_regions: dict) -> str:
     """
