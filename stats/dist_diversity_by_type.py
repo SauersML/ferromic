@@ -996,23 +996,87 @@ def main():
         inversion_df = pd.read_csv(inv_file_path)
         logger.info(f"Loaded {inversion_df.shape[0]} rows from inversion file.")
         recurrent_regions, single_event_regions = map_regions_to_inversions(inversion_df)
-    except Exception as e:
+     except Exception as e:
         logger.error(f"Failed to load or process inversion file {inv_file_path}: {e}", exc_info=True)
         return
 
-    # Make sure single_event_regions exists and has data before calling
+    # Define pi_file_path early for use in diagnostics
+    pi_file_path = Path(PI_DATA_FILE)
+    if not pi_file_path.is_file():
+         logger.error(f"Pi data file not found: {pi_file_path}. Cannot run diagnostics or analysis.")
+         return
+
+    # --- Quick Raw File Header Scan ---
+    # This scan checks the input file *before* filtering by load_pi_data
+    # to see if the sheer number of available headers for single-event
+    # regions is balanced between direct and inverted haplotypes.
+    logger.info("--- STARTING Quick Raw File Header Scan (Single-Event) ---")
+    raw_se_direct_headers = 0
+    raw_se_inverted_headers = 0
+    headers_checked_raw = 0
+    try:
+        # Check if single_event_regions is not empty before proceeding
+        if single_event_regions:
+            with open(pi_file_path, 'r') as f_raw:
+                for line in f_raw:
+                    if line.startswith('>'):
+                        headers_checked_raw += 1
+                        # Attempt to extract coordinates and group using existing helper
+                        coords = extract_coordinates_from_header(line)
+                        # Proceed only if coordinates and group were successfully extracted
+                        if coords and coords.get('group') is not None:
+                            header_chrom = coords['chrom']
+                            header_start = coords['start']
+                            header_end = coords['end']
+                            header_group = coords['group'] # Should be 0 or 1
+
+                            # Check for overlap specifically with single-event regions
+                            if header_chrom in single_event_regions:
+                                for r_start, r_end in single_event_regions[header_chrom]:
+                                    # Use existing helper to check for geographical overlap
+                                    if is_overlapping(header_start, header_end, r_start, r_end):
+                                        # Increment the appropriate counter based on the group
+                                        if header_group == 0:
+                                            raw_se_direct_headers += 1
+                                        elif header_group == 1:
+                                            raw_se_inverted_headers += 1
+                                        # Important: Break after the first overlap found for this header
+                                        # to avoid counting the same header multiple times if it spans
+                                        # multiple defined single-event regions.
+                                        break
+        else:
+            # Log if no single-event regions were defined in the first place
+            logger.warning("RAW SCAN: No single-event regions defined, skipping raw header count.")
+
+    except FileNotFoundError:
+        # Handle case where the pi data file doesn't exist
+        logger.error(f"RAW SCAN ERROR: Pi file not found at {pi_file_path}")
+    except Exception as e:
+        # Catch any other file reading or processing errors during the raw scan
+        logger.error(f"RAW SCAN ERROR: Error reading {pi_file_path}: {e}")
+
+    # Log the results of the raw scan
+    logger.info(f"Raw Scan Results ({headers_checked_raw} headers checked):")
+    logger.info(f"  Headers overlapping ANY defined Single-Event region (Direct, group=0): {raw_se_direct_headers}")
+    logger.info(f"  Headers overlapping ANY defined Single-Event region (Inverted, group=1): {raw_se_inverted_headers}")
+    # Issue a warning if the raw counts differ, suggesting input file imbalance
+    if raw_se_direct_headers != raw_se_inverted_headers:
+        logger.warning("RAW SCAN: Imbalance detected in the number of headers present for single-event regions.")
+    else:
+        logger.info("RAW SCAN: Header counts for single-event regions appear balanced in the raw file.")
+    logger.info("--- ENDING Quick Raw File Header Scan ---")
+ 
     if single_event_regions:
          diagnose_single_event_discrepancy(
-             pi_file_path=Path(PI_DATA_FILE), # PI_DATA_FILE is defined before this point
+             pi_file_path=pi_file_path, # Use the already defined pi_file_path
              single_event_regions=single_event_regions,
-             min_length=MIN_LENGTH, # MIN_LENGTH is defined
+             min_length=MIN_LENGTH,
              inv_info_path=inv_file_path
          )
     else:
          logger.warning("Skipping single-event discrepancy diagnosis as no single-event regions were loaded/mapped.")
 
     # --- 2. Load Pi Data ---
-    pi_file_path = Path(PI_DATA_FILE)
     if not pi_file_path.is_file():
         logger.error(f"Pi data file not found: {pi_file_path}. Cannot proceed.")
         return
