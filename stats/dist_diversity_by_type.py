@@ -829,154 +829,183 @@ def format_p_value(p_value: float) -> str:
         # Use 2 or 3 significant figures, avoiding trailing zeros where possible
         return f"p = {p_value:.2g}" if p_value >= 0.01 else f"p = {p_value:.3f}"
 
+import logging
+import time
+from pathlib import Path
 
-def create_bar_plot(categories: dict, all_sequences_stats: list[dict], test_results: dict) -> plt.Figure | None:
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns  # Import seaborn for KDE plots
+from scipy.stats import gaussian_kde # Alternative for manual KDE, but seaborn is easier
+
+# Assume logger, OUTPUT_DIR, COLOR_PALETTE, FLANKING_COLOR, MIDDLE_COLOR,
+# SCATTER_ALPHA, SCATTER_SIZE, format_p_value are defined as before.
+# Ensure plt.style.use('seaborn-v0_8-whitegrid') is set elsewhere or here.
+
+logger = logging.getLogger('pi_flanking_analysis') # Make sure logger is defined
+OUTPUT_DIR = Path('pi_analysis_results') # Make sure OUTPUT_DIR is defined
+COLOR_PALETTE = plt.cm.tab10.colors # Define COLOR_PALETTE
+FLANKING_COLOR = COLOR_PALETTE[0] # Blue
+MIDDLE_COLOR = COLOR_PALETTE[1]  # Orange
+SCATTER_ALPHA = 0.6 # Define SCATTER_ALPHA
+SCATTER_SIZE = 15 # Define SCATTER_SIZE (adjusted for potentially many points)
+JITTER_WIDTH = 0.08 # Width for jittering scatter points
+
+# Ensure the format_p_value function exists as defined before
+def format_p_value(p_value: float) -> str:
+    """Formats p-value for display on the plot."""
+    if np.isnan(p_value):
+        return "p = N/A"
+    elif p_value < 0.001:
+        return "p < 0.001"
+    else:
+        # Use 2 or 3 significant figures, avoiding trailing zeros where possible
+        return f"p = {p_value:.2g}" if p_value >= 0.01 else f"p = {p_value:.3f}"
+
+
+def create_kdr_plot(all_sequences_stats: list[dict], test_results: dict) -> plt.Figure | None:
     """
-    Create bar plot comparing mean pi values by category.
-    Includes scatter plot overlay of individual data points and permutation test p-values.
-    Uses highly transparent bars. Only produces mean plot.
+    Creates an overlaid Kernel Density Estimate (KDE) plot comparing the overall
+    distribution of mean Pi values between Middle and Flanking regions across all valid sequences.
+    Includes a jittered scatter plot of individual data points and displays the overall
+    paired test p-value.
 
     Args:
-        categories: Dictionary with categorized sequence statistics.
-        all_sequences_stats: List of all sequence statistics (for 'Overall').
-        test_results: Dictionary containing pre-calculated p-values for the mean.
+        all_sequences_stats: List of dictionaries containing statistics for ALL sequences
+                             that passed initial filters and calculations. Expected keys include
+                             'middle_mean' and 'flanking_mean'.
+        test_results: Dictionary containing pre-calculated test results, specifically
+                      expecting test_results['Overall']['mean_p'] and
+                      test_results['Overall']['n_valid_pairs'].
 
     Returns:
-        matplotlib Figure object or None if no data to plot.
+        matplotlib Figure object or None if no valid data to plot.
     """
-    stat_type = "mean" # Hardcoded to mean
-    logger.info(f"Creating bar plot for {stat_type.capitalize()}...")
+    stat_type = "mean" # Focus is on mean Pi
+    logger.info(f"Creating Overall KDE comparison plot for {stat_type.capitalize()} Pi...")
     start_time = time.time()
 
-    # Determine which fields to use based on stat_type="mean"
+    # --- 1. Extract Data for Overall Comparison ---
     flanking_field = f"flanking_{stat_type}"
     middle_field = f"middle_{stat_type}"
-    p_value_field = f"{stat_type}_p" # Key to fetch p-value from test_results
 
-    # Prepare data for plotting
-    plot_data = {}
-    max_stat_value = 0 # Keep track of max value for y-axis limits and annotation placement
+    # Extract paired values, ensuring both are non-NaN for each pair
+    flanking_values = []
+    middle_values = []
+    for s in all_sequences_stats:
+        f_val = s.get(flanking_field)
+        m_val = s.get(middle_field)
+        # Check both values are valid numbers before adding the pair
+        if f_val is not None and m_val is not None and \
+           not np.isnan(f_val) and not np.isnan(m_val):
+            flanking_values.append(f_val)
+            middle_values.append(m_val)
 
-    # Collect stats for each category in the defined order + Overall
-    for display_cat in CATEGORY_ORDER_WITH_OVERALL:
-        if display_cat == 'Overall':
-            seq_list = all_sequences_stats
-        else:
-            internal_cat = CAT_MAPPING[display_cat]
-            seq_list = categories.get(internal_cat, [])
-        count = len(seq_list)
+    # Get overall test results
+    overall_results = test_results.get('Overall', {})
+    overall_p_value = overall_results.get('mean_p', np.nan)
+    n_valid_pairs = overall_results.get('n_valid_pairs', len(flanking_values)) # Use calculated N if available
 
-        # Calculate aggregated mean stats for the bars
-        valid_flanking = [s[flanking_field] for s in seq_list if not np.isnan(s[flanking_field])]
-        valid_middle = [s[middle_field] for s in seq_list if not np.isnan(s[middle_field])]
-
-        # Use mean for bar height
-        agg_flanking_stat = np.mean(valid_flanking) if valid_flanking else np.nan
-        agg_middle_stat = np.mean(valid_middle) if valid_middle else np.nan
-
-        # Extract individual paired points for scatter plot, removing pairs with NaNs
-        paired_flanking = []
-        paired_middle = []
-        for s in seq_list:
-            f_val = s[flanking_field]
-            m_val = s[middle_field]
-            if not np.isnan(f_val) and not np.isnan(m_val):
-                paired_flanking.append(f_val)
-                paired_middle.append(m_val)
-                # Update max for y-limit based on individual points
-                max_stat_value = max(max_stat_value, f_val, m_val)
-
-        plot_data[display_cat] = {
-            'flanking_agg': agg_flanking_stat,
-            'middle_agg': agg_middle_stat,
-            'flanking_points': paired_flanking,
-            'middle_points': paired_middle,
-            'count': count,
-            'p_value': test_results.get(display_cat, {}).get(p_value_field, np.nan)
-        }
-        # Update max for y-limit based on aggregated bar heights
-        max_stat_value = max(max_stat_value, agg_flanking_stat if not np.isnan(agg_flanking_stat) else 0, agg_middle_stat if not np.isnan(agg_middle_stat) else 0)
-
-
-    # Check if there's anything to plot
-    all_points_count = sum(len(d['flanking_points']) for d in plot_data.values())
-    if all_points_count == 0:
-         logger.warning(f"No valid data points found to plot for {stat_type}. Skipping plot generation.")
+    # Check if there's enough data to plot
+    if n_valid_pairs < 2:
+         logger.warning(f"Insufficient valid pairs ({n_valid_pairs}) for Overall comparison. Skipping KDE plot.")
          return None
 
-    # --- Plotting Setup ---
-    fig, ax = plt.subplots(figsize=(16, 9)) # Wider format
-    x = np.arange(len(CATEGORY_ORDER_WITH_OVERALL)) # x-coordinates for categories
-    width = 0.35 # Width of the bars
+    # Calculate mean difference for annotation
+    mean_diff = np.mean(np.array(middle_values) - np.array(flanking_values))
 
-    # Extract aggregated values for bars
-    flanking_bar_values = [plot_data[cat]['flanking_agg'] for cat in CATEGORY_ORDER_WITH_OVERALL]
-    middle_bar_values = [plot_data[cat]['middle_agg'] for cat in CATEGORY_ORDER_WITH_OVERALL]
+    # --- 2. Plotting Setup ---
+    plt.style.use('seaborn-v0_8-whitegrid') # Ensure style is set
+    fig, ax = plt.subplots(figsize=(10, 7)) # Adjusted figure size for single comparison
 
-    # Create bars with high transparency
-    rects1 = ax.bar(x - width/2, flanking_bar_values, width, label='Flanking Regions', color=FLANKING_COLOR, alpha=BAR_ALPHA)
-    rects2 = ax.bar(x + width/2, middle_bar_values, width, label='Middle Region', color=MIDDLE_COLOR, alpha=BAR_ALPHA)
+    # --- 3. Jittered Scatter Plot (Plotted first, potentially lower zorder) ---
+    # Create x-coordinates for jittering
+    x_flank = np.random.normal(1, JITTER_WIDTH, size=n_valid_pairs) # Centered around 1
+    x_middle = np.random.normal(2, JITTER_WIDTH, size=n_valid_pairs) # Centered around 2
 
-    # Add scatter plot overlay and p-value annotations
-    # Add a small buffer to the max value for limits
-    y_lim_max = max_stat_value * 1.20 if max_stat_value > 0 else 1.0 # Avoid 0 limit if max is 0
-    annotation_y_pos = max_stat_value * 1.05 if max_stat_value > 0 else 0.1 # Position annotations
+    ax.scatter(x_flank, flanking_values, color=FLANKING_COLOR, alpha=SCATTER_ALPHA,
+               s=SCATTER_SIZE, label=f'Flanking Regions (n={n_valid_pairs})', zorder=1)
+    ax.scatter(x_middle, middle_values, color=MIDDLE_COLOR, alpha=SCATTER_ALPHA,
+               s=SCATTER_SIZE, label=f'Middle Region (n={n_valid_pairs})', zorder=1)
 
-    for i, cat in enumerate(CATEGORY_ORDER_WITH_OVERALL):
-        cat_data = plot_data[cat]
-        n_points = len(cat_data['flanking_points']) # Should be same as middle_points
+    # --- 4. KDE Plot (Overlay) ---
+    # Use seaborn's kdeplot for simplicity and nice smoothing
+    sns.kdeplot(y=flanking_values, color=FLANKING_COLOR, fill=True, alpha=0.3, linewidth=2, ax=ax, label='_nolegend_')
+    sns.kdeplot(y=middle_values, color=MIDDLE_COLOR, fill=True, alpha=0.3, linewidth=2, ax=ax, label='_nolegend_')
 
-        if n_points > 0:
-            # Add jitter for scatter points
-            jitter_flank = np.random.normal(0, 0.04, size=n_points)
-            jitter_middle = np.random.normal(0, 0.04, size=n_points)
+    # --- 5. Add Connecting Lines for Paired Data ---
+    # Draw faint lines connecting paired points to emphasize the paired nature
+    for i in range(n_valid_pairs):
+        ax.plot([x_flank[i], x_middle[i]], [flanking_values[i], middle_values[i]],
+                color='grey', alpha=0.2, linewidth=0.5, zorder=0)
 
-            # Plot scatter points (they are drawn on top of bars)
-            ax.scatter(x[i] - width/2 + jitter_flank, cat_data['flanking_points'],
-                       color=FLANKING_COLOR, alpha=SCATTER_ALPHA, s=SCATTER_SIZE, edgecolors='grey', linewidth=0.5, zorder=3)
-            ax.scatter(x[i] + width/2 + jitter_middle, cat_data['middle_points'],
-                       color=MIDDLE_COLOR, alpha=SCATTER_ALPHA, s=SCATTER_SIZE, edgecolors='grey', linewidth=0.5, zorder=3)
+    # --- 6. Annotations and Text ---
+    # Format p-value and mean difference
+    p_text = format_p_value(overall_p_value)
+    diff_text = f"Mean Diff (Middle - Flank): {mean_diff:.4g}"
+    n_text = f"N = {n_valid_pairs} pairs"
 
-        # Add p-value annotation (using the pre-calculated mean p-value)
-        p_value = cat_data['p_value']
-        p_text = format_p_value(p_value)
-        # Position annotation slightly above the highest point/bar in that category
-        cat_max_y = 0
-        if n_points > 0:
-             cat_max_y = max(max(cat_data['flanking_points']), max(cat_data['middle_points']))
-        cat_max_y = max(cat_max_y, cat_data['flanking_agg'] if not np.isnan(cat_data['flanking_agg']) else 0, cat_data['middle_agg'] if not np.isnan(cat_data['middle_agg']) else 0)
-        current_annotation_y_pos = cat_max_y * 1.05 if cat_max_y > 0 else annotation_y_pos # Dynamic y-pos per category
+    # Combine annotation text
+    annotation_text = f"{n_text}\n{diff_text}\n{p_text} (Permutation Test)"
+
+    # Position the annotation - typically upper right or guided by data range
+    # Determine y-position based on data range
+    max_y_val = max(max(flanking_values, default=0), max(middle_values, default=0))
+    min_y_val = min(min(flanking_values, default=0), min(middle_values, default=0))
+    y_range = max_y_val - min_y_val
+    annot_y = max_y_val - y_range * 0.05 # Position slightly below the top
+    annot_x = 2.5 # Position to the right of the data
+
+    ax.text(annot_x, annot_y, annotation_text,
+            ha='left', va='top', fontsize=11, color='black',
+            bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.7, ec='grey'))
+
+    # --- 7. Final Plot Styling ---
+    ax.set_ylabel(f'Mean Nucleotide Diversity (π)', fontsize=13)
+    ax.set_xlabel('Region Type', fontsize=13)
+
+    # Set x-axis ticks and labels to represent the two groups
+    ax.set_xticks([1, 2])
+    ax.set_xticklabels(['Flanking Regions', 'Middle Region'], fontsize=12)
+    ax.set_xlim(0.5, 2.5) # Limit x-axis to keep data groups clear
+
+    ax.set_title(f'Overall Comparison of Mean π: Middle vs. Flanking Regions', fontsize=16, pad=20)
+
+    # Add legend for scatter points explicitly (KDE labels were suppressed)
+    handles, labels = ax.get_legend_handles_labels()
+    # Filter out the KDE '_nolegend_' entries if seaborn added them
+    filtered_handles_labels = [(h, l) for h, l in zip(handles, labels) if not l.startswith('_nolegend_')]
+    if filtered_handles_labels: # Only show legend if there are actual scatter labels
+        filtered_handles, filtered_labels = zip(*filtered_handles_labels)
+        ax.legend(handles=filtered_handles, labels=filtered_labels, title="Region Type", loc='upper left', fontsize=10, frameon=True, facecolor='white', framealpha=0.8)
+    else:
+         ax.legend(title="Region Type", loc='upper left', fontsize=10, frameon=True, facecolor='white', framealpha=0.8) # Fallback legend
 
 
-        ax.text(x[i], current_annotation_y_pos, p_text, # Position above the pair of bars
-                ha='center', va='bottom', fontsize=10, color='black')
-
-    # --- Final Plot Styling ---
-    ax.set_ylabel(f'Nucleotide Diversity (π) - {stat_type.capitalize()}', fontsize=12)
-    ax.set_xticks(x)
-    # Use display names and add counts to labels
-    x_labels = [f"{cat}\n(n={plot_data[cat]['count']})" for cat in CATEGORY_ORDER_WITH_OVERALL]
-    ax.set_xticklabels(x_labels, fontsize=10, rotation=0, ha='center')
-    ax.set_title(f'Comparison of π ({stat_type.capitalize()}) between Flanking and Middle Regions', fontsize=16, pad=20)
-    ax.legend(title="Region Type", loc='upper right', fontsize=10)
     ax.grid(axis='y', linestyle='--', alpha=0.7)
+    ax.grid(axis='x', linestyle='-', alpha=0.1) # Faint grid for x category separation
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    # Adjust y-axis limit
-    ax.set_ylim(bottom=0, top=y_lim_max) # bottom is 0
+    # Adjust y-axis limit slightly beyond data range
+    y_buffer = y_range * 0.1
+    ax.set_ylim(bottom=max(0, min_y_val - y_buffer), top=max_y_val + y_buffer)
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to prevent title overlap
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout
 
-    # Save plot
-    output_filename = OUTPUT_DIR / f"pi_flanking_regions_{stat_type}_bar_plot.png"
-    plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-    logger.info(f"Saved {stat_type} plot to {output_filename}")
+    # --- 8. Save Plot ---
+    output_filename = OUTPUT_DIR / f"pi_overall_{stat_type}_kde_comparison.png"
+    try:
+        plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+        logger.info(f"Saved overall comparison KDE plot to {output_filename}")
+    except Exception as e:
+        logger.error(f"Failed to save overall KDE plot to {output_filename}: {e}")
 
     elapsed_time = time.time() - start_time
-    logger.info(f"Created and saved plot in {elapsed_time:.2f} seconds.")
+    logger.info(f"Created and saved overall KDE plot in {elapsed_time:.2f} seconds.")
 
-    return fig # Return figure object if needed elsewhere
+    return fig # Return figure object
 
 # --- Main Execution ---
 
@@ -1139,7 +1168,7 @@ def main():
     # Generates a bar plot visualizing the mean pi values for middle vs. flanking regions
     # across the different categories, overlaying individual data points and p-values.
     # This function includes internal error handling.
-    fig_mean = create_bar_plot(categories, flanking_stats, test_results)
+    fig_mean = create_kdr_plot(categories, flanking_stats, test_results)
     # Note: No median plot is created in this version.
 
     # --- 7. Summary Report (mean Focus) ---
