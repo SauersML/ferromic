@@ -864,17 +864,49 @@ def format_p_value(p_value: float) -> str:
         return f"p = {p_value:.2g}" if p_value >= 0.01 else f"p = {p_value:.3f}"
 
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+import numpy as np
+import time
+import logging
+from pathlib import Path # Assuming Path is used for OUTPUT_DIR
+
+# --- Mock Constants/Setup (replace with your actual values) ---
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+OUTPUT_DIR = Path("./output_plots") # Example output directory
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+FLANKING_COLOR = '#377eb8' # Example Blue
+MIDDLE_COLOR = '#ff7f00'  # Example Orange
+SCATTER_ALPHA = 0.6
+SCATTER_SIZE = 15
+LINE_ALPHA = 0.2
+LINE_WIDTH = 0.5
+
+def format_p_value(p_value):
+    """Helper to format p-value."""
+    if np.isnan(p_value):
+        return "p = N/A"
+    if p_value < 0.001:
+        return "p < 0.001"
+    return f"p = {p_value:.3g}"
+# --- End Mock Setup ---
+
+
 def create_kde_plot(all_sequences_stats: list[dict], test_results: dict) -> plt.Figure | None:
     """
-    Creates an overlaid Kernel Density Estimate (KDE) plot comparing the overall
-    distribution of mean Pi values between Middle and Flanking regions across all valid sequences.
-    Includes a jittered scatter plot of individual data points and displays the overall
-    paired test p-value.
+    Creates a paired comparison plot (Violin + Strip + Connection Lines)
+    comparing the distribution of mean Pi values between Middle and Flanking regions
+    across all valid sequences. Displays the overall paired test p-value.
 
     Args:
-        all_sequences_stats: List of dictionaries containing statistics for ALL sequences
-                             that passed initial filters and calculations. Expected keys include
-                             'middle_mean' and 'flanking_mean'.
+        all_sequences_stats: List of dictionaries containing statistics for ALL sequences.
+                             Expected keys include 'middle_mean', 'flanking_mean', and
+                             a unique sequence identifier (e.g., 'sequence_id') if available,
+                             otherwise pairing is implicit by order.
         test_results: Dictionary containing pre-calculated test results, specifically
                       expecting test_results['Overall']['mean_p'] and
                       test_results['Overall']['n_valid_pairs'].
@@ -883,127 +915,138 @@ def create_kde_plot(all_sequences_stats: list[dict], test_results: dict) -> plt.
         matplotlib Figure object or None if no valid data to plot.
     """
     stat_type = "mean" # Focus is on mean Pi
-    logger.info(f"Creating Overall KDE comparison plot for {stat_type.capitalize()} Pi...")
+    logger.info(f"Creating Overall Paired Comparison plot for {stat_type.capitalize()} Pi...")
     start_time = time.time()
 
-    # --- 1. Extract Data for Overall Comparison ---
+    # --- 1. Prepare Data in a Suitable Format (Long Format DataFrame) ---
     flanking_field = f"flanking_{stat_type}"
     middle_field = f"middle_{stat_type}"
 
-    # Extract paired values, ensuring both are non-NaN for each pair
-    flanking_values = []
-    middle_values = []
-    for s in all_sequences_stats:
+    data_list = []
+    flanking_values_paired = [] # Keep original paired lists for line plotting
+    middle_values_paired = []
+
+    for i, s in enumerate(all_sequences_stats):
         f_val = s.get(flanking_field)
         m_val = s.get(middle_field)
+        seq_id = s.get('sequence_id', f'pair_{i}') # Get ID or create one
+
         # Check both values are valid numbers before adding the pair
         if f_val is not None and m_val is not None and \
            not np.isnan(f_val) and not np.isnan(m_val):
-            flanking_values.append(f_val)
-            middle_values.append(m_val)
+            # Add to long format list
+            data_list.append({'id': seq_id, 'region': 'Flanking', 'pi_value': f_val})
+            data_list.append({'id': seq_id, 'region': 'Middle', 'pi_value': m_val})
+            # Add to paired lists
+            flanking_values_paired.append(f_val)
+            middle_values_paired.append(m_val)
 
     # Get overall test results
     overall_results = test_results.get('Overall', {})
     overall_p_value = overall_results.get('mean_p', np.nan)
-    n_valid_pairs = overall_results.get('n_valid_pairs', len(flanking_values)) # Use calculated N if available
+    # Use n_valid_pairs from results if available, otherwise count collected pairs
+    n_valid_pairs = overall_results.get('n_valid_pairs', len(flanking_values_paired))
 
     # Check if there's enough data to plot
     if n_valid_pairs < 2:
-         logger.warning(f"Insufficient valid pairs ({n_valid_pairs}) for Overall comparison. Skipping KDE plot.")
+         logger.warning(f"Insufficient valid pairs ({n_valid_pairs}) for Overall comparison. Skipping plot.")
          return None
 
+    if not data_list:
+        logger.warning("Data list for plotting is empty after filtering. Skipping plot.")
+        return None
+
+    # Create DataFrame
+    df = pd.DataFrame(data_list)
+
     # Calculate mean difference for annotation
-    mean_diff = np.mean(np.array(middle_values) - np.array(flanking_values))
+    mean_diff = np.mean(np.array(middle_values_paired) - np.array(flanking_values_paired))
 
     # --- 2. Plotting Setup ---
-    plt.style.use('seaborn-v0_8-whitegrid') # Ensure style is set
-    fig, ax = plt.subplots(figsize=(10, 7)) # Adjusted figure size for single comparison
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(8, 8)) # Adjusted figure size for clarity
+    region_palette = {'Flanking': FLANKING_COLOR, 'Middle': MIDDLE_COLOR}
+    region_order = ['Flanking', 'Middle'] # Ensure consistent order
 
-    # --- 3. Jittered Scatter Plot (Plotted first, potentially lower zorder) ---
-    # Create x-coordinates for jittering
-    x_flank = np.random.normal(1, JITTER_WIDTH, size=n_valid_pairs) # Centered around 1
-    x_middle = np.random.normal(2, JITTER_WIDTH, size=n_valid_pairs) # Centered around 2
-
-    ax.scatter(x_flank, flanking_values, color=FLANKING_COLOR, alpha=SCATTER_ALPHA,
-               s=SCATTER_SIZE, label=f'Flanking Regions (n={n_valid_pairs})', zorder=1)
-    ax.scatter(x_middle, middle_values, color=MIDDLE_COLOR, alpha=SCATTER_ALPHA,
-               s=SCATTER_SIZE, label=f'Middle Region (n={n_valid_pairs})', zorder=1)
-
-    # --- 4. KDE Plot (Overlay) ---
-    # Use seaborn's kdeplot for simplicity and nice smoothing
-    sns.kdeplot(y=flanking_values, color=FLANKING_COLOR, fill=True, alpha=0.3, linewidth=2, ax=ax, label='_nolegend_')
-    sns.kdeplot(y=middle_values, color=MIDDLE_COLOR, fill=True, alpha=0.3, linewidth=2, ax=ax, label='_nolegend_')
-
-    # --- 5. Add Connecting Lines for Paired Data ---
-    # Draw faint lines connecting paired points to emphasize the paired nature
+    # --- 3. Add Connecting Lines (Plotted first, low zorder) ---
+    # X coordinates for the categories (typically 0 and 1 in seaborn)
+    x_coords = [0, 1]
     for i in range(n_valid_pairs):
-        ax.plot([x_flank[i], x_middle[i]], [flanking_values[i], middle_values[i]],
-                color='grey', alpha=0.2, linewidth=0.5, zorder=0)
+        ax.plot(x_coords, [flanking_values_paired[i], middle_values_paired[i]],
+                color='grey', alpha=LINE_ALPHA, linewidth=LINE_WIDTH, zorder=1)
+
+    # --- 4. Violin Plot (Shows Distribution) ---
+    sns.violinplot(data=df, x='region', y='pi_value', order=region_order,
+                   palette=region_palette, ax=ax,
+                   inner=None, # Don't draw inner box/quartiles, we'll add points
+                   linewidth=1.5,
+                   cut=0, # Limit violin range to data
+                   scale='width', # Violins have same width/area
+                   zorder=10) # Draw violins above lines
+
+    # --- 5. Strip Plot (Jittered Individual Points) ---
+    # Plot points ON TOP of violins
+    sns.stripplot(data=df, x='region', y='pi_value', order=region_order,
+                  ax=ax,
+                  color='black', # Use black or dark grey for points for contrast
+                  alpha=SCATTER_ALPHA,
+                  size=SCATTER_SIZE * 0.5, # Make points slightly smaller than original plan
+                  jitter=True,
+                  zorder=20) # Draw points above violins
 
     # --- 6. Annotations and Text ---
-    # Format p-value and mean difference
     p_text = format_p_value(overall_p_value)
     diff_text = f"Mean Diff (Middle - Flank): {mean_diff:.4g}"
     n_text = f"N = {n_valid_pairs} pairs"
+    annotation_text = f"{n_text}\n{diff_text}\n{p_text} (Permutation Test)" # Assuming test type
 
-    # Combine annotation text
-    annotation_text = f"{n_text}\n{diff_text}\n{p_text} (Permutation Test)"
-
-    # Position the annotation - typically upper right or guided by data range
-    # Determine y-position based on data range
-    max_y_val = max(max(flanking_values, default=0), max(middle_values, default=0))
-    min_y_val = min(min(flanking_values, default=0), min(middle_values, default=0))
-    y_range = max_y_val - min_y_val
-    annot_y = max_y_val - y_range * 0.05 # Position slightly below the top
-    annot_x = 2.5 # Position to the right of the data
-
-    ax.text(annot_x, annot_y, annotation_text,
-            ha='left', va='top', fontsize=11, color='black',
-            bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.7, ec='grey'))
+    # Position annotation - use data coordinates transformed
+    # Place in upper right quadrant relative to axes
+    ax.text(0.95, 0.95, annotation_text,
+            transform=ax.transAxes, # Use axes coordinates (0-1 range)
+            ha='right', va='top', fontsize=11, color='black',
+            bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.8, ec='grey'))
 
     # --- 7. Final Plot Styling ---
     ax.set_ylabel(f'Mean Nucleotide Diversity (π)', fontsize=13)
-    ax.set_xlabel('Region Type', fontsize=13)
+    ax.set_xlabel('Region Type', fontsize=13) # X-axis clearly shows the categories
 
-    # Set x-axis ticks and labels to represent the two groups
-    ax.set_xticks([1, 2])
-    ax.set_xticklabels(['Flanking Regions', 'Middle Region'], fontsize=12)
-    ax.set_xlim(0.5, 2.5) # Limit x-axis to keep data groups clear
+    # Adjust x-tick labels if needed (seaborn usually handles this well with `order`)
+    ax.tick_params(axis='x', labelsize=12)
+    ax.tick_params(axis='y', labelsize=11)
 
-    ax.set_title(f'Overall Comparison of Mean π: Middle vs. Flanking Regions', fontsize=16, pad=20)
+    ax.set_title(f'Paired Comparison of Mean π: Middle vs. Flanking Regions', fontsize=16, pad=20)
 
-    # Add legend for scatter points explicitly (KDE labels were suppressed)
-    handles, labels = ax.get_legend_handles_labels()
-    # Filter out the KDE '_nolegend_' entries if seaborn added them
-    filtered_handles_labels = [(h, l) for h, l in zip(handles, labels) if not l.startswith('_nolegend_')]
-    if filtered_handles_labels: # Only show legend if there are actual scatter labels
-        filtered_handles, filtered_labels = zip(*filtered_handles_labels)
-        ax.legend(handles=filtered_handles, labels=filtered_labels, title="Region Type", loc='upper left', fontsize=10, frameon=True, facecolor='white', framealpha=0.8)
-    else:
-         ax.legend(title="Region Type", loc='upper left', fontsize=10, frameon=True, facecolor='white', framealpha=0.8) # Fallback legend
-
+    # No legend needed if colors are clear from violins and axis labels
+    # Optional: Add a simple legend if preferred
+    # handles = [plt.Rectangle((0,0),1,1, color=FLANKING_COLOR), plt.Rectangle((0,0),1,1, color=MIDDLE_COLOR)]
+    # labels = ["Flanking Regions", "Middle Region"]
+    # ax.legend(handles, labels, title="Region Type", loc='upper left', fontsize=10)
 
     ax.grid(axis='y', linestyle='--', alpha=0.7)
-    ax.grid(axis='x', linestyle='-', alpha=0.1) # Faint grid for x category separation
+    ax.grid(axis='x', alpha=0.0) # No vertical grid lines needed for categories
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    # Adjust y-axis limit slightly beyond data range
-    y_buffer = y_range * 0.1
-    ax.set_ylim(bottom=max(0, min_y_val - y_buffer), top=max_y_val + y_buffer)
+    # Adjust y-axis limits slightly for padding
+    min_val = df['pi_value'].min()
+    max_val = df['pi_value'].max()
+    y_range = max_val - min_val
+    y_buffer = y_range * 0.05
+    ax.set_ylim(bottom=max(0, min_val - y_buffer), top=max_val + y_buffer) # Ensure Y doesn't go below 0 unless data is negative
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to prevent title overlap
 
     # --- 8. Save Plot ---
-    output_filename = OUTPUT_DIR / f"pi_overall_{stat_type}_kde_comparison.png"
+    output_filename = OUTPUT_DIR / f"pi_overall_{stat_type}_paired_comparison.png"
     try:
         plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-        logger.info(f"Saved overall comparison KDE plot to {output_filename}")
+        logger.info(f"Saved overall paired comparison plot to {output_filename}")
     except Exception as e:
-        logger.error(f"Failed to save overall KDE plot to {output_filename}: {e}")
+        logger.error(f"Failed to save overall paired comparison plot to {output_filename}: {e}")
 
     elapsed_time = time.time() - start_time
-    logger.info(f"Created and saved overall KDE plot in {elapsed_time:.2f} seconds.")
+    logger.info(f"Created and saved overall paired comparison plot in {elapsed_time:.2f} seconds.")
 
     return fig # Return figure object
 
