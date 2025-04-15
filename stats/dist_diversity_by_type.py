@@ -3,6 +3,10 @@ Analyzes nucleotide diversity (pi) in flanking regions vs. middle regions
 of genomic segments, categorized by inversion type and haplotype status,
 focusing on mean values and ensuring robust statistical testing.
 
+Retains only sequences marked 'filtered_pi' in the header and sequences
+meeting a minimum length requirement. All other filtering (e.g., strict pairing,
+haplotype completeness) is removed.
+
 Handles potentially sparse pi data (many zeros).
 """
 import logging
@@ -26,18 +30,18 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-logger = logging.getLogger('pi_flanking_analysis')
+logger = logging.getLogger('pi_flanking_analysis_filtered_pi_length') # Updated logger name
 
 # Constants
 MIN_LENGTH = 150_000  # Minimum sequence length for analysis
 FLANK_SIZE = 50_000  # Size of flanking regions (each end)
 PERMUTATIONS = 10000 # Number of permutations for significance testing
-BAR_ALPHA = 0.3      # Transparency for plot bars
+BAR_ALPHA = 0.3      # Transparency for plot bars (Used previously, kept for reference)
 
 # File paths (Update these paths if necessary)
 PI_DATA_FILE = 'per_site_output.falsta'
 INVERSION_FILE = 'inv_info.csv'
-OUTPUT_DIR = Path('pi_analysis_results')
+OUTPUT_DIR = Path('pi_analysis_results_filtered_pi_length') # Updated output directory name
 
 # Create output directory if it doesn't exist
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,13 +60,21 @@ CATEGORY_ORDER_WITH_OVERALL = CATEGORY_ORDER + ['Overall']
 INTERNAL_CATEGORIES = list(CAT_MAPPING.values())
 
 # Plotting Style
-plt.style.use('seaborn-v0_8-whitegrid')
-# Using Tableau 10 color scheme for better distinction
+plt.style.use('seaborn-v0_8-ticks') # Updated style for better appearance
+# Using Tableau 10 color scheme for better distinction in general
 COLOR_PALETTE = plt.cm.tab10.colors
-FLANKING_COLOR = COLOR_PALETTE[0] # Blue
-MIDDLE_COLOR = COLOR_PALETTE[1]  # Orange
-SCATTER_ALPHA = 0.6
-SCATTER_SIZE = 25
+FLANKING_COLOR = COLOR_PALETTE[0] # Blue for Flanking
+MIDDLE_COLOR = COLOR_PALETTE[1]  # Orange for Middle
+# Paired plot specific styles
+SCATTER_ALPHA = 0.35 # Slightly more transparent points
+SCATTER_SIZE = 3.0   # Smaller points for less overlap
+LINE_ALPHA = 0.15    # More transparent lines
+LINE_WIDTH = 0.9     # Thinner lines
+VIOLIN_ALPHA = 0.2   # More transparent violin body
+MEDIAN_LINE_COLOR = 'k' # Black median line
+MEDIAN_LINE_WIDTH = 1.5 # Clear median line width
+DEFAULT_LINE_COLOR = 'grey' # Color for lines if L2FC calculation fails
+PLOT_COLORMAP = cm.coolwarm # Colormap for paired lines based on L2FC
 
 # --- Helper Functions ---
 
@@ -95,11 +107,18 @@ def extract_coordinates_from_header(header: str) -> dict | None:
     Extract genomic coordinates and group from pi sequence header using regex.
     Example: ">filtered_pi_chr_1_start_13104251_end_13122521_group_1"
     Returns None if parsing fails. Avoids try-except.
+    Only processes headers containing 'filtered_pi'.
     """
-    # Regex to capture chromosome, start, end, and  group
+    # Require 'filtered_pi' in the header for extraction
+    if 'filtered_pi' not in header.lower():
+        return None
+
+    # Regex to capture chromosome, start, end, and group
     # Allows 'chr' or 'chr_' prefix for chromosome part
     pattern = re.compile(
-        r'>.*?_chr_?([\w\.\-]+)_start_(\d+)_end_(\d+)(?:_group_([01]))?', # Allow more chars in chrom name
+        # Ensure start of line or '>' precedes 'filtered_pi' to avoid partial matches
+        # Then look for the standard coordinate pattern
+        r'>.*?filtered_pi.*?_chr_?([\w\.\-]+)_start_(\d+)_end_(\d+)(?:_group_([01]))?',
         re.IGNORECASE # Ignore case for keywords
     )
     match = pattern.search(header)
@@ -131,7 +150,10 @@ def extract_coordinates_from_header(header: str) -> dict | None:
         }
         return result
     else:
-        logger.warning(f"Failed to extract coordinates using regex from header: {header[:70]}...")
+        # Log failure only if it was supposed to be a filtered_pi header
+        # (This check is technically redundant with the initial 'if' but adds clarity)
+        if 'filtered_pi' in header.lower():
+            logger.warning(f"Failed to extract coordinates using regex from filtered_pi header: {header[:70]}...")
         return None
 
 def map_regions_to_inversions(inversion_df: pd.DataFrame) -> tuple[dict, dict]:
@@ -144,7 +166,7 @@ def map_regions_to_inversions(inversion_df: pd.DataFrame) -> tuple[dict, dict]:
     recurrent_regions = {}
     single_event_regions = {}
 
-    # correct data types, coercing errors to NaT/NaN
+    # Correct data types, coercing errors to NaT/NaN
     inversion_df['Start'] = pd.to_numeric(inversion_df['Start'], errors='coerce')
     inversion_df['End'] = pd.to_numeric(inversion_df['End'], errors='coerce')
     inversion_df['0_single_1_recur'] = pd.to_numeric(inversion_df['0_single_1_recur'], errors='coerce')
@@ -164,7 +186,7 @@ def map_regions_to_inversions(inversion_df: pd.DataFrame) -> tuple[dict, dict]:
         if chrom is None:
             continue # Skip if chromosome name is invalid
 
-        start = int(row['Start']) # Already  numeric and not NaN
+        start = int(row['Start']) # Already numeric and not NaN
         end = int(row['End'])
         is_recurrent = int(row['0_single_1_recur']) == 1
 
@@ -302,7 +324,17 @@ def parse_pi_data_line(line: str) -> np.ndarray | None:
         return data
     except ValueError as e:
         # Handle cases where a value cannot be converted to float and isn't NA
-        logger.warning(f"ValueError parsing data line value '{val_str}': {e}. Skipping line: {line[:50]}...")
+        # Extract the problematic value more reliably
+        problem_val = 'unknown'
+        try:
+            # Try to identify the specific value causing the error
+            float(val_str)
+        except ValueError:
+            problem_val = f"'{val_str}'"
+        logger.warning(f"ValueError parsing data line value {problem_val}: {e}. Skipping line segment: {line[:50]}...")
+        return None
+    except Exception as e: # Catch other unexpected errors during parsing
+        logger.error(f"Unexpected error parsing data line: {e}. Skipping line segment: {line[:50]}...", exc_info=True)
         return None
 
 def load_pi_data(file_path: str | Path) -> list[dict]:
@@ -311,21 +343,25 @@ def load_pi_data(file_path: str | Path) -> list[dict]:
     Assumes header lines start with '>' and data follows on the next line(s).
     Handles multi-line sequences by concatenating.
     Filters sequences based on MIN_LENGTH.
-    Extracts coordinates and group info from headers containing 'filtered_pi'.
+    Only processes sequences with headers containing 'filtered_pi'.
+    Extracts coordinates and group info from these headers.
     """
     logger.info(f"Loading pi data from {file_path}")
+    logger.info(f"Applying filters: Header must contain 'filtered_pi', Sequence length >= {MIN_LENGTH}")
     start_time = time.time()
 
     pi_sequences = []
     sequences_processed = 0
     headers_read = 0
     skipped_short = 0
-    skipped_not_filtered = 0
+    skipped_not_filtered_pi = 0 # Explicitly track skipped non-'filtered_pi'
     skipped_coord_error = 0
     skipped_data_error = 0
+    skipped_missing_group = 0 # Track missing group specifically
 
     current_header = None
     current_sequence_parts = []
+    is_current_header_valid = False # Track if the current header is one we care about
 
     try:
         with open(file_path, 'r') as f:
@@ -337,53 +373,67 @@ def load_pi_data(file_path: str | Path) -> list[dict]:
                 if line.startswith('>'):
                     headers_read += 1
                     # --- Process the *previous* sequence if one was being read ---
-                    if current_header and current_sequence_parts:
+                    if is_current_header_valid and current_header and current_sequence_parts:
                         sequences_processed += 1
                         full_sequence_line = "".join(current_sequence_parts)
                         pi_data = parse_pi_data_line(full_sequence_line)
 
                         if pi_data is not None:
-                            actual_length = len(pi_data)
+                            actual_length = len(pi_data) # Use actual length after parsing
                             if actual_length >= MIN_LENGTH:
-                                coords = extract_coordinates_from_header(current_header)
-                                if coords and coords.get('group') is not None: # group info exists
-                                    # Determine haplotype status (group 1 = inverted)
-                                    is_inverted = coords['group'] == 1
-
-                                    pi_sequences.append({
-                                        'header': current_header,
-                                        'coords': coords,
-                                        'data': pi_data,
-                                        'length': actual_length,
-                                        'is_inverted': is_inverted
-                                    })
+                                # Coords should already be extracted and checked when header was read
+                                coords = extract_coordinates_from_header(current_header) # Re-extract for safety, though inefficient
+                                if coords:
+                                    if coords.get('group') is not None: # Check group info exists
+                                        is_inverted = coords['group'] == 1
+                                        pi_sequences.append({
+                                            'header': current_header,
+                                            'coords': coords,
+                                            'data': pi_data,
+                                            'length': actual_length,
+                                            'is_inverted': is_inverted
+                                        })
+                                    else:
+                                        logger.warning(f"Skipping sequence: Missing group info in header '{current_header[:70]}...'")
+                                        skipped_missing_group += 1
                                 else:
-                                    # Log reason for skipping (coord error or missing group)
-                                    reason = "coordinate/group extraction failed" if not coords or coords.get('group') is None else "coordinate extraction failed"
-                                    logger.warning(f"Skipping sequence from header '{current_header[:70]}...' ({reason})")
+                                    # This case should be rare if the logic below is correct
+                                    logger.error(f"Internal Logic Error: Header '{current_header[:70]}...' was marked valid but coordinate extraction failed later.")
                                     skipped_coord_error += 1
                             else:
+                                logger.debug(f"Skipping sequence (Too Short: {actual_length} < {MIN_LENGTH}): Header '{current_header[:70]}...'")
                                 skipped_short += 1
                         else:
+                            logger.warning(f"Skipping sequence (Data Parse Error): Header '{current_header[:70]}...'")
                             skipped_data_error +=1 # Parsing the data string failed
-                        # Reset for next sequence
-                        current_header = None
-                        current_sequence_parts = []
-                    # --- Start processing the *new* sequence header ---
-                    if 'filtered_pi' in line.lower():
-                        current_header = line
-                        current_sequence_parts = [] # Reset sequence parts for the new header
-                    else:
-                        skipped_not_filtered += 1
-                        current_header = None # Ignore sequences not marked as filtered_pi
 
-                elif current_header:
-                    # Append data line to current sequence parts (handles multi-line)
-                    # Only append if we have a valid header we care about
+                    # --- Start processing the *new* sequence header ---
+                    # Reset state for the new header
+                    current_header = line
+                    current_sequence_parts = []
+                    is_current_header_valid = False # Assume invalid until checked
+
+                    # Check if this new header is 'filtered_pi'
+                    if 'filtered_pi' in current_header.lower():
+                         # Attempt to extract coordinates immediately to validate header structure
+                         coords_check = extract_coordinates_from_header(current_header)
+                         if coords_check:
+                             is_current_header_valid = True # Header looks ok, start collecting data
+                         else:
+                             logger.warning(f"Skipping sequence: 'filtered_pi' header failed coordinate/format check '{current_header[:70]}...'")
+                             skipped_coord_error += 1
+                             current_header = None # Ensure data isn't collected for this invalid header
+                    else:
+                        # It's not a 'filtered_pi' header, mark as skipped and ignore data lines
+                        skipped_not_filtered_pi += 1
+                        current_header = None # Ensure data isn't collected
+
+                elif is_current_header_valid and current_header:
+                    # Append data line only if the current header is valid ('filtered_pi' and coords ok)
                     current_sequence_parts.append(line)
 
             # --- Process the very last sequence in the file after loop ends ---
-            if current_header and current_sequence_parts:
+            if is_current_header_valid and current_header and current_sequence_parts:
                 sequences_processed += 1
                 full_sequence_line = "".join(current_sequence_parts)
                 pi_data = parse_pi_data_line(full_sequence_line)
@@ -392,22 +442,27 @@ def load_pi_data(file_path: str | Path) -> list[dict]:
                     actual_length = len(pi_data)
                     if actual_length >= MIN_LENGTH:
                         coords = extract_coordinates_from_header(current_header)
-                        if coords and coords.get('group') is not None:
-                            is_inverted = coords['group'] == 1
-                            pi_sequences.append({
-                                'header': current_header,
-                                'coords': coords,
-                                'data': pi_data,
-                                'length': actual_length,
-                                'is_inverted': is_inverted
-                            })
+                        if coords:
+                            if coords.get('group') is not None:
+                                is_inverted = coords['group'] == 1
+                                pi_sequences.append({
+                                    'header': current_header,
+                                    'coords': coords,
+                                    'data': pi_data,
+                                    'length': actual_length,
+                                    'is_inverted': is_inverted
+                                })
+                            else:
+                                logger.warning(f"Skipping last sequence: Missing group info in header '{current_header[:70]}...'")
+                                skipped_missing_group += 1
                         else:
-                            reason = "coordinate/group extraction failed" if not coords or coords.get('group') is None else "coordinate extraction failed"
-                            logger.warning(f"Skipping last sequence from header '{current_header[:70]}...' ({reason})")
-                            skipped_coord_error += 1
+                             logger.error(f"Internal Logic Error: Last header '{current_header[:70]}...' was marked valid but coordinate extraction failed.")
+                             skipped_coord_error += 1
                     else:
+                        logger.debug(f"Skipping last sequence (Too Short: {actual_length} < {MIN_LENGTH}): Header '{current_header[:70]}...'")
                         skipped_short += 1
                 else:
+                    logger.warning(f"Skipping last sequence (Data Parse Error): Header '{current_header[:70]}...'")
                     skipped_data_error += 1
 
     except FileNotFoundError:
@@ -418,10 +473,14 @@ def load_pi_data(file_path: str | Path) -> list[dict]:
         return []
 
     elapsed_time = time.time() - start_time
-    logger.info(f"Read {headers_read} headers, processed {sequences_processed} potential sequences in {elapsed_time:.2f} seconds.")
-    logger.info(f"Loaded {len(pi_sequences)} valid 'filtered_pi' sequences with length >= {MIN_LENGTH} and group info.")
-    logger.info(f"Skipped: {skipped_short} (too short), {skipped_not_filtered} (not 'filtered_pi'), "
-                f"{skipped_coord_error} (coord/group error), {skipped_data_error} (data parse error).")
+    logger.info(f"Read {headers_read} headers, processed {sequences_processed} potential 'filtered_pi' sequences in {elapsed_time:.2f} seconds.")
+    logger.info(f"Loaded {len(pi_sequences)} valid sequences meeting all criteria ('filtered_pi', length >= {MIN_LENGTH}, valid coords, group info).")
+    logger.info(f"Skipped sequences breakdown:")
+    logger.info(f"  - Not 'filtered_pi': {skipped_not_filtered_pi}")
+    logger.info(f"  - Too Short (< {MIN_LENGTH} bp): {skipped_short}")
+    logger.info(f"  - Coordinate/Format Error in Header: {skipped_coord_error}")
+    logger.info(f"  - Missing Group Info in Header: {skipped_missing_group}")
+    logger.info(f"  - Data Parsing Error: {skipped_data_error}")
 
     if pi_sequences:
          # Log chromosome distribution
@@ -431,19 +490,23 @@ def load_pi_data(file_path: str | Path) -> list[dict]:
             chrom_counts[chrom] = chrom_counts.get(chrom, 0) + 1
         logger.info(f"Chromosome distribution of loaded sequences: {chrom_counts}")
     else:
-        logger.warning("No valid pi sequences were loaded that met all criteria.")
+        logger.warning("No valid pi sequences were loaded that met all specified criteria.")
 
     return pi_sequences
+
 
 def calculate_flanking_stats(pi_sequences: list[dict]) -> list[dict]:
     """
     Calculate mean and median pi for beginning, middle, and ending regions.
     Handles NaN values within regions. Returns list of dicts with stats.
+    Skips sequences too short for flank analysis or where essential stats (middle) are NaN.
     """
     logger.info(f"Calculating flanking and middle statistics for {len(pi_sequences)} sequences...")
     start_time = time.time()
     results = []
     skipped_too_short_for_flanks = 0
+    skipped_nan_middle = 0
+    skipped_nan_flanks = 0
 
     for i, seq in enumerate(pi_sequences):
         data = seq['data']
@@ -466,61 +529,72 @@ def calculate_flanking_stats(pi_sequences: list[dict]) -> list[dict]:
             'header': seq['header'],
             'coords': seq['coords'],
             'is_inverted': seq['is_inverted'],
+            'length': seq['length'], # Keep length info
             'beginning_mean': np.nanmean(beginning_flank),
             'ending_mean': np.nanmean(ending_flank),
             'middle_mean': np.nanmean(middle_region),
-            'beginning_median': np.nanmedian(beginning_flank),
+            'beginning_median': np.nanmedian(beginning_flank), # Keep median calculation for potential future use
             'ending_median': np.nanmedian(ending_flank),
             'middle_median': np.nanmedian(middle_region)
         }
 
         # Calculate combined flanking stats AFTER individual stats are computed
-        # This prevents issues if one flank is all NaN
         b_mean, e_mean = stats['beginning_mean'], stats['ending_mean']
         stats['flanking_mean'] = np.nanmean([b_mean, e_mean]) # nanmean handles if one is NaN
 
         b_med, e_med = stats['beginning_median'], stats['ending_median']
         stats['flanking_median'] = np.nanmean([b_med, e_med]) # Use nanmean of medians as combined measure
 
-        # Check if any critical calculation resulted in NaN (e.g., all NaNs in middle region)
-        # Flanking mean/median might be valid even if one flank is NaN, but middle must be valid.
-        if np.isnan(stats['middle_mean']) or np.isnan(stats['middle_median']):
-             logger.warning(f"Sequence {i} ({seq_id}...) middle region resulted in NaN stats. Skipping this sequence.")
-             # skip sequences where essential stats are NaN
-             continue
-        # Also check if BOTH flanking regions resulted in NaN
-        if np.isnan(stats['flanking_mean']) or np.isnan(stats['flanking_median']):
-            logger.warning(f"Sequence {i} ({seq_id}...) both flanking regions resulted in NaN stats. Skipping this sequence.")
-            continue
+        # Check if any critical calculation resulted in NaN
+        # Middle region MUST have a valid mean.
+        # Flanking regions: at least one flank must have a valid mean.
+        middle_is_nan = np.isnan(stats['middle_mean'])
+        flanking_is_nan = np.isnan(stats['flanking_mean']) # Combined flanking mean is NaN only if BOTH individual flanks are NaN
 
+        if middle_is_nan:
+             logger.warning(f"Sequence {i} ({seq_id}...) middle region resulted in NaN mean stat. Skipping this sequence.")
+             skipped_nan_middle += 1
+             continue
+        if flanking_is_nan:
+            logger.warning(f"Sequence {i} ({seq_id}...) BOTH flanking regions resulted in NaN mean stats. Skipping this sequence.")
+            skipped_nan_flanks += 1
+            continue
 
         results.append(stats)
 
     elapsed_time = time.time() - start_time
+    logger.info(f"Successfully calculated statistics for {len(results)} sequences in {elapsed_time:.2f} seconds.")
     if skipped_too_short_for_flanks > 0:
         logger.warning(f"Skipped {skipped_too_short_for_flanks} sequences too short (< {min_req_len} bp) for flank analysis.")
-    logger.info(f"Successfully calculated statistics for {len(results)} sequences in {elapsed_time:.2f} seconds.")
+    if skipped_nan_middle > 0:
+        logger.warning(f"Skipped {skipped_nan_middle} sequences due to NaN in middle region mean.")
+    if skipped_nan_flanks > 0:
+        logger.warning(f"Skipped {skipped_nan_flanks} sequences due to NaN in BOTH flanking region means.")
+
     return results
 
 def categorize_sequences(flanking_stats: list[dict], recurrent_regions: dict, single_event_regions: dict) -> dict:
     """
     Categorize sequences based on inversion type and haplotype status.
     Returns a dictionary where keys are internal category names and values are lists of sequence stat dicts.
+    Sequences overlapping both recurrent and single-event regions ('ambiguous') or
+    not overlapping any defined region ('unknown') are logged but not included in categories.
     """
-    logger.info("Categorizing sequences...")
+    logger.info("Categorizing sequences based on overlap with inversion regions...")
     start_time = time.time()
     # Initialize categories using the defined order
     categories = {CAT_MAPPING[cat_name]: [] for cat_name in CATEGORY_ORDER}
     ambiguous_count = 0
     unknown_count = 0
-    sequences_without_coords = 0 # Should be low if load_pi_data works
+    sequences_without_coords = 0 # Should be low if load_pi_data/calculate_flanking_stats worked
 
     for seq_stats in flanking_stats:
         coords = seq_stats.get('coords')
-        is_inverted = seq_stats.get('is_inverted') # Should always exist if it passed calculate_stats
+        is_inverted = seq_stats.get('is_inverted') # Should exist if passed calculate_stats
 
         if coords is None or is_inverted is None:
-             sequences_without_coords += 1 # Should not happen often
+             logger.warning(f"Sequence missing coordinates or inversion status during categorization: {seq_stats.get('header', 'Unknown Header')[:70]}...")
+             sequences_without_coords += 1
              continue
 
         inversion_type = determine_inversion_type(coords, recurrent_regions, single_event_regions)
@@ -532,28 +606,37 @@ def categorize_sequences(flanking_stats: list[dict], recurrent_regions: dict, si
             category_key = 'single_event_inverted' if is_inverted else 'single_event_direct'
         elif inversion_type == 'ambiguous':
             ambiguous_count += 1
+            logger.debug(f"Sequence categorized as ambiguous (overlaps both recurrent and single): {seq_stats['header'][:70]}...")
         else: # 'unknown'
             unknown_count += 1
+            logger.debug(f"Sequence categorized as unknown (no overlap with defined regions): {seq_stats['header'][:70]}...")
 
         if category_key and category_key in categories:
             categories[category_key].append(seq_stats)
+        elif category_key:
+            # This case should not happen if CAT_MAPPING is correct
+             logger.error(f"Internal Error: Generated category key '{category_key}' not found in initialized categories for header {seq_stats['header'][:70]}...")
 
     elapsed_time = time.time() - start_time
     logger.info(f"Finished categorization in {elapsed_time:.2f} seconds.")
-    logger.info("Category counts:")
+    logger.info("Category counts (sequences assigned):")
+    total_categorized = 0
     for display_cat in CATEGORY_ORDER:
         internal_cat = CAT_MAPPING[display_cat]
-        logger.info(f"  {display_cat}: {len(categories[internal_cat])}")
-    logger.info(f"  Skipped (Ambiguous overlap): {ambiguous_count}")
-    logger.info(f"  Skipped (Unknown overlap / Not in inv file): {unknown_count}")
+        count = len(categories[internal_cat])
+        logger.info(f"  {display_cat}: {count}")
+        total_categorized += count
+    logger.info(f"Total sequences categorized: {total_categorized}")
+    logger.info(f"Sequences not categorized (Ambiguous overlap): {ambiguous_count}")
+    logger.info(f"Sequences not categorized (Unknown overlap / Not in inv file): {unknown_count}")
     if sequences_without_coords > 0:
-        logger.warning(f"  Skipped due to missing coords/group in stats data: {sequences_without_coords}")
+        logger.warning(f"Sequences skipped during categorization due to missing coords/group in stats data: {sequences_without_coords}")
 
-    # Check for empty categories
+    # Check for empty categories which might indicate issues
     for display_cat in CATEGORY_ORDER:
         internal_cat = CAT_MAPPING[display_cat]
         if not categories[internal_cat]:
-            logger.warning(f"Category '{display_cat}' is empty.")
+            logger.warning(f"Category '{display_cat}' is empty after categorization.")
 
     return categories
 
@@ -562,75 +645,95 @@ def categorize_sequences(flanking_stats: list[dict], recurrent_regions: dict, si
 def perform_statistical_tests(categories: dict, all_sequences_stats: list[dict]) -> dict:
     """
     Performs paired permutation tests and Shapiro-Wilk normality tests
-    for mean differences between flanking and middle regions.
+    for mean differences between flanking and middle regions for each category
+    and overall.
+
+    Args:
+        categories (dict): Dictionary mapping internal category names to lists of sequence stats.
+        all_sequences_stats (list): List containing stats for ALL sequences that passed previous steps.
 
     Returns:
-        dict: Nested dictionary with p-values
-              {'CategoryName': {'mean_p': float, 'mean_normality_p': float}}.
+        dict: Nested dictionary with p-values and valid pair counts.
+              {'CategoryName': {'mean_p': float, 'mean_normality_p': float, 'n_valid_pairs': int}}.
     """
-    logger.info("Performing statistical tests (Middle vs Flanking - mean)...")
+    logger.info("Performing statistical tests (Middle vs Flanking - mean difference)...")
     test_results = {}
 
-    # Combine specific categories and 'Overall' for iteration
+    # Create a map including 'Overall' using the display names for consistency
     category_data_map = {REVERSE_CAT_MAPPING[k]: v for k, v in categories.items()}
     category_data_map['Overall'] = all_sequences_stats
 
-    for category_name, seq_list in category_data_map.items():
-        logger.info(f"  Testing category: {category_name} ({len(seq_list)} sequences)")
-        test_results[category_name] = {'mean_p': np.nan, 'mean_normality_p': np.nan}
+    for category_name in CATEGORY_ORDER_WITH_OVERALL: # Iterate in defined order
+        seq_list = category_data_map.get(category_name)
+        if seq_list is None: # Should not happen with Overall, but check for safety
+            logger.warning(f"  Category {category_name} not found in data map for testing. Skipping.")
+            continue
 
-        if len(seq_list) < 2: # Need at least 2 sequences
-            logger.warning(f"    Skipping tests for {category_name}: < 2 sequences.")
+        logger.info(f"  Testing category: {category_name} ({len(seq_list)} sequences)")
+        # Initialize results for this category
+        test_results[category_name] = {'mean_p': np.nan, 'mean_normality_p': np.nan, 'n_valid_pairs': 0}
+
+        if len(seq_list) < 2: # Need at least 2 sequences for any comparison
+            logger.warning(f"    Skipping tests for {category_name}: < 2 sequences available.")
             continue
 
         # Extract paired mean values, handling potential NaNs from calculations
         flanking_means = np.array([s['flanking_mean'] for s in seq_list], dtype=float)
         middle_means = np.array([s['middle_mean'] for s in seq_list], dtype=float)
 
-        # Perform tests only if there are enough valid pairs
+        # Determine number of valid pairs (non-NaN in both flanking and middle)
         valid_indices = ~np.isnan(flanking_means) & ~np.isnan(middle_means)
-        num_valid_pairs = np.sum(valid_indices)
+        num_valid_pairs = int(np.sum(valid_indices)) # Cast to int for reporting
+        test_results[category_name]['n_valid_pairs'] = num_valid_pairs
 
         if num_valid_pairs >= 2:
-             # --- Permutation Test (mean) ---
-             # Test: Middle vs Flanking (mean differences)
+             # --- Permutation Test (mean differences) ---
+             # Test: Middle vs Flanking (using the valid pairs)
              mean_perm_p = paired_permutation_test(
                  middle_means[valid_indices], flanking_means[valid_indices], use_median=False
              )
              test_results[category_name]['mean_p'] = mean_perm_p
              logger.info(f"    Permutation test (mean): p = {mean_perm_p:.4g} ({num_valid_pairs} valid pairs)")
 
-             # --- Normality Test (mean Differences) ---
+             # --- Normality Test (on the mean Differences of valid pairs) ---
              if num_valid_pairs >= 3: # Shapiro-Wilk requires at least 3 samples
                  differences = middle_means[valid_indices] - flanking_means[valid_indices]
-                 try:
-                     shapiro_stat, shapiro_p = shapiro(differences)
-                     test_results[category_name]['mean_normality_p'] = shapiro_p
-                     # Log normality result clearly
-                     logger.info(f"    Normality test (mean Diffs): Shapiro-Wilk W={shapiro_stat:.4f}, p={shapiro_p:.4g}")
-                 except ValueError as e:
-                     # Handle cases like all differences being identical
-                     logger.warning(f"    Could not perform normality test for {category_name}: {e}")
+                 # Check for constant data which causes Shapiro-Wilk error
+                 if len(np.unique(differences)) > 1:
+                     try:
+                         shapiro_stat, shapiro_p = shapiro(differences)
+                         test_results[category_name]['mean_normality_p'] = shapiro_p
+                         # Log normality result clearly
+                         logger.info(f"    Normality test (mean Diffs): Shapiro-Wilk W={shapiro_stat:.4f}, p={shapiro_p:.4g}")
+                     except ValueError as e:
+                         # Should be less likely after unique check, but catch just in case
+                         logger.warning(f"    Could not perform normality test for {category_name} (ValueError): {e}")
+                 else:
+                     logger.warning(f"    Skipping normality test for {category_name}: All differences are identical ({num_valid_pairs} pairs).")
+                     test_results[category_name]['mean_normality_p'] = np.nan # Indicate test not performed meaningfully
+
              else:
                  logger.info(f"    Skipping normality test for {category_name}: < 3 valid pairs ({num_valid_pairs}).")
 
         else:
-            logger.warning(f"    Skipping tests for {category_name}: < 2 valid pairs ({num_valid_pairs}).")
+            logger.warning(f"    Skipping tests for {category_name}: < 2 valid pairs found ({num_valid_pairs}).")
 
     return test_results
+
+# --- Diagnostic Function (Optional but potentially useful) ---
 
 def diagnose_single_event_discrepancy(
     pi_file_path: str | Path,
     single_event_regions: dict,
     min_length: int,
-    inv_info_path: str | Path # Added for context
+    inv_info_path: str | Path
     ) -> None:
     """
-    Diagnoses why counts for single-event direct vs inverted might differ.
+    Diagnoses why counts for single-event direct vs inverted might differ *after filtering*.
 
     Checks each defined single-event region against the pi data headers
     to see if direct/inverted sequences are found and why they might be
-    filtered out *before* categorization (Not Found, Too Short, Not 'filtered_pi').
+    filtered out by `load_pi_data` (Not Found, Not 'filtered_pi', Too Short, Coord/Group Error).
 
     Args:
         pi_file_path: Path to the per_site_output.falsta file.
@@ -638,10 +741,10 @@ def diagnose_single_event_discrepancy(
         min_length: The minimum sequence length threshold used in load_pi_data.
         inv_info_path: Path to the inversion info file (for logging context).
     """
-    logger.info("--- STARTING DIAGNOSIS: Single-Event Discrepancy ---")
+    logger.info("--- STARTING DIAGNOSIS: Single-Event Discrepancy (Post-Filtering) ---")
     logger.info(f"Analyzing Pi file: {pi_file_path}")
     logger.info(f"Based on Single-Event regions from: {inv_info_path}")
-    logger.info(f"Minimum Length Threshold: {min_length}")
+    logger.info(f"Using Filters: Header contains 'filtered_pi', Min Length >= {min_length}")
 
     if not single_event_regions:
         logger.warning("DIAGNOSIS: No single-event regions were defined. Skipping diagnosis.")
@@ -649,16 +752,13 @@ def diagnose_single_event_discrepancy(
         return
 
     # Initialize tracking for each defined single-event region
-    # Key: tuple (chrom, start, end)
-    # Value: dict {'direct_status': 'Not Found', 'inverted_status': 'Not Found',
-    #             'direct_details': '', 'inverted_details': ''}
     region_status = {}
     defined_region_count = 0
     for chrom, regions in single_event_regions.items():
         for start, end in regions:
             region_key = (chrom, start, end)
             region_status[region_key] = {
-                'direct_status': 'Not Found', 'inverted_status': 'Not Found',
+                'direct_status': 'Region Not Matched', 'inverted_status': 'Region Not Matched',
                 'direct_details': '', 'inverted_details': ''
             }
             defined_region_count += 1
@@ -666,83 +766,103 @@ def diagnose_single_event_discrepancy(
 
     processed_headers = 0
     potential_matches = 0
+    headers_analyzed = 0 # Count headers passing initial '>' check
+
     try:
         with open(pi_file_path, 'r') as f:
             current_header = None
             line_num = 0
-            while True: # Read header and associated data line
-                line = f.readline()
+            while True: # Process header and potential data line(s)
+                header_line = f.readline()
                 line_num += 1
-                if not line: # End of file
-                     break
-                line = line.strip()
-                if not line:
-                    continue
+                if not header_line: break # End of file
+                header_line = header_line.strip()
+                if not header_line or not header_line.startswith('>'): continue
 
-                if line.startswith('>'):
-                    current_header = line
-                    processed_headers += 1
+                headers_analyzed += 1
+                current_header = header_line
 
-                    # Now, attempt to parse this header and see if it *could* match a single-event region
-                    coords = extract_coordinates_from_header(current_header)
-                    if not coords or coords.get('group') is None:
-                        # Cannot evaluate this header for matching regions if coords/group invalid
-                        continue
+                # 1. Check if header contains 'filtered_pi'
+                if 'filtered_pi' not in current_header.lower():
+                    # This header would be skipped by load_pi_data - check if it overlaps a region
+                    coords_raw = extract_coordinates_from_header(current_header.replace('filtered_pi', 'filtered_pi')) # Hacky way to maybe parse coords
+                    if coords_raw: # Parsed coords even without 'filtered_pi'? Unlikely with current regex but check
+                        if coords_raw['chrom'] in single_event_regions:
+                             for r_start, r_end in single_event_regions[coords_raw['chrom']]:
+                                 if is_overlapping(coords_raw['start'], coords_raw['end'], r_start, r_end):
+                                     region_key = (coords_raw['chrom'], r_start, r_end)
+                                     target_key = 'direct_status' if coords_raw.get('group') == 0 else 'inverted_status'
+                                     target_details = 'direct_details' if coords_raw.get('group') == 0 else 'inverted_details'
+                                     if region_status[region_key][target_key] == 'Region Not Matched':
+                                         region_status[region_key][target_key] = "Filtered (Not 'filtered_pi')"
+                                         region_status[region_key][target_details] = f"Header: {current_header[:70]}"
+                                     break
+                    continue # Skip to next header
 
-                    header_chrom = coords['chrom']
-                    header_start = coords['start']
-                    header_end = coords['end']
-                    header_group = coords['group'] # 0 or 1
+                # 2. Check if header has valid coordinates and group
+                coords = extract_coordinates_from_header(current_header)
+                if not coords or coords.get('group') is None:
+                     # Header is 'filtered_pi' but fails coord/group extraction
+                     # Check if the *intended* region (if parsable somehow) matches a defined SE region
+                     # This is complex, log the failure for now
+                     logger.debug(f"DIAGNOSIS: Header '{current_header[:70]}' is 'filtered_pi' but failed coord/group parse.")
+                     # We cannot reliably link this to a region without coords. It contributes to `skipped_coord_error` or `skipped_missing_group`.
+                     continue # Skip to next header
 
-                    # Read the *next* line to determine length (simplification: assumes data on one line)
-                    data_line = f.readline()
-                    line_num += 1
-                    if not data_line: # Unexpected EOF after header
-                         logger.warning(f"DIAGNOSIS: Unexpected EOF after header: {current_header[:70]}...")
-                         continue
+                # Header is 'filtered_pi' and has valid coords/group
+                header_chrom = coords['chrom']
+                header_start = coords['start']
+                header_end = coords['end']
+                header_group = coords['group'] # 0 or 1
+
+                # 3. Check sequence length (requires reading next line(s))
+                # Simplified: Read only the *next* line. Assumes data is on one line for diagnosis.
+                data_line = f.readline()
+                line_num += 1
+                actual_length = 0
+                if data_line:
                     data_line = data_line.strip()
                     try:
-                        # Mimic part of parse_pi_data_line for length check
                         values = data_line.split(',')
-                        # Count actual numeric values, excluding empty strings or 'NA'
                         actual_length = sum(1 for x in values if x.strip() and x.strip().upper() != 'NA')
-                    except Exception as e:
-                        logger.warning(f"DIAGNOSIS: Error parsing data line for length check below header {current_header[:70]}... Error: {e}")
-                        actual_length = 0 # Cannot determine length
+                    except Exception:
+                         actual_length = 0 # Cannot determine length if parsing fails
 
-                    # Check if this header corresponds to any defined single-event region
-                    matched = False
-                    if header_chrom in single_event_regions:
-                        for region_start, region_end in single_event_regions[header_chrom]:
-                            if is_overlapping(header_start, header_end, region_start, region_end):
-                                potential_matches += 1
-                                matched = True
-                                region_key = (header_chrom, region_start, region_end)
+                is_too_short = actual_length < min_length
 
-                                # Determine the status based on filters applied in load_pi_data
-                                status = "Error (Should not happen)"
-                                details = f"Header: {current_header[:70]}... Len={actual_length}"
-                                if 'filtered_pi' not in current_header.lower():
-                                    status = "Filtered (Not 'filtered_pi')"
-                                elif actual_length < min_length:
-                                    status = f"Filtered (Too Short: {actual_length})"
-                                else:
-                                    status = "Found & Passed Filters" # Passed primary filters relevant here
+                # 4. Check for overlap with defined single-event regions
+                matched_region = False
+                if header_chrom in single_event_regions:
+                    for region_start, region_end in single_event_regions[header_chrom]:
+                        if is_overlapping(header_start, header_end, region_start, region_end):
+                            potential_matches += 1
+                            matched_region = True
+                            region_key = (header_chrom, region_start, region_end)
+                            target_status_key = 'direct_status' if header_group == 0 else 'inverted_status'
+                            target_details_key = 'direct_details' if header_group == 0 else 'inverted_details'
 
-                                # Update the status for the matched DEFINED region
-                                target_status_key = 'direct_status' if header_group == 0 else 'inverted_status'
-                                target_details_key = 'direct_details' if header_group == 0 else 'inverted_details'
+                            status = "Error"
+                            details = f"Header: {current_header[:70]}... Len={actual_length}"
+                            if is_too_short:
+                                status = f"Filtered (Too Short: {actual_length})"
+                            else:
+                                status = "Found & Passed Filters"
 
-                                # Only update if 'Not Found' or if a new reason is found (e.g., found header but filtered)
-                                # We prioritize 'Found & Passed Filters' if multiple headers match a region
-                                current_region_s = region_status[region_key][target_status_key]
-                                if current_region_s == 'Not Found' or status == "Found & Passed Filters":
+                            # Update status, prioritizing "Passed" if found, then "Filtered", then "Not Matched"
+                            current_region_s = region_status[region_key][target_status_key]
+                            if current_region_s == 'Region Not Matched' or status == "Found & Passed Filters" or "Filtered" in status:
+                                # Prioritize 'Passed' if already 'Filtered'
+                                if status == "Found & Passed Filters" or current_region_s == 'Region Not Matched':
                                      region_status[region_key][target_status_key] = status
                                      region_status[region_key][target_details_key] = details
-                                # Important: If multiple headers overlap the same defined region, this logic
-                                # might slightly simplify, but focuses on whether *at least one* passed filters.
+                                # If current is 'Passed', don't overwrite with 'Filtered' from another overlapping header
+                                elif "Filtered" in status and "Filtered" not in current_region_s and current_region_s != "Found & Passed Filters":
+                                     region_status[region_key][target_status_key] = status
+                                     region_status[region_key][target_details_key] = details
 
-                                break # Assume header maps to only one defined region for simplicity
+
+                            break # Assume header maps to only one defined SE region for simplicity
+
 
     except FileNotFoundError:
         logger.error(f"DIAGNOSIS: Pi data file not found at {pi_file_path}")
@@ -753,60 +873,49 @@ def diagnose_single_event_discrepancy(
         logger.info("--- ENDING DIAGNOSIS ---")
         return
 
-    logger.info(f"Processed {processed_headers} headers from Pi file.")
+    logger.info(f"Diagnosis scan complete. Analyzed {headers_analyzed} '>' headers.")
     logger.info(f"Found {potential_matches} headers potentially overlapping defined single-event regions.")
 
-    # Summarize the findings
+    # Summarize the findings based on the *first* reason a region's haplotype might be excluded
     summary_counts = {
-        'direct': {'Not Found': 0, "Filtered (Not 'filtered_pi')": 0, 'Filtered (Too Short)': 0, 'Found & Passed Filters': 0, 'Other Filtered': 0},
-        'inverted': {'Not Found': 0, "Filtered (Not 'filtered_pi')": 0, 'Filtered (Too Short)': 0, 'Found & Passed Filters': 0, 'Other Filtered': 0}
+        'direct': {'Region Not Matched': 0, "Filtered (Not 'filtered_pi')": 0, 'Filtered (Too Short)': 0, 'Filtered (Coord/Group Err)': 0, 'Found & Passed Filters': 0},
+        'inverted': {'Region Not Matched': 0, "Filtered (Not 'filtered_pi')": 0, 'Filtered (Too Short)': 0, 'Filtered (Coord/Group Err)': 0, 'Found & Passed Filters': 0}
     }
     detailed_examples = {'direct_filtered_short': [], 'inverted_filtered_short': []}
 
+    # Re-calculate counts based on final status
     for region_key, status_dict in region_status.items():
-        # Direct status
         d_stat = status_dict['direct_status']
-        d_details = status_dict['direct_details']
-        if d_stat == 'Not Found':
-            summary_counts['direct']['Not Found'] += 1
-        elif "Filtered (Not 'filtered_pi')" in d_stat:
-             summary_counts['direct']["Filtered (Not 'filtered_pi')"] += 1
-        elif "Filtered (Too Short" in d_stat:
-             summary_counts['direct']['Filtered (Too Short)'] += 1
-             if len(detailed_examples['direct_filtered_short']) < 5: # Log few examples
-                 detailed_examples['direct_filtered_short'].append(f"{region_key}: {d_details}")
-        elif d_stat == "Found & Passed Filters":
-             summary_counts['direct']['Found & Passed Filters'] += 1
-        else: # Catch any other filtered status if logic expands
-             summary_counts['direct']['Other Filtered'] += 1
+        if "Region Not Matched" in d_stat: summary_counts['direct']['Region Not Matched'] += 1
+        elif "Not 'filtered_pi'" in d_stat: summary_counts['direct']["Filtered (Not 'filtered_pi')"] += 1
+        elif "Too Short" in d_stat:
+            summary_counts['direct']['Filtered (Too Short)'] += 1
+            if len(detailed_examples['direct_filtered_short']) < 5: detailed_examples['direct_filtered_short'].append(f"{region_key}: {status_dict['direct_details']}")
+        elif "Passed Filters" in d_stat: summary_counts['direct']['Found & Passed Filters'] += 1
+        # Note: Coord/Group Error is harder to track back to a specific region if coords fail, so this count might be underrepresented here. It's captured in load_pi_data logs.
 
-        # Inverted status
         i_stat = status_dict['inverted_status']
-        i_details = status_dict['inverted_details']
-        if i_stat == 'Not Found':
-            summary_counts['inverted']['Not Found'] += 1
-        elif "Filtered (Not 'filtered_pi')" in i_stat:
-             summary_counts['inverted']["Filtered (Not 'filtered_pi')"] += 1
-        elif "Filtered (Too Short" in i_stat:
-             summary_counts['inverted']['Filtered (Too Short)'] += 1
-             if len(detailed_examples['inverted_filtered_short']) < 5: # Log few examples
-                 detailed_examples['inverted_filtered_short'].append(f"{region_key}: {i_details}")
-        elif i_stat == "Found & Passed Filters":
-             summary_counts['inverted']['Found & Passed Filters'] += 1
-        else: # Catch any other filtered status
-             summary_counts['inverted']['Other Filtered'] += 1
+        if "Region Not Matched" in i_stat: summary_counts['inverted']['Region Not Matched'] += 1
+        elif "Not 'filtered_pi'" in i_stat: summary_counts['inverted']["Filtered (Not 'filtered_pi')"] += 1
+        elif "Too Short" in i_stat:
+            summary_counts['inverted']['Filtered (Too Short)'] += 1
+            if len(detailed_examples['inverted_filtered_short']) < 5: detailed_examples['inverted_filtered_short'].append(f"{region_key}: {status_dict['inverted_details']}")
+        elif "Passed Filters" in i_stat: summary_counts['inverted']['Found & Passed Filters'] += 1
 
-    logger.info("\n--- DIAGNOSIS SUMMARY ---")
+    # Adjust counts: Total regions = defined_region_count. Summing statuses should equal this.
+    # If a region wasn't matched by any header, it remains 'Region Not Matched'.
+    # We need to ensure other categories don't double-count.
+    # The logic above tries to capture the *reason* a haplotype matching the region might be missing.
+
+    logger.info("\n--- DIAGNOSIS SUMMARY (Single-Event Regions) ---")
     logger.info(f"Total Defined Single-Event Regions: {defined_region_count}")
-    logger.info("\nStatus Counts (Direct Haplotype):")
-    for status, count in summary_counts['direct'].items():
-        logger.info(f"  {status}: {count}")
-    logger.info("\nStatus Counts (Inverted Haplotype):")
-    for status, count in summary_counts['inverted'].items():
-        logger.info(f"  {status}: {count}")
+    logger.info(f"\nStatus for Direct Haplotype (per defined region):")
+    for status, count in summary_counts['direct'].items(): logger.info(f"  {status}: {count}")
+    logger.info(f"\nStatus for Inverted Haplotype (per defined region):")
+    for status, count in summary_counts['inverted'].items(): logger.info(f"  {status}: {count}")
 
-    logger.info(f"\nExpected 'Single-event Direct' count (Found & Passed Filters): {summary_counts['direct']['Found & Passed Filters']}")
-    logger.info(f"Expected 'Single-event Inverted' count (Found & Passed Filters): {summary_counts['inverted']['Found & Passed Filters']}")
+    logger.info(f"\n-> Expected 'Single-event Direct' count passing filters: {summary_counts['direct']['Found & Passed Filters']}")
+    logger.info(f"-> Expected 'Single-event Inverted' count passing filters: {summary_counts['inverted']['Found & Passed Filters']}")
 
     if summary_counts['direct']['Filtered (Too Short)'] > 0 or summary_counts['inverted']['Filtered (Too Short)'] > 0:
         logger.info("\nExamples of sequences Filtered (Too Short):")
@@ -817,112 +926,158 @@ def diagnose_single_event_discrepancy(
              logger.info("  Inverted:")
              for ex in detailed_examples['inverted_filtered_short']: logger.info(f"    {ex}")
 
-    if summary_counts['direct']['Found & Passed Filters'] != summary_counts['inverted']['Found & Passed Filters']:
+    final_direct_count = summary_counts['direct']['Found & Passed Filters']
+    final_inverted_count = summary_counts['inverted']['Found & Passed Filters']
+
+    if final_direct_count != final_inverted_count:
         logger.warning("DIAGNOSIS: Counts for 'Found & Passed Filters' DIFFER between Direct and Inverted.")
-        logger.warning("DIAGNOSIS: Primary reasons likely: 'Not Found' in Pi file OR 'Filtered (Too Short)' OR 'Filtered (Not 'filtered_pi')'. Check counts above.")
+        logger.warning("DIAGNOSIS: This suggests the filtering applied by `load_pi_data` (checking for 'filtered_pi', length, valid coords/group) affects the haplotypes differently.")
+        logger.warning("DIAGNOSIS: Check the status counts above to see the primary reasons for discrepancy (e.g., more 'Too Short' sequences for one haplotype).")
     else:
-        logger.info("DIAGNOSIS: Counts for 'Found & Passed Filters' MATCH. If final category counts differ, the issue might be later (e.g., NaN stats - check main logs) or in categorization logic itself.")
+        logger.info("DIAGNOSIS: Counts for 'Found & Passed Filters' MATCH.")
+        logger.info("DIAGNOSIS: If final category counts in the main analysis differ, the issue might be later (e.g., NaN stats in `calculate_flanking_stats` - check main logs, or ambiguous/unknown overlap in `categorize_sequences`).")
 
     logger.info("--- ENDING DIAGNOSIS ---")
 
-logger = logging.getLogger('pi_flanking_analysis')
-OUTPUT_DIR = Path('pi_analysis_results')
-plt.style.use('seaborn-v0_8-ticks')
-COLOR_PALETTE = plt.cm.tab10.colors
-FLANKING_COLOR = COLOR_PALETTE[0]
-MIDDLE_COLOR = COLOR_PALETTE[1]
-SCATTER_ALPHA = 0.35
-SCATTER_SIZE = 3.0
-LINE_ALPHA = 0.15
-LINE_WIDTH = 0.9
-VIOLIN_ALPHA = 0.2
-MEDIAN_LINE_COLOR = 'k'
-MEDIAN_LINE_WIDTH = 1.5
-DEFAULT_LINE_COLOR = 'grey'
-PLOT_COLORMAP = cm.coolwarm
+
+# --- Plotting ---
+
+def format_p_value(p_value: float) -> str:
+    """Formats p-value for display on plots."""
+    if pd.isna(p_value):
+        return "p = N/A"
+    elif p_value < 0.001:
+        return "p < 0.001"
+    elif p_value < 1e-6:
+         # Use scientific notation for very small p-values
+         return f"p = {p_value:.2e}"
+    else:
+        # Use general format with reasonable precision for other cases
+        return f"p = {p_value:.3g}"
 
 def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Optional[plt.Figure]:
-    stat_type = "mean"
+    """
+    Creates a paired violin plot comparing Middle vs Flanking Pi (mean).
+    Includes individual data points (jittered), violin plots showing distribution,
+    median lines, and lines connecting paired points colored by Log2 Fold Change.
+
+    Args:
+        all_sequences_stats: List of dictionaries containing stats for each sequence.
+        test_results: Dictionary containing statistical test results ('Overall' key is used).
+
+    Returns:
+        matplotlib.figure.Figure object or None if plotting fails.
+    """
+    stat_type = "mean" # Focus on mean as requested
     logger.info(f"Creating Overall Paired Violin Plot for {stat_type.capitalize()} Pi...")
     start_time = time.time()
 
     flanking_field = f"flanking_{stat_type}"
     middle_field = f"middle_{stat_type}"
 
-    plot_data = []
-    paired_list = []
+    plot_data = [] # For seaborn violin/stripplot (long format)
+    paired_list = [] # For calculating differences and connecting lines
 
+    # Prepare data for plotting
     for i, s in enumerate(all_sequences_stats):
         f_val = s.get(flanking_field)
         m_val = s.get(middle_field)
-        pair_id = f'pair_{i}'
+        pair_id = f'pair_{i}' # Unique identifier for each sequence pair
 
+        # Ensure both values are valid numbers for inclusion in the plot
         if pd.notna(f_val) and pd.notna(m_val):
+            # Add data in long format for seaborn plots
             plot_data.append({'pair_id': pair_id, 'region_type': 'Flanking', 'pi_value': f_val})
             plot_data.append({'pair_id': pair_id, 'region_type': 'Middle', 'pi_value': m_val})
+            # Add data in wide format for paired calculations
             paired_list.append({'pair_id': pair_id, 'Flanking': f_val, 'Middle': m_val})
 
-    n_valid_pairs = len(paired_list)
+    n_valid_pairs_plot = len(paired_list) # Number of pairs actually plotted
+
+    # Retrieve overall test results
     overall_results = test_results.get('Overall', {})
     overall_p_value = overall_results.get('mean_p', np.nan)
-    n_reported = overall_results.get('n_valid_pairs', n_valid_pairs)
+    # Use n_valid_pairs reported by the test function for annotation consistency
+    n_reported_test = overall_results.get('n_valid_pairs', n_valid_pairs_plot)
 
-    if n_valid_pairs < 2:
-        logger.warning(f"Insufficient valid pairs ({n_valid_pairs}) for Overall comparison. Skipping plot.")
+
+    if n_valid_pairs_plot < 2:
+        logger.warning(f"Insufficient valid pairs ({n_valid_pairs_plot}) with non-NaN Flanking and Middle means. Skipping Overall plot.")
         return None
 
     df_long = pd.DataFrame(plot_data)
     df_paired = pd.DataFrame(paired_list)
 
+    # Calculate Log2 Fold Change (Middle / Flanking) for coloring lines
+    # Use np.errstate to suppress potential division by zero or log(0) warnings
     with np.errstate(divide='ignore', invalid='ignore'):
         ratio = df_paired['Middle'] / df_paired['Flanking']
+        # Use np.where to handle non-positive ratios gracefully -> NaN
         df_paired['L2FC'] = np.where(ratio > 0, np.log2(ratio), np.nan)
 
+    # Calculate mean difference for annotation
     mean_diff = (df_paired['Middle'] - df_paired['Flanking']).mean()
 
+    # Prepare colormap normalization based on L2FC values
     l2fc_values = df_paired['L2FC'].dropna()
     can_draw_colorbar = not l2fc_values.empty
 
     if can_draw_colorbar:
         vmin, vmax = l2fc_values.min(), l2fc_values.max()
+        # If L2FC spans positive and negative, center the colormap around 0
         if vmin < 0 < vmax:
-            max_abs = max(abs(vmin), abs(vmax), 1e-9)
+            max_abs = max(abs(vmin), abs(vmax), 1e-9) # Avoid max_abs being 0
             norm = mcolors.Normalize(vmin=-max_abs, vmax=max_abs)
-        else:
+        else: # Otherwise, just scale to the data range
             norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
         scalar_mappable = cm.ScalarMappable(norm=norm, cmap=PLOT_COLORMAP)
     else:
-        logger.warning("No valid L2FC values to create color mapping. Lines will use default color.")
-        norm = mcolors.Normalize(vmin=-1, vmax=1)
+        logger.warning("No valid L2FC values found (e.g., all flanking values were zero or middle/flanking were NaN). Paired lines will use default color.")
+        # Create a dummy mappable for placeholder if needed, though colorbar won't be drawn
+        norm = mcolors.Normalize(vmin=-1, vmax=1) # Example range
         scalar_mappable = cm.ScalarMappable(norm=norm, cmap=PLOT_COLORMAP)
 
-    fig, ax = plt.subplots(figsize=(7, 7))
+
+    # --- Create the plot ---
+    fig, ax = plt.subplots(figsize=(7, 7)) # Slightly wider for better spacing
+
+    # Define region order and color palette
     region_palette = {'Flanking': FLANKING_COLOR, 'Middle': MIDDLE_COLOR}
     region_order = ['Flanking', 'Middle']
-    x_coords_cat = {'Flanking': 0, 'Middle': 1}
-    violin_width = 0.8
-    median_line_width_on_plot = 0.15
+    x_coords_cat = {'Flanking': 0, 'Middle': 1} # X-coordinates for the two categories
 
+    # 1. Stripplot for individual points (jittered)
     sns.stripplot(data=df_long, x='region_type', y='pi_value', order=region_order,
                   palette=region_palette,
                   size=SCATTER_SIZE, alpha=SCATTER_ALPHA,
-                  jitter=0.15, legend=False, ax=ax, zorder=5)
+                  jitter=0.15, # Control amount of jitter
+                  legend=False, ax=ax, zorder=5) # Points on top of violin lines
 
+    # 2. Violin plot for distribution shape
+    violin_width = 0.8
     sns.violinplot(data=df_long, x='region_type', y='pi_value', order=region_order,
                    palette=region_palette,
-                   inner=None, linewidth=1.2, width=violin_width,
-                   cut=0, scale='width', alpha=VIOLIN_ALPHA,
-                   ax=ax, zorder=10)
+                   inner=None, # Don't draw internal box/lines
+                   linewidth=1.2, # Outline width
+                   width=violin_width, # Width of violins
+                   cut=0, # Don't extend beyond data range
+                   scale='width', # Scale violins to have same max width
+                   alpha=VIOLIN_ALPHA, # Make violins semi-transparent
+                   ax=ax, zorder=10) # Violin slightly above points
 
+    # 3. Median lines within violins
     median_values = df_long.groupby('region_type', observed=False)['pi_value'].median()
+    median_line_width_on_plot = 0.15 # Relative width of the median line on x-axis
     for region, median_val in median_values.items():
         x_center = x_coords_cat[region]
         xmin = x_center - median_line_width_on_plot / 2
         xmax = x_center + median_line_width_on_plot / 2
         ax.hlines(y=median_val, xmin=xmin, xmax=xmax,
                   color=MEDIAN_LINE_COLOR, linestyle='-', linewidth=MEDIAN_LINE_WIDTH,
-                  zorder=12, alpha=0.8)
+                  zorder=12, # Median line above violin body
+                  alpha=0.8) # Slightly transparent
 
+    # 4. Paired lines connecting Flanking to Middle points, colored by L2FC
     for _, row in df_paired.iterrows():
         l2fc_val = row['L2FC']
         x_flank = x_coords_cat['Flanking']
@@ -930,60 +1085,70 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
         y_flank = row['Flanking']
         y_middle = row['Middle']
 
+        # Determine line color based on L2FC
         if pd.notna(l2fc_val) and can_draw_colorbar:
              line_color = scalar_mappable.to_rgba(l2fc_val)
         else:
-             line_color = DEFAULT_LINE_COLOR
+             line_color = DEFAULT_LINE_COLOR # Use default grey if L2FC is NaN or colorbar isn't used
 
+        # Draw the line
         ax.plot([x_flank, x_middle], [y_flank, y_middle],
                 color=line_color,
                 alpha=LINE_ALPHA,
                 lw=LINE_WIDTH,
-                zorder=15)
+                zorder=1) # Lines behind points/violins for clarity
 
+    # 5. Colorbar for L2FC
+    colorbar_width_adjustment = 0.97 # Default layout width
     if can_draw_colorbar:
+        # Add colorbar to the right
         cbar = fig.colorbar(scalar_mappable, ax=ax, pad=0.02, aspect=25, shrink=0.6)
         cbar.set_label('Log2 (π Middle / π Flanking)', rotation=270, labelpad=18, fontsize=10)
         cbar.ax.tick_params(labelsize=8)
-        cbar.outline.set_visible(False)
-        colorbar_width_adjustment = 0.90
-    else:
-        colorbar_width_adjustment = 0.97
+        cbar.outline.set_visible(False) # Cleaner look without outline
+        colorbar_width_adjustment = 0.90 # Adjust layout to make space for colorbar
 
+    # 6. Annotations (Stats)
     p_text = format_p_value(overall_p_value)
     diff_text = f"Mean Diff (Middle - Flank): {mean_diff:.4g}"
-    n_text = f"N = {n_reported} pairs"
+    n_text = f"N = {n_reported_test} pairs" # Use N from statistical test
     annotation_text = f"{n_text}\n{diff_text}\n{p_text} (Permutation Test)"
 
+    # Position annotation box in upper left
     ax.text(0.03, 0.97, annotation_text,
-            transform=ax.transAxes,
-            ha='left', va='top',
+            transform=ax.transAxes, # Coordinates relative to axes
+            ha='left', va='top', # Alignment
             fontsize=10, color='black',
-            bbox=dict(boxstyle='round,pad=0.4', fc='white', alpha=0.8, ec='grey'))
+            bbox=dict(boxstyle='round,pad=0.4', fc='white', alpha=0.8, ec='grey')) # White box background
 
+    # 7. Axes labels, title, ticks, limits, and style
     ax.set_ylabel(f'Mean Nucleotide Diversity (π)', fontsize=12)
     ax.set_xlabel('Region Type', fontsize=12)
     ax.set_xticks(list(x_coords_cat.values()))
     ax.set_xticklabels(list(x_coords_cat.keys()), fontsize=11)
-    ax.set_xlim(-0.5, 1.5)
-    ax.set_title(f'Overall Comparison of Mean π: Middle vs. Flanking Regions', fontsize=14, pad=20)
+    ax.set_xlim(-0.5, 1.5) # Add padding on x-axis
+    ax.set_title(f'Overall Comparison of Mean π: Middle vs. Flanking Regions', fontsize=14, pad=20) # Add padding to title
 
-    ax.yaxis.grid(True, linestyle=':', linewidth=0.6, alpha=0.7)
+    # Grid and spines
+    ax.yaxis.grid(True, linestyle=':', linewidth=0.6, alpha=0.7) # Horizontal grid only
     ax.xaxis.grid(False)
-    sns.despine(ax=ax, offset=5, trim=False)
+    sns.despine(ax=ax, offset=5, trim=False) # Remove top/right spines
 
+    # Adjust Y limits for better visualization
     min_val = df_long['pi_value'].min()
     max_val = df_long['pi_value'].max()
     y_range = max_val - min_val
-    y_buffer = y_range * 0.05 if y_range > 0 else 0.1
-    ax.set_ylim(bottom=max(0, min_val - y_buffer), top=max_val + y_buffer)
+    y_buffer = y_range * 0.05 if y_range > 0 else 0.1 # Add 5% buffer, or fixed if range is 0
+    ax.set_ylim(bottom=max(0, min_val - y_buffer), top=max_val + y_buffer) # Ensure y starts at or above 0
 
+    # --- Final Adjustments and Save ---
     try:
-        fig.tight_layout(rect=[0.03, 0.03, colorbar_width_adjustment, 0.93])
+        # Adjust layout to prevent overlap, considering colorbar
+        fig.tight_layout(rect=[0.03, 0.03, colorbar_width_adjustment, 0.93]) # Leave space for title and axes labels
     except ValueError:
-        logger.warning("Could not apply tight_layout. Manual adjustment might be needed.")
+        logger.warning("Could not apply tight_layout automatically. Manual adjustment of plot might be needed if elements overlap.")
 
-    output_filename = OUTPUT_DIR / f"pi_overall_{stat_type}_violin_paired_styled.png"
+    output_filename = OUTPUT_DIR / f"pi_overall_{stat_type}_violin_paired_coloredLines.png" # Updated filename
     try:
         plt.savefig(output_filename, dpi=300, bbox_inches='tight')
         logger.info(f"Saved overall styled paired violin plot to {output_filename}")
@@ -996,178 +1161,17 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
     return fig
 
 
-def format_p_value(p_value: float) -> str:
-    if pd.isna(p_value):
-        return "p = N/A"
-    elif p_value < 0.001:
-        return "p < 0.001"
-    elif p_value < 1e-6:
-         return f"p = {p_value:.2e}"
-    else:
-        return f"p = {p_value:.3g}"
-def filter_sequences_by_region_completeness(
-    flanking_stats_input: list[dict],
-    recurrent_regions: dict,
-    single_event_regions: dict
-) -> list[dict]:
-    logger.info("Applying filter: Removing sequences from regions lacking both haplotypes...")
-    start_time = time.time()
-
-    def _find_overlapping_region_key(coords: dict, rec_regions: dict, se_regions: dict) -> tuple | None:
-        chrom = coords.get('chrom')
-        start = coords.get('start')
-        end = coords.get('end')
-        if not all([chrom, isinstance(start, int), isinstance(end, int)]): return None
-        overlapping_keys = []
-        if chrom in rec_regions:
-            for r_start, r_end in rec_regions[chrom]:
-                if is_overlapping(start, end, r_start, r_end):
-                    overlapping_keys.append(('recurrent', chrom, r_start, r_end))
-        if chrom in se_regions:
-            for r_start, r_end in se_regions[chrom]:
-                if is_overlapping(start, end, r_start, r_end):
-                    overlapping_keys.append(('single_event', chrom, r_start, r_end))
-        return overlapping_keys[0] if len(overlapping_keys) == 1 else None
-
-    region_haplotype_status = {}
-    temp_flanking_stats = []
-
-    for seq_stats in flanking_stats_input:
-        coords = seq_stats.get('coords')
-        is_inverted = seq_stats.get('is_inverted')
-        region_key = None
-
-        if coords and is_inverted is not None:
-            region_key = _find_overlapping_region_key(coords, recurrent_regions, single_event_regions)
-            if region_key:
-                if region_key not in region_haplotype_status:
-                    region_haplotype_status[region_key] = {'has_direct': False, 'has_inverted': False}
-                if is_inverted:
-                    region_haplotype_status[region_key]['has_inverted'] = True
-                else:
-                    region_haplotype_status[region_key]['has_direct'] = True
-        temp_flanking_stats.append({'stats': seq_stats, 'key': region_key})
-
-    logger.info(f"Filter Pass 1: Analyzed {len(flanking_stats_input)} sequences, found {len(region_haplotype_status)} unique defined regions represented.")
-
-    regions_to_remove = set()
-    for region_key, status in region_haplotype_status.items():
-        if not (status['has_direct'] and status['has_inverted']):
-            regions_to_remove.add(region_key)
-
-    logger.info(f"Filter Pass 2: Identified {len(regions_to_remove)} defined regions missing at least one haplotype.")
-    if regions_to_remove:
-         logger.debug(f"  Regions to be removed: {regions_to_remove}")
-
-    filtered_flanking_stats = []
-    sequences_filtered_out = 0
-    for item in temp_flanking_stats:
-        region_key = item['key']
-        if region_key is None or region_key not in regions_to_remove:
-            filtered_flanking_stats.append(item['stats'])
-        else:
-            sequences_filtered_out += 1
-
-    elapsed_time = time.time() - start_time
-    logger.info(f"Filter applied in {elapsed_time:.2f} seconds.")
-    logger.info(f"Sequences remaining after filter: {len(filtered_flanking_stats)} (Removed {sequences_filtered_out})")
-
-    if len(filtered_flanking_stats) == 0:
-        logger.error("FILTERING ERROR: No sequences remained after applying the haplotype completeness filter. Check input data and region definitions.")
-
-    return filtered_flanking_stats
-
-
-def find_and_filter_strict_pairs(flanking_stats_input, recurrent_regions, single_event_regions):
-    print("INFO: Applying strict 1:1 filter: Keeping only regions with exactly one direct and one inverted entry...")
-
-    def _find_overlapping_region_key(coords, rec_regions, se_regions):
-        chrom = coords.get('chrom')
-        start = coords.get('start')
-        end = coords.get('end')
-        if not (chrom and isinstance(start, int) and isinstance(end, int)):
-             return None
-
-        overlapping_keys = []
-        for r_start, r_end in rec_regions.get(chrom, []):
-             if is_overlapping(start, end, r_start, r_end):
-                 overlapping_keys.append(('recurrent', chrom, r_start, r_end))
-        for r_start, r_end in se_regions.get(chrom, []):
-             if is_overlapping(start, end, r_start, r_end):
-                 overlapping_keys.append(('single_event', chrom, r_start, r_end))
-
-        key_to_return = None
-        if len(overlapping_keys) == 1:
-             key_to_return = overlapping_keys[0]
-
-        return key_to_return
-
-    sequences_by_region = {}
-    sequences_without_region = []
-    sequences_with_issues = 0
-
-    for seq_stats in flanking_stats_input:
-        coords = seq_stats.get('coords')
-        is_inverted_status = seq_stats.get('is_inverted')
-
-        if coords is None or is_inverted_status is None:
-            sequences_without_region.append(seq_stats)
-            sequences_with_issues += 1
-            continue
-
-        region_key = _find_overlapping_region_key(coords, recurrent_regions, single_event_regions)
-
-        if region_key:
-            sequences_by_region.setdefault(region_key, []).append(seq_stats)
-        else:
-            sequences_without_region.append(seq_stats)
-
-    if sequences_with_issues > 0:
-        print(f"WARNING: Strict Pair Filter: {sequences_with_issues} sequences lacked coordinates or inversion status.")
-    print(f"INFO: Strict Pair Filter: Grouped sequences into {len(sequences_by_region)} potential region groups.")
-
-    strictly_paired_stats = []
-    regions_passed = 0
-    regions_failed_count = 0
-    regions_failed_duplicates = 0
-
-    for region_key, seq_list in sequences_by_region.items():
-        direct_sequences = [s for s in seq_list if s.get('is_inverted') == False]
-        inverted_sequences = [s for s in seq_list if s.get('is_inverted') == True]
-
-        if len(direct_sequences) == 1 and len(inverted_sequences) == 1:
-            strictly_paired_stats.extend(direct_sequences)
-            strictly_paired_stats.extend(inverted_sequences)
-            regions_passed += 1
-        else:
-            regions_failed_count += 1
-            if len(direct_sequences) > 1 or len(inverted_sequences) > 1:
-                 regions_failed_duplicates += 1
-                 print(f"CRITICAL ERROR: Strict Pair Filter: Region {region_key} FAILED (Duplicates Found - Direct: {len(direct_sequences)}, Inverted: {len(inverted_sequences)}).")
-
-    strictly_paired_stats.extend(sequences_without_region)
-    num_non_region_kept = len(sequences_without_region)
-
-    print(f"INFO: Strict 1:1 filter complete.")
-    print(f"  Regions passing 1:1 check: {regions_passed}")
-    print(f"  Regions failing check (any reason): {regions_failed_count}")
-    if regions_failed_duplicates > 0:
-         print(f"  WARNING: Regions failed due to DUPLICATES: {regions_failed_duplicates} << CHECK INPUT DATA")
-    print(f"  Sequences kept (not in defined regions): {num_non_region_kept}")
-    print(f"  Total sequences returned: {len(strictly_paired_stats)}")
-
-    if len(strictly_paired_stats) == 0 and len(flanking_stats_input) > 0 :
-        print("ERROR: FILTERING ERROR: No sequences remained after applying the strict 1:1 pairing filter.")
-
-    return strictly_paired_stats
+# --- Main Execution ---
 
 def main():
     total_start_time = time.time()
-    logger.info("--- Starting Pi Flanking Regions Analysis (mean Focus) ---")
+    logger.info("--- Starting Pi Flanking Regions Analysis ---")
+    logger.info("--- Mode: Filtered Pi & Length Only ---")
 
+    # --- Load Inversion Info ---
     inv_file_path = Path(INVERSION_FILE)
     if not inv_file_path.is_file():
-        logger.error(f"Inversion info file not found: {inv_file_path}. Cannot proceed.")
+        logger.error(f"Inversion info file not found: {inv_file_path}. Cannot proceed with categorization.")
         return
     logger.info(f"Loading inversion info from {inv_file_path}")
     try:
@@ -1178,52 +1182,13 @@ def main():
         logger.error(f"Failed to load or process inversion file {inv_file_path}: {e}", exc_info=True)
         return
 
+    # --- Load Pi Data (with Filtering) ---
     pi_file_path = Path(PI_DATA_FILE)
     if not pi_file_path.is_file():
-         logger.error(f"Pi data file not found: {pi_file_path}. Cannot run diagnostics or analysis.")
+         logger.error(f"Pi data file not found: {pi_file_path}. Cannot run analysis.")
          return
 
-    logger.info("--- STARTING Quick Raw File Header Scan (Single-Event) ---")
-    raw_se_direct_headers = 0
-    raw_se_inverted_headers = 0
-    headers_checked_raw = 0
-    try:
-        if single_event_regions:
-            with open(pi_file_path, 'r') as f_raw:
-                for line in f_raw:
-                    if line.startswith('>'):
-                        headers_checked_raw += 1
-                        coords = extract_coordinates_from_header(line)
-                        if coords and coords.get('group') is not None:
-                            header_chrom = coords['chrom']
-                            header_start = coords['start']
-                            header_end = coords['end']
-                            header_group = coords['group']
-                            if header_chrom in single_event_regions:
-                                for r_start, r_end in single_event_regions[header_chrom]:
-                                    if is_overlapping(header_start, header_end, r_start, r_end):
-                                        if header_group == 0:
-                                            raw_se_direct_headers += 1
-                                        elif header_group == 1:
-                                            raw_se_inverted_headers += 1
-                                        break
-        else:
-            logger.warning("RAW SCAN: No single-event regions defined, skipping raw header count.")
-
-    except FileNotFoundError:
-        logger.error(f"RAW SCAN ERROR: Pi file not found at {pi_file_path}")
-    except Exception as e:
-        logger.error(f"RAW SCAN ERROR: Error reading {pi_file_path}: {e}")
-
-    logger.info(f"Raw Scan Results ({headers_checked_raw} headers checked):")
-    logger.info(f"  Headers overlapping ANY defined Single-Event region (Direct, group=0): {raw_se_direct_headers}")
-    logger.info(f"  Headers overlapping ANY defined Single-Event region (Inverted, group=1): {raw_se_inverted_headers}")
-    if raw_se_direct_headers != raw_se_inverted_headers:
-        logger.warning("RAW SCAN: Imbalance detected in the number of headers present for single-event regions.")
-    else:
-        logger.info("RAW SCAN: Header counts for single-event regions appear balanced in the raw file.")
-    logger.info("--- ENDING Quick Raw File Header Scan ---")
-
+    # Optional: Run diagnosis before main loading if needed
     if single_event_regions:
          diagnose_single_event_discrepancy(
              pi_file_path=pi_file_path,
@@ -1236,88 +1201,106 @@ def main():
 
     pi_sequences = load_pi_data(pi_file_path)
     if not pi_sequences:
-        logger.error("No valid pi sequences loaded after filtering by `load_pi_data`. Exiting.")
+        logger.error("No valid sequences loaded after filtering ('filtered_pi', length, coords, group). Exiting.")
         return
 
+    # --- Calculate Flanking Stats ---
     flanking_stats = calculate_flanking_stats(pi_sequences)
     if not flanking_stats:
         logger.error("No sequences remained after calculating flanking statistics (check logs for NaN/length issues). Exiting.")
         return
 
-    strict_paired_stats = find_and_filter_strict_pairs(
-        flanking_stats,
-        recurrent_regions,
-        single_event_regions
-    )
-    if not strict_paired_stats:
-        logger.error("No sequences remained after applying the strict 1:1 pairing filter. Analysis cannot proceed.")
-        return
+    # --- REMOVED FILTERS ---
+    # The following filters are EXPLICITLY REMOVED based on the request:
+    # - filter_sequences_by_region_completeness
+    # - find_and_filter_strict_pairs
+    # The analysis proceeds with all sequences that passed `load_pi_data` and `calculate_flanking_stats`.
+    logger.info("Skipping Haplotype Completeness and Strict Pairing filters as requested.")
+    sequences_for_analysis = flanking_stats # Use the direct output
 
-    categories = categorize_sequences(strict_paired_stats, recurrent_regions, single_event_regions)
+    # --- Categorize Sequences ---
+    categories = categorize_sequences(sequences_for_analysis, recurrent_regions, single_event_regions)
 
-    test_results = perform_statistical_tests(categories, strict_paired_stats)
+    # --- Perform Statistical Tests ---
+    # Pass the full set of sequences for 'Overall' comparison
+    test_results = perform_statistical_tests(categories, sequences_for_analysis)
 
-    fig_mean = create_kde_plot(strict_paired_stats, test_results)
+    # --- Generate Plot ---
+    fig_mean = create_kde_plot(sequences_for_analysis, test_results)
 
-    logger.info("\n--- Analysis Summary (mean Focus - AFTER STRICT 1:1 REGION PAIRING) ---")
+    # --- Generate Summary ---
+    logger.info("\n--- Analysis Summary (Filtered Pi & Length Only) ---")
     logger.info(f"Input Pi File: {PI_DATA_FILE}")
     logger.info(f"Input Inversion File: {INVERSION_FILE}")
-    logger.info(f"Min Sequence Length Filter (load_pi_data): {MIN_LENGTH}, Flank Size: {FLANK_SIZE}")
-    logger.info(f"Total Sequences Used in Final Analysis (after ALL filters & strict pairing): {len(strict_paired_stats)}")
+    logger.info(f"Filters Applied: Header contains 'filtered_pi', Min Length >= {MIN_LENGTH}, Valid Coords/Group, Calculable Stats (Flanks/Middle)")
+    logger.info(f"Total Sequences Used in Final Analysis: {len(sequences_for_analysis)}")
 
-    logger.info("\nPaired Test Results (Middle vs Flanking - mean):")
-    logger.info("-" * 80)
-    logger.info(f"{'Category':<25} {'N Valid Pairs':<15} {'mean Diff (M-F)':<18} {'Permutation p':<15} {'Normality p':<15}")
-    logger.info("-" * 80)
+    logger.info("\nPaired Test Results (Middle vs Flanking - mean difference):")
+    logger.info("-" * 85) # Adjusted width
+    logger.info(f"{'Category':<25} {'N Valid Pairs':<15} {'Mean Diff (M-F)':<18} {'Permutation p':<15} {'Normality p (Diffs)':<15}")
+    logger.info("-" * 85)
 
     summary_data = []
+    # Iterate through categories in the defined order + Overall
     for cat in CATEGORY_ORDER_WITH_OVERALL:
-        if cat == 'Overall':
-            seq_list = strict_paired_stats
-        else:
-            internal_cat = CAT_MAPPING[cat]
-            seq_list = categories.get(internal_cat, [])
+        results_for_cat = test_results.get(cat, {})
+        n_valid_pairs = results_for_cat.get('n_valid_pairs', 0)
 
-        n_valid_pairs = 0
+        # Calculate mean difference from the input data for this category
         mean_diff = np.nan
-        if seq_list:
+        if cat == 'Overall':
+            seq_list = sequences_for_analysis
+        else:
+            internal_cat = CAT_MAPPING.get(cat)
+            seq_list = categories.get(internal_cat, []) if internal_cat else []
+
+        if seq_list and n_valid_pairs > 0: # Ensure there are pairs to calculate diff from
             m_means = np.array([s['middle_mean'] for s in seq_list])
             f_means = np.array([s['flanking_mean'] for s in seq_list])
             valid_indices = ~np.isnan(m_means) & ~np.isnan(f_means)
-            n_valid_pairs = int(np.sum(valid_indices))
-            if n_valid_pairs > 0:
-                mean_diff = np.mean(m_means[valid_indices] - f_means[valid_indices])
+            # Recalculate diff using only the valid pairs identified by the test function
+            if np.sum(valid_indices) == n_valid_pairs: # Safety check
+                 mean_diff = np.mean(m_means[valid_indices] - f_means[valid_indices])
+            else:
+                 logger.warning(f"Mismatch in valid pair count for {cat} between summary ({np.sum(valid_indices)}) and test ({n_valid_pairs}). Using test count.")
+                 # Attempt calculation anyway if possible
+                 if np.sum(valid_indices) > 0:
+                     mean_diff = np.mean(m_means[valid_indices] - f_means[valid_indices])
 
-        mean_p = test_results.get(cat, {}).get('mean_p', np.nan)
-        norm_p = test_results.get(cat, {}).get('mean_normality_p', np.nan)
 
+        mean_p = results_for_cat.get('mean_p', np.nan)
+        norm_p = results_for_cat.get('mean_normality_p', np.nan)
+
+        # Format for nice output
         n_str = str(n_valid_pairs)
-        mean_diff_str = f"{mean_diff:.4g}" if not np.isnan(mean_diff) else "N/A"
+        mean_diff_str = f"{mean_diff:.4g}" if pd.notna(mean_diff) else "N/A"
         mean_p_str = format_p_value(mean_p)
-        norm_p_str = f"{norm_p:.3g}" if not np.isnan(norm_p) else "N/A"
+        norm_p_str = f"{norm_p:.3g}" if pd.notna(norm_p) else ("N/A" if n_valid_pairs < 3 else "Const") # Indicate if const or N<3
 
         logger.info(f"{cat:<25} {n_str:<15} {mean_diff_str:<18} {mean_p_str:<15} {norm_p_str:<15}")
         summary_data.append({
             'Category': cat,
             'N_Valid_Pairs': n_valid_pairs,
-            'mean_Difference_Middle_Minus_Flanking': mean_diff,
-            'mean_Permutation_p_value': mean_p,
-            'mean_Diff_Normality_p_value': norm_p
+            'Mean_Difference_Middle_Minus_Flanking': mean_diff,
+            'Mean_Permutation_p_value': mean_p,
+            'Mean_Diff_Normality_p_value': norm_p
          })
 
-    logger.info("-" * 80)
+    logger.info("-" * 85)
 
+    # Save summary table
     summary_df = pd.DataFrame(summary_data)
-    summary_csv_path = OUTPUT_DIR / "pi_analysis_mean_summary_strict_pairs.csv"
+    summary_csv_path = OUTPUT_DIR / "pi_analysis_mean_summary_filtered_pi_length.csv" # Updated filename
     try:
         summary_df.to_csv(summary_csv_path, index=False, float_format='%.5g')
-        logger.info(f"Analysis summary (strict pairing) saved to {summary_csv_path}")
+        logger.info(f"Analysis summary saved to {summary_csv_path}")
     except Exception as e:
-        logger.error(f"Failed to save strictly paired summary CSV to {summary_csv_path}: {e}")
+        logger.error(f"Failed to save summary CSV to {summary_csv_path}: {e}")
 
     total_elapsed_time = time.time() - total_start_time
     logger.info(f"--- Analysis finished in {total_elapsed_time:.2f} seconds ---")
 
+    # Close plot figure if it was created
     if fig_mean:
         plt.close(fig_mean)
 
