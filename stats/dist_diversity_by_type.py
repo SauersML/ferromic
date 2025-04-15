@@ -1374,6 +1374,31 @@ def main():
 
     logger.info("-" * 85)
 
+    # --- Calculate and Print Overall Fold Difference ---
+    logger.info("\n--- Overall Fold Difference (Mean Pi) ---")
+    # Extract all flanking and middle means from the sequences used in the final analysis
+    all_flanking_means = np.array([s.get('flanking_mean', np.nan) for s in sequences_for_analysis], dtype=float)
+    all_middle_means = np.array([s.get('middle_mean', np.nan) for s in sequences_for_analysis], dtype=float)
+
+    # Calculate the overall aggregate means (ignoring NaNs)
+    overall_agg_mean_flank = np.nanmean(all_flanking_means)
+    overall_agg_mean_middle = np.nanmean(all_middle_means)
+
+    # Calculate Fold Difference (Middle / Flanking), handling division by zero/NaN
+    overall_fc_mean = np.nan
+    if pd.notna(overall_agg_mean_flank) and not np.isclose(overall_agg_mean_flank, 0):
+        overall_fc_mean = overall_agg_mean_middle / overall_agg_mean_flank
+    elif pd.notna(overall_agg_mean_middle) and pd.notna(overall_agg_mean_flank) and np.isclose(overall_agg_mean_middle, 0) and np.isclose(overall_agg_mean_flank, 0):
+         overall_fc_mean = np.nan # 0/0 case - Undefined
+    elif pd.notna(overall_agg_mean_middle) and not np.isclose(overall_agg_mean_middle, 0) and pd.notna(overall_agg_mean_flank) and np.isclose(overall_agg_mean_flank, 0):
+         overall_fc_mean = np.inf # non-zero / zero case - Infinity
+
+    # Format and print the result
+    fc_mean_str = f"{overall_fc_mean:.4g}" if pd.notna(overall_fc_mean) and np.isfinite(overall_fc_mean) else ('Inf' if overall_fc_mean == np.inf else 'N/A')
+    logger.info(f"Overall Fold Difference (Mean Middle π / Mean Flanking π): {fc_mean_str}")
+    logger.info(f"(Based on Overall Mean Flank π: {overall_agg_mean_flank:.4g}, Overall Mean Middle π: {overall_agg_mean_middle:.4g})")
+    # ----------------------------------------------------
+
     # Save summary table
     summary_df = pd.DataFrame(summary_data)
     summary_csv_path = OUTPUT_DIR / "pi_analysis_mean_summary_filtered_pi_length.csv" # Updated filename
