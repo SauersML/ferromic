@@ -52,13 +52,13 @@ def map_cds_to_inversions(pairwise_df, inversion_df):
         
         # Find matching inversions
         rec_matches = recurrent_inv[
-            (recurrent_inv['chr'] == chrom) &
-            ((start <= recurrent_inv['region_end']) & (end >= recurrent_inv['region_start']))
+            (recurrent_inv['Chromosome'] == chrom) &
+            ((start <= recurrent_inv['End']) & (end >= recurrent_inv['Start']))
         ]
         
         single_matches = single_event_inv[
-            (single_event_inv['chr'] == chrom) &
-            ((start <= single_event_inv['region_end']) & (end >= single_event_inv['region_start']))
+            (single_event_inv['Chromosome'] == chrom) &
+            ((start <= single_event_inv['End']) & (end >= single_event_inv['Start']))
         ]
         
         # Classify CDS
@@ -351,7 +351,7 @@ def main():
         inversion_df = pd.read_csv(INVERSION_FILE)
         
         # Ensure proper numeric types
-        for col in ['region_start', 'region_end', '0_single_1_recur']:
+        for col in ['Start', 'End', '0_single_1_recur']:
             inversion_df[col] = pd.to_numeric(inversion_df[col], errors='coerce')
     except Exception as e:
         print(f"Error loading input files: {e}")
