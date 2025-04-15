@@ -39,8 +39,11 @@ ENABLE_PC_CORRECTION = True
 # Minimum number of sequences required in each group for valid analysis
 MIN_SEQUENCES_PER_GROUP = 10
 
-# Flag to determine whether to filter out special omega values (-1 and 99)
-FILTER_SPECIAL_OMEGA_VALUES = False
+# Flag to determine whether to filter out omega = 99 values
+FILTER_OMEGA_99 = True  # <-- True to filter 99
+
+# Flag to determine whether to use ranked omega for the main statistical analysis
+USE_RANKED_OMEGA_ANALYSIS = True # <-- True to use ranks
 
 # Flag to determine whether to calculate omega manually from dN/dS
 CALCULATE_OMEGA_MANUALLY = False # This should do nothing
@@ -148,13 +151,13 @@ def read_and_preprocess_data(file_path):
     print(f"Rows with omega = -1: {omega_minus1_count}")
     print(f"Rows with omega = 99: {omega_99_count}")
     
-    # Filter out special omega values if flag is set
-    if FILTER_SPECIAL_OMEGA_VALUES:
+    # Filter out omega=99 values if flag is set
+    if FILTER_OMEGA_99:
         original_len = len(df)
-        df = df[(df['omega'] != 99)]
+        df = df[df['omega'] != 99]
         filtered_count = original_len - len(df)
-        print(f"Filtered out {filtered_count} rows with special omega values (99)")
-    
+        print(f"Filtered out {filtered_count} rows with omega=99")
+
     # Keep all valid omega values, only dropping NaN entries
     # This preserves special codes while ensuring numeric analysis
     df = df.dropna(subset=['omega'])
@@ -842,15 +845,17 @@ def analysis_worker(args):
 
     df = pd.DataFrame(data)
     
-    # Apply different transformations based on our filtering flag
-    if FILTER_SPECIAL_OMEGA_VALUES:
-        # Use raw omega values directly when special values are filtered out
-        df['analysis_var'] = df['omega_value']
-    else:
-        # Use rank transform when keeping special values
+    # Determine analysis variable (raw or ranked) based on the new flag
+    if USE_RANKED_OMEGA_ANALYSIS:
+        # Use rank transform
+        print("Using RANKED omega values for analysis.")
         df['ranked_omega'] = df['omega_value'].rank(method='average')
         # Analysis variable will be the rank
         df['analysis_var'] = df['ranked_omega']
+    else:
+        # Use raw omega values
+        print("Using RAW omega values for analysis.")
+        df['analysis_var'] = df['omega_value']
 
     # Initialize results variables
     effect_size = np.nan
