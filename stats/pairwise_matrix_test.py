@@ -760,27 +760,28 @@ def get_gene_annotation(coordinates):
         print(f"Error in gene annotation: {str(e)}")
         return None, None
 
+
 def analysis_worker(args):
     """
     Perform mixed-effects statistical analysis for a group of sequences.
-    
+
     This worker function implements a crossed random effects model to compare
     omega values between two groups while accounting for sequence-specific effects
     and controlling for population structure using principal components.
     It's designed to be used with parallel processing.
-    
+
     Parameters:
     -----------
     args : tuple
         Tuple containing:
-        - all_sequences: Combined list of all sequence IDs
+        - all_sequences: Combined list of all sequence IDs (Not directly used in this version, but part of signature)
         - pairwise_dict: Dictionary of pairwise omega values
         - sequences_0: List of sequence IDs in group 0
         - sequences_1: List of sequence IDs in group 1
         - chromosome: Chromosome identifier for PCA matching
-        - pc_data: Dictionary of PC values by chromosome and sample
+        - pc_data: Dictionary of PC values by chromosome and sample {chr: {sample: [PC1,..]}}
         - enable_pc_correction: Flag to enable PC-based correction
-        
+
     Returns:
     --------
     dict
@@ -792,202 +793,214 @@ def analysis_worker(args):
         - std_err: Standard error of the effect size estimate
         - failure_reason: Description of analysis failure (if any)
         - pc_corrected: Boolean indicating if PC correction was applied
-        
+
     Note:
     -----
     - Uses mixed linear model with crossed random effects for sequence identities
-    - Includes PCs as covariates when PC data is available
+    - Includes PCs as covariates when PC data is available (using optimized merge)
     - Returns NaN for effect_size and p_value if analysis cannot be completed
     - Analysis may fail due to insufficient sequences, lack of variation, or model errors
     """
+    # Unpack arguments
     all_sequences, pairwise_dict, sequences_0, sequences_1, chromosome, pc_data, enable_pc_correction = args
-    
+    func_start_time = datetime.now()
+    print(f"[{func_start_time}] Worker started for chromosome {chromosome}.")
+
     n0, n1 = len(sequences_0), len(sequences_1)
-    
-    # Validate minimum sequence requirements for statistical power
+
+    # --- 1. Validate minimum sequence requirements ---
     if n0 < MIN_SEQUENCES_PER_GROUP or n1 < MIN_SEQUENCES_PER_GROUP:
-        insufficient_groups = []
-        if n0 < MIN_SEQUENCES_PER_GROUP:
-            insufficient_groups.append('0')
-        if n1 < MIN_SEQUENCES_PER_GROUP:
-            insufficient_groups.append('1')
-            
+        insufficient_groups = [g for g, count in [('0', n0), ('1', n1)] if count < MIN_SEQUENCES_PER_GROUP]
         groups_str = " and ".join(insufficient_groups)
-        print(f"Insufficient sequences in group(s) {groups_str}, need at least {MIN_SEQUENCES_PER_GROUP} sequences per group.")
-
+        reason = f"Insufficient sequences in group(s) {groups_str} ({n0=}, {n1=}, minimum {MIN_SEQUENCES_PER_GROUP} required)"
+        print(f"[{datetime.now()}] Worker exiting early: {reason}")
+        num_comp_0 = sum(1 for (s1, s2) in pairwise_dict.keys() if s1 in sequences_0 and s2 in sequences_0)
+        num_comp_1 = sum(1 for (s1, s2) in pairwise_dict.keys() if s1 in sequences_1 and s2 in sequences_1)
         return {
-            'effect_size': np.nan,
-            'p_value': np.nan,
-            'n0': n0,
-            'n1': n1,
-            'num_comp_group_0': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_0 and seq2 in sequences_0),
-            'num_comp_group_1': sum(1 for (seq1, seq2) in pairwise_dict.keys() if seq1 in sequences_1 and seq2 in sequences_1),
-            'std_err': np.nan,
-            'failure_reason': f"Insufficient sequences in group(s) {groups_str} (minimum {MIN_SEQUENCES_PER_GROUP} required)"
+            'effect_size': np.nan, 'p_value': np.nan, 'n0': n0, 'n1': n1,
+            'num_comp_group_0': num_comp_0, 'num_comp_group_1': num_comp_1,
+            'std_err': np.nan, 'failure_reason': reason, 'pc_corrected': False
         }
-    
-    # Prepare data for mixed-model analysis by collecting all pairwise comparisons, including cross-group
-    data = []
-    for (seq1, seq2), omega in pairwise_dict.items():
-        pair_group = None
-        if seq1 in sequences_0 and seq2 in sequences_0:
-            pair_group = 0
-        elif seq1 in sequences_1 and seq2 in sequences_1:
-            pair_group = 1
-        else:
-            pair_group = 2
-        data.append({
-            'omega_value': omega,
-            'group': pair_group,
-            'seq1': seq1,
-            'seq2': seq2
-        })
 
+    # --- 2. Prepare DataFrame from pairwise data ---
+    print(f"[{datetime.now()}] Preparing DataFrame for {len(pairwise_dict)} comparisons...")
+    # Using list comprehension for potentially slightly better performance than append loop
+    data = [
+        {'omega_value': omega,
+         'group': 0 if seq1 in sequences_0 and seq2 in sequences_0 else (1 if seq1 in sequences_1 and seq2 in sequences_1 else 2),
+         'seq1': seq1,
+         'seq2': seq2}
+        for (seq1, seq2), omega in pairwise_dict.items()
+    ]
     df = pd.DataFrame(data)
-    
-    # Determine analysis variable (raw or ranked) based on the new flag
+    print(f"[{datetime.now()}] DataFrame prepared with {len(df)} rows.")
+
+    # --- 3. Determine Analysis Variable (Ranked or Raw) ---
     if USE_RANKED_OMEGA_ANALYSIS:
-        # Use rank transform
-        print("Using RANKED omega values for analysis.")
-        df['ranked_omega'] = df['omega_value'].rank(method='average')
-        # Analysis variable will be the rank
-        df['analysis_var'] = df['ranked_omega']
+        print(f"[{datetime.now()}] Using RANKED omega values for analysis.")
+        df['analysis_var'] = df['omega_value'].rank(method='average')
     else:
-        # Use raw omega values
-        print("Using RAW omega values for analysis.")
+        print(f"[{datetime.now()}] Using RAW omega values for analysis.")
         df['analysis_var'] = df['omega_value']
 
-    # Initialize results variables
-    effect_size = np.nan
-    p_value = np.nan
-    std_err = np.nan
+    # --- 4. Initialize Results & Validate Data for Model ---
+    effect_size, p_value, std_err = np.nan, np.nan, np.nan
     failure_reason = None
+    pc_corrected = False # Initialize here
 
-    # Validate data requirements for statistical analysis
+    # Check for sufficient data variance and groups *before* complex steps
     if df.empty or df['group'].nunique() < 2 or df['analysis_var'].nunique() < 2:
-        if df.empty:
-            failure_reason = "No valid pairwise comparisons found"
-        elif df['group'].nunique() < 2:
-            failure_reason = "Missing one of the groups in pairwise comparisons"
+        if df.empty: failure_reason = "No valid pairwise comparisons found after initial prep"
+        elif df['group'].nunique() < 2: failure_reason = "Missing one of the comparison groups (0 or 1)"
         elif df['analysis_var'].nunique() < 2:
-            print("RAW DATA for Not enough omega value variation for statistical analysis:")
-            print(df)
-            failure_reason = "Not enough omega value variation for statistical analysis"
-        
-        print(f"WARNING: {failure_reason}")
-        
+             print("DEBUG: Data with low variation:")
+             print(df[['omega_value', 'group', 'analysis_var']].head())
+             failure_reason = f"Not enough variation in '{'ranked_omega' if USE_RANKED_OMEGA_ANALYSIS else 'omega_value'}' for statistical analysis (nunique={df['analysis_var'].nunique()})"
+        print(f"[{datetime.now()}] WARNING: {failure_reason}")
         return {
-            'effect_size': effect_size,
-            'p_value': p_value,
-            'n0': n0,
-            'n1': n1,
+            'effect_size': np.nan, 'p_value': np.nan, 'n0': n0, 'n1': n1,
             'num_comp_group_0': (df['group'] == 0).sum() if not df.empty else 0,
             'num_comp_group_1': (df['group'] == 1).sum() if not df.empty else 0,
-            'std_err': std_err,
-            'failure_reason': failure_reason
+            'std_err': np.nan, 'failure_reason': failure_reason, 'pc_corrected': False
         }
 
-    # Prepare categorical codes for sequence identifiers to use in random effects
+    # --- 5. Prepare Sequence Codes for Random Effects ---
+    print(f"[{datetime.now()}] Preparing sequence codes for random effects...")
     all_unique_seqs = pd.unique(pd.concat([df['seq1'], df['seq2']]))
     seq_to_code = {seq: i for i, seq in enumerate(all_unique_seqs)}
+    df['seq1_code'] = df['seq1'].map(seq_to_code).astype('category') # Using category might help statsmodels slightly
+    df['seq2_code'] = df['seq2'].map(seq_to_code).astype('category')
+    print(f"[{datetime.now()}] Codes prepared for {len(all_unique_seqs)} unique sequences.")
 
-    # Apply the same coding to both columns
-    df['seq1_code'] = df['seq1'].map(seq_to_code)
-    df['seq2_code'] = df['seq2'].map(seq_to_code)
+    # --- 6. Prepare Model Formula (Fixed Effects + Optional PCs) ---
+    print(f"[{datetime.now()}] Preparing model formula...")
+    # Base fixed effects: intercept is implicit, test group 1 vs group 0 (ref), include group 2
+    df['is_group1'] = (df['group'] == 1).astype(int)
+    df['is_group2'] = (df['group'] == 2).astype(int) # Cross-group comparisons
+    fixed_effects = ['is_group1', 'is_group2']
+    all_pc_cols = []
 
-    # Whether PC correction was applied
-    pc_corrected = False
-    
-    try:
-        # Set up mixed model with crossed random effects for sequence identities
-        # This controls for sequence-specific effects that might confound group differences
-        df['groups'] = 1  # Dummy grouping variable for statsmodels implementation
-        vc = {
-            'seq1': '0 + C(seq1_code)',  # Random effect for first sequence
-            'seq2': '0 + C(seq2_code)'   # Random effect for second sequence
-        }
-        
-        # Create dummy variables for each group explicitly
-        df['is_group1'] = (df['group'] == 1).astype(int)
-        df['is_group2'] = (df['group'] == 2).astype(int)  # Cross-group comparison
-        
-        # Determine if we need to apply PC correction
-        should_apply_pc = enable_pc_correction and pc_data is not None and chromosome in pc_data
-        
-        # If applying PC correction and data is available
-        if should_apply_pc:
-            # Get PC data for sequences in this analysis
-            print(f"Applying PC correction for chromosome {chromosome}")
-            pc_cols = []
-            
-            # Add PC covariates for each sequence
-            for seq_idx, seq in enumerate(['seq1', 'seq2']):
-                # Extract unique sequence IDs to add PC data
-                unique_seqs = df[seq].unique()
-                
-                # For each PC dimension
-                for pc_idx in range(NUM_PCS_TO_USE):
-                    pc_col_name = f"PC{pc_idx+1}_{seq}"
-                    pc_cols.append(pc_col_name)
-                    
-                    # Initialize with zeros (no correction)
-                    df[pc_col_name] = 0.0
-                    
-                    # Update with actual PC values where available
-                    for seq_name in unique_seqs:
-                        if seq_name in pc_data[chromosome]:
-                            # Get PC values, handling potential index errors
-                            pc_values = pc_data[chromosome][seq_name]
-                            if pc_idx < len(pc_values):
-                                pc_val = pc_values[pc_idx]
-                                # Set the PC value for all rows with this sequence
-                                df.loc[df[seq] == seq_name, pc_col_name] = pc_val
-            
-            # Build formula including PCs
-            formula = 'analysis_var ~ is_group1 + is_group2 + ' + ' + '.join(pc_cols)
+    # --- 6a. PC Addition ---
+    should_apply_pc = enable_pc_correction and pc_data is not None and chromosome in pc_data and pc_data[chromosome]
+
+    if should_apply_pc:
+        print(f"[{datetime.now()}] Applying PC correction for chromosome {chromosome} using optimized merge...")
+        try:
+            # Convert PC data for this chromosome into a DataFrame
+            pc_dict_chrom = pc_data[chromosome]
+            pc_df = pd.DataFrame.from_dict(pc_dict_chrom, orient='index')
+            # Rename columns to PC1, PC2, ...
+            pc_df.columns = [f"PC{i+1}" for i in range(len(pc_df.columns))]
+            # Select only the required number of PCs
+            pc_cols_base = [f"PC{i+1}" for i in range(NUM_PCS_TO_USE)]
+            if not all(pc in pc_df.columns for pc in pc_cols_base):
+                 print(f"Warning: Requested {NUM_PCS_TO_USE} PCs, but only {len(pc_df.columns)} available in data for chr {chromosome}.")
+                 pc_cols_base = [pc for pc in pc_cols_base if pc in pc_df.columns] # Use available PCs
+            pc_df = pc_df[pc_cols_base]
+
+            # Define final PC column names
+            pc_cols_s1 = [f"{pc}_s1" for pc in pc_cols_base]
+            pc_cols_s2 = [f"{pc}_s2" for pc in pc_cols_base]
+            all_pc_cols = pc_cols_s1 + pc_cols_s2
+
+            # Merge for seq1
+            df = pd.merge(df, pc_df, left_on='seq1', right_index=True, how='left', suffixes=('', '_s1_temp'))
+            rename_dict_s1 = {old: new for old, new in zip(pc_cols_base, pc_cols_s1)}
+            df.rename(columns=rename_dict_s1, inplace=True)
+
+            # Merge for seq2
+            df = pd.merge(df, pc_df, left_on='seq2', right_index=True, how='left', suffixes=('', '_s2_temp'))
+            rename_dict_s2 = {old: new for old, new in zip(pc_cols_base, pc_cols_s2)}
+            df.rename(columns=rename_dict_s2, inplace=True)
+
+            # Fill NaNs introduced by merge (sequences missing PC data) with 0.0
+            df[all_pc_cols] = df[all_pc_cols].fillna(0.0)
+
+            fixed_effects.extend(all_pc_cols)
             pc_corrected = True
-            print(f"  Added {len(pc_cols)} PC covariates to the model")
-        else:
-            # Standard formula without PC correction
-            formula = 'analysis_var ~ is_group1 + is_group2'
-            if enable_pc_correction:
-                if pc_data is None:
-                    print("  No PC data available for correction")
-                elif chromosome not in pc_data:
-                    print(f"  No PC data available for chromosome {chromosome}")
-        
-        # Fit mixed linear model with appropriate formula
+            print(f"[{datetime.now()}] Added {len(all_pc_cols)} PC covariates via merge.")
+
+        except Exception as e:
+            print(f"[{datetime.now()}] ERROR during PC data merge for chr {chromosome}: {e}. Proceeding without PC correction.")
+            pc_corrected = False
+            # Ensure fixed_effects only contains base group indicators if PC merge failed
+            fixed_effects = ['is_group1', 'is_group2']
+    else:
+        # Log why PC wasn't applied
+        if not enable_pc_correction: reason = "PC correction disabled globally"
+        elif pc_data is None: reason = "No PC data loaded"
+        elif chromosome not in pc_data: reason = f"No PC data available for chromosome {chromosome}"
+        elif not pc_data[chromosome]: reason = f"PC data for chromosome {chromosome} is empty"
+        else: reason = "PC check logic error (unexpected)"
+        print(f"[{datetime.now()}] Skipping PC correction: {reason}.")
+
+    # Construct the final formula string
+    formula = f"analysis_var ~ {' + '.join(fixed_effects)}"
+
+    # --- 7. Define and Fit the Mixed Model ---
+    # Random effects structure (crossed effects for seq1 and seq2)
+    vc_formula = {'seq1': '0 + C(seq1_code)', 'seq2': '0 + C(seq2_code)'}
+
+    print(f"[{datetime.now()}] Preparing to fit MixedLM model.")
+    print(f"  Data dimensions: {df.shape[0]} rows, {df.shape[1]} columns")
+    print(f"  Unique sequences (random effects levels): {len(all_unique_seqs)}")
+    print(f"  Formula: {formula}")
+    print(f"  VC Formula: {vc_formula}")
+
+    fit_start_time = datetime.now()
+    print(f"[{fit_start_time}] >>> Starting model.fit()...")
+    try:
         model = MixedLM.from_formula(
-            formula,
-            groups='groups',
-            vc_formula=vc,
-            re_formula='0',
+            formula=formula,
+            groups=np.ones(len(df)), # Dummy group for crossed effects in statsmodels
+            vc_formula=vc_formula,
+            re_formula='0', # Indicates only variance components, no separate random intercepts
             data=df
         )
-        result = model.fit(reml=False)
-        
-        # Extract ONLY the group 0 vs group 1 effect
+        # Consider adding method='cg' or others if default ('lbfgs') is slow/fails
+        # result = model.fit(reml=False, method='lbfgs', maxiter=100) # Example with options
+        result = model.fit(reml=False) # Use default first
+
+        fit_end_time = datetime.now()
+        print(f"[{fit_end_time}] <<< Finished model.fit() (Duration: {fit_end_time - fit_start_time}).")
+
+        # --- 8. Extract Results ---
+        print(f"[{datetime.now()}] Extracting results from fitted model.")
+        # Use .get() with default np.nan for robustness if a term wasn't estimated
         effect_size = result.params.get('is_group1', np.nan)
         p_value = result.pvalues.get('is_group1', np.nan)
         std_err = result.bse.get('is_group1', np.nan)
-        
+
+        # Sanity check for NaN results which might indicate fit issues
+        if pd.isna(p_value) and pd.isna(effect_size):
+             failure_reason = "Model fit succeeded but key results (p_value, effect_size) are NaN."
+             print(f"[{datetime.now()}] WARNING: {failure_reason}")
+             # Optionally print result.summary() here for debugging
+             # print(result.summary())
+
     except Exception as e:
-        # Handle statistical model failures
-        failure_reason = f"Statistical model error: {str(e)[:100]}..."
-        print(f"Model fitting failed with error: {str(e)}")
+        fit_fail_time = datetime.now()
+        print(f"[{fit_fail_time}] !!! FAILED model.fit() (Duration before fail: {fit_fail_time - fit_start_time}).")
+        failure_reason = f"StatsModels MixedLM Error: {str(e)[:150]}..." # Limit error length
+        print(f"  Error details: {e}")
+        # Reset results to NaN if fit failed
+        effect_size, p_value, std_err = np.nan, np.nan, np.nan
 
-    return {
-            'effect_size': effect_size,
-            'p_value': p_value,
-            'n0': n0,
-            'n1': n1,
-            'std_err': std_err,
-            'num_comp_group_0': (df['group'] == 0).sum(),
-            'num_comp_group_1': (df['group'] == 1).sum(),
-            'failure_reason': failure_reason,
-            'pc_corrected': pc_corrected
-        }
-
+    # --- 9. Return Final Dictionary ---
+    final_result = {
+        'effect_size': effect_size,
+        'p_value': p_value,
+        'n0': n0,
+        'n1': n1,
+        'std_err': std_err,
+        'num_comp_group_0': (df['group'] == 0).sum(),
+        'num_comp_group_1': (df['group'] == 1).sum(),
+        'failure_reason': failure_reason,
+        'pc_corrected': pc_corrected # Use the flag set during PC processing
+    }
+    func_end_time = datetime.now()
+    print(f"[{func_end_time}] Worker finished for chromosome {chromosome} (Total time: {func_end_time - func_start_time}).")
+    return final_result
 
 def analyze_transcript(args):
     """
