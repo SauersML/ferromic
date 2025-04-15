@@ -116,7 +116,7 @@ def extract_coordinates_from_header(header: str) -> dict | None:
     # Regex to capture chromosome, start, end, and group
     # Allows 'chr' or 'chr_' prefix for chromosome part
     pattern = re.compile(
-        # Ensure start of line or '>' precedes 'filtered_pi' to avoid partial matches
+        # start of line or '>' precedes 'filtered_pi' to avoid partial matches
         # Then look for the standard coordinate pattern
         r'>.*?filtered_pi.*?_chr_?([\w\.\-]+)_start_(\d+)_end_(\d+)(?:_group_([01]))?',
         re.IGNORECASE # Ignore case for keywords
@@ -422,11 +422,11 @@ def load_pi_data(file_path: str | Path) -> list[dict]:
                          else:
                              logger.warning(f"Skipping sequence: 'filtered_pi' header failed coordinate/format check '{current_header[:70]}...'")
                              skipped_coord_error += 1
-                             current_header = None # Ensure data isn't collected for this invalid header
+                             current_header = None # data isn't collected for this invalid header
                     else:
                         # It's not a 'filtered_pi' header, mark as skipped and ignore data lines
                         skipped_not_filtered_pi += 1
-                        current_header = None # Ensure data isn't collected
+                        current_header = None # data isn't collected
 
                 elif is_current_header_valid and current_header:
                     # Append data line only if the current header is valid ('filtered_pi' and coords ok)
@@ -904,7 +904,7 @@ def diagnose_single_event_discrepancy(
 
     # Adjust counts: Total regions = defined_region_count. Summing statuses should equal this.
     # If a region wasn't matched by any header, it remains 'Region Not Matched'.
-    # We need to ensure other categories don't double-count.
+    # We need to other categories don't double-count.
     # The logic above tries to capture the *reason* a haplotype matching the region might be missing.
 
     logger.info("\n--- DIAGNOSIS SUMMARY (Single-Event Regions) ---")
@@ -959,7 +959,8 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
     """
     Creates a paired violin plot comparing Middle vs Flanking Pi (mean).
     Includes individual data points (jittered), violin plots showing distribution,
-    median lines, and lines connecting paired points colored by Log2 Fold Change.
+    median lines, and lines connecting paired points colored by CONTINUOUS
+    Log2 Fold Change (L2FC), using MANUAL normalization and a colorbar.
 
     Args:
         all_sequences_stats: List of dictionaries containing stats for each sequence.
@@ -969,7 +970,7 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
         matplotlib.figure.Figure object or None if plotting fails.
     """
     stat_type = "mean" # Focus on mean as requested
-    logger.info(f"Creating Overall Paired Violin Plot for {stat_type.capitalize()} Pi...")
+    logger.info(f"Creating Overall Paired Violin Plot for {stat_type.capitalize()} Pi (Continuous L2FC, Manual Norm)...")
     start_time = time.time()
 
     flanking_field = f"flanking_{stat_type}"
@@ -984,7 +985,7 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
         m_val = s.get(middle_field)
         pair_id = f'pair_{i}' # Unique identifier for each sequence pair
 
-        # Ensure both values are valid numbers for inclusion in the plot
+        # both values are valid numbers for inclusion in the plot
         if pd.notna(f_val) and pd.notna(m_val):
             # Add data in long format for seaborn plots
             plot_data.append({'pair_id': pair_id, 'region_type': 'Flanking', 'pi_value': f_val})
@@ -1009,63 +1010,149 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
     df_paired = pd.DataFrame(paired_list)
 
     # Calculate Log2 Fold Change (Middle / Flanking) for coloring lines
-    # Use np.errstate to suppress potential division by zero or log(0) warnings
     with np.errstate(divide='ignore', invalid='ignore'):
         ratio = df_paired['Middle'] / df_paired['Flanking']
-        # Use np.where to handle non-positive ratios gracefully -> NaN
-        df_paired['L2FC'] = np.where(ratio > 0, np.log2(ratio), np.nan)
+        df_paired['L2FC'] = np.log2(ratio)
+        # --- FIX: Use recommended pandas way to avoid SettingWithCopyWarning ---
+        # Create a mask for values to replace
+        mask_to_replace = np.isneginf(df_paired['L2FC']) | pd.isna(df_paired['L2FC'])
+        # Assign np.nan using .loc
+        df_paired.loc[mask_to_replace, 'L2FC'] = np.nan
+        # --------------------------------------------------------------------
 
-    # Calculate mean difference for annotation
-    mean_diff = (df_paired['Middle'] - df_paired['Flanking']).mean()
+    # --- DIAGNOSTICS: Inspect L2FC Distribution ---
+    # Filter out NaN AND +/- Inf values before calculating descriptive stats and percentiles
+    l2fc_finite_values = df_paired['L2FC'].replace([np.inf, -np.inf], np.nan).dropna()
 
-    # Prepare colormap normalization based on L2FC values
-    l2fc_values = df_paired['L2FC'].dropna()
-    can_draw_colorbar = not l2fc_values.empty
+    can_draw_colorbar = not l2fc_finite_values.empty
+    scalar_mappable = None # Initialize
+    manual_vmin = np.nan
+    manual_vmax = np.nan
 
     if can_draw_colorbar:
-        vmin, vmax = l2fc_values.min(), l2fc_values.max()
-        # If L2FC spans positive and negative, center the colormap around 0
-        if vmin < 0 < vmax:
-            max_abs = max(abs(vmin), abs(vmax), 1e-9) # Avoid max_abs being 0
-            norm = mcolors.Normalize(vmin=-max_abs, vmax=max_abs)
-        else: # Otherwise, just scale to the data range
-            norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        logger.info("--- L2FC Distribution Diagnostics (Finite Values Only) ---")
+        logger.info(f"L2FC (Finite) Summary:\n{l2fc_finite_values.describe()}")
+        # Optional: Save a histogram plot for visual inspection
+        try:
+            fig_diag, ax_diag = plt.subplots(figsize=(6, 4))
+            sns.histplot(l2fc_finite_values, kde=True, bins=30, ax=ax_diag)
+            ax_diag.set_title("Distribution of Calculated Finite L2FC Values")
+            ax_diag.set_xlabel("Log2(Middle / Flanking)")
+            ax_diag.set_ylabel("Frequency")
+            # OUTPUT_DIR is a Path object accessible here
+            dist_path = OUTPUT_DIR / "diagnostic_l2fc_finite_distribution.png"
+            fig_diag.savefig(dist_path, dpi=150, bbox_inches='tight')
+            plt.close(fig_diag) # Close the diagnostic plot figure
+            logger.info(f"Saved L2FC finite distribution plot to {dist_path}")
+        except Exception as e:
+            logger.warning(f"Could not generate L2FC finite distribution plot: {e}")
+        logger.info("------------------------------------")
+
+        # --- NEW METHOD: Manual Normalization based on Percentiles of FINITE values ---
+        # Determine symmetric range based on percentiles to be robust to outliers
+        q_low = np.nanpercentile(l2fc_finite_values, 2)
+        q_high = np.nanpercentile(l2fc_finite_values, 98)
+        max_abs_l2fc = max(abs(q_low), abs(q_high))
+
+        # the range is not zero or extremely small
+        min_range_magnitude = 0.1 # Set a minimum sensible range magnitude
+        # Check against zero or very small values explicitly
+        if max_abs_l2fc < (min_range_magnitude / 2) or np.isclose(max_abs_l2fc, 0):
+             logger.warning(f"L2FC finite percentile range very small or zero ({max_abs_l2fc:.3f}). Setting manual normalization range to +/- {min_range_magnitude / 2:.2f}.")
+             manual_vmin = -min_range_magnitude / 2
+             manual_vmax = min_range_magnitude / 2
+        else:
+            manual_vmin = -max_abs_l2fc
+            manual_vmax = max_abs_l2fc
+            logger.info(f"Setting manual L2FC normalization range: [{manual_vmin:.3f}, {manual_vmax:.3f}] based on 2nd/98th percentiles of finite values.")
+
+        # Create the normalization object MANUALLY, using clip=True
+        norm = mcolors.Normalize(vmin=manual_vmin, vmax=manual_vmax, clip=True)
         scalar_mappable = cm.ScalarMappable(norm=norm, cmap=PLOT_COLORMAP)
+
     else:
-        logger.warning("No valid L2FC values found (e.g., all flanking values were zero or middle/flanking were NaN). Paired lines will use default color.")
-        # Create a dummy mappable for placeholder if needed, though colorbar won't be drawn
-        norm = mcolors.Normalize(vmin=-1, vmax=1) # Example range
-        scalar_mappable = cm.ScalarMappable(norm=norm, cmap=PLOT_COLORMAP)
+        logger.warning("No finite L2FC values found. Cannot create L2FC colorbar. Paired lines will use default color.")
+        # scalar_mappable remains None
 
 
     # --- Create the plot ---
-    fig, ax = plt.subplots(figsize=(7, 7)) # Slightly wider for better spacing
+    fig, ax = plt.subplots(figsize=(8, 7)) # Slightly wider for colorbar
 
-    # Define region order and color palette
+    # Define region order and palette for points/violins
     region_palette = {'Flanking': FLANKING_COLOR, 'Middle': MIDDLE_COLOR}
     region_order = ['Flanking', 'Middle']
-    x_coords_cat = {'Flanking': 0, 'Middle': 1} # X-coordinates for the two categories
+    x_coords_cat = {'Flanking': 0, 'Middle': 1} # X-coordinates
 
-    # 1. Stripplot for individual points (jittered)
+    # --- Draw Plot Elements ---
+
+    # 1. Paired lines (DRAW FIRST, colored by continuous L2FC with manual norm)
+    lines_colored = 0
+    lines_default = 0
+    lines_inf = 0 # Track infinite L2FC lines separately
+    for _, row in df_paired.iterrows():
+        l2fc_val = row['L2FC']
+        x_flank = x_coords_cat['Flanking']
+        x_middle = x_coords_cat['Middle']
+        y_flank = row['Flanking']
+        y_middle = row['Middle']
+
+        # Determine line color based on L2FC and manual normalization
+        # Check if scalar_mappable was successfully created and L2FC is finite
+        if scalar_mappable is not None and pd.notna(l2fc_val) and np.isfinite(l2fc_val):
+             line_color = scalar_mappable.to_rgba(l2fc_val)
+             lines_colored += 1
+        elif np.isinf(l2fc_val):
+             # Optionally color infinite values differently or use default
+             line_color = DEFAULT_LINE_COLOR # Or assign a specific color like 'purple'
+             lines_inf +=1
+        else: # Handles NaN or cases where scalar_mappable is None
+             line_color = DEFAULT_LINE_COLOR
+             lines_default += 1
+
+        # Draw the line
+        ax.plot([x_flank, x_middle], [y_flank, y_middle],
+                color=line_color,
+                alpha=LINE_ALPHA,
+                lw=LINE_WIDTH,
+                zorder=1) # Lines behind points/violins
+
+    if lines_colored > 0:
+        logger.info(f"Colored {lines_colored} lines based on finite L2FC.")
+    if lines_inf > 0:
+        logger.info(f"Drew {lines_inf} lines with default color (Infinite L2FC).")
+    if lines_default > 0:
+        logger.info(f"Drew {lines_default} lines with default color (NaN L2FC or no colorbar).")
+
+
+    # 2. Stripplot for individual points (jittered)
+    # Handle FutureWarning for seaborn v0.14+
     sns.stripplot(data=df_long, x='region_type', y='pi_value', order=region_order,
-                  palette=region_palette,
+                  # palette=region_palette, # Deprecated without hue
+                  hue='region_type', palette=region_palette, # Correct way
                   size=SCATTER_SIZE, alpha=SCATTER_ALPHA,
-                  jitter=0.15, # Control amount of jitter
-                  legend=False, ax=ax, zorder=5) # Points on top of violin lines
+                  jitter=0.15,
+                  legend=False, # Disable legend for hue='region_type'
+                  ax=ax, zorder=5)
 
-    # 2. Violin plot for distribution shape
+    # 3. Violin plot for distribution shape
+    # Handle FutureWarning for seaborn v0.14+ and v0.15+
+    # --- FIX: Define violin_width ---
     violin_width = 0.8
+    # ------------------------------
     sns.violinplot(data=df_long, x='region_type', y='pi_value', order=region_order,
-                   palette=region_palette,
-                   inner=None, # Don't draw internal box/lines
-                   linewidth=1.2, # Outline width
-                   width=violin_width, # Width of violins
-                   cut=0, # Don't extend beyond data range
-                   scale='width', # Scale violins to have same max width
-                   alpha=VIOLIN_ALPHA, # Make violins semi-transparent
-                   ax=ax, zorder=10) # Violin slightly above points
+                   # palette=region_palette, # Deprecated without hue
+                   hue='region_type', palette=region_palette, # Correct way
+                   inner=None,
+                   linewidth=1.2,
+                   width=violin_width, # Now defined
+                   cut=0,
+                   # scale='width', # Deprecated
+                   density_norm='width', # Correct way for seaborn v0.15+
+                   alpha=VIOLIN_ALPHA,
+                   legend=False, # Disable legend for hue='region_type'
+                   ax=ax, zorder=10)
 
-    # 3. Median lines within violins
+    # 4. Median lines within violins
     median_values = df_long.groupby('region_type', observed=False)['pi_value'].median()
     median_line_width_on_plot = 0.15 # Relative width of the median line on x-axis
     for region, median_val in median_values.items():
@@ -1077,30 +1164,10 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
                   zorder=12, # Median line above violin body
                   alpha=0.8) # Slightly transparent
 
-    # 4. Paired lines connecting Flanking to Middle points, colored by L2FC
-    for _, row in df_paired.iterrows():
-        l2fc_val = row['L2FC']
-        x_flank = x_coords_cat['Flanking']
-        x_middle = x_coords_cat['Middle']
-        y_flank = row['Flanking']
-        y_middle = row['Middle']
 
-        # Determine line color based on L2FC
-        if pd.notna(l2fc_val) and can_draw_colorbar:
-             line_color = scalar_mappable.to_rgba(l2fc_val)
-        else:
-             line_color = DEFAULT_LINE_COLOR # Use default grey if L2FC is NaN or colorbar isn't used
-
-        # Draw the line
-        ax.plot([x_flank, x_middle], [y_flank, y_middle],
-                color=line_color,
-                alpha=LINE_ALPHA,
-                lw=LINE_WIDTH,
-                zorder=1) # Lines behind points/violins for clarity
-
-    # 5. Colorbar for L2FC
-    colorbar_width_adjustment = 0.97 # Default layout width
-    if can_draw_colorbar:
+    # 5. Colorbar for L2FC (using the manually defined ScalarMappable)
+    colorbar_width_adjustment = 0.97 # Default layout width if no colorbar
+    if scalar_mappable is not None: # Check if colorbar should be drawn
         # Add colorbar to the right
         cbar = fig.colorbar(scalar_mappable, ax=ax, pad=0.02, aspect=25, shrink=0.6)
         cbar.set_label('Log2 (π Middle / π Flanking)', rotation=270, labelpad=18, fontsize=10)
@@ -1108,8 +1175,20 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
         cbar.outline.set_visible(False) # Cleaner look without outline
         colorbar_width_adjustment = 0.90 # Adjust layout to make space for colorbar
 
+        # Use cbar.vmin and cbar.vmax (Corrected based on previous error)
+        cbar_vmin = cbar.vmin
+        cbar_vmax = cbar.vmax
+
+        logger.info(f"Colorbar displayed with range: [{cbar_vmin:.3f}, {cbar_vmax:.3f}]")
+        # Check if the displayed range matches the intended manual range (allowing for float precision)
+        if not (np.isclose(cbar_vmin, manual_vmin) and np.isclose(cbar_vmax, manual_vmax)):
+            logger.warning(f"Colorbar limits [{cbar_vmin:.3f}, {cbar_vmax:.3f}] do not exactly match intended manual normalization bounds [{manual_vmin:.3f}, {manual_vmax:.3f}]! Check implementation.")
+
+
     # 6. Annotations (Stats)
     p_text = format_p_value(overall_p_value)
+    # Calculate mean difference only from pairs used in plot
+    mean_diff = np.nanmean(df_paired['Middle'] - df_paired['Flanking'])
     diff_text = f"Mean Diff (Middle - Flank): {mean_diff:.4g}"
     n_text = f"N = {n_reported_test} pairs" # Use N from statistical test
     annotation_text = f"{n_text}\n{diff_text}\n{p_text} (Permutation Test)"
@@ -1118,8 +1197,9 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
     ax.text(0.03, 0.97, annotation_text,
             transform=ax.transAxes, # Coordinates relative to axes
             ha='left', va='top', # Alignment
-            fontsize=10, color='black',
-            bbox=dict(boxstyle='round,pad=0.4', fc='white', alpha=0.8, ec='grey')) # White box background
+            fontsize=9, color='black',
+            bbox=dict(boxstyle='round,pad=0.4', fc='white', alpha=0.8, ec='grey'))
+
 
     # 7. Axes labels, title, ticks, limits, and style
     ax.set_ylabel(f'Mean Nucleotide Diversity (π)', fontsize=12)
@@ -1127,7 +1207,7 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
     ax.set_xticks(list(x_coords_cat.values()))
     ax.set_xticklabels(list(x_coords_cat.keys()), fontsize=11)
     ax.set_xlim(-0.5, 1.5) # Add padding on x-axis
-    ax.set_title(f'Overall Comparison of Mean π: Middle vs. Flanking Regions', fontsize=14, pad=20) # Add padding to title
+    ax.set_title(f'Overall Comparison of Mean π: Middle vs. Flanking Regions', fontsize=14, pad=20)
 
     # Grid and spines
     ax.yaxis.grid(True, linestyle=':', linewidth=0.6, alpha=0.7) # Horizontal grid only
@@ -1135,31 +1215,37 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
     sns.despine(ax=ax, offset=5, trim=False) # Remove top/right spines
 
     # Adjust Y limits for better visualization
-    min_val = df_long['pi_value'].min()
-    max_val = df_long['pi_value'].max()
-    y_range = max_val - min_val
-    y_buffer = y_range * 0.05 if y_range > 0 else 0.1 # Add 5% buffer, or fixed if range is 0
-    ax.set_ylim(bottom=max(0, min_val - y_buffer), top=max_val + y_buffer) # Ensure y starts at or above 0
+    all_pi_values = df_long['pi_value'].dropna()
+    if not all_pi_values.empty:
+        min_val = all_pi_values.min()
+        max_val = all_pi_values.max()
+        y_range = max_val - min_val
+        y_buffer = y_range * 0.05 if y_range > 0 else 0.1 # Add 5% buffer, or fixed if range is 0
+        ax.set_ylim(bottom=max(0, min_val - y_buffer), top=max_val + y_buffer) # y starts at or above 0
+    else:
+        ax.set_ylim(0, 1) # Default if no data
 
     # --- Final Adjustments and Save ---
     try:
-        # Adjust layout to prevent overlap, considering colorbar
-        fig.tight_layout(rect=[0.03, 0.03, colorbar_width_adjustment, 0.93]) # Leave space for title and axes labels
+        # Adjust layout to prevent overlap, considering potential colorbar
+        fig.tight_layout(rect=[0.03, 0.03, colorbar_width_adjustment, 0.93]) # Leave space for title/axes/colorbar
     except ValueError:
         logger.warning("Could not apply tight_layout automatically. Manual adjustment of plot might be needed if elements overlap.")
+    except Exception as e: # Catch other potential layout errors
+        logger.error(f"Error during tight_layout adjustment: {e}")
 
-    output_filename = OUTPUT_DIR / f"pi_overall_{stat_type}_violin_paired_coloredLines.png" # Updated filename
+
+    output_filename = OUTPUT_DIR / f"pi_overall_{stat_type}_violin_paired_L2FC_ManualNormLines.png" # Updated filename
     try:
         plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-        logger.info(f"Saved overall styled paired violin plot to {output_filename}")
+        logger.info(f"Saved overall styled paired violin plot (Manual Norm L2FC) to {output_filename}")
     except Exception as e:
-        logger.error(f"Failed to save styled violin plot to {output_filename}: {e}")
+        logger.error(f"Failed to save styled violin plot (Manual Norm L2FC) to {output_filename}: {e}")
 
     elapsed_time = time.time() - start_time
-    logger.info(f"Created and saved styled violin plot in {elapsed_time:.2f} seconds.")
+    logger.info(f"Created and saved styled violin plot (Manual Norm L2FC) in {elapsed_time:.2f} seconds.")
 
     return fig
-
 
 # --- Main Execution ---
 
@@ -1254,7 +1340,7 @@ def main():
             internal_cat = CAT_MAPPING.get(cat)
             seq_list = categories.get(internal_cat, []) if internal_cat else []
 
-        if seq_list and n_valid_pairs > 0: # Ensure there are pairs to calculate diff from
+        if seq_list and n_valid_pairs > 0: # there are pairs to calculate diff from
             m_means = np.array([s['middle_mean'] for s in seq_list])
             f_means = np.array([s['flanking_mean'] for s in seq_list])
             valid_indices = ~np.isnan(m_means) & ~np.isnan(f_means)
