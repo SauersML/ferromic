@@ -46,8 +46,8 @@ def load_input_files():
         logger.info(f"Inversion info: {inversion_df.shape[0]} rows, {inversion_df.shape[1]} columns")
 
         # Ensure numeric columns are properly typed
-        inversion_df['region_start'] = pd.to_numeric(inversion_df['region_start'], errors='coerce')
-        inversion_df['region_end'] = pd.to_numeric(inversion_df['region_end'], errors='coerce')
+        inversion_df['Start'] = pd.to_numeric(inversion_df['Start'], errors='coerce')
+        inversion_df['End'] = pd.to_numeric(inversion_df['End'], errors='coerce')
         inversion_df['0_single_1_recur'] = pd.to_numeric(inversion_df['0_single_1_recur'], errors='coerce')
 
         return pairwise_df, inversion_df
@@ -91,18 +91,18 @@ def map_cds_to_inversions_excluding_ambiguous(pairwise_df, inversion_df):
         end = coords['end']                                                                                                                                                                                                                                                                                                                                       
         # Find matching inversion regions using overlap criteria                                                                                                                     
         rec_matches = recurrent_inv[                                                                                                                                                     
-            (recurrent_inv['chr'] == chrom) &
+            (recurrent_inv['Chromosome'] == chrom) &
             (                                                                                                                                                                                
                 # CDS overlaps or is contained within inversion                                                                                                                              
-                ((start <= recurrent_inv['region_end']) & (end >= recurrent_inv['region_start']))                                                                                        
+                ((start <= recurrent_inv['End']) & (end >= recurrent_inv['Start']))                                                                                        
             )                                                                                                                                                                        
         ]
                                                                                                                                                                                      
         single_matches = single_event_inv[                                                                                                                                               
-            (single_event_inv['chr'] == chrom) &                                                                                                                                         
+            (single_event_inv['Chromosome'] == chrom) &                                                                                                                                         
             (                                                                                                                                                                                
                 # CDS overlaps or is contained within inversion
-                ((start <= single_event_inv['region_end']) & (end >= single_event_inv['region_start']))                                                                                  
+                ((start <= single_event_inv['End']) & (end >= single_event_inv['Start']))                                                                                  
             )                                                                                                                                                                        
         ]                                                                                                                                                                                                                                                                                                                                                         
         # Determine inversion type
