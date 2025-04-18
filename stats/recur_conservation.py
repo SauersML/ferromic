@@ -353,7 +353,7 @@ def conduct_leave_one_out_analysis(median_df, cds_to_type, inversion_to_cds_map)
         print("Skipped: No valid sequence data for recurrent/single types.")
         return None, np.nan
 
-    valid_df['is_identical'] = (valid_df['median_omega'] == -1).astypupdatee(int)
+    valid_df['is_identical'] = (valid_df['median_omega'] == -1).astype(int)
     logger.info(f"Total sequences for LOO analysis: {len(valid_df):,}")
 
     baseline_stats = analyze_proportions_median_based(valid_df, inversion_to_cds_map)
