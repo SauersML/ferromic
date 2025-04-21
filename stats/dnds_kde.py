@@ -357,7 +357,7 @@ def plot_median_omega_distribution(median_count_data):
     logger.info("Creating standalone plot for median omega distribution...")
 
     # Define categories for display and internal lookup
-    display_categories = ["Identical Seq.\n(ω = -1)", "Purifying/Neutral\n(0 ≤ ω ≤ 1)", "Positive Sel.\n(ω > 1)"]
+    display_categories = ["Identical Sequences", "0 ≤ ω ≤ 1", "ω > 1"]
     internal_categories = ["Exactly -1", "0 to 1", "Above 1"]
     n_categories = len(display_categories)
 
