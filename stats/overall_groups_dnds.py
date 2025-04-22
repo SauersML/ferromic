@@ -15,6 +15,7 @@ from collections import defaultdict
 from scipy import stats # Import stats for testing
 from tqdm import tqdm # Import tqdm for progress bar
 import warnings # Import warnings module
+import math
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -91,7 +92,11 @@ def assign_recurrence_status(row, inv_lookup, tolerance=COORDINATE_TOLERANCE):
     return np.nan # Return NaN if no overlap found
 
 def run_mannwhitneyu(group1_data, group2_data, group1_name, group2_name, test_description):
-    """Runs Mann-Whitney U test and prints results (without summary stats)."""
+    """
+    Runs Mann-Whitney U test, prints results, calculates Common Language Effect Size (CLES)
+    to infer and report the direction of effect if significant.
+    """
+    # Drop NaNs before calculations
     group1_data = group1_data.dropna()
     group2_data = group2_data.dropna()
     n1 = len(group1_data)
@@ -99,22 +104,70 @@ def run_mannwhitneyu(group1_data, group2_data, group1_name, group2_name, test_de
 
     print(f"\n  --- Test: {test_description} ---")
     print(f"    Group 1: {group1_name} (n={n1})")
+    # Optionally print medians for context, but don't use for direction inference
+    if n1 > 0:
+        median1 = group1_data.median()
+        print(f"      Median: {median1:.6f}")
+    else:
+        print("      (No data)")
+
     print(f"    Group 2: {group2_name} (n={n2})")
+    if n2 > 0:
+        median2 = group2_data.median()
+        print(f"      Median: {median2:.6f}")
+    else:
+        print("      (No data)")
 
     if n1 < MIN_SAMPLES_FOR_TEST or n2 < MIN_SAMPLES_FOR_TEST:
         print(f"\n    Skipping statistical test: Insufficient samples (min required={MIN_SAMPLES_FOR_TEST}).")
         return None, None
+
+    # Check for zero variance / identical values which can cause errors or trivial results
+    if n1 > 0 and np.allclose(group1_data.iloc[0], group1_data):
+        print(f"\n    Skipping statistical test: All values in {group1_name} are identical.")
+        return None, None
+    if n2 > 0 and np.allclose(group2_data.iloc[0], group2_data):
+        print(f"\n    Skipping statistical test: All values in {group2_name} are identical.")
+        return None, None
+    # Check if both groups are identical to each other
+    if n1 > 0 and n2 > 0 and n1 == n2 and np.allclose(np.sort(group1_data), np.sort(group2_data)):
+         print(f"\n    Skipping statistical test: Values in both groups are identical.")
+         return None, None
+
     try:
+        # Calculate U statistic and p-value
+        # U statistic calculated by SciPy corresponds to group1 unless specified otherwise
         stat, p_value = stats.mannwhitneyu(group1_data, group2_data, alternative='two-sided')
+
         print(f"\n    Mann-Whitney U Test Result:")
-        print(f"      Statistic = {stat:.4f}, P-value = {p_value:.4g}")
+        print(f"      U Statistic = {stat:.4f}, P-value = {p_value:.4g}")
+
         if p_value < 0.05:
             print("      Result: Statistically significant (p < 0.05)")
+
+            # Calculate and interpret Common Language Effect Size (CLES) for direction
+            denominator = n1 * n2
+            if denominator > 0:
+                cles = stat / denominator # Probability P(Group1 > Group2)
+                print(f"      Common Language Effect Size (CLES): {cles:.4f}")
+                # Compare CLES to 0.5, using a small tolerance for floating point checks
+                if math.isclose(cles, 0.5, abs_tol=1e-9):
+                     print("      Direction: No directional tendency indicated (CLES ≈ 0.5).")
+                elif cles > 0.5:
+                    print(f"      Direction: {group1_name} tends to have higher ranks/values than {group2_name} (CLES > 0.5).")
+                else: # cles < 0.5
+                    print(f"      Direction: {group2_name} tends to have higher ranks/values than {group1_name} (CLES < 0.5).")
+            else:
+                print("      Direction: Cannot calculate CLES (one or both groups empty).")
+
         else:
             print("      Result: Not statistically significant (p >= 0.05)")
+            print("      Direction: No significant difference in distributions.")
+
         return stat, p_value
     except ValueError as e:
-         print(f"\n    Skipping statistical test due to error: {e}")
+         # Handles cases potentially missed by initial checks
+         print(f"\n    Skipping statistical test due to ValueError: {e}")
          return None, None
     except Exception as e:
         print(f"\n    An unexpected error occurred during the test: {e}")
