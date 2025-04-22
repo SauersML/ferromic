@@ -470,10 +470,10 @@ def plot_median_omega_distribution(pairwise_df, output_plot_path, config):
                     color=config.get('SINGLE_EVENT_COLOR', 'orange'),
                     hatch=config.get('SINGLE_EVENT_HATCH', '\\'), alpha=0.85, edgecolor='grey')
 
-    if inv_rec_total > 0:
-        ax.bar_label(rects1, fmt='%.1f%%', padding=3, fontsize=11)
-    if inv_single_total > 0:
-        ax.bar_label(rects2, fmt='%.1f%%', padding=3, fontsize=11)
+    #if inv_rec_total > 0:
+        #ax.bar_label(rects1, fmt='%.1f%%', padding=3, fontsize=11)
+    #if inv_single_total > 0:
+        #ax.bar_label(rects2, fmt='%.1f%%', padding=3, fontsize=11)
 
     line_color = 'black'
     line_width = 2.0
