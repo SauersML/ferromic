@@ -499,7 +499,7 @@ def summarize_and_test_dnds_effects():
 
             # --- Plot Customization ---
             ax.set_xlabel(r"Percentile of Per-Sequence Median $\omega$ (within group)", fontsize=14)
-            ax.set_ylabel(r"Mean Per-Sequence Median $\omega$ (within bin)", fontsize=14)
+            ax.set_ylabel(r"Per-Sequence Median $\omega$ (averaged within each percentile)", fontsize=14)
             ax.set_title(r"Distribution of Per-Sequence Median $\omega$ (Top Percentiles)", fontsize=16)
             
             ax.set_xlim(PERCENTILE_START, PERCENTILE_END)
