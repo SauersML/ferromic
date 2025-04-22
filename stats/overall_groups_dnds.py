@@ -3,7 +3,7 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm, Normalize
-from matplotlib.ticker import FixedLocator, FixedFormatter, MaxNLocator
+from matplotlib.ticker import FixedLocator, FixedFormatter, MaxNLocator, MultipleLocator
 from pathlib import Path
 import os
 import math
@@ -11,17 +11,6 @@ import re
 from matplotlib.patches import ConnectionPatch
 import matplotlib.patches as mpatches
 from matplotlib.cm import ScalarMappable
-
-try:
-    import statsmodels.api as sm
-    lowess = sm.nonparametric.lowess
-    STATSMODELS_AVAILABLE = True
-    print("Successfully imported statsmodels.")
-except ImportError:
-    print("Warning: statsmodels not found. LOESS smoothing will be skipped.")
-    STATSMODELS_AVAILABLE = False
-    lowess = None
-
 from collections import defaultdict
 from scipy import stats # Import stats for testing
 from tqdm import tqdm # Import tqdm for progress bar
@@ -30,6 +19,7 @@ import warnings # Import warnings module
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
+warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 
 # --- Configuration ---
 RESULTS_DIR = Path("results")
@@ -37,9 +27,9 @@ PLOTS_DIR = Path("plots") # For saving the plot
 RAW_DATA_FILE = 'all_pairwise_results.csv'
 INV_INFO_FILE = 'inv_info.csv'
 MIN_SAMPLES_FOR_TEST = 5 # Minimum number of data points (sequences) per group for tests
-N_PERCENTILE_BINS = 100 # Use 100 bins for 100 percentiles
-LOESS_FRAC = 0.4 # Smoothing fraction for LOESS (adjust as needed)
-PLOT_X_MIN_PERCENTILE = 80 # Start plotting from this percentile
+N_PLOT_BINS = 20 # Number of bins to plot
+PERCENTILE_START = 90 # Starting percentile
+PERCENTILE_END = 100 # Ending percentile
 # --- Constants ---
 RECURRENCE_COL_RAW = '0_single_1_recur'
 RECURRENCE_COL_INTERNAL = 'recurrence_flag'
@@ -130,45 +120,78 @@ def run_mannwhitneyu(group1_data, group2_data, group1_name, group2_name, test_de
         print(f"\n    An unexpected error occurred during the test: {e}")
         return None, None
 
-def calculate_percentile_bins(data, value_col, n_bins=N_PERCENTILE_BINS):
-    """Calculates mean, SEM, and checks if all values are zero within exact percentile bins."""
-    if data.empty or data[value_col].isna().all():
-        return pd.DataFrame(columns=['percentile_int', 'mean_omega', 'sem_omega', 'n_obs', 'all_zero'])
+def calculate_manual_percentile_bins(data, value_col, start_perc=PERCENTILE_START, n_bins=N_PLOT_BINS):
+    """Manually calculates stats within n_bins covering the top (100-start_perc)% range."""
 
-    valid_data = data[[value_col]].dropna()
-    if len(valid_data) < 2: # Need at least 2 points to calculate percentiles reasonably
-        print(f"Warning: Not enough valid data points ({len(valid_data)}) for percentile binning. Skipping.")
-        return pd.DataFrame(columns=['percentile_int', 'mean_omega', 'sem_omega', 'n_obs', 'all_zero'])
+    if data.empty or value_col not in data.columns or data[value_col].isna().all():
+        print(f"Warning: Input data empty or value column '{value_col}' missing/all NaN. Skipping binning.")
+        return pd.DataFrame()
 
-    # Calculate exact percentiles for each data point
-    data['percentile_exact'] = data[value_col].rank(pct=True) * 100
-    # Assign to integer percentile bin (e.g., 0.5% -> bin 0, 99.8% -> bin 99)
-    # Floor the percentile rank to get the bin index (0-99)
-    data['percentile_int'] = np.floor(data['percentile_exact']).astype(int)
-    # Ensure values exactly at 100 go into the last bin (99)
-    data.loc[data['percentile_int'] == 100, 'percentile_int'] = n_bins - 1
+    # Sort data by the value column to easily select top percentiles
+    data_sorted = data.sort_values(by=value_col, ascending=True).copy()
+    n_total = len(data_sorted)
 
-    # Define aggregation functions
-    def sem(x):
-        x = x.dropna()
-        if len(x) < 2: return 0
-        return x.std() / np.sqrt(len(x))
+    if n_total < n_bins:
+        print(f"Warning: Only {n_total} data points available, less than target bins ({n_bins}). Skipping binning.")
+        return pd.DataFrame()
 
-    def check_all_zero(x):
-        x = x.dropna()
-        if x.empty: return False
-        return (x == 0.0).all()
+    # Determine the index cutoff for the starting percentile
+    start_index = math.floor(n_total * (start_perc / 100.0))
+    start_index = min(start_index, n_total - 1)
 
-    # Aggregate per integer percentile bin
-    binned_stats = data.groupby('percentile_int', observed=False)[value_col].agg(
-        mean_omega='mean',
-        sem_omega=sem,
-        n_obs='count',
-        all_zero=check_all_zero
-    ).reset_index()
+    # Select the data from the starting percentile onwards
+    top_data = data_sorted.iloc[start_index:].copy()
+    n_subset = len(top_data)
 
-    # percentile_int now directly represents the percentile (0 to 99)
-    return binned_stats
+    if n_subset < n_bins :
+         print(f"Warning: Only {n_subset} points >= {start_perc}th percentile, less than target bins ({n_bins}). Skipping binning.")
+         return pd.DataFrame()
+
+    chunk_size = n_subset // n_bins
+    remainder = n_subset % n_bins
+    print(f"    Manual Binning: N in Top {100-start_perc}% = {n_subset}, Target Bins={n_bins}, Base Chunk Size={chunk_size}, Remainder={remainder}")
+
+    binned_results = []
+    current_idx = 0
+    percentile_step = (100.0 - start_perc) / n_bins
+
+    for i in range(n_bins):
+        current_chunk_size = chunk_size + 1 if i < remainder else chunk_size
+        chunk_start_idx = current_idx
+        chunk_end_idx = current_idx + current_chunk_size
+        current_chunk = top_data.iloc[chunk_start_idx:chunk_end_idx]
+        current_idx = chunk_end_idx
+
+        if current_chunk.empty:
+            print(f"      Bin {i}: Empty chunk unexpected, skipping.")
+            continue
+
+        chunk_values = current_chunk[value_col].dropna()
+        if chunk_values.empty:
+             continue
+
+        mean_omega = chunk_values.mean()
+        n_obs = len(chunk_values)
+        sem_omega = 0 if n_obs < 2 else chunk_values.std(ddof=1) / np.sqrt(n_obs)
+        # Removed all_zero check
+        percentile_midpoint = start_perc + (i + 0.5) * percentile_step
+
+        binned_results.append({
+            'manual_bin_index': i,
+            'percentile_midpoint': percentile_midpoint, # X-value for plotting
+            'mean_omega': mean_omega,
+            'sem_omega': sem_omega,
+            'n_obs': n_obs,
+            # 'all_zero': all_zero # Removed
+        })
+
+    binned_stats_df = pd.DataFrame(binned_results)
+    if len(binned_stats_df) != n_bins:
+         print(f"Warning: Generated {len(binned_stats_df)} bins, but expected exactly {n_bins}. Review binning logic.")
+    else:
+         print(f"    Successfully generated {len(binned_stats_df)} bins.")
+
+    return binned_stats_df
 
 
 # --- Main Function ---
@@ -296,6 +319,11 @@ def summarize_and_test_dnds_effects():
     if not raw_df_processed.empty:
         aggregated_results_list = []
         grouping_cols_agg = ['transcript_id', 'Recurrence Type', 'Orientation']
+        if raw_df_processed[grouping_cols_agg].isnull().any().any():
+            print(f"  Warning: Found NaNs in aggregation grouping columns: {raw_df_processed[grouping_cols_agg].isnull().sum().to_dict()}")
+            raw_df_processed.dropna(subset=grouping_cols_agg, inplace=True)
+            print(f"  Shape after dropping NaN grouping rows: {raw_df_processed.shape}")
+
         grouped = raw_df_processed.groupby(grouping_cols_agg)
         print(f"  Aggregating across {len(grouped)} transcript/category groups...")
 
@@ -325,6 +353,7 @@ def summarize_and_test_dnds_effects():
             print("  No results after aggregation loop.")
     else:
         print("  Skipping aggregation as processed raw data is empty.")
+
 
     # --- 4. Remove Model Loading Section ---
     print("\n[4] Skipping model results loading.")
@@ -372,7 +401,6 @@ def summarize_and_test_dnds_effects():
         sngl_direct = groups_for_test.get(('Single-Event', 'Direct'), pd.Series(dtype=float))
         sngl_invert = groups_for_test.get(('Single-Event', 'Inverted'), pd.Series(dtype=float))
 
-        # Combine orientations for Recurrent vs Single-Event test
         all_recurrent = pd.concat([rec_direct, rec_invert]).dropna()
         all_single_event = pd.concat([sngl_direct, sngl_invert]).dropna()
 
@@ -381,7 +409,6 @@ def summarize_and_test_dnds_effects():
         run_mannwhitneyu(sngl_invert, sngl_direct, "Sngl Inv", "Sngl Dir", "Inv vs Dir within Single-Event")
         run_mannwhitneyu(rec_direct, sngl_direct, "Rec Dir", "Sngl Dir", "Rec vs Sngl within Direct")
         run_mannwhitneyu(rec_invert, sngl_invert, "Rec Inv", "Sngl Inv", "Rec vs Sngl within Inverted")
-        # --- New Test ---
         run_mannwhitneyu(all_recurrent, all_single_event, "All Recurrent", "All Single-Event", "Overall Recurrent vs Single-Event")
 
     else:
@@ -392,7 +419,7 @@ def summarize_and_test_dnds_effects():
     print("     Generating Percentile Plot")
     print("="*40)
 
-    if raw_summary_available_for_test and not agg_omega_per_seq.empty and STATSMODELS_AVAILABLE:
+    if raw_summary_available_for_test and not agg_omega_per_seq.empty: # Removed STATSMODELS_AVAILABLE check
         plt.style.use('seaborn-v0_8-whitegrid')
         fig, ax = plt.subplots(figsize=(14, 9))
 
@@ -404,6 +431,8 @@ def summarize_and_test_dnds_effects():
         }
 
         plot_data_generated = False
+        all_binned_stats_dfs = [] # Collect binned stats for each group
+
         for name, style in group_styles.items():
             rec_type, orient = name
             group_data = agg_omega_per_seq[
@@ -416,101 +445,98 @@ def summarize_and_test_dnds_effects():
                  print("    Skipping group due to no data.")
                  continue
 
-            # Calculate binned statistics using integer percentiles
-            binned_stats = calculate_percentile_bins(group_data, 'median_omega_per_sequence', n_bins=N_PERCENTILE_BINS)
+            # Calculate manually chunked bins for the top percentiles
+            binned_stats = calculate_manual_percentile_bins(
+                group_data, 'median_omega_per_sequence',
+                start_perc=PERCENTILE_START, n_bins=N_PLOT_BINS
+            )
 
-            if not binned_stats.empty and 'percentile_int' in binned_stats.columns:
-                print(f"    Generated {len(binned_stats)} bins for plotting.")
-
-                # Filter bins for plotting based on percentile range
-                plot_df = binned_stats[binned_stats['percentile_int'] >= PLOT_X_MIN_PERCENTILE].copy()
-                print(f"    Keeping {len(plot_df)} bins >= {PLOT_X_MIN_PERCENTILE}th percentile.")
-
-                if not plot_df.empty:
-                    # Separate points that are all zero vs. not
-                    all_zero_points = plot_df[plot_df['all_zero'] == True]
-                    non_zero_points = plot_df[plot_df['all_zero'] == False]
-
-                    # Plot actual binned mean points (non-zero)
-                    if not non_zero_points.empty:
-                        ax.scatter(non_zero_points['percentile_int'], non_zero_points['mean_omega'],
-                                   color=style['color'], alpha=0.6, s=30, label=f"_{style['label']} (bins)") # Underscore hides from legend
-                        print(f"      Plotted {len(non_zero_points)} non-zero mean bin points.")
-
-                    # Plot actual binned mean points (all-zero)
-                    if not all_zero_points.empty:
-                        ax.scatter(all_zero_points['percentile_int'], all_zero_points['mean_omega'],
-                                   color='grey', alpha=0.4, s=30, marker='x', label=f"_{style['label']} (all zero bins)") # Underscore hides from legend
-                        print(f"      Plotted {len(all_zero_points)} 'all zero' mean bin points.")
-
-                    # Fit and plot LOESS on non-zero mean points (if enough data)
-                    # Use 'percentile_int' as x for LOESS fitting
-                    loess_plot_df = non_zero_points.dropna(subset=['percentile_int', 'mean_omega'])
-                    if len(loess_plot_df) >= 5:
-                        try:
-                            # Sort by x value before LOESS for reliable results
-                            loess_plot_df = loess_plot_df.sort_values('percentile_int')
-                            loess_result = lowess(loess_plot_df['mean_omega'], loess_plot_df['percentile_int'], frac=LOESS_FRAC, it=1)
-                            loess_x = loess_result[:, 0]
-                            loess_y = loess_result[:, 1]
-
-                            # Plot LOESS curve
-                            ax.plot(loess_x, loess_y, color=style['color'], linestyle=style['linestyle'], label=style['label'], linewidth=3.0) # Keep label for LOESS line
-
-                            # Interpolate SEM to match LOESS x-points for smooth shading
-                            valid_sem_points = loess_plot_df.dropna(subset=['sem_omega'])
-                            if len(valid_sem_points) > 1:
-                                interp_sem = np.interp(loess_x, valid_sem_points['percentile_int'], valid_sem_points['sem_omega'])
-                                ax.fill_between(loess_x, loess_y - interp_sem, loess_y + interp_sem, color=style['color'], alpha=0.10)
-                                print(f"      Plotted LOESS and SEM shading for {style['label']}.")
-                            else:
-                                print(f"      Skipping SEM shading for {style['label']} due to insufficient points with valid SEM.")
-
-                            plot_data_generated = True
-
-                        except Exception as e:
-                            print(f"      Error during LOESS fitting/plotting for {style['label']}: {e}")
-                    else:
-                         print(f"      Skipping LOESS for {style['label']} due to insufficient non-zero points ({len(loess_plot_df)}).")
-                else:
-                     print(f"    No bins remaining after percentile filter for {style['label']}.")
+            if not binned_stats.empty and 'percentile_midpoint' in binned_stats.columns:
+                 if len(binned_stats) < N_PLOT_BINS: # Check if exactly N_PLOT_BINS were generated
+                     print(f"    Warning: Manual binning generated {len(binned_stats)} bins, expected {N_PLOT_BINS}. Plotting available bins.")
+                 else:
+                     print(f"    Generated {len(binned_stats)} manual bins for plotting.")
+                 all_binned_stats_dfs.append({'name': name, 'style': style, 'bins': binned_stats}) # Store for plotting
+                 plot_data_generated = True # Mark that we have data to plot
             else:
-                 print(f"    Skipping plotting for {style['label']} due to empty binned stats or missing columns.")
+                 print(f"    Skipping plotting for {style['label']} due to empty or invalid binned stats.")
 
-
+        # Now plot the collected binned stats
         if plot_data_generated:
-            # Update axis labels
-            ax.set_xlabel(f"Percentile of Per-Sequence Median $\omega$ (within group)", fontsize=14)
-            ax.set_ylabel("Median Per-Sequence $\omega$ (averaged within percentile bin)", fontsize=14)
-            ax.set_title("Distribution of Per-Sequence Median $\omega$ (Top Percentiles)", fontsize=16)
+            for group_plot_data in all_binned_stats_dfs:
+                name = group_plot_data['name']
+                style = group_plot_data['style']
+                plot_df = group_plot_data['bins'] # This is the binned data for the group
 
-            # Set x-axis limits and ticks
-            ax.set_xlim(PLOT_X_MIN_PERCENTILE - 0.5, N_PERCENTILE_BINS - 0.5) # Show from specified percentile
-            # Set integer ticks, potentially skipping some
-            ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=10)) # Adjust nbins for desired tick density
+                if plot_df.empty: continue
 
-            ax.legend(fontsize=12, loc='upper left', bbox_to_anchor=(1.02, 1))
-            ax.grid(True, linestyle='--', alpha=0.6)
+                # Plot simple line connecting the mean points
+                # Use percentile_midpoint for x-axis
+                ax.plot(plot_df['percentile_midpoint'], plot_df['mean_omega'],
+                        color=style['color'],
+                        linestyle=style['linestyle'],
+                        linewidth=2.0, # Make lines slightly thinner
+                        alpha=0.6, # Add transparency
+                        label=style['label'],
+                        marker='o', # Add markers to see the bin points
+                        markersize=4, # Smaller markers
+                        zorder=5) # Keep lines above shading
+                print(f"      Plotted line for {style['label']} with {len(plot_df)} points.")
+
+                # Plot SEM shading
+                valid_sem_points = plot_df.dropna(subset=['sem_omega'])
+                if len(valid_sem_points) > 1:
+                    # Sort points by x-axis for fill_between
+                    valid_sem_points = valid_sem_points.sort_values('percentile_midpoint')
+                    x_coords = valid_sem_points['percentile_midpoint']
+                    y_means = valid_sem_points['mean_omega']
+                    y_sem = valid_sem_points['sem_omega']
+                    ax.fill_between(x_coords, y_means - y_sem, y_means + y_sem,
+                                    color=style['color'], alpha=0.10, zorder=0)
+                    print(f"      Plotted SEM shading for {style['label']}.")
+                else:
+                    print(f"      Skipping SEM shading for {style['label']} due to insufficient points with valid SEM.")
+
+            # --- Plot Customization ---
+            ax.set_xlabel(r"Percentile of Per-Sequence Median $\omega$ (within group)", fontsize=14)
+            ax.set_ylabel(r"Mean Per-Sequence Median $\omega$ (within bin)", fontsize=14)
+            ax.set_title(r"Distribution of Per-Sequence Median $\omega$ (Top Percentiles)", fontsize=16)
+            
+            ax.set_xlim(PERCENTILE_START, PERCENTILE_END)
+            # Set integer ticks every 1 percentile
+            tick_values = np.arange(PERCENTILE_START, PERCENTILE_END + 1, 1)
+            ax.set_xticks(tick_values)
+            # Optionally rotate x-tick labels if they overlap
+            ax.tick_params(axis='x', labelsize=10, rotation=45)
+            ax.tick_params(axis='y', labelsize=12)
+            
+            # Add vertical grid lines at each percentile tick
+            for tick_val in tick_values:
+                ax.axvline(tick_val, color='grey', linestyle=':', linewidth=0.5, alpha=0.3, zorder=-1)
+            print(f"   Added vertical grid lines at percentiles: {tick_values}")
+            
+            # Place legend inside the plot area, top left
+            ax.legend(fontsize=12, loc='upper left', bbox_to_anchor=(0.02, 0.98), frameon=True, facecolor='white', framealpha=0.7)
+            ax.grid(True, which='major', axis='y', linestyle='--', alpha=0.6) # Keep horizontal grid
+            ax.grid(False, axis='x') # Turn off default x grid
             ax.set_ylim(bottom=-0.01)
-
+            
             plot_out_fname = PLOTS_DIR / "omega_percentile_distribution.png"
             print(f"\n  Saving percentile plot to {plot_out_fname}")
             try:
-                plt.tight_layout(rect=[0, 0, 0.88, 1]) # Adjust right margin
-                plt.savefig(plot_out_fname, dpi=300)
+                plt.tight_layout()
+                plt.savefig(plot_out_fname, dpi=300, bbox_inches='tight')
             except Exception as e:
                 print(f"  Error saving plot: {e}")
             plt.close(fig)
         else:
             print("\n  Skipping plot generation as no data was prepared or plotted.")
-    elif not STATSMODELS_AVAILABLE:
-        print("\n Skipping plot generation because 'statsmodels' package is not installed.")
+
     else:
         print("\n  Skipping plot generation: Insufficient aggregated raw dN/dS data.")
 
     print("\n" + "="*40)
     print("--- Summary, Testing, and Plotting Complete ---")
-
 
 # --- Main Execution ---
 if __name__ == "__main__":
