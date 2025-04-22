@@ -2,69 +2,85 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm, Normalize
 from matplotlib.ticker import FixedLocator, FixedFormatter
-from adjustText import adjust_text
 from pathlib import Path
 import os
 import math
+import re
 from matplotlib.patches import ConnectionPatch
+import matplotlib.patches as mpatches
+from matplotlib.cm import ScalarMappable
 
-# Constants
 RESULTS_DIR = Path("results")
 PLOTS_DIR = Path("plots")
 
-# Create necessary directories
 for directory in [RESULTS_DIR, PLOTS_DIR]:
     directory.mkdir(exist_ok=True)
 
-# Hard-coded chromosome lengths
 CHR_LENGTHS = {
-    "chr1": 248956422,
-    "chr2": 242193529,
-    "chr3": 198295559,
-    "chr4": 190214555,
-    "chr5": 181538259,
-    "chr6": 170805979,
-    "chr7": 159345973,
-    "chr8": 145138636,
-    "chr9": 138394717,
-    "chr10": 133797422,
-    "chr11": 135086622,
-    "chr12": 133275309,
-    "chr13": 114364328,
-    "chr14": 107043718,
-    "chr15": 101991189,
-    "chr16": 90338345,
-    "chr17": 83257441,
-    "chr18": 80373285,
-    "chr19": 58617616,
-    "chr20": 64444167,
-    "chr21": 46709983,
-    "chr22": 50818468,
-    "chrX": 156040895
+    "chr1": 248956422, "chr2": 242193529, "chr3": 198295559, "chr4": 190214555,
+    "chr5": 181538259, "chr6": 170805979, "chr7": 159345973, "chr8": 145138636,
+    "chr9": 138394717, "chr10": 133797422, "chr11": 135086622, "chr12": 133275309,
+    "chr13": 114364328, "chr14": 107043718, "chr15": 101991189, "chr16": 90338345,
+    "chr17": 83257441, "chr18": 80373285, "chr19": 58617616, "chr20": 64444167,
+    "chr21": 46709983, "chr22": 50818468, "chrX": 156040895
 }
 
-def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annotate=10):
-    """
-    Creates a figure with:
-      1) One row of subplots (side by side), one per chromosome. 
-         Each top subplot x-range => [0..1], y-range => 0..(global max neg_log_p).
-         We place data points, shading for inversions, boundary dots for left/right region. 
-      2) A single axis at the bottom (one horizontal bar) representing the real, linear
-         base-pair coordinates for *all chromosomes side by side.* 
-         Then from each sub-subplot boundary to the corresponding bottom region, 
-         we draw lines to connect the "zoomed" top view to the "real" coordinate space.
-    """
+def parse_coords(coord_str):
+    if pd.isna(coord_str):
+        return np.nan, np.nan
+    first_segment = coord_str.split(';')[0]
+    match = re.match(r'chr.*?:(\d+)-(\d+)', first_segment)
+    if match:
+        try:
+            start = int(match.group(1))
+            end = int(match.group(2))
+            return start, end
+        except ValueError:
+            return np.nan, np.nan
+    else:
+        return np.nan, np.nan
 
-    # Read main data
-    results_df = pd.read_csv(data_file)
-    valid_mask = (results_df['p_value'].notnull()) & (results_df['p_value'] > 0)
-    if valid_mask.sum() == 0:
-        print("No valid p-values found. Cannot create plot.")
+def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
+    print(f"Reading main data from: {data_file}")
+    try:
+        results_df = pd.read_csv(data_file)
+    except FileNotFoundError:
+        print(f"Error: Input data file not found at {data_file}")
+        return
+    except Exception as e:
+        print(f"Error reading {data_file}: {e}")
         return
 
-    # Bonferroni correction, -log10
+    print("Parsing coordinates and renaming columns...")
+    coords_parsed = results_df['coordinates'].apply(parse_coords)
+    results_df['start'] = coords_parsed.apply(lambda x: x[0])
+    results_df['end'] = coords_parsed.apply(lambda x: x[1])
+
+    results_df.rename(columns={'chromosome': 'chrom', 'effect_size': 'observed_effect_size'}, inplace=True)
+
+    original_rows = len(results_df)
+    results_df.dropna(subset=['start', 'end', 'chrom'], inplace=True)
+    rows_dropped = original_rows - len(results_df)
+    if rows_dropped > 0:
+        print(f"Dropped {rows_dropped} rows due to missing/unparseable coordinates or chromosome.")
+
+    if results_df.empty:
+        print("No valid data rows remain after parsing coordinates. Cannot create plot.")
+        return
+
+    results_df['start'] = results_df['start'].astype(int)
+    results_df['end'] = results_df['end'].astype(int)
+    results_df['chrom'] = results_df['chrom'].astype(str)
+    results_df['chrom'] = results_df['chrom'].apply(lambda x: x if x.startswith('chr') else 'chr' + x)
+
+    print("Calculating p-value metrics...")
+    valid_mask = (results_df['p_value'].notnull()) & (results_df['p_value'] > 0) & (results_df['start'].notnull()) & (results_df['end'].notnull())
+    if valid_mask.sum() == 0:
+        print("No valid p-values with associated coordinates found. Cannot create plot.")
+        return
+
     valid_pvals = results_df.loc[valid_mask, 'p_value']
     m = len(valid_pvals)
     results_df['bonferroni_p_value'] = np.nan
@@ -73,272 +89,325 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv', top_hits_to_annota
     ).clip(upper=1.0)
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
 
-    # Read inversion data, filter by overlap
-    inv_df = pd.read_csv(inv_file).dropna(subset=['chr','region_start','region_end'])
-    def overlaps(inv_row, all_df):
-        c = inv_row['chr']
-        s = inv_row['region_start']
-        e = inv_row['region_end']
-        subset = all_df[
-            (all_df['chrom'] == c)
-            & (all_df['start'] <= e)
-            & (all_df['end']   >= s)
-            & (all_df['p_value'].notnull())
-            & (all_df['p_value'] > 0)
-        ]
-        return len(subset) > 0
-    inv_df = inv_df[inv_df.apply(lambda row: overlaps(row, results_df), axis=1)]
+    print("Filtering chromosomes based on valid data...")
+    chroms_with_valid_data = results_df.loc[valid_mask, 'chrom'].unique()
+    if len(chroms_with_valid_data) == 0:
+        print("No chromosomes have valid data points. Cannot create plot.")
+        return
 
-    # Sort chromosomes
     def chr_sort_key(ch):
         base = ch.replace('chr','')
         try:
             return (0, int(base))
-        except:
+        except ValueError:
             mapping = {'X':23,'Y':24,'M':25}
             return (1, mapping.get(base,99))
-    unique_chroms = sorted(results_df['chrom'].dropna().unique(), key=chr_sort_key)
-    if not unique_chroms:
-        print("No valid chromosomes found. Exiting.")
-        return
 
-    # Determine c_min, c_max from valid data only
-    chrom_ranges = {}
-    for c in unique_chroms:
-        cdata = results_df[(results_df['chrom'] == c) & valid_mask]
-        if cdata.empty:
-            chrom_ranges[c] = (0, 1)  # fallback when no valid data is present
+    unique_chroms = sorted(chroms_with_valid_data, key=chr_sort_key)
+    print(f"Chromosomes to plot (having valid data): {unique_chroms}")
+
+    # Filter the main dataframe to only include chromosomes being plotted
+    results_df = results_df[results_df['chrom'].isin(unique_chroms)].copy()
+    # Re-apply valid_mask based on the filtered dataframe
+    valid_mask = (results_df['p_value'].notnull()) & (results_df['p_value'] > 0) & (results_df['start'].notnull()) & (results_df['end'].notnull())
+
+
+    print("Reading and filtering inversion data...")
+    inv_expected_cols = ['chr', 'region_start', 'region_end']
+    inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
+
+    try:
+        inv_df_raw = pd.read_csv(inv_file)
+
+        if all(col in inv_df_raw.columns for col in inv_expected_cols):
+            inv_df = inv_df_raw.copy()
+            inv_df.dropna(subset=inv_expected_cols, inplace=True)
+
+            if not inv_df.empty:
+                inv_df['chr'] = inv_df['chr'].astype(str).apply(lambda x: x if x.startswith('chr') else 'chr' + x)
+                # Filter inversions to only include those on chromosomes we are plotting
+                inv_df = inv_df[inv_df['chr'].isin(unique_chroms)].copy()
+
+                if not inv_df.empty:
+                    inv_df['region_start'] = pd.to_numeric(inv_df['region_start'], errors='coerce')
+                    inv_df['region_end'] = pd.to_numeric(inv_df['region_end'], errors='coerce')
+                    inv_df.dropna(subset=['region_start','region_end'], inplace=True)
+
+                    if not inv_df.empty:
+                        inv_df['region_start'] = inv_df['region_start'].astype(int)
+                        inv_df['region_end'] = inv_df['region_end'].astype(int)
+                        print(f"Found {len(inv_df)} inversions on plotted chromosomes after coordinate validation.")
+                    else:
+                        print("Inversion data invalid after coordinate conversion.")
+                        inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
+                else:
+                    print("No inversions found on the chromosomes being plotted.")
+                    inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
+
+            else:
+                print("Inversion data empty after initial NaN drop.")
+                inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
+
         else:
-            c_min = cdata['start'].min()
-            c_max = cdata['end'].max()
-            chrom_ranges[c] = (c_min, c_max)
+            missing_cols = [col for col in inv_expected_cols if col not in inv_df_raw.columns]
+            print(f"Warning: Inversion info file '{inv_file}' is missing expected columns: {missing_cols}. Proceeding without inversion shading.")
+            inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
 
-    # We'll unify the y-limits for all subplots by a global max of neg_log_p
-    global_max_neglogp = results_df['neg_log_p'].max()
-    if not math.isfinite(global_max_neglogp):
+    except FileNotFoundError:
+        print(f"Warning: Inversion info file not found at {inv_file}. Proceeding without inversion shading.")
+    except Exception as e:
+        print(f"Warning: Error reading inversion file {inv_file}: {e}. Proceeding without inversion shading.")
+
+
+    chrom_ranges = {}
+    for c in unique_chroms: # Only iterate through chromosomes known to have data
+        cdata = results_df[(results_df['chrom'] == c) & valid_mask]
+        # Should not be empty due to pre-filtering, but check just in case
+        if cdata.empty:
+             print(f"Error: Chromosome {c} was selected but has no valid data after filtering.")
+             continue # Should not happen
+        c_min = cdata['start'].min()
+        c_max = cdata['end'].max()
+        if c_min >= c_max:
+             c_max = c_min + 1
+        chrom_ranges[c] = (c_min, c_max)
+
+    neg_log_p_values = results_df.loc[valid_mask, 'neg_log_p'].dropna()
+    if neg_log_p_values.empty:
+        print("Warning: No valid -log10(p) values found. Setting default Y-limit.")
         global_max_neglogp = 1.0
+    else:
+        global_max_neglogp = neg_log_p_values.max()
+
+    if not math.isfinite(global_max_neglogp) or global_max_neglogp <= 0:
+         print(f"Warning: Invalid global max -log10(p) ({global_max_neglogp}). Setting default Y-limit.")
+         global_max_neglogp = 1.0
     YLIM_TOP = global_max_neglogp * 1.1
 
-    # Color map for effect sizes
     cmap = LinearSegmentedColormap.from_list('custom_diverging', ['blue','gray','red'])
-    norm = TwoSlopeNorm(vmin=-1, vcenter=0.0, vmax=1)
+    effect_sizes = results_df.loc[valid_mask, 'observed_effect_size'].dropna()
+    if not effect_sizes.empty:
+        eff_min = effect_sizes.min()
+        eff_max = effect_sizes.max()
+        if eff_min == eff_max:
+            eff_min -= 0.1
+            eff_max += 0.1
+        if eff_min < 0 < eff_max:
+             norm = TwoSlopeNorm(vmin=eff_min, vcenter=0.0, vmax=eff_max)
+        else:
+             norm = Normalize(vmin=eff_min, vmax=eff_max)
+    else:
+        norm = TwoSlopeNorm(vmin=-1, vcenter=0.0, vmax=1)
+        print("Warning: No valid effect size data found for coloring. Using default range [-1, 1].")
 
-    # We'll layout: 2 rows. 
-    #   Row 1: ncols = len(unique_chroms) => subplots for each chromosome
-    #   Row 2: single axis spanning entire width => real linear coords bar
+    print("Setting up plot layout...")
     n_chroms = len(unique_chroms)
-    fig_h = max(6, 3.0)  # minimum height
-    fig_w = max(16, 3*n_chroms)  # width scales with n_chroms
+    fig_h = max(8, 4.0)
+    fig_w = max(20, 3*n_chroms)
     fig = plt.figure(figsize=(fig_w, fig_h))
-    
-    # We'll define a top row for the subplots, a bottom row for the single axis
+
     from matplotlib.gridspec import GridSpec
-    gs = GridSpec(nrows=2, ncols=n_chroms+1, width_ratios=[1]*n_chroms + [0.3], height_ratios=[5,1], figure=fig)
+    gs = GridSpec(nrows=2, ncols=n_chroms+1, width_ratios=[1]*n_chroms + [0.15], height_ratios=[6,1], figure=fig, wspace=0.1, hspace=0.1)
 
-
-    # We'll create a subplot for each chromosome in row=0, col i => the top "zoomed" axis
     ax_subplots = []
     for i, c in enumerate(unique_chroms):
         ax_i = fig.add_subplot(gs[0, i])
         ax_subplots.append(ax_i)
 
-    # The single bottom axis spans row=1, columns 0 to n_chroms-1 (excluding the colorbar column)
     ax_bottom = fig.add_subplot(gs[1, :n_chroms])
-    
-    # *** Build the bottom axis for the real, linear coords ***
-    # We'll place each chromosome side by side, offset-based
-    # Then we can show how each region maps from the top subplot to the bottom bar
 
-    # Offsets for each chromosome
+    print("Building linear genome axis...")
     offsets = {}
     cum_len = 0
+    actual_chrom_lengths_used = {}
+    boundary_tick_positions = []
+    midpoint_label_positions = []
+    midpoint_label_texts = []
+
     for c in unique_chroms:
-        real_len = CHR_LENGTHS.get(c, 1)
+        real_len = CHR_LENGTHS.get(c, 1000000)
+        if c not in CHR_LENGTHS:
+            print(f"Warning: Chromosome {c} not found in CHR_LENGTHS dictionary. Using default length 1,000,000.")
         offsets[c] = cum_len
+        actual_chrom_lengths_used[c] = real_len
+
+        start_pos = offsets[c]
+        end_pos = start_pos + real_len
+        mid_pos = start_pos + real_len / 2
+
+        boundary_tick_positions.extend([start_pos, end_pos])
+        midpoint_label_positions.append(mid_pos)
+        midpoint_label_texts.append(c.replace("chr",""))
+
+        ax_bottom.hlines(0.5, start_pos, end_pos, color='darkgray', lw=5)
+
         cum_len += real_len
 
-    # The bottom axis from x=0..cum_len
     ax_bottom.set_xlim(0, cum_len)
     ax_bottom.set_ylim(0, 1)
-    # We'll draw each chromosome's segment from offsets[c].. offsets[c]+chr_len at y=0.5
-    # plus label
     for spine in ['top','left','right','bottom']:
         ax_bottom.spines[spine].set_visible(False)
     ax_bottom.set_yticks([])
-    ax_bottom.set_xlabel("Chromosome", fontsize=28)
-    tick_positions = []
-    for c in unique_chroms:
-        tick_positions.append(offsets[c])
-        tick_positions.append(offsets[c] + CHR_LENGTHS.get(c, 1))
-    tick_positions = sorted(set(tick_positions))
-    ax_bottom.set_xticks(tick_positions)
+    ax_bottom.set_xlabel("Chromosome", fontsize=28, labelpad=20)
+
+    # Set boundary ticks
+    ax_bottom.set_xticks(boundary_tick_positions)
     ax_bottom.set_xticklabels([])
-    ax_bottom.tick_params(axis='x', which='both', length=15, width=2, labelsize=20)
+    ax_bottom.tick_params(axis='x', which='major', length=6, width=1.5, color='gray', direction='out')
 
-    # Draw a line & label for each chromosome
-    for c in unique_chroms:
-        real_len = CHR_LENGTHS.get(c,1)
-        off = offsets[c]
-        left_bar = off
-        right_bar= off+real_len
-        ax_bottom.hlines(0.5, left_bar, right_bar, color='black', lw=2)
-        # place label near the center
-        mid_x = (left_bar + right_bar)*0.5
-        ax_bottom.text(mid_x, 0.45, c.replace("chr",""), ha='center', va='top', fontsize=26, fontweight='bold')
+    # Add midpoint labels using text
+    for pos, txt in zip(midpoint_label_positions, midpoint_label_texts):
+         ax_bottom.text(pos, 0.3, txt, ha='center', va='center', fontsize=26, fontweight='bold')
 
 
-    # *** Now fill each chromosome top subplot with data ***
-    # Then connect boundary dots to the bottom axis
-    from matplotlib import patches as mpatches
+    print("Plotting data for each chromosome...")
     recurrent_color = 'purple'
     single_color    = 'green'
 
     for i, c in enumerate(unique_chroms):
         ax_top = ax_subplots[i]
         ax_top.set_xlim(-0.08,1.08)
-        ax_top.set_ylim(0,YLIM_TOP)
+        ax_top.set_ylim(0, YLIM_TOP)
+
         if i == 0:
-            ax_top.set_ylabel("-log10(p)", fontsize=26)
+            ax_top.set_ylabel("-log10(p)", fontsize=26, labelpad=10)
             ax_top.tick_params(axis='y', labelsize=26)
         else:
             ax_top.set_yticks([])
             ax_top.set_ylabel("")
-        # remove unneeded spines
-        ax_top.yaxis.grid(True, which='major', color='lightgray', linestyle='--', lw=0.5)
+
+        ax_top.yaxis.grid(True, which='major', color='lightgray', linestyle='--', lw=0.7)
         ax_top.xaxis.grid(False)
-        for spine in ['top','right','left']:
+        for spine in ['top','right']:
             ax_top.spines[spine].set_visible(False)
+        ax_top.spines['left'].set_linewidth(0.5)
+        ax_top.spines['bottom'].set_linewidth(0.5)
         ax_top.set_xticks([])
-        # gather data for c
-        cdata = results_df[(results_df['chrom']==c) & valid_mask].copy()
-        if cdata.empty:
-            ax_top.text(0.5, 0.5*YLIM_TOP, "No data", ha='center', va='center', fontsize=19)
-            continue
+
+        cdata = results_df[(results_df['chrom'] == c) & valid_mask].copy()
+        # No need to check if cdata is empty here due to pre-filtering
         c_min_data, c_max_data = chrom_ranges[c]
-        # Build the x for each row => normalized
+
         def normpos(x):
-            if c_max_data>c_min_data:
-                return max(0, min(1,(x-c_min_data)/(c_max_data-c_min_data)))
+            if c_max_data > c_min_data:
+                return max(0.0, min(1.0, (x - c_min_data) / (c_max_data - c_min_data)))
             else:
                 return 0.5
         cdata['chr_plot_x'] = cdata['start'].apply(normpos)
 
-        # scatter
-        eff_this = cdata['observed_effect_size']
-        eff_mean = eff_this.mean()
-        eff_std  = eff_this.std() if math.isfinite(eff_this.std()) and eff_this.std()>0 else 1
-        eff_zchr = np.clip((eff_this - eff_mean)/eff_std, -1,1)
+        eff_this = cdata['observed_effect_size'].dropna()
+        if not eff_this.empty:
+             point_colors = cmap(norm(eff_this))
+        else:
+             point_colors = 'grey'
 
         ax_top.scatter(
             cdata['chr_plot_x'],
             cdata['neg_log_p'],
-            c=eff_zchr,
-            cmap=cmap,
-            norm=norm,
+            c=point_colors,
             s=150, alpha=0.7, linewidth=0, zorder=2
         )
 
-        # highlight inversions
-        invsub = inv_df[inv_df['chr']==c]
+        used_min = cdata['start'].min()
+        used_max = cdata['end'].max()
+        if used_min >= used_max: used_max = used_min + 1
+        left_rel = normpos(used_min)
+        right_rel = normpos(used_max)
+
+        invsub = inv_df[inv_df['chr'] == c]
         for _, invrow in invsub.iterrows():
             inv_start = invrow['region_start']
             inv_end   = invrow['region_end']
-            inv_size  = inv_end - inv_start
-            if inv_size<=0: continue
-            if c_max_data>c_min_data:
-                left_rel = (inv_start - c_min_data)/(c_max_data - c_min_data)
-                right_rel= (inv_end   - c_min_data)/(c_max_data - c_min_data)
+            if pd.isna(inv_start) or pd.isna(inv_end) or inv_end <= inv_start: continue
+
+            if c_max_data > c_min_data:
+                inv_left_rel = max(0.0, min(1.0, (inv_start - c_min_data) / (c_max_data - c_min_data)))
+                inv_right_rel = max(0.0, min(1.0, (inv_end - c_min_data) / (c_max_data - c_min_data)))
             else:
-                left_rel,right_rel=0.4,0.6
-            left_rel= max(0, min(1,left_rel))
-            right_rel=max(0, min(1,right_rel))
-            t = invrow.get('0_single_1_recur',0)
-            inv_color = recurrent_color if t==1 else single_color
-            ax_top.axvspan(left_rel, right_rel, color=inv_color, alpha=0.2, zorder=0)
+                continue
+
+            t_col = '0_single_1_recur'
+            t = invrow.get(t_col, 0) if t_col in invrow else 0
+            inv_color = recurrent_color if t == 1 else single_color
+            ax_top.axvspan(inv_left_rel, inv_right_rel, color=inv_color, alpha=0.15, zorder=0, lw=0)
 
 
-        # boundary
-        used_min = cdata['start'].min()
-        used_max = cdata['end'].max()
-        if not math.isfinite(used_min) or not math.isfinite(used_max):
-            used_min,used_max=0,0
-        left_rel = normpos(used_min)
-        right_rel= normpos(used_max)
-        # top boundary dots
-        ax_top.axvspan(left_rel, right_rel, facecolor='white', alpha=0.2, zorder=1)
+        off = offsets.get(c, 0)
+        real_len_chrom = actual_chrom_lengths_used.get(c, 1)
 
-        # connect lines to the bottom axis
-        # bottom coords => offset + used_min.. offset+ used_max
-        off = offsets.get(c,0)
-        real_len = CHR_LENGTHS.get(c,1)
-        used_min_clamp = max(0,min(real_len, used_min))
-        used_max_clamp = max(0,min(real_len, used_max))
-        bottom_left_x  = off+used_min_clamp
-        bottom_right_x = off+used_max_clamp
+        bottom_min_pos = c_min_data
+        bottom_max_pos = c_max_data
 
-        # connect
-        # Draw the red dashed connection lines.
+        bottom_left_x  = off + max(0, min(real_len_chrom, bottom_min_pos))
+        bottom_right_x = off + max(0, min(real_len_chrom, bottom_max_pos))
+
         con_left = ConnectionPatch(
-            xyA=(bottom_left_x, 0.5),
-            xyB=(left_rel, 0),
+            xyA=(bottom_left_x, 0.5), xyB=(left_rel, 0),
             coordsA="data", coordsB="data",
             axesA=ax_bottom, axesB=ax_top,
-            color="red", lw=1, linestyle="--", zorder=10
+            color="dimgray", lw=1, linestyle="--", zorder=10, alpha=0.6
         )
         con_right = ConnectionPatch(
-            xyA=(bottom_right_x, 0.5),
-            xyB=(right_rel, 0),
+            xyA=(bottom_right_x, 0.5), xyB=(right_rel, 0),
             coordsA="data", coordsB="data",
             axesA=ax_bottom, axesB=ax_top,
-            color="red", lw=1, linestyle="--", zorder=10
+            color="dimgray", lw=1, linestyle="--", zorder=10, alpha=0.6
         )
         fig.add_artist(con_left)
         fig.add_artist(con_right)
-        # Draw multiple solid gray connection lines in between the red dashed connection lines.
-        n_lines = 100
-        for i in range(1, n_lines):
-            f = i / n_lines
-            top_x = left_rel + f * (right_rel - left_rel)
-            bottom_x = bottom_left_x + f * (bottom_right_x - bottom_left_x)
-            con_mid = ConnectionPatch(
-                xyA=(bottom_x, 0.5),
-                xyB=(top_x, 0),
-                coordsA="data", coordsB="data",
-                axesA=ax_bottom, axesB=ax_top,
-                color="lightgray", lw=3, alpha=0.1, linestyle="-", zorder=9
-            )
-            fig.add_artist(con_mid)
 
+        n_lines = 20
+        if right_rel > left_rel and bottom_right_x > bottom_left_x:
+            for k in range(1, n_lines):
+                f = k / n_lines
+                top_x = left_rel + f * (right_rel - left_rel)
+                bottom_x = bottom_left_x + f * (bottom_right_x - bottom_left_x)
+                con_mid = ConnectionPatch(
+                    xyA=(bottom_x, 0.5), xyB=(top_x, 0),
+                    coordsA="data", coordsB="data",
+                    axesA=ax_bottom, axesB=ax_top,
+                    color="lightgray", lw=0.5, alpha=0.2, linestyle="-", zorder=9
+                )
+                fig.add_artist(con_mid)
 
-    from matplotlib.cm import ScalarMappable
+    print("Adding colorbar and legend...")
     ax_cb = fig.add_subplot(gs[0, n_chroms])
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
-    cb = fig.colorbar(sm, cax=ax_cb, orientation='vertical')
-    cb.set_label('Z-normed Effect Size', fontsize=20)
+    cb = fig.colorbar(sm, cax=ax_cb, orientation='vertical', aspect=15)
+    cb.set_label('Observed Effect Size', fontsize=20, labelpad=15)
     cb.ax.tick_params(labelsize=20)
-    cb.ax.text(0.0, 1.15, 'Higher dN/dS\nfor inverted', transform=cb.ax.transAxes, ha='left', va='bottom', fontsize=25)
-    cb.ax.text(0.0, -0.15, 'Higher dN/dS\nfor non-inverted', transform=cb.ax.transAxes, ha='left', va='top', fontsize=25)
+    min_val, max_val = norm.vmin, norm.vmax
+    cb.ax.text(0.5, 1.05, f'Higher dN/dS\nin Inverted ({max_val:.2f})', transform=cb.ax.transAxes, ha='center', va='bottom', fontsize=16)
+    cb.ax.text(0.5, -0.05, f'Higher dN/dS\nin Direct ({min_val:.2f})', transform=cb.ax.transAxes, ha='center', va='top', fontsize=16)
     pos = ax_cb.get_position()
-    ax_cb.set_position([pos.x0, pos.y0 + 0.1, pos.width, pos.height * 0.7])
+    ax_cb.set_position([pos.x0 + pos.width*0.1, pos.y0 + pos.height*0.1, pos.width*0.8, pos.height*0.8])
 
-
-    import matplotlib.patches as mpatches
     recurrent_patch = mpatches.Patch(color=recurrent_color, alpha=0.2, label='Recurrent inversion')
     single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
-    ax_subplots[-1].legend(handles=[recurrent_patch, single_patch], fontsize=30, frameon=True, loc='upper right', bbox_to_anchor=(1, 1.2))
+    if ax_subplots:
+        ax_subplots[-1].legend(handles=[recurrent_patch, single_patch], fontsize=20, frameon=True, loc='upper right', bbox_to_anchor=(1.0, 1.15))
+    else:
+        print("Warning: No subplots created, cannot add legend.")
 
-    # finalize
-    plt.tight_layout()
-    out_fname = os.path.join(PLOTS_DIR, "manhattan_plot_subplots.png")
+    print("Finalizing plot...")
+    plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+    out_fname = PLOTS_DIR / "manhattan_plot_subplots.png"
+    print(f"Saving plot to {out_fname}")
     plt.savefig(out_fname, dpi=300, bbox_inches='tight')
-    plt.show()
-    plt.close()
+    plt.close(fig)
+    print("Plotting complete.")
 
 def main():
-    data_file = RESULTS_DIR / 'manhattan_plot_data.csv'
+    data_file = RESULTS_DIR / 'final_results.csv'
     inv_file = 'inv_info.csv'
-    create_manhattan_plot(data_file, inv_file=inv_file, top_hits_to_annotate=10)
+
+    if not data_file.exists():
+        print(f"ERROR: Main data file not found: {data_file}")
+        print("Please ensure the first script ran successfully and produced this file.")
+        return
+
+    create_manhattan_plot(data_file, inv_file=inv_file)
 
 if __name__ == "__main__":
     main()
