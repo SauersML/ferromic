@@ -89,6 +89,20 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     ).clip(upper=1.0)
     results_df['neg_log_p'] = -np.log10(results_df['p_value'].replace(0, np.nan))
 
+    print("Calculating Z-scores for effect size...")
+    effect_sizes = results_df.loc[valid_mask, 'observed_effect_size'].dropna()
+    if not effect_sizes.empty:
+        mean_effect = effect_sizes.mean()
+        std_effect = effect_sizes.std()
+        if std_effect > 0:
+             results_df['effect_zscore'] = (results_df['observed_effect_size'] - mean_effect) / std_effect
+        else:
+             results_df['effect_zscore'] = 0.0
+             print("Warning: Standard deviation of effect size is zero. Z-scores set to 0.")
+    else:
+        results_df['effect_zscore'] = np.nan
+        print("Warning: No valid effect sizes to calculate Z-scores.")
+
     print("Filtering chromosomes based on valid data...")
     chroms_with_valid_data = results_df.loc[valid_mask, 'chrom'].unique()
     if len(chroms_with_valid_data) == 0:
@@ -106,26 +120,28 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     unique_chroms = sorted(chroms_with_valid_data, key=chr_sort_key)
     print(f"Chromosomes to plot (having valid data): {unique_chroms}")
 
-    # Filter the main dataframe to only include chromosomes being plotted
     results_df = results_df[results_df['chrom'].isin(unique_chroms)].copy()
-    # Re-apply valid_mask based on the filtered dataframe
     valid_mask = (results_df['p_value'].notnull()) & (results_df['p_value'] > 0) & (results_df['start'].notnull()) & (results_df['end'].notnull())
 
-
     print("Reading and filtering inversion data...")
-    inv_expected_cols = ['chr', 'region_start', 'region_end']
-    inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
+    inv_raw_cols = ['Chromosome', 'Start', 'End']
+    inv_recur_col = '0_single_1_recur'
+    inv_internal_cols = ['chr', 'region_start', 'region_end']
+    inv_df = pd.DataFrame(columns=inv_internal_cols + [inv_recur_col])
 
     try:
         inv_df_raw = pd.read_csv(inv_file)
 
-        if all(col in inv_df_raw.columns for col in inv_expected_cols):
-            inv_df = inv_df_raw.copy()
-            inv_df.dropna(subset=inv_expected_cols, inplace=True)
+        if all(col in inv_df_raw.columns for col in inv_raw_cols):
+            inv_df = inv_df_raw.rename(columns={
+                'Chromosome': 'chr',
+                'Start': 'region_start',
+                'End': 'region_end'
+            })
+            inv_df.dropna(subset=inv_internal_cols, inplace=True)
 
             if not inv_df.empty:
                 inv_df['chr'] = inv_df['chr'].astype(str).apply(lambda x: x if x.startswith('chr') else 'chr' + x)
-                # Filter inversions to only include those on chromosomes we are plotting
                 inv_df = inv_df[inv_df['chr'].isin(unique_chroms)].copy()
 
                 if not inv_df.empty:
@@ -136,22 +152,29 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
                     if not inv_df.empty:
                         inv_df['region_start'] = inv_df['region_start'].astype(int)
                         inv_df['region_end'] = inv_df['region_end'].astype(int)
+                        # Handle potential missing recurrence column gracefully
+                        if inv_recur_col not in inv_df.columns:
+                            print(f"Warning: Inversion file missing recurrence column '{inv_recur_col}'. Defaulting to 0 (single).")
+                            inv_df[inv_recur_col] = 0
+                        else:
+                            inv_df[inv_recur_col] = pd.to_numeric(inv_df[inv_recur_col], errors='coerce').fillna(0).astype(int)
+
                         print(f"Found {len(inv_df)} inversions on plotted chromosomes after coordinate validation.")
                     else:
                         print("Inversion data invalid after coordinate conversion.")
-                        inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
+                        inv_df = pd.DataFrame(columns=inv_internal_cols + [inv_recur_col])
                 else:
                     print("No inversions found on the chromosomes being plotted.")
-                    inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
+                    inv_df = pd.DataFrame(columns=inv_internal_cols + [inv_recur_col])
 
             else:
                 print("Inversion data empty after initial NaN drop.")
-                inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
+                inv_df = pd.DataFrame(columns=inv_internal_cols + [inv_recur_col])
 
         else:
-            missing_cols = [col for col in inv_expected_cols if col not in inv_df_raw.columns]
+            missing_cols = [col for col in inv_raw_cols if col not in inv_df_raw.columns]
             print(f"Warning: Inversion info file '{inv_file}' is missing expected columns: {missing_cols}. Proceeding without inversion shading.")
-            inv_df = pd.DataFrame(columns=inv_expected_cols + ['0_single_1_recur'])
+            inv_df = pd.DataFrame(columns=inv_internal_cols + [inv_recur_col])
 
     except FileNotFoundError:
         print(f"Warning: Inversion info file not found at {inv_file}. Proceeding without inversion shading.")
@@ -160,12 +183,11 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
 
 
     chrom_ranges = {}
-    for c in unique_chroms: # Only iterate through chromosomes known to have data
+    for c in unique_chroms:
         cdata = results_df[(results_df['chrom'] == c) & valid_mask]
-        # Should not be empty due to pre-filtering, but check just in case
         if cdata.empty:
              print(f"Error: Chromosome {c} was selected but has no valid data after filtering.")
-             continue # Should not happen
+             continue
         c_min = cdata['start'].min()
         c_max = cdata['end'].max()
         if c_min >= c_max:
@@ -179,26 +201,27 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     else:
         global_max_neglogp = neg_log_p_values.max()
 
-    if not math.isfinite(global_max_neglogp) or global_max_neglogp <= 0:
+    if not np.isfinite(global_max_neglogp) or global_max_neglogp <= 0:
          print(f"Warning: Invalid global max -log10(p) ({global_max_neglogp}). Setting default Y-limit.")
          global_max_neglogp = 1.0
     YLIM_TOP = global_max_neglogp * 1.1
 
-    cmap = LinearSegmentedColormap.from_list('custom_diverging', ['blue','gray','red'])
-    effect_sizes = results_df.loc[valid_mask, 'observed_effect_size'].dropna()
-    if not effect_sizes.empty:
-        eff_min = effect_sizes.min()
-        eff_max = effect_sizes.max()
-        if eff_min == eff_max:
-            eff_min -= 0.1
-            eff_max += 0.1
-        if eff_min < 0 < eff_max:
-             norm = TwoSlopeNorm(vmin=eff_min, vcenter=0.0, vmax=eff_max)
-        else:
-             norm = Normalize(vmin=eff_min, vmax=eff_max)
+    cmap = LinearSegmentedColormap.from_list('custom_diverging', ['blue','lightgray','red'], N=256)
+    z_scores = results_df.loc[valid_mask, 'effect_zscore'].dropna()
+    if not z_scores.empty:
+        z_min = z_scores.min()
+        z_max = z_scores.max()
+        # Use a reasonable clip like +/- 3 for normalization range, centered at 0
+        norm_vmin = max(z_min, -3)
+        norm_vmax = min(z_max, 3)
+        # Ensure vmin < vmax even if all z-scores are outside +/-3
+        if norm_vmin >= norm_vmax:
+             norm_vmin = -3
+             norm_vmax = 3
+        norm = TwoSlopeNorm(vmin=norm_vmin, vcenter=0.0, vmax=norm_vmax)
     else:
         norm = TwoSlopeNorm(vmin=-1, vcenter=0.0, vmax=1)
-        print("Warning: No valid effect size data found for coloring. Using default range [-1, 1].")
+        print("Warning: No valid Z-scores found for coloring. Using default range [-1, 1].")
 
     print("Setting up plot layout...")
     n_chroms = len(unique_chroms)
@@ -250,12 +273,10 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     ax_bottom.set_yticks([])
     ax_bottom.set_xlabel("Chromosome", fontsize=28, labelpad=20)
 
-    # Set boundary ticks
     ax_bottom.set_xticks(boundary_tick_positions)
     ax_bottom.set_xticklabels([])
     ax_bottom.tick_params(axis='x', which='major', length=6, width=1.5, color='gray', direction='out')
 
-    # Add midpoint labels using text
     for pos, txt in zip(midpoint_label_positions, midpoint_label_texts):
          ax_bottom.text(pos, 0.3, txt, ha='center', va='center', fontsize=26, fontweight='bold')
 
@@ -285,7 +306,6 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
         ax_top.set_xticks([])
 
         cdata = results_df[(results_df['chrom'] == c) & valid_mask].copy()
-        # No need to check if cdata is empty here due to pre-filtering
         c_min_data, c_max_data = chrom_ranges[c]
 
         def normpos(x):
@@ -295,9 +315,9 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
                 return 0.5
         cdata['chr_plot_x'] = cdata['start'].apply(normpos)
 
-        eff_this = cdata['observed_effect_size'].dropna()
-        if not eff_this.empty:
-             point_colors = cmap(norm(eff_this))
+        z_scores_chr = cdata['effect_zscore'].dropna()
+        if not z_scores_chr.empty:
+             point_colors = cmap(norm(z_scores_chr))
         else:
              point_colors = 'grey'
 
@@ -326,8 +346,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
             else:
                 continue
 
-            t_col = '0_single_1_recur'
-            t = invrow.get(t_col, 0) if t_col in invrow else 0
+            t = invrow.get(inv_recur_col, 0)
             inv_color = recurrent_color if t == 1 else single_color
             ax_top.axvspan(inv_left_rel, inv_right_rel, color=inv_color, alpha=0.15, zorder=0, lw=0)
 
@@ -375,11 +394,11 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cb = fig.colorbar(sm, cax=ax_cb, orientation='vertical', aspect=15)
-    cb.set_label('Observed Effect Size', fontsize=20, labelpad=15)
+    cb.set_label('Effect Size Z-score', fontsize=20, labelpad=15)
     cb.ax.tick_params(labelsize=20)
     min_val, max_val = norm.vmin, norm.vmax
-    cb.ax.text(0.5, 1.05, f'Higher dN/dS\nin Inverted ({max_val:.2f})', transform=cb.ax.transAxes, ha='center', va='bottom', fontsize=16)
-    cb.ax.text(0.5, -0.05, f'Higher dN/dS\nin Direct ({min_val:.2f})', transform=cb.ax.transAxes, ha='center', va='top', fontsize=16)
+    cb.ax.text(0.5, 1.05, f'Higher dN/dS\nin Inverted (Z>{max_val:.1f})', transform=cb.ax.transAxes, ha='center', va='bottom', fontsize=16)
+    cb.ax.text(0.5, -0.05, f'Higher dN/dS\nin Direct (Z<{min_val:.1f})', transform=cb.ax.transAxes, ha='center', va='top', fontsize=16)
     pos = ax_cb.get_position()
     ax_cb.set_position([pos.x0 + pos.width*0.1, pos.y0 + pos.height*0.1, pos.width*0.8, pos.height*0.8])
 
