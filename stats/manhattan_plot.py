@@ -24,7 +24,7 @@ for directory in [RESULTS_DIR, PLOTS_DIR]:
     directory.mkdir(exist_ok=True)
 print(f"Ensured directories exist: {RESULTS_DIR}, {PLOTS_DIR}")
 
-# --- Chromosome Lengths ---
+# --- Chromosome Lengths (Update if necessary) ---
 CHR_LENGTHS = {
     "chr1": 248956422, "chr2": 242193529, "chr3": 198295559, "chr4": 190214555,
     "chr5": 181538259, "chr6": 170805979, "chr7": 159345973, "chr8": 145138636,
@@ -112,8 +112,6 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
         results_df.loc[valid_mask, 'bonferroni_p_value'] = (
             results_df.loc[valid_mask, 'p_value'] * m
         ).clip(upper=1.0)
-        # bonf_p_example = results_df.loc[valid_mask, 'bonferroni_p_value'].iloc[0]
-        # print(f"Calculated Bonferroni p-values (example: {bonf_p_example:.2e})")
     else:
          print("Warning: m=0 tests, cannot calculate Bonferroni p-values.")
 
@@ -171,7 +169,6 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     try:
         inv_df_raw = pd.read_csv(inv_file)
         print(f"Read inversion file {inv_file}, shape: {inv_df_raw.shape}")
-        # print(f"Inversion file columns: {inv_df_raw.columns.tolist()}") # Reduce verbosity
 
         if all(col in inv_df_raw.columns for col in inv_raw_cols):
             print("Essential inversion columns found.")
@@ -186,21 +183,17 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
                 inv_df[inv_recur_col_internal] = 0
             else:
                  inv_df[inv_recur_col_internal] = pd.to_numeric(inv_df[inv_recur_col_raw], errors='coerce').fillna(0).astype(int)
-                 # print(f"Processed recurrence column '{inv_recur_col_raw}' into '{inv_recur_col_internal}'.") # Reduce verbosity
 
             inv_df.dropna(subset=inv_internal_cols, inplace=True)
-            # print(f"Inversion df shape after dropping NaNs in chr/start/end: {inv_df.shape}") # Reduce verbosity
 
             if not inv_df.empty:
                 inv_df['chr'] = inv_df['chr'].astype(str).apply(lambda x: x if x.startswith('chr') else 'chr' + x)
                 inv_df = inv_df[inv_df['chr'].isin(unique_chroms)].copy()
-                # print(f"Inversion df shape after filtering for plottable chromosomes: {inv_df.shape}") # Reduce verbosity
 
                 if not inv_df.empty:
                     inv_df['region_start'] = pd.to_numeric(inv_df['region_start'], errors='coerce')
                     inv_df['region_end'] = pd.to_numeric(inv_df['region_end'], errors='coerce')
                     inv_df.dropna(subset=['region_start','region_end'], inplace=True)
-                    # print(f"Inversion df shape after converting/dropping NaN coordinates: {inv_df.shape}") # Reduce verbosity
 
                     if not inv_df.empty:
                         inv_df['region_start'] = inv_df['region_start'].astype(int)
@@ -240,7 +233,6 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
         if c_min >= c_max:
              c_max = c_min + 1
         chrom_ranges[c] = (c_min, c_max)
-        # print(f"Range for {c}: {chrom_ranges[c]}") # Reduce verbosity
 
 
     print("Calculating Y-axis limit and significance level...")
@@ -254,7 +246,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     if not np.isfinite(global_max_neglogp) or global_max_neglogp <= 0:
          print(f"Warning: Invalid global max -log10(p) ({global_max_neglogp}). Setting default Y-limit.")
          global_max_neglogp = 1.0
-    YLIM_TOP = global_max_neglogp * 1.1
+    YLIM_TOP = global_max_neglogp * 1.15 # Increased padding slightly for legend space
     print(f"Global max -log10(p) = {global_max_neglogp:.2f}, Y-limit set to {YLIM_TOP:.2f}")
 
     significance_level_neglogp = np.nan
@@ -284,7 +276,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     fig = plt.figure(figsize=(fig_w, fig_h))
     print(f"Figure size: {fig_w} x {fig_h}")
 
-    gs = GridSpec(nrows=2, ncols=n_chroms+1, width_ratios=[1]*n_chroms + [0.22], height_ratios=[6,1], figure=fig, wspace=0.1, hspace=0.1) # Adjusted colorbar width ratio
+    gs = GridSpec(nrows=2, ncols=n_chroms+1, width_ratios=[1]*n_chroms + [0.22], height_ratios=[6,1], figure=fig, wspace=0.1, hspace=0.1)
     print(f"GridSpec defined: {gs.nrows} rows, {gs.ncols} columns.")
 
     ax_subplots = []
@@ -335,7 +327,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     ax_bottom.tick_params(axis='x', which='major', length=6, width=1.5, color='gray', direction='out')
     print(f"Set {len(boundary_tick_positions)} boundary ticks on bottom axis.")
 
-    label_y_pos = 0.25 # Lowered position
+    label_y_pos = 0.20 # Lowered position slightly more
     for pos, txt in zip(midpoint_label_positions, midpoint_label_texts):
          ax_bottom.text(pos, label_y_pos, txt, ha='center', va='center', fontsize=26, fontweight='bold')
     print(f"Added {len(midpoint_label_positions)} midpoint labels on bottom axis at y={label_y_pos}.")
@@ -345,24 +337,21 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     recurrent_color = 'purple'
     single_color    = 'green'
 
-    # Create a single overarching axes for the significance line
-    ax_sig_line = fig.add_subplot(gs[0, :n_chroms], frameon=False)
+    # Create a single overarching axes for the significance line, covering all subplot columns
+    ax_sig_line = fig.add_subplot(gs[0, :n_chroms], frameon=False) # Spans columns 0 to n_chroms-1
     ax_sig_line.set_ylim(0, YLIM_TOP)
     ax_sig_line.set_yticks([])
     ax_sig_line.set_xticks([])
     # Add significance line ONCE to this overarching axes
     if np.isfinite(significance_level_neglogp) and significance_level_neglogp < YLIM_TOP :
-        ax_sig_line.axhline(significance_level_neglogp, color='dimgray', linestyle=':', linewidth=1.5, zorder=5) # Ensure it's above shading but below points
+        ax_sig_line.axhline(significance_level_neglogp, color='dimgray', linestyle=':', linewidth=1.5, zorder=5)
         print(f"Added significance line at y={significance_level_neglogp:.2f} to overarching axes.")
 
-
     for i, c in enumerate(unique_chroms):
-        # print(f"  Plotting {c} (subplot {i+1}/{n_chroms})...") # Reduce verbosity
-        ax_top = ax_subplots[i] # Use the specific subplot for this chromosome
+        ax_top = ax_subplots[i]
         ax_top.set_xlim(-0.08,1.08)
-        ax_top.set_ylim(0, YLIM_TOP) # Use same Y-limit
+        ax_top.set_ylim(0, YLIM_TOP)
 
-        # Set labels/ticks only for the first subplot
         if i == 0:
             ax_top.set_ylabel("-log10(p)", fontsize=26, labelpad=10)
             ax_top.tick_params(axis='y', labelsize=26)
@@ -370,7 +359,6 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
             ax_top.set_yticks([])
             ax_top.set_ylabel("")
 
-        # Configure grid and spines
         ax_top.yaxis.grid(True, which='major', color='lightgray', linestyle='--', lw=0.7)
         ax_top.xaxis.grid(False)
         for spine in ['top','right']:
@@ -379,11 +367,9 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
         ax_top.spines['bottom'].set_linewidth(0.5)
         ax_top.set_xticks([])
 
-        # Get data for this chromosome
         cdata = results_df[(results_df['chrom'] == c) & valid_mask].copy()
         c_min_data, c_max_data = chrom_ranges[c]
 
-        # Normalize positions
         def normpos(x):
             if c_max_data > c_min_data:
                 return max(0.0, min(1.0, (x - c_min_data) / (c_max_data - c_min_data)))
@@ -391,29 +377,26 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
                 return 0.5
         cdata['chr_plot_x'] = cdata['start'].apply(normpos)
 
-        # Determine point colors based on Z-score
         z_scores_chr = cdata['effect_zscore'].dropna()
         if not z_scores_chr.empty:
              point_colors = cmap(norm(z_scores_chr))
         else:
              point_colors = 'grey'
 
-        # Add scatter points to the specific subplot
+        # Increase zorder so points are above significance line
         ax_top.scatter(
             cdata['chr_plot_x'],
             cdata['neg_log_p'],
             c=point_colors,
-            s=150, alpha=0.7, linewidth=0, zorder=10 # Increase zorder to be above sig line
+            s=150, alpha=0.7, linewidth=0, zorder=10
         )
 
-        # Calculate relative range of data
         used_min = cdata['start'].min()
         used_max = cdata['end'].max()
         if used_min >= used_max: used_max = used_min + 1
         left_rel = normpos(used_min)
         right_rel = normpos(used_max)
 
-        # Add inversion shading to the specific subplot
         invsub = inv_df[inv_df['chr'] == c]
         for inv_idx, invrow in invsub.iterrows():
             inv_start = invrow['region_start']
@@ -429,9 +412,9 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
 
             t = invrow.get(inv_recur_col_internal, 0)
             inv_color = recurrent_color if t == 1 else single_color
-            ax_top.axvspan(inv_left_rel, inv_right_rel, color=inv_color, alpha=0.15, zorder=0, lw=0) # zorder=0 to be behind everything
+            # Ensure shading is behind points and significance line
+            ax_top.axvspan(inv_left_rel, inv_right_rel, color=inv_color, alpha=0.15, zorder=0, lw=0)
 
-        # Add connection lines (remain the same logic)
         off = offsets.get(c, 0)
         real_len_chrom = actual_chrom_lengths_used.get(c, 1)
         bottom_min_pos = c_min_data
@@ -443,13 +426,13 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
             xyA=(bottom_left_x, 0.5), xyB=(left_rel, 0),
             coordsA="data", coordsB="data",
             axesA=ax_bottom, axesB=ax_top,
-            color="dimgray", lw=1, linestyle="--", zorder=1, alpha=0.6 # zorder adjusted
+            color="dimgray", lw=1, linestyle="--", zorder=1, alpha=0.6
         )
         con_right = ConnectionPatch(
             xyA=(bottom_right_x, 0.5), xyB=(right_rel, 0),
             coordsA="data", coordsB="data",
             axesA=ax_bottom, axesB=ax_top,
-            color="dimgray", lw=1, linestyle="--", zorder=1, alpha=0.6 # zorder adjusted
+            color="dimgray", lw=1, linestyle="--", zorder=1, alpha=0.6
         )
         fig.add_artist(con_left)
         fig.add_artist(con_right)
@@ -464,43 +447,40 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
                     xyA=(bottom_x, 0.5), xyB=(top_x, 0),
                     coordsA="data", coordsB="data",
                     axesA=ax_bottom, axesB=ax_top,
-                    color="lightgray", lw=0.5, alpha=0.2, linestyle="-", zorder=1 # zorder adjusted
+                    color="lightgray", lw=0.5, alpha=0.2, linestyle="-", zorder=1
                 )
                 fig.add_artist(con_mid)
 
     print("Adding colorbar and legend...")
-    ax_cb = fig.add_subplot(gs[0, n_chroms]) # Uses the last column in the top row
+    ax_cb = fig.add_subplot(gs[0, n_chroms])
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cb = fig.colorbar(sm, cax=ax_cb, orientation='vertical', aspect=15)
     cb.set_label('Effect Size Z-score', fontsize=20, labelpad=15)
     cb.ax.tick_params(labelsize=20)
-    # Remove Z-score range from text
     cb.ax.text(0.5, 1.05, 'Higher dN/dS\nin Inverted', transform=cb.ax.transAxes, ha='center', va='bottom', fontsize=16)
     cb.ax.text(0.5, -0.05, 'Higher dN/dS\nin Direct', transform=cb.ax.transAxes, ha='center', va='top', fontsize=16)
     pos = ax_cb.get_position()
-    # Adjust position further right - increase x0 significantly
-    ax_cb.set_position([pos.x0 + pos.width*0.7, pos.y0 + pos.height*0.1, pos.width*0.8, pos.height*0.8])
+    # Adjust x0 slightly more to move further right
+    ax_cb.set_position([pos.x0 + pos.width*0.8, pos.y0 + pos.height*0.1, pos.width*0.8, pos.height*0.8])
     print("Colorbar added.")
 
-    # Create legend handles
     recurrent_patch = mpatches.Patch(color=recurrent_color, alpha=0.2, label='Recurrent inversion')
     single_patch = mpatches.Patch(color=single_color, alpha=0.2, label='Single-event inversion')
-
-    # Add legend to the figure, positioned relative to the figure (top left)
     if ax_subplots:
+         # Place legend relative to the figure, right and slightly down from top-left corner
          fig.legend(handles=[recurrent_patch, single_patch],
                     fontsize=20,
                     frameon=True,
-                    loc='upper left', # Position relative to figure
-                    bbox_to_anchor=(0.01, 0.98)) # Adjust x, y (0,0 is bottom left, 1,1 is top right)
-         print("Legend added to figure top left.")
+                    loc='upper left', # Anchor point of the legend box
+                    bbox_to_anchor=(0.13, 0.90)) # Position of the anchor point (x, y) in figure coordinates
+         print("Legend added to figure top left area.")
     else:
         print("Warning: No subplots created, cannot add legend.")
 
     print("Finalizing plot...")
     # Adjust layout AFTER adding figure legend
-    fig.tight_layout(rect=[0, 0.03, 0.96, 0.94]) # Adjust margins for legend/colorbar/title space
+    fig.tight_layout(rect=[0, 0.03, 0.96, 0.94]) # Adjust margins
     out_fname = PLOTS_DIR / "manhattan_plot_subplots.png"
     print(f"Saving plot to {out_fname}")
     try:
