@@ -14,6 +14,7 @@ import time
 from typing import Dict, List, Tuple, Optional
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
+from scipy.stats import wilcoxon, mannwhitneyu
 
 # =====================================================================
 # Configuration
@@ -600,6 +601,176 @@ except Exception as e:
     logger.error(f"ERROR: Model fitting failed: {e}", exc_info=True)
     result = None # inner=None,result is None if fitting failed
 
+
+
+
+# =====================================================================
+# --- Step 9a: Performing Direct Comparisons for Plot Annotation ---
+# =====================================================================
+# This section calculates p-values for specific comparisons to be added
+# as annotations to the violin plot. It uses Wilcoxon signed-rank test
+# for paired data (Direct vs. Inverted within groups) and Mann-Whitney U
+# test for independent groups (Overall Single-event vs. Recurrent).
+
+logger.info("--- Step 9a: Performing Direct Comparisons for Plot Annotation ---")
+
+# Import necessary statistical functions
+from scipy.stats import wilcoxon, mannwhitneyu
+
+# --- Helper Function for P-value Formatting ---
+def format_p_value_plotting(p: Optional[float], min_n_for_ns: int = 5, n_obs: int = 0) -> str:
+    """Formats p-values for plot annotations.
+
+    Args:
+        p: The calculated p-value.
+        min_n_for_ns: Minimum observations required to report 'n.s.' instead of 'n/a'.
+        n_obs: Actual number of observations/pairs used in the test.
+
+    Returns:
+        Formatted p-value string (e.g., "p < 0.001", "p = 0.04", "n.s.", "n/a").
+    """
+    if pd.isna(p):
+        # Distinguish between test not run due to insufficient data vs. other error
+        if n_obs < min_n_for_ns:
+             return "n/a" # Not applicable / not enough data
+        else:
+             return "error" # Test failed for other reason
+    elif p < 0.001:
+        return "p < 0.001"
+    elif p < 0.05:
+        # Use general format 'g' which handles decimals and switches to scientific notation
+        # .2g aims for 2 significant digits, good for p-values like 0.043 or 0.0012
+        return f"p = {p:.2g}"
+    else:
+        # Only report non-significant if we had enough data to potentially find significance
+        if n_obs >= min_n_for_ns:
+            return "n.s." # Non-significant
+        else:
+            return "n/a" # Not enough data to claim non-significance meaningfully
+
+# Initialize p-value variables
+pval_wilcoxon_single = np.nan
+pval_wilcoxon_recurrent = np.nan
+pval_mw_overall = np.nan
+n_pairs_single = 0
+n_pairs_recurrent = 0
+n_obs_single_overall = 0
+n_obs_recurrent_overall = 0
+MIN_N_PAIRS_WILCOXON = 5 # Minimum number of pairs for Wilcoxon test reporting
+MIN_N_SAMPLES_MWU = 5   # Minimum number of samples per group for MWU test reporting
+
+
+# --- 1. Paired Tests (Wilcoxon: Direct vs. Inverted) ---
+logger.info("Calculating Wilcoxon p-values (Direct vs. Inverted)...")
+# We need the 'paired_data' DataFrame which pivots data_long.
+# Create it here to ensure it's available and has the required structure.
+try:
+    # Pivot the final cleaned data (data_long)
+    paired_data_for_stats = data_long.pivot_table(
+        index=['InversionRegionID_geno', 'Recurrence'],
+        columns='Orientation',
+        values='PiValue',
+        observed=False # Keep consistency with plotting if observed=False used there
+    ).reset_index()
+
+    # IMPORTANT: Only include pairs where BOTH Direct and Inverted Pi are non-missing
+    paired_data_for_stats = paired_data_for_stats.dropna(subset=['Direct', 'Inverted'])
+
+    if paired_data_for_stats.empty:
+        logger.warning("No complete pairs (Direct and Inverted) found after pivoting. Cannot run Wilcoxon tests.")
+    else:
+        # Subset for Single-event
+        paired_single = paired_data_for_stats[paired_data_for_stats['Recurrence'] == 'Single-event']
+        n_pairs_single = len(paired_single)
+        if n_pairs_single >= MIN_N_PAIRS_WILCOXON:
+            try:
+                # Wilcoxon test requires differences; identical pairs are often dropped.
+                # alternative='two-sided' is the default, but good to be explicit.
+                # zero_method='wilcox' handles zero differences by default (drops them).
+                # Consider 'pratt' or 'zsplit' if zeros are numerous and meaningful.
+                diff = paired_single['Direct'] - paired_single['Inverted']
+                # Check if all differences are zero (causes ValueError)
+                if np.all(np.isclose(diff, 0)):
+                     logger.warning(f"Wilcoxon (Single-event): All {n_pairs_single} pairs have zero difference. Setting p=1.0")
+                     pval_wilcoxon_single = 1.0
+                else:
+                    stat_ws, pval_wilcoxon_single = wilcoxon(paired_single['Direct'], paired_single['Inverted'],
+                                                             zero_method='wilcox', alternative='two-sided')
+                    logger.info(f"  Wilcoxon (Single-event, N={n_pairs_single} pairs): p = {pval_wilcoxon_single:.4g}")
+
+            except ValueError as e:
+                logger.warning(f"Wilcoxon test failed for Single-event (N={n_pairs_single} pairs): {e}")
+        else:
+            logger.warning(f"Skipping Wilcoxon for Single-event: Insufficient pairs ({n_pairs_single} < {MIN_N_PAIRS_WILCOXON})")
+
+        # Subset for Recurrent
+        paired_recurrent = paired_data_for_stats[paired_data_for_stats['Recurrence'] == 'Recurrent']
+        n_pairs_recurrent = len(paired_recurrent)
+        if n_pairs_recurrent >= MIN_N_PAIRS_WILCOXON:
+            try:
+                diff = paired_recurrent['Direct'] - paired_recurrent['Inverted']
+                if np.all(np.isclose(diff, 0)):
+                     logger.warning(f"Wilcoxon (Recurrent): All {n_pairs_recurrent} pairs have zero difference. Setting p=1.0")
+                     pval_wilcoxon_recurrent = 1.0
+                else:
+                    stat_wr, pval_wilcoxon_recurrent = wilcoxon(paired_recurrent['Direct'], paired_recurrent['Inverted'],
+                                                                zero_method='wilcox', alternative='two-sided')
+                    logger.info(f"  Wilcoxon (Recurrent, N={n_pairs_recurrent} pairs): p = {pval_wilcoxon_recurrent:.4g}")
+            except ValueError as e:
+                 logger.warning(f"Wilcoxon test failed for Recurrent (N={n_pairs_recurrent} pairs): {e}")
+        else:
+            logger.warning(f"Skipping Wilcoxon for Recurrent: Insufficient pairs ({n_pairs_recurrent} < {MIN_N_PAIRS_WILCOXON})")
+
+except Exception as e:
+    logger.error(f"Failed during paired data preparation or Wilcoxon tests: {e}", exc_info=True)
+
+
+# --- 2. Independent Test (Mann-Whitney U: Overall Single vs. Recurrent) ---
+logger.info("Calculating Mann-Whitney U p-value (Overall Single-event vs. Recurrent)...")
+try:
+    # Use the final 'data_long' DataFrame, getting all Pi values per group
+    single_event_pi = data_long[data_long['Recurrence'] == 'Single-event']['PiValue'].dropna()
+    recurrent_pi = data_long[data_long['Recurrence'] == 'Recurrent']['PiValue'].dropna()
+    n_obs_single_overall = len(single_event_pi)
+    n_obs_recurrent_overall = len(recurrent_pi)
+
+    # Check if both groups have sufficient data
+    if n_obs_single_overall >= MIN_N_SAMPLES_MWU and n_obs_recurrent_overall >= MIN_N_SAMPLES_MWU:
+       try:
+            # alternative='two-sided' checks if distributions differ in location
+            stat_mw, pval_mw_overall = mannwhitneyu(single_event_pi, recurrent_pi,
+                                                    alternative='two-sided',
+                                                    use_continuity=True) # Continuity correction usually recommended
+            logger.info(f"  Mann-Whitney U (Overall: Single[N={n_obs_single_overall}] vs Recurrent[N={n_obs_recurrent_overall}]): p = {pval_mw_overall:.4g}")
+       except ValueError as e: # Can happen if distributions are identical or only contain NaNs etc.
+            logger.warning(f"Mann-Whitney U test failed: {e}")
+            # Check if identical distributions might be the cause
+            if np.array_equal(single_event_pi.sort_values().values, recurrent_pi.sort_values().values):
+                 logger.warning("Mann-Whitney U failed likely due to identical distributions. Setting p=1.0")
+                 pval_mw_overall = 1.0
+
+    else:
+        logger.warning(f"Skipping Mann-Whitney U for Overall Recurrence: Insufficient data "
+                       f"(N_single={n_obs_single_overall}, N_recurrent={n_obs_recurrent_overall}; Min required={MIN_N_SAMPLES_MWU})")
+
+except Exception as e:
+    logger.error(f"Failed during independent data preparation or Mann-Whitney U test: {e}", exc_info=True)
+
+
+# --- 3. Store Formatted P-values for Plotting ---
+# These variables will be used later in the plotting code
+pval_str_w_single = format_p_value_plotting(pval_wilcoxon_single, MIN_N_PAIRS_WILCOXON, n_pairs_single)
+pval_str_w_recurrent = format_p_value_plotting(pval_wilcoxon_recurrent, MIN_N_PAIRS_WILCOXON, n_pairs_recurrent)
+pval_str_mw_overall = format_p_value_plotting(pval_mw_overall, MIN_N_SAMPLES_MWU, min(n_obs_single_overall, n_obs_recurrent_overall)) # Use min N for n.s. criteria
+
+logger.info(f"Formatted p-values for plot annotation:")
+logger.info(f"  Single (D vs I): {pval_str_w_single}")
+logger.info(f"  Recurrent (D vs I): {pval_str_w_recurrent}")
+logger.info(f"  Overall (S vs R): {pval_str_mw_overall}")
+
+# =====================================================================
+
+
 # --- Step 9: Output Results and Visualizations ---
 logger.info("--- Step 9: Saving Results and Generating Visualizations ---")
 
@@ -770,9 +941,6 @@ if result:
             print(f"    {idx}: {row['median']:.4f} (n={int(row['count'])} pairs considered)")
     else:
          print("    No pairs found to calculate Median of Ratios.")
-
-    
-
     # Generate Visualizations
     logger.info("Generating visualizations...")
     try:
@@ -786,153 +954,241 @@ if result:
         recur_markers = {'Single-event': 'o', 'Recurrent': 'X'}
         recur_lines = {'Single-event': '-', 'Recurrent': ':'}
 
-        # --- Violin Plot with Paired Lines ---
-        logger.info("Generating Violin Plot with Paired Lines...")
+        # Define file paths for the new plots (should be already defined earlier)
+        VIOLIN_PLOT_PATH = os.path.join(OUTPUT_DIR, 'pi_violin_plot_grouped_paired_with_pvals.png') # Modified name
+        INTERACTION_PLOT_WITH_DATA_PATH = os.path.join(OUTPUT_DIR, 'pi_interaction_plot_with_data.png')
+
+
+        # --- Violin Plot with Paired Lines and P-value Annotations ---
+        logger.info("Generating Violin Plot with Paired Lines and P-value Annotations...")
         fig_viol, ax_viol = plt.subplots(figsize=(11, 7)) # Slightly adjusted size
 
-        # 1. Prepare data for pairing lines (same as before)
-        paired_data = data_long.pivot_table(index=['InversionRegionID_geno', 'Recurrence'], columns='Orientation', values='PiValue', observed=False).reset_index()
-        paired_data = paired_data.dropna(subset=['Direct', 'Inverted'])
+        # 1. Prepare data for pairing lines (uses data_long)
+        # It's good practice to ensure the paired_data used for lines is the same basis
+        # as the one used for Wilcoxon tests (paired_data_for_stats). Re-use if possible or recalculate.
+        # Assuming 'paired_data_for_stats' from Step 9a is the definitive source for pairs:
+        if 'paired_data_for_stats' in locals() and not paired_data_for_stats.empty:
+             plot_paired_data = paired_data_for_stats.copy()
+             logger.info(f"Using {len(plot_paired_data)} pairs for plotting lines.")
+        else:
+            # Fallback if Step 9a failed or didn't create it, but warn
+            logger.warning("Recreating paired data for plotting lines; ensure consistency with stats if Step 9a ran.")
+            plot_paired_data = data_long.pivot_table(index=['InversionRegionID_geno', 'Recurrence'], columns='Orientation', values='PiValue', observed=False).reset_index()
+            plot_paired_data = plot_paired_data.dropna(subset=['Direct', 'Inverted'])
 
-        # --- Robust L2FC Calculation (same as before) ---
-        valid_direct = paired_data['Direct'] > 0
-        valid_inverted = paired_data['Inverted'] > 0
-        valid_both = valid_direct & valid_inverted
-        paired_data['L2FC'] = np.nan
-        ratio = paired_data.loc[valid_both, 'Direct'] / paired_data.loc[valid_both, 'Inverted']
-        paired_data.loc[valid_both, 'L2FC'] = np.log2(ratio)
+
+        # --- Robust L2FC Calculation ---
+        # Apply to the data being used for plotting lines
+        if not plot_paired_data.empty:
+            valid_direct = plot_paired_data['Direct'] > 0
+            valid_inverted = plot_paired_data['Inverted'] > 0
+            valid_both = valid_direct & valid_inverted
+            plot_paired_data['L2FC'] = np.nan
+            # Ensure division by zero results in NaN or Inf, log2 handles Inf appropriately
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ratio = plot_paired_data.loc[valid_both, 'Direct'] / plot_paired_data.loc[valid_both, 'Inverted']
+            plot_paired_data.loc[valid_both, 'L2FC'] = np.log2(ratio.replace([np.inf, -np.inf], np.nan)) # Convert Inf ratio to NaN before log2
+        else:
+            plot_paired_data['L2FC'] = np.nan # Add column even if empty
         # --- End Robust L2FC Calculation ---
 
         # 2. Define coordinates for pairing lines (same as before)
         recurrence_categories = ['Single-event', 'Recurrent']
         orientation_categories = ['Direct', 'Inverted']
         recurrence_map_pos = {cat: i for i, cat in enumerate(recurrence_categories)}
-        paired_data['x_recurrence_num'] = paired_data['Recurrence'].map(recurrence_map_pos).astype(float)
+
+        if not plot_paired_data.empty:
+            plot_paired_data['x_recurrence_num'] = plot_paired_data['Recurrence'].map(recurrence_map_pos).astype(float)
+        else:
+             plot_paired_data['x_recurrence_num'] = np.nan # Add column even if empty
+
         n_hues = len(orientation_categories)
-        violin_width = 0.8
-        dodge_sep = 0.02
-        total_dodge_width = violin_width + dodge_sep
+        violin_width = 0.8 # Width of the violins
+        dodge_sep = 0.02   # Separation between violins of different hues
+        total_dodge_width = violin_width + dodge_sep # Total width covered by dodged elements
+        # Calculate offsets relative to the center of the recurrence category position
         orient_offsets = {'Direct': -total_dodge_width / 4, 'Inverted': total_dodge_width / 4}
-        paired_data['x_direct'] = paired_data['x_recurrence_num'] + orient_offsets['Direct']
-        paired_data['x_inverted'] = paired_data['x_recurrence_num'] + orient_offsets['Inverted']
+
+        if not plot_paired_data.empty:
+            plot_paired_data['x_direct'] = plot_paired_data['x_recurrence_num'] + orient_offsets['Direct']
+            plot_paired_data['x_inverted'] = plot_paired_data['x_recurrence_num'] + orient_offsets['Inverted']
+        else:
+            plot_paired_data['x_direct'] = np.nan
+            plot_paired_data['x_inverted'] = np.nan
 
         # 3. Set up colormap for L2FC lines (same as before)
-        l2fc_values = paired_data['L2FC'].dropna()
+        l2fc_values = plot_paired_data['L2FC'].dropna()
         if not l2fc_values.empty:
             vmin, vmax = l2fc_values.min(), l2fc_values.max()
-            max_abs = max(abs(vmin), abs(vmax), 1e-9)
+            # Handle cases where all L2FC are 0 or very close
+            if np.isclose(vmin, 0) and np.isclose(vmax, 0):
+                 max_abs = 1.0 # Default range if no variation
+            elif pd.isna(vmin) or pd.isna(vmax):
+                 max_abs = 1.0 # Default if calculation resulted in NaN
+            else:
+                 max_abs = max(abs(vmin), abs(vmax), 1e-9) # Ensure max_abs is not zero
             norm = mcolors.Normalize(vmin=-max_abs, vmax=max_abs)
         else:
-            norm = mcolors.Normalize(vmin=-1, vmax=1)
+            norm = mcolors.Normalize(vmin=-1, vmax=1) # Default norm if no L2FC values
         cmap = cm.coolwarm
         scalar_mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
 
-        # 4. Add the transparent strip plot (Low zorder - drawn first)
+        # --- Plotting Elements ---
+        # 4. Add the transparent strip plot (drawn first)
         sns.stripplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
-                      palette=orient_palette, dodge=True, size=3.0, alpha=0.35, # Slightly smaller alpha
+                      palette=orient_palette, dodge=True, size=3.0, alpha=0.35,
                       jitter=0.1, legend=False, hue_order=orientation_categories, order=recurrence_categories,
-                      ax=ax_viol, zorder=5) # Drawn first
+                      ax=ax_viol, zorder=5)
 
-        # 5. Create the main Violin plot 
+        # 5. Create the main Violin plot (drawn over strip plot)
         sns.violinplot(x='Recurrence', y='PiValue', hue='Orientation', data=data_long,
                        palette=orient_palette, hue_order=orientation_categories, order=recurrence_categories,
-                       inner=None, 
+                       inner=None, # No box/whisker/points inside violin
                        linewidth=1.2,
-                       width=violin_width, cut=0, dodge=dodge_sep,
-                       scale='width',
-                       alpha=0.2,
-                       ax=ax_viol, zorder=10)
+                       width=violin_width, cut=0, dodge=dodge_sep, # Control width and dodging
+                       scale='width', # Violins have same max width regardless of N
+                       alpha=0.2, # Make violins transparent
+                       ax=ax_viol, zorder=10) # Draw above stripplot
 
-        # Calculate medians for each group plotted
+        # 6. Add Median Lines inside Violins
         median_values = data_long.groupby(['Recurrence', 'Orientation'], observed=False)['PiValue'].median()
-
-        # Define visual properties for the median line segments
-        median_line_width_on_plot = 0.15 # Controls the horizontal width of the line segment
-        median_line_color = 'k'          # Black color
-        median_line_style = '-'          # Solid line
-        median_line_lw = 1.5             # Thickness
-        median_line_zorder = 12          # Draw above violin fill, below pairing lines
-
-        # Iterate through calculated medians and draw the lines
+        median_line_width_on_plot = 0.15 # Horizontal width of median line
+        median_line_color = 'k'; median_line_style = '-'; median_line_lw = 1.5
+        median_line_zorder = 12 # Above violin fill, below pairing lines
         for group_index, median_val in median_values.items():
-            # group_index is like ('Single-event', 'Direct')
-            recurrence_cat, orientation_cat = group_index
+            if pd.notna(median_val): # Only plot if median exists
+                recurrence_cat, orientation_cat = group_index
+                x_center = recurrence_map_pos[recurrence_cat] + orient_offsets[orientation_cat]
+                xmin = x_center - median_line_width_on_plot / 2
+                xmax = x_center + median_line_width_on_plot / 2
+                ax_viol.hlines(y=median_val, xmin=xmin, xmax=xmax, color=median_line_color,
+                               linestyle=median_line_style, linewidth=median_line_lw,
+                               zorder=median_line_zorder, alpha=0.7) # Slightly transparent
 
-            # Calculate the center x-coordinate for this violin segment using pre-defined mappings
-            x_center = recurrence_map_pos[recurrence_cat] + orient_offsets[orientation_cat]
+        # 7. Draw the Pairing Lines (drawn over violins)
+        if not plot_paired_data.empty:
+            line_alpha = 0.7; line_lw = 0.9
+            for _, row in plot_paired_data.iterrows():
+                l2fc_val = row['L2FC']
+                # Check if L2FC is valid, and if coordinates are valid
+                if pd.notna(l2fc_val) and pd.notna(row['x_direct']) and pd.notna(row['x_inverted']):
+                    line_color = scalar_mappable.to_rgba(l2fc_val)
+                    ax_viol.plot([row['x_direct'], row['x_inverted']], [row['Direct'], row['Inverted']],
+                                 color=line_color, alpha=line_alpha, lw=line_lw, zorder=15) # Draw last
 
-            # Calculate the start and end x-coordinates for the horizontal line segment
-            xmin = x_center - median_line_width_on_plot / 2
-            xmax = x_center + median_line_width_on_plot / 2
+        # --- Add P-value Annotations (NEW PART) ---
+        # Use the formatted p-value strings calculated in Step 9a:
+        # pval_str_w_single, pval_str_w_recurrent, pval_str_mw_overall
 
-            # Draw the horizontal median line segment
-            ax_viol.hlines(y=median_val, xmin=xmin, xmax=xmax,
-                           color=median_line_color,
-                           linestyle=median_line_style,
-                           linewidth=median_line_lw,
-                           zorder=median_line_zorder,
-                           alpha=0.5)
-    
-        # 6. Draw the pairing lines (High zorder - drawn over violins)
-        line_alpha = 0.8 #  alpha for visibility on top
-        line_lw = 0.95 #  thicker lines
-        for _, row in paired_data.iterrows():
-            l2fc_val = row['L2FC']
-            if pd.notna(l2fc_val):
-                line_color = scalar_mappable.to_rgba(l2fc_val)
-                ax_viol.plot([row['x_direct'], row['x_inverted']], [row['Direct'], row['Inverted']],
-                             color=line_color, alpha=line_alpha, lw=line_lw, zorder=15) # Drawn last
+        # Define bracket heights - adjust factors as needed
+        bracket_height_factor = 1.05 # How much higher than max data point
+        bracket_spacing_factor = 1.08 # Multiplier to space stacked brackets
+        bracket_line_width = 1.0
+        bracket_tick_height = 0.02 # Relative height of vertical ticks on brackets
+        annotation_fontsize = 8
 
-        # 7. Add Colorbar (Smaller)
-        cbar = fig_viol.colorbar(scalar_mappable, ax=ax_viol, pad=0.02, aspect=25, # Adjust aspect for ratio
-                                 shrink=0.65) # Make colorbar smaller
-        cbar.set_label('Log2 (π Direct / π Inverted)', rotation=270, labelpad=18, fontsize=10) # Adjust font size
-        cbar.ax.tick_params(labelsize=8) # Adjust tick label size
+        y_max_overall = data_long['PiValue'].max() if not data_long['PiValue'].empty else 0
+        current_max_y_for_brackets = y_max_overall # Start tracking highest point needed
+
+        # Annotation 1: Direct vs Inverted (Single-event)
+        if pval_str_w_single != "error": # Only plot if test ran successfully
+            y_max_single_group = data_long[data_long['Recurrence'] == 'Single-event']['PiValue'].max()
+            y_bracket1 = y_max_single_group * bracket_height_factor
+            x1_s = recurrence_map_pos['Single-event'] + orient_offsets['Direct']
+            x2_s = recurrence_map_pos['Single-event'] + orient_offsets['Inverted']
+            y_tick1 = y_bracket1 * bracket_tick_height # Calculate tick height based on bracket y
+            # Draw bracket line
+            ax_viol.plot([x1_s, x1_s, x2_s, x2_s], [y_bracket1, y_bracket1 + y_tick1, y_bracket1 + y_tick1, y_bracket1],
+                         lw=bracket_line_width, c='k')
+            # Add text slightly above bracket ticks
+            ax_viol.text((x1_s + x2_s) / 2, y_bracket1 + y_tick1 * 1.1, pval_str_w_single,
+                         ha='center', va='bottom', color='k', fontsize=annotation_fontsize)
+            current_max_y_for_brackets = max(current_max_y_for_brackets, y_bracket1 + y_tick1 * 2) # Update max Y needed
+
+        # Annotation 2: Direct vs Inverted (Recurrent)
+        if pval_str_w_recurrent != "error":
+            y_max_recurrent_group = data_long[data_long['Recurrence'] == 'Recurrent']['PiValue'].max()
+            # Ensure this bracket is above the first one if groups overlap in x
+            y_bracket2 = max(y_max_recurrent_group * bracket_height_factor, current_max_y_for_brackets * bracket_spacing_factor * 0.8) # Place relative to current max
+            x1_r = recurrence_map_pos['Recurrent'] + orient_offsets['Direct']
+            x2_r = recurrence_map_pos['Recurrent'] + orient_offsets['Inverted']
+            y_tick2 = y_bracket2 * bracket_tick_height
+            ax_viol.plot([x1_r, x1_r, x2_r, x2_r], [y_bracket2, y_bracket2 + y_tick2, y_bracket2 + y_tick2, y_bracket2],
+                         lw=bracket_line_width, c='k')
+            ax_viol.text((x1_r + x2_r) / 2, y_bracket2 + y_tick2 * 1.1, pval_str_w_recurrent,
+                         ha='center', va='bottom', color='k', fontsize=annotation_fontsize)
+            current_max_y_for_brackets = max(current_max_y_for_brackets, y_bracket2 + y_tick2 * 2)
+
+        # Annotation 3: Single-event vs Recurrent (Overall)
+        if pval_str_mw_overall != "error":
+            # Place this bracket higher than the others, spanning the two main groups
+            y_bracket3 = current_max_y_for_brackets * bracket_spacing_factor # Place above existing annotations
+            x1_overall = recurrence_map_pos['Single-event'] # Center of single-event group (approx)
+            x2_overall = recurrence_map_pos['Recurrent']   # Center of recurrent group (approx)
+            y_tick3 = y_bracket3 * bracket_tick_height
+            ax_viol.plot([x1_overall, x1_overall, x2_overall, x2_overall], [y_bracket3, y_bracket3 + y_tick3, y_bracket3 + y_tick3, y_bracket3],
+                         lw=bracket_line_width, c='k')
+            ax_viol.text((x1_overall + x2_overall) / 2, y_bracket3 + y_tick3 * 1.1, pval_str_mw_overall,
+                         ha='center', va='bottom', color='k', fontsize=annotation_fontsize)
+            current_max_y_for_brackets = max(current_max_y_for_brackets, y_bracket3 + y_tick3 * 2)
+
+        # Adjust y-limits to make space for annotations
+        current_ylim = ax_viol.get_ylim()
+        new_ylim_top = max(current_ylim[1], current_max_y_for_brackets * 1.05) # Add a little padding above highest annotation
+        ax_viol.set_ylim(current_ylim[0], new_ylim_top)
+
+        # --- End P-value Annotations ---
+
+        # 8. Add Colorbar (Smaller)
+        cbar = fig_viol.colorbar(scalar_mappable, ax=ax_viol, pad=0.02, aspect=25, shrink=0.65)
+        cbar.set_label('Log2 (π Direct / π Inverted)', rotation=270, labelpad=18, fontsize=10)
+        cbar.ax.tick_params(labelsize=8)
         cbar.outline.set_visible(False)
 
-        # 8. Set titles, labels, and aesthetics
+        # 9. Set titles, labels, and aesthetics
         title_text = "Nucleotide Diversity (π) by Inversion Type and Orientation"
-        ax_viol.set_title(title_text, fontsize=14, pad=25)
-        # Use figtext for caption relative to figure, better with tight_layout
-
+        ax_viol.set_title(title_text, fontsize=14, pad=20) # Adjusted pad for potential top annotation
         ax_viol.set_xlabel('Inversion Recurrence Type', fontsize=12)
         ax_viol.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
-        ax_viol.tick_params(axis='both', which='major', labelsize=10, length=4) # Shorter ticks
+        ax_viol.tick_params(axis='both', which='major', labelsize=10, length=4)
         ax_viol.set_xticks(range(len(recurrence_categories)))
         ax_viol.set_xticklabels(recurrence_categories)
 
         # Add subtle gridlines and remove top/right spines
         ax_viol.yaxis.grid(True, linestyle=':', linewidth=0.6, alpha=0.7)
-        sns.despine(ax=ax_viol, offset=5) # Remove top/right spines
+        sns.despine(ax=ax_viol, offset=5)
 
-        # Handle legend
+        # Handle legend (ensure it doesn't overlap colorbar)
         handles, labels = ax_viol.get_legend_handles_labels()
-        # Filter to get only handles corresponding to orientation (e.g., first two)
-        orient_legend_handles = handles[:len(orientation_categories)]
-        orient_legend_labels = labels[:len(orientation_categories)]
-        # Create custom handles if necessary (e.g., if violinplot returns complex handles)
-        # orient_legend_handles = [plt.Rectangle((0,0),1,1, color=orient_palette[label]) for label in orientation_categories]
+        # Filter to get only handles corresponding to orientation
+        # Need to be careful here as violinplot might return complex handles
+        # Simplest way is often to create proxy artists
+        from matplotlib.patches import Patch
+        orient_legend_handles = [Patch(facecolor=orient_palette[label], alpha=0.6, label=label) for label in orientation_categories] # Use alpha similar to violins
+        orient_legend_labels = orientation_categories
 
         ax_viol.legend(orient_legend_handles, orient_legend_labels,
-                       title='Haplotype Orientation', title_fontsize='10', fontsize='9', # Adjust font sizes
-                       loc='upper left', bbox_to_anchor=(1.03, 1), frameon=False) # Place legend outside, no frame
+                       title='Haplotype Orientation', title_fontsize='10', fontsize='9',
+                       loc='upper left', bbox_to_anchor=(1.04, 1), frameon=False) # Adjusted anchor slightly right
 
-        # Adjust layout AFTER placing elements like legend/colorbar outside
-        fig_viol.tight_layout(rect=[0.02, 0.02, 0.88, 0.94]) # Fine-tune Rect [left, bottom, right, top]
+        # Adjust layout AFTER placing elements like legend/colorbar/annotations
+        # May need to adjust 'top' in rect to accommodate annotations
+        fig_viol.tight_layout(rect=[0.02, 0.02, 0.88, 0.93]) # Adjusted top boundary slightly
 
         plt.savefig(VIOLIN_PLOT_PATH, dpi=300, bbox_inches='tight')
         plt.close(fig_viol)
-        logger.info(f"Violin plot with pairing lines saved to {VIOLIN_PLOT_PATH}")
+        logger.info(f"Violin plot with pairing lines and p-value annotations saved to {VIOLIN_PLOT_PATH}")
 
-        # --- Interaction Plot with Raw Data Points ---
+
+        # --- Interaction Plot with Raw Data Points (No changes needed here) ---
         logger.info("Generating Interaction Plot...")
-        fig_int, ax_int = plt.subplots(figsize=(7, 5.5)) # Slightly adjusted size
+        fig_int, ax_int = plt.subplots(figsize=(7, 5.5))
         point_dodge = 0.15
 
         # 1. Plot transparent raw data points first
         sns.stripplot(x='Orientation', y='PiValue', hue='Recurrence', data=data_long,
                       palette=recur_palette, hue_order=['Single-event', 'Recurrent'], order=['Direct', 'Inverted'],
-                      dodge=point_dodge, size=3.5, alpha=0.3, # More transparent
+                      dodge=point_dodge, size=3.5, alpha=0.3,
                       jitter=0.1, legend=False,
                       ax=ax_int, zorder=1)
 
@@ -943,29 +1199,27 @@ if result:
                       linestyles=[recur_lines[cat] for cat in ['Single-event', 'Recurrent']],
                       hue_order=['Single-event', 'Recurrent'], order=['Direct', 'Inverted'],
                       dodge=point_dodge, errorbar=('ci', 95), capsize=.08,
-                      linewidth=1.5, # Make lines slightly thicker if needed
+                      linewidth=1.5,
                       ax=ax_int, zorder=10)
 
         # 3. Set titles, labels, and aesthetics
         title_text_int = "Interaction Plot: Mean Nucleotide Diversity (π)"
         caption_text_int = "Lines: Group Means ± 95% CI. Points: Raw Data per Inversion/Orientation."
-        ax_int.set_title(title_text_int, fontsize=13, pad=20) # Adjust size/pad
+        ax_int.set_title(title_text_int, fontsize=13, pad=20)
         fig_int.text(0.5, 0.95, caption_text_int, ha="center", va="bottom", fontsize=9, alpha=0.8, wrap=True)
 
         ax_int.set_xlabel('Haplotype Orientation', fontsize=11)
         ax_int.set_ylabel('Mean Nucleotide Diversity (π) [95% CI]', fontsize=11)
         ax_int.tick_params(axis='both', which='major', labelsize=9, length=4)
-
-        # Add subtle gridlines and remove top/right spines
         ax_int.yaxis.grid(True, linestyle=':', linewidth=0.6, alpha=0.7)
         sns.despine(ax=ax_int, offset=5)
 
         handles, labels = ax_int.get_legend_handles_labels()
         num_recur_cats = len(recur_palette)
         ax_int.legend(handles[:num_recur_cats], labels[:num_recur_cats],
-                      title='Recurrence Type', title_fontsize='10', fontsize='9', loc='best', frameon=False) # No frame
+                      title='Recurrence Type', title_fontsize='10', fontsize='9', loc='best', frameon=False)
 
-        fig_int.tight_layout(rect=[0.02, 0.02, 0.98, 0.93]) # Fine-tune Rect
+        fig_int.tight_layout(rect=[0.02, 0.02, 0.98, 0.93])
 
         plt.savefig(INTERACTION_PLOT_WITH_DATA_PATH, dpi=300, bbox_inches='tight')
         plt.close(fig_int)
