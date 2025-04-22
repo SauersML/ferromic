@@ -724,49 +724,14 @@ try:
 except Exception as e:
     logger.error(f"Failed during paired data preparation or Wilcoxon tests: {e}", exc_info=True)
 
-
-# --- 2. Independent Test (Mann-Whitney U: Overall Single vs. Recurrent) ---
-logger.info("Calculating Mann-Whitney U p-value (Overall Single-event vs. Recurrent)...")
-try:
-    # Use the final 'data_long' DataFrame, getting all Pi values per group
-    single_event_pi = data_long[data_long['Recurrence'] == 'Single-event']['PiValue'].dropna()
-    recurrent_pi = data_long[data_long['Recurrence'] == 'Recurrent']['PiValue'].dropna()
-    n_obs_single_overall = len(single_event_pi)
-    n_obs_recurrent_overall = len(recurrent_pi)
-
-    # Check if both groups have sufficient data
-    if n_obs_single_overall >= MIN_N_SAMPLES_MWU and n_obs_recurrent_overall >= MIN_N_SAMPLES_MWU:
-       try:
-            # alternative='two-sided' checks if distributions differ in location
-            stat_mw, pval_mw_overall = mannwhitneyu(single_event_pi, recurrent_pi,
-                                                    alternative='two-sided',
-                                                    use_continuity=True) # Continuity correction usually recommended
-            logger.info(f"  Mann-Whitney U (Overall: Single[N={n_obs_single_overall}] vs Recurrent[N={n_obs_recurrent_overall}]): p = {pval_mw_overall:.4g}")
-       except ValueError as e: # Can happen if distributions are identical or only contain NaNs etc.
-            logger.warning(f"Mann-Whitney U test failed: {e}")
-            # Check if identical distributions might be the cause
-            if np.array_equal(single_event_pi.sort_values().values, recurrent_pi.sort_values().values):
-                 logger.warning("Mann-Whitney U failed likely due to identical distributions. Setting p=1.0")
-                 pval_mw_overall = 1.0
-
-    else:
-        logger.warning(f"Skipping Mann-Whitney U for Overall Recurrence: Insufficient data "
-                       f"(N_single={n_obs_single_overall}, N_recurrent={n_obs_recurrent_overall}; Min required={MIN_N_SAMPLES_MWU})")
-
-except Exception as e:
-    logger.error(f"Failed during independent data preparation or Mann-Whitney U test: {e}", exc_info=True)
-
-
 # --- 3. Store Formatted P-values for Plotting ---
 # These variables will be used later in the plotting code
 pval_str_w_single = format_p_value_plotting(pval_wilcoxon_single, MIN_N_PAIRS_WILCOXON, n_pairs_single)
 pval_str_w_recurrent = format_p_value_plotting(pval_wilcoxon_recurrent, MIN_N_PAIRS_WILCOXON, n_pairs_recurrent)
-pval_str_mw_overall = format_p_value_plotting(pval_mw_overall, MIN_N_SAMPLES_MWU, min(n_obs_single_overall, n_obs_recurrent_overall)) # Use min N for n.s. criteria
 
 logger.info(f"Formatted p-values for plot annotation:")
 logger.info(f"  Single (D vs I): {pval_str_w_single}")
 logger.info(f"  Recurrent (D vs I): {pval_str_w_recurrent}")
-logger.info(f"  Overall (S vs R): {pval_str_mw_overall}")
 
 # =====================================================================
 
@@ -1118,19 +1083,6 @@ if result:
             ax_viol.text((x1_r + x2_r) / 2, y_bracket2 + y_tick2 * 1.1, pval_str_w_recurrent,
                          ha='center', va='bottom', color='k', fontsize=annotation_fontsize)
             current_max_y_for_brackets = max(current_max_y_for_brackets, y_bracket2 + y_tick2 * 2)
-
-        # Annotation 3: Single-event vs Recurrent (Overall)
-        if pval_str_mw_overall != "error":
-            # Place this bracket higher than the others, spanning the two main groups
-            y_bracket3 = current_max_y_for_brackets * bracket_spacing_factor # Place above existing annotations
-            x1_overall = recurrence_map_pos['Single-event'] # Center of single-event group (approx)
-            x2_overall = recurrence_map_pos['Recurrent']   # Center of recurrent group (approx)
-            y_tick3 = y_bracket3 * bracket_tick_height
-            ax_viol.plot([x1_overall, x1_overall, x2_overall, x2_overall], [y_bracket3, y_bracket3 + y_tick3, y_bracket3 + y_tick3, y_bracket3],
-                         lw=bracket_line_width, c='k')
-            ax_viol.text((x1_overall + x2_overall) / 2, y_bracket3 + y_tick3 * 1.1, pval_str_mw_overall,
-                         ha='center', va='bottom', color='k', fontsize=annotation_fontsize)
-            current_max_y_for_brackets = max(current_max_y_for_brackets, y_bracket3 + y_tick3 * 2)
 
         # Adjust y-limits to make space for annotations
         current_ylim = ax_viol.get_ylim()
