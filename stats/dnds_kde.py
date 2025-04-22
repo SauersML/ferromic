@@ -268,7 +268,6 @@ def calculate_sequence_median_omega(pairwise_df):
 
     return median_df
 
-# <<<--- Modified Function to reflect pre-filtering of 99 --->>>
 def categorize_median_omega_values(median_df, cds_to_type):
     """
     Categorize median omega values into three categories based on mapped inversion type.
@@ -348,79 +347,185 @@ def categorize_median_omega_values(median_df, cds_to_type):
     }
 
 
-# <<<--- New Standalone Plotting Function --->>>
-def plot_median_omega_distribution(median_count_data):
-    """
-    Create a standalone bar plot showing the percentage distribution of
-    median omega values for Recurrent vs. Single-event inversion types.
-    """
-    logger.info("Creating standalone plot for median omega distribution...")
 
-    # Define categories for display and internal lookup
-    display_categories = ["Identical Sequences", "0 ≤ ω ≤ 1", "ω > 1"]
+def _calculate_omega_stats_for_plotting(pairwise_df):
+    required_cols = ['Group1', 'Group2', 'InversionType', 'omega']
+    if not all(col in pairwise_df.columns for col in required_cols):
+        print(f"ERROR: Helper input DataFrame missing required columns: {required_cols}")
+        return None
+
+    def categorize_omega(omega):
+        if pd.isna(omega):
+            return None
+        if omega == -1:
+            return "Exactly -1"
+        elif 0 <= omega <= 1:
+            return "0 to 1"
+        elif omega > 1:
+            return "Above 1"
+        else:
+            print(f"WARNING: Unexpected omega value encountered during categorization: {omega}")
+            return None
+
+    pairwise_df_copy = pairwise_df.copy()
+    pairwise_df_copy['omega_category'] = pairwise_df_copy['omega'].apply(categorize_omega)
+
+    pairwise_df_categorized = pairwise_df_copy.dropna(subset=['omega_category'])
+    if pairwise_df_categorized.empty:
+        print("WARNING: No valid omega categories found after categorization in helper.")
+        empty_counts = {"Exactly -1": 0, "0 to 1": 0, "Above 1": 0}
+        empty_type_counts = {'Recurrent': empty_counts.copy(), 'Single-event': empty_counts.copy()}
+        return {'Inverted': empty_type_counts.copy(), 'Direct': empty_type_counts.copy()}
+
+    results = {'Inverted': {}, 'Direct': {}}
+
+    inverted_df = pairwise_df_categorized[
+        (pairwise_df_categorized['Group1'] == 1) & (pairwise_df_categorized['Group2'] == 1)
+    ]
+    if not inverted_df.empty:
+        inverted_counts = inverted_df.groupby(['InversionType', 'omega_category']).size().unstack(fill_value=0)
+        results['Inverted'] = inverted_counts.to_dict('index')
+    else:
+        print("WARNING: No INVERTED pairs found (Group1=1 & Group2=1) in helper.")
+
+    direct_df = pairwise_df_categorized[
+        (pairwise_df_categorized['Group1'] == 0) & (pairwise_df_categorized['Group2'] == 0)
+    ]
+    if not direct_df.empty:
+        direct_counts = direct_df.groupby(['InversionType', 'omega_category']).size().unstack(fill_value=0)
+        results['Direct'] = direct_counts.to_dict('index')
+    else:
+        print("WARNING: No DIRECT pairs found (Group1=0 & Group2=0) in helper.")
+
+    internal_categories = ["Exactly -1", "0 to 1", "Above 1"]
+    inv_types = ["Recurrent", "Single-event"]
+
+    for group in ['Inverted', 'Direct']:
+        if group not in results:
+             results[group] = {}
+        for inv_type in inv_types:
+            if inv_type not in results[group]:
+                results[group][inv_type] = {cat: 0 for cat in internal_categories}
+            else:
+                for cat in internal_categories:
+                    if cat not in results[group][inv_type]:
+                        results[group][inv_type][cat] = 0
+
+    return results
+
+
+def plot_median_omega_distribution(pairwise_df, output_plot_path, config):
+    print("Calculating statistics and creating plot for pairwise omega distribution...")
+
+    plot_data = _calculate_omega_stats_for_plotting(pairwise_df)
+
+    if plot_data is None:
+        print("ERROR: Helper function failed to produce data. Skipping plot.")
+        return None
+
+    display_categories = ["Identical Sequences (ω = -1)", "0 ≤ ω ≤ 1", "ω > 1"]
     internal_categories = ["Exactly -1", "0 to 1", "Above 1"]
     n_categories = len(display_categories)
 
-    # Extract counts, ensuring keys exist
-    rec_counts = median_count_data.get('Recurrent', {})
-    single_counts = median_count_data.get('Single-event', {})
+    inv_rec_counts = plot_data.get('Inverted', {}).get('Recurrent', {})
+    inv_single_counts = plot_data.get('Inverted', {}).get('Single-event', {})
 
-    rec_values = [rec_counts.get(cat, 0) for cat in internal_categories]
-    single_values = [single_counts.get(cat, 0) for cat in internal_categories]
+    inv_rec_values = [inv_rec_counts.get(cat, 0) for cat in internal_categories]
+    inv_single_values = [inv_single_counts.get(cat, 0) for cat in internal_categories]
 
-    # Calculate totals and percentages
-    rec_total = sum(rec_values)
-    single_total = sum(single_values)
+    inv_rec_total = sum(inv_rec_values)
+    inv_single_total = sum(inv_single_values)
 
-    if rec_total == 0 and single_total == 0:
-        logger.error("No data available for plotting in either category. Skipping plot generation.")
-        return None
+    inv_rec_percentages = [(v / inv_rec_total * 100) if inv_rec_total > 0 else 0 for v in inv_rec_values]
+    inv_single_percentages = [(v / inv_single_total * 100) if inv_single_total > 0 else 0 for v in inv_single_values]
 
-    rec_percentages = [(v / rec_total * 100) if rec_total > 0 else 0 for v in rec_values]
-    single_percentages = [(v / single_total * 100) if single_total > 0 else 0 for v in single_values]
+    dir_rec_counts = plot_data.get('Direct', {}).get('Recurrent', {})
+    dir_single_counts = plot_data.get('Direct', {}).get('Single-event', {})
 
-    # --- Plotting ---
-    fig, ax = plt.subplots(figsize=(10, 7)) # Adjusted figure size for better spacing
+    dir_rec_values = [dir_rec_counts.get(cat, 0) for cat in internal_categories]
+    dir_single_values = [dir_single_counts.get(cat, 0) for cat in internal_categories]
 
-    x = np.arange(n_categories) # the label locations
-    width = 0.35                # the width of the bars
+    dir_rec_total = sum(dir_rec_values)
+    dir_single_total = sum(dir_single_values)
 
-    # Plot bars
-    rects1 = ax.bar(x - width/2, rec_percentages, width,
-                  label=f'Recurrent (N={rec_total})', # N in legend
-                  color=RECURRENT_COLOR, hatch=RECURRENT_HATCH, alpha=0.85, edgecolor='grey')
-    rects2 = ax.bar(x + width/2, single_percentages, width,
-                  label=f'Single-event (N={single_total})', # N in legend
-                  color=SINGLE_EVENT_COLOR, hatch=SINGLE_EVENT_HATCH, alpha=0.85, edgecolor='grey')
+    dir_rec_percentages = [(v / dir_rec_total * 100) if dir_rec_total > 0 else 0 for v in dir_rec_values]
+    dir_single_percentages = [(v / dir_single_total * 100) if dir_single_total > 0 else 0 for v in dir_single_values]
 
-    # Add percentage labels above bars
-    # <<<--- Using ax.bar_label for cleaner code --->>>
-    ax.bar_label(rects1, fmt='%.1f%%', padding=3, fontsize=11) # Add '%' sign
-    ax.bar_label(rects2, fmt='%.1f%%', padding=3, fontsize=11) # Add '%' sign
+    if inv_rec_total == 0 and inv_single_total == 0 and dir_rec_total == 0 and dir_single_total == 0:
+         print("WARNING: No data found for any category (Inverted/Direct, Recurrent/Single-event). Skipping plot.")
+         return None
+    elif inv_rec_total == 0 and inv_single_total == 0:
+        print("WARNING: No INVERTED data available for plotting main bars. Plot will only show Direct lines if available.")
 
-    # Add labels, title, and ticks
-    ax.set_ylabel('Percentage of Sequences (%)', fontsize=14) # Slightly larger axis label
-    ax.set_title('Distribution of Median Sequence ω by Inversion Type', fontsize=16, pad=15) # Larger title
+    fig, ax = plt.subplots(figsize=(10, 7))
+    x = np.arange(n_categories)
+    width = 0.35
+
+    rects1 = ax.bar(x - width/2, inv_rec_percentages, width,
+                    label=f'Inverted Recurrent (N={inv_rec_total})',
+                    color=config.get('RECURRENT_COLOR', 'blue'),
+                    hatch=config.get('RECURRENT_HATCH', '/'), alpha=0.85, edgecolor='grey')
+    rects2 = ax.bar(x + width/2, inv_single_percentages, width,
+                    label=f'Inverted Single-event (N={inv_single_total})',
+                    color=config.get('SINGLE_EVENT_COLOR', 'orange'),
+                    hatch=config.get('SINGLE_EVENT_HATCH', '\\'), alpha=0.85, edgecolor='grey')
+
+    if inv_rec_total > 0:
+        ax.bar_label(rects1, fmt='%.1f%%', padding=3, fontsize=11)
+    if inv_single_total > 0:
+        ax.bar_label(rects2, fmt='%.1f%%', padding=3, fontsize=11)
+
+    line_color = 'black'
+    line_width = 2.0
+    zorder = 3
+
+    if dir_rec_total > 0 or dir_single_total > 0:
+        ax.plot([], [], color=line_color, linewidth=line_width, linestyle='-',
+                label=f'Direct Pairs (N Rec={dir_rec_total}, N Single={dir_single_total})')
+
+    for i in range(n_categories):
+        if dir_rec_total > 0:
+             bar1 = rects1[i]
+             y_val1 = dir_rec_percentages[i]
+             xmin1 = bar1.get_x()
+             xmax1 = bar1.get_x() + bar1.get_width()
+             ax.hlines(y_val1, xmin=xmin1, xmax=xmax1, color=line_color,
+                       linewidth=line_width, linestyle='-', zorder=zorder)
+
+        if dir_single_total > 0:
+            bar2 = rects2[i]
+            y_val2 = dir_single_percentages[i]
+            xmin2 = bar2.get_x()
+            xmax2 = bar2.get_x() + bar2.get_width()
+            ax.hlines(y_val2, xmin=xmin2, xmax=xmax2, color=line_color,
+                      linewidth=line_width, linestyle='-', zorder=zorder)
+
+    ax.set_ylabel('Percentage of Pairwise Comparisons (%)', fontsize=14)
+    ax.set_title('Distribution of Pairwise ω by Inversion Type (Inverted vs Direct)', fontsize=16, pad=15)
     ax.set_xticks(x)
-    ax.set_xticklabels(display_categories, fontsize=12) # Larger tick labels
-    ax.legend(fontsize=12, title='Inversion Type', title_fontsize=13) # Larger legend, add title
+    ax.set_xticklabels(display_categories, fontsize=12)
+    ax.legend(fontsize=11, title='Pair Type & Inversion Class', title_fontsize=12)
 
-    # Customize appearance
     ax.grid(axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, max(rec_percentages + single_percentages) * 1.15) # Adjust ylim slightly for labels
-    sns.despine(ax=ax) # Remove top and right spines
+    visible_percentages = []
+    if inv_rec_total > 0: visible_percentages.extend(inv_rec_percentages)
+    if inv_single_total > 0: visible_percentages.extend(inv_single_percentages)
+    if dir_rec_total > 0: visible_percentages.extend(dir_rec_percentages)
+    if dir_single_total > 0: visible_percentages.extend(dir_single_percentages)
 
-    plt.tight_layout() # Adjust layout
+    max_perc = max(visible_percentages) if visible_percentages else 10
+    ax.set_ylim(0, max(10, max_perc * 1.18))
+    sns.despine(ax=ax)
 
-    # Save the figure
+    plt.tight_layout()
+
     try:
-        plt.savefig(OUTPUT_PLOT_PATH, dpi=300, bbox_inches='tight')
-        logger.info(f"Saved standalone median omega plot to {OUTPUT_PLOT_PATH}")
+        plt.savefig(output_plot_path, dpi=300, bbox_inches='tight')
+        print(f"Saved pairwise omega distribution plot to {output_plot_path}")
     except Exception as e:
-        logger.error(f"Failed to save plot: {e}")
+        print(f"ERROR: Failed to save plot '{output_plot_path}': {e}")
 
-    plt.show() # Display the plot
-    return fig # Return figure object if needed elsewhere
+    return fig
 
 # --- Main Execution ---
 
@@ -441,24 +546,41 @@ def main():
         logger.error("Failed to map CDS to inversion types. Exiting.")
         return
 
-    # Calculate median omega value for each sequence (using Group 1, filters 99)
-    median_df = calculate_sequence_median_omega(pairwise_df)
-    if median_df.empty:
-        logger.error("Median omega DataFrame is empty after calculation. Exiting.")
-        return
+    # --- Prepare DataFrame and Config for the NEW Plotting Function ---
+    print("Preparing pairwise data for plotting...")
+    pairwise_df['InversionType'] = pairwise_df['CDS'].map(cds_to_type)
 
-    # Categorize median omega values based on inversion type
-    median_count_data = categorize_median_omega_values(median_df, cds_to_type)
-    if not median_count_data.get('Recurrent') and not median_count_data.get('Single-event'):
-         logger.error("No data found for either Recurrent or Single-event categories after mapping. Cannot plot. Exiting.")
-         return
+    # Filter out rows that could not be mapped (where InversionType is NaN)
+    initial_plot_rows = len(pairwise_df)
+    pairwise_df_plotting = pairwise_df.dropna(subset=['InversionType']).copy()
+    dropped_plot_rows = initial_plot_rows - len(pairwise_df_plotting)
+    if dropped_plot_rows > 0:
+        print(f"INFO: Removed {dropped_plot_rows} rows from pairwise data that couldn't be mapped to an inversion type before plotting.")
 
-    # Create the standalone plot
-    fig = plot_median_omega_distribution(median_count_data)
-    if fig is None:
-        logger.error("Plot generation failed.")
+    if pairwise_df_plotting.empty:
+        print("ERROR: No pairwise data remains after filtering for mapped inversion types. Cannot plot.")
     else:
-        logger.info("Plot generation successful.")
+        # Create the config dictionary
+        config = {
+            'RECURRENT_COLOR': RECURRENT_COLOR,
+            'SINGLE_EVENT_COLOR': SINGLE_EVENT_COLOR,
+            'RECURRENT_HATCH': RECURRENT_HATCH,
+            'SINGLE_EVENT_HATCH': SINGLE_EVENT_HATCH
+        }
+
+        # --- Call the plotting function with the CORRECT arguments ---
+        print("Calling plot function...")
+        fig = plot_median_omega_distribution(
+            pairwise_df_plotting, # The prepared DataFrame with InversionType
+            OUTPUT_PLOT_PATH,     # The global path variable
+            config                # The config dictionary
+        )
+
+        # Check if plotting returned a figure object (optional check)
+        if fig is None:
+            print("Plot generation function returned None (likely failed or skipped).")
+        else:
+            print("Plot generation function executed.")
 
     logger.info("--- Analysis completed ---")
 
