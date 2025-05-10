@@ -2411,7 +2411,7 @@ fn process_single_config_entry(
                     sequence_length: adjusted_sequence_length,
                 };
 
-                match stats::calculate_hudson_fst_for_pair(&pop0_context, &pop1_context) {
+                match calculate_hudson_fst_for_pair(&pop0_context, &pop1_context) {
                     Ok(outcome) => {
                         local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
                             chr: entry.seqname.clone(),
