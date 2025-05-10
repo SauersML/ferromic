@@ -1711,6 +1711,8 @@ fn process_chromosome_entries(
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
     pca_storage: Option<(Arc<Mutex<HashMap<String, Vec<Variant>>>>, Arc<Mutex<Vec<String>>>)>,
+    // Arc containing the parsed population definitions from the CSV file, if provided.
+    // Key: Population Name (String), Value: List of Sample IDs (String) in that population.
     parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>>,
 ) -> Result<(Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, Vec<RegionalHudsonFSTOutcome>), VcfError> {
     set_stage(ProcessingStage::ConfigEntry);
