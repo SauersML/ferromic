@@ -1025,7 +1025,7 @@ pub fn process_config_entries(
         if args.enable_fst {
             if let Some(csv_path_str) = &args.fst_populations {
                 log(LogLevel::Info, &format!("Parsing population definition file for FST: {}", csv_path_str));
-                match parse_population_csv(Path::new(csv_path_str)) { // parse_population_csv returns HashMap<PopulationName, Vec<SampleID_from_CSV>>
+                match crate::stats::parse_population_csv(Path::new(csv_path_str)) {
                     Ok(parsed_map) => Some(Arc::new(parsed_map)),
                     Err(e) => {
                         log(LogLevel::Error, &format!("Failed to parse population CSV '{}': {}. FST calculations for CSV-defined populations will be skipped.", csv_path_str, e));
