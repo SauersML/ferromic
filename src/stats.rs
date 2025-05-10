@@ -765,13 +765,13 @@ fn calculate_fst_wc_at_site_general(
 
     for i in 0..pop_id_list.len() {
         for j in (i + 1)..pop_id_list.len() {
-            let pop1_id = &pop_id_list[i];
-            let pop2_id = &pop_id_list[j];
+            let pop1_id_str = &pop_id_list[i];
+            let pop2_id_str = &pop_id_list[j];
 
             let mut current_pair_stats = HashMap::new();
             // These unwraps are safe because pop_id_list elements are keys from pop_stats.
-            current_pair_stats.insert(pop1_id.clone(), *pop_stats.get(pop1_id).unwrap());
-            current_pair_stats.insert(pop2_id.clone(), *pop_stats.get(pop2_id).unwrap());
+            current_pair_stats.insert(pop1_id_str.clone(), *pop_stats.get(pop1_id_str).unwrap());
+            current_pair_stats.insert(pop2_id_str.clone(), *pop_stats.get(pop2_id_str).unwrap());
             
             let total_haplotypes_pair: usize = current_pair_stats.values().map(|(n, _)| *n).sum();
             let mut weighted_freq_sum_pair = 0.0;
@@ -786,7 +786,14 @@ fn calculate_fst_wc_at_site_general(
             
             let pairwise_fst_val = FstEstimate::from_ratio(pairwise_a_xy, pairwise_a_xy + pairwise_b_xy);
             
-            let pair_key = format!("{}_vs_{}", pop1_id, pop2_id);
+            // Canonical key order (lexicographical) for pairwise results.
+            let (key_pop1, key_pop2) = if pop1_id_str < pop2_id_str {
+                (pop1_id_str, pop2_id_str)
+            } else {
+                (pop2_id_str, pop1_id_str)
+            };
+            let pair_key = format!("{}_vs_{}", key_pop1, key_pop2);
+            
             pairwise_fst_estimate_map.insert(pair_key.clone(), pairwise_fst_val);
             pairwise_variance_components_map.insert(pair_key.clone(), (pairwise_a_xy, pairwise_b_xy));
 
@@ -828,15 +835,13 @@ fn calculate_variance_components(
         total_haplotypes += *size;
     }
 
-    let n_bar = (total_haplotypes as f64) / r; // Average sample size (n̄)
-    // If average sample size is too small (e.g., implies some populations have 0 or 1 sample after averaging),
-    // components are effectively zero or undefined.
-    if n_bar <= 1.0 && pop_stats.values().any(|(n_i, _)| *n_i <= 1) {
+    let n_bar = (total_haplotypes as f64) / r; // Average sample size (n̄)
+  
+    // Check if n_bar - 1.0 is zero or negative, which would make subsequent calculations problematic.
+    // This condition also covers n_bar <= 1.0.
+    if (n_bar - 1.0) < 1e-9 { // Using < 1e-9 to catch n_bar very close to 1.0 or less than 1.0
         return (0.0, 0.0);
     }
-    if (n_bar - 1.0).abs() < 1e-9 || (n_bar - 1.0) < 0.0 { // n_bar is effectively 1 or less
-        return (0.0, 0.0);
-    }
 
     let global_p = global_freq; // p̄
 
@@ -882,16 +887,16 @@ fn calculate_variance_components(
     let a_numerator_term = msc - (msg / (n_bar - 1.0));
     let a_denominator_factor = 1.0 - (c_squared / r); // This is n_c / n_bar
 
-    let a = if a_denominator_factor.abs() > 1e-9 && a_denominator_factor > 0.0 { // Avoid division by zero or negative for n_c/n_bar
-        a_numerator_term / a_denominator_factor
-    } else if a_numerator_term == 0.0 { // If numerator is 0, and denom_factor implies n_c is ~0, 'a' is 0.
-        0.0
-    } else {
-        // This case implies n_c (effective sample size related term) is zero or negative,
-        // while the variance difference term is non-zero. This indicates an unstable estimate for 'a'.
-        if a_numerator_term.abs() < 1e-9 { 0.0 } else { 0.0 } // Wrong???
-    };
-
+    // Calculate component 'a'.
+    // This division is allowed to produce Infinity or NaN if a_denominator_factor is zero
+    // and a_numerator_term is non-zero or zero, respectively.
+    // These non-finite 'a' values will propagate to the calculation of (a+b),
+    // and FstEstimate::from_ratio(a, a+b) will then correctly classify the
+    // resulting FST estimate (e.g., as Calculable(NaN), Calculable(Infinity),
+    // or SummedVariancesNonPositive if a+b itself becomes non-positive or non-finite).
+    // This approach defers the classification of problematic numerical outcomes to the
+    // FstEstimate::from_ratio method, rather than preemptively altering the value of 'a'.
+    let a = a_numerator_term / a_denominator_factor;
     // Variance component 'b' (within populations, among individuals for diploids)
     // For haplotypes, this is effectively the remaining variance.
     // b = (n̄ / (n̄-1)) * [ p̄(1-p̄) - ((r-1)/r)S² ]  (from W&C eq. 3, with h_bar=0)
