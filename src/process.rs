@@ -2070,6 +2070,8 @@ fn process_single_config_entry(
             start: entry.interval.start as i64,
             end: entry.interval.end as i64,
         };
+
+        // The QueryRegion from ConfigEntry.interval (a ZeroBasedHalfOpen which is 0-based inclusive start, 0-based exclusive end) is incorrect?
         
         // FST between haplotype groups (0 vs 1)
         log(LogLevel::Info, "Calculating FST between haplotype groups (0 vs 1)");
