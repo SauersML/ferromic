@@ -21,7 +21,7 @@ pub struct SiteDiversity {
 
 /// FST results for a single site
 #[derive(Debug, Clone)]
-pub struct SiteFST {
+pub struct SiteFST_WC {
     /// Position (1-based coordinate)
     pub position: i64,
 
@@ -57,7 +57,7 @@ pub struct FST_WC_Results {
     pub pairwise_variance_components: HashMap<String, (f64, f64)>,
     
     /// Per-site FST values
-    pub site_fst: Vec<SiteFST>,
+    pub site_fst: Vec<SiteFST_WC>,
     
     /// Type of FST calculation (e.g., "haplotype_groups" or "population_groups")
     pub fst_type: String,
@@ -172,9 +172,9 @@ pub fn calculate_fst_between_groups(
         
         if let Some(variant) = variant_map.get(&pos) {
             // Calculate FST at this site using haplotype groups
-            let site_result = calculate_fst_at_site_by_group(variant, &haplotype_to_group);
+            let site_result = calculate_fst_wc_at_site_by_haplotype_group(variant, &haplotype_to_group);
             
-            site_fst_values.push(SiteFST {
+            site_fst_values.push(SiteFST_WC {
                 position: ZeroBasedPosition(pos).to_one_based(),
                 overall_fst: site_result.0,
                 pairwise_fst: site_result.1,
@@ -197,7 +197,7 @@ pub fn calculate_fst_between_groups(
             empty_sizes.insert("0".to_string(), 0);
             empty_sizes.insert("1".to_string(), 0);
             
-            site_fst_values.push(SiteFST {
+            site_fst_values.push(SiteFST_WC {
                 position: ZeroBasedPosition(pos).to_one_based(),
                 overall_fst: f64::NAN,
                 pairwise_fst: empty_pairwise,
@@ -211,7 +211,7 @@ pub fn calculate_fst_between_groups(
     finish_step_progress("Completed per-site FST calculations");
     
     // 4. Calculate overall FST for the region
-    let (overall_fst, pairwise_fst) = calculate_overall_fst(&site_fst_values);
+    let (overall_fst, pairwise_fst) = calculate_overall_fst_wc(&site_fst_values);
     
     // Log summary statistics
     let polymorphic_sites = site_fst_values.iter()
@@ -257,14 +257,14 @@ pub fn calculate_fst_between_groups(
 ///
 /// # Returns
 /// FST results or an error if the CSV cannot be parsed
-pub fn calculate_fst_from_csv(
+pub fn calculate_fst_wc_csv_populations(
     variants: &[Variant],
     sample_names: &[String],
     csv_path: &Path,
     region: QueryRegion,
 ) -> Result<FST_WC_Results, VcfError> {
-    // The code that calls calculate_fst_at_site_by_population now expects
-    // a 5-tuple from that function. We handle the new pairwise (a,b) map when building SiteFST.
+    // The code that calls calculate_fst_wc_at_site_by_population now expects
+    // a 5-tuple from that function. We handle the new pairwise (a,b) map when building SiteFST_WC.
 
     let spinner = create_spinner(&format!(
         "Calculating FST between population groups for region {}:{}-{}",
@@ -307,9 +307,9 @@ pub fn calculate_fst_from_csv(
         
         if let Some(variant) = variant_map.get(&pos) {
             // Calculate FST at this site using population groups
-            let site_result = calculate_fst_at_site_by_population(variant, &sample_to_pop);
+            let site_result = calculate_fst_wc_at_site_by_population(variant, &sample_to_pop);
             
-            site_fst_values.push(SiteFST {
+            site_fst_values.push(SiteFST_WC {
                 position: ZeroBasedPosition(pos).to_one_based(),
                 overall_fst: site_result.0,
                 pairwise_fst: site_result.1,
@@ -319,7 +319,7 @@ pub fn calculate_fst_from_csv(
             });
         } else {
             // No variant at this position (monomorphic site): we store FST as NaN
-            site_fst_values.push(SiteFST {
+            site_fst_values.push(SiteFST_WC {
                 position: ZeroBasedPosition(pos).to_one_based(),
                 overall_fst: f64::NAN,
                 pairwise_fst: HashMap::new(),
@@ -333,7 +333,7 @@ pub fn calculate_fst_from_csv(
     finish_step_progress("Completed per-site FST calculations");
     
     // 5. Calculate overall FST for the region
-    let (overall_fst, pairwise_fst) = calculate_overall_fst(&site_fst_values);
+    let (overall_fst, pairwise_fst) = calculate_overall_fst_wc(&site_fst_values);
     
     // Log summary statistics
     let polymorphic_sites = site_fst_values.iter()
@@ -508,28 +508,28 @@ fn map_samples_to_populations(
 ///
 /// # Returns
 /// (overall_fst, pairwise_fst, variance_components, population_sizes)
-fn calculate_fst_at_site_by_group(
+fn calculate_fst_wc_at_site_by_haplotype_group(
     variant: &Variant,
     haplotype_to_group: &HashMap<(usize, HaplotypeSide), String>
 ) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
     // We delegate to the new general function with an is_population flag = false
     // Then we parse out the returned data
-    calculate_fst_at_site_general(variant, haplotype_to_group)
+    calculate_fst_wc_at_site_general(variant, haplotype_to_group)
 }
 
 /// Calculate FST at a single site using population assignments
 ///
-/// Similar to calculate_fst_at_site_by_group but handles multiple population groups
-fn calculate_fst_at_site_by_population(
+/// Similar to calculate_fst_wc_at_site_by_haplotype_group but handles multiple population groups
+fn calculate_fst_wc_at_site_by_population(
     variant: &Variant,
     sample_to_pop: &HashMap<(usize, HaplotypeSide), String>
 ) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
     // We delegate to the new general function with an is_population flag = true
     // Then we parse out the returned data
-    calculate_fst_at_site_general(variant, sample_to_pop)
+    calculate_fst_wc_at_site_general(variant, sample_to_pop)
 }
 
-fn calculate_fst_at_site_general(
+fn calculate_fst_wc_at_site_general(
     variant: &Variant,
     map_subpop: &HashMap<(usize, HaplotypeSide), String>
 ) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
@@ -742,7 +742,7 @@ fn calculate_variance_components(
 ///
 /// # Returns
 /// (overall_fst, pairwise_fst)
-fn calculate_overall_fst(site_fst_values: &[SiteFST]) -> (f64, HashMap<String, f64>) {
+fn calculate_overall_fst_wc(site_fst_values: &[SiteFST_WC]) -> (f64, HashMap<String, f64>) {
     /*
     This function sums the per-site variance components (a, b) across all sites that have (a + b) > 0.
     That means we skip monomorphic or uninformative sites where (a + b) == 0. Skipping avoids an
