@@ -1,6 +1,6 @@
 use crate::stats::{
     calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site_diversity,
-    calculate_pi, calculate_watterson_theta, calculate_fst_between_groups, calculate_fst_from_csv, SiteDiversity, FST_WC_Results
+    calculate_pi, calculate_watterson_theta, calculate_fst_wc_haplotype_groups, calculate_fst_wc_csv_populations, SiteDiversity, FST_WC_Results
 };
 
 use crate::parse::{
@@ -1960,7 +1960,7 @@ fn process_single_config_entry(
         
         // FST between haplotype groups (0 vs 1)
         log(LogLevel::Info, "Calculating FST between haplotype groups (0 vs 1)");
-        let haplotype_fst = calculate_fst_between_groups(
+        let haplotype_fst = calculate_fst_wc_haplotype_groups(
             &filtered_variants,
             &sample_names,
             &entry.samples_filtered,
@@ -1970,7 +1970,7 @@ fn process_single_config_entry(
         // FST between population groups if CSV is provided
         let population_fst = if let Some(pop_csv) = &args.fst_populations {
             log(LogLevel::Info, &format!("Calculating FST between population groups from {}", pop_csv));
-            match calculate_fst_from_csv(
+            match calculate_fst_wc_csv_populations(
                 &filtered_variants,
                 &sample_names,
                 Path::new(pop_csv),
