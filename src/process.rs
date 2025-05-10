@@ -924,10 +924,20 @@ pub fn map_sample_names_to_indices(sample_names: &[String]) -> Result<HashMap<&s
     Ok(vcf_sample_id_to_index)
 }
 
+/// Retrieves VCF sample indices and HaplotypeSides for samples belonging to a specific haplotype group (0 or 1),
+/// based on the sample filter definitions from the configuration.
+///
+/// # Arguments
+/// * `haplotype_group` - The target haplotype group (0 or 1).
+/// * `sample_filter` - A map from sample names (String) to their (left_haplotype_group, right_haplotype_group) assignments.
+/// * `vcf_sample_id_to_index` - A map from core VCF sample IDs (String) to their 0-based VCF column indices.
+///
+/// # Returns
+/// A `Result` containing a `Vec` of `(vcf_sample_index, HaplotypeSide)` tuples.
 pub fn get_haplotype_indices_for_group(
     haplotype_group: u8,
     sample_filter: &HashMap<String, (u8, u8)>,
-    vcf_sample_id_to_index: &HashMap<&str, usize>,
+    vcf_sample_id_to_index: &HashMap<String, usize>,
 ) -> Result<Vec<(usize, HaplotypeSide)>, VcfError> {
     let mut haplotype_indices = Vec::new();
     let mut missing_samples = Vec::new();
