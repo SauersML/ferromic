@@ -1,7 +1,7 @@
 use crate::process::{Variant, ZeroBasedPosition, HaplotypeSide, ZeroBasedHalfOpen, QueryRegion, VcfError};
 use crate::progress::{
-    log, LogLevel, init_step_progress, update_step_progress,
-    finish_step_progress, create_spinner, display_status_box, StatusBox, set_stage, ProcessingStage
+    log, LogLevel, init_step_progress, update_step_progress,
+    finish_step_progress, create_spinner, display_status_box, StatusBox, set_stage, ProcessingStage
 };
 use rayon::iter::IntoParallelIterator;
 use rayon::prelude::*;
@@ -10,43 +10,122 @@ use std::sync::Arc;
 use std::fs::File;
 use std::io::{BufReader, BufRead};
 use std::path::Path;
+use std::fmt;
+
+/// Represents the outcome of an FST (Fixation Index) calculation.
+///
+/// This enum provides distinct states for FST estimates to clearly differentiate
+/// between valid calculations, calculations undefined due to insufficient data,
+/// and calculations undefined due to mathematical properties of the variance
+/// components (specifically, a non-positive sum of components that would form
+/// the denominator of the FST ratio).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FstEstimate {
+    /// FST is considered calculable because the denominator in the Fst = Numerator/Denominator
+    /// formula was positive, and there was sufficient data for comparison.
+    /// The contained `f64` value is the direct result of Numerator / Denominator.
+    /// This value can be a finite number (positive, negative, or zero),
+    /// `f64::NAN`, `f64::INFINITY`, or `f64::NEG_INFINITY`, depending on the
+    /// properties of the numerator and the division outcome.
+    Calculable(f64),
+
+    /// FST is undefined specifically because the sum of variance components
+    /// (e.g., a+b or Σ(a+b)) that forms the denominator in the FST ratio
+    /// was calculated to be zero or negative. This makes the FST ratio
+    /// mathematically ill-defined according to the estimator's formula.
+    SummedVariancesNonPositive,
+
+    /// FST could not be calculated because there was insufficient data to form
+    /// the necessary population comparisons (e.g., fewer than 2 populations/groups
+    /// had data for the site or region). In this case, variance components a and b,
+    /// and thus their sum, are not meaningfully formed for an FST calculation.
+    InsufficientData,
+}
+
+impl FstEstimate {
+    /// Creates an `FstEstimate` from a numerator and a denominator.
+    ///
+    /// This function is intended to be called when variance components (numerator and
+    /// the components forming the denominator) have been successfully calculated.
+    /// It determines if the FST ratio is well-defined based on the denominator.
+    ///
+    /// - If `denominator > 0.0`, returns `FstEstimate::Calculable(numerator / denominator)`.
+    ///   The inner `f64` may be finite, `NaN`, or `Infinity`.
+    /// - If `denominator <= 0.0`, returns `FstEstimate::SummedVariancesNonPositive`.
+    ///
+    /// Cases of `InsufficientData` (e.g., < 2 populations) should be handled
+    /// before attempting to calculate components and calling this method.
+    pub fn from_ratio(numerator: f64, denominator: f64) -> Self {
+        if denominator > 0.0 {
+            FstEstimate::Calculable(numerator / denominator)
+        } else { // denominator is <= 0.0
+            FstEstimate::SummedVariancesNonPositive
+        }
+    }
+}
+
+impl fmt::Display for FstEstimate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FstEstimate::Calculable(val) => {
+                if val.is_nan() {
+                    write!(f, "NaN")
+                } else if val.is_infinite() {
+                    if val.is_sign_positive() {
+                        write!(f, "Infinity")
+                    } else {
+                        write!(f, "-Infinity")
+                    }
+                } else {
+                    // Format finite FST values; {:.6} is a common precision for FST.
+                    write!(f, "{:.6}", val)
+                }
+            }
+            FstEstimate::SummedVariancesNonPositive => write!(f, "Undefined (Sum of Variance Components Non-Positive)"),
+            FstEstimate::InsufficientData => write!(f, "Undefined (Insufficient Data for Comparison)"),
+        }
+    }
+}
+
 
 // Define a struct to hold diversity metrics for each genomic site
 #[derive(Debug)]
 pub struct SiteDiversity {
-    pub position: i64, // 1-based position of the site in the genome
-    pub pi: f64, // Nucleotide diversity (π) at this site
-    pub watterson_theta: f64, // Watterson's theta (θ_w) at this site
+    pub position: i64, // 1-based position of the site in the genome
+    pub pi: f64, // Nucleotide diversity (π) at this site
+    pub watterson_theta: f64, // Watterson's theta (θ_w) at this site
 }
 
-/// FST results for a single site (Weir & Cockerham method)
+/// FST results for a single site using the Weir & Cockerham method.
 #[derive(Debug, Clone)]
 pub struct SiteFstWc {
-    /// Position (1-based coordinate)
-    pub position: i64,
+    /// Position (1-based coordinate) of the site.
+    pub position: i64,
 
-    /// Overall FST value across all populations
-    pub overall_fst: f64,
+    /// Overall FST estimate across all populations for this site.
+    pub overall_fst: FstEstimate,
 
-    /// Pairwise FST values between populations
-    /// Keys are (pop_id1, pop_id2) where pop_id1 < pop_id2
-    pub pairwise_fst: HashMap<String, f64>,
+    /// Pairwise FST estimates between populations for this site.
+    /// Keys are formatted as "pop_id1_vs_pop_id2" where pop_id1 < pop_id2.
+    pub pairwise_fst: HashMap<String, FstEstimate>,
 
-    /// Variance components (a, b) from Weir & Cockerham
-    pub variance_components: (f64, f64),
+    /// Variance components (a, b) from Weir & Cockerham used for `overall_fst` at this site.
+    /// `a` is the among-population component, `b` is the within-population component.
+    pub variance_components: (f64, f64),
 
-    /// Number of samples in each population group
-    pub population_sizes: HashMap<String, usize>,
+    /// Number of haplotypes in each population group contributing to this site's calculations.
+    pub population_sizes: HashMap<String, usize>,
 
-    /// Pairwise variance components for each subpopulation pair (a_xy, b_xy)
-    pub pairwise_variance_components: HashMap<String, (f64, f64)>,
+    /// Pairwise variance components (a_xy, b_xy) for each subpopulation pair at this site.
+    /// These are used to calculate the `pairwise_fst` values for this site.
+    pub pairwise_variance_components: HashMap<String, (f64, f64)>,
 }
 
 /// Identifier for a population or group being analyzed, used across FST methods.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PopulationId {
-    HaplotypeGroup(u8), // For predefined groups like 0 (e.g., reference) and 1 (e.g., inversion)
-    Named(String),      // For populations defined by names from external files
+    HaplotypeGroup(u8), // For predefined groups like 0 (e.g., reference) and 1 (e.g., inversion)
+    Named(String),      // For populations defined by names from external files
 }
 
 /// Represents a collection of haplotypes and associated data for a specific population/group
@@ -55,381 +134,369 @@ pub enum PopulationId {
 /// data is copied unnecessarily for these large collections.
 #[derive(Debug, Clone)]
 pub struct PopulationContext<'a> {
-    /// Unique identifier for this population or group.
-    pub id: PopulationId,
-    /// List of haplotypes belonging to this population. Each tuple contains the
-    /// VCF sample index and the specific haplotype side (Left or Right).
-    pub haplotypes: Vec<(usize, HaplotypeSide)>,
-    /// Slice of variants relevant to the genomic region being analyzed for this population.
-    pub variants: &'a [Variant],
-    /// Slice of all sample names present in the VCF, used for context or debugging.
-    pub sample_names: &'a [String],
-    /// The effective sequence length (L) for normalization in diversity calculations.
-    /// This should account for any masking or specific intervals considered.
-    pub sequence_length: i64,
+    /// Unique identifier for this population or group.
+    pub id: PopulationId,
+    /// List of haplotypes belonging to this population. Each tuple contains the
+    /// VCF sample index and the specific haplotype side (Left or Right).
+    pub haplotypes: Vec<(usize, HaplotypeSide)>,
+    /// Slice of variants relevant to the genomic region being analyzed for this population.
+    pub variants: &'a [Variant],
+    /// Slice of all sample names present in the VCF, used for context or debugging.
+    pub sample_names: &'a [String],
+    /// The effective sequence length (L) for normalization in diversity calculations.
+    /// This should account for any masking or specific intervals considered.
+    pub sequence_length: i64,
 }
 
 /// Holds the result of a Dxy (between-population nucleotide diversity) calculation,
-/// specifically for Hudson's FST methodology.
+/// specifically for Hudson's FST.
 #[derive(Debug, Clone, Default)]
 pub struct DxyHudsonResult {
-    /// The calculated Dxy value (average pairwise differences per site between two populations).
-    /// `None` if calculation was not possible (e.g., no valid pairs, zero sequence length).
-    pub d_xy: Option<f64>,
-    // Maybe others later
+    /// The calculated Dxy value (average pairwise differences per site between two populations).
+    /// `None` if calculation was not possible (e.g., no valid pairs, zero sequence length).
+    pub d_xy: Option<f64>,
+    // Maybe others later
 }
 
 /// Encapsulates all components and the final FST value for a pairwise Hudson's FST calculation.
-/// This structure provides a comprehensive output for a single FST comparison between two populations.
 #[derive(Debug, Clone, Default)]
 pub struct HudsonFSTOutcome {
-    /// Identifier for the first population in the comparison.
-    pub pop1_id: Option<PopulationId>,
-    /// Identifier for the second population in the comparison.
-    pub pop2_id: Option<PopulationId>,
-    /// The calculated Hudson's FST value.
-    /// `None` if FST could not be determined (e.g., Dxy is zero or components are missing).
-    pub fst: Option<f64>,
-    /// Between-population nucleotide diversity (Dxy).
-    pub d_xy: Option<f64>,
-    /// Within-population nucleotide diversity for the first population (π1).
-    pub pi_pop1: Option<f64>,
-    /// Within-population nucleotide diversity for the second population (π2).
-    pub pi_pop2: Option<f64>,
-    /// Average within-population diversity: 0.5 * (π1 + π2).
-    /// `None` if either pi_pop1 or pi_pop2 is `None`.
-    pub pi_xy_avg: Option<f64>,
+    /// Identifier for the first population in the comparison.
+    pub pop1_id: Option<PopulationId>,
+    /// Identifier for the second population in the comparison.
+    pub pop2_id: Option<PopulationId>,
+    /// The calculated Hudson's FST value.
+    /// `None` if FST could not be determined (e.g., Dxy is zero or components are missing).
+    pub fst: Option<f64>,
+    /// Between-population nucleotide diversity (Dxy).
+    pub d_xy: Option<f64>,
+    /// Within-population nucleotide diversity for the first population (π1).
+    pub pi_pop1: Option<f64>,
+    /// Within-population nucleotide diversity for the second population (π2).
+    pub pi_pop2: Option<f64>,
+    /// Average within-population diversity: 0.5 * (π1 + π2).
+    /// `None` if either pi_pop1 or pi_pop2 is `None`.
+    pub pi_xy_avg: Option<f64>,
 }
 
-/// FST results for a genomic region
+/// Weir & Cockerham FST results for a genomic region.
 #[derive(Debug, Clone)]
 pub struct FstWcResults {
-    /// Overall FST value for the region
-    pub overall_fst: f64,
-    
-    /// Pairwise FST values
-    pub pairwise_fst: HashMap<String, f64>,
+    /// Overall FST estimate for the entire region.
+    pub overall_fst: FstEstimate,
+    
+    /// Pairwise FST estimates for each pair of populations across the region.
+    /// Keys are population pair identifiers (e.g., "pop1_vs_pop2").
+    pub pairwise_fst: HashMap<String, FstEstimate>,
 
-    /// Pairwise variance components for each subpopulation pair
-    /// Keys match those in `pairwise_fst`, storing (a_xy, b_xy) for that pair at this site
-    pub pairwise_variance_components: HashMap<String, (f64, f64)>,
-    
-    /// Per-site FST values
-    pub site_fst: Vec<SiteFstWc>,
-    
-    /// Type of FST calculation (e.g., "haplotype_groups" or "population_groups")
-    pub fst_type: String,
+    /// Summed pairwise variance components (sum_a_xy, sum_b_xy) for each subpopulation pair
+    /// across the entire region. These are the sums used to calculate the values in `pairwise_fst`.
+    /// Keys are population pair identifiers (e.g., "pop1_vs_pop2").
+    pub pairwise_variance_components: HashMap<String, (f64, f64)>,
+    
+    /// Per-site FST values and components.
+    pub site_fst: Vec<SiteFstWc>,
+    
+    /// Describes the type of grouping used for FST calculation (e.g., "haplotype_groups", "population_groups").
+    pub fst_type: String,
 }
 
 /*
-    Weir & Cockerham (1984) define F-statistics (F, Θ, f) as correlations
-    of alleles at different levels: within individuals, among individuals
-    within subpopulations, and among subpopulations. The key parameters
-    can be estimated by partitioning the total allelic variance into
-    hierarchical components usually denoted a, b, c.
+    Weir & Cockerham (1984) define F-statistics (F, Θ, f) as correlations
+    of alleles at different levels: within individuals, among individuals
+    within subpopulations, and among subpopulations. The parameters
+    can be estimated by partitioning the total allelic variance into
+    hierarchical components a, b, and c.
 
-    In the standard diploid random-mating model, the parameter F (F_IS) measures
-    correlation of genes within individuals, while Θ (F_ST) measures correlation
-    of genes among subpopulations.
-    
-    The model also allows a “within-individual” term c.
+    In the standard diploid random-mating model, the parameter F (F_IS) measures
+    correlation of genes within individuals, while Θ (F_ST) measures correlation
+    of genes among subpopulations.
+    
+    The model also allows a “within-individual” term c.
 
-    However, if we treat each haplotype independently and assume random union
-    of gametes (no within-individual correlation), then effectively c=0
-    and we can use simplified "haploid" forms of the Weir & Cockerham (W&C)
-    variance-component estimators. In this scenario, a is the among-subpopulation
-    variance component, and b is the within-subpopulation variance component.
+    However, if we treat each haplotype independently and assume random union
+    of gametes (no within-individual correlation), then effectively c=0
+    and we can use simplified "haploid" forms of the Weir & Cockerham (W&C)
+    variance-component estimators. In this scenario, a is the among-subpopulation
+    variance component, and b is the within-subpopulation variance component.
 
-    For a single site with subpopulations i = 1..r:
-       - Let p_i be the allele frequency in subpopulation i,
-       - Let n_i be the number of haplotypes sampled in subpopulation i,
-       - Let p̄ = (Σ n_i p_i) / (Σ n_i) be the global (pooled) frequency,
-       - Let S² = [ Σ n_i (p_i - p̄)² ] / [ (r-1)*n̄ ]  (a weighted variance)
-         where n̄ = (Σ n_i) / r is the average sample size,
-       - Let c² = [ Σ (n_i - n̄)² ] / [ r n̄² ] measure the squared CV of n_i.
+    For a single site with subpopulations i = 1..r:
+       - Let p_i be the allele frequency in subpopulation i,
+       - Let n_i be the number of haplotypes sampled in subpopulation i,
+       - Let p̄ = (Σ n_i p_i) / (Σ n_i) be the global (pooled) frequency,
+       - Let S² = [ Σ n_i (p_i - p̄)² ] / [ (r-1)*n̄ ]  (a weighted variance)
+         where n̄ = (Σ n_i) / r is the average sample size,
+       - Let c² = [ Σ (n_i - n̄)² ] / [ r n̄² ] measure the squared CV of n_i.
 
-    The W&C 1984 "haploid ignoring c term" formulas for a, b (equations 5–7 in the text,
-    specialized to random union of gametes) look like:
+    Conceptually, "a" is the among-subpopulations variance component, and "b"
+    is the residual within-subpop variance. The Fst at that site is then
 
-       a = [n̄ / (n̄ - 1)] * [ S² - { p̄(1-p̄) - ((r-1)/r) S² } / n̄ ],
-       b = [n̄ / (n̄ - 1)] * [ p̄(1 - p̄) + (some c² adjustments) - ((r-1)/r)*S² - ...].
+       Fst(site) = a / (a + b).
 
-    Conceptually, "a" is the among-subpopulations variance component, and "b"
-    is the residual within-subpop variance. The Fst at that site is then
+    We repeat for each site and sum the a_i and b_i across sites i to obtain an overall Fst:
 
-       Fst(site) = a / (a + b).
+       Fst(overall) = ( Σ_i a_i ) / ( Σ_i (a_i + b_i) ).
 
-    We repeat for each site and sum the a_i and b_i across sites i to obtain an overall Fst:
+    Pairwise subpopulation Fst can be done by restricting the above to only the
+    two subpops of interest (i.e., r=2).
 
-       Fst(overall) = ( Σ_i a_i ) / ( Σ_i (a_i + b_i) ).
-
-    Pairwise subpopulation Fst can be done by restricting the above to only the
-    two subpops of interest (i.e., r=2).
-
-    In our “haplotype-based” version, each diploid sample contributes two
-    haplotypes (assuming no inbreeding parameter), so we treat them as
-    independent. We omit W&C’s “c” term for within-individual correlation.
+    In our “haplotype-based” version, each diploid sample contributes two
+    haplotypes (no inbreeding parameter), so we treat them as
+    independent. We omit W&C’s “c” term for within-individual correlation.
 */
 
 
-/// Calculate FST between haplotype groups (0 vs 1) for a region
+/// Calculates Weir & Cockerham FST between predefined haplotype groups (e.g., 0 vs 1) for a genomic region.
 ///
-/// This implements the Weir & Cockerham (1984) estimator for FST calculation.
-/// It uses variance components to estimate θ (theta), which is equivalent to FST.
+/// This function implements the Weir & Cockerham (1984) estimator for FST.
+/// It first calculates per-site variance components (a_i, b_i) and FST estimates.
+/// Then, it aggregates these components across all sites in the region to compute
+/// an overall FST estimate for the region, as well as overall pairwise FST estimates.
 ///
 /// # Arguments
-/// * `variants` - The variant data for all samples in the region
-/// * `sample_names` - Names of all samples
-/// * `sample_to_group_map` - Maps sample names to their (left, right) haplotype group assignments
-/// * `region` - Genomic region to analyze
+/// * `variants`: A slice of `Variant` structs containing genotype data for all samples in the region.
+/// * `sample_names`: A slice of `String`s, representing the names of all samples.
+/// * `sample_to_group_map`: A `HashMap` mapping sample names to their (left, right) haplotype group assignments (e.g., `u8` values like 0 or 1).
+/// * `region`: A `QueryRegion` struct defining the genomic start and end (0-based, inclusive) to analyze.
 ///
 /// # Returns
-/// FST results including per-site values and overall estimates
+/// An `FstWcResults` struct containing overall FST, pairwise FSTs (as `FstEstimate` enums),
+/// summed pairwise variance components, per-site FST details, and the FST type.
 pub fn calculate_fst_wc_haplotype_groups(
-    variants: &[Variant],
-    sample_names: &[String],
-    sample_to_group_map: &HashMap<String, (u8, u8)>,
-    region: QueryRegion,
+    variants: &[Variant],
+    sample_names: &[String],
+    sample_to_group_map: &HashMap<String, (u8, u8)>,
+    region: QueryRegion,
 ) -> FstWcResults {
-    // Create a more descriptive progress spinner
-    let spinner = create_spinner(&format!(
-        "Calculating FST between haplotype groups for region {}-{} of length {}",
-        region.start, region.end, region.len()
-    ));
-    
-    log(LogLevel::Info, &format!(
-        "Beginning FST calculation between haplotype groups (0 vs 1) for region {}-{}",
-        region.start, region.end
-    ));
-    
-    // 1. Map samples to their respective haplotype groups
-    let haplotype_to_group = map_samples_to_haplotype_groups(sample_names, sample_to_group_map);
-    
-    // 2. Build variant lookup map for quick position-based access
-    let variant_map: HashMap<i64, &Variant> = variants.iter()
-        .map(|v| (v.position, v))
-        .collect();
-    
-    // 3. Calculate FST at each position in region
-    let mut site_fst_values = Vec::with_capacity(region.len() as usize);
-    let position_count = region.len() as usize;
-    
-    // Initialize detailed progress tracking
-    init_step_progress(&format!(
-        "Calculating FST at {} positions", position_count
-    ), position_count as u64);
-    
-    for (idx, pos) in (region.start..=region.end).enumerate() {
-        // Update progress periodically
-        if idx % 1000 == 0 || idx == 0 || idx == position_count - 1 {
-            update_step_progress(idx as u64, &format!(
-                "Position {}/{} ({:.1}%)",
-                idx, position_count, (idx as f64 / position_count as f64) * 100.0
-            ));
-        }
-        
-        if let Some(variant) = variant_map.get(&pos) {
-            // Calculate FST at this site using haplotype groups
-            let site_result = calculate_fst_wc_at_site_by_haplotype_group(variant, &haplotype_to_group);
-            
-            site_fst_values.push(SiteFstWc {
-                position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: site_result.0,
-                pairwise_fst: site_result.1,
-                variance_components: site_result.2,
-                population_sizes: site_result.3,
-                pairwise_variance_components: site_result.4,
-            });
-        } else {
-            // No variant at this position (monomorphic site): we store FST as NaN
-            // "Notice that if the same allele is fixed in all samples, then (1) provides θ = a⁄a,
-            // so that the estimate is undefined. We feel that this is an appropriate outcome since
-            // there is no way of knowing from presently observed homozygosity whether the different
-            // populations have just become homozygous or have been homozygous for some time that may
-            // have extended back to the founding population..."
+    let spinner = create_spinner(&format!(
+        "Calculating FST between haplotype groups for region {}:{}..{} (length {})",
+        sample_names.get(0).map_or("UnknownChr", |s| s.split('_').next().unwrap_or("UnknownChr")), // Attempt to get chr from first sample if possible
+        ZeroBasedPosition(region.start).to_one_based(), 
+        ZeroBasedPosition(region.end).to_one_based(), 
+        region.len()
+    ));
+    
+    log(LogLevel::Info, &format!(
+        "Beginning FST calculation between haplotype groups (0 vs 1) for region {}:{}..{}",
+        sample_names.get(0).map_or("UnknownChr", |s| s.split('_').next().unwrap_or("UnknownChr")),
+        ZeroBasedPosition(region.start).to_one_based(),
+        ZeroBasedPosition(region.end).to_one_based()
+    ));
+    
+    let haplotype_to_group = map_samples_to_haplotype_groups(sample_names, sample_to_group_map);
+    
+    let variant_map: HashMap<i64, &Variant> = variants.iter()
+        .map(|v| (v.position, v))
+        .collect();
+    
+    let mut site_fst_values = Vec::with_capacity(region.len() as usize);
+    let position_count = region.len() as usize;
+    
+    init_step_progress(&format!(
+        "Calculating FST at {} positions for haplotype groups", position_count
+    ), position_count as u64);
+    
+    for (idx, pos) in (region.start..=region.end).enumerate() {
+        if idx % 1000 == 0 || idx == 0 || idx == position_count.saturating_sub(1) {
+            update_step_progress(idx as u64, &format!(
+                "Position {}/{} ({:.1}%)",
+                idx + 1, position_count, ((idx + 1) as f64 / position_count as f64) * 100.0
+            ));
+        }
+        
+        if let Some(variant) = variant_map.get(&pos) {
+            let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
+                calculate_fst_wc_at_site_by_haplotype_group(variant, &haplotype_to_group);
+            
+            site_fst_values.push(SiteFstWc {
+                position: ZeroBasedPosition(pos).to_one_based(),
+                overall_fst,
+                pairwise_fst,
+                variance_components: var_comps,
+                population_sizes: pop_sizes,
+                pairwise_variance_components: pairwise_var_comps,
+            });
+        } else {
+            // Site is not in variant_map, thus considered globally monomorphic for this region.
+            // FST is undefined because variance components a and b are zero.
+            let mut site_pairwise_fst = HashMap::new();
+            site_pairwise_fst.insert("0_vs_1".to_string(), FstEstimate::SummedVariancesNonPositive);
 
-            let mut empty_pairwise = HashMap::new();
-            empty_pairwise.insert("0_vs_1".to_string(), f64::NAN);
-            
-            let mut empty_sizes = HashMap::new();
-            empty_sizes.insert("0".to_string(), 0);
-            empty_sizes.insert("1".to_string(), 0);
-            
-            site_fst_values.push(SiteFstWc {
-                position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: f64::NAN,
-                pairwise_fst: empty_pairwise,
-                variance_components: (0.0, 0.0),
-                population_sizes: empty_sizes,
-                pairwise_variance_components: HashMap::new(),
-            });
-        }
-    }
-    
-    finish_step_progress("Completed per-site FST calculations");
-    
-    // 4. Calculate overall FST for the region
-    let (overall_fst, pairwise_fst) = calculate_overall_fst_wc(&site_fst_values);
-    
-    // Log summary statistics
-    let polymorphic_sites = site_fst_values.iter()
-        .filter(|site| site.overall_fst > 0.0)
-        .count();
-    
-    log(LogLevel::Info, &format!(
-        "FST calculation complete: {} polymorphic sites out of {} total positions",
-        polymorphic_sites, site_fst_values.len()
-    ));
-    
-    log(LogLevel::Info, &format!(
-        "Overall FST between haplotype groups: {:.6}",
-        overall_fst
-    ));
-    
-    for (pair, fst) in &pairwise_fst {
-        log(LogLevel::Info, &format!(
-            "Pairwise FST for {}: {:.6}",
-            pair, fst
-        ));
-    }
-    
-    spinner.finish_and_clear();
-    
-    // Return complete results
-    FstWcResults {
-        overall_fst,
-        pairwise_fst,
-        pairwise_variance_components: HashMap::new(),
-        site_fst: site_fst_values,
-        fst_type: "haplotype_groups".to_string(),
-    }
+            let mut actual_pop_sizes = HashMap::new();
+            let mut group_counts: HashMap<String, usize> = HashMap::new();
+            for group_id_str in haplotype_to_group.values() {
+                *group_counts.entry(group_id_str.clone()).or_insert(0) += 1;
+            }
+            actual_pop_sizes.insert("0".to_string(), *group_counts.get("0").unwrap_or(&0));
+            actual_pop_sizes.insert("1".to_string(), *group_counts.get("1").unwrap_or(&0));
+            
+            site_fst_values.push(SiteFstWc {
+                position: ZeroBasedPosition(pos).to_one_based(),
+                overall_fst: FstEstimate::SummedVariancesNonPositive,
+                pairwise_fst: site_pairwise_fst,
+                variance_components: (0.0, 0.0), // No variance components for monomorphic site
+                population_sizes: actual_pop_sizes,
+                pairwise_variance_components: HashMap::new(),
+            });
+        }
+    }
+    
+    finish_step_progress("Completed per-site FST calculations for haplotype groups");
+    
+    let (overall_fst_estimate, pairwise_fst_estimates, aggregated_pairwise_components) =
+        calculate_overall_fst_wc(&site_fst_values);
+    
+    let defined_positive_fst_sites = site_fst_values.iter()
+        .filter(|site| matches!(site.overall_fst, FstEstimate::Calculable(v) if v.is_finite() && v > 0.0))
+        .count();
+    
+    log(LogLevel::Info, &format!(
+        "Haplotype group FST calculation complete: {} sites with defined positive FST out of {} total positions.",
+        defined_positive_fst_sites, site_fst_values.len()
+    ));
+    
+    log(LogLevel::Info, &format!("Overall FST between haplotype groups: {}", overall_fst_estimate));
+    
+    for (pair, fst_e) in &pairwise_fst_estimates {
+        log(LogLevel::Info, &format!("Pairwise FST for {}: {}", pair, fst_e));
+    }
+    
+    spinner.finish_and_clear();
+    
+    FstWcResults {
+        overall_fst: overall_fst_estimate,
+        pairwise_fst: pairwise_fst_estimates,
+        pairwise_variance_components: aggregated_pairwise_components,
+        site_fst: site_fst_values,
+        fst_type: "haplotype_groups".to_string(),
+    }
 }
 
-/// Calculate FST from a CSV file defining population groups
+/// Calculates Weir & Cockerham FST between population groups defined in a CSV file for a genomic region.
+///
+/// This function implements the Weir & Cockerham (1984) estimator for FST (theta).
+/// It reads population assignments from a CSV file, then calculates per-site variance
+/// components (a_i, b_i) and FST estimates. It aggregates these across all sites in
+/// the region for overall and pairwise FST estimates.
 ///
 /// # Arguments
-/// * `variants` - The variant data for all samples in the region
-/// * `sample_names` - Names of all samples
-/// * `csv_path` - Path to CSV file defining population assignments
-/// * `region` - Genomic region to analyze
+/// * `variants`: A slice of `Variant` structs for all samples in the region.
+/// * `sample_names`: A slice of `String`s, representing the names of all samples.
+/// * `csv_path`: Path to the CSV file defining population assignments.
+/// * `region`: A `QueryRegion` struct defining the genomic start and end (0-based, inclusive).
 ///
 /// # Returns
-/// FST results or an error if the CSV cannot be parsed
+/// A `Result` containing `FstWcResults` (with `FstEstimate` enums) or a `VcfError`.
 pub fn calculate_fst_wc_csv_populations(
-    variants: &[Variant],
-    sample_names: &[String],
-    csv_path: &Path,
-    region: QueryRegion,
+    variants: &[Variant],
+    sample_names: &[String],
+    csv_path: &Path,
+    region: QueryRegion,
 ) -> Result<FstWcResults, VcfError> {
-    // The code that calls calculate_fst_wc_at_site_by_population now expects
-    // a 5-tuple from that function. We handle the new pairwise (a,b) map when building SiteFstWc.
-
-    let spinner = create_spinner(&format!(
-        "Calculating FST between population groups for region {}:{}-{}",
-        region.start, region.end, region.len()
-    ));
-    
-    log(LogLevel::Info, &format!(
-        "Beginning FST calculation between population groups defined in {} for region {}-{}",
-        csv_path.display(), region.start, region.end
-    ));
-    
-    // 1. Parse CSV file to get population assignments
-    let population_assignments = parse_population_csv(csv_path)?;
-    
-    // 2. Map samples to their respective populations
-    let sample_to_pop = map_samples_to_populations(sample_names, &population_assignments);
-    
-    // 3. Build variant lookup map for quick position-based access
-    let variant_map: HashMap<i64, &Variant> = variants.iter()
-        .map(|v| (v.position, v))
-        .collect();
-    
-    // 4. Calculate FST at each position in region
-    let mut site_fst_values = Vec::with_capacity(region.len() as usize);
-    let position_count = region.len() as usize;
-    
-    // Initialize detailed progress tracking
-    init_step_progress(&format!(
-        "Calculating FST at {} positions", position_count
-    ), position_count as u64);
-    
-    for (idx, pos) in (region.start..=region.end).enumerate() {
-        // Update progress periodically
-        if idx % 1000 == 0 || idx == 0 || idx == position_count - 1 {
-            update_step_progress(idx as u64, &format!(
-                "Position {}/{} ({:.1}%)",
-                idx, position_count, (idx as f64 / position_count as f64) * 100.0
-            ));
-        }
-        
-        if let Some(variant) = variant_map.get(&pos) {
-            // Calculate FST at this site using population groups
-            let site_result = calculate_fst_wc_at_site_by_population(variant, &sample_to_pop);
-            
-            site_fst_values.push(SiteFstWc {
-                position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: site_result.0,
-                pairwise_fst: site_result.1,
-                variance_components: site_result.2,
-                population_sizes: site_result.3,
-                pairwise_variance_components: site_result.4,
-            });
-        } else {
-            // No variant at this position (monomorphic site): we store FST as NaN
-            site_fst_values.push(SiteFstWc {
-                position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: f64::NAN,
-                pairwise_fst: HashMap::new(),
-                variance_components: (0.0, 0.0),
-                population_sizes: HashMap::new(),
-                pairwise_variance_components: HashMap::new(),
-            });
-        }
-    }
-    
-    finish_step_progress("Completed per-site FST calculations");
-    
-    // 5. Calculate overall FST for the region
-    let (overall_fst, pairwise_fst) = calculate_overall_fst_wc(&site_fst_values);
-    
-    // Log summary statistics
-    let polymorphic_sites = site_fst_values.iter()
-        .filter(|site| site.overall_fst > 0.0)
-        .count();
-    
-    let population_count = population_assignments.keys().count();
-    
-    log(LogLevel::Info, &format!(
-        "FST calculation complete: {} polymorphic sites out of {} total positions across {} populations",
-        polymorphic_sites, site_fst_values.len(), population_count
-    ));
-    
-    log(LogLevel::Info, &format!(
-        "Overall FST across all populations: {:.6}",
-        overall_fst
-    ));
-    
-    for (pair, fst) in &pairwise_fst {
-        log(LogLevel::Info, &format!(
-            "Pairwise FST for {}: {:.6}",
-            pair, fst
-        ));
-    }
-    
-    spinner.finish_and_clear();
-    
-    // Return complete results
-    Ok(FstWcResults {
-        overall_fst,
-        pairwise_fst,
-        pairwise_variance_components: HashMap::new(),
-        site_fst: site_fst_values,
-        fst_type: "population_groups".to_string(),
-    })
+    let spinner = create_spinner(&format!(
+        "Calculating FST between CSV-defined population groups for region {}:{}..{} (length {})",
+        sample_names.get(0).map_or("UnknownChr", |s| s.split('_').next().unwrap_or("UnknownChr")),
+        ZeroBasedPosition(region.start).to_one_based(), 
+        ZeroBasedPosition(region.end).to_one_based(), 
+        region.len()
+    ));
+    
+    log(LogLevel::Info, &format!(
+        "Beginning FST calculation between population groups defined in {} for region {}:{}..{}",
+        csv_path.display(), 
+        sample_names.get(0).map_or("UnknownChr", |s| s.split('_').next().unwrap_or("UnknownChr")),
+        ZeroBasedPosition(region.start).to_one_based(),
+        ZeroBasedPosition(region.end).to_one_based()
+    ));
+    
+    let population_assignments = parse_population_csv(csv_path)?;
+    let sample_to_pop = map_samples_to_populations(sample_names, &population_assignments);
+    
+    let variant_map: HashMap<i64, &Variant> = variants.iter()
+        .map(|v| (v.position, v))
+        .collect();
+    
+    let mut site_fst_values = Vec::with_capacity(region.len() as usize);
+    let position_count = region.len() as usize;
+    
+    init_step_progress(&format!(
+        "Calculating FST at {} positions for CSV populations", position_count
+    ), position_count as u64);
+    
+    for (idx, pos) in (region.start..=region.end).enumerate() {
+        if idx % 1000 == 0 || idx == 0 || idx == position_count.saturating_sub(1) {
+            update_step_progress(idx as u64, &format!(
+                "Position {}/{} ({:.1}%)",
+                idx + 1, position_count, ((idx + 1) as f64 / position_count as f64) * 100.0
+            ));
+        }
+        
+        if let Some(variant) = variant_map.get(&pos) {
+            let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
+                calculate_fst_wc_at_site_by_population(variant, &sample_to_pop);
+            
+            site_fst_values.push(SiteFstWc {
+                position: ZeroBasedPosition(pos).to_one_based(),
+                overall_fst,
+                pairwise_fst,
+                variance_components: var_comps,
+                population_sizes: pop_sizes,
+                pairwise_variance_components: pairwise_var_comps,
+            });
+        } else {
+            // Site is not in variant_map, thus considered globally monomorphic for this region.
+            // FST is undefined because variance components a and b are zero.
+            let mut pop_counts_for_site: HashMap<String, usize> = HashMap::new();
+            for pop_id_str in sample_to_pop.values() {
+                *pop_counts_for_site.entry(pop_id_str.clone()).or_insert(0) += 1;
+            }
+            // These are haplotype counts per population.
+            
+            site_fst_values.push(SiteFstWc {
+                position: ZeroBasedPosition(pos).to_one_based(),
+                overall_fst: FstEstimate::SummedVariancesNonPositive,
+                pairwise_fst: HashMap::new(), // No defined pairwise FSTs for a globally monomorphic site
+                variance_components: (0.0, 0.0),
+                population_sizes: pop_counts_for_site,
+                pairwise_variance_components: HashMap::new(),
+            });
+        }
+    }
+    
+    finish_step_progress("Completed per-site FST calculations for CSV populations");
+    
+    let (overall_fst_estimate, pairwise_fst_estimates, aggregated_pairwise_components) =
+        calculate_overall_fst_wc(&site_fst_values);
+    
+    let defined_positive_fst_sites = site_fst_values.iter()
+        .filter(|site| matches!(site.overall_fst, FstEstimate::Calculable(v) if v.is_finite() && v > 0.0))
+        .count();
+    
+    let population_count = population_assignments.keys().count();
+    
+    log(LogLevel::Info, &format!(
+        "CSV population FST calculation complete: {} sites with defined positive FST out of {} total positions, across {} populations.",
+        defined_positive_fst_sites, site_fst_values.len(), population_count
+    ));
+    
+    log(LogLevel::Info, &format!("Overall FST across all populations: {}", overall_fst_estimate));
+    
+    for (pair, fst_e) in &pairwise_fst_estimates {
+        log(LogLevel::Info, &format!("Pairwise FST for {}: {}", pair, fst_e));
+    }
+    
+    spinner.finish_and_clear();
+    
+    Ok(FstWcResults {
+        overall_fst: overall_fst_estimate,
+        pairwise_fst: pairwise_fst_estimates,
+        pairwise_variance_components: aggregated_pairwise_components,
+        site_fst: site_fst_values,
+        fst_type: "population_groups".to_string(),
+    })
 }
 
-/// Parse a CSV file containing population assignments.
+/// Parses a CSV file containing population assignments for FST calculations.
 ///
 /// The CSV file should have population labels in the first column,
 /// and subsequent columns on the same row should list sample IDs belonging to that population.
@@ -437,7 +504,7 @@ pub fn calculate_fst_wc_csv_populations(
 /// Sample IDs and population names are trimmed of whitespace.
 ///
 /// # Arguments
-/// * `csv_path` - A reference to the Path of the CSV file.
+/// * `csv_path`: A reference to the `Path` of the CSV file.
 ///
 /// # Returns
 /// A `Result` containing a `HashMap` where keys are population names (String)
@@ -445,478 +512,478 @@ pub fn calculate_fst_wc_csv_populations(
 /// Returns `VcfError::Parse` if the file contains no valid population data after parsing,
 /// or `VcfError::Io` if the file cannot be opened or read.
 pub fn parse_population_csv(csv_path: &Path) -> Result<HashMap<String, Vec<String>>, VcfError> {
-    let file = File::open(csv_path).map_err(|e| 
-        VcfError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to open population CSV file {}: {}", csv_path.display(), e)
-        ))
-    )?;
-    
-    let reader = BufReader::new(file);
-    let mut population_map = HashMap::new();
-    
-    for line_result in reader.lines() {
-        let line = line_result.map_err(|e| VcfError::Io(e))?; // Changed to VcfError::Io for read errors
-        if line.trim().is_empty() || line.starts_with('#') {
-            continue; // Skip empty lines and comments
-        }
-        
-        let parts: Vec<String> = line.split(',').map(|s| s.trim().to_string()).collect();
-        if parts.is_empty() || parts[0].is_empty() {
-            // Skip lines that are empty after trimming or have no population name
-            continue;
-        }
-        
-        let population = parts[0].clone();
-        // Collect non-empty sample IDs from the rest of the parts
-        let samples: Vec<String> = parts.iter().skip(1).filter(|s| !s.is_empty()).cloned().collect();
-        
-        if !samples.is_empty() {
-            population_map.insert(population, samples);
-        } else {
-            // Log if a population is defined but no samples are listed for it
-            log(LogLevel::Warning, &format!("Population '{}' in CSV file '{}' has no associated sample IDs listed on its line.", population, csv_path.display()));
-        }
-    }
-    
-    if population_map.is_empty() {
-        return Err(VcfError::Parse(format!("Population CSV file '{}' contains no valid population data after parsing.", csv_path.display())));
-    }
-    
-    Ok(population_map)
+    let file = File::open(csv_path).map_err(|e| 
+        VcfError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to open population CSV file {}: {}", csv_path.display(), e)
+        ))
+    )?;
+    
+    let reader = BufReader::new(file);
+    let mut population_map = HashMap::new();
+    
+    for line_result in reader.lines() {
+        let line = line_result.map_err(VcfError::Io)?;
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        
+        let parts: Vec<String> = line.split(',').map(|s| s.trim().to_string()).collect();
+        if parts.is_empty() || parts[0].is_empty() {
+            continue;
+        }
+        
+        let population = parts[0].clone();
+        let samples: Vec<String> = parts.iter().skip(1).filter(|s| !s.is_empty()).cloned().collect();
+        
+        if !samples.is_empty() {
+            population_map.insert(population, samples);
+        } else {
+            log(LogLevel::Warning, &format!("Population '{}' in CSV file '{}' has no associated sample IDs listed on its line.", population, csv_path.display()));
+        }
+    }
+    
+    if population_map.is_empty() {
+        return Err(VcfError::Parse(format!("Population CSV file '{}' contains no valid population data after parsing.", csv_path.display())));
+    }
+    
+    Ok(population_map)
 }
 
-/// Map samples to their haplotype groups (0 or 1)
-///
-/// # Returns
-/// HashMap mapping (sample_index, haplotype_side) tuples to group identifiers ("0" or "1")
-fn map_samples_to_haplotype_groups(
-    sample_names: &[String],
-    sample_to_group_map: &HashMap<String, (u8, u8)>
-) -> HashMap<(usize, HaplotypeSide), String> {
-    let mut haplotype_to_group = HashMap::new();
-    
-    // Build sample name to index mapping
-    let mut sample_id_to_index = HashMap::new();
-    for (idx, name) in sample_names.iter().enumerate() {
-        let sample_id = name.rsplit('_').next().unwrap_or(name);
-        sample_id_to_index.insert(sample_id, idx);
-    }
-    
-    // Map each sample's haplotypes to their assigned groups
-    for (sample_name, &(left_group, right_group)) in sample_to_group_map {
-        if let Some(&idx) = sample_id_to_index.get(sample_name.as_str()) {
-            // Convert group numbers to strings for consistent handling with population groups
-            haplotype_to_group.insert(
-                (idx, HaplotypeSide::Left),
-                left_group.to_string()
-            );
-            
-            haplotype_to_group.insert(
-                (idx, HaplotypeSide::Right),
-                right_group.to_string()
-            );
-        }
-    }
-    
-    haplotype_to_group
-}
-
-/// Map samples to their population groups from CSV
-///
-/// # Returns
-/// HashMap mapping (sample_index, haplotype_side) tuples to population identifiers
-fn map_samples_to_populations(
-    sample_names: &[String],
-    population_assignments: &HashMap<String, Vec<String>>
-) -> HashMap<(usize, HaplotypeSide), String> {
-    let mut sample_to_pop = HashMap::new();
-    
-    // Create flat map of sample ID to population
-    let mut sample_id_to_pop = HashMap::new();
-    for (pop, samples) in population_assignments {
-        for sample in samples {
-            sample_id_to_pop.insert(sample.clone(), pop.clone());
-        }
-    }
-    
-    // Map each sample to its population
-    for (idx, name) in sample_names.iter().enumerate() {
-        // Try different formats for matching
-        // Some VCFs have sample names like "NA12878", others like "EUR_CEU_NA12878"
-        if let Some(pop) = sample_id_to_pop.get(name) {
-            // Both haplotypes of this sample belong to the same population
-            sample_to_pop.insert((idx, HaplotypeSide::Left), pop.clone());
-            sample_to_pop.insert((idx, HaplotypeSide::Right), pop.clone());
-            continue;
-        }
-        
-        // Try to match by the sample ID suffix
-        let sample_id = name.rsplit('_').next().unwrap_or(name);
-        if let Some(pop) = sample_id_to_pop.get(sample_id) {
-            sample_to_pop.insert((idx, HaplotypeSide::Left), pop.clone());
-            sample_to_pop.insert((idx, HaplotypeSide::Right), pop.clone());
-            continue;
-        }
-        
-        // If that fails, try to match by prefix (e.g., "EUR" in "EUR_CEU_NA12878")
-        // Potentially remove this...
-        let prefix = name.split('_').next().unwrap_or(name);
-        for (pop, _) in population_assignments {
-            if name.starts_with(pop) || prefix == pop {
-                sample_to_pop.insert((idx, HaplotypeSide::Left), pop.clone());
-                sample_to_pop.insert((idx, HaplotypeSide::Right), pop.clone());
-                break;
-            }
-        }
-    }
-    
-    sample_to_pop
-}
-
-/// Calculate FST at a single site using haplotype groups (0 vs 1)
-///
-/// Implements the Weir & Cockerham (1984) estimator.
-///
-/// # Returns
-/// (overall_fst, pairwise_fst, variance_components, population_sizes)
-fn calculate_fst_wc_at_site_by_haplotype_group(
-    variant: &Variant,
-    haplotype_to_group: &HashMap<(usize, HaplotypeSide), String>
-) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
-    // We delegate to the new general function with an is_population flag = false
-    // Then we parse out the returned data
-    calculate_fst_wc_at_site_general(variant, haplotype_to_group)
-}
-
-/// Calculate FST at a single site using population assignments
-///
-/// Similar to calculate_fst_wc_at_site_by_haplotype_group but handles multiple population groups
-fn calculate_fst_wc_at_site_by_population(
-    variant: &Variant,
-    sample_to_pop: &HashMap<(usize, HaplotypeSide), String>
-) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
-    // We delegate to the new general function with an is_population flag = true
-    // Then we parse out the returned data
-    calculate_fst_wc_at_site_general(variant, sample_to_pop)
-}
-
-fn calculate_fst_wc_at_site_general(
-    variant: &Variant,
-    map_subpop: &HashMap<(usize, HaplotypeSide), String>
-) -> (f64, HashMap<String, f64>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
-    // This single function computes the at-site FST for an arbitrary subpop mapping
-    // Then returns overall_fst, pairwise_fst, (a,b), population_sizes, plus the pairwise (a_xy,b_xy).
-
-    // 1. Count alt vs ref per subpopulation
-    let mut allele_counts = HashMap::new();
-    for (&(sample_idx, side), pop_id) in map_subpop {
-        if let Some(genotypes) = variant.genotypes.get(sample_idx) {
-            if let Some(genotypes_vec) = genotypes {
-                if let Some(&allele_code) = genotypes_vec.get(side as usize) {
-                    let entry = allele_counts.entry(pop_id.clone()).or_insert((0_usize, 0_usize));
-                    entry.0 += 1;
-                    if allele_code != 0 {
-                        entry.1 += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. Build pop_stats (sample_size, freq)
-    let mut pop_stats = HashMap::new();
-    let mut pop_sizes = HashMap::new();
-    for (pop_id, (sz, alt_ct)) in allele_counts {
-        if sz > 0 {
-            let freq = alt_ct as f64 / sz as f64;
-            pop_stats.insert(pop_id.clone(), (sz, freq));
-            pop_sizes.insert(pop_id, sz);
-        }
-    }
-    if pop_stats.len() < 2 {
-        return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
-    }
-
-    // Previously:
-    // 3. Check if all subpop frequencies are effectively identical.
-    // We define a small threshold for difference, and if the maximum difference
-    // among any pair of frequencies is below that threshold, we consider
-    // the site monomorphic in all subpops and return Fst=0.0. However, this is wrong.
-    // Fix later.
-    
-    // The calculation of variance components `a` and `b` by `calculate_variance_components`
-    // and the subsequent FST calculation `a / (a + b)` (or NaN if a+b is zero)
-    // correctly handles cases where all subpopulation allele frequencies are identical.
-    // If frequencies are identical and the site is polymorphic overall (e.g., all are 0.5), FST will be 0.
-    // If frequencies are identical and the site is monomorphic overall (e.g., all are 0 or all are 1),
-    // both `a` and `b` components will be 0, leading to a NaN FST.
-
-    // 4. Compute overall (a,b), overall_fst
-    let total_samples: usize = pop_stats.values().map(|(sz, _)| *sz).sum();
-    let mut freq_sum = 0.0;
-    for (_, (sz, fv)) in &pop_stats {
-        freq_sum += (*sz as f64) * fv;
-    }
-    let global_freq = freq_sum / (total_samples as f64);
-    let (a, b) = calculate_variance_components(&pop_stats, global_freq);
-    let overall_fst = if (a + b) > 0.0 {
-        a / (a + b)
-    } else {
-        f64::NAN  // Undefined as per Weir & Cockerham
-    };
-
-    // 5. Compute pairwise: sum up a_xy,b_xy for each pair
-    let mut pairwise_fst_map = HashMap::new();
-    let mut pairwise_ab_map = HashMap::new();
-    let pop_list: Vec<_> = pop_stats.keys().cloned().collect();
-    for i in 0..pop_list.len() {
-        for j in (i+1)..pop_list.len() {
-            let p1 = &pop_list[i];
-            let p2 = &pop_list[j];
-            let freq1 = pop_stats[p1].1;
-            let freq2 = pop_stats[p2].1;
-            // The calculation of variance components (a_xy, b_xy) will proceed for all pairs.
-            // This allows for more accurate FST values and component storage:
-            // 1. If freq1 == freq2 at a polymorphic site (e.g., p1=0.5, p2=0.5):
-            //    - The sample variance s_squared_pair will be 0.
-            //    - calculate_variance_components will produce a small negative a_xy and a positive b_xy.
-            //    - The FST (a_xy / (a_xy + b_xy)) will be a small negative value, reflecting the estimator's behavior.
-            // 2. If freq1 == freq2 because the site is monomorphic in the pair (e.g., p1=0, p2=0):
-            //    - s_squared_pair will be 0, and pair_freq*(1-pair_freq) will be 0.
-            //    - calculate_variance_components will produce a_xy = 0 and b_xy = 0.
-            //    - The subsequent FST calculation logic will handle this 0/0 case as NaN.
-            // This means that actual variance components are calculated and stored,
-            // and FST values correctly distinguish between no differentiation (FST ~0) and undefined FST (NaN).
-            let mut pair_stats = HashMap::new();
-            pair_stats.insert(p1.clone(), pop_stats[p1]);
-            pair_stats.insert(p2.clone(), pop_stats[p2]);
-            let pair_sum = pop_stats[p1].0 + pop_stats[p2].0;
-            let mut freq_pair_sum = 0.0;
-            for (_, (sz2, fv2)) in &pair_stats {
-                freq_pair_sum += (*sz2 as f64) * fv2;
-            }
-            let pair_freq = freq_pair_sum / (pair_sum as f64);
-            let (a_xy, b_xy) = calculate_variance_components(&pair_stats, pair_freq);
-            let f_xy: f64;
-
-            // Calculate pairwise FST (f_xy) using the Weir & Cockerham components a_xy and b_xy.
-            // The interpretation of FST depends on the nature of these components:
-            // 1. Monomorphic sites for the pair:
-            //    If the site is monomorphic within the combined data of the pair (i.e., pair_freq is 0 or 1),
-            //    and consequently s_squared_pair is 0, then `calculate_variance_components` will yield
-            //    a_xy = 0 and b_xy = 0. In this 0/0 scenario, FST is undefined.
-            // 2. Polymorphic sites with no differentiation:
-            //    If the site is polymorphic within the pair (pair_freq is not 0 or 1) but the allele
-            //    frequencies are identical between the two populations (freq1 == freq2), then s_squared_pair = 0.
-            //    `calculate_variance_components` will yield a small negative a_xy and a positive b_xy.
-            //    The ratio a_xy / (a_xy + b_xy) will be a small negative value. This is the direct output of the
-            //    estimator and is reported as such, interpreted as FST approximately equal to 0.
-            // 3. Differentiated polymorphic sites:
-            //    Standard calculation applies: f_xy = a_xy / (a_xy + b_xy).
-            // 4. Unstable estimates:
-            //    If (a_xy + b_xy) is zero or negative, and it's not the monomorphic (0/0) case,
-            //    the estimate is undefined.
-
-            // Heuristic to check for a_xy ≈ 0 and b_xy ≈ 0 (monomorphic case for the pair)
-            // This specifically targets the 0/0 scenario for an undefined FST.
-            if a_xy.abs() < 1e-9 && b_xy.abs() < 1e-9 {
-                f_xy = f64::NAN;
-            } else if (a_xy + b_xy) > 0.0 {
-                // Denominator is strictly positive. This covers standard differentiated cases
-                // and polymorphic undifferentiated cases (where FST will be small negative).
-                f_xy = a_xy / (a_xy + b_xy);
-            } else {
-                // Denominator is zero or negative, but not from a_xy=0 and b_xy=0.
-                // Undefined estimate.
-                f_xy = f64::NAN;
-            }
-            pairwise_fst_map.insert(format!("{}_vs_{}", p1, p2), f_xy);
-            pairwise_ab_map.insert(format!("{}_vs_{}", p1, p2), (a_xy, b_xy));
-        }
-    }
-
-    (overall_fst, pairwise_fst_map, (a, b), pop_sizes, pairwise_ab_map)
-}
-
-/// Calculate variance components for the Weir & Cockerham (1984) FST estimator
+/// Maps VCF samples to their predefined haplotype groups (0 or 1).
 ///
 /// # Arguments
-/// * `pop_stats` - HashMap mapping population IDs to (sample_size, allele_frequency) tuples
-/// * `global_freq` - Global weighted allele frequency
+/// * `sample_names`: Slice of all sample names from the VCF.
+/// * `sample_to_group_map`: HashMap from config, mapping sample names to (left_hap_group, right_hap_group).
 ///
 /// # Returns
-/// (a, b) variance components, where:
-/// * a = variance between populations
-/// * b = variance within populations
+/// A HashMap mapping `(vcf_sample_index, HaplotypeSide)` tuples to group identifier strings ("0" or "1").
+fn map_samples_to_haplotype_groups(
+    sample_names: &[String],
+    sample_to_group_map: &HashMap<String, (u8, u8)>
+) -> HashMap<(usize, HaplotypeSide), String> {
+    let mut haplotype_to_group = HashMap::new();
+    
+    let mut sample_id_to_index = HashMap::new();
+    for (idx, name) in sample_names.iter().enumerate() {
+        let sample_id = name.rsplit('_').next().unwrap_or(name); // Uses a simplified ID if name has _L/_R suffix
+        sample_id_to_index.insert(sample_id, idx);
+    }
+    
+    for (config_sample_name, &(left_group, right_group)) in sample_to_group_map {
+        if let Some(&vcf_idx) = sample_id_to_index.get(config_sample_name.as_str()) {
+            haplotype_to_group.insert(
+                (vcf_idx, HaplotypeSide::Left),
+                left_group.to_string()
+            );
+            
+            haplotype_to_group.insert(
+                (vcf_idx, HaplotypeSide::Right),
+                right_group.to_string()
+            );
+        }
+    }
+    
+    haplotype_to_group
+}
+
+/// Maps VCF samples to their population groups as defined in a CSV file.
+///
+/// # Arguments
+/// * `sample_names`: Slice of all sample names from the VCF.
+/// * `population_assignments`: HashMap from parsed CSV, mapping population names to lists of sample IDs.
+///
+/// # Returns
+/// A HashMap mapping `(vcf_sample_index, HaplotypeSide)` tuples to population identifier strings.
+fn map_samples_to_populations(
+    sample_names: &[String],
+    population_assignments: &HashMap<String, Vec<String>>
+) -> HashMap<(usize, HaplotypeSide), String> {
+    let mut sample_to_pop_map_for_fst = HashMap::new();
+    
+    let mut csv_sample_id_to_pop_name = HashMap::new();
+    for (pop_name, samples_in_pop) in population_assignments {
+        for sample_id in samples_in_pop {
+            csv_sample_id_to_pop_name.insert(sample_id.clone(), pop_name.clone());
+        }
+    }
+    
+    for (vcf_idx, vcf_sample_name) in sample_names.iter().enumerate() {
+        // Attempt direct match
+        if let Some(pop_name) = csv_sample_id_to_pop_name.get(vcf_sample_name) {
+            sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Left), pop_name.clone());
+            sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Right), pop_name.clone());
+            continue;
+        }
+        
+        // Attempt match by suffix (e.g., VCF "ID_L" or "ID_R" vs CSV "ID")
+        let core_vcf_id = vcf_sample_name.rsplit('_').next().unwrap_or(vcf_sample_name);
+        if let Some(pop_name) = csv_sample_id_to_pop_name.get(core_vcf_id) {
+            sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Left), pop_name.clone());
+            sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Right), pop_name.clone());
+            continue;
+        }
+        
+        // Optional: attempt match by prefix (e.g. VCF "POP_SUBPOP_ID" vs CSV "POP") - currently present
+        let vcf_prefix = vcf_sample_name.split('_').next().unwrap_or(vcf_sample_name);
+        for (csv_pop_name, _) in population_assignments { // Iterating to check if VCF name STARTS WITH a pop name
+            if vcf_sample_name.starts_with(csv_pop_name) || vcf_prefix == csv_pop_name {
+                sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Left), csv_pop_name.clone());
+                sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Right), csv_pop_name.clone());
+                break; 
+            }
+        }
+    }
+    
+    sample_to_pop_map_for_fst
+}
+
+/// Calculates Weir & Cockerham FST at a single site between predefined haplotype groups (0 vs 1).
+///
+/// This function delegates to `calculate_fst_wc_at_site_general`.
+///
+/// # Arguments
+/// * `variant`: The `Variant` struct for the site.
+/// * `haplotype_to_group`: A `HashMap` mapping `(vcf_sample_index, HaplotypeSide)` to group ID strings ("0" or "1").
+///
+/// # Returns
+/// A tuple containing the overall FST estimate (`FstEstimate`), pairwise FST estimates,
+/// variance components (a,b), population sizes, and pairwise variance components (a_xy, b_xy) for the site.
+fn calculate_fst_wc_at_site_by_haplotype_group(
+    variant: &Variant,
+    haplotype_to_group: &HashMap<(usize, HaplotypeSide), String>
+) -> (FstEstimate, HashMap<String, FstEstimate>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
+    calculate_fst_wc_at_site_general(variant, haplotype_to_group)
+}
+
+/// Calculates Weir & Cockerham FST at a single site between population groups defined from a CSV file.
+///
+/// This function delegates to `calculate_fst_wc_at_site_general`.
+///
+/// # Arguments
+/// * `variant`: The `Variant` struct for the site.
+/// * `sample_to_pop`: A `HashMap` mapping `(vcf_sample_index, HaplotypeSide)` to population name strings.
+///
+/// # Returns
+/// A tuple containing the overall FST estimate (`FstEstimate`), pairwise FST estimates,
+/// variance components (a,b), population sizes, and pairwise variance components (a_xy, b_xy) for the site.
+fn calculate_fst_wc_at_site_by_population(
+    variant: &Variant,
+    sample_to_pop: &HashMap<(usize, HaplotypeSide), String>
+) -> (FstEstimate, HashMap<String, FstEstimate>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
+    calculate_fst_wc_at_site_general(variant, sample_to_pop)
+}
+
+/// General function to calculate Weir & Cockerham FST components and estimates at a single site.
+///
+/// This function takes a variant and a mapping of haplotypes to subpopulation identifiers.
+/// It calculates allele frequencies per subpopulation, then computes Weir & Cockerham's
+/// variance components 'a' (among populations) and 'b' (within populations).
+/// From these, it derives overall and pairwise FST estimates for the site.
+///
+/// # Arguments
+/// * `variant`: The `Variant` data for the site.
+/// * `map_subpop`: A `HashMap` where keys are `(vcf_sample_index, HaplotypeSide)` identifying a haplotype,
+///   and values are `String` identifiers for the subpopulation that haplotype belongs to.
+///
+/// # Returns
+/// A tuple:
+///   - `overall_fst_at_site` (`FstEstimate`): The overall FST estimate for this site across all defined subpopulations.
+///   - `pairwise_fst_estimate_map` (`HashMap<String, FstEstimate>`): Pairwise FST estimates between all pairs of subpopulations.
+///   - `(overall_a, overall_b)` (`(f64, f64)`): The overall variance components 'a' and 'b' for the site.
+///   - `pop_sizes` (`HashMap<String, usize>`): The number of haplotypes sampled per subpopulation at this site.
+///   - `pairwise_variance_components_map` (`HashMap<String, (f64, f64)>`): The (a_xy, b_xy) components for each pair of subpopulations.
+fn calculate_fst_wc_at_site_general(
+    variant: &Variant,
+    map_subpop: &HashMap<(usize, HaplotypeSide), String>
+) -> (FstEstimate, HashMap<String, FstEstimate>, (f64, f64), HashMap<String, usize>, HashMap<String, (f64, f64)>) {
+    
+    // 1. Count allele occurrences per subpopulation for the current variant.
+    let mut allele_counts: HashMap<String, (usize, usize)> = HashMap::new(); // Stores (total_haplotypes_in_pop, alt_allele_count_in_pop)
+    for (&(sample_idx, side), pop_id) in map_subpop {
+        if let Some(Some(genotypes_vec)) = variant.genotypes.get(sample_idx) {
+            if let Some(&allele_code) = genotypes_vec.get(side as usize) {
+                let entry = allele_counts.entry(pop_id.clone()).or_insert((0, 0));
+                entry.0 += 1; // Increment total haplotypes for this subpopulation.
+                if allele_code != 0 { // Assuming 0 is reference, non-zero is alternate.
+                    entry.1 += 1; // Increment alternate allele count.
+                }
+            }
+        }
+    }
+
+    // 2. Calculate allele frequencies and store population statistics.
+    let mut pop_stats: HashMap<String, (usize, f64)> = HashMap::new(); // Stores (num_haplotypes_in_pop, alt_allele_frequency_in_pop)
+    let mut pop_sizes: HashMap<String, usize> = HashMap::new();
+    for (pop_id, (num_haplotypes, alt_allele_count)) in allele_counts {
+        if num_haplotypes > 0 {
+            let allele_freq = alt_allele_count as f64 / num_haplotypes as f64;
+            pop_stats.insert(pop_id.clone(), (num_haplotypes, allele_freq));
+            pop_sizes.insert(pop_id, num_haplotypes);
+        }
+    }
+
+    // If fewer than two populations have data at this site, FST is not meaningful.
+    if pop_stats.len() < 2 {
+        log(LogLevel::Trace, &format!(
+            "Site at pos {}: FST is {} (reason: found {} populations with data, need >= 2).",
+            ZeroBasedPosition(variant.position).to_one_based(), FstEstimate::InsufficientData, pop_stats.len()
+        ));
+        return (FstEstimate::InsufficientData, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
+    }
+
+    // 3. Compute overall variance components (a, b) for all populations at this site.
+    let total_haplotypes_overall: usize = pop_stats.values().map(|(n, _)| *n).sum();
+    let mut weighted_freq_sum_overall = 0.0;
+    for (_, (n, freq)) in &pop_stats {
+        weighted_freq_sum_overall += (*n as f64) * freq;
+    }
+    // Global allele frequency, ensuring total_haplotypes_overall is not zero (though pop_stats.len() < 2 check should prevent this).
+    let global_allele_freq = if total_haplotypes_overall > 0 {
+        weighted_freq_sum_overall / (total_haplotypes_overall as f64)
+    } else {
+        // This case implies pop_stats has >= 2 entries but all have 0 haplotypes, which shouldn't happen due to earlier filter.
+        // If it did, it would lead to a division by zero if not handled. 
+        // However, calculate_variance_components handles n_bar <= 1.0 returning (0.0,0.0).
+        0.0 
+    };
+
+    let (overall_a, overall_b) = calculate_variance_components(&pop_stats, global_allele_freq);
+    
+    let overall_fst_at_site = FstEstimate::from_ratio(overall_a, overall_a + overall_b);
+    if !matches!(overall_fst_at_site, FstEstimate::Calculable(v) if v.is_finite()) { // Log if not a finite calculable value
+        log(LogLevel::Trace, &format!(
+            "Site at pos {}: Overall FST is {} (a={:.4e}, b={:.4e}, a+b={:.4e}).",
+            ZeroBasedPosition(variant.position).to_one_based(), overall_fst_at_site, overall_a, overall_b, overall_a + overall_b
+        ));
+    }
+
+    // 4. Compute pairwise FSTs and their respective variance components (a_xy, b_xy).
+    let mut pairwise_fst_estimate_map = HashMap::new();
+    let mut pairwise_variance_components_map = HashMap::new();
+    let pop_id_list: Vec<_> = pop_stats.keys().cloned().collect(); // Already know pop_id_list.len() >= 2
+
+    for i in 0..pop_id_list.len() {
+        for j in (i + 1)..pop_id_list.len() {
+            let pop1_id = &pop_id_list[i];
+            let pop2_id = &pop_id_list[j];
+
+            let mut current_pair_stats = HashMap::new();
+            // These unwraps are safe because pop_id_list elements are keys from pop_stats.
+            current_pair_stats.insert(pop1_id.clone(), *pop_stats.get(pop1_id).unwrap());
+            current_pair_stats.insert(pop2_id.clone(), *pop_stats.get(pop2_id).unwrap());
+            
+            let total_haplotypes_pair: usize = current_pair_stats.values().map(|(n, _)| *n).sum();
+            let mut weighted_freq_sum_pair = 0.0;
+            for (_, (n, freq)) in &current_pair_stats {
+                weighted_freq_sum_pair += (*n as f64) * freq;
+            }
+            let pair_global_allele_freq = if total_haplotypes_pair > 0 {
+                weighted_freq_sum_pair / (total_haplotypes_pair as f64)
+            } else { 0.0 };
+
+            let (pairwise_a_xy, pairwise_b_xy) = calculate_variance_components(&current_pair_stats, pair_global_allele_freq);
+            
+            let pairwise_fst_val = FstEstimate::from_ratio(pairwise_a_xy, pairwise_a_xy + pairwise_b_xy);
+            
+            let pair_key = format!("{}_vs_{}", pop1_id, pop2_id);
+            pairwise_fst_estimate_map.insert(pair_key.clone(), pairwise_fst_val);
+            pairwise_variance_components_map.insert(pair_key.clone(), (pairwise_a_xy, pairwise_b_xy));
+
+            if !matches!(pairwise_fst_val, FstEstimate::Calculable(v) if v.is_finite()) {
+                log(LogLevel::Trace, &format!(
+                    "Site at pos {}: Pairwise FST for {} is {} (a_xy={:.4e}, b_xy={:.4e}, a_xy+b_xy={:.4e}).",
+                    ZeroBasedPosition(variant.position).to_one_based(), pair_key, pairwise_fst_val, pairwise_a_xy, pairwise_b_xy, pairwise_a_xy + pairwise_b_xy
+                ));
+            }
+        }
+    }
+    (overall_fst_at_site, pairwise_fst_estimate_map, (overall_a, overall_b), pop_sizes, pairwise_variance_components_map)
+}
+
+/// Calculates Weir & Cockerham (1984) variance components 'a' (among-population) and 'b' (within-population)
+/// for a set of subpopulations, assuming a haploid model (random union of gametes, no within-individual correlation).
+///
+/// # Arguments
+/// * `pop_stats`: A `HashMap` mapping population identifiers (String) to tuples of
+///   `(haplotype_sample_size_for_this_pop, alt_allele_frequency_in_this_pop)`.
+/// * `global_freq`: The global (weighted average) frequency of the alternate allele across all considered subpopulations.
+///
+/// # Returns
+/// A tuple `(a, b)` representing the estimated variance components. These components are not clamped
+/// and can be negative due to sampling variance, which is consistent with W&C's estimator properties.
 fn calculate_variance_components(
-    pop_stats: &HashMap<String, (usize, f64)>,
-    global_freq: f64
+    pop_stats: &HashMap<String, (usize, f64)>, // (n_i, p_i)
+    global_freq: f64 // p̄
 ) -> (f64, f64) {
-    /*
-    This function implements the Weir & Cockerham (1984) haploid-based variance-component
-    calculations for random union of gametes. It treats each haplotype as an independent sample
-    and omits the within-individual component c.
+    let r = pop_stats.len() as f64; // Number of subpopulations
+    if r < 2.0 { // Need at least two populations to compare
+        return (0.0, 0.0);
+    }
 
-    1) n_bar = mean subpopulation size, counting haplotypes.
-    2) global_p = global_freq is the overall allele frequency in all subpops combined.
-    3) We compute c2 as the squared coefficient of variation of subpopulation sizes.
-    4) S^2 is the weighted among-subpop variance in allele frequency.
-    5) a and b are computed so that Fst = a / (a + b).
-    6) If sample sizes are identical, c2 = 0 and the formula reduces properly. If sample sizes
-       differ greatly, c2 adjusts a and b as per the W&C derivation. This matches eqns. (5)–(7)
-       under a haploid model with random union of gametes.
-    */
+    let mut n_values = Vec::with_capacity(pop_stats.len());
+    let mut total_haplotypes = 0_usize;
+    for (_, (size, _freq)) in pop_stats.iter() {
+        n_values.push(*size as f64);
+        total_haplotypes += *size;
+    }
 
-    let r = pop_stats.len() as f64;
-    if r < 2.0 {
+    let n_bar = (total_haplotypes as f64) / r; // Average sample size (n̄)
+    // If average sample size is too small (e.g., implies some populations have 0 or 1 sample after averaging),
+    // components are effectively zero or undefined.
+    if n_bar <= 1.0 && pop_stats.values().any(|(n_i, _)| *n_i <= 1) {
+        return (0.0, 0.0);
+    }
+    if (n_bar - 1.0).abs() < 1e-9 || (n_bar - 1.0) < 0.0 { // n_bar is effectively 1 or less
         return (0.0, 0.0);
     }
 
-    let mut n_values = Vec::with_capacity(pop_stats.len());
-    let mut total_samples = 0_usize;
-    for (_pop_id, (size, _freq)) in pop_stats.iter() {
-        n_values.push(*size as f64);
-        total_samples += *size;
-    }
+    let global_p = global_freq; // p̄
 
-    let n_bar = (total_samples as f64) / r;
-    if n_bar <= 1.0 {
-        return (0.0, 0.0);
-    }
+    // Calculate c², the squared coefficient of variation of sample sizes (n_i).
+    // c² = [ Σ (n_i - n̄)² ] / [ r * n̄² ]
+    let mut sum_sq_diff_n = 0.0;
+    for n_i_val in &n_values {
+        let diff = *n_i_val - n_bar;
+        sum_sq_diff_n += diff * diff;
+    }
+    let c_squared = if r > 0.0 && n_bar > 0.0 { // Avoid division by zero if r or n_bar is zero
+        sum_sq_diff_n / (r * n_bar * n_bar)
+    } else {
+        0.0 // If r or n_bar is zero, c_squared is ill-defined or zero.
+    };
 
-    let global_p = global_freq;
+    // Calculate S², the sample variance of allele frequencies over populations, weighted by n_i.
+    // S² = [ Σ n_i (p_i - p̄)² ] / [ (r-1) * n̄ ]
+    let mut numerator_s_squared = 0.0;
+    for (_, (size, freq)) in pop_stats.iter() {
+        let diff_p = *freq - global_p;
+        numerator_s_squared += (*size as f64) * diff_p * diff_p;
+    }
+    let s_squared = if (r - 1.0) > 1e-9 && n_bar > 1e-9 { // denominators are positive
+        numerator_s_squared / ((r - 1.0) * n_bar)
+    } else {
+        0.0 // If r=1 or n_bar=0, S² is undefined or zero.
+    };
 
-    let mut sum_sq_diff = 0.0;
-    for n_i in &n_values {
-        let diff = *n_i - n_bar;
-        sum_sq_diff += diff * diff;
-    }
-    let c2 = sum_sq_diff / (r * n_bar * n_bar);
+    // Weir & Cockerham (1984) equations for a and b (adapted for haploid case, random union of gametes).
+    // Individual haplotypes have no heterozygosity at a single locus.
+    // The component 'c' (between gametes within individuals) is thus 0.
 
-    let mut numerator_s2 = 0.0;
-    for (_pop_id, (size, freq)) in pop_stats.iter() {
-        let diff = *freq - global_p;
-        numerator_s2 += (*size as f64) * diff * diff;
-    }
-    let s_squared = if (r - 1.0) > 0.0 && n_bar > 0.0 {
-        numerator_s2 / ((r - 1.0) * n_bar)
-    } else {
-        0.0
-    };
+    let term_in_brackets_for_a = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared;
+    let msc = s_squared; // Mean Square Component for populations (analogous)
+    let msg = term_in_brackets_for_a; // Mean Square Component for individuals within populations
 
-    let a_num = s_squared
-        - (
-            global_p * (1.0 - global_p)
-            - ((r - 1.0) / r) * s_squared
-          )
-          / (n_bar - 1.0);
+    // Variance component 'a' (among populations)
+    // a = (MSP - MSW) / n̄_eff  where n̄_eff depends on sample size variation.
+    // a = (n̄/n_c) * [ S² - (1/(n̄-1)) * ( p̄(1-p̄) - ((r-1)/r)S² ) ]
+    // where n_c = n̄ * (1 - c²/r). So, n̄/n_c = 1 / (1 - c²/r).
     
-    let denom_factor = 1.0 - (c2 / r);
-    
-    // If either (n_bar - 1.0) <= 0 or denom_factor <= 0, set a = 0.0 as a fallback
-    // (this avoids negative or undefined denominators)
-    let a = if (n_bar - 1.0) > 0.0 && denom_factor > 0.0 {
-        a_num / denom_factor
-    } else {
+    let a_numerator_term = msc - (msg / (n_bar - 1.0));
+    let a_denominator_factor = 1.0 - (c_squared / r); // This is n_c / n_bar
+
+    let a = if a_denominator_factor.abs() > 1e-9 && a_denominator_factor > 0.0 { // Avoid division by zero or negative for n_c/n_bar
+        a_numerator_term / a_denominator_factor
+    } else if a_numerator_term == 0.0 { // If numerator is 0, and denom_factor implies n_c is ~0, 'a' is 0.
         0.0
+    } else {
+        // This case implies n_c (effective sample size related term) is zero or negative,
+        // while the variance difference term is non-zero. This indicates an unstable estimate for 'a'.
+        if a_numerator_term.abs() < 1e-9 { 0.0 } else { 0.0 } // Wrong???
     };
 
-    // Calculate component `b` (within-population variance for haplotypes).
-    // This is derived from Weir & Cockerham (1984).
-    // For haplotypes, there is no within-individual heterozygosity at a single locus,
-    // so h_bar = 0, and consequently, W&C's component `c` (which is h_bar/2) is zero.
-    //
-    // The W&C (1984) formula for diploid `b` is:
-    //   b_diploid = (n_bar / (n_bar - 1.0)) * [global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared - ((2.0 * n_bar - 1.0) / (4.0 * n_bar)) * h_bar]
-    // Setting h_bar = 0, the formula for haplotype `b` becomes:
-    //   b_haploid = (n_bar / (n_bar - 1.0)) * [global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared]
-    //
-    // The term `b_num` here represents the quantity in the square brackets:
-    //   b_num = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared
-    //
-    // Weir & Cockerham's framework inherently accounts for unequal sample sizes (n_i)
-    // through the definitions of n_bar (average sample size), global_p (weighted average
-    // allele frequency), and s_squared (weighted sample variance of allele frequencies).
-    let b_num = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared;
+    // Variance component 'b' (within populations, among individuals for diploids)
+    // For haplotypes, this is effectively the remaining variance.
+    // b = (n̄ / (n̄-1)) * [ p̄(1-p̄) - ((r-1)/r)S² ]  (from W&C eq. 3, with h_bar=0)
+    let b_term_in_brackets = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared;
+    let b = (n_bar / (n_bar - 1.0)) * b_term_in_brackets;
 
-    let b = if (n_bar - 1.0) > 0.0 {
-        (n_bar / (n_bar - 1.0)) * b_num
-    } else {
-        0.0
-    };
-
-    (a, b) // do not clamp negative estimates for downstream estimate
+    (a, b) // Return raw estimated components; they can be negative.
 }
 
-/// Calculate overall FST for a region from per-site values
+/// Calculates overall and pairwise Weir & Cockerham FST estimates for a region from per-site FST results.
 ///
-/// This follows W&C's approach of summing variance components across sites.
+/// This function implements Equation 10 from Weir & Cockerham (1984) by summing
+/// the among-population variance components (a_i) and total variance components (a_i + b_i)
+/// from all sites before calculating the final ratio.
+///
+/// # Arguments
+/// * `site_fst_values`: A slice of `SiteFstWc` structs, each containing per-site
+///   variance components and `FstEstimate` values. Per-site components are assumed to be finite.
 ///
 /// # Returns
-/// (overall_fst, pairwise_fst)
-fn calculate_overall_fst_wc(site_fst_values: &[SiteFstWc]) -> (f64, HashMap<String, f64>) {
-    /*
-    This function sums the per-site variance components (a, b) across all sites that have (a + b) > 0.
-    That means we skip monomorphic or uninformative sites where (a + b) == 0. Skipping avoids an
-    undefined ratio of 0/0. Under the Weir & Cockerham (1984) formula, summing a and b over
-    just the informative sites is the standard approach. We then compute the global Fst as
-    sum(a) / sum(a + b).
+/// A tuple containing:
+/// * `overall_fst_estimate` (`FstEstimate`): The Weir & Cockerham FST estimate for the entire region.
+/// * `pairwise_fst_estimates` (`HashMap<String, FstEstimate>`): A map of regional pairwise FST estimates.
+/// * `aggregated_pairwise_variance_components` (`HashMap<String, (f64,f64)>`): Summed (a_xy, b_xy) for each pair.
+fn calculate_overall_fst_wc(site_fst_values: &[SiteFstWc]) -> (FstEstimate, HashMap<String, FstEstimate>, HashMap<String, (f64,f64)>) {
+    let mut sum_a_total: f64 = 0.0;
+    let mut sum_b_total: f64 = 0.0;
+    let mut diagnostic_count_overall_non_positive_sum_comps: usize = 0;
 
-    For pairwise Fst, we gather each site's pairwise (a_xy, b_xy), sum them, and compute the ratio.
-    */
-    let mut informative_sites = Vec::new();
-    for site in site_fst_values.iter() {
-        let (a, b) = site.variance_components;
-        if (a + b) > 0.0 {
-            informative_sites.push(site);
-        }
-    }
+    for site in site_fst_values.iter() {
+        let (site_a, site_b) = site.variance_components;
+        sum_a_total += site_a;
+        sum_b_total += site_b;
+        
+        if (site_a + site_b) <= 0.0 && (site_a.abs() > 1e-9 || site_b.abs() > 1e-9) { // Not a simple 0,0 monomorphic site
+            diagnostic_count_overall_non_positive_sum_comps += 1;
+        }
+    }
+    
+    if diagnostic_count_overall_non_positive_sum_comps > 0 {
+        log(LogLevel::Debug, &format!(
+            "Diagnostic: {} sites had per-site (a+b) sum of components <= 0 (excluding fully monomorphic a=0,b=0 sites); these components were included in regional sums.",
+            diagnostic_count_overall_non_positive_sum_comps
+        ));
+    }
 
-    if informative_sites.is_empty() {
-        return (0.0, HashMap::new());
-    }
+    let overall_fst_estimate = FstEstimate::from_ratio(sum_a_total, sum_a_total + sum_b_total);
+    if !matches!(overall_fst_estimate, FstEstimate::Calculable(v) if v.is_finite()) {
+        log(LogLevel::Info, &format!(
+            "Overall regional FST is {} (sum_a={:.4e}, sum_b={:.4e}, sum_a+sum_b={:.4e}).",
+            overall_fst_estimate, sum_a_total, sum_b_total, sum_a_total + sum_b_total
+        ));
+    }
 
-    let mut sum_a_total = 0.0;
-    let mut sum_b_total = 0.0;
-    for site in &informative_sites {
-        sum_a_total += site.variance_components.0;
-        sum_b_total += site.variance_components.1;
-    }
-    let raw_overall = if (sum_a_total + sum_b_total) > 0.0 {
-        sum_a_total / (sum_a_total + sum_b_total)
-    } else {
-        f64::NAN  // Undefined as per Weir & Cockerham
-    };
-    // Assign the raw overall FST calculation directly, preserving potential negative values.
-    // NaN is handled by the raw_overall calculation itself if the denominator is zero.
-    let overall_fst = raw_overall;
+    let mut pairwise_ab_sums: HashMap<String, (f64, f64)> = HashMap::new();
+    let mut diagnostic_count_pairwise_non_positive_sum_comps: HashMap<String, usize> = HashMap::new();
 
-    let mut pairwise_ab_sums: HashMap<String, (f64, f64)> = HashMap::new();
-    for site in &informative_sites {
-        for (pair_key, &(a_xy, b_xy)) in site.pairwise_variance_components.iter() {
-            let entry = pairwise_ab_sums.entry(pair_key.clone()).or_insert((0.0, 0.0));
-            entry.0 += a_xy;
-            entry.1 += b_xy;
-        }
-    }
+    for site in site_fst_values.iter() {
+        for (pair_key, &(site_a_xy, site_b_xy)) in &site.pairwise_variance_components {
+            let entry = pairwise_ab_sums.entry(pair_key.clone()).or_insert((0.0, 0.0));
+            entry.0 += site_a_xy;
+            entry.1 += site_b_xy;
 
-    let mut pairwise_fst = HashMap::new();
-    for (pair_key, (a_sum, b_sum)) in pairwise_ab_sums {
-        let ratio = if (a_sum + b_sum) > 0.0 {
-            a_sum / (a_sum + b_sum)
-        } else {
-            f64::NAN
-        };
-        // Assign the raw pairwise FST calculation directly, preserving potential negative values.
-        // NaN is handled by the ratio calculation itself if the denominator is zero.
-        let pairwise_ratio = ratio;
-        pairwise_fst.insert(pair_key, pairwise_ratio);
-    }
+            if (site_a_xy + site_b_xy) <= 0.0 && (site_a_xy.abs() > 1e-9 || site_b_xy.abs() > 1e-9) {
+                *diagnostic_count_pairwise_non_positive_sum_comps.entry(pair_key.clone()).or_insert(0) += 1;
+            }
+        }
+    }
 
-    (overall_fst, pairwise_fst)
+    for (pair_key, count) in diagnostic_count_pairwise_non_positive_sum_comps.iter() {
+        if *count > 0 {
+            log(LogLevel::Debug, &format!(
+                "Diagnostic for pair {}: {} sites had per-site (a_xy+b_xy) sum of components <= 0 (excluding fully monomorphic a_xy=0,b_xy=0 sites); these components were included in regional sums.",
+                pair_key, count
+            ));
+        }
+    }
+
+    let mut pairwise_fst_estimates = HashMap::new();
+    for (pair_key, (sum_a_xy, sum_b_xy)) in &pairwise_ab_sums {
+        let estimate_for_pair = FstEstimate::from_ratio(*sum_a_xy, *sum_a_xy + *sum_b_xy);
+        pairwise_fst_estimates.insert(pair_key.clone(), estimate_for_pair);
+        if !matches!(estimate_for_pair, FstEstimate::Calculable(v) if v.is_finite()) {
+            log(LogLevel::Info, &format!(
+                "Pairwise FST for pair {} is {} (sum_a_xy={:.4e}, sum_b_xy={:.4e}, sum_a_xy+sum_b_xy={:.4e}).",
+                pair_key, estimate_for_pair, sum_a_xy, sum_b_xy, sum_a_xy + sum_b_xy
+            ));
+        }
+    }
+    
+    (overall_fst_estimate, pairwise_fst_estimates, pairwise_ab_sums)
 }
-
 
 /// Calculates Dxy (average number of pairwise differences per site between two populations)
 /// for Hudson's FST, as defined by Hudson et al. (1992) and elaborated by
