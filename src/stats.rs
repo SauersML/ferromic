@@ -808,102 +808,107 @@ fn calculate_fst_wc_at_site_general(
     (overall_fst_at_site, pairwise_fst_estimate_map, (overall_a, overall_b), pop_sizes, pairwise_variance_components_map)
 }
 
-/// Calculates Weir & Cockerham (1984) variance components 'a' (among-population) and 'b' (within-population)
-/// for a set of subpopulations, assuming a haploid model (random union of gametes, no within-individual correlation).
+/// Calculates Weir & Cockerham (1984) variance components 'a' (among-population)
+/// and 'b' (between effective individuals/haplotypes within populations) for a set of subpopulations.
+/// For haplotype data, observed heterozygosity (h_bar in W&C) is 0, leading to
+/// their variance component 'c' being 0 (W&C eq. 4). The 'a' and 'b' components
+/// implemented here are derived from W&C general equations (2) and (3) under this h_bar=0 condition.
 ///
 /// # Arguments
 /// * `pop_stats`: A `HashMap` mapping population identifiers (String) to tuples of
-///   `(haplotype_sample_size_for_this_pop, alt_allele_frequency_in_this_pop)`.
+///  `(haplotype_sample_size_for_this_pop, alt_allele_frequency_in_this_pop)`.
 /// * `global_freq`: The global (weighted average) frequency of the alternate allele across all considered subpopulations.
 ///
 /// # Returns
 /// A tuple `(a, b)` representing the estimated variance components. These components are not clamped
 /// and can be negative due to sampling variance, which is consistent with W&C's estimator properties.
 fn calculate_variance_components(
-    pop_stats: &HashMap<String, (usize, f64)>, // (n_i, p_i)
-    global_freq: f64 // p̄
+    pop_stats: &HashMap<String, (usize, f64)>, // (n_i, p_i)
+    global_freq: f64 // p̄
 ) -> (f64, f64) {
-    let r = pop_stats.len() as f64; // Number of subpopulations
-    if r < 2.0 { // Need at least two populations to compare
-        return (0.0, 0.0);
-    }
+    let r = pop_stats.len() as f64; // Number of subpopulations
+    if r < 2.0 { // Need at least two populations to compare
+        return (0.0, 0.0);
+    }
 
-    let mut n_values = Vec::with_capacity(pop_stats.len());
-    let mut total_haplotypes = 0_usize;
-    for (_, (size, _freq)) in pop_stats.iter() {
-        n_values.push(*size as f64);
-        total_haplotypes += *size;
-    }
+    let mut n_values = Vec::with_capacity(pop_stats.len());
+    let mut total_haplotypes = 0_usize;
+    for (_, (size, _freq)) in pop_stats.iter() {
+        n_values.push(*size as f64);
+        total_haplotypes += *size;
+    }
 
     let n_bar = (total_haplotypes as f64) / r; // Average sample size (n̄)
-  
-    // Check if n_bar - 1.0 is zero or negative, which would make subsequent calculations problematic.
-    // This condition also covers n_bar <= 1.0.
-    if (n_bar - 1.0) < 1e-9 { // Using < 1e-9 to catch n_bar very close to 1.0 or less than 1.0
-        return (0.0, 0.0);
-    }
+ 
+    // Check if n_bar - 1.0 is zero or negative, which would make subsequent calculations problematic.
+    // This condition also covers n_bar <= 1.0.
+    if (n_bar - 1.0) < 1e-9 { // Using < 1e-9 to catch n_bar very close to 1.0 or less than 1.0
+        return (0.0, 0.0);
+    }
 
-    let global_p = global_freq; // p̄
+    let global_p = global_freq; // p̄
 
     // Calculate c², the squared coefficient of variation of sample sizes (n_i).
     // c² = [ Σ (n_i - n̄)² ] / [ r * n̄² ]
-    let mut sum_sq_diff_n = 0.0;
-    for n_i_val in &n_values {
-        let diff = *n_i_val - n_bar;
-        sum_sq_diff_n += diff * diff;
-    }
-    let c_squared = if r > 0.0 && n_bar > 0.0 { // Avoid division by zero if r or n_bar is zero
-        sum_sq_diff_n / (r * n_bar * n_bar)
-    } else {
-        0.0 // If r or n_bar is zero, c_squared is ill-defined or zero.
-    };
+    let mut sum_sq_diff_n = 0.0;
+    for n_i_val in &n_values {
+        let diff = *n_i_val - n_bar;
+        sum_sq_diff_n += diff * diff;
+    }
+    let c_squared = if r > 0.0 && n_bar > 0.0 { // Avoid division by zero if r or n_bar is zero
+        sum_sq_diff_n / (r * n_bar * n_bar)
+    } else {
+        0.0 // If r or n_bar is zero, c_squared is ill-defined or zero.
+    };
 
     // Calculate S², the sample variance of allele frequencies over populations, weighted by n_i.
     // S² = [ Σ n_i (p_i - p̄)² ] / [ (r-1) * n̄ ]
-    let mut numerator_s_squared = 0.0;
-    for (_, (size, freq)) in pop_stats.iter() {
-        let diff_p = *freq - global_p;
-        numerator_s_squared += (*size as f64) * diff_p * diff_p;
-    }
-    let s_squared = if (r - 1.0) > 1e-9 && n_bar > 1e-9 { // denominators are positive
-        numerator_s_squared / ((r - 1.0) * n_bar)
-    } else {
-        0.0 // If r=1 or n_bar=0, S² is undefined or zero.
-    };
+    let mut numerator_s_squared = 0.0;
+    for (_, (size, freq)) in pop_stats.iter() {
+        let diff_p = *freq - global_p;
+        numerator_s_squared += (*size as f64) * diff_p * diff_p;
+    }
+    let s_squared = if (r - 1.0) > 1e-9 && n_bar > 1e-9 { // denominators are positive
+        numerator_s_squared / ((r - 1.0) * n_bar)
+    } else {
+        0.0 // If r=1 or n_bar=0, S² is undefined or zero.
+    };
 
-    // Weir & Cockerham (1984) equations for a and b (adapted for haploid case, random union of gametes).
-    // Individual haplotypes have no heterozygosity at a single locus.
-    // The component 'c' (between gametes within individuals) is thus 0.
+    // The implemented 'a' and 'b' components are derived from Weir & Cockerham (1984)
+    // general estimators (their equations 2 and 3 respectively). For haplotype data, observed
+    // heterozygosity (h_bar in W&C, their eq. 4 and related definitions) is effectively 0.
+    // This leads to their variance component 'c' (W&C eq. 4) being 0,
+    // and simplifies eqs. (2) and (3) to the forms implemented below.
+    //
+    // Let X_wc = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared.
+    // This term, X_wc, represents the portion of p_bar * (1 - p_bar) that is not
+    // explained by the among-population variance scaled by (r-1)/r.
+    //
+    // The formulas effectively compute:
+    // a = (n_bar / n_c) * [s_squared - X_wc / (n_bar - 1.0)]
+    //   (where n_bar / n_c is equivalent to 1.0 / (1.0 - (c_squared / r)) from W&C notation,
+    //    and n_c is a correction factor for variance in sample sizes)
+    // b = (n_bar / (n_bar - 1.0)) * X_wc
 
-    let term_in_brackets_for_a = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared;
-    let msc = s_squared; // Mean Square Component for populations (analogous)
-    let msg = term_in_brackets_for_a; // Mean Square Component for individuals within populations
-
-    // Variance component 'a' (among populations)
-    // a = (MSP - MSW) / n̄_eff  where n̄_eff depends on sample size variation.
-    // a = (n̄/n_c) * [ S² - (1/(n̄-1)) * ( p̄(1-p̄) - ((r-1)/r)S² ) ]
-    // where n_c = n̄ * (1 - c²/r). So, n̄/n_c = 1 / (1 - c²/r).
+    let X_wc = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared;
     
-    let a_numerator_term = msc - (msg / (n_bar - 1.0));
-    let a_denominator_factor = 1.0 - (c_squared / r); // This is n_c / n_bar
+    // Calculate component 'a' (among-population variance component)
+    let a_numerator_term = s_squared - (X_wc / (n_bar - 1.0));
+    // a_denominator_factor is n_c / n_bar, so dividing by it is multiplying by n_bar / n_c.
+    let a_denominator_factor = 1.0 - (c_squared / r); 
 
-    // Calculate component 'a'.
-    // This division is allowed to produce Infinity or NaN if a_denominator_factor is zero
-    // and a_numerator_term is non-zero or zero, respectively.
-    // These non-finite 'a' values will propagate to the calculation of (a+b),
-    // and FstEstimate::from_ratio(a, a+b) will then correctly classify the
-    // resulting FST estimate (e.g., as Calculable(NaN), Calculable(Infinity),
-    // or SummedVariancesNonPositive if a+b itself becomes non-positive or non-finite).
-    // This approach defers the classification of problematic numerical outcomes to the
-    // FstEstimate::from_ratio method, rather than preemptively altering the value of 'a'.
-    let a = a_numerator_term / a_denominator_factor;
-    // Variance component 'b' (within populations, among individuals for diploids)
-    // For haplotypes, this is effectively the remaining variance.
-    // b = (n̄ / (n̄-1)) * [ p̄(1-p̄) - ((r-1)/r)S² ]  (from W&C eq. 3, with h_bar=0)
-    let b_term_in_brackets = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared;
-    let b = (n_bar / (n_bar - 1.0)) * b_term_in_brackets;
+    // This division for 'a' is allowed to produce Infinity or NaN if a_denominator_factor is zero
+    // (e.g., due to extreme sample size variance where n_c becomes 0)
+    // and a_numerator_term is non-zero or zero, respectively.
+    // These non-finite 'a' values will propagate to the calculation of (a+b),
+    // and FstEstimate::from_ratio(a, a+b) will then correctly classify the
+    // resulting FST estimate.
+    let a = a_numerator_term / a_denominator_factor;
+    
+    // Calculate component 'b' (within-population variance component, effectively among haplotypes within populations)
+    let b = (n_bar / (n_bar - 1.0)) * X_wc;
 
-    (a, b) // Return raw estimated components; they can be negative.
+    (a, b) // Return raw estimated components; they can be negative.
 }
 
 /// Calculates overall and pairwise Weir & Cockerham FST estimates for a region from per-site FST results.
