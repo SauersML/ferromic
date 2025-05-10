@@ -185,7 +185,7 @@ pub struct FST_WC_Results {
 ///
 /// # Returns
 /// FST results including per-site values and overall estimates
-pub fn calculate_fst_between_groups(
+pub fn calculate_fst_wc_haplotype_groups(
     variants: &[Variant],
     sample_names: &[String],
     sample_to_group_map: &HashMap<String, (u8, u8)>,
