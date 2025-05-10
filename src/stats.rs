@@ -641,28 +641,19 @@ fn calculate_fst_wc_at_site_general(
         return (0.0, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
     }
 
+    // Previously:
     // 3. Check if all subpop frequencies are effectively identical.
     // We define a small threshold for difference, and if the maximum difference
     // among any pair of frequencies is below that threshold, we consider
     // the site monomorphic in all subpops and return Fst=0.0. However, this is wrong.
     // Fix later.
-    let freq_values: Vec<f64> = pop_stats.values().map(|(_, f)| *f).collect();
-    let mut max_diff = 0.0;
-    for i in 0..freq_values.len() {
-        for j in (i+1)..freq_values.len() {
-            let diff = (freq_values[i] - freq_values[j]).abs();
-            if diff > max_diff {
-                max_diff = diff;
-            }
-        }
-    }
-    let threshold = 1e-12;
-    if max_diff < threshold {
-        // If subpop frequencies are (practically) identical,
-        // this site does not provide a defined Fst. Mark as NaN:
-        let empty_map = HashMap::new();
-        return (f64::NAN, empty_map, (0.0, 0.0), pop_sizes, HashMap::new());
-    }
+    
+    // The calculation of variance components `a` and `b` by `calculate_variance_components`
+    // and the subsequent FST calculation `a / (a + b)` (or NaN if a+b is zero)
+    // correctly handles cases where all subpopulation allele frequencies are identical.
+    // If frequencies are identical and the site is polymorphic overall (e.g., all are 0.5), FST will be 0.
+    // If frequencies are identical and the site is monomorphic overall (e.g., all are 0 or all are 1),
+    // both `a` and `b` components will be 0, leading to a NaN FST.
 
     // 4. Compute overall (a,b), overall_fst
     let total_samples: usize = pop_stats.values().map(|(sz, _)| *sz).sum();
