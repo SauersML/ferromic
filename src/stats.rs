@@ -434,6 +434,7 @@ pub fn calculate_fst_wc_csv_populations(
 /// The CSV file should have population labels in the first column,
 /// and subsequent columns on the same row should list sample IDs belonging to that population.
 /// Lines starting with '#' are treated as comments and skipped. Empty lines are also skipped.
+/// Sample IDs and population names are trimmed of whitespace.
 ///
 /// # Arguments
 /// * `csv_path` - A reference to the Path of the CSV file.
@@ -441,13 +442,13 @@ pub fn calculate_fst_wc_csv_populations(
 /// # Returns
 /// A `Result` containing a `HashMap` where keys are population names (String)
 /// and values are `Vec<String>` of sample IDs associated with that population.
-/// Returns `VcfError::Parse` if the file is empty or cannot be parsed correctly,
-/// or `VcfError::Io` if the file cannot be opened.
+/// Returns `VcfError::Parse` if the file contains no valid population data after parsing,
+/// or `VcfError::Io` if the file cannot be opened or read.
 pub fn parse_population_csv(csv_path: &Path) -> Result<HashMap<String, Vec<String>>, VcfError> {
     let file = File::open(csv_path).map_err(|e| 
         VcfError::Io(std::io::Error::new(
             std::io::ErrorKind::Other,
-            format!("Failed to open population CSV file: {}", e)
+            format!("Failed to open population CSV file {}: {}", csv_path.display(), e)
         ))
     )?;
     
@@ -455,35 +456,31 @@ pub fn parse_population_csv(csv_path: &Path) -> Result<HashMap<String, Vec<Strin
     let mut population_map = HashMap::new();
     
     for line_result in reader.lines() {
-        let line = line_result.map_err(|e| VcfError::Parse(format!("Error reading CSV line: {}", e)))?;
+        let line = line_result.map_err(|e| VcfError::Io(e))?; // Changed to VcfError::Io for read errors
         if line.trim().is_empty() || line.starts_with('#') {
             continue; // Skip empty lines and comments
         }
         
-        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-        if parts.is_empty() || parts[0].is_empty() { // Also check if population name is empty
+        let parts: Vec<String> = line.split(',').map(|s| s.trim().to_string()).collect();
+        if parts.is_empty() || parts[0].is_empty() {
+            // Skip lines that are empty after trimming or have no population name
             continue;
         }
         
-        let population = parts[0].to_string();
-        // Collect non-empty sample IDs
-        let samples: Vec<String> = parts[1..].iter()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect();
+        let population = parts[0].clone();
+        // Collect non-empty sample IDs from the rest of the parts
+        let samples: Vec<String> = parts.iter().skip(1).filter(|s| !s.is_empty()).cloned().collect();
         
-        // Only insert if there are actual samples for the population
         if !samples.is_empty() {
             population_map.insert(population, samples);
-        } else if !parts[0].is_empty() && parts.len() > 1 {
-            // Population name exists, but all sample fields were empty. This is unusual but not an error.
-            // We only insert if samples are present.
-            log(LogLevel::Warning, &format!("Population '{}' in CSV has no associated sample IDs listed on its line.", population));
+        } else {
+            // Log if a population is defined but no samples are listed for it
+            log(LogLevel::Warning, &format!("Population '{}' in CSV file '{}' has no associated sample IDs listed on its line.", population, csv_path.display()));
         }
     }
     
     if population_map.is_empty() {
-        return Err(VcfError::Parse("Population CSV file contains no valid population data after parsing.".to_string()));
+        return Err(VcfError::Parse(format!("Population CSV file '{}' contains no valid population data after parsing.", csv_path.display())));
     }
     
     Ok(population_map)
