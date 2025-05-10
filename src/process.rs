@@ -1,6 +1,6 @@
 use crate::stats::{
     calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site_diversity,
-    calculate_pi, calculate_watterson_theta, calculate_fst_wc_haplotype_groups, calculate_fst_wc_csv_populations, SiteDiversity, FST_WC_Results,
+    calculate_pi, calculate_watterson_theta, calculate_fst_wc_haplotype_groups, calculate_fst_wc_csv_populations, SiteDiversity, FstWcResults,
     HudsonFSTOutcome, PopulationContext, PopulationId, calculate_hudson_fst_for_pair
 };
 
@@ -420,7 +420,7 @@ struct CsvRowData {
     n_hap_1_f: usize,
     inv_freq_no_filter: f64,
     inv_freq_filter: f64,
-    population_fst_wc_results: Option<FST_WC_Results>, // FST results based on population CSV file
+    population_FstWcResults: Option<FstWcResults>, // FST results based on population CSV file
     haplotype_overall_fst_wc: f64, // Region-wide FST (unclamped, Sum(a)/Sum(a+b)) between haplotype groups 0 and 1 (filtered variants)
     population_overall_fst_wc: f64, // Region-wide FST (unclamped, Sum(a)/Sum(a+b)) across all populations from CSV (filtered variants)
 }
@@ -1439,7 +1439,7 @@ pub fn process_config_entries(
             writeln!(fst_fasta_writer, "{}", pairwise_values.join(","))?;
             
             // Process and write population pairwise FST data if available
-            if let Some(ref pop_results) = csv_row.population_fst_wc_results {
+            if let Some(ref pop_results) = csv_row.population_FstWcResults {
                 // Create a map of all pairwise comparisons across all sites
                 let mut all_pairs = HashSet::new();
                 for site in &pop_results.site_fst {
@@ -2370,7 +2370,7 @@ fn process_single_config_entry(
         haplotype_overall_fst_wc: fst_results_filtered.as_ref().map_or(f64::NAN, |res| res.overall_fst),
         population_overall_fst_wc: fst_results_pop_filtered.as_ref().map_or(f64::NAN, |res| res.overall_fst),
         // Store the complete W&C FST results for populations (includes site-specific and pairwise)
-        population_fst_wc_results: fst_results_pop_filtered.clone(),
+        population_FstWcResults: fst_results_pop_filtered.clone(),
     };
 
     let mut local_regional_hudson_outcomes: Vec<RegionalHudsonFSTOutcome> = Vec::new();
