@@ -1530,11 +1530,7 @@ pub fn process_config_entries(
 
     // Write Hudson FST results if FST calculations were enabled
     if args.enable_fst {
-        // Determine the output path for Hudson FST results.
-        // Defaults to "hudson_fst_results.tsv" if not specified by args.hudson_fst_output_file.
-        let hudson_output_filename = args.hudson_fst_output_file
-            .clone()
-            .unwrap_or_else(|| "hudson_fst_results.tsv".to_string());
+        let hudson_output_filename = "hudson_fst_results.tsv".to_string();
         
         // Place the Hudson FST output file in the same directory as the main output file.
         let hudson_output_path = if let Some(main_output_parent) = output_file.parent() {
