@@ -1,6 +1,7 @@
 use crate::stats::{
     calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site_diversity,
-    calculate_pi, calculate_watterson_theta, calculate_fst_wc_haplotype_groups, calculate_fst_wc_csv_populations, SiteDiversity, FST_WC_Results
+    calculate_pi, calculate_watterson_theta, calculate_fst_wc_haplotype_groups, calculate_fst_wc_csv_populations, SiteDiversity, FST_WC_Results,
+    HudsonFSTOutcome, PopulationContext, PopulationId, calculate_hudson_fst_for_pair
 };
 
 use crate::parse::{
@@ -118,8 +119,6 @@ pub struct Args {
     /// Path to CSV file defining population groups for FST calculation
     #[arg(long = "fst_populations", help = "Path to CSV file defining population groups for FST calculation")]
     pub fst_populations: Option<String>,
-
-    // Combine enable_fst and fst_populations args?
 }
 
 /// ZeroBasedHalfOpen represents a half-open interval [start..end).
@@ -1015,10 +1014,36 @@ pub fn process_config_entries(
     }
 
     // We will process each chromosome in parallel (for speed),
-    // then flatten the per-chromosome results in the order we get them.
-    let all_pairs: Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)> = grouped
+    // then flatten the per-chromosome results.
+    // `process_chromosome_entries` now returns a tuple: (Vec_for_main_csv, Vec_for_hudson_csv)
+    let mut all_main_csv_data_tuples: Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)> = Vec::new();
+    let mut all_regional_hudson_outcomes: Vec<RegionalHudsonFSTOutcome> = Vec::new();
+
+    // Parse population CSV once if --fst and --fst_populations are provided.
+    // This parsed data will be passed to each chromosome's processing.
+    let parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>> =
+        if args.enable_fst {
+            if let Some(csv_path_str) = &args.fst_populations {
+                log(LogLevel::Info, &format!("Parsing population definition file for FST: {}", csv_path_str));
+                match parse_population_csv(Path::new(csv_path_str)) { // parse_population_csv returns HashMap<PopulationName, Vec<SampleID_from_CSV>>
+                    Ok(parsed_map) => Some(Arc::new(parsed_map)),
+                    Err(e) => {
+                        log(LogLevel::Error, &format!("Failed to parse population CSV '{}': {}. FST calculations for CSV-defined populations will be skipped.", csv_path_str, e));
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+    // The map operation collects results per chromosome.
+    // Each result is a tuple: (main_csv_data_for_this_chr, hudson_data_for_this_chr)
+    let per_chromosome_collected_results: Vec<((Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, Vec<RegionalHudsonFSTOutcome>))> = grouped
         .par_iter()
-        .flat_map(|(chr, chr_entries)| {
+        .map(|(chr, chr_entries)| {
             match process_chromosome_entries(
                 chr,
                 chr_entries,
@@ -1032,17 +1057,25 @@ pub fn process_config_entries(
                 } else {
                     None
                 },
+                parsed_csv_populations_arc.clone(), // Pass the Arc'd map
             ) {
-                Ok(list) => list,
+                Ok(data_tuple_for_chr) => Some(data_tuple_for_chr),
                 Err(e) => {
                     eprintln!("Error processing chromosome {}: {}", chr, e);
-                    Vec::new()
+                    None // This chromosome processing failed
                 }
             }
         })
+        .filter_map(|optional_result| optional_result) // Remove None entries (failed chromosomes)
         .collect();
 
-    let all_results: Vec<CsvRowData> = all_pairs
+    // Aggregate results from all chromosomes
+    for (mut main_data_for_chr, mut hudson_data_for_chr) in per_chromosome_collected_results {
+        all_main_csv_data_tuples.append(&mut main_data_for_chr);
+        all_regional_hudson_outcomes.append(&mut hudson_data_for_chr);
+    }
+
+    let all_results: Vec<CsvRowData> = all_main_csv_data_tuples
         .iter()
         .map(|(csv_row, _sites, _fst)| csv_row.clone())
         .collect();
@@ -1618,7 +1651,8 @@ fn process_chromosome_entries(
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
     pca_storage: Option<(Arc<Mutex<HashMap<String, Vec<Variant>>>>, Arc<Mutex<Vec<String>>>)>,
-) -> Result<Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, VcfError> {
+    parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>>,
+) -> Result<(Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, Vec<RegionalHudsonFSTOutcome>), VcfError> {
     set_stage(ProcessingStage::ConfigEntry);
     log(LogLevel::Info, &format!("Processing chromosome: {}", chr));
     
@@ -1682,8 +1716,10 @@ fn process_chromosome_entries(
     
     finish_step_progress(&format!("Loaded resources for chr{}", chr));
 
-    // We'll store final rows from each entry in this vector
-    let mut rows = Vec::with_capacity(entries.len());
+    // Stores tuples for the main CSV output (W&C FST, diversity stats)
+    let mut main_csv_tuples = Vec::with_capacity(entries.len());
+    // Stores RegionalHudsonFSTOutcome for the dedicated Hudson FST output file for this chromosome
+    let mut chromosome_hudson_fst_results: Vec<RegionalHudsonFSTOutcome> = Vec::new();
     
     // Store filtered variants for PCA if enabled
     if let Some((_, sample_names_storage)) = &pca_storage {
@@ -1746,10 +1782,13 @@ fn process_chromosome_entries(
             chr,
             args,
             pca_storage.as_ref(),
+            parsed_csv_populations_arc.clone(), // Pass down the Arc<HashMap<String, Vec<String>>>
         );
         
         match result {
-            Ok(Some(row_data)) => {
+            Ok(Some((main_csv_tuple, mut hudson_outcomes_for_entry))) => {
+                main_csv_tuples.push(main_csv_tuple);
+                chromosome_hudson_fst_results.append(&mut hudson_outcomes_for_entry);
                 rows.push(row_data);
                 log(LogLevel::Info, &format!("Successfully processed region {}", region_desc));
                 
@@ -1842,11 +1881,10 @@ fn process_chromosome_entries(
         }
     }
 
-    let mut result_rows = Vec::with_capacity(rows.len());
-    for (csv_data, site_data, fst_data) in rows {
-        result_rows.push((csv_data, site_data, fst_data));
-    }
-    Ok(result_rows)
+    // This function returns a tuple:
+    // 1. Data for the main CSV output file.
+    // 2. Data for the dedicated Hudson FST output file, specific to this chromosome.
+    Ok((main_csv_tuples, chromosome_hudson_fst_results))
 }
 
 /// Processes a single config entry's region and sample sets for a given chromosome.
@@ -2342,6 +2380,82 @@ fn process_single_config_entry(
         per_site_diversity_records,
         per_site_fst_records,
     )))
+}
+
+/// Helper struct to associate a HudsonFSTOutcome with its genomic region.
+/// Used internally for collecting results before writing to file.
+#[derive(Debug, Clone)]
+struct RegionalHudsonFSTOutcome {
+    chr: String,
+    region_start: i64, // 0-based inclusive, from ConfigEntry.interval.start
+    region_end: i64,   // 0-based inclusive, from ConfigEntry.interval.end
+    outcome: HudsonFSTOutcome,
+}
+
+/// Formats an Option<PopulationId> into type and name strings for output.
+fn format_population_id(pop_id_opt: &Option<PopulationId>) -> (String, String) {
+    match pop_id_opt {
+        Some(PopulationId::HaplotypeGroup(g)) => ("HaplotypeGroup".to_string(), g.to_string()),
+        Some(PopulationId::Named(n)) => ("NamedPopulation".to_string(), n.clone()),
+        None => ("NA".to_string(), "NA".to_string()),
+    }
+}
+
+/// Formats an Option<f64> to a string, representing None or NaN as "NA".
+/// Floating point values are formatted to six decimal places.
+fn format_optional_float(val_opt: Option<f64>) -> String {
+    match val_opt {
+        Some(f) => {
+            if f.is_nan() {
+                "NA".to_string()
+            } else {
+                format!("{:.6}", f)
+            }
+        }
+        None => "NA".to_string(),
+    }
+}
+
+/// Retrieves VCF sample indices and HaplotypeSides for samples belonging to a specified population
+/// as defined in a population definition CSV file.
+///
+/// # Arguments
+/// * `pop_name` - The name of the population to retrieve haplotypes for.
+/// * `parsed_csv_populations` - A map where keys are population names and values are lists of sample IDs (from CSV).
+/// * `vcf_sample_id_to_index` - A map where keys are core VCF sample IDs and values are their 0-based VCF column indices.
+///
+/// # Returns
+/// A vector of tuples, where each tuple is `(vcf_sample_index, HaplotypeSide)`.
+/// Both Left and Right haplotypes are included for each matched sample.
+fn get_haplotype_indices_for_csv_population(
+    pop_name: &str,
+    parsed_csv_populations: &HashMap<String, Vec<String>>,
+    vcf_sample_id_to_index: &HashMap<String, usize>,
+) -> Vec<(usize, HaplotypeSide)> {
+    let mut haplotype_indices = Vec::new();
+
+    if let Some(sample_ids_for_pop) = parsed_csv_populations.get(pop_name) {
+        for csv_sample_id in sample_ids_for_pop {
+            // The vcf_sample_id_to_index keys are core VCF sample IDs (e.g., "NA12878").
+            // The csv_sample_id is also expected to be a core sample ID.
+            if let Some(&vcf_idx) = vcf_sample_id_to_index.get(csv_sample_id) {
+                haplotype_indices.push((vcf_idx, HaplotypeSide::Left));
+                haplotype_indices.push((vcf_idx, HaplotypeSide::Right));
+            } else {
+                log(LogLevel::Warning, &format!(
+                    "Sample '{}' defined for population '{}' in CSV not found in VCF sample list. This sample will be skipped for population '{}'.",
+                    csv_sample_id, pop_name, pop_name
+                ));
+            }
+        }
+    } else {
+        // This case should ideally not be reached if pop_name is derived from parsed_csv_populations.keys()
+        log(LogLevel::Warning, &format!(
+            "Population name '{}' was queried but not found in parsed CSV definitions during haplotype gathering.",
+            pop_name
+        ));
+    }
+    haplotype_indices
 }
 
 // Function to process a VCF file
