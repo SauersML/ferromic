@@ -787,9 +787,24 @@ fn calculate_variance_components(
         0.0
     };
 
-    let b_num = (global_p * (1.0 - global_p) + (c2 * global_p * (1.0 - global_p)))
-        - ((r - 1.0) / r) * s_squared
-        - (c2 * (r - 1.0) * s_squared / r);
+    // Calculate component `b` (within-population variance for haplotypes).
+    // This is derived from Weir & Cockerham (1984).
+    // For haplotypes, there is no within-individual heterozygosity at a single locus,
+    // so h_bar = 0, and consequently, W&C's component `c` (which is h_bar/2) is zero.
+    //
+    // The W&C (1984) formula for diploid `b` is:
+    //   b_diploid = (n_bar / (n_bar - 1.0)) * [global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared - ((2.0 * n_bar - 1.0) / (4.0 * n_bar)) * h_bar]
+    // Setting h_bar = 0, the formula for haplotype `b` becomes:
+    //   b_haploid = (n_bar / (n_bar - 1.0)) * [global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared]
+    //
+    // The term `b_num` here represents the quantity in the square brackets:
+    //   b_num = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared
+    //
+    // Weir & Cockerham's framework inherently accounts for unequal sample sizes (n_i)
+    // through the definitions of n_bar (average sample size), global_p (weighted average
+    // allele frequency), and s_squared (weighted sample variance of allele frequencies).
+    let b_num = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared;
+
     let b = if (n_bar - 1.0) > 0.0 {
         (n_bar / (n_bar - 1.0)) * b_num
     } else {
