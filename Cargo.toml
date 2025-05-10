@@ -11,7 +11,7 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 pyo3 = { version = "0.18", features = ["extension-module"] }
 clap = { version = "4.5", features = ["derive"] }
-tokio = { version = "1.44", features = ["full"] }
+tokio = { version = "1.45", features = ["full"] }
 flate2 = "1.1" 
 anyhow = "1.0"
 rayon = "1.10"
@@ -28,18 +28,18 @@ colored = "2.2"
 itertools = "0.10"
 rand = "0.8.5"
 parking_lot = "0.12.3"
-tempfile = "3.18"
+tempfile = "3.19"
 csv = "1.3"
 assert_cmd = "2.0"
 predicates = "2.1"
 bio = "2.2.0"
 regex = "1.11"
 prettytable = "0.10"
-once_cell = "1.21.1"
+once_cell = "1.21.3"
 terminal_size = "0.4.2"
-chrono = "0.4.40"
+chrono = "0.4.41"
 glob = "0.3.2"
-efficient_pca = "0.1.3"
+efficient_pca = "0.1.4"
 ndarray = "0.16.1"
 
 [profile.release]
