@@ -731,7 +731,7 @@ fn calculate_fst_wc_at_site_general(
 
     // If fewer than two populations have data at this site, FST is not meaningful.
     if pop_stats.len() < 2 {
-        log(LogLevel::Trace, &format!(
+        log(LogLevel::Debug, &format!(
             "Site at pos {}: FST is {} (reason: found {} populations with data, need >= 2).",
             ZeroBasedPosition(variant.position).to_one_based(), FstEstimate::InsufficientData, pop_stats.len()
         ));
@@ -758,7 +758,7 @@ fn calculate_fst_wc_at_site_general(
     
     let overall_fst_at_site = FstEstimate::from_ratio(overall_a, overall_a + overall_b);
     if !matches!(overall_fst_at_site, FstEstimate::Calculable(v) if v.is_finite()) { // Log if not a finite calculable value
-        log(LogLevel::Trace, &format!(
+        log(LogLevel::Debug, &format!(
             "Site at pos {}: Overall FST is {} (a={:.4e}, b={:.4e}, a+b={:.4e}).",
             ZeroBasedPosition(variant.position).to_one_based(), overall_fst_at_site, overall_a, overall_b, overall_a + overall_b
         ));
@@ -804,7 +804,7 @@ fn calculate_fst_wc_at_site_general(
             pairwise_variance_components_map.insert(pair_key.clone(), (pairwise_a_xy, pairwise_b_xy));
 
             if !matches!(pairwise_fst_val, FstEstimate::Calculable(v) if v.is_finite()) {
-                log(LogLevel::Trace, &format!(
+                log(LogLevel::Debug, &format!(
                     "Site at pos {}: Pairwise FST for {} is {} (a_xy={:.4e}, b_xy={:.4e}, a_xy+b_xy={:.4e}).",
                     ZeroBasedPosition(variant.position).to_one_based(), pair_key, pairwise_fst_val, pairwise_a_xy, pairwise_b_xy, pairwise_a_xy + pairwise_b_xy
                 ));
