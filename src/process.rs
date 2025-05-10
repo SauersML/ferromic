@@ -1236,7 +1236,8 @@ pub fn process_config_entries(
     // The site records contain (position, pi, watterson_theta, group_id, is_filtered).
     // We do this for each region row in all_pairs.
 
-    for (csv_row, per_site_diversity_vec, _fst_data) in &all_pairs {
+    // Data for per-site diversity comes from the second element of the tuple in all_main_csv_data_tuples
+    for (csv_row, per_site_diversity_vec, _fst_data_wc) in &all_main_csv_data_tuples {
         let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
         let region_len = region.len();
 
