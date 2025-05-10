@@ -19,7 +19,7 @@ pub struct SiteDiversity {
     pub watterson_theta: f64, // Watterson's theta (θ_w) at this site
 }
 
-/// FST results for a single site
+/// FST results for a single site (Weir & Cockerham method)
 #[derive(Debug, Clone)]
 pub struct SiteFST_WC {
     /// Position (1-based coordinate)
@@ -42,6 +42,64 @@ pub struct SiteFST_WC {
     pub pairwise_variance_components: HashMap<String, (f64, f64)>,
 }
 
+/// Identifier for a population or group being analyzed, used across FST methods.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PopulationId {
+    HaplotypeGroup(u8), // For predefined groups like 0 (e.g., reference) and 1 (e.g., inversion)
+    Named(String),      // For populations defined by names from external files
+}
+
+/// Represents a collection of haplotypes and associated data for a specific population/group
+/// within a defined genomic region. This context is used for diversity and differentiation calculations.
+/// The lifetime 'a is tied to the underlying variants and sample_names slices, so no
+/// data is copied unnecessarily for these large collections.
+#[derive(Debug, Clone)]
+pub struct PopulationContext<'a> {
+    /// Unique identifier for this population or group.
+    pub id: PopulationId,
+    /// List of haplotypes belonging to this population. Each tuple contains the
+    /// VCF sample index and the specific haplotype side (Left or Right).
+    pub haplotypes: Vec<(usize, HaplotypeSide)>,
+    /// Slice of variants relevant to the genomic region being analyzed for this population.
+    pub variants: &'a [Variant],
+    /// Slice of all sample names present in the VCF, used for context or debugging.
+    pub sample_names: &'a [String],
+    /// The effective sequence length (L) for normalization in diversity calculations.
+    /// This should account for any masking or specific intervals considered.
+    pub sequence_length: i64,
+}
+
+/// Holds the result of a Dxy (between-population nucleotide diversity) calculation,
+/// specifically for Hudson's FST methodology.
+#[derive(Debug, Clone, Default)]
+pub struct DxyHudsonResult {
+    /// The calculated Dxy value (average pairwise differences per site between two populations).
+    /// `None` if calculation was not possible (e.g., no valid pairs, zero sequence length).
+    pub d_xy: Option<f64>,
+    // Maybe others later
+}
+
+/// Encapsulates all components and the final FST value for a pairwise Hudson's FST calculation.
+/// This structure provides a comprehensive output for a single FST comparison between two populations.
+#[derive(Debug, Clone, Default)]
+pub struct HudsonFSTOutcome {
+    /// Identifier for the first population in the comparison.
+    pub pop1_id: Option<PopulationId>,
+    /// Identifier for the second population in the comparison.
+    pub pop2_id: Option<PopulationId>,
+    /// The calculated Hudson's FST value.
+    /// `None` if FST could not be determined (e.g., Dxy is zero or components are missing).
+    pub fst: Option<f64>,
+    /// Between-population nucleotide diversity (Dxy).
+    pub d_xy: Option<f64>,
+    /// Within-population nucleotide diversity for the first population (π1).
+    pub pi_pop1: Option<f64>,
+    /// Within-population nucleotide diversity for the second population (π2).
+    pub pi_pop2: Option<f64>,
+    /// Average within-population diversity: 0.5 * (π1 + π2).
+    /// `None` if either pi_pop1 or pi_pop2 is `None`.
+    pub pi_xy_avg: Option<f64>,
+}
 
 /// FST results for a genomic region
 #[derive(Debug, Clone)]
