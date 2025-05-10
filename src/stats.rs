@@ -862,6 +862,251 @@ fn calculate_overall_fst_wc(site_fst_values: &[SiteFST_WC]) -> (f64, HashMap<Str
     (overall_fst, pairwise_fst)
 }
 
+
+/// Calculates Dxy (average number of pairwise differences per site between two populations)
+/// for Hudson's FST, as defined by Hudson et al. (1992) and elaborated by
+/// de Jong et al. (2024). Dxy is the mean number of differences between sequences
+/// sampled from two different populations.
+///
+/// This implementation iterates over all possible inter-population pairs of haplotypes,
+/// sums the raw nucleotide differences for each pair across all provided variants,
+/// and then normalizes by the total number of such pairs and the sequence length.
+///
+/// # Arguments
+/// * `pop1_context` - A `PopulationContext` for the first population.
+/// * `pop2_context` - A `PopulationContext` for the second population.
+///
+/// # Returns
+/// A `Result` containing `DxyHudsonResult` which holds `Some(d_xy_value)` if successful,
+/// or `None` within `DxyHudsonResult` if Dxy cannot be meaningfully calculated (e.g., no
+/// haplotypes in one of the populations, or zero sequence length). Returns `Err(VcfError)`
+/// for precondition violations like sequence length mismatch.
+pub fn calculate_d_xy_hudson<'a>(
+    pop1_context: &PopulationContext<'a>,
+    pop2_context: &PopulationContext<'a>,
+) -> Result<DxyHudsonResult, VcfError> {
+    if pop1_context.sequence_length <= 0 {
+        log(LogLevel::Error, "Cannot calculate Dxy: sequence_length must be positive.");
+        // This is a critical error in input setup
+        return Err(VcfError::InvalidRegion(
+            "Sequence length must be positive for Dxy calculation".to_string(),
+        ));
+    }
+
+    if pop1_context.sequence_length != pop2_context.sequence_length {
+        log(LogLevel::Error, "Sequence length mismatch between populations for Dxy calculation.");
+        return Err(VcfError::Parse(
+            "Sequence length mismatch in Dxy calculation".to_string(),
+        ));
+    }
+
+    if pop1_context.haplotypes.is_empty() || pop2_context.haplotypes.is_empty() {
+        log(LogLevel::Warning, &format!(
+            "Cannot calculate Dxy for pops {:?}/{:?}: one or both have no haplotypes ({} and {} respectively).",
+            pop1_context.id, pop2_context.id, pop1_context.haplotypes.len(), pop2_context.haplotypes.len()
+        ));
+        return Ok(DxyHudsonResult { d_xy: None });
+    }
+
+    let mut sum_total_differences_between_pops: f64 = 0.0;
+    let num_haplotypes_pop1 = pop1_context.haplotypes.len();
+    let num_haplotypes_pop2 = pop2_context.haplotypes.len();
+
+    // total_inter_population_pairs is N1 * N2
+    let total_inter_population_pairs = (num_haplotypes_pop1 * num_haplotypes_pop2) as f64;
+
+    if total_inter_population_pairs == 0.0 { // Should be caught by is_empty above
+        return Ok(DxyHudsonResult { d_xy: None });
+    }
+
+    for (sample_idx1, side1) in pop1_context.haplotypes.iter() {
+        for (sample_idx2, side2) in pop2_context.haplotypes.iter() {
+            let mut differences_for_this_specific_pair: u64 = 0;
+
+            // Iterate through all variants provided in the context.
+            // The `popX_context.variants` slice should contain only variants
+            // within the specific region of interest being analyzed.
+            for variant_site in pop1_context.variants.iter() { // pop1.variants is same as pop2.variants
+                let allele1_opt = variant_site
+                    .genotypes
+                    .get(*sample_idx1)
+                    .and_then(|gt_option| gt_option.as_ref())
+                    .and_then(|gt_vec| gt_vec.get(*side1 as usize));
+
+                let allele2_opt = variant_site
+                    .genotypes
+                    .get(*sample_idx2)
+                    .and_then(|gt_option| gt_option.as_ref())
+                    .and_then(|gt_vec| gt_vec.get(*side2 as usize));
+
+                if let (Some(&a1_code), Some(&a2_code)) = (allele1_opt, allele2_opt) {
+                    // Both alleles are present (not missing, e.g. not '.')
+                    // This site is comparable for this pair.
+                    if a1_code != a2_code {
+                        differences_for_this_specific_pair += 1;
+                    }
+                }
+            }
+            sum_total_differences_between_pops += differences_for_this_specific_pair as f64;
+        }
+    }
+
+    let effective_sequence_length = pop1_context.sequence_length as f64;
+    let denominator = total_inter_population_pairs * effective_sequence_length;
+
+    let d_xy_value = if denominator > 0.0 {
+        Some(sum_total_differences_between_pops / denominator)
+    } else {
+        log(LogLevel::Warning, &format!(
+            "Dxy denominator is zero for pops {:?}/{:?} (pairs: {}, L: {}). Setting Dxy to None.",
+            pop1_context.id, pop2_context.id, total_inter_population_pairs, effective_sequence_length
+        ));
+        None
+    };
+
+    Ok(DxyHudsonResult { d_xy: d_xy_value })
+}
+
+/// Computes Hudson's FST and its intermediate components (pi_xy_avg)
+/// from pre-calculated within-population diversities (pi_pop1, pi_pop2)
+/// and between-population diversity (Dxy).
+///
+/// # Arguments
+/// * `pop1_id` - Identifier for the first population.
+/// * `pop2_id` - Identifier for the second population.
+/// * `pi_pop1` - `Option<f64>` for nucleotide diversity of population 1.
+/// * `pi_pop2` - `Option<f64>` for nucleotide diversity of population 2.
+/// * `d_xy_result` - Result of Dxy calculation (`DxyHudsonResult`).
+///
+/// # Returns
+/// An `HudsonFSTOutcome` struct containing all components. Values will be `None`
+/// if they cannot be robustly calculated from the inputs.
+pub fn compute_hudson_fst_outcome(
+    pop1_id: PopulationId,
+    pop2_id: PopulationId,
+    pi_pop1: Option<f64>,
+    pi_pop2: Option<f64>,
+    d_xy_result: &DxyHudsonResult,
+) -> HudsonFSTOutcome {
+    let mut outcome = HudsonFSTOutcome {
+        pop1_id: Some(pop1_id),
+        pop2_id: Some(pop2_id),
+        pi_pop1,
+        pi_pop2,
+        d_xy: d_xy_result.d_xy,
+        ..Default::default() // Initializes fst and pi_xy_avg to None
+    };
+
+    if let (Some(p1), Some(p2)) = (outcome.pi_pop1, outcome.pi_pop2) {
+        // p1 and p2 are finite before averaging
+        if p1.is_finite() && p2.is_finite() {
+            outcome.pi_xy_avg = Some(0.5 * (p1 + p2));
+        } else {
+            log(LogLevel::Warning, "One or both Pi values are non-finite, cannot calculate Pi_xy_avg.");
+        }
+    } else {
+        log(LogLevel::Debug, "One or both Pi values are None, cannot calculate Pi_xy_avg.");
+    }
+
+    if let (Some(dxy_val), Some(pi_xy_avg_val)) = (outcome.d_xy, outcome.pi_xy_avg) {
+        // dxy_val and pi_xy_avg_val are finite and dxy_val is positive for division
+        if dxy_val.is_finite() && pi_xy_avg_val.is_finite() {
+            if dxy_val > 1e-9 { // Use a small epsilon to avoid division by effective zero
+                outcome.fst = Some((dxy_val - pi_xy_avg_val) / dxy_val);
+            } else if dxy_val >= 0.0 && (dxy_val - pi_xy_avg_val).abs() < 1e-9 {
+                // Case: Dxy is ~0 and Pi_xy_avg is also ~0 (or Dxy approx equals Pi_xy_avg)
+                // This implies no differentiation and possibly no variation. FST is 0.
+                outcome.fst = Some(0.0);
+            } else {
+                // Dxy is effectively zero or negative, but Pi_xy_avg is substantially different,
+                // or Dxy is non-finite.
+                log(LogLevel::Warning, &format!(
+                    "Cannot calculate Hudson FST: Dxy ({:.4e}) is too small or invalid relative to Pi_xy_avg ({:.4e}).",
+                    dxy_val, pi_xy_avg_val
+                ));
+                outcome.fst = None;
+            }
+        } else {
+            log(LogLevel::Warning, "Dxy or Pi_xy_avg is non-finite, cannot calculate Hudson FST.");
+        }
+    } else {
+        log(LogLevel::Debug, "Dxy or Pi_xy_avg is None, cannot calculate Hudson FST.");
+    }
+
+    outcome
+}
+
+/// Calculates Hudson's FST and its components for a given pair of populations.
+/// This is the main public interface for obtaining Hudson's FST.
+/// It orchestrates the calculation of within-population diversities (π)
+/// and between-population diversity (Dxy), then computes the FST.
+///
+/// # Arguments
+/// * `pop1_context` - `PopulationContext` for the first population.
+/// * `pop2_context` - `PopulationContext` for the second population.
+///
+/// # Returns
+/// A `Result` containing `HudsonFSTOutcome`. If any underlying calculation fails
+/// or inputs are invalid (e.g., insufficient haplotypes for pi), the corresponding
+/// fields in `HudsonFSTOutcome` will be `None`.
+pub fn calculate_hudson_fst_for_pair<'a>(
+    pop1_context: &PopulationContext<'a>,
+    pop2_context: &PopulationContext<'a>,
+) -> Result<HudsonFSTOutcome, VcfError> {
+    // Basic input validation
+    if pop1_context.sequence_length != pop2_context.sequence_length {
+        return Err(VcfError::Parse(
+            "Sequence length mismatch between population contexts for Hudson FST calculation.".to_string()
+        ));
+    }
+    // A light check; deeper equality is complex and costly.
+    if pop1_context.variants.as_ptr() != pop2_context.variants.as_ptr() {
+        log(LogLevel::Debug,
+            "Variant slices might differ between population contexts for Hudson FST. Ensure they refer to the same logical data."
+        );
+    }
+
+    // 1. Calculate Pi for Pop1
+    // `calculate_pi` returns f64::NAN if <2 haplotypes or seq_length <= 0.
+    // We convert NAN to None here for consistent Option<f64> handling.
+    let pi1_raw = calculate_pi(
+        pop1_context.variants,
+        &pop1_context.haplotypes,
+        pop1_context.sequence_length,
+    );
+    let pi1_opt = if pi1_raw.is_finite() { Some(pi1_raw) } else { None };
+    if pi1_opt.is_none() && pop1_context.haplotypes.len() >=2 && pop1_context.sequence_length > 0 {
+        log(LogLevel::Warning, &format!("Pi calculation for pop {:?} resulted in non-finite value despite sufficient data.", pop1_context.id));
+    }
+
+
+    // 2. Calculate Pi for Pop2
+    let pi2_raw = calculate_pi(
+        pop2_context.variants,
+        &pop2_context.haplotypes,
+        pop2_context.sequence_length,
+    );
+    let pi2_opt = if pi2_raw.is_finite() { Some(pi2_raw) } else { None };
+    if pi2_opt.is_none() && pop2_context.haplotypes.len() >=2 && pop2_context.sequence_length > 0 {
+         log(LogLevel::Warning, &format!("Pi calculation for pop {:?} resulted in non-finite value despite sufficient data.", pop2_context.id));
+    }
+
+    // 3. Calculate Dxy between Pop1 and Pop2
+    // This function returns Result<DxyHudsonResult, VcfError>
+    let dxy_result = calculate_d_xy_hudson(pop1_context, pop2_context)?;
+
+    // 4. Compute final Hudson FST outcome
+    let outcome = compute_hudson_fst_outcome(
+        pop1_context.id.clone(),
+        pop2_context.id.clone(),
+        pi1_opt,
+        pi2_opt,
+        &dxy_result,
+    );
+
+    Ok(outcome)
+}
+
 // Calculate the effective sequence length after adjusting for allowed and masked regions
 pub fn calculate_adjusted_sequence_length(
     region_start: i64, // Start of the genomic region (1-based, inclusive)
