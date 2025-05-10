@@ -676,11 +676,18 @@ fn calculate_fst_wc_at_site_general(
             let p2 = &pop_list[j];
             let freq1 = pop_stats[p1].1;
             let freq2 = pop_stats[p2].1;
-            if (freq1 - freq2).abs() < 1e-12 {
-                pairwise_fst_map.insert(format!("{}_vs_{}", p1, p2), f64::NAN);
-                pairwise_ab_map.insert(format!("{}_vs_{}", p1, p2), (0.0, 0.0)); // Double-check
-                continue;
-            }
+            // The calculation of variance components (a_xy, b_xy) will proceed for all pairs.
+            // This allows for more accurate FST values and component storage:
+            // 1. If freq1 == freq2 at a polymorphic site (e.g., p1=0.5, p2=0.5):
+            //    - The sample variance s_squared_pair will be 0.
+            //    - calculate_variance_components will produce a small negative a_xy and a positive b_xy.
+            //    - The FST (a_xy / (a_xy + b_xy)) will be a small negative value, reflecting the estimator's behavior.
+            // 2. If freq1 == freq2 because the site is monomorphic in the pair (e.g., p1=0, p2=0):
+            //    - s_squared_pair will be 0, and pair_freq*(1-pair_freq) will be 0.
+            //    - calculate_variance_components will produce a_xy = 0 and b_xy = 0.
+            //    - The subsequent FST calculation logic will handle this 0/0 case as NaN.
+            // This means that actual variance components are calculated and stored,
+            // and FST values correctly distinguish between no differentiation (FST ~0) and undefined FST (NaN).
             let mut pair_stats = HashMap::new();
             pair_stats.insert(p1.clone(), pop_stats[p1]);
             pair_stats.insert(p2.clone(), pop_stats[p2]);
@@ -691,11 +698,39 @@ fn calculate_fst_wc_at_site_general(
             }
             let pair_freq = freq_pair_sum / (pair_sum as f64);
             let (a_xy, b_xy) = calculate_variance_components(&pair_stats, pair_freq);
-            let f_xy = if (a_xy + b_xy) > 0.0 {
-                a_xy / (a_xy + b_xy)
+            let f_xy: f64;
+
+            // Calculate pairwise FST (f_xy) using the Weir & Cockerham components a_xy and b_xy.
+            // The interpretation of FST depends on the nature of these components:
+            // 1. Monomorphic sites for the pair:
+            //    If the site is monomorphic within the combined data of the pair (i.e., pair_freq is 0 or 1),
+            //    and consequently s_squared_pair is 0, then `calculate_variance_components` will yield
+            //    a_xy = 0 and b_xy = 0. In this 0/0 scenario, FST is undefined.
+            // 2. Polymorphic sites with no differentiation:
+            //    If the site is polymorphic within the pair (pair_freq is not 0 or 1) but the allele
+            //    frequencies are identical between the two populations (freq1 == freq2), then s_squared_pair = 0.
+            //    `calculate_variance_components` will yield a small negative a_xy and a positive b_xy.
+            //    The ratio a_xy / (a_xy + b_xy) will be a small negative value. This is the direct output of the
+            //    estimator and is reported as such, interpreted as FST approximately equal to 0.
+            // 3. Differentiated polymorphic sites:
+            //    Standard calculation applies: f_xy = a_xy / (a_xy + b_xy).
+            // 4. Unstable estimates:
+            //    If (a_xy + b_xy) is zero or negative, and it's not the monomorphic (0/0) case,
+            //    the estimate is undefined.
+
+            // Heuristic to check for a_xy ≈ 0 and b_xy ≈ 0 (monomorphic case for the pair)
+            // This specifically targets the 0/0 scenario for an undefined FST.
+            if a_xy.abs() < 1e-9 && b_xy.abs() < 1e-9 {
+                f_xy = f64::NAN;
+            } else if (a_xy + b_xy) > 0.0 {
+                // Denominator is strictly positive. This covers standard differentiated cases
+                // and polymorphic undifferentiated cases (where FST will be small negative).
+                f_xy = a_xy / (a_xy + b_xy);
             } else {
-                0.0
-            };
+                // Denominator is zero or negative, but not from a_xy=0 and b_xy=0.
+                // Undefined estimate.
+                f_xy = f64::NAN;
+            }
             pairwise_fst_map.insert(format!("{}_vs_{}", p1, p2), f_xy);
             pairwise_ab_map.insert(format!("{}_vs_{}", p1, p2), (a_xy, b_xy));
         }
