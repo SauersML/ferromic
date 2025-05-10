@@ -1366,7 +1366,7 @@ pub fn process_config_entries(
     let mut fst_fasta_writer = BufWriter::new(fst_fasta_file);
     
     // Process FST data for each region
-    for (csv_row, _, fst_data) in &all_pairs {
+    for (csv_row, _, fst_data) in &all_main_csv_data_tuples {
         // Process FST data between groups 0 and 1
         if !fst_data.is_empty() {            
             // Write header for overall FST (Haplotype or Population based)
@@ -1898,8 +1898,8 @@ fn process_chromosome_entries(
         title: format!("Chromosome {} Statistics", chr),
         stats: vec![
             ("Total regions".to_string(), entries.len().to_string()),
-            ("Successful regions".to_string(), rows.len().to_string()),
-            ("Skipped/failed".to_string(), (entries.len() - rows.len()).to_string()),
+            ("Successful regions".to_string(), main_csv_tuples.len().to_string()),
+            ("Skipped/failed".to_string(), (entries.len() - main_csv_tuples.len()).to_string()),
         ],
     });
 
