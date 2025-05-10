@@ -1841,12 +1841,11 @@ fn process_chromosome_entries(
             Ok(Some((main_csv_tuple, mut hudson_outcomes_for_entry))) => {
                 main_csv_tuples.push(main_csv_tuple);
                 chromosome_hudson_fst_results.append(&mut hudson_outcomes_for_entry);
-                rows.push(row_data);
                 log(LogLevel::Info, &format!("Successfully processed region {}", region_desc));
                 
                 if entry.seqname.contains("X") || entry.seqname.contains("x") {
                     log(LogLevel::Info, &format!(
-                        "DEBUG X: ADDED chrX region {} to output rows (now {} rows)",
+                        "ADDED chrX region {} to output rows (now {} rows)",
                         region_desc, rows.len()
                     ));
                 }
