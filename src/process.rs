@@ -1527,6 +1527,58 @@ pub fn process_config_entries(
             std::fs::copy(&temp_log, std::path::Path::new(".").join(log_file))?;
         }
     }
+
+    // Write Hudson FST results if FST calculations were enabled
+    if args.enable_fst {
+        // Determine the output path for Hudson FST results.
+        // Defaults to "hudson_fst_results.tsv" if not specified by args.hudson_fst_output_file.
+        let hudson_output_filename = args.hudson_fst_output_file
+            .clone()
+            .unwrap_or_else(|| "hudson_fst_results.tsv".to_string());
+        
+        // Place the Hudson FST output file in the same directory as the main output file.
+        let hudson_output_path = if let Some(main_output_parent) = output_file.parent() {
+            main_output_parent.join(&hudson_output_filename)
+        } else {
+            Path::new(&hudson_output_filename).to_path_buf()
+        };
+
+        log(LogLevel::Info, &format!("Writing Hudson FST results to: {}", hudson_output_path.display()));
+        
+        let hudson_file = File::create(&hudson_output_path).map_err(|e| VcfError::Io(e.into()))?;
+        let mut hudson_writer = WriterBuilder::new().delimiter(b'\t').from_writer(BufWriter::new(hudson_file));
+
+        // Write Hudson FST header
+        hudson_writer.write_record(&[
+            "chr", "region_start_0based", "region_end_0based",
+            "pop1_id_type", "pop1_id_name",
+            "pop2_id_type", "pop2_id_name",
+            "Dxy", "pi_pop1", "pi_pop2", "pi_xy_avg", "FST"
+        ])?;
+
+        // Write Hudson FST data rows
+        for regional_outcome in &all_regional_hudson_outcomes {
+            let (pop1_type, pop1_name) = format_population_id(&regional_outcome.outcome.pop1_id);
+            let (pop2_type, pop2_name) = format_population_id(&regional_outcome.outcome.pop2_id);
+            hudson_writer.write_record(&[
+                regional_outcome.chr.clone(),
+                regional_outcome.region_start.to_string(), // region_start is 0-based inclusive
+                regional_outcome.region_end.to_string(),   // region_end is 0-based inclusive
+                pop1_type,
+                pop1_name,
+                pop2_type,
+                pop2_name,
+                format_optional_float(regional_outcome.outcome.d_xy),
+                format_optional_float(regional_outcome.outcome.pi_pop1),
+                format_optional_float(regional_outcome.outcome.pi_pop2),
+                format_optional_float(regional_outcome.outcome.pi_xy_avg),
+                format_optional_float(regional_outcome.outcome.fst),
+            ])?;
+        }
+        hudson_writer.flush()?;
+        log(LogLevel::Info, &format!("Successfully wrote {} Hudson FST records to {}", all_regional_hudson_outcomes.len(), hudson_output_path.display()));
+    }
+
     Ok(())
 }
 
@@ -1903,7 +1955,15 @@ fn process_single_config_entry(
     chr: &str,
     args: &Args,
     pca_storage: Option<&(Arc<Mutex<HashMap<String, Vec<Variant>>>>, Arc<Mutex<Vec<String>>>)>,
-) -> Result<Option<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, VcfError> {
+    // Arc containing the parsed population definitions from the CSV file, if provided.
+    // Key: Population Name (String), Value: List of Sample IDs (String) in that population.
+    parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>>,
+) -> Result<Option<(
+    CsvRowData, // Data for the main CSV output (W&C FST, diversity stats, etc.)
+    Vec<(i64, f64, f64, u8, bool)>, // Per-site diversity data (pos, pi, theta, group_id, is_filtered) for falsta output
+    Vec<(i64, f64, f64)>, // Per-site W&C FST data (pos, overall_wc_fst, pairwise_wc_fst_0vs1) for falsta output
+    Vec<RegionalHudsonFSTOutcome> // Hudson FST results specific to this config entry
+)>, VcfError> {
     set_stage(ProcessingStage::ConfigEntry);
     let region_desc = format!("{}:{}-{}", 
         entry.seqname, entry.interval.start, entry.interval.end);
@@ -2294,14 +2354,127 @@ fn process_single_config_entry(
         n_hap_1_f,
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
-        // Store the region-wide FST calculation results (unclamped)
-        // Use NaN if FST calculation was disabled or failed
+        // Store the region-wide W&C FST calculation results (unclamped)
         haplotype_overall_fst_wc: fst_results_filtered.as_ref().map_or(f64::NAN, |res| res.overall_fst),
         population_overall_fst_wc: fst_results_pop_filtered.as_ref().map_or(f64::NAN, |res| res.overall_fst),
-        // Keep the full population results struct if needed elsewhere, but overall value is now redundant
+        // Store the complete W&C FST results for populations (includes site-specific and pairwise)
         population_fst_wc_results: fst_results_pop_filtered.clone(),
     };
-    
+
+    let mut local_regional_hudson_outcomes: Vec<RegionalHudsonFSTOutcome> = Vec::new();
+
+    if args.enable_fst {
+        log(LogLevel::Info, &format!("Initiating Hudson FST calculations for region: {}", region_desc));
+
+        // This map is for linking sample IDs from config/CSV to their VCF column index.
+        // It maps the core sample ID (e.g., "NA12878") to its 0-based VCF column index.
+        let mut vcf_sample_id_to_index: HashMap<String, usize> = HashMap::new();
+        for (i, vcf_sample_name) in sample_names.iter().enumerate() {
+            // The key stored should be the identifier used in the config/CSV files.
+            let core_sample_id = vcf_sample_name.rsplit('_').next().unwrap_or(vcf_sample_name).to_string();
+            vcf_sample_id_to_index.insert(core_sample_id, i);
+        }
+
+        // A. Hudson FST for Haplotype Groups (0 vs. 1) using filtered samples and variants
+        let haplotypes_group_0_res = get_haplotype_indices_for_group(0, &entry.samples_filtered, &vcf_sample_id_to_index);
+        let haplotypes_group_1_res = get_haplotype_indices_for_group(1, &entry.samples_filtered, &vcf_sample_id_to_index);
+
+        if let (Ok(haplotypes_group_0), Ok(haplotypes_group_1)) = (haplotypes_group_0_res, haplotypes_group_1_res) {
+            // Check if both groups have at least two haplotypes, required for `calculate_pi`.
+            if haplotypes_group_0.len() >= 2 && haplotypes_group_1.len() >= 2 {
+                let pop0_context = PopulationContext {
+                    id: PopulationId::HaplotypeGroup(0),
+                    haplotypes: haplotypes_group_0,
+                    variants: &filtered_variants, // Using filtered variants for consistency
+                    sample_names: &sample_names,
+                    sequence_length: adjusted_sequence_length,
+                };
+                let pop1_context = PopulationContext {
+                    id: PopulationId::HaplotypeGroup(1),
+                    haplotypes: haplotypes_group_1,
+                    variants: &filtered_variants, // Using filtered variants
+                    sample_names: &sample_names,
+                    sequence_length: adjusted_sequence_length,
+                };
+
+                match stats::calculate_hudson_fst_for_pair(&pop0_context, &pop1_context) {
+                    Ok(outcome) => {
+                        local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
+                            chr: entry.seqname.clone(),
+                            region_start: entry.interval.start as i64, // 0-based inclusive
+                            region_end: entry.interval.end as i64,     // 0-based inclusive
+                            outcome,
+                        });
+                    }
+                    Err(e) => log(LogLevel::Error, &format!("Error calculating Hudson FST for haplotype groups 0 vs 1 in region {}: {}", region_desc, e)),
+                }
+            } else {
+                log(LogLevel::Warning, &format!("Skipping Hudson FST for haplotype groups 0 vs 1 in region {}: one or both groups have fewer than 2 haplotypes.", region_desc));
+            }
+        } else {
+             log(LogLevel::Error, &format!("Failed to get haplotype indices for Hudson FST (haplotype groups) in region {}.", region_desc));
+        }
+
+        // B. Hudson FST for CSV-Defined Populations using filtered samples and variants
+        if let Some(csv_populations_map_arc_ref) = &parsed_csv_populations_arc {
+            let csv_populations_map = csv_populations_map_arc_ref.as_ref(); // Dereference Arc
+
+            // Map population names to their actual haplotype lists (VCF index, Side) present in this VCF.
+            let mut population_name_to_haplotypes_map: HashMap<String, Vec<(usize, HaplotypeSide)>> = HashMap::new();
+            for pop_name in csv_populations_map.keys() {
+                let pop_haplotypes = get_haplotype_indices_for_csv_population(pop_name, csv_populations_map, &vcf_sample_id_to_index);
+                if !pop_haplotypes.is_empty() { // Only consider populations with present samples
+                    population_name_to_haplotypes_map.insert(pop_name.clone(), pop_haplotypes);
+                }
+            }
+
+            let mut valid_pop_names: Vec<String> = population_name_to_haplotypes_map.keys().cloned().collect();
+            valid_pop_names.sort(); // Ensures consistent order for generating pairs
+
+            for i in 0..valid_pop_names.len() {
+                for j in (i + 1)..valid_pop_names.len() {
+                    let pop_name_a = &valid_pop_names[i];
+                    let pop_name_b = &valid_pop_names[j];
+
+                    // These unwraps are safe because valid_pop_names comes from the map's keys.
+                    let haplotypes_pop_a = population_name_to_haplotypes_map.get(pop_name_a).unwrap();
+                    let haplotypes_pop_b = population_name_to_haplotypes_map.get(pop_name_b).unwrap();
+
+                    if haplotypes_pop_a.len() >= 2 && haplotypes_pop_b.len() >= 2 {
+                        let pop_a_context_csv = PopulationContext {
+                            id: PopulationId::Named(pop_name_a.clone()),
+                            haplotypes: haplotypes_pop_a.clone(), // Clone Vec for ownership
+                            variants: &filtered_variants,
+                            sample_names: &sample_names,
+                            sequence_length: adjusted_sequence_length,
+                        };
+                        let pop_b_context_csv = PopulationContext {
+                            id: PopulationId::Named(pop_name_b.clone()),
+                            haplotypes: haplotypes_pop_b.clone(), // Clone Vec for ownership
+                            variants: &filtered_variants,
+                            sample_names: &sample_names,
+                            sequence_length: adjusted_sequence_length,
+                        };
+
+                        match stats::calculate_hudson_fst_for_pair(&pop_a_context_csv, &pop_b_context_csv) {
+                            Ok(outcome) => {
+                                local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
+                                    chr: entry.seqname.clone(),
+                                    region_start: entry.interval.start as i64,
+                                    region_end: entry.interval.end as i64,
+                                    outcome,
+                                });
+                            }
+                            Err(e) => log(LogLevel::Error, &format!("Error calculating Hudson FST for CSV populations '{}' vs '{}' in region {}: {}", pop_name_a, pop_name_b, region_desc, e)),
+                        }
+                    } else {
+                         log(LogLevel::Warning, &format!("Skipping Hudson FST for CSV populations '{}' vs '{}' in region {}: one or both groups have fewer than 2 haplotypes.", pop_name_a, pop_name_b, region_desc));
+                    }
+                }
+            }
+        }
+    }
+        
     // Display summary of results
     display_status_box(StatusBox {
         title: format!("Results for {}", region_desc),
@@ -2379,6 +2552,7 @@ fn process_single_config_entry(
         row_data,
         per_site_diversity_records,
         per_site_fst_records,
+        local_regional_hudson_outcomes
     )))
 }
 
