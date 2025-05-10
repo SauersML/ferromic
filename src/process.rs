@@ -915,10 +915,11 @@ fn process_variants(
     )))
 }
 
-pub fn map_sample_names_to_indices(sample_names: &[String]) -> Result<HashMap<&str, usize>, VcfError> {
+pub fn map_sample_names_to_indices(sample_names: &[String]) -> Result<HashMap<String, usize>, VcfError> {
     let mut vcf_sample_id_to_index = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
-        let sample_id = name.rsplit('_').next().unwrap_or(name);
+        // Convert to String to so the HashMap owns its keys.
+        let sample_id = name.rsplit('_').next().unwrap_or(name).to_string();
         vcf_sample_id_to_index.insert(sample_id, i);
     }
     Ok(vcf_sample_id_to_index)
@@ -1051,7 +1052,7 @@ pub fn process_config_entries(
 
     // The map operation collects results per chromosome.
     // Each result is a tuple: (main_csv_data_for_this_chr, hudson_data_for_this_chr)
-    let per_chromosome_collected_results: Vec<((Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, Vec<RegionalHudsonFSTOutcome>))> = grouped
+    let per_chromosome_collected_results: Vec<(Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, Vec<RegionalHudsonFSTOutcome>)> = grouped
         .par_iter()
         .map(|(chr, chr_entries)| {
             match process_chromosome_entries(
@@ -1772,7 +1773,7 @@ fn process_chromosome_entries(
         Err(e) => {
             log(LogLevel::Error, &format!("Error finding VCF file for chr{}: {:?}", chr, e));
             finish_step_progress(&format!("Failed to find VCF for chr{}", chr));
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new())); // Return empty tuple for both main CSV data and Hudson FST results
         }
     };
     
@@ -1789,7 +1790,7 @@ fn process_chromosome_entries(
             Ok(file) => file,
             Err(e) => {
                 log(LogLevel::Error, &format!("Error finding VCF file for chr{} for PCA: {:?}", chr, e));
-                return Ok(Vec::new());
+                return Ok((Vec::new(), Vec::new())); // Return empty tuple for both main CSV data and Hudson FST results
             }
         };
         
@@ -2470,7 +2471,7 @@ fn process_single_config_entry(
                             sequence_length: adjusted_sequence_length,
                         };
 
-                        match stats::calculate_hudson_fst_for_pair(&pop_a_context_csv, &pop_b_context_csv) {
+                        match calculate_hudson_fst_for_pair(&pop_a_context_csv, &pop_b_context_csv) {
                             Ok(outcome) => {
                                 local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
                                     chr: entry.seqname.clone(),
