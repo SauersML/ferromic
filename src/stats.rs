@@ -249,14 +249,20 @@ pub struct FstWcResults {
 /// Calculates Weir & Cockerham FST between predefined haplotype groups (e.g., 0 vs 1) for a genomic region.
 ///
 /// This function implements the Weir & Cockerham (1984) estimator for FST.
-/// It first calculates per-site variance components (a_i, b_i) and FST estimates.
+///
+/// Observed within-haplotype heterozygosity (h_bar in W&C's notation) is zero. This results in the variance 
+/// component 'c' being zero. The FST is then estimated as a / (a + b), using the
+/// 'a' and 'b' components derived under this h_bar=0 condition.
+///
+/// The function first calculates per-site variance components (a_i, b_i) and FST estimates.
 /// Then, it aggregates these components across all sites in the region to compute
-/// an overall FST estimate for the region, as well as overall pairwise FST estimates.
+/// an overall FST estimate for the region (using W&C eq. 10, by summing a_i and (a_i + b_i) separately), 
+/// as well as overall pairwise FST estimates using the same aggregation principle.
 ///
 /// # Arguments
 /// * `variants`: A slice of `Variant` structs containing genotype data for all samples in the region.
 /// * `sample_names`: A slice of `String`s, representing the names of all samples.
-/// * `sample_to_group_map`: A `HashMap` mapping sample names to their (left, right) haplotype group assignments (e.g., `u8` values like 0 or 1).
+/// * `sample_to_group_map`: A `HashMap` mapping sample names to their (left, right) haplotype group assignments.
 /// * `region`: A `QueryRegion` struct defining the genomic start and end (0-based, inclusive) to analyze.
 ///
 /// # Returns
