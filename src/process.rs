@@ -1846,15 +1846,20 @@ fn process_chromosome_entries(
         );
         
         match result {
-            Ok(Some((main_csv_tuple, mut hudson_outcomes_for_entry))) => {
-                main_csv_tuples.push(main_csv_tuple);
+            // A 4-element tuple from process_single_config_entry
+            Ok(Some((main_csv_tuple_content, per_site_diversity_data, per_site_wc_fst_data, mut hudson_outcomes_for_entry))) => {
+                // The main_csv_tuple_content is CsvRowData
+                // The per_site_diversity_data is Vec<(i64, f64, f64, u8, bool)>
+                // The per_site_wc_fst_data is Vec<(i64, f64, f64)>
+                // These two Vecs are for the .falsta output files and are aggregated in process_config_entries
+                main_csv_tuples.push((main_csv_tuple_content, per_site_diversity_data, per_site_wc_fst_data));
                 chromosome_hudson_fst_results.append(&mut hudson_outcomes_for_entry);
                 log(LogLevel::Info, &format!("Successfully processed region {}", region_desc));
                 
                 if entry.seqname.contains("X") || entry.seqname.contains("x") {
                     log(LogLevel::Info, &format!(
-                        "ADDED chrX region {} to output rows (now {} rows)",
-                        region_desc, rows.len()
+                        "ADDED chrX region {} to output rows (now {} main CSV tuples)",
+                        region_desc, main_csv_tuples.len()
                     ));
                 }
             }
