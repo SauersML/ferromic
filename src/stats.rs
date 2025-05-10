@@ -45,7 +45,7 @@ pub struct SiteFST {
 
 /// FST results for a genomic region
 #[derive(Debug, Clone)]
-pub struct FSTResults {
+pub struct FST_WC_Results {
     /// Overall FST value for the region
     pub overall_fst: f64,
     
@@ -132,7 +132,7 @@ pub fn calculate_fst_between_groups(
     sample_names: &[String],
     sample_to_group_map: &HashMap<String, (u8, u8)>,
     region: QueryRegion,
-) -> FSTResults {
+) -> FST_WC_Results {
     // Create a more descriptive progress spinner
     let spinner = create_spinner(&format!(
         "Calculating FST between haplotype groups for region {}-{} of length {}",
@@ -238,7 +238,7 @@ pub fn calculate_fst_between_groups(
     spinner.finish_and_clear();
     
     // Return complete results
-    FSTResults {
+    FST_WC_Results {
         overall_fst,
         pairwise_fst,
         pairwise_variance_components: HashMap::new(),
@@ -262,7 +262,7 @@ pub fn calculate_fst_from_csv(
     sample_names: &[String],
     csv_path: &Path,
     region: QueryRegion,
-) -> Result<FSTResults, VcfError> {
+) -> Result<FST_WC_Results, VcfError> {
     // The code that calls calculate_fst_at_site_by_population now expects
     // a 5-tuple from that function. We handle the new pairwise (a,b) map when building SiteFST.
 
@@ -362,7 +362,7 @@ pub fn calculate_fst_from_csv(
     spinner.finish_and_clear();
     
     // Return complete results
-    Ok(FSTResults {
+    Ok(FST_WC_Results {
         overall_fst,
         pairwise_fst,
         pairwise_variance_components: HashMap::new(),
