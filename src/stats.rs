@@ -21,7 +21,7 @@ pub struct SiteDiversity {
 
 /// FST results for a single site (Weir & Cockerham method)
 #[derive(Debug, Clone)]
-pub struct SiteFST_WC {
+pub struct SiteFstWc {
     /// Position (1-based coordinate)
     pub position: i64,
 
