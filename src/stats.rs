@@ -103,7 +103,7 @@ pub struct HudsonFSTOutcome {
 
 /// FST results for a genomic region
 #[derive(Debug, Clone)]
-pub struct FST_WC_Results {
+pub struct FstWcResults {
     /// Overall FST value for the region
     pub overall_fst: f64,
     
@@ -190,7 +190,7 @@ pub fn calculate_fst_wc_haplotype_groups(
     sample_names: &[String],
     sample_to_group_map: &HashMap<String, (u8, u8)>,
     region: QueryRegion,
-) -> FST_WC_Results {
+) -> FstWcResults {
     // Create a more descriptive progress spinner
     let spinner = create_spinner(&format!(
         "Calculating FST between haplotype groups for region {}-{} of length {}",
@@ -296,7 +296,7 @@ pub fn calculate_fst_wc_haplotype_groups(
     spinner.finish_and_clear();
     
     // Return complete results
-    FST_WC_Results {
+    FstWcResults {
         overall_fst,
         pairwise_fst,
         pairwise_variance_components: HashMap::new(),
@@ -320,7 +320,7 @@ pub fn calculate_fst_wc_csv_populations(
     sample_names: &[String],
     csv_path: &Path,
     region: QueryRegion,
-) -> Result<FST_WC_Results, VcfError> {
+) -> Result<FstWcResults, VcfError> {
     // The code that calls calculate_fst_wc_at_site_by_population now expects
     // a 5-tuple from that function. We handle the new pairwise (a,b) map when building SiteFstWc.
 
@@ -420,7 +420,7 @@ pub fn calculate_fst_wc_csv_populations(
     spinner.finish_and_clear();
     
     // Return complete results
-    Ok(FST_WC_Results {
+    Ok(FstWcResults {
         overall_fst,
         pairwise_fst,
         pairwise_variance_components: HashMap::new(),
