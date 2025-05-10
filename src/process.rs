@@ -1142,7 +1142,8 @@ pub fn process_config_entries(
     }
 
     // Populate our all_columns map with the data from each region–group combo.
-    for (csv_row, per_site_diversity_vec, _fst_data) in &all_pairs {
+    // Data for per-site diversity comes from the second element of the tuple in all_main_csv_data_tuples
+    for (csv_row, per_site_diversity_vec, _fst_data_wc) in &all_main_csv_data_tuples {
         // We'll produce 4 columns for each region+group combo.
         // We want to fill these columns for each entry in per_site_diversity_vec:
         // If is_filtered=false, we fill the "unfiltered_pi_" and "unfiltered_theta_" columns.
