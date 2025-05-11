@@ -2804,6 +2804,14 @@ fn format_optional_float(val_opt: Option<f64>) -> String {
     }
 }
 
+/// Formats an Option<usize> to a string, representing None as "NA".
+fn format_optional_usize(val_opt: Option<usize>) -> String {
+    match val_opt {
+        Some(u) => u.to_string(),
+        None => "NA".to_string(),
+    }
+}
+
 /// Retrieves VCF sample indices and HaplotypeSides for samples belonging to a specified population
 /// as defined in a population definition CSV file.
 ///
