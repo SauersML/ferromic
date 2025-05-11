@@ -1339,8 +1339,17 @@ fn calculate_overall_fst_wc(site_fst_values: &[SiteFstWc]) -> (FstEstimate, Hash
 
 /// Calculates Dxy (average number of pairwise differences per site between two populations)
 /// for Hudson's FST, as defined by Hudson et al. (1992) and elaborated by
-/// de Jong et al. (2024). Dxy is the mean number of differences between sequences
+/// de Jong et al. (2024). Dxy is the mean number of differences per site between sequences
 /// sampled from two different populations.
+///
+/// The calculation sums the absolute number of differing sites between haplotype pairs
+/// based only on the variants provided in the `popX_context.variants` slice. This sum
+/// is then normalized by `(total_inter_population_pairs * popX_context.sequence_length)`.
+/// It is crucial that the `popX_context.variants` slice accurately represents all and only
+/// the variable sites within the genomic region whose total callable length is given by
+/// `popX_context.sequence_length`. Monomorphic sites within this `sequence_length`
+/// contribute zero to the sum of differences but are correctly accounted for by the
+/// normalization factor `sequence_length`. A similar principle applies to `calculate_pi`.
 ///
 /// This implementation iterates over all possible inter-population pairs of haplotypes,
 /// sums the raw nucleotide differences for each pair across all provided variants,
