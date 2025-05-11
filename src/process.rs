@@ -2448,17 +2448,17 @@ fn process_single_config_entry(
             if haplotypes_group_0.len() >= 2 && haplotypes_group_1.len() >= 2 {
                 let pop0_context = PopulationContext {
                     id: PopulationId::HaplotypeGroup(0),
-                    haplotypes: haplotypes_group_0,
-                    variants: &filtered_variants, // Using filtered variants for consistency
-                    sample_names: &sample_names,
-                    sequence_length: adjusted_sequence_length,
+                    haplotypes: haplotypes_group_0,
+                    variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
+                    sample_names: &sample_names,
+                    sequence_length: adjusted_sequence_length,
                 };
                 let pop1_context = PopulationContext {
                     id: PopulationId::HaplotypeGroup(1),
-                    haplotypes: haplotypes_group_1,
-                    variants: &filtered_variants, // Using filtered variants
-                    sample_names: &sample_names,
-                    sequence_length: adjusted_sequence_length,
+                    haplotypes: haplotypes_group_1,
+                    variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
+                    sample_names: &sample_names,
+                    sequence_length: adjusted_sequence_length,
                 };
 
                 match calculate_hudson_fst_for_pair(&pop0_context, &pop1_context) {
@@ -2507,17 +2507,17 @@ fn process_single_config_entry(
                     if haplotypes_pop_a.len() >= 2 && haplotypes_pop_b.len() >= 2 {
                         let pop_a_context_csv = PopulationContext {
                             id: PopulationId::Named(pop_name_a.clone()),
-                            haplotypes: haplotypes_pop_a.clone(), // Clone Vec for ownership
-                            variants: &filtered_variants,
-                            sample_names: &sample_names,
-                            sequence_length: adjusted_sequence_length,
+                            haplotypes: haplotypes_pop_a.clone(), // Clone Vec for ownership
+                            variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
+                            sample_names: &sample_names,
+                            sequence_length: adjusted_sequence_length,
                         };
                         let pop_b_context_csv = PopulationContext {
                             id: PopulationId::Named(pop_name_b.clone()),
-                            haplotypes: haplotypes_pop_b.clone(), // Clone Vec for ownership
-                            variants: &filtered_variants,
-                            sample_names: &sample_names,
-                            sequence_length: adjusted_sequence_length,
+                            haplotypes: haplotypes_pop_b.clone(), // Clone Vec for ownership
+                            variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
+                            sample_names: &sample_names,
+                            sequence_length: adjusted_sequence_length,
                         };
 
                         match calculate_hudson_fst_for_pair(&pop_a_context_csv, &pop_b_context_csv) {
