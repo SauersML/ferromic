@@ -63,6 +63,7 @@ DATA_QUALITY_DISCREPANCY_THRESHOLD = 0.20
 MAX_INDIVIDUAL_WARNINGS_PER_CATEGORY = 10 
 MAX_EXAMPLES_OF_OUT_OF_SPEC_LOGGING = 5 
 
+FST_TEST_SUMMARIES = []
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -345,8 +346,11 @@ def _draw_boxplots(ax, valid_series, valid_pos, valid_colors):
 
 
 def create_comparison_plot(categorized_data, analysis_column_name, plot_type):
-    """Creates and saves a comparison plot (violin or box)."""
-    fig, ax = plt.subplots(figsize=(7, 7)) # Create fig, ax here
+    global FST_TEST_SUMMARIES
+    fig, ax = plt.subplots(figsize=(7, 7))
+
+    output_filename = ""
+    plot_specific_draw_func = None
     
     output_filename = ""
     plot_specific_draw_func = None
@@ -367,23 +371,61 @@ def create_comparison_plot(categorized_data, analysis_column_name, plot_type):
 
         # Statistical Test (Mann-Whitney U) - only for specified FST columns AND if it's a violin plot
         if analysis_column_name in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT and plot_type == 'violin':
-            p_val_text = "Test N/A (logic error)" 
+            p_val_text = "Test N/A (logic error)" # Initial default for p-value text
             rec_key = INVERSION_CATEGORY_MAPPING.get('Recurrent')
             sing_key = INVERSION_CATEGORY_MAPPING.get('Single-event')
-            # keys exist before trying to access data, though they should with current setup
+
+            # Initialize data and stats for summary storage
+            data_r, data_s = [], [] # Default to empty lists
+            recurrent_n, single_event_n = 0, 0
+            recurrent_mean, recurrent_median = np.nan, np.nan
+            single_event_mean, single_event_median = np.nan, np.nan
+
             if rec_key and sing_key:
+                # Attempt to get data for recurrent and single-event categories
                 data_r, data_s = categorized_data.get(rec_key, []), categorized_data.get(sing_key, [])
-                if data_r and data_s: # Check if lists are non-empty
-                    if np.var(data_r)==0 and np.var(data_s)==0 and np.mean(data_r)==np.mean(data_s): 
+                recurrent_n = len(data_r)
+                single_event_n = len(data_s)
+
+                # Calculate mean and median if data is available
+                if recurrent_n > 0:
+                    recurrent_mean = np.mean(data_r)
+                    recurrent_median = np.median(data_r)
+                if single_event_n > 0:
+                    single_event_mean = np.mean(data_s)
+                    single_event_median = np.median(data_s)
+
+                # Perform Mann-Whitney U test if both groups have data
+                if data_r and data_s: # Check if lists are non-empty for MWU test
+                    if np.var(data_r) == 0 and np.var(data_s) == 0 and np.mean(data_r) == np.mean(data_s): 
                         p_val_text = "p = 1.0 (Identical)"
                     else:
                         try:
                             stat, p_val = mannwhitneyu(data_r, data_s, alternative='two-sided')
                             p_val_text = "p < 0.001" if p_val < 0.001 else f"p = {p_val:.3f}"
-                            logger.info(f"Mann-Whitney U for '{analysis_column_name}': W={stat:.1f}, {p_val_text} (N={len(data_r)} vs N={len(data_s)})")
-                        except ValueError as e: p_val_text = "Test Error"; logger.warning(f"MWU test failed for '{analysis_column_name}': {e}")
-                else: p_val_text = "Test N/A (groups empty)"
-            else: p_val_text = "Test N/A (category key missing)" # Should not happen
+                            logger.info(f"Mann-Whitney U for '{analysis_column_name}': W={stat:.1f}, {p_val_text} (N={recurrent_n} vs N={single_event_n})")
+                        except ValueError as e: 
+                            p_val_text = "Test Error"
+                            logger.warning(f"MWU test failed for '{analysis_column_name}': {e}")
+                else: # One or both groups empty, but category keys were valid
+                    p_val_text = "Test N/A (groups empty)"
+            else: # rec_key or sing_key (or both) were invalid
+                p_val_text = "Test N/A (category key missing)"
+            
+            # Store summary statistics for this FST test in the global list
+            current_fst_summary = {
+                'column_name': analysis_column_name,
+                'recurrent_N': recurrent_n,
+                'recurrent_mean': recurrent_mean,
+                'recurrent_median': recurrent_median,
+                'single_event_N': single_event_n,
+                'single_event_mean': single_event_mean,
+                'single_event_median': single_event_median,
+                'p_value_text': p_val_text # This captures the outcome of p-value calculation and any error/NA states.
+            }
+            FST_TEST_SUMMARIES.append(current_fst_summary)
+            
+            # Display p-value on the plot
             ax.text(0.04,0.96,f"Mann-Whitney U\n{p_val_text}",transform=ax.transAxes,fontsize=10,va='top',ha='left',
                     bbox=dict(boxstyle='round,pad=0.3',fc='ghostwhite',alpha=0.7,ec='lightgrey'))
         
@@ -469,6 +511,19 @@ def main():
 
     final_sup_summary = global_warning_tracker.get_suppressed_summary()
     if final_sup_summary: logger.info(f"\n--- Summary of Suppressed Warnings ---\n{final_sup_summary}")
+
+    # Print summary of FST test statistics collected during the analysis
+    if FST_TEST_SUMMARIES:
+        logger.info("\n====== Summary Statistics for FST Tests (Recurrent vs Single-event) ======")
+        for summary in FST_TEST_SUMMARIES:
+            logger.info(f"  --- FST Metric: {summary['column_name']} ---")
+            # Format NaN values as 'nan' which is standard; use .4f for float precision.
+            logger.info(f"    Recurrent:     N={summary['recurrent_N']}, Mean={summary['recurrent_mean']:.4f}, Median={summary['recurrent_median']:.4f}")
+            logger.info(f"    Single-event:  N={summary['single_event_N']}, Mean={summary['single_event_mean']:.4f}, Median={summary['single_event_median']:.4f}")
+            logger.info(f"    Mann-Whitney U: {summary['p_value_text']}") # p_value_text already contains formatted string or error message
+    else:
+        logger.info("\n====== No FST Test Summary Statistics to display (no FST tests were run or no data was available for them) ======")
+    
     logger.info(f"====== Full Analysis Script completed in {time.time()-overall_start:.2f}s ======")
 
 if __name__ == "__main__":
