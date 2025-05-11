@@ -531,12 +531,12 @@ pub fn prepare_to_write_cds(
                 // For positive strand: first segment start to last segment end
                 let first_seg = cds.segments.first().unwrap();
                 let last_seg = cds.segments.last().unwrap();
-                (first_seg.start_1based_inclusive(), last_seg.end_1based_inclusive())
+                (first_seg.start_1based_inclusive(), last_seg.get_1based_inclusive_end_coord())
             } else {
                 // For negative strand: last segment start to first segment end
                 let first_seg = cds.segments.first().unwrap();
                 let last_seg = cds.segments.last().unwrap();
-                (last_seg.start_1based_inclusive(), first_seg.end_1based_inclusive())
+                (last_seg.start_1based_inclusive(), first_seg.get_1based_inclusive_end_coord())
             }
         };
         
@@ -560,11 +560,11 @@ pub fn prepare_to_write_cds(
          * 
          * 1. For '+' strand transcripts:
          *    - cds_start = first segment's start_1based_inclusive()
-         *    - cds_end = last segment's end_1based_inclusive()
+         *    - cds_end = last segment's get_1based_inclusive_end_coord()
          *    
          * 2. For '-' strand transcripts:
          *    - cds_start = last segment's start_1based_inclusive()
-         *    - cds_end = first segment's end_1based_inclusive()
+         *    - cds_end = first segment's get_1based_inclusive_end_coord()
          * 
          * COORDINATES ARE 1-BASED:
          * ----------------------------------
