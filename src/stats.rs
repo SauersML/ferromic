@@ -1035,9 +1035,14 @@ fn calculate_fst_wc_at_site_general(
 
 /// Calculates Weir & Cockerham (1984) variance components 'a' (among-population)
 /// and 'b' (between effective individuals/haplotypes within populations) for a set of subpopulations.
-/// For haplotype data, observed heterozygosity (h_bar in W&C) is 0, leading to
-/// their variance component 'c' being 0 (W&C eq. 4). The 'a' and 'b' components
-/// implemented here are derived from W&C general equations (2) and (3) under this h_bar=0 condition.
+///
+/// These components are derived from Weir & Cockerham (equations 2 & 3)
+/// under the specific assumption that the average observed heterozygosity `h_bar` (using W&C's notation
+/// for heterozygosity of the allele under study) is zero. This assumption is appropriate for
+/// haplotype-level data where each haplotype is treated as a haploid entity at each site,
+/// meaning it carries a single allele and thus exhibits no heterozygosity itself.
+/// This simplification results in W&C's variance component `c` (related to within-individual variance)
+/// also being zero (their eq. 4).
 ///
 /// # Arguments
 /// * `pop_stats`: A `HashMap` mapping population identifiers (String) to tuples of
