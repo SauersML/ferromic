@@ -391,7 +391,7 @@ pub fn calculate_fst_wc_haplotype_groups(
         calculate_overall_fst_wc(&site_fst_values);
     
     let defined_positive_fst_sites = site_fst_values.iter()
-        .filter(|site| matches!(site.overall_fst, FstEstimate::Calculable(v) if v.is_finite() && v > 0.0))
+        .filter(|site| matches!(site.overall_fst, FstEstimate::Calculable { value, .. } if value.is_finite() && value > 0.0))
         .count();
     
     log(LogLevel::Info, &format!(
@@ -541,7 +541,7 @@ pub fn calculate_fst_wc_csv_populations(
         calculate_overall_fst_wc(&site_fst_values);
     
     let defined_positive_fst_sites = site_fst_values.iter()
-        .filter(|site| matches!(site.overall_fst, FstEstimate::Calculable(v) if v.is_finite() && v > 0.0))
+        .filter(|site| matches!(site.overall_fst, FstEstimate::Calculable { value, .. } if value.is_finite() && value > 0.0))
         .count();
     
     let population_count = population_assignments.keys().count();
