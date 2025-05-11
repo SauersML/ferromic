@@ -345,10 +345,7 @@ pub fn calculate_fst_wc_haplotype_groups(
             });
         } else {
             // Site is not in variant_map, thus considered globally monomorphic for this region.
-            // FST is undefined because variance components a and b are zero.
-            let mut site_pairwise_fst = HashMap::new();
-            site_pairwise_fst.insert("0_vs_1".to_string(), FstEstimate::SummedVariancesNonPositive);
-
+            // For monomorphic sites, FST is NoInterPopulationVariance as components a and b are zero.
             let mut actual_pop_sizes = HashMap::new();
             let mut group_counts: HashMap<String, usize> = HashMap::new();
             for group_id_str in haplotype_to_group.values() {
@@ -357,31 +354,36 @@ pub fn calculate_fst_wc_haplotype_groups(
             actual_pop_sizes.insert("0".to_string(), *group_counts.get("0").unwrap_or(&0));
             actual_pop_sizes.insert("1".to_string(), *group_counts.get("1").unwrap_or(&0));
             
-            let site_is_monomorphic_estimate = FstEstimate::NoInterPopulationVariance {
+            let site_is_monomorphic_overall_estimate = FstEstimate::NoInterPopulationVariance {
                 sum_a: 0.0,
                 sum_b: 0.0,
-                sites_evaluated: 1, // This one site was evaluated as monomorphic
+                sites_evaluated: 1, // This one site was evaluated (by absence) as monomorphic
             };
-            // For monomorphic sites, pairwise FSTs are also NoInterPopulationVariance
-            // if the pair of populations exists.
+            
             let mut populated_pairwise_fst = HashMap::new();
             let mut populated_pairwise_var_comps = HashMap::new();
-            if actual_pop_sizes.get("0").unwrap_or(&0) > &0 && actual_pop_sizes.get("1").unwrap_or(&0) > &0 {
-                 populated_pairwise_fst.insert("0_vs_1".to_string(), site_is_monomorphic_estimate);
+            // For haplotype groups, the primary pair is "0_vs_1".
+            // If both groups have members, their pairwise FST is also NoInterPopulationVariance.
+            if actual_pop_sizes.get("0").map_or(false, |&c| c > 0) && actual_pop_sizes.get("1").map_or(false, |&c| c > 0) {
+                 let site_is_monomorphic_pairwise_estimate = FstEstimate::NoInterPopulationVariance {
+                    sum_a: 0.0,
+                    sum_b: 0.0,
+                    sites_evaluated: 1, // This one site evaluated for this pair
+                 };
+                 populated_pairwise_fst.insert("0_vs_1".to_string(), site_is_monomorphic_pairwise_estimate);
+                 // Pairwise variance components for a monomorphic site are also (0.0, 0.0).
                  populated_pairwise_var_comps.insert("0_vs_1".to_string(), (0.0, 0.0));
             }
 
-
             site_fst_values.push(SiteFstWc {
                 position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: site_is_monomorphic_estimate,
+                overall_fst: site_is_monomorphic_overall_estimate,
                 pairwise_fst: populated_pairwise_fst,
-                variance_components: (0.0, 0.0), // No variance components for monomorphic site
+                variance_components: (0.0, 0.0), // Overall a, b for this monomorphic site are 0.
                 population_sizes: actual_pop_sizes,
                 pairwise_variance_components: populated_pairwise_var_comps,
             });
         }
-    }
     
     finish_step_progress("Completed per-site FST calculations for haplotype groups");
     
