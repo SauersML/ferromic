@@ -401,9 +401,17 @@ impl QueryRegion {
         pos >= self.start && pos <= self.end
     }
 
-    /// Returns the number of positions in this inclusive range
+    /// Returns the number of positions in this 0-based inclusive range [start..end].
     pub fn len(&self) -> i64 {
-        self.end - self.start + 1
+        // self.start and self.end are 0-based inclusive.
+        // To calculate length using ZeroBasedHalfOpen, convert to 0-based half-open [start, end+1).
+        // The length of [S0, E0) is E0 - S0.
+        // So, for [self.start, self.end+1), the length is (self.end + 1) - self.start.
+        if self.start > self.end { // Catches invalid ranges where start is after end.
+            0 
+        } else {
+            ZeroBasedHalfOpen::from_0based_inclusive(self.start, self.end).len() as i64
+        }
     }
 }
 
@@ -2610,8 +2618,8 @@ fn process_single_config_entry(
                             Ok(outcome) => {
                                 local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
                                     chr: entry.seqname.clone(),
-                                    region_start: entry.interval.start as i64,
-                                    region_end: entry.interval.get_0based_inclusive_end_coord(),
+                                    region_start: entry.interval.start as i64, // entry.interval.start is 0-based inclusive start
+                                    region_end: entry.interval.get_0based_inclusive_end_coord(), // get_0based_inclusive_end_coord provides the 0-based inclusive end
                                     outcome,
                                 });
                             }
