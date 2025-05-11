@@ -1282,18 +1282,6 @@ pub fn process_config_entries(
                     );
                     continue;
                 }
-            } else {
-                let pi_col = build_col_name("unfiltered_pi_", csv_row, group_id);
-                let theta_col = build_col_name("unfiltered_theta_", csv_row, group_id);
-
-                all_columns
-                    .entry(pi_col)
-                    .or_insert_with(BTreeMap::new)
-                    .insert(rel_pos as usize, pi_val);
-                all_columns
-                    .entry(theta_col)
-                    .or_insert_with(BTreeMap::new)
-                    .insert(rel_pos as usize, theta_val);
             }
         }
     }
