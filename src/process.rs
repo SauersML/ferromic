@@ -2054,13 +2054,12 @@ fn process_single_config_entry(
     let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
         let spinner = create_spinner("Calculating FST statistics");
     
-        // Define the region as a QueryRegion (zero-based inclusive)
-        let region = QueryRegion {
-            start: entry.interval.start as i64,
-            end: entry.interval.end as i64,
-        };
-
-        // The QueryRegion from ConfigEntry.interval (a ZeroBasedHalfOpen which is 0-based inclusive start, 0-based exclusive end) is incorrect?
+        // Define the FST analysis region.
+        // entry.interval is ZeroBasedHalfOpen [start, end), meaning 0-based inclusive start and 0-based exclusive end.
+        // QueryRegion for FST calculations requires a 0-based inclusive start and 0-based inclusive end.
+        // Convert entry.interval to ZeroBasedInclusive, then to QueryRegion.
+        let fst_query_region_zbi = entry.interval.to_zero_based_inclusive();
+        let fst_query_region: QueryRegion = fst_query_region_zbi.into();
         
         // FST between haplotype groups (0 vs 1)
         log(LogLevel::Info, "Calculating FST between haplotype groups (0 vs 1)");
@@ -2068,7 +2067,7 @@ fn process_single_config_entry(
             &filtered_variants,
             &sample_names,
             &entry.samples_filtered,
-            region
+            fst_query_region
         );
         
         // FST between population groups if CSV is provided
@@ -2078,7 +2077,7 @@ fn process_single_config_entry(
                 &filtered_variants,
                 &sample_names,
                 Path::new(pop_csv),
-                region
+                fst_query_region
             ) {
                 Ok(results) => {
                     // Log successful population FST calculation
