@@ -746,16 +746,27 @@ fn process_variants(
     // Calculate diversity statistics
     update_step_progress(2, "Calculating diversity statistics");
     
-    // Define the region as a ZeroBasedHalfOpen interval for length calculation
-    let region = ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end);
+    // Define the precise QueryRegion for per-site diversity calculation,
+    // matching the original entry.interval.
+    // region_start is entry.interval.start (0-based inclusive)
+    // region_end is entry.interval.end (0-based exclusive)
+    let current_entry_interval_zbh = ZeroBasedHalfOpen {
+        start: region_start as usize, // region_start is 0-based inclusive
+        end: region_end as usize,     // region_end is 0-based exclusive
+    };
+    let query_region_for_diversity = QueryRegion::from(current_entry_interval_zbh.to_zero_based_inclusive());
 
-    let final_length = adjusted_sequence_length.unwrap_or(region.len() as i64);
-    let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, final_length);
-    let final_pi = calculate_pi(&variants_in_region, &group_haps, final_length);
+    // The 'final_length' for overall theta/pi should also be based on the precise entry.interval
+    // 'adjusted_sequence_length' is already calculated based on entry.interval and passed in.
+    // If 'adjusted_sequence_length' is None, it means we use the raw length of entry.interval.
+    let length_for_overall_stats = adjusted_sequence_length.unwrap_or(current_entry_interval_zbh.len() as i64);
+
+    let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, length_for_overall_stats);
+    let final_pi = calculate_pi(&variants_in_region, &group_haps, length_for_overall_stats);
     
     log(LogLevel::Info, &format!(
-        "Group {} ({}): θ={:.6}, π={:.6}, with {} segregating sites across {} haplotypes",
-        haplotype_group, group_type, final_theta, final_pi, region_segsites, region_hap_count
+        "Group {} ({}): θ={:.6}, π={:.6}, with {} segregating sites ({} haplotypes, length {}bp)",
+        haplotype_group, group_type, final_theta, final_pi, region_segsites, region_hap_count, length_for_overall_stats
     ));
 
     // Step 4: Process transcripts for this region
@@ -908,10 +919,9 @@ fn process_variants(
 
     // Calculate per-site diversity
     let spinner = create_spinner("Calculating per-site diversity");
-    // Convert from 1-based inclusive to QueryRegion using type conversions
-    let region_zero_based = ZeroBasedHalfOpen::from_1based_inclusive(region_start, region_end)
-        .to_zero_based_inclusive();
-    let site_diversities = calculate_per_site_diversity(variants, &group_haps, region_zero_based.into());
+    // query_region_for_diversity was defined earlier based on entry.interval.start and entry.interval.end
+    // to correctly represent the 0-based inclusive range [entry.interval.start, entry.interval.end - 1].
+    let site_diversities = calculate_per_site_diversity(variants, &group_haps, query_region_for_diversity);
     spinner.finish_and_clear();
     log(LogLevel::Info, &format!(
         "Calculated diversity for {} sites",
@@ -2509,8 +2519,9 @@ fn process_single_config_entry(
 
     let row_data = CsvRowData {
         seqname: entry.seqname.clone(),
-        region_start: entry.interval.start as i64, // 0-based inclusive start
-        region_end: entry.interval.get_0based_inclusive_end_coord(), // 0-based inclusive end
+        // Populate with 1-based inclusive coordinates for CSV output, using methods from ZeroBasedHalfOpen
+        region_start: entry.interval.start_1based_inclusive(), // 1-based inclusive start
+        region_end: entry.interval.get_1based_inclusive_end_coord(), // 1-based inclusive end
         seq_len_0: sequence_length,
         seq_len_1: sequence_length,
         seq_len_adj_0: adjusted_sequence_length,
