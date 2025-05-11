@@ -2018,7 +2018,7 @@ fn process_single_config_entry(
     
     finish_step_progress(&format!(
         "Extended region: {}:{}-{}", 
-        chr, extended_region.start_1based_inclusive(), extended_region.end_1based_inclusive()
+        chr, extended_region.start_1based_inclusive(), extended_region.get_1based_inclusive_end_coord()
     ));
 
     let seqinfo_storage_unfiltered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
