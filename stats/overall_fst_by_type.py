@@ -31,13 +31,12 @@ ANALYSIS_COLUMNS = [
     'hudson_pi_hap_group_0',
     'hudson_pi_hap_group_1',
     'hudson_pi_avg_hap_group_0v1',
-    'inversion_freq_filter', # New column for inversion frequency
-    '0_num_hap_filter',      # New column for non-inverted haplotype count
-    '1_num_hap_filter'       # New column for inverted haplotype count
+    'inversion_freq_filter',
+    '0_num_hap_filter',
+    '1_num_hap_filter'
 ]
 
 # Columns for which to perform statistical tests (Recurrent vs Single-event)
-# These will also be the FST violin plots that are displayed.
 FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT = [
     'haplotype_overall_fst_wc',
     'hudson_fst_hap_group_0v1'
@@ -45,21 +44,19 @@ FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT = [
 
 # Additional columns for which to generate box plots
 OTHER_COLUMNS_FOR_BOX_PLOT = [
-    'haplotype_num_informative_sites_wc', # Basic count/diversity indicator
-    'hudson_dxy_hap_group_0v1',           # Absolute divergence
-    'hudson_pi_avg_hap_group_0v1',        # Average internal diversity
-    'haplotype_within_pop_variance_wc'    # Variance component
+    'haplotype_num_informative_sites_wc',
+    'hudson_dxy_hap_group_0v1',
+    'hudson_pi_avg_hap_group_0v1',
+    'haplotype_within_pop_variance_wc'
 ]
 
-# Combine for the master list of columns that will have some plot generated
 COLUMNS_FOR_PLOTTING = FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT + OTHER_COLUMNS_FOR_BOX_PLOT
 
-# New columns for scatterplot analysis
 FST_WC_COL = 'haplotype_overall_fst_wc'
 FST_HUDSON_COL = 'hudson_fst_hap_group_0v1'
 INV_FREQ_COL = 'inversion_freq_filter'
-N_HAP_0_COL = '0_num_hap_filter'  # Non-inverted (standard) haplotypes
-N_HAP_1_COL = '1_num_hap_filter'  # Inverted haplotypes
+N_HAP_0_COL = '0_num_hap_filter'
+N_HAP_1_COL = '1_num_hap_filter'
 
 SCATTER_PLOT_CONFIG = [
     {'fst_col': FST_WC_COL, 'attr_col': INV_FREQ_COL, 'attr_name': 'Inversion Allele Frequency'},
@@ -69,7 +66,6 @@ SCATTER_PLOT_CONFIG = [
     {'fst_col': FST_WC_COL, 'attr_col': N_HAP_0_COL, 'attr_name': 'N Non-Inverted Haplotypes'},
     {'fst_col': FST_HUDSON_COL, 'attr_col': N_HAP_0_COL, 'attr_name': 'N Non-Inverted Haplotypes'}
 ]
-
 
 SUMMARY_STATS_COORDINATE_COLUMNS = {'chr': 'chr', 'start': 'region_start', 'end': 'region_end'}
 INVERSION_FILE_COLUMNS = ['Chromosome', 'Start', 'End', '0_single_1_recur']
@@ -84,12 +80,12 @@ SCATTER_COLOR_MAP = {
     'single_event': COLOR_PALETTE[1]
 }
 
-
 DATA_QUALITY_DISCREPANCY_THRESHOLD = 0.20
 MAX_INDIVIDUAL_WARNINGS_PER_CATEGORY = 10
 MAX_EXAMPLES_OF_OUT_OF_SPEC_LOGGING = 5
 
 FST_TEST_SUMMARIES = []
+SCATTER_PLOT_SUMMARIES = [] # New global list for scatterplot summaries
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -144,8 +140,8 @@ def get_column_value_specifications(column_name):
     if 'dxy' in col_lower: return (0.0, float('inf'), 'numeric', False)
     if '_variance_' in col_lower: return (0.0, float('inf'), 'numeric', False)
     if '_num_informative_sites_' in col_lower: return (0, float('inf'), 'integer', False)
-    if 'inversion_freq_filter' in col_lower: return (0.0, 1.0, 'numeric', False) # Freq between 0 and 1
-    if 'num_hap_filter' in col_lower: return (0, float('inf'), 'integer', False) # Haplotype counts >= 0
+    if 'inversion_freq_filter' in col_lower: return (0.0, 1.0, 'numeric', False)
+    if 'num_hap_filter' in col_lower: return (0, float('inf'), 'integer', False)
     logger.debug(f"No specific value range for '{column_name}'. Generic numeric range used for flagging.")
     return (-float('inf'), float('inf'), 'numeric', True)
 
@@ -217,12 +213,10 @@ def assign_inversion_type_to_summary_row(row, rec_map, sing_map, coord_conf):
         return 'coordinate_error'
 
 def prepare_data_for_analysis(summary_df_with_types, column_name):
-    # This function is primarily for data quality logging per column.
-    # The actual data for plotting (as lists of numbers) is prepared in main().
     logger.info(f"--- Data Quality Check for column: '{column_name}' ---")
     if column_name not in summary_df_with_types.columns:
         logger.error(f"Column '{column_name}' not found in summary_df_with_types. Skipping DQ check.")
-        return # Can't return dict of lists as it's not the primary purpose here anymore
+        return
 
     cat_stats = {}
     min_exp, max_exp, val_type, _ = get_column_value_specifications(column_name)
@@ -234,7 +228,8 @@ def prepare_data_for_analysis(summary_df_with_types, column_name):
         stats = cat_stats[int_key] = {'initial':initial_n, 'missing_non_numeric':0, 'numeric_for_analysis':0, 'flagged_oos':0}
         
         if initial_n == 0:
-            logger.info(f"No regions for '{disp_name}', column '{column_name}' in DQ check.")
+            # This is normal if a category has no data, so not a warning.
+            logger.debug(f"No regions for '{disp_name}', column '{column_name}' in DQ check.")
             continue
         
         num_series_attempts = pd.to_numeric(raw_series, errors='coerce')
@@ -251,49 +246,51 @@ def prepare_data_for_analysis(summary_df_with_types, column_name):
             if stats['flagged_oos'] > 0:
                 logger.info(f"  For '{disp_name}', '{column_name}': {stats['flagged_oos']} numeric values flagged as out-of-spec. Examples:")
                 shown = 0
-                for idx, problem in oos_mask.items(): # Use .items() for Series
-                    if problem and shown < MAX_EXAMPLES_OF_OUT_OF_SPEC_LOGGING:
-                        val = valid_numerics[idx]; reasons = []
+                # Iterate using .items() for Series to get index and value if needed
+                for idx, problem_flag in oos_mask.items(): 
+                    if problem_flag and shown < MAX_EXAMPLES_OF_OUT_OF_SPEC_LOGGING:
+                        val = valid_numerics[idx] 
+                        reasons = []
                         if val_type=='integer' and ((val!=np.floor(val)) and (np.abs(val-np.round(val))>1e-9)): reasons.append(f"expected int, got {val:.4g}")
                         if val < min_exp: reasons.append(f"below min {min_exp} (is {val:.4g})")
                         if val > max_exp: reasons.append(f"above max {max_exp} (is {val:.4g})")
-                        logger.info(f"    - Value {val:.4g}: {'; '.join(reasons) or 'flagged issue'}")
+                        logger.info(f"    - Value {val:.4g} (Index {idx}): {'; '.join(reasons) or 'flagged issue'}")
                         shown += 1
-                    elif problem and shown == MAX_EXAMPLES_OF_OUT_OF_SPEC_LOGGING:
+                    elif problem_flag and shown == MAX_EXAMPLES_OF_OUT_OF_SPEC_LOGGING:
                         logger.info("    - (Further out-of-spec examples suppressed)"); shown+=1; break
         
-        prop_miss = stats['missing_non_numeric']/initial_n if initial_n else 0
-        prop_flag = stats['flagged_oos']/stats['numeric_for_analysis'] if stats['numeric_for_analysis'] else 0
+        prop_miss = stats['missing_non_numeric']/initial_n if initial_n > 0 else 0
+        prop_flag = stats['flagged_oos']/stats['numeric_for_analysis'] if stats['numeric_for_analysis'] > 0 else 0
         logger.info(f"  DQ Check Col '{column_name}', Cat '{disp_name}': Initial={initial_n}, Missing={stats['missing_non_numeric']} ({prop_miss:.2%}). "
                     f"Numerics={stats['numeric_for_analysis']} (of which {stats['flagged_oos']} or {prop_flag:.2%} flagged OOS).")
 
     keys = list(INVERSION_CATEGORY_MAPPING.values())
     if len(keys) == 2:
-        s1,s2 = cat_stats.get(keys[0]), cat_stats.get(keys[1])
-        if s1 and s2:
-            if s1['initial']>0 and s2['initial']>0:
-                pm1,pm2 = s1['missing_non_numeric']/s1['initial'], s2['missing_non_numeric']/s2['initial']
-                if abs(pm1-pm2)>DATA_QUALITY_DISCREPANCY_THRESHOLD: logger.warning(f"DISCREPANCY MissingOrNonNumeric for '{column_name}': {keys[0]} {pm1:.2%}, {keys[1]} {pm2:.2%}.")
-            if s1['numeric_for_analysis']>0 and s2['numeric_for_analysis']>0:
-                pf1,pf2 = s1['flagged_oos']/s1['numeric_for_analysis'], s2['flagged_oos']/s2['numeric_for_analysis']
-                if abs(pf1-pf2)>DATA_QUALITY_DISCREPANCY_THRESHOLD: logger.warning(f"DISCREPANCY FlaggedAsOutOfSpec for '{column_name}': {keys[0]} {pf1:.2%}, {keys[1]} {pf2:.2%}.")
-    # No return needed as this is for logging
+        s1_stats, s2_stats = cat_stats.get(keys[0]), cat_stats.get(keys[1])
+        if s1_stats and s2_stats: # Both categories must exist
+            if s1_stats['initial'] > 0 and s2_stats['initial'] > 0:
+                pm1 = s1_stats['missing_non_numeric'] / s1_stats['initial']
+                pm2 = s2_stats['missing_non_numeric'] / s2_stats['initial']
+                if abs(pm1 - pm2) > DATA_QUALITY_DISCREPANCY_THRESHOLD:
+                    logger.warning(f"DISCREPANCY MissingOrNonNumeric for '{column_name}': {keys[0]} {pm1:.2%}, {keys[1]} {pm2:.2%}.")
+            
+            if s1_stats['numeric_for_analysis'] > 0 and s2_stats['numeric_for_analysis'] > 0 :
+                pf1 = s1_stats['flagged_oos'] / s1_stats['numeric_for_analysis']
+                pf2 = s2_stats['flagged_oos'] / s2_stats['numeric_for_analysis']
+                if abs(pf1 - pf2) > DATA_QUALITY_DISCREPANCY_THRESHOLD:
+                    logger.warning(f"DISCREPANCY FlaggedAsOutOfSpec for '{column_name}': {keys[0]} {pf1:.2%}, {keys[1]} {pf2:.2%}.")
 
 def _plot_common_elements(ax, plot_data_for_current_col, analysis_column_name, plot_type_specific_func):
-    """Helper for common plot elements: data prep, titles, labels, scatter points."""
-    # plot_data_for_current_col is a dict: {'recurrent': [vals...], 'single_event': [vals...]}
-    
-    plot_labels = list(INVERSION_CATEGORY_MAPPING.keys()) # ['Recurrent', 'Single-event']
-    # plot_data will be a list of lists: [[recurrent_vals], [single_event_vals]]
-    plot_data = [plot_data_for_current_col[INVERSION_CATEGORY_MAPPING[label]] for label in plot_labels]
+    plot_labels = list(INVERSION_CATEGORY_MAPPING.keys())
+    plot_data = [plot_data_for_current_col.get(INVERSION_CATEGORY_MAPPING[label], []) for label in plot_labels]
     
     meta = {}
     metric_name = analysis_column_name.replace('_', ' ').title()
     total_pts = 0
-    all_vals_for_ylim = [] # Renamed to avoid confusion
+    all_vals_for_ylim = []
 
     for i, label in enumerate(plot_labels):
-        vals = plot_data[i] # This is now a list of numbers
+        vals = plot_data[i] 
         n = len(vals)
         total_pts += n
         meta[label] = {'median': np.median(vals) if n > 0 else np.nan, 'n_points': n}
@@ -305,13 +302,12 @@ def _plot_common_elements(ax, plot_data_for_current_col, analysis_column_name, p
     positions = np.arange(len(plot_labels))
     err_style = {'ha':'center','va':'center','transform':ax.transAxes,'fontsize':12,'color':'red'}
 
-    if total_pts > 0 and any(len(s) > 0 for s in plot_data): # Check if there's any actual data to plot
+    if total_pts > 0 and any(len(s) > 0 for s in plot_data):
         valid_series, valid_pos, valid_colors = [], [], []
-        # Use original COLOR_PALETTE for violin/box fill
         cmap_fill = {k: COLOR_PALETTE[i] for i,k in enumerate(INVERSION_CATEGORY_MAPPING.values())}
 
         for i, series in enumerate(plot_data):
-            if series: # Only include if list is not empty
+            if series: 
                 valid_series.append(series)
                 valid_pos.append(positions[i])
                 valid_colors.append(cmap_fill[INVERSION_CATEGORY_MAPPING[plot_labels[i]]])
@@ -391,7 +387,6 @@ def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summar
         return
 
     try:
-        # _plot_common_elements now receives the dict of lists of numbers for the current column
         _plot_common_elements(ax, plot_data_for_current_col, analysis_column_name, plot_specific_draw_func)
 
         if analysis_column_name in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT and plot_type == 'violin':
@@ -413,7 +408,6 @@ def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summar
                 recurrent_n = len(data_r)
                 single_event_n = len(data_s)
 
-                # Get DataFrames for summary stats of auxiliary columns
                 data_r_df = categorized_dfs_for_summary.get(rec_key, pd.DataFrame())
                 data_s_df = categorized_dfs_for_summary.get(sing_key, pd.DataFrame())
 
@@ -474,19 +468,28 @@ def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summar
     finally:
         plt.close(fig)
 
-
 def create_fst_vs_attribute_scatterplot(summary_df_with_types, fst_col, attr_col, attr_name):
     fig, ax = plt.subplots(figsize=(8, 7))
     fst_col_name_pretty = fst_col.replace('_', ' ').title()
     title = f'{fst_col_name_pretty} vs. {attr_name}'
     any_data_plotted = False
+    plot_specific_summary = {
+        'fst_metric': fst_col,
+        'attribute_plotted': attr_col,
+        'attribute_name_pretty': attr_name,
+    }
 
     logger.info(f"--- Scatter Plot: {title} ---")
     for inv_type_display_name, inv_type_internal_key in INVERSION_CATEGORY_MAPPING.items():
         subset_df = summary_df_with_types[summary_df_with_types['inversion_type'] == inv_type_internal_key]
         
+        current_cat_summary = {'N': 0, 'mean_fst': np.nan, 'mean_attr': np.nan}
+
         if fst_col not in subset_df.columns or attr_col not in subset_df.columns:
             logger.warning(f"  Category '{inv_type_display_name}': Missing '{fst_col}' or '{attr_col}'. Skipping scatter points.")
+            plot_specific_summary[f"{inv_type_internal_key}_N"] = 0
+            plot_specific_summary[f"{inv_type_internal_key}_mean_fst"] = np.nan
+            plot_specific_summary[f"{inv_type_internal_key}_mean_attr"] = np.nan
             continue
 
         fst_values = pd.to_numeric(subset_df[fst_col], errors='coerce')
@@ -497,6 +500,7 @@ def create_fst_vs_attribute_scatterplot(summary_df_with_types, fst_col, attr_col
         attr_values_valid = attr_values[valid_mask]
         
         num_points = len(fst_values_valid)
+        current_cat_summary['N'] = num_points
         logger.info(f"  Category '{inv_type_display_name}': Plotting {num_points} valid points for {fst_col} vs {attr_col}.")
 
         if num_points > 0:
@@ -505,18 +509,19 @@ def create_fst_vs_attribute_scatterplot(summary_df_with_types, fst_col, attr_col
                        color=SCATTER_COLOR_MAP[inv_type_internal_key], 
                        alpha=0.6, s=30, edgecolor='k', linewidth=0.5)
             any_data_plotted = True
-            if num_points > 0:
-                 logger.info(f"    Example data for {inv_type_display_name} ({fst_col} vs {attr_col}):")
-                 for i in range(min(3, num_points)):
-                     logger.info(f"      FST: {fst_values_valid.iloc[i]:.4f}, Attr ({attr_col}): {attr_values_valid.iloc[i]}")
+            current_cat_summary['mean_fst'] = fst_values_valid.mean()
+            current_cat_summary['mean_attr'] = attr_values_valid.mean()
         else:
             logger.info(f"  Category '{inv_type_display_name}': No valid points to plot.")
-
+        
+        plot_specific_summary[f"{inv_type_internal_key}_N"] = current_cat_summary['N']
+        plot_specific_summary[f"{inv_type_internal_key}_mean_fst"] = current_cat_summary['mean_fst']
+        plot_specific_summary[f"{inv_type_internal_key}_mean_attr"] = current_cat_summary['mean_attr']
 
     if not any_data_plotted:
         logger.warning(f"No valid data across all categories to plot for '{title}'. Skipping plot generation.")
         plt.close(fig)
-        return
+        return None # Return None if no plot generated
 
     ax.set_xlabel(attr_name, fontsize=13)
     ax.set_ylabel(fst_col_name_pretty, fontsize=13)
@@ -539,13 +544,23 @@ def create_fst_vs_attribute_scatterplot(summary_df_with_types, fst_col, attr_col
         logger.error(f"Failed to save scatter plot '{output_filename}': {e}", exc_info=True)
     finally:
         plt.close(fig)
+    
+    return plot_specific_summary
 
 
 # --- Main Execution Block ---
 def main():
+    global SCATTER_PLOT_SUMMARIES # Declare we are modifying the global list
     overall_start = time.time()
     logger.info(f"--- Starting Inversion Comparison Analysis ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---")
-    # ... (rest of the initial log messages)
+    logger.info(f"Summary Statistics File: '{SUMMARY_STATS_FILE}'")
+    logger.info(f"Inversion Information File: '{INVERSION_FILE}'")
+    logger.info(f"All columns processed for data quality: {ANALYSIS_COLUMNS}")
+    logger.info(f"Violin/Box plots will be generated ONLY for: {COLUMNS_FOR_PLOTTING}")
+    logger.info(f"  - Violin plots (with test & display) for FST measures: {FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT}")
+    logger.info(f"  - Box plots for other selected measures: {OTHER_COLUMNS_FOR_BOX_PLOT}")
+    logger.info(f"  - Scatter plots for FST vs attributes: Defined in SCATTER_PLOT_CONFIG")
+    logger.info("NOTE: All numeric data is used for plots/tests; out-of-spec checks are for logging/awareness.")
 
     all_needed_summary_cols = list(SUMMARY_STATS_COORDINATE_COLUMNS.values()) + \
                               [c for c in ANALYSIS_COLUMNS if c not in SUMMARY_STATS_COORDINATE_COLUMNS.values()]
@@ -555,7 +570,7 @@ def main():
         inv_df = pd.read_csv(INVERSION_FILE, usecols=INVERSION_FILE_COLUMNS)
         sum_df = pd.read_csv(SUMMARY_STATS_FILE, usecols=sum_cols_load)
     except FileNotFoundError as e: logger.critical(f"CRITICAL: Input file not found. {e}"); sys.exit(1)
-    except ValueError as e: logger.critical(f"CRITICAL: Column error in input. {e}"); sys.exit(1) # More generic error
+    except ValueError as e: logger.critical(f"CRITICAL: Column error in input. {e}"); sys.exit(1)
     except Exception as e: logger.critical(f"CRITICAL reading inputs: {e}", exc_info=True); sys.exit(1)
     logger.info(f"Loaded data. Summary: {len(sum_df)} rows. Inversion: {len(inv_df)} rows.")
 
@@ -581,7 +596,7 @@ def main():
     if 'coordinate_error' in type_cts: logger.warning(f"{type_cts['coordinate_error']} regions had coord errors.")
     if not any(c in type_cts for c in INVERSION_CATEGORY_MAPPING.values()): logger.warning("No regions classified. Check inputs.")
 
-    categorized_dfs = {} # Dict of {str_key: DataFrame}
+    categorized_dfs = {}
     for inv_type_display_name, inv_type_internal_key in INVERSION_CATEGORY_MAPPING.items():
          categorized_dfs[inv_type_internal_key] = sum_df[sum_df['inversion_type'] == inv_type_internal_key].copy()
 
@@ -589,10 +604,8 @@ def main():
         col_start_time = time.time()
         logger.info(f"===== Processing Column: '{current_col}' =====")
         
-        # Run Data Quality Check (primarily for logging)
-        prepare_data_for_analysis(sum_df, current_col)
+        prepare_data_for_analysis(sum_df, current_col) # For DQ logging
         
-        # Prepare data specifically for plotting (dict of lists of numbers)
         plot_data_for_current_col = {}
         all_categories_empty_for_plot = True
         for inv_type_key, df_subset in categorized_dfs.items():
@@ -603,7 +616,6 @@ def main():
                     all_categories_empty_for_plot = False
             else:
                 plot_data_for_current_col[inv_type_key] = []
-                logger.warning(f"Column '{current_col}' not found in DataFrame for category '{inv_type_key}' during plot data prep.")
         
         if current_col in COLUMNS_FOR_PLOTTING:
             plot_type_to_use = 'violin' if current_col in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT else 'box'
@@ -628,7 +640,11 @@ def main():
             logger.warning(f"Skipping scatterplot: {fst_col} vs {attr_col}. One or both columns missing from summary data.")
             continue
         
-        create_fst_vs_attribute_scatterplot(sum_df, fst_col, attr_col, attr_name)
+        # create_fst_vs_attribute_scatterplot now returns summary data for the plot
+        plot_summary = create_fst_vs_attribute_scatterplot(sum_df, fst_col, attr_col, attr_name)
+        if plot_summary: # Only append if plot was generated (i.e., data was present)
+            SCATTER_PLOT_SUMMARIES.append(plot_summary)
+
 
     final_sup_summary = global_warning_tracker.get_suppressed_summary()
     if final_sup_summary: logger.info(f"\n--- Summary of Suppressed Warnings ---\n{final_sup_summary}")
@@ -637,13 +653,24 @@ def main():
         logger.info("\n====== Summary Statistics for FST Tests (Recurrent vs Single-event) ======")
         for summary in FST_TEST_SUMMARIES:
             logger.info(f"  --- FST Metric: {summary['column_name']} ---")
-            logger.info(f"    Recurrent:     N={summary['recurrent_N']}, Mean={summary['recurrent_mean']:.4f}, Median={summary['recurrent_median']:.4f}, "
-                        f"InvFreq_Mean={summary['recurrent_inv_freq_mean']:.4f}, N0_Haps_Mean={summary['recurrent_n0_hap_mean']:.2f}, N1_Haps_Mean={summary['recurrent_n1_hap_mean']:.2f}")
-            logger.info(f"    Single-event:  N={summary['single_event_N']}, Mean={summary['single_event_mean']:.4f}, Median={summary['single_event_median']:.4f}, "
-                        f"InvFreq_Mean={summary['single_event_inv_freq_mean']:.4f}, N0_Haps_Mean={summary['single_event_n0_hap_mean']:.2f}, N1_Haps_Mean={summary['single_event_n1_hap_mean']:.2f}")
+            logger.info(f"    Recurrent:     N={summary['recurrent_N']}, Mean_FST={summary['recurrent_mean']:.4f}, Median_FST={summary['recurrent_median']:.4f}, "
+                        f"InvFreq_Mean={summary.get('recurrent_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('recurrent_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('recurrent_n1_hap_mean', np.nan):.2f}")
+            logger.info(f"    Single-event:  N={summary['single_event_N']}, Mean_FST={summary['single_event_mean']:.4f}, Median_FST={summary['single_event_median']:.4f}, "
+                        f"InvFreq_Mean={summary.get('single_event_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('single_event_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('single_event_n1_hap_mean', np.nan):.2f}")
             logger.info(f"    Mann-Whitney U: {summary['p_value_text']}")
     else:
         logger.info("\n====== No FST Test Summary Statistics to display ======")
+    
+    if SCATTER_PLOT_SUMMARIES:
+        logger.info("\n====== Summary Statistics for Scatter Plots (Recurrent vs Single-event) ======")
+        for summary in SCATTER_PLOT_SUMMARIES:
+            rec_key = INVERSION_CATEGORY_MAPPING['Recurrent']
+            se_key = INVERSION_CATEGORY_MAPPING['Single-event']
+            logger.info(f"  --- Scatter Plot: {summary['fst_metric']} vs. {summary['attribute_name_pretty']} (Attr: {summary['attribute_plotted']}) ---")
+            logger.info(f"    Recurrent:     N={summary.get(f'{rec_key}_N', 0)}, Mean FST={summary.get(f'{rec_key}_mean_fst', np.nan):.4f}, Mean Attribute={summary.get(f'{rec_key}_mean_attr', np.nan):.4f}")
+            logger.info(f"    Single-event:  N={summary.get(f'{se_key}_N', 0)}, Mean FST={summary.get(f'{se_key}_mean_fst', np.nan):.4f}, Mean Attribute={summary.get(f'{se_key}_mean_attr', np.nan):.4f}")
+    else:
+        logger.info("\n====== No Scatter Plot Summary Statistics to display ======")
     
     logger.info(f"====== Full Analysis Script completed in {time.time()-overall_start:.2f}s ======")
 
