@@ -1209,31 +1209,71 @@ pub fn process_config_entries(
             // Check if the 0-based position is outside the 0-based half-open check_region_zbh.
             // check_region_zbh.start is 0-based inclusive.
             // check_region_zbh.end is 0-based exclusive.
+            // The 'region' variable here is equivalent to 'check_region_zbh', representing the current CSV processing region
+            // as a ZeroBasedHalfOpen interval.
             if pos_0based_for_check < check_region_zbh.start as i64 || pos_0based_for_check >= check_region_zbh.end as i64 {
                 eprintln!(
-                    "Warning: Position {} (1-based) is outside region {}-{} (1-based inclusive)",
+                    "Warning: Position {} (1-based) is outside region {}-{} (1-based inclusive) for FALSTA all_columns map. This site was at 0-based pos {} against 0-based half-open interval [{}, {}).",
                     pos_1based_in_vec,      // Print the original 1-based position from the diversity vector
                     csv_row.region_start, // This is the 1-based inclusive start from CsvRowData
-                    csv_row.region_end    // This is the 1-based inclusive end from CsvRowData
+                    csv_row.region_end,   // This is the 1-based inclusive end from CsvRowData
+                    pos_0based_for_check,
+                    check_region_zbh.start,
+                    check_region_zbh.end
                 );
                 continue;
             }
-            let rel_pos = (pos_zero_based - region.start as i64) + 1;
-            if (rel_pos as usize) > max_position {
-                max_position = rel_pos as usize;
-            }
-            if is_filtered {
-                let pi_col = build_col_name("filtered_pi_", csv_row, group_id);
-                let theta_col = build_col_name("filtered_theta_", csv_row, group_id);
 
-                all_columns
-                    .entry(pi_col)
-                    .or_insert_with(BTreeMap::new)
-                    .insert(rel_pos as usize, pi_val);
-                all_columns
-                    .entry(theta_col)
-                    .or_insert_with(BTreeMap::new)
-                    .insert(rel_pos as usize, theta_val);
+            // Calculate the 1-based relative position of pos_1based_in_vec within the current region (check_region_zbh).
+            // check_region_zbh (or equivalently 'region' from the outer scope) is ZeroBasedHalfOpen.
+            match check_region_zbh.relative_position_1based_inclusive(pos_1based_in_vec) {
+                Some(rel_pos_usize) => { // rel_pos_usize is the 1-based relative position
+                    if rel_pos_usize > max_position { // Ensure max_position is usize
+                        max_position = rel_pos_usize;
+                    }
+
+                    if is_filtered {
+                        let pi_col = build_col_name("filtered_pi_", csv_row, group_id);
+                        let theta_col = build_col_name("filtered_theta_", csv_row, group_id);
+
+                        all_columns
+                            .entry(pi_col)
+                            .or_insert_with(BTreeMap::new)
+                            .insert(rel_pos_usize, pi_val); // Use rel_pos_usize as key
+                        all_columns
+                            .entry(theta_col)
+                            .or_insert_with(BTreeMap::new)
+                            .insert(rel_pos_usize, theta_val); // Use rel_pos_usize as key
+                    } else {
+                        let pi_col = build_col_name("unfiltered_pi_", csv_row, group_id);
+                        let theta_col = build_col_name("unfiltered_theta_", csv_row, group_id);
+
+                        all_columns
+                            .entry(pi_col)
+                            .or_insert_with(BTreeMap::new)
+                            .insert(rel_pos_usize, pi_val); // Use rel_pos_usize as key
+                        all_columns
+                            .entry(theta_col)
+                            .or_insert_with(BTreeMap::new)
+                            .insert(rel_pos_usize, theta_val); // Use rel_pos_usize as key
+                    }
+                }
+                None => {
+                    // This path indicates that pos_1based_in_vec, despite passing the earlier coarse bounds check,
+                    // could not be mapped to a relative position within the region. This might occur if
+                    // the region itself is empty or if there's an edge case in relative_position_1based_inclusive
+                    // for positions at the exact boundaries, though the prior check should ideally prevent this.
+                    eprintln!(
+                        "Warning: Site at 1-based absolute position {} could not be relatively positioned within region {}:{}-{} (0-based HO: [{},{})) for FALSTA `all_columns` map. Skipping this site for this entry.",
+                        pos_1based_in_vec,
+                        csv_row.seqname,
+                        csv_row.region_start, // 1-based inclusive start from CsvRowData
+                        csv_row.region_end,   // 1-based inclusive end from CsvRowData
+                        check_region_zbh.start,
+                        check_region_zbh.end
+                    );
+                    continue;
+                }
             } else {
                 let pi_col = build_col_name("unfiltered_pi_", csv_row, group_id);
                 let theta_col = build_col_name("unfiltered_theta_", csv_row, group_id);
@@ -1315,10 +1355,13 @@ pub fn process_config_entries(
         }
 
         // Fill in data from per_site_diversity_vec
-        let region = ZeroBasedHalfOpen { start: csv_row.region_start as usize, end: csv_row.region_end as usize };
         for &(pos_1based, pi_val, theta_val, group_id, is_filtered) in per_site_diversity_vec {
-            if let Some(rel_pos) = region.relative_position_1based_inclusive(pos_1based) {
-                let idx_0based = rel_pos - 1;
+            // 'region' refers to the defined ZeroBasedHalfOpen interval for the current csv_row.
+            if let Some(rel_pos_usize) = region.relative_position_1based_inclusive(pos_1based) {
+                // rel_pos_usize is a 1-based relative index. Convert to 0-based for vector indexing.
+                let idx_0based = OneBasedPosition::new(rel_pos_usize as i64)
+                    .expect("Relative position from relative_position_1based_inclusive should be valid and >= 1")
+                    .zero_based() as usize;
                 let key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
                 {
                     let combo_key = format!("{}pi_group_{}", key_prefix, group_id);
@@ -1426,12 +1469,14 @@ pub fn process_config_entries(
     for (csv_row, _, fst_data) in &all_main_csv_data_tuples {
         // Process FST data between groups 0 and 1
         if !fst_data.is_empty() {            
-            // Define the 0-based inclusive region length for FALSTA output.
-            // csv_row.region_start and csv_row.region_end are 0-based inclusive.
-            let region_length_for_falsta = (csv_row.region_end - csv_row.region_start + 1).max(0) as usize;
+             // Define the region length for FALSTA output.
+            // csv_row.region_start and csv_row.region_end are 1-based inclusive as outputted in the main CSV.
+            let falsta_region_zbh = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+            let region_length_for_falsta = falsta_region_zbh.len();
 
             // Write header and data for Overall Haplotype FST
             if !fst_data.is_empty() { // Only write if there's haplotype FST data
+                // Headers use 1-based inclusive coordinates matching the CSV output.
                 let header_overall_hap_fst = format!(
                     ">haplotype_overall_fst_summary_chr_{}_start_{}_end_{}",
                     csv_row.seqname, csv_row.region_start, csv_row.region_end
@@ -1439,13 +1484,24 @@ pub fn process_config_entries(
                 writeln!(fst_fasta_writer, "{}", header_overall_hap_fst)?;
                 
                 let mut overall_values_str = vec!["NA".to_string(); region_length_for_falsta];
-                // fst_data contains (1-based_pos, OverallHaplotypeFstEstimate, Pairwise0v1HaplotypeFstEstimate)
-                for &(pos_1based, ref overall_hap_fst_estimate, _) in fst_data {
-                    // Convert 1-based position from fst_data to 0-based index relative to region start
-                    // csv_row.region_start is 0-based inclusive.
-                    let rel_pos_0based = (pos_1based - (csv_row.region_start + 1)) as usize;
-                    if rel_pos_0based < region_length_for_falsta {
-                        overall_values_str[rel_pos_0based] = overall_hap_fst_estimate.to_string();
+                // fst_data contains (1-based_pos, OverallHaplotypeFstEstimate_f64, Pairwise0v1HaplotypeFstEstimate_f64)
+                let region_start_1based = OneBasedPosition::new(csv_row.region_start).map_err(|e| VcfError::Parse(format!("Invalid 1-based region_start for FST FALSTA: {}, error: {}", csv_row.region_start, e)))?;
+
+                for &(pos_1based, overall_hap_fst_val, _) in fst_data {
+                    // Convert absolute 1-based position from fst_data to 0-based index relative to region start
+                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| VcfError::Parse(format!("Invalid 1-based site position for FST FALSTA: {}, error: {}", pos_1based, e)))?;
+                    
+                    let rel_pos_0based_i64 = site_pos_1based.zero_based() - region_start_1based.zero_based();
+
+                    if rel_pos_0based_i64 >= 0 && (rel_pos_0based_i64 as usize) < region_length_for_falsta {
+                        let rel_pos_0based = rel_pos_0based_i64 as usize;
+                        overall_values_str[rel_pos_0based] = if overall_hap_fst_val.is_nan() { "NA".to_string() } else { format!("{:.6}", overall_hap_fst_val) };
+                    } else if rel_pos_0based_i64 < 0 {
+                        // This case implies the site is before the region
+                        log(LogLevel::Warning, &format!("Site at 1-based position {} is before current FALSTA FST region start {} (1-based). Skipping.", pos_1based, csv_row.region_start));
+                    } else {
+                        // This case implies the site is after the region end
+                        log(LogLevel::Warning, &format!("Site at 1-based position {} is outside current FALSTA FST region ({}:{}-{}, length {}). Rel 0-based idx {} out of bounds. Skipping.", pos_1based, csv_row.seqname, csv_row.region_start, csv_row.region_end, region_length_for_falsta, rel_pos_0based_i64));
                     }
                 }
                 writeln!(fst_fasta_writer, "{}", overall_values_str.join(","))?;
@@ -1458,10 +1514,17 @@ pub fn process_config_entries(
                 writeln!(fst_fasta_writer, "{}", header_pairwise_0v1_hap_fst)?;
 
                 let mut pairwise_0v1_values_str = vec!["NA".to_string(); region_length_for_falsta];
-                for &(pos_1based, _, ref pairwise_0v1_hap_fst_estimate) in fst_data {
-                    let rel_pos_0based = (pos_1based - (csv_row.region_start + 1)) as usize;
-                    if rel_pos_0based < region_length_for_falsta {
-                        pairwise_0v1_values_str[rel_pos_0based] = pairwise_0v1_hap_fst_estimate.to_string();
+                for &(pos_1based, _, pairwise_0v1_hap_fst_val) in fst_data {
+                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| VcfError::Parse(format!("Invalid 1-based site position for FST FALSTA pairwise: {}, error: {}", pos_1based, e)))?;
+                    let rel_pos_0based_i64 = site_pos_1based.zero_based() - region_start_1based.zero_based();
+
+                    if rel_pos_0based_i64 >= 0 && (rel_pos_0based_i64 as usize) < region_length_for_falsta {
+                        let rel_pos_0based = rel_pos_0based_i64 as usize;
+                        pairwise_0v1_values_str[rel_pos_0based] = if pairwise_0v1_hap_fst_val.is_nan() { "NA".to_string() } else { format!("{:.6}", pairwise_0v1_hap_fst_val) };
+                    } else if rel_pos_0based_i64 < 0 {
+                         log(LogLevel::Warning, &format!("Pairwise FST Site at 1-based position {} is before current FALSTA FST region start {} (1-based). Skipping.", pos_1based, csv_row.region_start));
+                    } else {
+                         log(LogLevel::Warning, &format!("Pairwise FST Site at 1-based position {} is outside current FALSTA FST region ({}:{}-{}, length {}). Rel 0-based idx {} out of bounds. Skipping.", pos_1based, csv_row.seqname, csv_row.region_start, csv_row.region_end, region_length_for_falsta, rel_pos_0based_i64));
                     }
                 }
                 writeln!(fst_fasta_writer, "{}", pairwise_0v1_values_str.join(","))?;
@@ -1486,16 +1549,31 @@ pub fn process_config_entries(
 
                         // Format values for this pair
                         let mut pair_values = vec!["NA".to_string(); region_length_for_falsta];
+                        // csv_row.region_start is 1-based inclusive. Convert to 0-based for comparison with site.position.
+                        let region_start_0based = OneBasedPosition::new(csv_row.region_start).map_err(|e| VcfError::Parse(format!("Invalid 1-based region_start for PopFST FALSTA: {}, error: {}", csv_row.region_start, e)))?.zero_based();
+                        // csv_row.region_end is 1-based inclusive. Convert to 0-based for comparison.
+                        let region_end_0based_inclusive = OneBasedPosition::new(csv_row.region_end).map_err(|e| VcfError::Parse(format!("Invalid 1-based region_end for PopFST FALSTA: {}, error: {}", csv_row.region_end, e)))?.zero_based();
+
 
                         for site in &pop_results.site_fst {
-                            if site.position >= csv_row.region_start && site.position <= csv_row.region_end {
-                                let rel_pos = (site.position - csv_row.region_start) as usize;
+                            // site.position is 0-based from SiteFstWc.
+                            if site.position >= region_start_0based && site.position <= region_end_0based_inclusive {
+                                let rel_pos_i64 = site.position - region_start_0based;
+                                // This check should be redundant if the above condition is met and region_start_0based <= region_end_0based_inclusive
+                                if rel_pos_i64 < 0 {
+                                     log(LogLevel::Warning, &format!("Population FST site position {} (0-based) resulted in negative relative offset from region start {} (0-based). Skipping.", site.position, region_start_0based));
+                                     continue;
+                                }
+                                let rel_pos = rel_pos_i64 as usize;
+
                                 if rel_pos < region_length_for_falsta {
                                     // Get this pair's FST value if it exists
                                     if let Some(&fst_estimate_val) = site.pairwise_fst.get(&pair_name) {
-                                        // Use the Display trait of FstEstimate
+                                        // Use the Display trait of FstEstimate for formatting
                                         pair_values[rel_pos] = fst_estimate_val.to_string();
                                     }
+                                } else {
+                                     log(LogLevel::Warning, &format!("Population FST site position {} (0-based), relative index {} is out of bounds for length {}. Region {}:{}-{}. Skipping.", site.position, rel_pos, region_length_for_falsta, csv_row.seqname, csv_row.region_start, csv_row.region_end));
                                 }
                             }
                         }
@@ -1631,8 +1709,8 @@ fn write_csv_header<W: Write>(writer: &mut csv::Writer<W>) -> Result<(), VcfErro
     writer
         .write_record(&[
             "chr",
-            "region_start", // 0-based inclusive
-            "region_end",   // 0-based inclusive
+            "region_start", // 1-based inclusive
+            "region_end",   // 1-based inclusive
             "0_sequence_length",
             "1_sequence_length",
             "0_sequence_length_adjusted",
