@@ -1939,12 +1939,20 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     }
 
     // Compute nucleotide diversity: average number of differences per site
-    // Pi = (total number of differences) / (sequence length * number of pairs)
-    let pi = if total_compared_pairs > 0 {
-        total_differences as f64 / (seq_length as f64 * total_compared_pairs as f64)
-    } else {
-        0.0
-    };
+    // Pi = (total number of differences) / (sequence length * number of pairs)
+    // If total_compared_pairs is 0, it means no valid comparisons could be made from the variant data,
+    // so pi is un-estimable (NaN). seq_length > 0 is ensured by earlier checks.
+    let pi = if total_compared_pairs > 0 {
+        total_differences as f64 / (seq_length as f64 * total_compared_pairs as f64)
+    } else {
+        // This case implies that although there might be >= 2 haplotypes and seq_length > 0,
+        // no two haplotypes had concurrently valid (non-missing) alleles at any variant site.
+        log(LogLevel::Debug, &format!(
+            "Pi calculation: total_compared_pairs is 0 for {} haplotypes over {} bp ({} total possible pairs). Returning NaN.",
+            haplotypes_in_group.len(), seq_length, total_possible_pairs
+        ));
+        f64::NAN
+    };
     
     spinner.finish_and_clear();
     log(LogLevel::Info, &format!(
