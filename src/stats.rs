@@ -77,9 +77,6 @@ pub enum FstEstimate {
     },
 }
 
-// The `from_ratio` method is removed as construction of `FstEstimate` is now
-// context-specific within calculation functions (`calculate_fst_wc_at_site_general`
-// and `calculate_overall_fst_wc`).
 
 impl fmt::Display for FstEstimate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -102,7 +99,6 @@ impl fmt::Display for FstEstimate {
             }
             FstEstimate::InsufficientDataForEstimation { sum_a, sum_b, sites_attempted } => {
                 // For InsufficientData, sum_a and sum_b are not typically meaningful data-derived sums.
-                // Reporting them with limited precision as they are often conventional values (e.g. 0.0).
                 write!(f, "InsufficientData (A: {:.1}, B: {:.1}, SitesAtt: {})", sum_a, sum_b, sites_attempted)
             }
         }
