@@ -12,67 +12,102 @@ use std::io::{BufReader, BufRead};
 use std::path::Path;
 use std::fmt;
 
-/// Represents the outcome of an FST (Fixation Index) calculation, providing
-/// detailed context for both per-site and regional estimates.
+/// Encapsulates the result of an FST (Fixation Index) calculation for a specific genetic site or genomic region.
+/// FST is a measure of population differentiation, reflecting how much of the total genetic variation
+/// is structured among different populations. It is derived from variance components:
+/// 'a', the estimated genetic variance among subpopulations, and 'b', the estimated genetic variance
+/// among haplotypes (or individuals) within these subpopulations. For analyses based on
+/// haplotype data, such as this implementation, a third component 'c' (related to heterozygosity
+/// within diploid individuals) is effectively zero. The FST estimate, often denoted as θ (theta),
+/// is then calculated as the ratio a / (a + b).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FstEstimate {
-    /// A specific FST value was determined.
-    /// This is the primary success case where a meaningful FST ratio (a / (a+b))
-    /// could be formed from the variance components.
-    /// - 'value': The FST value itself. Can be finite (positive, negative, zero),
-    ///   or non-finite (Infinity, -Infinity from non-0/0 division by zero).
-    /// - 'sum_a', 'sum_b': The (summed) variance components 'a' and 'b'.
-    ///   For per-site, these are the site's a_i, b_i. For regional, these are Σa_i, Σb_i.
-    /// - 'num_informative_sites': Number of sites that contributed (potentially non-zero)
-    ///   components to sum_a and sum_b (for regional) or 1 (for a single informative per-site estimate).
+    /// The FST calculation yielded a numerically definable value, representing the estimated
+    /// degree of genetic differentiation. This is the typical outcome when variance components
+    /// `sum_a` and `sum_b` allow for a meaningful ratio.
     Calculable {
+        /// The FST value itself. An FST value near 0 indicates little genetic differentiation,
+        /// meaning the populations are genetically quite similar at the loci analyzed. Conversely,
+        /// a value near 1 signifies substantial genetic differentiation, where populations
+        /// have very different allele frequencies, potentially with different alleles nearing fixation.
+        /// Due to sampling effects in real data, especially with low true differentiation or small
+        /// sample sizes, this estimated `value` can sometimes be negative (FST ≈ 0)
+        /// or, rarely, exceed 1. If `sum_a` is non-zero while `sum_a + sum_b` is zero (implying all
+        /// quantifiable variance is between populations), this value can be `f64::INFINITY` or
+        /// `f64::NEG_INFINITY`.
         value: f64,
+
+        /// The sum of 'a' components (among-population variance) from all genetic sites
+        /// that contributed to this FST estimate. For a per-site estimate, this is simply the 'a'
+        /// value for that site. It reflects the magnitude of genetic divergence attributable to
+        /// systematic differences in allele frequencies between the sampled populations.
         sum_a: f64,
+
+        /// The sum of 'b' components (within-population variance) from all genetic sites
+        /// that contributed to this FST estimate. For a per-site estimate, this is the 'b' value
+        /// for that site. It reflects the magnitude of genetic diversity existing within
+        /// the individual populations being compared.
         sum_b: f64,
+
+        /// The number of distinct genetic sites (e.g., SNPs) that provided valid, non-missing
+        /// variance components (`a_i`, `b_i`) which were subsequently summed to produce `sum_a` and `sum_b`.
+        /// For a single-site FST estimate, this count will be 1 if the site was informative.
+        /// A larger number of informative sites generally lends greater robustness to a regional FST estimate.
         num_informative_sites: usize,
     },
 
-    /// The FST estimate is indeterminate. Although underlying genetic variation may have led
-    /// to non-zero variance components (sum_a and/or sum_b are non-zero), their combined
-    /// sum (sum_a + sum_b) is zero or negative. This makes the standard FST ratio
-    /// problematic. This state is distinct from a total lack of variation across all
-    /// sites (which would be NoInterPopulationVariance).
-    /// This often arises from sampling effects when true differentiation is low.
-    /// - 'sum_a', 'sum_b': The (summed) variance components 'a' and 'b'.
-    /// - 'num_informative_sites': Number of sites that contributed (potentially non-zero)
-    ///   components to these sums.
+    /// The FST estimate is indeterminate because the estimated total variance (sum_a + sum_b)
+    /// is negative. This makes the standard FST ratio a/(a+b) problematic for interpretation
+    /// as a simple proportion of variance. Such outcomes often arise from statistical sampling
+    /// effects, particularly when true population differentiation is minimal or sample sizes are
+    /// limited, leading to unstable (and potentially negative) estimates of the variance components.
+    /// This state is distinct from a complete absence of genetic variation (see `NoInterPopulationVariance`).
     ComponentsYieldIndeterminateRatio {
+        /// The sum of the 'a' components (among-population variance). Its value can be
+        /// positive or negative under these conditions.
         sum_a: f64,
+        /// The sum of the 'b' components (within-population variance). Its value can also
+        /// be positive or negative.
         sum_b: f64,
+        /// The number of genetic sites whose summed variance components led to this
+        /// indeterminate FST outcome.
         num_informative_sites: usize,
     },
 
-    /// FST is undefined because the site or region entirely lacks observable genetic variation
-    /// that can distinguish populations (e.g., all sites monomorphic across populations,
-    /// or no allele frequency differences were found at any processed site, or summed components from
-    /// informative sites cancelled out to 0/0).
-    /// Consequently, both sum_a and sum_b are effectively zero.
-    /// - 'sum_a', 'sum_b': The (summed) variance components, expected to be 0.0.
-    /// - 'sites_evaluated': Number of sites that were processed and found to lack
-    ///   inter-population variance, or number of informative sites that summed to 0/0.
-    ///   (For per-site, this would be 1 if the site was evaluated and found this way).
+    /// FST is undefined because the genetic data from the site or region shows no discernible
+    /// allele frequency differences among populations that would indicate differentiation, leading to
+    /// an FST calculation of 0/0. This can happen if, for instance, all populations are fixed for
+    /// the same allele at all analyzed sites, or if allele frequencies are identical across all
+    /// populations and there's no residual within-population variance contributing to 'b'.
+    /// In such cases, both the estimated among-population variance (`sum_a`) and the estimated
+    /// total variance (`sum_a + sum_b`) are effectively zero.
     NoInterPopulationVariance {
-        sum_a: f64, // Expected 0.0
-        sum_b: f64, // Expected 0.0
+        /// The sum of the 'a' components, expected to be approximately 0.0 in this state.
+        sum_a: f64,
+        /// The sum of the 'b' components, also expected to be approximately 0.0 in this state.
+        sum_b: f64,
+        /// The number of genetic sites that were evaluated and found to have no
+        /// inter-population variance (e.g., all monomorphic, or all having identical
+        /// allele frequencies across populations leading to zero components).
         sites_evaluated: usize,
     },
 
-    /// FST could not be estimated due to a fundamental lack of sufficient or appropriate input data.
-    /// For a site: e.g., fewer than 2 populations had genotype data.
-    /// For a region: e.g., no sites could be processed at all (empty input to aggregation),
-    /// or all sites individually resulted in this state or a state that couldn't contribute components.
-    /// - 'sum_a', 'sum_b': Not meaningfully calculated from data; defaults (e.g., 0.0) indicate
-    ///   components weren't properly formed or summed from valid site-level estimates.
-    /// - 'sites_attempted': Number of sites for which an estimate was initially attempted but
-    ///   could not proceed to component calculation/summation. (For per-site, this would be 1).
+    /// FST could not be estimated because the input data did not meet the fundamental
+    /// requirements for the calculation. For example, FST quantifies differentiation among
+    /// populations, so at least two populations are required. Other reasons could include
+    /// a complete lack of processable variant sites in the specified genomic region or all
+    /// individual sites resulting in a state that prevents component contribution.
+    /// In this situation, no meaningful FST value or variance components can be reported.
     InsufficientDataForEstimation {
-        sum_a: f64, // Default to 0.0, as components weren't really formed from data.
-        sum_b: f64, // Default to 0.0.
+        /// The sum of 'a' components; this field is set to a default (e.g., 0.0) as meaningful
+        /// components were not derived from the data due to the insufficiency.
+        sum_a: f64,
+        /// The sum of 'b' components; similarly, set to a default as components were not
+        /// meaningfully derived.
+        sum_b: f64,
+        /// The number of genetic sites where an FST estimation was attempted but could not
+        /// proceed to the calculation of variance components or their meaningful summation
+        /// due to data limitations. For a single-site attempt, this value would be 1.
         sites_attempted: usize,
     },
 }
