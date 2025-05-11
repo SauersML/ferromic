@@ -18,7 +18,7 @@ INVERSION_FILE = 'inv_info.csv'
 OUTPUT_PLOT_TEMPLATE = 'fst_recurrent_vs_single_event_violin_{fst_col_safe_name}.png'
 
 # FST Column Selection: List of FST columns to analyze
-FST_COLUMN_NAMES = ['haplotype_between_pop_variance_wc', 'hudson_fst_hap_group_0v1']
+FST_COLUMN_NAMES = ['haplotype_overall_fst_wc', 'hudson_fst_hap_group_0v1']
 
 # Plotting Categories and Colors
 CAT_MAPPING = {
