@@ -1425,10 +1425,10 @@ pub fn process_config_entries(
                     }
                 }
                 writeln!(fst_fasta_writer, "{}", pairwise_0v1_values_str.join(","))?;
-            }
-            
-            // Process and write population pairwise FST data if available
-            if let Some(ref pop_results) = csv_row.population_fst_wc_results {
+            }
+            
+            // Process and write population pairwise FST data if available
+            if let Some(ref pop_results) = csv_row.population_fst_wc_results {
                 // Create a map of all pairwise comparisons across all sites
                 let mut all_pairs = HashSet::new();
                 for site in &pop_results.site_fst {
@@ -2034,28 +2034,28 @@ fn process_single_config_entry(
     
     update_step_progress(1, "Analyzing variant statistics");
 
-    if !filtered_variants.is_empty() {
-        let is_sorted = filtered_variants.windows(2).all(|w| w[0].position <= w[1].position);
-        if !is_sorted {
-            // This should not happen if process_vcf sorts them.
-            // Log an error or panic, as this is a critical pre-condition for efficient and correct sub-slicing.
-            log(LogLevel::Error, "CRITICAL: filtered_variants are not sorted by position in process_single_config_entry. Hudson FST results may be incorrect.");
-        }
-    }
+    if !filtered_variants.is_empty() {
+        let is_sorted = filtered_variants.windows(2).all(|w| w[0].position <= w[1].position);
+        if !is_sorted {
+            // This should not happen if process_vcf sorts them.
+            // Log an error or panic, as this is a critical pre-condition for efficient and correct sub-slicing.
+            log(LogLevel::Error, "CRITICAL: filtered_variants are not sorted by position in process_single_config_entry. Hudson FST results may be incorrect.");
+        }
+    }
 
-    // Define the precise genomic region for Hudson FST analysis, corresponding to entry.interval.
-    // This region's effective length is `adjusted_sequence_length`.
-    let hudson_analysis_region_start_0based = entry.interval.start as i64;
-    // entry.interval.end is exclusive for ZeroBasedHalfOpen.
-    let hudson_analysis_region_end_0based_exclusive = entry.interval.end as i64;
+    // Define the precise genomic region for Hudson FST analysis, corresponding to entry.interval.
+    // This region's effective length is `adjusted_sequence_length`.
+    let hudson_analysis_region_start_0based = entry.interval.start as i64;
+    // entry.interval.end is exclusive for ZeroBasedHalfOpen.
+    let hudson_analysis_region_end_0based_exclusive = entry.interval.end as i64;
 
-    // Create a sub-slice of filtered_variants that strictly corresponds to this Hudson analysis region.
-    // This uses binary search, relying on filtered_variants being sorted by position.
-    let start_idx_for_hudson_slice = filtered_variants.binary_search_by_key(&hudson_analysis_region_start_0based, |v| v.position)
-        .unwrap_or_else(|idx| idx); // Returns Ok(idx) if found, or Err(idx) for insertion point. Both are fine.
+    // Create a sub-slice of filtered_variants that strictly corresponds to this Hudson analysis region.
+    // This uses binary search, relying on filtered_variants being sorted by position.
+    let start_idx_for_hudson_slice = filtered_variants.binary_search_by_key(&hudson_analysis_region_start_0based, |v| v.position)
+        .unwrap_or_else(|idx| idx); // Returns Ok(idx) if found, or Err(idx) for insertion point. Both are fine.
 
-    let end_idx_for_hudson_slice = filtered_variants.binary_search_by_key(&hudson_analysis_region_end_0based_exclusive, |v| v.position)
-        .unwrap_or_else(|idx| idx); // Insertion point is the correct exclusive end for the slice.
+    let end_idx_for_hudson_slice = filtered_variants.binary_search_by_key(&hudson_analysis_region_end_0based_exclusive, |v| v.position)
+        .unwrap_or_else(|idx| idx); // Insertion point is the correct exclusive end for the slice.
     
     let variants_for_hudson_slice: &[Variant] = if start_idx_for_hudson_slice < end_idx_for_hudson_slice && end_idx_for_hudson_slice <= filtered_variants.len() {
         &filtered_variants[start_idx_for_hudson_slice..end_idx_for_hudson_slice]
@@ -2069,8 +2069,8 @@ fn process_single_config_entry(
         &[]
     };
 
-    // Calculate FST if enabled
-    let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
+    // Calculate FST if enabled
+    let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
         let spinner = create_spinner("Calculating FST statistics");
     
         // Define the FST analysis region.
@@ -2417,17 +2417,17 @@ fn process_single_config_entry(
             if haplotypes_group_0.len() >= 2 && haplotypes_group_1.len() >= 2 {
                 let pop0_context = PopulationContext {
                     id: PopulationId::HaplotypeGroup(0),
-                    haplotypes: haplotypes_group_0,
-                    variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
-                    sample_names: &sample_names,
-                    sequence_length: adjusted_sequence_length,
+                    haplotypes: haplotypes_group_0,
+                    variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
+                    sample_names: &sample_names,
+                    sequence_length: adjusted_sequence_length,
                 };
                 let pop1_context = PopulationContext {
                     id: PopulationId::HaplotypeGroup(1),
-                    haplotypes: haplotypes_group_1,
-                    variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
-                    sample_names: &sample_names,
-                    sequence_length: adjusted_sequence_length,
+                    haplotypes: haplotypes_group_1,
+                    variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
+                    sample_names: &sample_names,
+                    sequence_length: adjusted_sequence_length,
                 };
 
                 match calculate_hudson_fst_for_pair(&pop0_context, &pop1_context) {
@@ -2476,17 +2476,17 @@ fn process_single_config_entry(
                     if haplotypes_pop_a.len() >= 2 && haplotypes_pop_b.len() >= 2 {
                         let pop_a_context_csv = PopulationContext {
                             id: PopulationId::Named(pop_name_a.clone()),
-                            haplotypes: haplotypes_pop_a.clone(), // Clone Vec for ownership
-                            variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
-                            sample_names: &sample_names,
-                            sequence_length: adjusted_sequence_length,
+                            haplotypes: haplotypes_pop_a.clone(), // Clone Vec for ownership
+                            variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
+                            sample_names: &sample_names,
+                            sequence_length: adjusted_sequence_length,
                         };
                         let pop_b_context_csv = PopulationContext {
                             id: PopulationId::Named(pop_name_b.clone()),
-                            haplotypes: haplotypes_pop_b.clone(), // Clone Vec for ownership
-                            variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
-                            sample_names: &sample_names,
-                            sequence_length: adjusted_sequence_length,
+                            haplotypes: haplotypes_pop_b.clone(), // Clone Vec for ownership
+                            variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
+                            sample_names: &sample_names,
+                            sequence_length: adjusted_sequence_length,
                         };
 
                         match calculate_hudson_fst_for_pair(&pop_a_context_csv, &pop_b_context_csv) {
@@ -2960,18 +2960,18 @@ pub fn process_vcf(
     }
 
     // Extract final variant vectors.
-    let mut final_unfiltered = Arc::try_unwrap(unfiltered_variants)
-        .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
-        .into_inner();
-    let mut final_filtered = Arc::try_unwrap(filtered_variants)
-        .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
-        .into_inner();
+    let mut final_unfiltered = Arc::try_unwrap(unfiltered_variants)
+        .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
+        .into_inner();
+    let mut final_filtered = Arc::try_unwrap(filtered_variants)
+        .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
+        .into_inner();
 
-    // Sort variants by position to ensure consistent order and enable efficient searching.
-    final_unfiltered.sort_by_key(|v| v.position);
-    final_filtered.sort_by_key(|v| v.position);
+    // Sort variants by position to ensure consistent order and enable efficient searching.
+    final_unfiltered.sort_by_key(|v| v.position);
+    final_filtered.sort_by_key(|v| v.position);
 
-    // Extract stats.
+    // Extract stats.
     let final_miss = Arc::try_unwrap(missing_data_info)
         .map_err(|_| VcfError::Parse("Missing data info still has multiple owners".to_string()))?
         .into_inner();
