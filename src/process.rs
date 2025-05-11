@@ -420,9 +420,10 @@ struct CsvRowData {
     n_hap_1_f: usize,
     inv_freq_no_filter: f64,
     inv_freq_filter: f64,
+    inv_freq_filter: f64,
     population_fst_wc_results: Option<FstWcResults>, // FST results based on population CSV file
-    haplotype_overall_fst_wc: f64, // Region-wide FST (unclamped, Sum(a)/Sum(a+b)) between haplotype groups 0 and 1 (filtered variants)
-    population_overall_fst_wc: f64, // Region-wide FST (unclamped, Sum(a)/Sum(a+b)) across all populations from CSV (filtered variants)
+    haplotype_overall_fst_wc: crate::stats::FstEstimate, // Store the full FstEstimate
+    population_overall_fst_wc: crate::stats::FstEstimate, // Store the full FstEstimate
 }
 
 // Custom error types
@@ -1370,43 +1371,47 @@ pub fn process_config_entries(
     for (csv_row, _, fst_data) in &all_main_csv_data_tuples {
         // Process FST data between groups 0 and 1
         if !fst_data.is_empty() {            
-            // Write header for overall FST (Haplotype or Population based)
-            let header = {
-                format!(">fst_chr_{}_start_{}_end_{}", 
-                    csv_row.seqname, csv_row.region_start, csv_row.region_end)
-            };
-            writeln!(fst_fasta_writer, "{}", header)?;
+            // Define the 0-based inclusive region length for FALSTA output.
+            // csv_row.region_start and csv_row.region_end are 0-based inclusive.
+            let region_length_for_falsta = (csv_row.region_end - csv_row.region_start + 1).max(0) as usize;
 
-            
-            // Format FST values as comma-separated list
-            let mut values = Vec::with_capacity(fst_data.len());
-            for &(pos, overall_fst, _) in fst_data {
-                if pos >= csv_row.region_start && pos <= csv_row.region_end {
-                    // Add to the right position (1-based offset)
-                    let rel_pos = pos - csv_row.region_start;
-                    while values.len() < rel_pos as usize {
-                        values.push("NA".to_string());
-                    }
-                    
-                    // Use overall FST as the value for each position
-                    if overall_fst.is_nan() {
-                        values.push("NA".to_string()); // Use NA for undefined values
-                    } else if overall_fst == 0.0 {
-                        values.push("0".to_string());
-                    } else {
-                        values.push(format!("{:.6}", overall_fst));
+            // Write header and data for Overall Haplotype FST
+            if !fst_data.is_empty() { // Only write if there's haplotype FST data
+                let header_overall_hap_fst = format!(
+                    ">haplotype_overall_fst_summary_chr_{}_start_{}_end_{}",
+                    csv_row.seqname, csv_row.region_start, csv_row.region_end
+                );
+                writeln!(fst_fasta_writer, "{}", header_overall_hap_fst)?;
+                
+                let mut overall_values_str = vec!["NA".to_string(); region_length_for_falsta];
+                // fst_data contains (1-based_pos, OverallHaplotypeFstEstimate, Pairwise0v1HaplotypeFstEstimate)
+                for &(pos_1based, ref overall_hap_fst_estimate, _) in fst_data {
+                    // Convert 1-based position from fst_data to 0-based index relative to region start
+                    // csv_row.region_start is 0-based inclusive.
+                    let rel_pos_0based = (pos_1based - (csv_row.region_start + 1)) as usize;
+                    if rel_pos_0based < region_length_for_falsta {
+                        overall_values_str[rel_pos_0based] = overall_hap_fst_estimate.to_string();
                     }
                 }
+                writeln!(fst_fasta_writer, "{}", overall_values_str.join(","))?;
+
+                // Write header and data for Pairwise Haplotype FST (0 vs 1)
+                let header_pairwise_0v1_hap_fst = format!(
+                    ">haplotype_0v1_pairwise_fst_summary_chr_{}_start_{}_end_{}",
+                    csv_row.seqname, csv_row.region_start, csv_row.region_end
+                );
+                writeln!(fst_fasta_writer, "{}", header_pairwise_0v1_hap_fst)?;
+
+                let mut pairwise_0v1_values_str = vec!["NA".to_string(); region_length_for_falsta];
+                for &(pos_1based, _, ref pairwise_0v1_hap_fst_estimate) in fst_data {
+                    let rel_pos_0based = (pos_1based - (csv_row.region_start + 1)) as usize;
+                    if rel_pos_0based < region_length_for_falsta {
+                        pairwise_0v1_values_str[rel_pos_0based] = pairwise_0v1_hap_fst_estimate.to_string();
+                    }
+                }
+                writeln!(fst_fasta_writer, "{}", pairwise_0v1_values_str.join(","))?;
             }
-            
-            // Make sure all positions in the region have values
-            let region_length = (csv_row.region_end - csv_row.region_start) as usize;
-            while values.len() < region_length {
-                values.push("NA".to_string());
-            }
-            
-            writeln!(fst_fasta_writer, "{}", values.join(","))?;
-    
+                
             // Write header for pairwise FST for the population comparisons
             let header = format!(">fst_population_pairwise_chr_{}_start_{}_end_{}", 
                 csv_row.seqname, csv_row.region_start, csv_row.region_end);
@@ -1464,14 +1469,10 @@ pub fn process_config_entries(
                             let rel_pos = (site.position - csv_row.region_start) as usize;
                             if rel_pos < region_length {
                                 // Get this pair's FST value if it exists
-                                if let Some(&pair_fst) = site.pairwise_fst.get(&pair_name) {
-                                    if pair_fst.is_nan() {
-                                        pair_values[rel_pos] = "NA".to_string();
-                                    } else if pair_fst == 0.0 {
-                                        pair_values[rel_pos] = "0".to_string();
-                                    } else {
-                                        pair_values[rel_pos] = format!("{:.6}", pair_fst);
-                                    }
+                                if let Some(&fst_estimate_val) = site.pairwise_fst.get(&pair_name) {
+                                    // Use the Display trait of FstEstimate
+                                    pair_values[rel_pos] = fst_estimate_val.to_string();
+                                }
                                 }
                             }
                         }
@@ -1668,9 +1669,9 @@ fn write_csv_row<W: Write>(writer: &mut csv::Writer<W>, row: &CsvRowData) -> Res
             &row.n_hap_1_f.to_string(),
             &format!("{:.6}", row.inv_freq_no_filter),
             &format!("{:.6}", row.inv_freq_filter),
-            // Write the new FST values using the helper function
-            &format_float_or_na(row.haplotype_overall_fst_wc),
-            &format_float_or_na(row.population_overall_fst_wc),
+            // Write the FstEstimate values using their Display trait
+            &row.haplotype_overall_fst_wc.to_string(),
+            &row.population_overall_fst_wc.to_string(),
         ])
         .map_err(|e| VcfError::Io(e.into()))?;
     Ok(())
@@ -2371,9 +2372,9 @@ fn process_single_config_entry(
         n_hap_1_f,
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
-        // Store the region-wide W&C FST calculation results (unclamped)
-        haplotype_overall_fst_wc: fst_results_filtered.as_ref().map_or(f64::NAN, |res| res.overall_fst),
-        population_overall_fst_wc: fst_results_pop_filtered.as_ref().map_or(f64::NAN, |res| res.overall_fst),
+        // Store the region-wide W&C FST calculation results
+        haplotype_overall_fst_wc: fst_results_filtered.as_ref().map_or(crate::stats::FstEstimate::InsufficientData, |res| res.overall_fst),
+        population_overall_fst_wc: fst_results_pop_filtered.as_ref().map_or(crate::stats::FstEstimate::InsufficientData, |res| res.overall_fst),
         // Store the complete W&C FST results for populations (includes site-specific and pairwise)
         population_fst_wc_results: fst_results_pop_filtered.clone(),
     };
@@ -2528,47 +2529,40 @@ fn process_single_config_entry(
         per_site_diversity_records.push((sd.position, sd.pi, sd.watterson_theta, 1, true));
     }
 
-    // Collect per-site FST records
-    let mut per_site_fst_records = Vec::new();
-    
-    // Add haplotype group FST data
-    if let Some(fst_results) = &fst_results_filtered {
-        // Access site FST data directly from the vector
-        for site in &fst_results.site_fst {
-            let pair_fst = site.pairwise_fst.get("0_vs_1").unwrap_or(&0.0);
-            per_site_fst_records.push((site.position, site.overall_fst, *pair_fst));
-        }
-    }
-    
-    // Add population FST data if available
-    if let Some(pop_fst_results) = &fst_results_pop_filtered {
+    // Collect per-site FST records specifically for the haplotype group analysis (0 vs. 1)
+    // for summary FALSTA output.
+    // Stores (1-based position, Overall_Haplotype_FstEstimate, Pairwise_0v1_Haplotype_FstEstimate).
+    let mut per_site_fst_records: Vec<(i64, crate::stats::FstEstimate, crate::stats::FstEstimate)> = Vec::new();
+
+    if let Some(fst_results_hap_groups) = &fst_results_filtered { // fst_results_hap_groups is &FstWcResults
         log(LogLevel::Info, &format!(
-            "Including {} sites of population FST data", 
-            pop_fst_results.site_fst.len()
+            "Collecting per-site FST data for haplotype groups (0 vs 1) for region {}",
+            region_desc
         ));
-        
-        // Add each population FST site to records
-        for site in &pop_fst_results.site_fst {
-            // Get an average of the pairwise FST values if multiple populations
-            let avg_pairwise_fst = if !site.pairwise_fst.is_empty() {
-                site.pairwise_fst.values().sum::<f64>() / site.pairwise_fst.len() as f64
-            } else {
-                f64::NAN  // Use NaN for undefined FST values
-            };
-            
-            per_site_fst_records.push((site.position, site.overall_fst, avg_pairwise_fst));
+        for site_fst_wc in &fst_results_hap_groups.site_fst { // site_fst_wc is &SiteFstWc
+            let overall_site_hap_fst = site_fst_wc.overall_fst;
+            let pairwise_0_vs_1_hap_fst = site_fst_wc.pairwise_fst.get("0_vs_1")
+                .copied() // Copies the FstEstimate from the Option<&FstEstimate>
+                .unwrap_or(crate::stats::FstEstimate::InsufficientData); // Default if "0_vs_1" key is not found
+            per_site_fst_records.push((site_fst_wc.position, overall_site_hap_fst, pairwise_0_vs_1_hap_fst));
         }
     }
+
+    // Note: Per-site FST data from CSV-defined populations (pop_fst_results_filtered)
+    // is NOT added to this specific `per_site_fst_records` vector.
+    // That data is fully contained within `row_data.population_fst_wc_results`
+    // and is used directly in `process_config_entries` for detailed per-population-pair FALSTA output.
+    // The overall FST for CSV populations is in `row_data.population_overall_fst_wc`.
     
     log(LogLevel::Info, &format!(
-        "Collected {} per-site diversity records for {}",
-        per_site_diversity_records.len(), region_desc
+        "Collected {} per-site diversity records and {} per-site haplotype FST summary records for {}",
+        per_site_diversity_records.len(), per_site_fst_records.len(), region_desc
     ));
 
     Ok(Some((
         row_data,
         per_site_diversity_records,
-        per_site_fst_records,
+        per_site_fst_records, // Vec<(i64, FstEstimate, FstEstimate)> containing only haplotype group FSTs
         local_regional_hudson_outcomes
     )))
 }
