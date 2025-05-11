@@ -1840,42 +1840,42 @@ pub fn harmonic(n: usize) -> f64 { // Returns the harmonic number as a float
 
 // Calculate Watterson's theta (θ_w), a measure of genetic diversity
 pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) -> f64 {
-    // Handle edge cases where computation isn't meaningful.
-    // Theta_w = S / (a_n * L), where a_n = H_{n-1} (harmonic number for n-1 samples).
-    if n <= 1 { // a_n (H_{n-1}) is undefined or zero if n=1, or problematic if n=0.
-        log(LogLevel::Warning, &format!(
-            "Cannot calculate Watterson's theta: {} haplotypes (n <= 1). S={}, L={}",
-            n, seg_sites, seq_length
-        ));
-        if seg_sites == 0 { return f64::NAN; } // Indeterminate (0/0 type situation)
-        else { return f64::INFINITY; }         // S/0 type situation
-    }
-    if seq_length <= 0 { // Denominator L is zero or negative.
-        log(LogLevel::Warning, &format!(
-            "Cannot calculate Watterson's theta: sequence length {} (L <= 0). S={}, n={}",
-            seq_length, seg_sites, n
-        ));
-        if seg_sites == 0 { return f64::NAN; } // Indeterminate (0/0 type situation)
-        else { return f64::INFINITY; }         // S/0 type situation
-    }
+    // Handle edge cases where computation isn't meaningful.
+    // Theta_w = S / (a_n * L), where a_n = H_{n-1} (harmonic number for n-1 samples).
+    if n <= 1 { // a_n (H_{n-1}) is undefined or zero if n=1, or problematic if n=0.
+        log(LogLevel::Warning, &format!(
+            "Cannot calculate Watterson's theta: {} haplotypes (n <= 1). S={}, L={}",
+            n, seg_sites, seq_length
+        ));
+        if seg_sites == 0 { return f64::NAN; } // Indeterminate (0/0 type situation)
+        else { return f64::INFINITY; }         // S/0 type situation
+    }
+    if seq_length <= 0 { // Denominator L is zero or negative.
+        log(LogLevel::Warning, &format!(
+            "Cannot calculate Watterson's theta: sequence length {} (L <= 0). S={}, n={}",
+            seq_length, seg_sites, n
+        ));
+        if seg_sites == 0 { return f64::NAN; } // Indeterminate (0/0 type situation)
+        else { return f64::INFINITY; }         // S/0 type situation
+    }
 
-    // Calculate the harmonic number H_{n-1}, used as the denominator factor a_n.
-    // Since n > 1 at this point, n-1 >= 1, so harmonic(n-1) will be > 0.
-    let harmonic_value = harmonic(n - 1);
-    // The check for harmonic_value == 0.0 below should ideally not be strictly necessary now
-    // if n > 1, as harmonic(k) for k>=1 is always positive.
-    // However, keeping it as a safeguard for extreme float precision issues, though unlikely.
-    if harmonic_value <= 1e-9 { // Using an epsilon for safety with float comparison
-        // This case should be rare if n > 1.
-        log(LogLevel::Error, &format!( // Error because this indicates an unexpected issue if n > 1
-            "Harmonic value (a_n) is unexpectedly near zero ({}) for Watterson's theta calculation with n={}. S={}, L={}",
-            harmonic_value, n, seg_sites, seq_length
-        ));
-        if seg_sites == 0 { return f64::NAN; }
-        else { return f64::INFINITY; }
-    }
-    
-    // Watterson's theta formula: θ_w = S / (a_n * L)
+    // Calculate the harmonic number H_{n-1}, used as the denominator factor a_n.
+    // Since n > 1 at this point, n-1 >= 1, so harmonic(n-1) will be > 0.
+    let harmonic_value = harmonic(n - 1);
+    // The check for harmonic_value == 0.0 below should ideally not be strictly necessary now
+    // if n > 1, as harmonic(k) for k>=1 is always positive.
+    // However, keeping it as a safeguard for extreme float precision issues, though unlikely.
+    if harmonic_value <= 1e-9 { // Using an epsilon for safety with float comparison
+        // This case should be rare if n > 1.
+        log(LogLevel::Error, &format!( // Error because this indicates an unexpected issue if n > 1
+            "Harmonic value (a_n) is unexpectedly near zero ({}) for Watterson's theta calculation with n={}. S={}, L={}",
+            harmonic_value, n, seg_sites, seq_length
+        ));
+        if seg_sites == 0 { return f64::NAN; }
+        else { return f64::INFINITY; }
+    }
+    
+    // Watterson's theta formula: θ_w = S / (a_n * L)
     // S = number of segregating sites, a_n = H_{n-1}, L = sequence length
     let theta = seg_sites as f64 / harmonic_value / seq_length as f64;
     
@@ -1970,20 +1970,20 @@ pub fn calculate_pi(variants: &[Variant], haplotypes_in_group: &[(usize, Haploty
     }
 
     // Compute nucleotide diversity: average number of differences per site
-    // Pi = (total number of differences) / (sequence length * number of pairs)
-    // If total_compared_pairs is 0, it means no valid comparisons could be made from the variant data,
-    // so pi is un-estimable (NaN). seq_length > 0 is ensured by earlier checks.
-    let pi = if total_compared_pairs > 0 {
-        total_differences as f64 / (seq_length as f64 * total_compared_pairs as f64)
-    } else {
-        // This case implies that although there might be >= 2 haplotypes and seq_length > 0,
-        // no two haplotypes had concurrently valid (non-missing) alleles at any variant site.
-        log(LogLevel::Debug, &format!(
-            "Pi calculation: total_compared_pairs is 0 for {} haplotypes over {} bp ({} total possible pairs). Returning NaN.",
-            haplotypes_in_group.len(), seq_length, total_possible_pairs
-        ));
-        f64::NAN
-    };
+    // Pi = (total number of differences) / (sequence length * number of pairs)
+    // If total_compared_pairs is 0, it means no valid comparisons could be made from the variant data,
+    // so pi is un-estimable (NaN). seq_length > 0 is ensured by earlier checks.
+    let pi = if total_compared_pairs > 0 {
+        total_differences as f64 / (seq_length as f64 * total_compared_pairs as f64)
+    } else {
+        // This case implies that although there might be >= 2 haplotypes and seq_length > 0,
+        // no two haplotypes had concurrently valid (non-missing) alleles at any variant site.
+        log(LogLevel::Debug, &format!(
+            "Pi calculation: total_compared_pairs is 0 for {} haplotypes over {} bp ({} total possible pairs). Returning NaN.",
+            haplotypes_in_group.len(), seq_length, total_possible_pairs
+        ));
+        f64::NAN
+    };
     
     spinner.finish_and_clear();
     log(LogLevel::Info, &format!(
