@@ -1182,14 +1182,34 @@ pub fn process_config_entries(
         // If is_filtered=true, we fill "filtered_pi_" and "filtered_theta_" columns.
         // The relative position is (pos - region_start + 1).
 
-        for &(pos, pi_val, theta_val, group_id, is_filtered) in per_site_diversity_vec {
-            // Compute a 0-based region from csv_row.region_start and csv_row.region_end
-            let region = ZeroBasedHalfOpen::from_0based_inclusive(csv_row.region_start, csv_row.region_end);
-            let pos_zero_based = pos;
-            if pos_zero_based < region.start as i64 || pos_zero_based >= region.end as i64 {
+        for &(pos_1based_in_vec, pi_val, theta_val, group_id, is_filtered) in per_site_diversity_vec {
+            // csv_row.region_start and csv_row.region_end now store 1-based inclusive coordinates.
+            // Convert these to a 0-based half-open interval for the bounds check.
+            // This represents the original entry.interval for comparison.
+            let check_region_zbh = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+            
+            // pos_1based_in_vec is the 1-based position from SiteDiversity calculations.
+            // Convert it to a 0-based value for comparison with the 0-based half-open check_region_zbh.
+            // We use OneBasedPosition and its zero_based() method to encapsulate the conversion.
+            // Positions from SiteDiversity are expected to be valid (>=1).
+            let pos_0based_for_check = match OneBasedPosition::new(pos_1based_in_vec) {
+                Ok(one_based_pos) => one_based_pos.zero_based(),
+                Err(_) => {
+                    // This case should ideally not be reached if positions are generated correctly.
+                    eprintln!("Error: Invalid 1-based position {} encountered from diversity vector. Skipping check.", pos_1based_in_vec);
+                    continue;
+                }
+            };
+
+            // Check if the 0-based position is outside the 0-based half-open check_region_zbh.
+            // check_region_zbh.start is 0-based inclusive.
+            // check_region_zbh.end is 0-based exclusive.
+            if pos_0based_for_check < check_region_zbh.start as i64 || pos_0based_for_check >= check_region_zbh.end as i64 {
                 eprintln!(
-                    "Warning: Position {} is outside region {}-{}",
-                    pos_zero_based, csv_row.region_start, csv_row.region_end
+                    "Warning: Position {} (1-based) is outside region {}-{} (1-based inclusive)",
+                    pos_1based_in_vec,      // Print the original 1-based position from the diversity vector
+                    csv_row.region_start, // This is the 1-based inclusive start from CsvRowData
+                    csv_row.region_end    // This is the 1-based inclusive end from CsvRowData
                 );
                 continue;
             }
