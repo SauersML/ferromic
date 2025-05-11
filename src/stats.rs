@@ -124,8 +124,10 @@ pub struct SiteFstWc {
 /// Identifier for a population or group being analyzed, used across FST methods.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PopulationId {
-    HaplotypeGroup(u8), // For predefined groups like 0 (e.g., reference) and 1 (e.g., inversion)
-    Named(String),      // For populations defined by names from external files
+    /// For predefined groups like 0 (e.g., reference) and 1 (e.g., inversion)
+    HaplotypeGroup(u8),
+    /// For populations defined by names from external files
+    Named(String),
 }
 
 /// Represents a collection of haplotypes and associated data for a specific population/group
