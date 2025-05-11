@@ -419,8 +419,8 @@ impl QueryRegion {
 #[derive(Debug, Clone)]
 struct CsvRowData {
     seqname: String,
-    region_start: i64, // 0-based inclusive start
-    region_end: i64,   // 0-based inclusive end
+    region_start: i64, // 1-based inclusive start of the processed region
+    region_end: i64,   // 1-based inclusive end of the processed region
     seq_len_0: i64,
     seq_len_1: i64,
     seq_len_adj_0: i64,
@@ -2637,8 +2637,8 @@ fn process_single_config_entry(
 
     let row_data = CsvRowData {
         seqname: entry.seqname.clone(),
-        region_start: entry.interval.start as i64,
-        region_end: entry.interval.get_0based_inclusive_end_coord(), // This is (entry.interval.end - 1)
+        region_start: entry.interval.start_1based_inclusive(), // Represents the 1-based inclusive start of the entry interval
+        region_end: entry.interval.get_1based_inclusive_end_coord(), // Represents the 1-based inclusive end of the entry interval
         seq_len_0: sequence_length,
         seq_len_1: sequence_length,
         seq_len_adj_0: adjusted_sequence_length,
