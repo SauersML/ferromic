@@ -1655,14 +1655,17 @@ fn write_csv_header<W: Write>(writer: &mut csv::Writer<W>) -> Result<(), VcfErro
             "1_num_hap_filter",
             "inversion_freq_no_filter",
             "inversion_freq_filter",
-            "haplotype_overall_fst_wc", // Weir & Cockerham FST for haplotype groups
+            // Weir & Cockerham FST components for haplotype groups
+            "haplotype_overall_fst_wc",
+            "haplotype_between_pop_variance_wc",
+            "haplotype_within_pop_variance_wc",
+            "haplotype_num_informative_sites_wc",
             // Hudson FST components for haplotype groups 0 vs 1
             "hudson_fst_hap_group_0v1",
             "hudson_dxy_hap_group_0v1",
             "hudson_pi_hap_group_0",
             "hudson_pi_hap_group_1",
             "hudson_pi_avg_hap_group_0v1",
-            "population_overall_fst_wc", // Weir & Cockerham FST for CSV-defined populations
         ])
         .map_err(|e| VcfError::Io(e.into()))?;
     Ok(())
