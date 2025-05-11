@@ -12,77 +12,99 @@ use std::io::{BufReader, BufRead};
 use std::path::Path;
 use std::fmt;
 
-/// Represents the outcome of an FST (Fixation Index) calculation.
-///
-/// This enum provides distinct states for FST estimates to clearly differentiate
-/// between valid calculations, calculations undefined due to insufficient data,
-/// and calculations undefined due to mathematical properties of the variance
-/// components (specifically, a non-positive sum of components that would form
-/// the denominator of the FST ratio).
+/// Represents the outcome of an FST (Fixation Index) calculation, providing
+/// detailed context for both per-site and regional estimates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FstEstimate {
-    /// FST is considered calculable because the denominator in the Fst = Numerator/Denominator
-    /// formula was positive, and there was sufficient data for comparison.
-    /// The contained `f64` value is the direct result of Numerator / Denominator.
-    /// This value can be a finite number (positive, negative, or zero),
-    /// `f64::NAN`, `f64::INFINITY`, or `f64::NEG_INFINITY`, depending on the
-    /// properties of the numerator and the division outcome.
-    Calculable(f64),
+    /// A specific FST value was determined.
+    /// This is the primary success case where a meaningful FST ratio (a / (a+b))
+    /// could be formed from the variance components.
+    /// - 'value': The FST value itself. Can be finite (positive, negative, zero),
+    ///   or non-finite (Infinity, -Infinity from non-0/0 division by zero).
+    /// - 'sum_a', 'sum_b': The (summed) variance components 'a' and 'b'.
+    ///   For per-site, these are the site's a_i, b_i. For regional, these are Σa_i, Σb_i.
+    /// - 'num_informative_sites': Number of sites that contributed (potentially non-zero)
+    ///   components to sum_a and sum_b (for regional) or 1 (for a single informative per-site estimate).
+    Calculable {
+        value: f64,
+        sum_a: f64,
+        sum_b: f64,
+        num_informative_sites: usize,
+    },
 
-    /// FST is undefined specifically because the sum of variance components
-    /// (e.g., a+b or Σ(a+b)) that forms the denominator in the FST ratio
-    /// was calculated to be zero or negative. This makes the FST ratio
-    /// mathematically ill-defined according to the estimator's formula.
-    SummedVariancesNonPositive,
+    /// The FST estimate is indeterminate. Although underlying genetic variation may have led
+    /// to non-zero variance components (sum_a and/or sum_b are non-zero), their combined
+    /// sum (sum_a + sum_b) is zero or negative. This makes the standard FST ratio
+    /// problematic. This state is distinct from a total lack of variation across all
+    /// sites (which would be NoInterPopulationVariance).
+    /// This often arises from sampling effects when true differentiation is low.
+    /// - 'sum_a', 'sum_b': The (summed) variance components 'a' and 'b'.
+    /// - 'num_informative_sites': Number of sites that contributed (potentially non-zero)
+    ///   components to these sums.
+    ComponentsYieldIndeterminateRatio {
+        sum_a: f64,
+        sum_b: f64,
+        num_informative_sites: usize,
+    },
 
-    /// FST could not be calculated because there was insufficient data to form
-    /// the necessary population comparisons (e.g., fewer than 2 populations/groups
-    /// had data for the site or region). In this case, variance components a and b,
-    /// and thus their sum, are not meaningfully formed for an FST calculation.
-    InsufficientData,
+    /// FST is undefined because the site or region entirely lacks observable genetic variation
+    /// that can distinguish populations (e.g., all sites monomorphic across populations,
+    /// or no allele frequency differences were found at any processed site, or summed components from
+    /// informative sites cancelled out to 0/0).
+    /// Consequently, both sum_a and sum_b are effectively zero.
+    /// - 'sum_a', 'sum_b': The (summed) variance components, expected to be 0.0.
+    /// - 'sites_evaluated': Number of sites that were processed and found to lack
+    ///   inter-population variance, or number of informative sites that summed to 0/0.
+    ///   (For per-site, this would be 1 if the site was evaluated and found this way).
+    NoInterPopulationVariance {
+        sum_a: f64, // Expected 0.0
+        sum_b: f64, // Expected 0.0
+        sites_evaluated: usize,
+    },
+
+    /// FST could not be estimated due to a fundamental lack of sufficient or appropriate input data.
+    /// For a site: e.g., fewer than 2 populations had genotype data.
+    /// For a region: e.g., no sites could be processed at all (empty input to aggregation),
+    /// or all sites individually resulted in this state or a state that couldn't contribute components.
+    /// - 'sum_a', 'sum_b': Not meaningfully calculated from data; defaults (e.g., 0.0) indicate
+    ///   components weren't properly formed or summed from valid site-level estimates.
+    /// - 'sites_attempted': Number of sites for which an estimate was initially attempted but
+    ///   could not proceed to component calculation/summation. (For per-site, this would be 1).
+    InsufficientDataForEstimation {
+        sum_a: f64, // Default to 0.0, as components weren't really formed from data.
+        sum_b: f64, // Default to 0.0.
+        sites_attempted: usize,
+    },
 }
 
-impl FstEstimate {
-    /// Creates an `FstEstimate` from a numerator and a denominator.
-    ///
-    /// This function is intended to be called when variance components (numerator and
-    /// the components forming the denominator) have been successfully calculated.
-    /// It determines if the FST ratio is well-defined based on the denominator.
-    ///
-    /// - If `denominator > 0.0`, returns `FstEstimate::Calculable(numerator / denominator)`.
-    ///   The inner `f64` may be finite, `NaN`, or `Infinity`.
-    /// - If `denominator <= 0.0`, returns `FstEstimate::SummedVariancesNonPositive`.
-    ///
-    /// Cases of `InsufficientData` (e.g., < 2 populations) should be handled
-    /// before attempting to calculate components and calling this method.
-    pub fn from_ratio(numerator: f64, denominator: f64) -> Self {
-        if denominator > 0.0 {
-            FstEstimate::Calculable(numerator / denominator)
-        } else { // denominator is <= 0.0
-            FstEstimate::SummedVariancesNonPositive
-        }
-    }
-}
+// The `from_ratio` method is removed as construction of `FstEstimate` is now
+// context-specific within calculation functions (`calculate_fst_wc_at_site_general`
+// and `calculate_overall_fst_wc`).
 
 impl fmt::Display for FstEstimate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FstEstimate::Calculable(val) => {
-                if val.is_nan() {
-                    write!(f, "NaN")
-                } else if val.is_infinite() {
-                    if val.is_sign_positive() {
-                        write!(f, "Infinity")
-                    } else {
-                        write!(f, "-Infinity")
-                    }
+            FstEstimate::Calculable { value, sum_a, sum_b, num_informative_sites } => {
+                let val_str = if value.is_nan() {
+                    "NaN".to_string()
+                } else if value.is_infinite() {
+                    if value.is_sign_positive() { "Infinity".to_string() } else { "-Infinity".to_string() }
                 } else {
-                    // Format finite FST values; {:.6} is a common precision for FST.
-                    write!(f, "{:.6}", val)
-                }
+                    format!("{:.6}", value) // Common precision for FST
+                };
+                write!(f, "FST: {} (A: {:.4e}, B: {:.4e}, N_inf_sites: {})", val_str, sum_a, sum_b, num_informative_sites)
             }
-            FstEstimate::SummedVariancesNonPositive => write!(f, "Undefined (Sum of Variance Components Non-Positive)"),
-            FstEstimate::InsufficientData => write!(f, "Undefined (Insufficient Data for Comparison)"),
+            FstEstimate::ComponentsYieldIndeterminateRatio { sum_a, sum_b, num_informative_sites } => {
+                write!(f, "IndeterminateRatio (A: {:.4e}, B: {:.4e}, N_inf_sites: {})", sum_a, sum_b, num_informative_sites)
+            }
+            FstEstimate::NoInterPopulationVariance { sum_a, sum_b, sites_evaluated } => {
+                write!(f, "NoInterPopVariance (A: {:.4e}, B: {:.4e}, SitesEval: {})", sum_a, sum_b, sites_evaluated)
+            }
+            FstEstimate::InsufficientDataForEstimation { sum_a, sum_b, sites_attempted } => {
+                // For InsufficientData, sum_a and sum_b are not typically meaningful data-derived sums.
+                // Reporting them with limited precision as they are often conventional values (e.g. 0.0).
+                write!(f, "InsufficientData (A: {:.1}, B: {:.1}, SitesAtt: {})", sum_a, sum_b, sites_attempted)
+            }
         }
     }
 }
@@ -339,13 +361,28 @@ pub fn calculate_fst_wc_haplotype_groups(
             actual_pop_sizes.insert("0".to_string(), *group_counts.get("0").unwrap_or(&0));
             actual_pop_sizes.insert("1".to_string(), *group_counts.get("1").unwrap_or(&0));
             
+            let site_is_monomorphic_estimate = FstEstimate::NoInterPopulationVariance {
+                sum_a: 0.0,
+                sum_b: 0.0,
+                sites_evaluated: 1, // This one site was evaluated as monomorphic
+            };
+            // For monomorphic sites, pairwise FSTs are also NoInterPopulationVariance
+            // if the pair of populations exists.
+            let mut populated_pairwise_fst = HashMap::new();
+            let mut populated_pairwise_var_comps = HashMap::new();
+            if actual_pop_sizes.get("0").unwrap_or(&0) > &0 && actual_pop_sizes.get("1").unwrap_or(&0) > &0 {
+                 populated_pairwise_fst.insert("0_vs_1".to_string(), site_is_monomorphic_estimate);
+                 populated_pairwise_var_comps.insert("0_vs_1".to_string(), (0.0, 0.0));
+            }
+
+
             site_fst_values.push(SiteFstWc {
                 position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: FstEstimate::SummedVariancesNonPositive,
-                pairwise_fst: site_pairwise_fst,
+                overall_fst: site_is_monomorphic_estimate,
+                pairwise_fst: populated_pairwise_fst,
                 variance_components: (0.0, 0.0), // No variance components for monomorphic site
                 population_sizes: actual_pop_sizes,
-                pairwise_variance_components: HashMap::new(),
+                pairwise_variance_components: populated_pairwise_var_comps,
             });
         }
     }
@@ -461,13 +498,41 @@ pub fn calculate_fst_wc_csv_populations(
             }
             // These are haplotype counts per population.
             
+            let site_is_monomorphic_estimate = FstEstimate::NoInterPopulationVariance {
+                sum_a: 0.0,
+                sum_b: 0.0,
+                sites_evaluated: 1, // This one site was evaluated as monomorphic
+            };
+
+            let mut site_pairwise_fst = HashMap::new();
+            let mut site_pairwise_var_comps = HashMap::new();
+            let pop_ids: Vec<_> = pop_counts_for_site.keys().cloned().collect();
+            // Create pairwise entries if there are at least two populations defined for this site
+            if pop_ids.len() >= 2 {
+                for i in 0..pop_ids.len() {
+                    for j in (i + 1)..pop_ids.len() {
+                        if pop_counts_for_site.get(&pop_ids[i]).map_or(false, |&count| count > 0) &&
+                           pop_counts_for_site.get(&pop_ids[j]).map_or(false, |&count| count > 0) {
+                            let (key_pop1, key_pop2) = if pop_ids[i] < pop_ids[j] {
+                                (&pop_ids[i], &pop_ids[j])
+                            } else {
+                                (&pop_ids[j], &pop_ids[i])
+                            };
+                            let pair_key = format!("{}_vs_{}", key_pop1, key_pop2);
+                            site_pairwise_fst.insert(pair_key.clone(), site_is_monomorphic_estimate);
+                            site_pairwise_var_comps.insert(pair_key, (0.0, 0.0));
+                        }
+                    }
+                }
+            }
+            
             site_fst_values.push(SiteFstWc {
                 position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: FstEstimate::SummedVariancesNonPositive,
-                pairwise_fst: HashMap::new(), // No defined pairwise FSTs for a globally monomorphic site
+                overall_fst: site_is_monomorphic_estimate,
+                pairwise_fst: site_pairwise_fst,
                 variance_components: (0.0, 0.0),
                 population_sizes: pop_counts_for_site,
-                pairwise_variance_components: HashMap::new(),
+                pairwise_variance_components: site_pairwise_var_comps,
             });
         }
     }
@@ -735,10 +800,16 @@ fn calculate_fst_wc_at_site_general(
     // If fewer than two populations have data at this site, FST is not meaningful.
     if pop_stats.len() < 2 {
         log(LogLevel::Debug, &format!(
-            "Site at pos {}: FST is {} (reason: found {} populations with data, need >= 2).",
-            ZeroBasedPosition(variant.position).to_one_based(), FstEstimate::InsufficientData, pop_stats.len()
+            "Site at pos {}: FST is InsufficientDataForEstimation (reason: found {} populations with data, need >= 2).",
+            ZeroBasedPosition(variant.position).to_one_based(), pop_stats.len()
         ));
-        return (FstEstimate::InsufficientData, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
+        let insufficient_data_estimate = FstEstimate::InsufficientDataForEstimation {
+            sum_a: 0.0,
+            sum_b: 0.0,
+            sites_attempted: 1, // This one site was attempted
+        };
+        // Returns (0.0, 0.0) for site_a, site_b as they are not meaningfully calculated.
+        return (insufficient_data_estimate, HashMap::new(), (0.0, 0.0), pop_sizes, HashMap::new());
     }
 
     // 3. Compute overall variance components (a, b) for all populations at this site.
@@ -747,30 +818,71 @@ fn calculate_fst_wc_at_site_general(
     for (_, (n, freq)) in &pop_stats {
         weighted_freq_sum_overall += (*n as f64) * freq;
     }
-    // Global allele frequency, ensuring total_haplotypes_overall is not zero (though pop_stats.len() < 2 check should prevent this).
     let global_allele_freq = if total_haplotypes_overall > 0 {
         weighted_freq_sum_overall / (total_haplotypes_overall as f64)
     } else {
-        // This case implies pop_stats has >= 2 entries but all have 0 haplotypes, which shouldn't happen due to earlier filter.
-        // If it did, it would lead to a division by zero if not handled. 
-        // However, calculate_variance_components handles n_bar <= 1.0 returning (0.0,0.0).
         0.0 
     };
 
-    let (overall_a, overall_b) = calculate_variance_components(&pop_stats, global_allele_freq);
+    let (site_a, site_b) = calculate_variance_components(&pop_stats, global_allele_freq);
     
-    let overall_fst_at_site = FstEstimate::from_ratio(overall_a, overall_a + overall_b);
-    if !matches!(overall_fst_at_site, FstEstimate::Calculable(v) if v.is_finite()) { // Log if not a finite calculable value
-        log(LogLevel::Debug, &format!(
-            "Site at pos {}: Overall FST is {} (a={:.4e}, b={:.4e}, a+b={:.4e}).",
-            ZeroBasedPosition(variant.position).to_one_based(), overall_fst_at_site, overall_a, overall_b, overall_a + overall_b
-        ));
+    // Construct the FstEstimate for the overall FST at this site
+    let overall_fst_at_site = {
+        let denominator = site_a + site_b;
+        let eps = 1e-9; // Small epsilon for float comparisons
+
+        if denominator > eps {
+            FstEstimate::Calculable {
+                value: site_a / denominator,
+                sum_a: site_a,
+                sum_b: site_b,
+                num_informative_sites: 1, // This site is informative
+            }
+        } else if denominator < -eps {
+            FstEstimate::ComponentsYieldIndeterminateRatio {
+                sum_a: site_a,
+                sum_b: site_b,
+                num_informative_sites: 1,
+            }
+        } else { // Denominator is effectively zero
+            if site_a.abs() > eps { // Non-zero numerator / zero denominator
+                FstEstimate::Calculable {
+                    value: site_a / denominator, // Will be Inf or -Inf
+                    sum_a: site_a,
+                    sum_b: site_b,
+                    num_informative_sites: 1,
+                }
+            } else { // Numerator is also effectively zero (0/0)
+                FstEstimate::NoInterPopulationVariance {
+                    sum_a: site_a, // Should be ~0.0
+                    sum_b: site_b, // Should be ~0.0
+                    sites_evaluated: 1, // This one site was evaluated
+                }
+            }
+        }
+    };
+    
+    // Logging for non-standard FST outcomes for overall_fst_at_site
+    match overall_fst_at_site {
+        FstEstimate::Calculable { value, .. } if !value.is_finite() => {
+            log(LogLevel::Debug, &format!(
+                "Site at pos {}: Overall FST is {} (a={:.4e}, b={:.4e}, a+b={:.4e}).",
+                ZeroBasedPosition(variant.position).to_one_based(), overall_fst_at_site, site_a, site_b, site_a + site_b
+            ));
+        }
+        FstEstimate::ComponentsYieldIndeterminateRatio { .. } | FstEstimate::NoInterPopulationVariance { .. } => {
+             log(LogLevel::Debug, &format!(
+                "Site at pos {}: Overall FST is {} (a={:.4e}, b={:.4e}, a+b={:.4e}).",
+                ZeroBasedPosition(variant.position).to_one_based(), overall_fst_at_site, site_a, site_b, site_a + site_b
+            ));
+        }
+        _ => {} // Finite Calculable cases or InsufficientData (already logged) don't need special logging here
     }
 
     // 4. Compute pairwise FSTs and their respective variance components (a_xy, b_xy).
     let mut pairwise_fst_estimate_map = HashMap::new();
     let mut pairwise_variance_components_map = HashMap::new();
-    let pop_id_list: Vec<_> = pop_stats.keys().cloned().collect(); // Already know pop_id_list.len() >= 2
+    let pop_id_list: Vec<_> = pop_stats.keys().cloned().collect(); 
 
     for i in 0..pop_id_list.len() {
         for j in (i + 1)..pop_id_list.len() {
@@ -778,7 +890,6 @@ fn calculate_fst_wc_at_site_general(
             let pop2_id_str = &pop_id_list[j];
 
             let mut current_pair_stats = HashMap::new();
-            // These unwraps are safe because pop_id_list elements are keys from pop_stats.
             current_pair_stats.insert(pop1_id_str.clone(), *pop_stats.get(pop1_id_str).unwrap());
             current_pair_stats.insert(pop2_id_str.clone(), *pop_stats.get(pop2_id_str).unwrap());
             
@@ -793,9 +904,41 @@ fn calculate_fst_wc_at_site_general(
 
             let (pairwise_a_xy, pairwise_b_xy) = calculate_variance_components(&current_pair_stats, pair_global_allele_freq);
             
-            let pairwise_fst_val = FstEstimate::from_ratio(pairwise_a_xy, pairwise_a_xy + pairwise_b_xy);
+            let pairwise_fst_val = {
+                let denominator_pair = pairwise_a_xy + pairwise_b_xy;
+                let eps = 1e-9;
+
+                if denominator_pair > eps {
+                    FstEstimate::Calculable {
+                        value: pairwise_a_xy / denominator_pair,
+                        sum_a: pairwise_a_xy,
+                        sum_b: pairwise_b_xy,
+                        num_informative_sites: 1,
+                    }
+                } else if denominator_pair < -eps {
+                    FstEstimate::ComponentsYieldIndeterminateRatio {
+                        sum_a: pairwise_a_xy,
+                        sum_b: pairwise_b_xy,
+                        num_informative_sites: 1,
+                    }
+                } else { // Denominator is effectively zero
+                    if pairwise_a_xy.abs() > eps {
+                        FstEstimate::Calculable {
+                            value: pairwise_a_xy / denominator_pair,
+                            sum_a: pairwise_a_xy,
+                            sum_b: pairwise_b_xy,
+                            num_informative_sites: 1,
+                        }
+                    } else {
+                        FstEstimate::NoInterPopulationVariance {
+                            sum_a: pairwise_a_xy,
+                            sum_b: pairwise_b_xy,
+                            sites_evaluated: 1,
+                        }
+                    }
+                }
+            };
             
-            // Canonical key order (lexicographical) for pairwise results.
             let (key_pop1, key_pop2) = if pop1_id_str < pop2_id_str {
                 (pop1_id_str, pop2_id_str)
             } else {
@@ -806,15 +949,25 @@ fn calculate_fst_wc_at_site_general(
             pairwise_fst_estimate_map.insert(pair_key.clone(), pairwise_fst_val);
             pairwise_variance_components_map.insert(pair_key.clone(), (pairwise_a_xy, pairwise_b_xy));
 
-            if !matches!(pairwise_fst_val, FstEstimate::Calculable(v) if v.is_finite()) {
-                log(LogLevel::Debug, &format!(
-                    "Site at pos {}: Pairwise FST for {} is {} (a_xy={:.4e}, b_xy={:.4e}, a_xy+b_xy={:.4e}).",
-                    ZeroBasedPosition(variant.position).to_one_based(), pair_key, pairwise_fst_val, pairwise_a_xy, pairwise_b_xy, pairwise_a_xy + pairwise_b_xy
-                ));
+            match pairwise_fst_val {
+                FstEstimate::Calculable { value, .. } if !value.is_finite() => {
+                    log(LogLevel::Debug, &format!(
+                        "Site at pos {}: Pairwise FST for {} is {} (a_xy={:.4e}, b_xy={:.4e}, a_xy+b_xy={:.4e}).",
+                        ZeroBasedPosition(variant.position).to_one_based(), pair_key, pairwise_fst_val, pairwise_a_xy, pairwise_b_xy, pairwise_a_xy + pairwise_b_xy
+                    ));
+                }
+                FstEstimate::ComponentsYieldIndeterminateRatio { .. } | FstEstimate::NoInterPopulationVariance { .. } => {
+                    log(LogLevel::Debug, &format!(
+                        "Site at pos {}: Pairwise FST for {} is {} (a_xy={:.4e}, b_xy={:.4e}, a_xy+b_xy={:.4e}).",
+                        ZeroBasedPosition(variant.position).to_one_based(), pair_key, pairwise_fst_val, pairwise_a_xy, pairwise_b_xy, pairwise_a_xy + pairwise_b_xy
+                    ));
+                }
+                _ => {}
             }
         }
     }
-    (overall_fst_at_site, pairwise_fst_estimate_map, (overall_a, overall_b), pop_sizes, pairwise_variance_components_map)
+    // Return site_a and site_b (overall components for this site) for storage in SiteFstWc.
+    (overall_fst_at_site, pairwise_fst_estimate_map, (site_a, site_b), pop_sizes, pairwise_variance_components_map)
 }
 
 /// Calculates Weir & Cockerham (1984) variance components 'a' (among-population)
@@ -923,12 +1076,13 @@ fn calculate_variance_components(
 /// Calculates overall and pairwise Weir & Cockerham FST estimates for a region from per-site FST results.
 ///
 /// This function implements Equation 10 from Weir & Cockerham (1984) by summing
-/// the among-population variance components (a_i) and total variance components (a_i + b_i)
-/// from all sites before calculating the final ratio.
+/// the among-population variance components (a_i) and within-population components (b_i)
+/// from all relevant sites before calculating the final ratio using the new `FstEstimate` structure.
+/// Relevant sites are those for which variance components could be estimated (i.e., not `InsufficientDataForEstimation` per-site).
 ///
 /// # Arguments
 /// * `site_fst_values`: A slice of `SiteFstWc` structs, each containing per-site
-///   variance components and `FstEstimate` values. Per-site components are assumed to be finite.
+///   variance components and `FstEstimate` values.
 ///
 /// # Returns
 /// A tuple containing:
@@ -936,72 +1090,183 @@ fn calculate_variance_components(
 /// * `pairwise_fst_estimates` (`HashMap<String, FstEstimate>`): A map of regional pairwise FST estimates.
 /// * `aggregated_pairwise_variance_components` (`HashMap<String, (f64,f64)>`): Summed (a_xy, b_xy) for each pair.
 fn calculate_overall_fst_wc(site_fst_values: &[SiteFstWc]) -> (FstEstimate, HashMap<String, FstEstimate>, HashMap<String, (f64,f64)>) {
-    let mut sum_a_total: f64 = 0.0;
-    let mut sum_b_total: f64 = 0.0;
-    let mut diagnostic_count_overall_non_positive_sum_comps: usize = 0;
+    if site_fst_values.is_empty() {
+        let estimate = FstEstimate::InsufficientDataForEstimation {
+            sum_a: 0.0,
+            sum_b: 0.0,
+            sites_attempted: 0,
+        };
+        return (estimate, HashMap::new(), HashMap::new());
+    }
+
+    let mut num_per_site_insufficient = 0;
+    // Stores (a_i, b_i) components from sites that were not per-site InsufficientDataForEstimation.
+    let mut informative_site_components_overall: Vec<(f64, f64)> = Vec::new();
+    // Stores (a_xy, b_xy) components for each pair from relevant sites.
+    let mut informative_site_components_pairwise: HashMap<String, Vec<(f64, f64)>> = HashMap::new();
+    // Keeps track of all unique pairwise keys observed across all sites.
+    let mut all_observed_pair_keys = HashSet::new();
+
 
     for site in site_fst_values.iter() {
-        let (site_a, site_b) = site.variance_components;
-        sum_a_total += site_a;
-        sum_b_total += site_b;
-        
-        if (site_a + site_b) <= 0.0 && (site_a.abs() > 1e-9 || site_b.abs() > 1e-9) { // Not a simple 0,0 monomorphic site
-            diagnostic_count_overall_non_positive_sum_comps += 1;
+        // Aggregate components for overall FST
+        // The SiteFstWc.variance_components stores the (a,b) for the overall calculation at that site.
+        match site.overall_fst {
+            FstEstimate::InsufficientDataForEstimation { .. } => {
+                num_per_site_insufficient += 1;
+            }
+            // For Calculable, ComponentsYieldIndeterminateRatio, and NoInterPopulationVariance,
+            // the raw a and b components from site.variance_components are summed.
+            // These are the components that led to the per-site FstEstimate.
+            _ => { // Catches Calculable, ComponentsYieldIndeterminateRatio, NoInterPopulationVariance for overall per-site
+                let (site_a, site_b) = site.variance_components;
+                informative_site_components_overall.push((site_a, site_b));
+            }
         }
-    }
-    
-    if diagnostic_count_overall_non_positive_sum_comps > 0 {
-        log(LogLevel::Debug, &format!(
-            "Diagnostic: {} sites had per-site (a+b) sum of components <= 0 (excluding fully monomorphic a=0,b=0 sites); these components were included in regional sums.",
-            diagnostic_count_overall_non_positive_sum_comps
-        ));
-    }
 
-    let overall_fst_estimate = FstEstimate::from_ratio(sum_a_total, sum_a_total + sum_b_total);
-    if !matches!(overall_fst_estimate, FstEstimate::Calculable(v) if v.is_finite()) {
-        log(LogLevel::Info, &format!(
-            "Overall regional FST is {} (sum_a={:.4e}, sum_b={:.4e}, sum_a+sum_b={:.4e}).",
-            overall_fst_estimate, sum_a_total, sum_b_total, sum_a_total + sum_b_total
-        ));
-    }
-
-    let mut pairwise_ab_sums: HashMap<String, (f64, f64)> = HashMap::new();
-    let mut diagnostic_count_pairwise_non_positive_sum_comps: HashMap<String, usize> = HashMap::new();
-
-    for site in site_fst_values.iter() {
+        // Aggregate components for pairwise FSTs
+        // The SiteFstWc.pairwise_variance_components stores the (a_xy, b_xy) for each pair at that site.
         for (pair_key, &(site_a_xy, site_b_xy)) in &site.pairwise_variance_components {
-            let entry = pairwise_ab_sums.entry(pair_key.clone()).or_insert((0.0, 0.0));
-            entry.0 += site_a_xy;
-            entry.1 += site_b_xy;
-
-            if (site_a_xy + site_b_xy) <= 0.0 && (site_a_xy.abs() > 1e-9 || site_b_xy.abs() > 1e-9) {
-                *diagnostic_count_pairwise_non_positive_sum_comps.entry(pair_key.clone()).or_insert(0) += 1;
+            all_observed_pair_keys.insert(pair_key.clone());
+            // We only sum components if the per-site pairwise FST for this pair was not InsufficientData.
+            // If site.pairwise_fst for this pair_key indicates it was calculable or had components,
+            // then site_a_xy and site_b_xy are relevant for summing.
+            // The per-site FstEstimate itself is in site.pairwise_fst.get(pair_key)
+            if !matches!(site.pairwise_fst.get(pair_key), Some(FstEstimate::InsufficientDataForEstimation { .. }) | None) {
+                 informative_site_components_pairwise
+                    .entry(pair_key.clone())
+                    .or_default()
+                    .push((site_a_xy, site_b_xy));
             }
         }
     }
 
-    for (pair_key, count) in diagnostic_count_pairwise_non_positive_sum_comps.iter() {
-        if *count > 0 {
-            log(LogLevel::Debug, &format!(
-                "Diagnostic for pair {}: {} sites had per-site (a_xy+b_xy) sum of components <= 0 (excluding fully monomorphic a_xy=0,b_xy=0 sites); these components were included in regional sums.",
-                pair_key, count
-            ));
-        }
-    }
+    let total_sites_attempted = site_fst_values.len();
+    // Number of sites that were not 'InsufficientDataForEstimation' at the per-site level (for the overall calculation).
+    // These are the sites whose components (even if zero) are considered for summation.
+    let sites_contributing_to_overall_sum = total_sites_attempted - num_per_site_insufficient;
 
+
+    // Overall FST calculation
+    let overall_fst_estimate = if sites_contributing_to_overall_sum == 0 {
+        // This means all sites were individually InsufficientDataForEstimation (for overall FST context),
+        // or no sites were provided (which is caught by the initial empty check).
+        FstEstimate::InsufficientDataForEstimation {
+            sum_a: 0.0,
+            sum_b: 0.0,
+            sites_attempted: total_sites_attempted, // Total sites input to this function.
+        }
+    } else {
+        // At least one site contributed components for the overall FST calculation.
+        let sum_a_total: f64 = informative_site_components_overall.iter().map(|(a, _)| *a).sum();
+        let sum_b_total: f64 = informative_site_components_overall.iter().map(|(_, b)| *b).sum();
+        // num_informative_sites is the count of sites that actually went into these sums.
+        let num_sites_in_overall_sum = informative_site_components_overall.len();
+        // Assertion: num_sites_in_overall_sum should equal sites_contributing_to_overall_sum if logic is correct.
+
+        let denominator = sum_a_total + sum_b_total;
+        let eps = 1e-9;
+
+        if denominator > eps {
+            FstEstimate::Calculable {
+                value: sum_a_total / denominator,
+                sum_a: sum_a_total,
+                sum_b: sum_b_total,
+                num_informative_sites: num_sites_in_overall_sum,
+            }
+        } else if denominator < -eps {
+            FstEstimate::ComponentsYieldIndeterminateRatio {
+                sum_a: sum_a_total,
+                sum_b: sum_b_total,
+                num_informative_sites: num_sites_in_overall_sum,
+            }
+        } else { // Denominator is effectively zero
+            if sum_a_total.abs() > eps { // Non-zero numerator
+                FstEstimate::Calculable {
+                    value: sum_a_total / denominator, // Inf or -Inf
+                    sum_a: sum_a_total,
+                    sum_b: sum_b_total,
+                    num_informative_sites: num_sites_in_overall_sum,
+                }
+            } else { // Numerator also effectively zero (0/0 from sum)
+                // This state means that after summing all contributing sites, the net variance is zero.
+                // 'sites_evaluated' here refers to the number of sites whose components were summed.
+                FstEstimate::NoInterPopulationVariance {
+                    sum_a: sum_a_total, // ~0.0
+                    sum_b: sum_b_total, // ~0.0
+                    sites_evaluated: num_sites_in_overall_sum,
+                }
+            }
+        }
+    };
+    
+    log(LogLevel::Info, &format!("Overall regional FST: {}", overall_fst_estimate));
+
+
+    // Pairwise FST calculation
     let mut pairwise_fst_estimates = HashMap::new();
-    for (pair_key, (sum_a_xy, sum_b_xy)) in &pairwise_ab_sums {
-        let estimate_for_pair = FstEstimate::from_ratio(*sum_a_xy, *sum_a_xy + *sum_b_xy);
-        pairwise_fst_estimates.insert(pair_key.clone(), estimate_for_pair);
-        if !matches!(estimate_for_pair, FstEstimate::Calculable(v) if v.is_finite()) {
-            log(LogLevel::Info, &format!(
-                "Pairwise FST for pair {} is {} (sum_a_xy={:.4e}, sum_b_xy={:.4e}, sum_a_xy+sum_b_xy={:.4e}).",
-                pair_key, estimate_for_pair, sum_a_xy, sum_b_xy, sum_a_xy + sum_b_xy
-            ));
+    let mut aggregated_pairwise_variance_components = HashMap::new();
+
+    for pair_key in all_observed_pair_keys {
+        if let Some(components_vec) = informative_site_components_pairwise.get(&pair_key) {
+            // This pair had at least one site contributing (non-InsufficientData) components for it.
+            let sum_a_xy: f64 = components_vec.iter().map(|(a, _)| *a).sum();
+            let sum_b_xy: f64 = components_vec.iter().map(|(_, b)| *b).sum();
+            let num_informative_sites_for_pair = components_vec.len();
+
+            aggregated_pairwise_variance_components.insert(pair_key.clone(), (sum_a_xy, sum_b_xy));
+
+            let denominator_pair = sum_a_xy + sum_b_xy;
+            let eps = 1e-9;
+
+            let estimate_for_pair = if denominator_pair > eps {
+                FstEstimate::Calculable {
+                    value: sum_a_xy / denominator_pair,
+                    sum_a: sum_a_xy,
+                    sum_b: sum_b_xy,
+                    num_informative_sites: num_informative_sites_for_pair,
+                }
+            } else if denominator_pair < -eps {
+                FstEstimate::ComponentsYieldIndeterminateRatio {
+                    sum_a: sum_a_xy,
+                    sum_b: sum_b_xy,
+                    num_informative_sites: num_informative_sites_for_pair,
+                }
+            } else { // Denominator is effectively zero
+                if sum_a_xy.abs() > eps { // Non-zero numerator
+                    FstEstimate::Calculable {
+                        value: sum_a_xy / denominator_pair, // Inf or -Inf
+                        sum_a: sum_a_xy,
+                        sum_b: sum_b_xy,
+                        num_informative_sites: num_informative_sites_for_pair,
+                    }
+                } else { // Numerator also effectively zero (0/0 from sum)
+                    FstEstimate::NoInterPopulationVariance {
+                        sum_a: sum_a_xy, // ~0.0
+                        sum_b: sum_b_xy, // ~0.0
+                        sites_evaluated: num_informative_sites_for_pair,
+                    }
+                }
+            };
+            pairwise_fst_estimates.insert(pair_key.clone(), estimate_for_pair);
+            log(LogLevel::Info, &format!("Regional pairwise FST for {}: {}", pair_key, estimate_for_pair));
+        } else {
+            // This pair_key was observed in some site's pairwise_variance_components map,
+            // but none of those sites contributed actual components to informative_site_components_pairwise.
+            // This implies for all sites where this pair was defined, its per-site FST was InsufficientData.
+            // We count how many sites defined this pair (had an entry in pairwise_variance_components or pairwise_fst).
+            let sites_attempted_for_this_pair = site_fst_values.iter()
+                .filter(|s| s.pairwise_variance_components.contains_key(&pair_key) || s.pairwise_fst.contains_key(&pair_key) )
+                .count();
+             pairwise_fst_estimates.insert(pair_key.clone(), FstEstimate::InsufficientDataForEstimation {
+                sum_a: 0.0, sum_b: 0.0, sites_attempted: sites_attempted_for_this_pair
+            });
+            aggregated_pairwise_variance_components.insert(pair_key.clone(), (0.0, 0.0)); // Store zero sums as components are not aggregated
+            log(LogLevel::Info, &format!("Regional pairwise FST for {} (no informative components from sites): {}", pair_key, pairwise_fst_estimates.get(&pair_key).unwrap()));
         }
     }
     
-    (overall_fst_estimate, pairwise_fst_estimates, pairwise_ab_sums)
+    (overall_fst_estimate, pairwise_fst_estimates, aggregated_pairwise_variance_components)
 }
 
 /// Calculates Dxy (average number of pairwise differences per site between two populations)
