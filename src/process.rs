@@ -1675,16 +1675,6 @@ fn write_csv_row<W: Write>(writer: &mut csv::Writer<W>, row: &CsvRowData) -> Res
     Ok(())
 }
 
-/// Helper function to format f64 values for CSV output, handling NaN.
-fn format_float_or_na(value: f64) -> String {
-    if value.is_nan() {
-        "NA".to_string()
-    } else {
-        // Use a reasonable number of decimal places, scientific notation for very small/large
-        format!("{:.8e}", value)
-    }
-}
-
 /// Groups `ConfigEntry` objects by chromosome name.
 /// Returns a HashMap<chr_name, Vec<ConfigEntry>>.
 fn group_config_entries_by_chr(
