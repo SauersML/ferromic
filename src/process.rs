@@ -2956,14 +2956,18 @@ pub fn process_vcf(
     }
 
     // Extract final variant vectors.
-    let final_unfiltered = Arc::try_unwrap(unfiltered_variants)
-        .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
-        .into_inner();
-    let final_filtered = Arc::try_unwrap(filtered_variants)
-        .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
-        .into_inner();
+    let mut final_unfiltered = Arc::try_unwrap(unfiltered_variants)
+        .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
+        .into_inner();
+    let mut final_filtered = Arc::try_unwrap(filtered_variants)
+        .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
+        .into_inner();
 
-    // Extract stats.
+    // Sort variants by position to ensure consistent order and enable efficient searching.
+    final_unfiltered.sort_by_key(|v| v.position);
+    final_filtered.sort_by_key(|v| v.position);
+
+    // Extract stats.
     let final_miss = Arc::try_unwrap(missing_data_info)
         .map_err(|_| VcfError::Parse("Missing data info still has multiple owners".to_string()))?
         .into_inner();
