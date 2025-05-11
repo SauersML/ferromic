@@ -2239,39 +2239,45 @@ pub fn calculate_per_site_diversity(
 // missing data by only counting haplotypes with alleles present.
 
 /// Helper function to extract numerical value and components from an FstEstimate enum.
-/// Returns a tuple: (fst_value, between_population_variance (sum_a),
-/// within_population_variance (sum_b), num_informative_sites_or_equivalent_count).
-/// Values are Options to handle cases where a component might not be applicable or calculable.
-/// For num_informative_sites_or_equivalent_count:
-/// - For `Calculable` and `ComponentsYieldIndeterminateRatio`, this is `num_informative_sites`.
-/// - For `NoInterPopulationVariance`, this is `sites_evaluated`.
-/// - For `InsufficientDataForEstimation`, this is `sites_attempted`.
+///
+/// Returns a tuple:
+///  - `Option<f64>`: The FST value. `Some(value)` if numerically calculable (can be
+///    positive, negative, zero, or +/- Infinity). `None` if FST is undefined or
+///    indeterminate (e.g., 0/0, negative denominator, insufficient data).
+///  - `Option<f64>`: The sum of 'a' components (between-population variance).
+///  - `Option<f64>`: The sum of 'b' components (within-population variance).
+///  - `Option<usize>`: A count metric, which is `num_informative_sites` for
+///    `Calculable` and `ComponentsYieldIndeterminateRatio`, `sites_evaluated`
+///    for `NoInterPopulationVariance`, and `sites_attempted` for
+///    `InsufficientDataForEstimation`.
 pub fn extract_wc_fst_components(
     fst_estimate: &FstEstimate,
 ) -> (Option<f64>, Option<f64>, Option<f64>, Option<usize>) {
     match fst_estimate {
         FstEstimate::Calculable { value, sum_a, sum_b, num_informative_sites } => {
-            // The FST value itself. Can be NaN or Infinity, which format_optional_float will handle.
+            // FST value is numerically defined. This can include positive, negative,
+            // zero (e.g., if sum_a is 0 but sum_a + sum_b > 0),
+            // or +/- Infinity (e.g., if sum_a is non-zero and sum_a + sum_b is zero).
             (Some(*value), Some(*sum_a), Some(*sum_b), Some(*num_informative_sites))
         }
         FstEstimate::ComponentsYieldIndeterminateRatio { sum_a, sum_b, num_informative_sites } => {
-            // FST value is indeterminate (e.g. negative denominator), so represented as None for the value.
-            // Variance components are still provided.
+            // FST ratio is indeterminate, typically because sum_a + sum_b is negative.
+            // The FST value itself is considered undefined in this case.
             (None, Some(*sum_a), Some(*sum_b), Some(*num_informative_sites))
         }
         FstEstimate::NoInterPopulationVariance { sum_a, sum_b, sites_evaluated } => {
-            // FST is 0/0, typically meaning FST is 0. Variance components are expected to be ~0.
-            // `sites_evaluated` is the count of sites that contributed to this 0/0 determination.
-            (Some(0.0), Some(*sum_a), Some(*sum_b), Some(*sites_evaluated))
+            // This state represents an FST calculation of 0/0, where sum_a is ~0 and sum_b is ~0.
+            // The FST value is represented as None.
+            // The variance components sum_a and sum_b are still reported (expected to be ~0).
+            (None, Some(*sum_a), Some(*sum_b), Some(*sites_evaluated))
         }
         FstEstimate::InsufficientDataForEstimation { sum_a, sum_b, sites_attempted } => {
-            // FST could not be estimated. sum_a and sum_b are often default (e.g., 0.0) placeholders.
-            // `sites_attempted` is the count of sites where estimation was attempted but failed.
+            // FST could not be estimated due to fundamental data limitations (e.g., <2 populations).
+            // The FST value is undefined.
             (None, Some(*sum_a), Some(*sum_b), Some(*sites_attempted))
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
