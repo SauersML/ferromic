@@ -2361,8 +2361,8 @@ fn process_single_config_entry(
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
         // Store the region-wide W&C FST calculation results
-        haplotype_overall_fst_wc: fst_results_filtered.as_ref().map_or(crate::stats::FstEstimate::InsufficientData, |res| res.overall_fst),
-        population_overall_fst_wc: fst_results_pop_filtered.as_ref().map_or(crate::stats::FstEstimate::InsufficientData, |res| res.overall_fst),
+        haplotype_overall_fst_wc: fst_results_filtered.as_ref().map_or(crate::stats::FstEstimate::InsufficientDataForEstimation { sum_a: 0.0, sum_b: 0.0, sites_attempted: 0 }, |res| res.overall_fst),
+        population_overall_fst_wc: fst_results_pop_filtered.as_ref().map_or(crate::stats::FstEstimate::InsufficientDataForEstimation { sum_a: 0.0, sum_b: 0.0, sites_attempted: 0 }, |res| res.overall_fst),
         // Store the complete W&C FST results for populations (includes site-specific and pairwise)
         population_fst_wc_results: fst_results_pop_filtered.clone(),
     };
@@ -2529,12 +2529,12 @@ fn process_single_config_entry(
         ));
         for site_fst_wc in &fst_results_hap_groups.site_fst { // site_fst_wc is &SiteFstWc
             let overall_site_hap_fst_val = match site_fst_wc.overall_fst {
-                crate::stats::FstEstimate::Calculable(v) => v,
-                _ => f64::NAN, // Use NaN for non-calculable or insufficient data FstEstimates.
+                crate::stats::FstEstimate::Calculable { value, .. } => value, // Extract the value field
+                _ => f64::NAN, // Use NaN for other FstEstimate variants.
             };
             let pairwise_0_vs_1_hap_fst_val = match site_fst_wc.pairwise_fst.get("0_vs_1") {
-                Some(&crate::stats::FstEstimate::Calculable(v)) => v,
-                _ => f64::NAN, // Use NaN if the specific pair "0_vs_1" is not found or its FstEstimate is not calculable.
+                Some(&crate::stats::FstEstimate::Calculable { value, .. }) => value, // Extract the value field
+                _ => f64::NAN, // Use NaN if the pair is not found or its FstEstimate is not Calculable.
             };
             per_site_fst_records.push((site_fst_wc.position, overall_site_hap_fst_val, pairwise_0_vs_1_hap_fst_val));
         }
