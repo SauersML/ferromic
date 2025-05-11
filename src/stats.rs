@@ -889,20 +889,20 @@ fn calculate_variance_components(
     // This leads to their variance component 'c' (W&C eq. 4) being 0,
     // and simplifies eqs. (2) and (3) to the forms implemented below.
     //
-    // Let X_wc = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared.
-    // This term, X_wc, represents the portion of p_bar * (1 - p_bar) that is not
+    // Let x_wc = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared.
+    // This term, x_wc, represents the portion of p_bar * (1 - p_bar) that is not
     // explained by the among-population variance scaled by (r-1)/r.
     //
     // The formulas effectively compute:
-    // a = (n_bar / n_c) * [s_squared - X_wc / (n_bar - 1.0)]
+    // a = (n_bar / n_c) * [s_squared - x_wc / (n_bar - 1.0)]
     //   (where n_bar / n_c is equivalent to 1.0 / (1.0 - (c_squared / r)) from W&C notation,
     //    and n_c is a correction factor for variance in sample sizes)
-    // b = (n_bar / (n_bar - 1.0)) * X_wc
+    // b = (n_bar / (n_bar - 1.0)) * x_wc
 
-    let X_wc = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared;
+    let x_wc = global_p * (1.0 - global_p) - ((r - 1.0) / r) * s_squared;
     
     // Calculate component 'a' (among-population variance component)
-    let a_numerator_term = s_squared - (X_wc / (n_bar - 1.0));
+    let a_numerator_term = s_squared - (x_wc / (n_bar - 1.0));
     // a_denominator_factor is n_c / n_bar, so dividing by it is multiplying by n_bar / n_c.
     let a_denominator_factor = 1.0 - (c_squared / r); 
 
@@ -915,7 +915,7 @@ fn calculate_variance_components(
     let a = a_numerator_term / a_denominator_factor;
     
     // Calculate component 'b' (within-population variance component, effectively among haplotypes within populations)
-    let b = (n_bar / (n_bar - 1.0)) * X_wc;
+    let b = (n_bar / (n_bar - 1.0)) * x_wc;
 
     (a, b) // Return raw estimated components; they can be negative.
 }
