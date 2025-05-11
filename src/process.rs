@@ -2065,8 +2065,43 @@ fn process_single_config_entry(
     
     update_step_progress(1, "Analyzing variant statistics");
 
-    // Calculate FST if enabled
-    let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
+    if !filtered_variants.is_empty() {
+        let is_sorted = filtered_variants.windows(2).all(|w| w[0].position <= w[1].position);
+        if !is_sorted {
+            // This should not happen if process_vcf sorts them.
+            // Log an error or panic, as this is a critical pre-condition for efficient and correct sub-slicing.
+            log(LogLevel::Error, "CRITICAL: filtered_variants are not sorted by position in process_single_config_entry. Hudson FST results may be incorrect.");
+        }
+    }
+
+    // Define the precise genomic region for Hudson FST analysis, corresponding to entry.interval.
+    // This region's effective length is `adjusted_sequence_length`.
+    let hudson_analysis_region_start_0based = entry.interval.start as i64;
+    // entry.interval.end is exclusive for ZeroBasedHalfOpen.
+    let hudson_analysis_region_end_0based_exclusive = entry.interval.end as i64;
+
+    // Create a sub-slice of filtered_variants that strictly corresponds to this Hudson analysis region.
+    // This uses binary search, relying on filtered_variants being sorted by position.
+    let start_idx_for_hudson_slice = filtered_variants.binary_search_by_key(&hudson_analysis_region_start_0based, |v| v.position)
+        .unwrap_or_else(|idx| idx); // Returns Ok(idx) if found, or Err(idx) for insertion point. Both are fine.
+
+    let end_idx_for_hudson_slice = filtered_variants.binary_search_by_key(&hudson_analysis_region_end_0based_exclusive, |v| v.position)
+        .unwrap_or_else(|idx| idx); // Insertion point is the correct exclusive end for the slice.
+    
+    let variants_for_hudson_slice: &[Variant] = if start_idx_for_hudson_slice < end_idx_for_hudson_slice && end_idx_for_hudson_slice <= filtered_variants.len() {
+        &filtered_variants[start_idx_for_hudson_slice..end_idx_for_hudson_slice]
+    } else {
+        // If the region is empty or indices are problematic, use an empty slice.
+        // This might happen if entry.interval is outside the range of filtered_variants.
+        log(LogLevel::Debug, &format!(
+            "Hudson FST: No variants from filtered_variants fall within entry.interval {}:{}-{}. Using empty variant slice.",
+            entry.seqname, entry.interval.start, entry.interval.end
+        ));
+        &[]
+    };
+
+    // Calculate FST if enabled
+    let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
         let spinner = create_spinner("Calculating FST statistics");
     
         // Define the FST analysis region.
