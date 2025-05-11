@@ -1700,15 +1700,17 @@ fn write_csv_row<W: Write>(writer: &mut csv::Writer<W>, row: &CsvRowData) -> Res
             &row.n_hap_1_f.to_string(),
             &format!("{:.6}", row.inv_freq_no_filter),
             &format!("{:.6}", row.inv_freq_filter),
-            // Write the FstEstimate values using their Display trait for W&C FST
-            &row.haplotype_overall_fst_wc.to_string(),
+            // Weir & Cockerham FST components for haplotype groups
+            &format_optional_float(row.haplotype_overall_fst_wc),
+            &format_optional_float(row.haplotype_between_pop_variance_wc),
+            &format_optional_float(row.haplotype_within_pop_variance_wc),
+            &format_optional_usize(row.haplotype_num_informative_sites_wc),
             // Write Hudson FST components for haplotype groups 0 vs 1
             &format_optional_float(row.hudson_fst_hap_group_0v1),
             &format_optional_float(row.hudson_dxy_hap_group_0v1),
             &format_optional_float(row.hudson_pi_hap_group_0),
             &format_optional_float(row.hudson_pi_hap_group_1),
             &format_optional_float(row.hudson_pi_avg_hap_group_0v1),
-            &row.population_overall_fst_wc.to_string(),
         ])
         .map_err(|e| VcfError::Io(e.into()))?;
     Ok(())
@@ -2545,11 +2547,24 @@ fn process_single_config_entry(
         }
     }
 
+// This is the FstEstimate enum for overall haplotype W&C FST
+    let haplotype_overall_fst_estimate_enum = fst_results_filtered.as_ref().map_or(
+        crate::stats::FstEstimate::InsufficientDataForEstimation { sum_a: 0.0, sum_b: 0.0, sites_attempted: 0 },
+        |res| res.overall_fst
+    );
+
+    // Extract components for CSV output
+    let (
+        hap_fst_val,
+        hap_sum_a,
+        hap_sum_b,
+        hap_num_sites
+    ) = crate::stats::extract_wc_fst_components(&haplotype_overall_fst_estimate_enum);
+
     let row_data = CsvRowData {
         seqname: entry.seqname.clone(),
-        // Populate with 1-based inclusive coordinates for CSV output, using methods from ZeroBasedHalfOpen
-        region_start: entry.interval.start_1based_inclusive(), // 1-based inclusive start
-        region_end: entry.interval.get_1based_inclusive_end_coord(), // 1-based inclusive end
+        region_start: entry.interval.start as i64,
+        region_end: entry.interval.get_0based_inclusive_end_coord(), // This is (entry.interval.end - 1)
         seq_len_0: sequence_length,
         seq_len_1: sequence_length,
         seq_len_adj_0: adjusted_sequence_length,
@@ -2572,19 +2587,17 @@ fn process_single_config_entry(
         n_hap_1_f,
         inv_freq_no_filter: inversion_freq_no_filter,
         inv_freq_filter: inversion_freq_filt,
-        haplotype_overall_fst_wc: fst_results_filtered.as_ref().map_or(
-            crate::stats::FstEstimate::InsufficientDataForEstimation { sum_a: 0.0, sum_b: 0.0, sites_attempted: 0 },
-            |res| res.overall_fst
-        ),
+        // Weir & Cockerham FST components for haplotype groups
+        haplotype_overall_fst_wc: hap_fst_val,
+        haplotype_between_pop_variance_wc: hap_sum_a,
+        haplotype_within_pop_variance_wc: hap_sum_b,
+        haplotype_num_informative_sites_wc: hap_num_sites,
+        // Hudson FST components for haplotype groups
         hudson_fst_hap_group_0v1: hudson_fst_hap_group_0v1_val,
         hudson_dxy_hap_group_0v1: hudson_dxy_hap_group_0v1_val,
         hudson_pi_hap_group_0: hudson_pi_hap_group_0_val,
         hudson_pi_hap_group_1: hudson_pi_hap_group_1_val,
         hudson_pi_avg_hap_group_0v1: hudson_pi_avg_hap_group_0v1_val,
-        population_overall_fst_wc: fst_results_pop_filtered.as_ref().map_or(
-            crate::stats::FstEstimate::InsufficientDataForEstimation { sum_a: 0.0, sum_b: 0.0, sites_attempted: 0 },
-            |res| res.overall_fst
-        ),
         population_fst_wc_results: fst_results_pop_filtered.clone(),
     };
 
