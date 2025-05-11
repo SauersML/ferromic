@@ -213,17 +213,32 @@ impl ZeroBasedHalfOpen {
         self.start as i64 + 1
     }
 
-    /// Returns the 1-based inclusive end coordinate of this interval.
-    pub fn end_1based_inclusive(&self) -> i64 {
-        if self.end > self.start { (self.end - 1) as i64 } else { self.start as i64 }
+    /// Returns the 0-based inclusive end coordinate of this 0-based half-open interval [self.start, self.end).
+    /// For a non-empty interval [S_0, E_0), this returns E_0 - 1.
+    /// For an empty interval where self.end <= self.start (e.g., [0,0) or [5,2) ), 
+    /// this will result in an end coordinate that is less than self.start,
+    /// correctly defining an empty or invalid 0-based inclusive interval [self.start, result].
+    pub fn get_0based_inclusive_end_coord(&self) -> i64 {
+        // This calculation means that if self.end <= self.start (empty interval),
+        // the resulting inclusive end will be less than self.start, making the
+        // inclusive interval [self.start, (self.end - 1)] also empty/invalid.
+        // E.g., for [0,0), returns -1. For [5,5), returns 4.
+        (self.end as i64) - 1
     }
 
-    pub fn end_1based_exclusive(&self) -> i64 {
+    /// Returns the coordinate value that serves as the 1-based inclusive end 
+    /// of this 0-based half-open interval [self.start, self.end).
+    /// For an interval like [S_0, E_0) (0-based half-open), the corresponding
+    /// 1-based inclusive interval is [S_0 + 1, E_0]. This function returns E_0.
+    pub fn get_1based_inclusive_end_coord(&self) -> i64 {
         self.end as i64
     }
 
+    /// Returns a tuple (1-based inclusive start, 1-based inclusive end) 
+    /// representing this 0-based half-open interval.
+    /// For an interval like [S_0, E_0) (0-based half-open), this returns (S_0 + 1, E_0).
     pub fn to_1based_inclusive_tuple(&self) -> (i64, i64) {
-        (self.start_1based_inclusive(), self.end_1based_exclusive())
+        (self.start_1based_inclusive(), self.get_1based_inclusive_end_coord())
     }
 
     /// Returns 1-based position of `pos` if inside [start..end), else None.
@@ -2150,9 +2165,18 @@ fn process_single_config_entry(
     ));
 
     let sequence_length = (entry.interval.end - entry.interval.start) as i64;
+    // Calculate adjusted sequence length.
+    // entry.interval is ZeroBasedHalfOpen { start: S_0, end: E_0 }, representing the 0-based interval [S_0, E_0).
+    // calculate_adjusted_sequence_length expects its region_start and region_end arguments to be 1-based inclusive.
+    // For a 0-based half-open interval [S_0, E_0):
+    //  - The 1-based inclusive start is S_0 + 1.
+    //  - The 1-based inclusive end is E_0.
+    // We use methods from ZeroBasedHalfOpen to get these 1-based coordinates.
+    let adj_seq_len_start_1based_inclusive = entry.interval.start_1based_inclusive();
+    let adj_seq_len_end_1based_inclusive = entry.interval.get_1based_inclusive_end_coord(); 
     let adjusted_sequence_length = calculate_adjusted_sequence_length(
-        entry.interval.start as i64,
-        entry.interval.end as i64,
+        adj_seq_len_start_1based_inclusive,
+        adj_seq_len_end_1based_inclusive,
         allow.as_ref().and_then(|a| a.get(&chr.to_string())),
         mask.as_ref().and_then(|m| m.get(&chr.to_string())),
     );
