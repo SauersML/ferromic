@@ -136,7 +136,7 @@ pub enum PopulationId {
 /// data is copied unnecessarily for these large collections.
 #[derive(Debug, Clone)]
 pub struct PopulationContext<'a> {
-    /// Unique identifier for this population or group.
+    /// Unique identifier for this population or group.
     pub id: PopulationId,
     /// List of haplotypes belonging to this population. Each tuple contains the
     /// VCF sample index and the specific haplotype side (Left or Right).
