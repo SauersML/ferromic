@@ -1425,41 +1425,10 @@ pub fn process_config_entries(
                     }
                 }
                 writeln!(fst_fasta_writer, "{}", pairwise_0v1_values_str.join(","))?;
-            }
-                
-            // Write header for pairwise FST for the population comparisons
-            let header = format!(">fst_population_pairwise_chr_{}_start_{}_end_{}", 
-                csv_row.seqname, csv_row.region_start, csv_row.region_end);
-            writeln!(fst_fasta_writer, "{}", header)?;
-            
-                let mut pairwise_values = Vec::with_capacity(fst_data.len());
-                for &(pos, _, pairwise_fst) in fst_data {
-                    if pos >= csv_row.region_start && pos <= csv_row.region_end {
-                        // Add to the right position (1-based offset)
-                        let rel_pos = pos - csv_row.region_start;
-                        while pairwise_values.len() < rel_pos as usize {
-                            pairwise_values.push("NA".to_string());
-                        }
-
-                        if pairwise_fst.is_nan() {
-                            pairwise_values.push("NA".to_string());
-                        } else if pairwise_fst == 0.0 {
-                            pairwise_values.push("0".to_string());
-                        } else {
-                            pairwise_values.push(format!("{:.6}", pairwise_fst));
-                        }
-                    }
-                }
-
-                // Make sure all positions in the region have values
-                while pairwise_values.len() < region_length_for_falsta {
-                    pairwise_values.push("NA".to_string());
-                }
-
-                writeln!(fst_fasta_writer, "{}", pairwise_values.join(","))?;
-            
-            // Process and write population pairwise FST data if available
-            if let Some(ref pop_results) = csv_row.population_fst_wc_results {
+            }
+            
+            // Process and write population pairwise FST data if available
+            if let Some(ref pop_results) = csv_row.population_fst_wc_results {
                 // Create a map of all pairwise comparisons across all sites
                 let mut all_pairs = HashSet::new();
                 for site in &pop_results.site_fst {
