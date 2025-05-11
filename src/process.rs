@@ -1473,7 +1473,6 @@ pub fn process_config_entries(
                                     // Use the Display trait of FstEstimate
                                     pair_values[rel_pos] = fst_estimate_val.to_string();
                                 }
-                                }
                             }
                         }
                     }
