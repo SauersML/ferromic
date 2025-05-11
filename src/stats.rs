@@ -116,7 +116,7 @@ pub enum FstEstimate {
 impl fmt::Display for FstEstimate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FstEstimate::Calculable { value, sum_a, sum_b, num_informative_sites } => {
+            FstEstimate::Calculable { value, .. } => { // sum_a, sum_b, num_informative_sites are not used in this Display impl
                 let val_str = if value.is_nan() {
                     "NaN".to_string()
                 } else if value.is_infinite() {
@@ -124,7 +124,7 @@ impl fmt::Display for FstEstimate {
                 } else {
                     format!("{:.6}", value) // Common precision for FST
                 };
-                write!(f, "FST: {} (A: {:.4e}, B: {:.4e}, N_inf_sites: {})", val_str, sum_a, sum_b, num_informative_sites)
+                write!(f, "{}", val_str) // Output only the formatted FST value string
             }
             FstEstimate::ComponentsYieldIndeterminateRatio { sum_a, sum_b, num_informative_sites } => {
                 write!(f, "IndeterminateRatio (A: {:.4e}, B: {:.4e}, N_inf_sites: {})", sum_a, sum_b, num_informative_sites)
