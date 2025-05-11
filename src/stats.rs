@@ -91,34 +91,34 @@ impl fmt::Display for FstEstimate {
 // Define a struct to hold diversity metrics for each genomic site
 #[derive(Debug)]
 pub struct SiteDiversity {
-    pub position: i64, // 1-based position of the site in the genome
-    pub pi: f64, // Nucleotide diversity (π) at this site
-    pub watterson_theta: f64, // Watterson's theta (θ_w) at this site
+    pub position: i64, // 1-based position of the site in the genome
+    pub pi: f64, // Nucleotide diversity (π) at this site
+    pub watterson_theta: f64, // Watterson's theta (θ_w) at this site
 }
 
 /// FST results for a single site using the Weir & Cockerham method.
 #[derive(Debug, Clone)]
 pub struct SiteFstWc {
-    /// Position (1-based coordinate) of the site.
-    pub position: i64,
+    /// Position (1-based coordinate) of the site.
+    pub position: i64,
 
-    /// Overall FST estimate across all populations for this site.
-    pub overall_fst: FstEstimate,
+    /// Overall FST estimate across all populations for this site.
+    pub overall_fst: FstEstimate,
 
-    /// Pairwise FST estimates between populations for this site.
-    /// Keys are formatted as "pop_id1_vs_pop_id2" where pop_id1 < pop_id2.
-    pub pairwise_fst: HashMap<String, FstEstimate>,
+    /// Pairwise FST estimates between populations for this site.
+    /// Keys are formatted as "pop_id1_vs_pop_id2" where pop_id1 < pop_id2.
+    pub pairwise_fst: HashMap<String, FstEstimate>,
 
-    /// Variance components (a, b) from Weir & Cockerham used for `overall_fst` at this site.
-    /// `a` is the among-population component, `b` is the within-population component.
-    pub variance_components: (f64, f64),
+    /// Variance components (a, b) from Weir & Cockerham used for `overall_fst` at this site.
+    /// `a` is the among-population component, `b` is the within-population component.
+    pub variance_components: (f64, f64),
 
-    /// Number of haplotypes in each population group contributing to this site's calculations.
-    pub population_sizes: HashMap<String, usize>,
+    /// Number of haplotypes in each population group contributing to this site's calculations.
+    pub population_sizes: HashMap<String, usize>,
 
-    /// Pairwise variance components (a_xy, b_xy) for each subpopulation pair at this site.
-    /// These are used to calculate the `pairwise_fst` values for this site.
-    pub pairwise_variance_components: HashMap<String, (f64, f64)>,
+    /// Pairwise variance components (a_xy, b_xy) for each subpopulation pair at this site.
+    /// These are used to calculate the `pairwise_fst` values for this site.
+    pub pairwise_variance_components: HashMap<String, (f64, f64)>,
 }
 
 /// Identifier for a population or group being analyzed, used across FST methods.
