@@ -301,29 +301,45 @@ pub struct FstWcResults {
     independent. We omit W&C’s “c” term for within-individual correlation.
 */
 
-
-/// Calculates Weir & Cockerham FST between predefined haplotype groups (e.g., 0 vs 1) for a genomic region.
-///
-/// This function implements the Weir & Cockerham (1984) estimator for FST.
-///
-/// Observed within-haplotype heterozygosity (h_bar in W&C's notation) is zero. This results in the variance 
-/// component 'c' being zero. The FST is then estimated as a / (a + b), using the
-/// 'a' and 'b' components derived under this h_bar=0 condition.
-///
-/// The function first calculates per-site variance components (a_i, b_i) and FST estimates.
-/// Then, it aggregates these components across all sites in the region to compute
-/// an overall FST estimate for the region (using W&C eq. 10, by summing a_i and (a_i + b_i) separately), 
-/// as well as overall pairwise FST estimates using the same aggregation principle.
-///
-/// # Arguments
-/// * `variants`: A slice of `Variant` structs containing genotype data for all samples in the region.
-/// * `sample_names`: A slice of `String`s, representing the names of all samples.
-/// * `sample_to_group_map`: A `HashMap` mapping sample names to their (left, right) haplotype group assignments.
-/// * `region`: A `QueryRegion` struct defining the genomic start and end (0-based, inclusive) to analyze.
-///
-/// # Returns
-/// An `FstWcResults` struct containing overall FST, pairwise FSTs (as `FstEstimate` enums),
-/// summed pairwise variance components, per-site FST details, and the FST type.
+// Calculates Weir & Cockerham's FST (Fixation Index) across a specified genomic region,
+// partitioning genetic variation between predefined haplotype groups. These groups
+// might represent, for example, samples carrying different alleles of a structural variant
+// (like an inversion) or other genetic markers defining distinct cohorts.
+//
+// This function implements the FST estimator as described by Weir & Cockerham (1984).
+// A key assumption for haplotype-level data is that observed within-haplotype
+// heterozygosity is zero. This simplifies the model,
+// causing the variance component 'c' (variance between gametes within individuals)
+// to also be zero. Consequently, FST (denoted theta) is estimated as the ratio of
+// among-population variance ('a') to the total variance ('a' + 'b'), where 'b' is the
+// variance among haplotypes within populations: FST = a / (a + b).
+//
+// Two main stages:
+// 1. Per-Site Estimation: For each genetic site (e.g., SNP) in the region, variance
+//    components (a_i, b_i) and an FST estimate are determined.
+// 2. Regional Aggregation: These per-site components are then summed across all
+//    informative sites in the region. An overall FST estimate for the entire region is
+//    computed using these summed components, consistent with Weir & Cockerham equation 10:
+//    sum a_i / sum (a_i + b_i). Overall pairwise FST estimates between specific haplotype
+//    groups are also calculated using the same aggregation principle for the relevant pairs.
+//
+// Arguments:
+// - `variants`: A slice of `Variant` structs, containing genotype data for all samples
+//   across the relevant loci in the target genomic region.
+// - `sample_names`: A slice of `String`s, representing the VCF sample identifiers.
+//   These are used to map samples to their assigned haplotype groups.
+// - `sample_to_group_map`: A `HashMap` that links each VCF sample name (String) to
+//   its haplotype group assignments.
+// - `region`: A `QueryRegion` struct that defines the genomic start and end coordinates
+//   (0-based, inclusive) of the region to be analyzed.
+//
+// Returns:
+// An `FstWcResults` struct. This struct encapsulates:
+// - The overall FST estimate for the entire region.
+// - A map of pairwise FST estimates between different haplotype groups across the region.
+// - The summed pairwise variance components (a_xy, b_xy) for each pair.
+// - A detailed list of per-site FST results (`SiteFstWc`).
+// - A string indicating the type of FST analysis performed (e.g., "haplotype_groups").
 pub fn calculate_fst_wc_haplotype_groups(
     variants: &[Variant],
     sample_names: &[String],
@@ -332,124 +348,138 @@ pub fn calculate_fst_wc_haplotype_groups(
 ) -> FstWcResults {
     let spinner = create_spinner(&format!(
         "Calculating FST between haplotype groups for region {}:{}..{} (length {})",
-        sample_names.get(0).map_or("UnknownChr", |s| s.split('_').next().unwrap_or("UnknownChr")), // Attempt to get chr from first sample if possible
-        ZeroBasedPosition(region.start).to_one_based(), 
-        ZeroBasedPosition(region.end).to_one_based(), 
+        // Attempt to display chromosome name from the first sample if available, otherwise "UnknownChr".
+        sample_names.get(0).map_or("UnknownChr", |s_name| s_name.split('_').next().unwrap_or("UnknownChr")),
+        ZeroBasedPosition(region.start).to_one_based(), // Convert 0-based start to 1-based for display
+        ZeroBasedPosition(region.end).to_one_based(),   // Convert 0-based end to 1-based for display
         region.len()
     ));
-    
+
     log(LogLevel::Info, &format!(
-        "Beginning FST calculation between haplotype groups (0 vs 1) for region {}:{}..{}",
-        sample_names.get(0).map_or("UnknownChr", |s| s.split('_').next().unwrap_or("UnknownChr")),
+        "Beginning FST calculation between haplotype groups (e.g., 0 vs 1) for region {}:{}..{}",
+        sample_names.get(0).map_or("UnknownChr", |s_name| s_name.split('_').next().unwrap_or("UnknownChr")),
         ZeroBasedPosition(region.start).to_one_based(),
         ZeroBasedPosition(region.end).to_one_based()
     ));
-    
+
+    // Map each VCF sample's haplotypes to their assigned groups (e.g., group "0" or "1").
     let haplotype_to_group = map_samples_to_haplotype_groups(sample_names, sample_to_group_map);
-    
+
+    // Create a lookup map for quick access to variants by their genomic position.
+    // This improves performance when iterating through positions in the region.
     let variant_map: HashMap<i64, &Variant> = variants.iter()
         .map(|v| (v.position, v))
         .collect();
-    
+
     let mut site_fst_values = Vec::with_capacity(region.len() as usize);
-    let position_count = region.len() as usize;
-    
+    let position_count = region.len() as usize; // Total number of base pairs in the region.
+
     init_step_progress(&format!(
         "Calculating FST at {} positions for haplotype groups", position_count
     ), position_count as u64);
-    
+
+    // Iterate through each genomic position (0-based) within the specified region.
     for (idx, pos) in (region.start..=region.end).enumerate() {
+        // Update progress bar periodically for long calculations.
         if idx % 1000 == 0 || idx == 0 || idx == position_count.saturating_sub(1) {
             update_step_progress(idx as u64, &format!(
                 "Position {}/{} ({:.1}%)",
                 idx + 1, position_count, ((idx + 1) as f64 / position_count as f64) * 100.0
             ));
         }
-        
+
         if let Some(variant) = variant_map.get(&pos) {
+            // If a variant exists at this position, calculate its FST.
             let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
                 calculate_fst_wc_at_site_by_haplotype_group(variant, &haplotype_to_group);
-            
+
             site_fst_values.push(SiteFstWc {
-                position: ZeroBasedPosition(pos).to_one_based(),
+                position: ZeroBasedPosition(pos).to_one_based(), // Store position as 1-based for output consistency.
                 overall_fst,
                 pairwise_fst,
-                variance_components: var_comps,
+                variance_components: var_comps, // Store the raw (a,b) components for this site.
                 population_sizes: pop_sizes,
                 pairwise_variance_components: pairwise_var_comps,
             });
         } else {
-            // Site is not in variant_map, thus considered globally monomorphic for this region.
-            // For monomorphic sites, FST is NoInterPopulationVariance as components a and b are zero.
+            // If no variant is found at this position in the input `variants` slice,
+            // the site is considered monomorphic across all samples for this analysis.
+            // For such sites, there's no genetic variation to partition, so FST components 'a' and 'b' are zero.
             let mut actual_pop_sizes = HashMap::new();
             let mut group_counts: HashMap<String, usize> = HashMap::new();
             for group_id_str in haplotype_to_group.values() {
                 *group_counts.entry(group_id_str.clone()).or_insert(0) += 1;
             }
+            // Ensure "0" and "1" group sizes are recorded, even if zero.
             actual_pop_sizes.insert("0".to_string(), *group_counts.get("0").unwrap_or(&0));
             actual_pop_sizes.insert("1".to_string(), *group_counts.get("1").unwrap_or(&0));
-            
+
+            // Overall FST for a monomorphic site results in NoInterPopulationVariance.
             let site_is_monomorphic_overall_estimate = FstEstimate::NoInterPopulationVariance {
                 sum_a: 0.0,
                 sum_b: 0.0,
-                sites_evaluated: 1, // This one site was evaluated (by absence) as monomorphic
+                sites_evaluated: 1, // This single site was evaluated as monomorphic.
             };
-            
+
             let mut populated_pairwise_fst = HashMap::new();
             let mut populated_pairwise_var_comps = HashMap::new();
-            // For haplotype groups, the primary pair is "0_vs_1".
-            // If both groups have members, their pairwise FST is also NoInterPopulationVariance.
-            if actual_pop_sizes.get("0").map_or(false, |&c| c > 0) && actual_pop_sizes.get("1").map_or(false, |&c| c > 0) {
-                 let site_is_monomorphic_pairwise_estimate = FstEstimate::NoInterPopulationVariance {
+
+            // For haplotype group comparisons (typically "0" vs "1"), if both groups
+            // have members, their pairwise FST at this monomorphic site is also NoInterPopulationVariance.
+            if actual_pop_sizes.get("0").map_or(false, |&count| count > 0) &&
+               actual_pop_sizes.get("1").map_or(false, |&count| count > 0) {
+                let site_is_monomorphic_pairwise_estimate = FstEstimate::NoInterPopulationVariance {
                     sum_a: 0.0,
                     sum_b: 0.0,
-                    sites_evaluated: 1, // This one site evaluated for this pair
-                 };
-                 populated_pairwise_fst.insert("0_vs_1".to_string(), site_is_monomorphic_pairwise_estimate);
-                 // Pairwise variance components for a monomorphic site are also (0.0, 0.0).
-                 populated_pairwise_var_comps.insert("0_vs_1".to_string(), (0.0, 0.0));
+                    sites_evaluated: 1, // This site was evaluated for this specific pair.
+                };
+                populated_pairwise_fst.insert("0_vs_1".to_string(), site_is_monomorphic_pairwise_estimate);
+                // Pairwise variance components (a_xy, b_xy) for a monomorphic site are (0.0, 0.0).
+                populated_pairwise_var_comps.insert("0_vs_1".to_string(), (0.0, 0.0));
             }
 
             site_fst_values.push(SiteFstWc {
                 position: ZeroBasedPosition(pos).to_one_based(),
                 overall_fst: site_is_monomorphic_overall_estimate,
                 pairwise_fst: populated_pairwise_fst,
-                variance_components: (0.0, 0.0), // Overall a, b for this monomorphic site are 0.
+                variance_components: (0.0, 0.0), // Overall (a,b) for this monomorphic site are zero.
                 population_sizes: actual_pop_sizes,
                 pairwise_variance_components: populated_pairwise_var_comps,
             });
         }
-    
+    }
     finish_step_progress("Completed per-site FST calculations for haplotype groups");
-    
+
+    // Aggregate per-site FST components to get regional FST estimates.
     let (overall_fst_estimate, pairwise_fst_estimates, aggregated_pairwise_components) =
         calculate_overall_fst_wc(&site_fst_values);
-    
+
     let defined_positive_fst_sites = site_fst_values.iter()
         .filter(|site| matches!(site.overall_fst, FstEstimate::Calculable { value, .. } if value.is_finite() && value > 0.0))
         .count();
-    
+
     log(LogLevel::Info, &format!(
-        "Haplotype group FST calculation complete: {} sites with defined positive FST out of {} total positions.",
+        "Haplotype group FST calculation complete: {} sites showed positive, finite FST out of {} total positions in the region.",
         defined_positive_fst_sites, site_fst_values.len()
     ));
-    
-    log(LogLevel::Info, &format!("Overall FST between haplotype groups: {}", overall_fst_estimate));
-    
-    for (pair, fst_e) in &pairwise_fst_estimates {
-        log(LogLevel::Info, &format!("Pairwise FST for {}: {}", pair, fst_e));
+
+    log(LogLevel::Info, &format!("Overall FST between haplotype groups for the region: {}", overall_fst_estimate));
+
+    for (pair_key, fst_estimate) in &pairwise_fst_estimates {
+        log(LogLevel::Info, &format!("Regional pairwise FST for {}: {}", pair_key, fst_estimate));
     }
-    
+
     spinner.finish_and_clear();
-    
+
     FstWcResults {
         overall_fst: overall_fst_estimate,
         pairwise_fst: pairwise_fst_estimates,
         pairwise_variance_components: aggregated_pairwise_components,
         site_fst: site_fst_values,
-        fst_type: "haplotype_groups".to_string(),
+        fst_type: "haplotype_groups".to_string(), // Type of grouping used.
     }
 }
+
 
 /// Calculates Weir & Cockerham FST between population groups defined in a CSV file for a genomic region.
 ///
