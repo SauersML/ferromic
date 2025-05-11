@@ -435,15 +435,20 @@ struct CsvRowData {
     n_hap_1_f: usize,
     inv_freq_no_filter: f64,
     inv_freq_filter: f64,
-    haplotype_overall_fst_wc: crate::stats::FstEstimate, // Weir & Cockerham overall FST for haplotype groups
+    // Weir & Cockerham FST components for haplotype groups (e.g., 0 vs 1)
+    haplotype_overall_fst_wc: Option<f64>,
+    haplotype_between_pop_variance_wc: Option<f64>, // Component 'A' from W&C
+    haplotype_within_pop_variance_wc: Option<f64>,  // Component 'B' from W&C
+    haplotype_num_informative_sites_wc: Option<usize>,
     // Hudson FST components for haplotype groups 0 vs 1
     hudson_fst_hap_group_0v1: Option<f64>,
     hudson_dxy_hap_group_0v1: Option<f64>,
     hudson_pi_hap_group_0: Option<f64>,
     hudson_pi_hap_group_1: Option<f64>,
     hudson_pi_avg_hap_group_0v1: Option<f64>,
-    population_overall_fst_wc: crate::stats::FstEstimate, // Weir & Cockerham overall FST for CSV-defined populations
-    population_fst_wc_results: Option<FstWcResults>, // Full FST results based on population CSV file
+    // Fields for population FST from CSV have been removed as per request to only include haplotype group (0vs1) info here.
+    // The full FstWcResults for CSV populations are still processed for other outputs (e.g., .falsta), but not summarized in this main CSV row.
+    population_fst_wc_results: Option<FstWcResults>, // Retained for passing to .falsta, but not for direct CSV column output of regional summary.
 }
 
 // Custom error types
