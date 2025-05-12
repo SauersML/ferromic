@@ -85,7 +85,14 @@ MAX_INDIVIDUAL_WARNINGS_PER_CATEGORY = 10
 MAX_EXAMPLES_OF_OUT_OF_SPEC_LOGGING = 5
 
 FST_TEST_SUMMARIES = []
+FST_TEST_SUMMARIES_FILTERED = [] # Global list for filtered FST test summaries
 SCATTER_PLOT_SUMMARIES = [] # global list for scatterplot summaries
+
+# Output File Template for filtered plots
+VIOLIN_PLOT_FILTERED_TEMPLATE = 'comparison_violin_filtered_hap_min2_{column_safe_name}.png'
+
+# Suffix for logging and identifying filtered analysis runs
+FILTER_SUFFIX = "_filtered_hap_min2"
 
 # Specific FST component columns for summary
 FST_WC_COMPONENT_COLUMNS = [
@@ -383,26 +390,33 @@ def _draw_boxplots(ax, valid_series, valid_pos, valid_colors):
     for i, patch in enumerate(bp['boxes']):
         patch.set_facecolor(valid_colors[i]); patch.set_alpha(0.5)
 
-def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summary, analysis_column_name, plot_type):
-    global FST_TEST_SUMMARIES
+def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summary, analysis_column_name, plot_type,
+                               output_filename_template_override=None,
+                               plot_suffix_for_logging=""):
     fig, ax = plt.subplots(figsize=(7, 7))
     output_filename = ""
     plot_specific_draw_func = None
+    returned_summary = None # Initialize to None, will be populated if an FST summary is generated
 
+    # Determine filename template based on overrides or defaults
+    safe_col_name = "".join(c if c.isalnum() else "_" for c in analysis_column_name).lower()
     if plot_type == 'violin':
         plot_specific_draw_func = _draw_violins
-        output_filename = VIOLIN_PLOT_TEMPLATE.format(column_safe_name="".join(c if c.isalnum() else "_" for c in analysis_column_name).lower())
+        template_to_use = output_filename_template_override if output_filename_template_override else VIOLIN_PLOT_TEMPLATE
+        output_filename = template_to_use.format(column_safe_name=safe_col_name)
     elif plot_type == 'box':
         plot_specific_draw_func = _draw_boxplots
-        output_filename = BOX_PLOT_TEMPLATE.format(column_safe_name="".join(c if c.isalnum() else "_" for c in analysis_column_name).lower())
+        template_to_use = output_filename_template_override if output_filename_template_override else BOX_PLOT_TEMPLATE
+        output_filename = template_to_use.format(column_safe_name=safe_col_name)
     else:
-        logger.error(f"Unknown plot type '{plot_type}' requested for {analysis_column_name}. Skipping plot.")
+        logger.error(f"Unknown plot type '{plot_type}' requested for {analysis_column_name}{plot_suffix_for_logging}. Skipping plot.")
         plt.close(fig)
-        return
+        return None # Return None as no summary can be generated
 
     try:
         _plot_common_elements(ax, plot_data_for_current_col, analysis_column_name, plot_specific_draw_func)
 
+        # Perform statistical test and prepare summary ONLY for FST violin plots
         if analysis_column_name in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT and plot_type == 'violin':
             p_val_text = "Test N/A (logic error)"
             rec_key = INVERSION_CATEGORY_MAPPING.get('Recurrent')
@@ -422,6 +436,7 @@ def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summar
                 recurrent_n = len(data_r)
                 single_event_n = len(data_s)
 
+                # Use the provided categorized_dfs_for_summary for detailed stats
                 data_r_df = categorized_dfs_for_summary.get(rec_key, pd.DataFrame())
                 data_s_df = categorized_dfs_for_summary.get(sing_key, pd.DataFrame())
 
@@ -439,24 +454,25 @@ def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summar
                     if N_HAP_0_COL in data_s_df.columns: single_event_n0_hap_mean = pd.to_numeric(data_s_df[N_HAP_0_COL], errors='coerce').mean()
                     if N_HAP_1_COL in data_s_df.columns: single_event_n1_hap_mean = pd.to_numeric(data_s_df[N_HAP_1_COL], errors='coerce').mean()
 
-                if data_r and data_s:
+                if data_r and data_s: # Both groups must have data for the test
                     if np.var(data_r) == 0 and np.var(data_s) == 0 and np.mean(data_r) == np.mean(data_s):
                         p_val_text = "p = 1.0 (Identical)"
                     else:
                         try:
                             stat, p_val = mannwhitneyu(data_r, data_s, alternative='two-sided')
                             p_val_text = "p < 0.001" if p_val < 0.001 else f"p = {p_val:.3f}"
-                            logger.info(f"Mann-Whitney U for '{analysis_column_name}': W={stat:.1f}, {p_val_text} (N={recurrent_n} vs N={single_event_n})")
+                            logger.info(f"Mann-Whitney U for '{analysis_column_name}'{plot_suffix_for_logging}: W={stat:.1f}, {p_val_text} (N={recurrent_n} vs N={single_event_n})")
                         except ValueError as e:
                             p_val_text = "Test Error"
-                            logger.warning(f"MWU test failed for '{analysis_column_name}': {e}")
-                else:
+                            logger.warning(f"MWU test failed for '{analysis_column_name}'{plot_suffix_for_logging}: {e}")
+                else: # One or both groups are empty
                     p_val_text = "Test N/A (groups empty)"
-            else:
+            else: # Recurrent or Single-event keys not found in mapping (should not happen with current setup)
                 p_val_text = "Test N/A (category key missing)"
             
             current_fst_summary = {
                 'column_name': analysis_column_name,
+                'analysis_type': plot_suffix_for_logging if plot_suffix_for_logging else "unfiltered", # Add analysis type
                 'recurrent_N': recurrent_n, 'recurrent_mean': recurrent_mean, 'recurrent_median': recurrent_median,
                 'single_event_N': single_event_n, 'single_event_mean': single_event_mean, 'single_event_median': single_event_median,
                 'p_value_text': p_val_text,
@@ -464,23 +480,26 @@ def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summar
                 'recurrent_n0_hap_mean': recurrent_n0_hap_mean, 'single_event_n0_hap_mean': single_event_n0_hap_mean,
                 'recurrent_n1_hap_mean': recurrent_n1_hap_mean, 'single_event_n1_hap_mean': single_event_n1_hap_mean,
             }
-            FST_TEST_SUMMARIES.append(current_fst_summary)
+            returned_summary = current_fst_summary # Set the summary to be returned
             
             ax.text(0.04,0.96,f"Mann-Whitney U\n{p_val_text}",transform=ax.transAxes,fontsize=10,va='top',ha='left',
                     bbox=dict(boxstyle='round,pad=0.3',fc='ghostwhite',alpha=0.7,ec='lightgrey'))
         
         plt.tight_layout(pad=1.5)
         plt.savefig(output_filename, dpi=350, bbox_inches='tight')
-        logger.info(f"Saved {plot_type} plot for '{analysis_column_name}' to '{output_filename}'")
+        logger.info(f"Saved {plot_type} plot{plot_suffix_for_logging} for '{analysis_column_name}' to '{output_filename}'")
         
+        # Display FST plots if they are part of the specific list (original behavior, no suffix needed for this specific log message)
         if analysis_column_name in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT and plot_type == 'violin':
             logger.info(f"Displaying FST plot for '{analysis_column_name}'. Close plot window to continue...")
             # plt.show() # Disabled for non-interactive run
     
     except Exception as e:
-        logger.error(f"Failed to create/save {plot_type} plot '{output_filename}' for '{analysis_column_name}': {e}", exc_info=True)
+        logger.error(f"Failed to create/save {plot_type} plot{plot_suffix_for_logging} '{output_filename}' for '{analysis_column_name}': {e}", exc_info=True)
     finally:
         plt.close(fig)
+    
+    return returned_summary
 
 def create_fst_vs_attribute_scatterplot(summary_df_with_types, fst_col, attr_col, attr_name):
     fig, ax = plt.subplots(figsize=(8, 7))
@@ -632,20 +651,102 @@ def main():
                 plot_data_for_current_col[inv_type_key] = []
         
         if current_col in COLUMNS_FOR_PLOTTING:
-            plot_type_to_use = 'violin' if current_col in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT else 'box'
-            logger.info(f"--- Generating {plot_type_to_use.upper()} Plot for: '{current_col}' ---")
-            
-            if all_categories_empty_for_plot:
-                logger.warning(f"No numeric data for plotting for '{current_col}' across all categories. Skipping plot.")
-            else:
-                create_comparison_plot(plot_data_for_current_col, categorized_dfs, current_col, plot_type_to_use)
-        else:
-            logger.info(f"Skipping violin/box plot generation for '{current_col}' (not in designated plot list).")
+            plot_type_to_use = 'violin' if current_col in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT else 'box'
+            logger.info(f"--- Generating {plot_type_to_use.upper()} Plot for: '{current_col}' (Unfiltered) ---")
+            
+            if all_categories_empty_for_plot:
+                logger.warning(f"No numeric data for plotting for '{current_col}' (Unfiltered) across all categories. Skipping plot.")
+            else:
+                # Call create_comparison_plot and capture the summary if one is returned
+                # The plot_suffix_for_logging defaults to "" for unfiltered plots, or can be explicitly ""
+                plot_summary = create_comparison_plot(plot_data_for_current_col, categorized_dfs, current_col, plot_type_to_use, plot_suffix_for_logging="")
+                if plot_summary: # If a summary was returned (i.e., it was an FST violin plot)
+                    FST_TEST_SUMMARIES.append(plot_summary)
+        else:
+            logger.info(f"Skipping violin/box plot generation for '{current_col}' (not in designated plot list).")
 
-    # --- Calculate and Store FST Component Summaries ---
-    logger.info("\n====== Calculating FST Component Summaries ======")
-    global FST_TEST_SUMMARIES # we are modifying the global list
-    for component_col_name in ALL_FST_COMPONENT_COLUMNS:
+    # --- Data Filtering for Haplotype Counts and Second Pass for FST Plots ---
+    logger.info(f"\n====== Preparing Data for FILTERED FST Analysis ({FILTER_SUFFIX}) ======")
+    logger.info(f"Filter condition: Minimum of '{N_HAP_0_COL}' and '{N_HAP_1_COL}' must be > 1 (i.e., >= 2).")
+
+    # filter columns are numeric in the original sum_df before filtering
+    # This step is crucial if these columns haven't been robustly converted to numeric yet.
+    if N_HAP_0_COL in sum_df.columns:
+        sum_df[N_HAP_0_COL] = pd.to_numeric(sum_df[N_HAP_0_COL], errors='coerce')
+    else:
+        logger.error(f"Filter column '{N_HAP_0_COL}' not found in summary DataFrame. Cannot apply filter.")
+        # Depending on desired behavior, could exit or proceed without filtering. Here, we'll log and proceed, filtered_df might be empty.
+    if N_HAP_1_COL in sum_df.columns:
+        sum_df[N_HAP_1_COL] = pd.to_numeric(sum_df[N_HAP_1_COL], errors='coerce')
+    else:
+        logger.error(f"Filter column '{N_HAP_1_COL}' not found in summary DataFrame. Cannot apply filter.")
+
+    # Apply filter if both columns exist
+    if N_HAP_0_COL in sum_df.columns and N_HAP_1_COL in sum_df.columns:
+        filter_condition = (sum_df[N_HAP_0_COL] > 1) & (sum_df[N_HAP_1_COL] > 1)
+        sum_df_filtered = sum_df[filter_condition].copy()
+        logger.info(f"Haplotype filter applied: Original rows = {len(sum_df)}, Filtered rows ({FILTER_SUFFIX}) = {len(sum_df_filtered)}")
+    else:
+        logger.warning(f"One or both filter columns ('{N_HAP_0_COL}', '{N_HAP_1_COL}') missing. Proceeding with an empty filtered DataFrame.")
+        sum_df_filtered = pd.DataFrame(columns=sum_df.columns) # Create empty df with same columns to avoid downstream errors
+
+    categorized_dfs_filtered = {}
+    for inv_type_display_name, inv_type_internal_key in INVERSION_CATEGORY_MAPPING.items():
+        if not sum_df_filtered.empty:
+            categorized_dfs_filtered[inv_type_internal_key] = sum_df_filtered[sum_df_filtered['inversion_type'] == inv_type_internal_key].copy()
+        else:
+            categorized_dfs_filtered[inv_type_internal_key] = pd.DataFrame(columns=sum_df_filtered.columns) # Empty df with correct columns
+
+    rec_count_filtered = len(categorized_dfs_filtered.get(INVERSION_CATEGORY_MAPPING['Recurrent'], pd.DataFrame()))
+    se_count_filtered = len(categorized_dfs_filtered.get(INVERSION_CATEGORY_MAPPING['Single-event'], pd.DataFrame()))
+    logger.info(f"Filtered data counts ({FILTER_SUFFIX}): Recurrent regions = {rec_count_filtered}, Single-event regions = {se_count_filtered}")
+
+    logger.info(f"\n====== Starting FILTERED FST Violin Plot Analysis ({FILTER_SUFFIX}) ======")
+    if sum_df_filtered.empty:
+        logger.warning(f"Skipping filtered FST analysis as the filtered DataFrame ({FILTER_SUFFIX}) is empty.")
+    else:
+        for current_col_filtered in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT:
+            logger.info(f"===== Processing Column (FILTERED {FILTER_SUFFIX}): '{current_col_filtered}' =====")
+            
+            # Optional: Data Quality check on the FILTERED data for this column
+            # prepare_data_for_analysis(sum_df_filtered, current_col_filtered) # Logs DQ info
+
+            plot_data_for_current_col_filtered = {}
+            all_categories_empty_for_plot_filtered = True
+            for inv_type_key, df_subset_filtered in categorized_dfs_filtered.items():
+                if current_col_filtered in df_subset_filtered.columns:
+                    #  data is numeric and drop NaNs for plotting
+                    numeric_series_filtered = pd.to_numeric(df_subset_filtered[current_col_filtered], errors='coerce').dropna()
+                    plot_data_for_current_col_filtered[inv_type_key] = numeric_series_filtered.tolist()
+                    if not numeric_series_filtered.empty:
+                        all_categories_empty_for_plot_filtered = False
+                else:
+                    plot_data_for_current_col_filtered[inv_type_key] = []
+            
+            if current_col_filtered not in sum_df_filtered.columns:
+                logger.warning(f"Column '{current_col_filtered}' not found in sum_df_filtered. Skipping filtered plot and test.")
+                continue
+
+            if all_categories_empty_for_plot_filtered:
+                logger.warning(f"No numeric data for plotting (FILTERED {FILTER_SUFFIX}) for '{current_col_filtered}' across all categories. Skipping plot.")
+            else:
+                logger.info(f"--- Generating VIOLIN Plot (FILTERED {FILTER_SUFFIX}) for: '{current_col_filtered}' ---")
+                plot_summary_filtered = create_comparison_plot(
+                    plot_data_for_current_col_filtered,
+                    categorized_dfs_filtered, # Pass the full categorized DFs for aux data like N_hap in summary
+                    current_col_filtered,
+                    'violin',
+                    output_filename_template_override=VIOLIN_PLOT_FILTERED_TEMPLATE,
+                    plot_suffix_for_logging=FILTER_SUFFIX
+                )
+                if plot_summary_filtered:
+                    FST_TEST_SUMMARIES_FILTERED.append(plot_summary_filtered)
+
+    # --- Calculate and Store FST Component Summaries (using original unfiltered data) ---
+    logger.info("\n====== Calculating FST Component Summaries (based on original unfiltered data) ======")
+    # The global FST_TEST_SUMMARIES is used here as these components are for the main FST measures from original data.
+    # If components for filtered data were desired, a separate loop and list would be needed.
+    for component_col_name in ALL_FST_COMPONENT_COLUMNS:
         # Check if the component column exists in the main summary dataframe to avoid errors if it's missing
         if component_col_name not in sum_df.columns:
             logger.warning(f"FST Component column '{component_col_name}' not found in summary_df. Skipping its component summary calculation.")
@@ -777,9 +878,22 @@ def main():
         if not hudson_components_found:
             logger.info("    No Hudson FST component data to display.")
     else:
-        logger.info("\n====== No FST Component Summary Statistics to display (list is empty or calculation was skipped) ======")
-    
-    logger.info(f"====== Full Analysis Script completed in {time.time()-overall_start:.2f}s ======")
+        logger.info("\n====== No FST Component Summary Statistics to display (list is empty or calculation was skipped) ======")
+    
+    # --- Print Filtered FST Test Summaries ---
+    if FST_TEST_SUMMARIES_FILTERED:
+        logger.info(f"\n====== Summary Statistics for FST Tests (Recurrent vs Single-event) - FILTERED ({FILTER_SUFFIX}) ======")
+        for summary in FST_TEST_SUMMARIES_FILTERED:
+            logger.info(f"  --- FST Metric: {summary['column_name']} ({summary.get('analysis_type', FILTER_SUFFIX)}) ---")
+            logger.info(f"    Recurrent:     N={summary['recurrent_N']}, Mean_FST={summary.get('recurrent_mean', np.nan):.4f}, Median_FST={summary.get('recurrent_median', np.nan):.4f}, "
+                        f"InvFreq_Mean={summary.get('recurrent_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('recurrent_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('recurrent_n1_hap_mean', np.nan):.2f}")
+            logger.info(f"    Single-event:  N={summary['single_event_N']}, Mean_FST={summary.get('single_event_mean', np.nan):.4f}, Median_FST={summary.get('single_event_median', np.nan):.4f}, "
+                        f"InvFreq_Mean={summary.get('single_event_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('single_event_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('single_event_n1_hap_mean', np.nan):.2f}")
+            logger.info(f"    Mann-Whitney U: {summary.get('p_value_text', 'N/A')}")
+    else:
+        logger.info(f"\n====== No FILTERED FST Test Summary Statistics ({FILTER_SUFFIX}) to display (list is empty or no data passed filter) ======")
+
+    logger.info(f"====== Full Analysis Script completed in {time.time()-overall_start:.2f}s ======")
 
 if __name__ == "__main__":
-    main()
+    main()
