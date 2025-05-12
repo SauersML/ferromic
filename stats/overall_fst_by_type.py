@@ -85,7 +85,21 @@ MAX_INDIVIDUAL_WARNINGS_PER_CATEGORY = 10
 MAX_EXAMPLES_OF_OUT_OF_SPEC_LOGGING = 5
 
 FST_TEST_SUMMARIES = []
-SCATTER_PLOT_SUMMARIES = [] # New global list for scatterplot summaries
+SCATTER_PLOT_SUMMARIES = [] # global list for scatterplot summaries
+
+# Specific FST component columns for summary
+FST_WC_COMPONENT_COLUMNS = [
+    'haplotype_between_pop_variance_wc',
+    'haplotype_within_pop_variance_wc'
+]
+FST_HUDSON_COMPONENT_COLUMNS = [
+    'hudson_dxy_hap_group_0v1',
+    'hudson_pi_hap_group_0',
+    'hudson_pi_hap_group_1',
+    'hudson_pi_avg_hap_group_0v1'
+]
+ALL_FST_COMPONENT_COLUMNS = FST_WC_COMPONENT_COLUMNS + FST_HUDSON_COMPONENT_COLUMNS
+
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -628,7 +642,47 @@ def main():
         else:
             logger.info(f"Skipping violin/box plot generation for '{current_col}' (not in designated plot list).")
 
-        logger.info(f"--- Completed processing for '{current_col}' in {time.time()-col_start_time:.2f}s ---")
+    # --- Calculate and Store FST Component Summaries ---
+    logger.info("\n====== Calculating FST Component Summaries ======")
+    global FST_TEST_SUMMARIES # we are modifying the global list
+    for component_col_name in ALL_FST_COMPONENT_COLUMNS:
+        # Check if the component column exists in the main summary dataframe to avoid errors if it's missing
+        if component_col_name not in sum_df.columns:
+            logger.warning(f"FST Component column '{component_col_name}' not found in summary_df. Skipping its component summary calculation.")
+            continue
+
+        component_summary_data = {'component_column': component_col_name, 'column_name': component_col_name}
+        logger.info(f"  Calculating summary for component: {component_col_name}")
+
+        for inv_type_display_name, inv_type_internal_key in INVERSION_CATEGORY_MAPPING.items():
+            df_subset = categorized_dfs.get(inv_type_internal_key)
+            mean_val, median_val, n_val = np.nan, np.nan, 0
+
+            if df_subset is not None and not df_subset.empty and component_col_name in df_subset.columns:
+                # Convert to numeric, coercing errors, and drop NaN values for calculation
+                numeric_series = pd.to_numeric(df_subset[component_col_name], errors='coerce').dropna()
+                if not numeric_series.empty:
+                    mean_val = numeric_series.mean()
+                    median_val = numeric_series.median()
+                    n_val = len(numeric_series)
+                else:
+                    logger.debug(f"    No valid numeric data for component '{component_col_name}' in category '{inv_type_display_name}' after NaN drop.")
+            elif df_subset is None or df_subset.empty:
+                 logger.debug(f"    DataFrame subset for category '{inv_type_display_name}' is None or empty for component '{component_col_name}'.")
+            elif component_col_name not in df_subset.columns:
+                 logger.debug(f"    Component column '{component_col_name}' not found in DataFrame subset for category '{inv_type_display_name}'.")
+
+
+            # Store results using the internal key (e.g., 'recurrent', 'single_event')
+            component_summary_data[f"{inv_type_internal_key}_N"] = n_val
+            component_summary_data[f"{inv_type_internal_key}_mean"] = mean_val
+            component_summary_data[f"{inv_type_internal_key}_median"] = median_val
+            mean_debug_str = f"{mean_val:.4f}" if not np.isnan(mean_val) else "NaN"
+            median_debug_str = f"{median_val:.4f}" if not np.isnan(median_val) else "NaN"
+            logger.debug(f"    Stats for '{inv_type_display_name}': N={n_val}, Mean={mean_debug_str}, Median={median_debug_str}")
+
+        FST_TEST_SUMMARIES.append(component_summary_data)
+    logger.info("====== Finished Calculating FST Component Summaries ======")
 
     logger.info("\n====== Generating Investigative Scatter Plots ======")
     for config in SCATTER_PLOT_CONFIG:
@@ -650,27 +704,80 @@ def main():
     if final_sup_summary: logger.info(f"\n--- Summary of Suppressed Warnings ---\n{final_sup_summary}")
 
     if FST_TEST_SUMMARIES:
-        logger.info("\n====== Summary Statistics for FST Tests (Recurrent vs Single-event) ======")
+            fst_test_results_to_print = [s for s in FST_TEST_SUMMARIES if 'p_value_text' in s]
+            if fst_test_results_to_print:
+                logger.info("\n====== Summary Statistics for FST Tests (Recurrent vs Single-event) ======")
+                for summary in fst_test_results_to_print:
+                    logger.info(f"  --- FST Metric: {summary['column_name']} ---")
+                    logger.info(f"    Recurrent:     N={summary['recurrent_N']}, Mean_FST={summary['recurrent_mean']:.4f}, Median_FST={summary['recurrent_median']:.4f}, "
+                                f"InvFreq_Mean={summary.get('recurrent_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('recurrent_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('recurrent_n1_hap_mean', np.nan):.2f}")
+                    logger.info(f"    Single-event:  N={summary['single_event_N']}, Mean_FST={summary['single_event_mean']:.4f}, Median_FST={summary['single_event_median']:.4f}, "
+                                f"InvFreq_Mean={summary.get('single_event_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('single_event_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('single_event_n1_hap_mean', np.nan):.2f}")
+                    logger.info(f"    Mann-Whitney U: {summary.get('p_value_text', 'N/A (Not applicable for this entry)')}")
+            else:
+                logger.info("\n====== No FST Test Summary Statistics (with p-values) to display ======")
+
+    logger.info("\n====== Summary Statistics for Scatter Plots (Recurrent vs Single-event) ======")
+    for summary in SCATTER_PLOT_SUMMARIES:
+        rec_key = INVERSION_CATEGORY_MAPPING['Recurrent']
+        se_key = INVERSION_CATEGORY_MAPPING['Single-event']
+        logger.info(f"  --- Scatter Plot: {summary['fst_metric']} vs. {summary['attribute_name_pretty']} (Attr: {summary['attribute_plotted']}) ---")
+        logger.info(f"    Recurrent:     N={summary.get(f'{rec_key}_N', 0)}, Mean FST={summary.get(f'{rec_key}_mean_fst', np.nan):.4f}, Mean Attribute={summary.get(f'{rec_key}_mean_attr', np.nan):.4f}")
+        logger.info(f"    Single-event:  N={summary.get(f'{se_key}_N', 0)}, Mean FST={summary.get(f'{se_key}_mean_fst', np.nan):.4f}, Mean Attribute={summary.get(f'{se_key}_mean_attr', np.nan):.4f}")
+
+    # --- Print FST Component Summaries ---
+    if FST_TEST_SUMMARIES:
+        logger.info("\n====== Summary Statistics for FST Components (Recurrent vs Single-event) ======")
+        rec_key_internal = INVERSION_CATEGORY_MAPPING['Recurrent']
+        se_key_internal = INVERSION_CATEGORY_MAPPING['Single-event']
+
+        # --- Weir & Cockerham FST Components ---
+        logger.info("  --- Weir & Cockerham FST Components ---")
+        wc_components_found = False
         for summary in FST_TEST_SUMMARIES:
-            logger.info(f"  --- FST Metric: {summary['column_name']} ---")
-            logger.info(f"    Recurrent:     N={summary['recurrent_N']}, Mean_FST={summary['recurrent_mean']:.4f}, Median_FST={summary['recurrent_median']:.4f}, "
-                        f"InvFreq_Mean={summary.get('recurrent_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('recurrent_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('recurrent_n1_hap_mean', np.nan):.2f}")
-            logger.info(f"    Single-event:  N={summary['single_event_N']}, Mean_FST={summary['single_event_mean']:.4f}, Median_FST={summary['single_event_median']:.4f}, "
-                        f"InvFreq_Mean={summary.get('single_event_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('single_event_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('single_event_n1_hap_mean', np.nan):.2f}")
-            logger.info(f"    Mann-Whitney U: {summary['p_value_text']}")
+            # Process only if it's a component summary and relevant to Weir & Cockerham
+            if 'component_column' in summary and summary['component_column'] in FST_WC_COMPONENT_COLUMNS:
+                wc_components_found = True
+                col_name = summary['component_column']
+                
+                rec_n = summary.get(f'{rec_key_internal}_N', 0)
+                rec_mean_str = f"{summary.get(f'{rec_key_internal}_mean', np.nan):.4f}" if rec_n > 0 and not np.isnan(summary.get(f'{rec_key_internal}_mean', np.nan)) else "N/A"
+                rec_median_str = f"{summary.get(f'{rec_key_internal}_median', np.nan):.4f}" if rec_n > 0 and not np.isnan(summary.get(f'{rec_key_internal}_median', np.nan)) else "N/A"
+
+                se_n = summary.get(f'{se_key_internal}_N', 0)
+                se_mean_str = f"{summary.get(f'{se_key_internal}_mean', np.nan):.4f}" if se_n > 0 and not np.isnan(summary.get(f'{se_key_internal}_mean', np.nan)) else "N/A"
+                se_median_str = f"{summary.get(f'{se_key_internal}_median', np.nan):.4f}" if se_n > 0 and not np.isnan(summary.get(f'{se_key_internal}_median', np.nan)) else "N/A"
+
+                logger.info(f"    Component: {col_name}")
+                logger.info(f"      Recurrent:    N={rec_n}, Mean={rec_mean_str}, Median={rec_median_str}")
+                logger.info(f"      Single-event: N={se_n}, Mean={se_mean_str}, Median={se_median_str}")
+        if not wc_components_found:
+            logger.info("    No Weir & Cockerham FST component data to display.")
+
+        # --- Hudson FST Components ---
+        logger.info("  --- Hudson FST Components ---")
+        hudson_components_found = False
+        for summary in FST_TEST_SUMMARIES:
+            # Process only if it's a component summary and relevant to Hudson
+            if 'component_column' in summary and summary['component_column'] in FST_HUDSON_COMPONENT_COLUMNS:
+                hudson_components_found = True
+                col_name = summary['component_column']
+
+                rec_n = summary.get(f'{rec_key_internal}_N', 0)
+                rec_mean_str = f"{summary.get(f'{rec_key_internal}_mean', np.nan):.4f}" if rec_n > 0 and not np.isnan(summary.get(f'{rec_key_internal}_mean', np.nan)) else "N/A"
+                rec_median_str = f"{summary.get(f'{rec_key_internal}_median', np.nan):.4f}" if rec_n > 0 and not np.isnan(summary.get(f'{rec_key_internal}_median', np.nan)) else "N/A"
+
+                se_n = summary.get(f'{se_key_internal}_N', 0)
+                se_mean_str = f"{summary.get(f'{se_key_internal}_mean', np.nan):.4f}" if se_n > 0 and not np.isnan(summary.get(f'{se_key_internal}_mean', np.nan)) else "N/A"
+                se_median_str = f"{summary.get(f'{se_key_internal}_median', np.nan):.4f}" if se_n > 0 and not np.isnan(summary.get(f'{se_key_internal}_median', np.nan)) else "N/A"
+
+                logger.info(f"    Component: {col_name}")
+                logger.info(f"      Recurrent:    N={rec_n}, Mean={rec_mean_str}, Median={rec_median_str}")
+                logger.info(f"      Single-event: N={se_n}, Mean={se_mean_str}, Median={se_median_str}")
+        if not hudson_components_found:
+            logger.info("    No Hudson FST component data to display.")
     else:
-        logger.info("\n====== No FST Test Summary Statistics to display ======")
-    
-    if SCATTER_PLOT_SUMMARIES:
-        logger.info("\n====== Summary Statistics for Scatter Plots (Recurrent vs Single-event) ======")
-        for summary in SCATTER_PLOT_SUMMARIES:
-            rec_key = INVERSION_CATEGORY_MAPPING['Recurrent']
-            se_key = INVERSION_CATEGORY_MAPPING['Single-event']
-            logger.info(f"  --- Scatter Plot: {summary['fst_metric']} vs. {summary['attribute_name_pretty']} (Attr: {summary['attribute_plotted']}) ---")
-            logger.info(f"    Recurrent:     N={summary.get(f'{rec_key}_N', 0)}, Mean FST={summary.get(f'{rec_key}_mean_fst', np.nan):.4f}, Mean Attribute={summary.get(f'{rec_key}_mean_attr', np.nan):.4f}")
-            logger.info(f"    Single-event:  N={summary.get(f'{se_key}_N', 0)}, Mean FST={summary.get(f'{se_key}_mean_fst', np.nan):.4f}, Mean Attribute={summary.get(f'{se_key}_mean_attr', np.nan):.4f}")
-    else:
-        logger.info("\n====== No Scatter Plot Summary Statistics to display ======")
+        logger.info("\n====== No FST Component Summary Statistics to display (list is empty or calculation was skipped) ======")
     
     logger.info(f"====== Full Analysis Script completed in {time.time()-overall_start:.2f}s ======")
 
