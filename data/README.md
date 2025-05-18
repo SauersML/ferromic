@@ -1,1 +1,1 @@
-callset.csv: 2A:GRCh38_unifiedCallset
+callset.tsv: 2A:GRCh38_unifiedCallset
