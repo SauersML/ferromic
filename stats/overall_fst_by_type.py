@@ -89,10 +89,10 @@ FST_TEST_SUMMARIES_FILTERED = [] # Global list for filtered FST test summaries
 SCATTER_PLOT_SUMMARIES = [] # global list for scatterplot summaries
 
 # Output File Template for filtered plots
-VIOLIN_PLOT_FILTERED_TEMPLATE = 'comparison_violin_filtered_hap_min2_{column_safe_name}.png'
+VIOLIN_PLOT_FILTERED_TEMPLATE = 'comparison_violin_filtered_hap_min_{column_safe_name}.png'
 
 # Suffix for logging and identifying filtered analysis runs
-FILTER_SUFFIX = "_filtered_hap_min2"
+FILTER_SUFFIX = "_filtered_hap_min"
 
 # Specific FST component columns for summary
 FST_WC_COMPONENT_COLUMNS = [
@@ -667,7 +667,7 @@ def main():
 
     # --- Data Filtering for Haplotype Counts and Second Pass for FST Plots ---
     logger.info(f"\n====== Preparing Data for FILTERED FST Analysis ({FILTER_SUFFIX}) ======")
-    logger.info(f"Filter condition: Minimum of '{N_HAP_0_COL}' and '{N_HAP_1_COL}' must be > 1 (i.e., >= 2).")
+    logger.info(f"Filter condition: Minimum of '{N_HAP_0_COL}' and '{N_HAP_1_COL}' must be > 4 (i.e., >= 5).")
 
     # filter columns are numeric in the original sum_df before filtering
     # This step is crucial if these columns haven't been robustly converted to numeric yet.
@@ -683,7 +683,7 @@ def main():
 
     # Apply filter if both columns exist
     if N_HAP_0_COL in sum_df.columns and N_HAP_1_COL in sum_df.columns:
-        filter_condition = (sum_df[N_HAP_0_COL] > 1) & (sum_df[N_HAP_1_COL] > 1)
+        filter_condition = (sum_df[N_HAP_0_COL] >= 5) & (sum_df[N_HAP_1_COL] >= 5)
         sum_df_filtered = sum_df[filter_condition].copy()
         logger.info(f"Haplotype filter applied: Original rows = {len(sum_df)}, Filtered rows ({FILTER_SUFFIX}) = {len(sum_df_filtered)}")
     else:
