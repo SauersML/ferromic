@@ -651,19 +651,19 @@ def main():
                 plot_data_for_current_col[inv_type_key] = []
         
         if current_col in COLUMNS_FOR_PLOTTING:
-            plot_type_to_use = 'violin' if current_col in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT else 'box'
-            logger.info(f"--- Generating {plot_type_to_use.upper()} Plot for: '{current_col}' (Unfiltered) ---")
-            
-            if all_categories_empty_for_plot:
-                logger.warning(f"No numeric data for plotting for '{current_col}' (Unfiltered) across all categories. Skipping plot.")
-            else:
-                # Call create_comparison_plot and capture the summary if one is returned
-                # The plot_suffix_for_logging defaults to "" for unfiltered plots, or can be explicitly ""
-                plot_summary = create_comparison_plot(plot_data_for_current_col, categorized_dfs, current_col, plot_type_to_use, plot_suffix_for_logging="")
-                if plot_summary: # If a summary was returned (i.e., it was an FST violin plot)
-                    FST_TEST_SUMMARIES.append(plot_summary)
-        else:
-            logger.info(f"Skipping violin/box plot generation for '{current_col}' (not in designated plot list).")
+            plot_type_to_use = 'violin' if current_col in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT else 'box'
+            logger.info(f"--- Generating {plot_type_to_use.upper()} Plot for: '{current_col}' (Unfiltered) ---")
+            
+            if all_categories_empty_for_plot:
+                logger.warning(f"No numeric data for plotting for '{current_col}' (Unfiltered) across all categories. Skipping plot.")
+            else:
+                # Call create_comparison_plot and capture the summary if one is returned
+                # The plot_suffix_for_logging defaults to "" for unfiltered plots, or can be explicitly ""
+                plot_summary = create_comparison_plot(plot_data_for_current_col, categorized_dfs, current_col, plot_type_to_use, plot_suffix_for_logging="")
+                if plot_summary: # If a summary was returned (i.e., it was an FST violin plot)
+                    FST_TEST_SUMMARIES.append(plot_summary)
+        else:
+            logger.info(f"Skipping violin/box plot generation for '{current_col}' (not in designated plot list).")
 
     # --- Data Filtering for Haplotype Counts and Second Pass for FST Plots ---
     logger.info(f"\n====== Preparing Data for FILTERED FST Analysis ({FILTER_SUFFIX}) ======")
@@ -742,11 +742,11 @@ def main():
                 if plot_summary_filtered:
                     FST_TEST_SUMMARIES_FILTERED.append(plot_summary_filtered)
 
-    # --- Calculate and Store FST Component Summaries (using original unfiltered data) ---
-    logger.info("\n====== Calculating FST Component Summaries (based on original unfiltered data) ======")
+    # --- Calculate and Store FST Component Summaries (using original unfiltered data) ---
+    logger.info("\n====== Calculating FST Component Summaries (based on original unfiltered data) ======")
     # The global FST_TEST_SUMMARIES is used here as these components are for the main FST measures from original data.
     # If components for filtered data were desired, a separate loop and list would be needed.
-    for component_col_name in ALL_FST_COMPONENT_COLUMNS:
+    for component_col_name in ALL_FST_COMPONENT_COLUMNS:
         # Check if the component column exists in the main summary dataframe to avoid errors if it's missing
         if component_col_name not in sum_df.columns:
             logger.warning(f"FST Component column '{component_col_name}' not found in summary_df. Skipping its component summary calculation.")
@@ -878,22 +878,22 @@ def main():
         if not hudson_components_found:
             logger.info("    No Hudson FST component data to display.")
     else:
-        logger.info("\n====== No FST Component Summary Statistics to display (list is empty or calculation was skipped) ======")
-    
+        logger.info("\n====== No FST Component Summary Statistics to display (list is empty or calculation was skipped) ======")
+    
     # --- Print Filtered FST Test Summaries ---
     if FST_TEST_SUMMARIES_FILTERED:
         logger.info(f"\n====== Summary Statistics for FST Tests (Recurrent vs Single-event) - FILTERED ({FILTER_SUFFIX}) ======")
         for summary in FST_TEST_SUMMARIES_FILTERED:
-            logger.info(f"  --- FST Metric: {summary['column_name']} ({summary.get('analysis_type', FILTER_SUFFIX)}) ---")
-            logger.info(f"    Recurrent:     N={summary['recurrent_N']}, Mean_FST={summary.get('recurrent_mean', np.nan):.4f}, Median_FST={summary.get('recurrent_median', np.nan):.4f}, "
+            logger.info(f"  --- FST Metric: {summary['column_name']} ({summary.get('analysis_type', FILTER_SUFFIX)}) ---")
+            logger.info(f"    Recurrent:     N={summary['recurrent_N']}, Mean_FST={summary.get('recurrent_mean', np.nan):.4f}, Median_FST={summary.get('recurrent_median', np.nan):.4f}, "
                         f"InvFreq_Mean={summary.get('recurrent_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('recurrent_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('recurrent_n1_hap_mean', np.nan):.2f}")
-            logger.info(f"    Single-event:  N={summary['single_event_N']}, Mean_FST={summary.get('single_event_mean', np.nan):.4f}, Median_FST={summary.get('single_event_median', np.nan):.4f}, "
+            logger.info(f"    Single-event:  N={summary['single_event_N']}, Mean_FST={summary.get('single_event_mean', np.nan):.4f}, Median_FST={summary.get('single_event_median', np.nan):.4f}, "
                         f"InvFreq_Mean={summary.get('single_event_inv_freq_mean', np.nan):.4f}, N_StdHaps_Mean={summary.get('single_event_n0_hap_mean', np.nan):.2f}, N_InvHaps_Mean={summary.get('single_event_n1_hap_mean', np.nan):.2f}")
-            logger.info(f"    Mann-Whitney U: {summary.get('p_value_text', 'N/A')}")
+            logger.info(f"    Mann-Whitney U: {summary.get('p_value_text', 'N/A')}")
     else:
         logger.info(f"\n====== No FILTERED FST Test Summary Statistics ({FILTER_SUFFIX}) to display (list is empty or no data passed filter) ======")
 
-    logger.info(f"====== Full Analysis Script completed in {time.time()-overall_start:.2f}s ======")
+    logger.info(f"====== Full Analysis Script completed in {time.time()-overall_start:.2f}s ======")
 
 if __name__ == "__main__":
-    main()
+    main()
