@@ -1,7 +1,8 @@
 import random
 import sys
+import collections
 
-# Hardcoded hg38 chromosome lengths
+# hg38 chromosome lengths (1-based, inclusive)
 HG38_CHROM_LENGTHS = {
     'chr1': 248956422, 'chr2': 242193529, 'chr3': 198295559,
     'chr4': 190214555, 'chr5': 181538259, 'chr6': 170805979,
@@ -13,117 +14,168 @@ HG38_CHROM_LENGTHS = {
     'chr22': 50818468, 'chrX': 156040895, 'chrY': 57227415,
 }
 
-def permute_genomic_coordinates(input_tsv_path, output_tsv_path="permuted.tsv"):
+def do_regions_overlap(start1: int, end1: int, start2: int, end2: int) -> bool:
+    """Checks if two 1-based, closed interval regions overlap."""
+    return max(start1, start2) <= min(end1, end2)
+
+def parse_and_validate_input(input_tsv_path: str) -> tuple[
+    collections.defaultdict[str, list[tuple[int, int]]], # exclusion_map
+    list[dict], # regions_to_process
+    str # header_line (string, not including newline)
+]:
     """
-    Reads a TSV file, permutes start and end coordinates, and writes to a new TSV.
-
-    The permutation keeps the chromosome and the distance (end - start) constant.
-    New start/end coordinates are chosen randomly within the valid bounds of the
-    same chromosome.
+    Reads the input TSV. Validates all regions and builds an exclusion map
+    from these original regions. Collects regions for permutation.
+    Raises errors on invalid data or file issues.
+    Input TSV: first 3 cols chr, start, end (1-based). Others carried over.
     """
-    processed_lines = 0
-    warning_lines = 0
+    exclusion_map = collections.defaultdict(list)
+    regions_to_process = []
+    
+    # If input_tsv_path doesn't exist, open() will raise FileNotFoundError.
+    with open(input_tsv_path, 'r') as infile:
+        header_line_content = infile.readline()
+        if not header_line_content.strip():
+            raise ValueError(f"Error: Input file '{input_tsv_path}' is empty or has no header line.")
+        header = header_line_content.strip()
 
-    try:
-        with open(input_tsv_path, 'r') as infile, \
-             open(output_tsv_path, 'w') as outfile:
+        for line_number, line_content in enumerate(infile, 2):
+            line_strip = line_content.strip()
+            if not line_strip: # Skip purely empty lines if any
+                continue
+            
+            fields = line_strip.split('\t')
 
-            header_line = infile.readline()
-            if not header_line:
-                print(f"Error: Input file '{input_tsv_path}' appears to be empty.")
-                return
-            outfile.write(header_line) # Write header as is (includes newline)
+            if len(fields) < 3:
+                raise ValueError(f"Error (L{line_number}): Insufficient columns ({len(fields)}). Expected >=3. Line: '{line_strip}'")
 
-            for line_number, line_content in enumerate(infile, 2): # Starts from file line 2
-                original_line_for_output = line_content # Preserve original line ending
-                fields = line_content.strip().split('\t')
+            seqnames = fields[0]
+            try:
+                original_start = int(fields[1])
+                original_end = int(fields[2])
+            except ValueError as e:
+                raise ValueError(f"Error (L{line_number}): Non-integer start/end coordinates. Line: '{line_strip}'. Details: {e}")
 
-                if len(fields) < 3:
-                    # print(f"Warning (Line {line_number}): Insufficient columns ({len(fields)}). Original: '{line_content.strip()}'. Writing as is.")
-                    outfile.write(original_line_for_output)
-                    warning_lines += 1
-                    continue
+            if seqnames not in HG38_CHROM_LENGTHS:
+                raise ValueError(f"Error (L{line_number}): Chromosome '{seqnames}' unknown. Line: '{line_strip}'")
 
-                seqnames = fields[0]
-                original_start_str = fields[1]
-                original_end_str = fields[2]
+            chromosome_length = HG38_CHROM_LENGTHS[seqnames]
+            
+            if not (1 <= original_start <= original_end <= chromosome_length):
+                raise ValueError(
+                    f"Error (L{line_number}): Invalid coordinates {seqnames}:{original_start}-{original_end}. "
+                    f"Must be 1 <= start <= end <= chromosome_length ({chromosome_length}). Line: '{line_strip}'"
+                )
+            
+            # span_val is (length - 1). For a 1bp region (start=1, end=1), span_val is 0.
+            # For a 2bp region (start=1, end=2), span_val is 1.
+            span_val = original_end - original_start 
 
-                try:
-                    original_start = int(original_start_str)
-                    original_end = int(original_end_str)
-                except ValueError:
-                    # print(f"Warning (Line {line_number}): Non-integer start/end. Original: '{line_content.strip()}'. Writing as is.")
-                    outfile.write(original_line_for_output)
-                    warning_lines += 1
-                    continue
+            exclusion_map[seqnames].append((original_start, original_end))
+            
+            regions_to_process.append({
+                'fields': fields,
+                'line_num': line_number,
+                'seqnames': seqnames,
+                'original_start': original_start,
+                'original_end': original_end,
+                'span_val': span_val, 
+                'chromosome_length': chromosome_length
+            })
 
-                if seqnames not in HG38_CHROM_LENGTHS:
-                    # print(f"Warning (Line {line_number}): Chromosome '{seqnames}' not in hardcoded lengths. Original: '{line_content.strip()}'. Writing as is.")
-                    outfile.write(original_line_for_output)
-                    warning_lines += 1
-                    continue
+    if not regions_to_process:
+        raise ValueError(f"Error: No valid data lines found in '{input_tsv_path}' after the header.")
 
-                chromosome_length = HG38_CHROM_LENGTHS[seqnames]
+    for chrom_key in exclusion_map: # Sort for consistent behavior if needed later, minor impact.
+        exclusion_map[chrom_key].sort()
+        
+    print(f"Parsed and validated {len(regions_to_process)} regions from '{input_tsv_path}'. These will also form the exclusion set.")
+    return exclusion_map, regions_to_process, header
+
+
+def permute_coordinates_with_self_exclusion(
+    input_tsv_path: str,
+    output_tsv_path: str = "permuted.tsv", # Fixed default output path
+    max_retries_per_region: int = 1000
+):
+    """
+    Permutes regions from input_tsv_path, ensuring permuted regions do not
+    overlap with ANY original region from the same input_tsv_path.
+    Carries over all columns. Crashes on failure to find a placement.
+    """
+    
+    exclusion_map, regions_to_process, header = parse_and_validate_input(input_tsv_path)
+    
+    permuted_count = 0
+    
+    print(f"Starting permutation for {len(regions_to_process)} regions. Output: '{output_tsv_path}'.")
+    
+    with open(output_tsv_path, 'w') as outfile:
+        outfile.write(header + '\n')
+
+        for region_info in regions_to_process:
+            fields = region_info['fields']
+            line_num = region_info['line_num']
+            seqnames = region_info['seqnames']
+            span = region_info['span_val'] 
+            chromosome_length = region_info['chromosome_length']
+
+            # new_start is 1-based. max_possible_new_start allows new_end to reach chromosome_length.
+            # new_end = new_start + span. So, new_start + span <= chromosome_length.
+            # new_start <= chromosome_length - span.
+            max_possible_new_start = chromosome_length - span
+            
+            if max_possible_new_start < 1:
+                # This implies region is effectively the entire chromosome or too large to place.
+                # Given prior validation (1 <= start <= end <= chrom_length),
+                # this means start=1 and end=chromosome_length (span = chromosome_length - 1).
+                # Such a region cannot be moved to a new location that doesn't overlap an original region (itself).
+                raise RuntimeError(
+                    f"Error (L{line_num}): Region {seqnames}:{region_info['original_start']}-{region_info['original_end']} "
+                    f"(span {span}) effectively covers the entire usable chromosome length or cannot be placed given "
+                    f"max_possible_new_start is {max_possible_new_start}. Non-overlapping permutation is impossible."
+                )
+
+            found_placement = False
+            for _ in range(max_retries_per_region):
+                new_start = random.randint(1, max_possible_new_start) 
+                new_end = new_start + span 
+
+                is_overlapping = False
+                if seqnames in exclusion_map: # Should always be true if region_info exists
+                    for ex_start, ex_end in exclusion_map[seqnames]:
+                        if do_regions_overlap(new_start, new_end, ex_start, ex_end):
+                            is_overlapping = True
+                            break 
                 
-                # Calculate the span or "distance" to be preserved
-                # span = original_end - original_start
-                # This interpretation ensures new_end = new_start + span
-                span = original_end - original_start
+                if not is_overlapping:
+                    permuted_fields = list(fields) 
+                    permuted_fields[1] = str(new_start)
+                    permuted_fields[2] = str(new_end)
+                    outfile.write('\t'.join(permuted_fields) + '\n')
+                    permuted_count += 1
+                    found_placement = True
+                    break 
+            
+            if not found_placement:
+                raise RuntimeError(
+                    f"Error (L{line_num}): Max retries ({max_retries_per_region}) exhausted for region "
+                    f"{seqnames}:{region_info['original_start']}-{region_info['original_end']}. "
+                    f"Could not find a random non-overlapping placement. CRASHING."
+                )
 
-                if span < 0:
-                    # print(f"Warning (Line {line_number}): End coordinate ({original_end}) is less than start ({original_start}). Original: '{line_content.strip()}'. Writing as is.")
-                    outfile.write(original_line_for_output)
-                    warning_lines += 1
-                    continue
-                
-                # Determine the valid range for the new start position
-                # new_start must be >= 1
-                # new_start + span must be <= chromosome_length
-                # So, new_start <= chromosome_length - span
-                max_possible_new_start = chromosome_length - span
+    print(f"\nProcessing complete. Successfully permuted {permuted_count} lines to '{output_tsv_path}'.")
 
-                if max_possible_new_start < 1:
-                    # This occurs if span >= chromosome_length
-                    if span == chromosome_length: # Segment is exactly chromosome length
-                        new_start = 1
-                    else: # span > chromosome_length, segment is too large
-                        # print(f"Warning (Line {line_number}): Segment span ({span}) for {seqnames} ({original_start}-{original_end}) "
-                        #       f"is greater than chromosome length ({chromosome_length}). Original: '{line_content.strip()}'. Writing as is.")
-                        outfile.write(original_line_for_output)
-                        warning_lines += 1
-                        continue
-                else:
-                    new_start = random.randint(1, max_possible_new_start)
-                
-                new_end = new_start + span
-
-                fields[1] = str(new_start)
-                fields[2] = str(new_end)
-                
-                outfile.write('\t'.join(fields) + '\n')
-                processed_lines += 1
-
-        print(f"\nProcessing complete.")
-        print(f"Successfully processed and permuted {processed_lines} data lines.")
-        if warning_lines > 0:
-            print(f"Encountered {warning_lines} lines with warnings (written as is to output). Check console for details if warnings were un-commented.")
-        print(f"Output written to '{output_tsv_path}'")
-
-    except FileNotFoundError:
-        print(f"Error: Input file '{input_tsv_path}' not found.")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python your_script_name.py <input_tsv_file>")
-        print("Example: python permute_coords.py variants_input.tsv")
+        print("Example: python your_script_name.py original_inversions_with_ids.tsv")
+        print("       (Output will be 'permuted.tsv' by default in the current directory)")
         sys.exit(1)
     
     input_filename = sys.argv[1]
-    output_filename = "permuted.tsv" 
     
-    print(f"Input file: {input_filename}")
-    print(f"Output file: {output_filename}")
+    print(f"Input TSV file: {input_filename}")
     
-    permute_genomic_coordinates(input_filename, output_filename)
+    permute_coordinates_with_self_exclusion(input_filename) # Output defaults to "permuted.tsv"
