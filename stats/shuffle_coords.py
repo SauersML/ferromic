@@ -1,6 +1,8 @@
 import random
 import sys
 import collections
+import os
+import glob
 
 # hg38 chromosome lengths (1-based, inclusive)
 HG38_CHROM_LENGTHS = {
@@ -19,42 +21,41 @@ def do_regions_overlap(start1: int, end1: int, start2: int, end2: int) -> bool:
     return max(start1, start2) <= min(end1, end2)
 
 def parse_and_validate_input(input_tsv_path: str) -> tuple[
-    collections.defaultdict[str, list[tuple[int, int]]], # exclusion_map
-    list[dict], # regions_to_process
-    str # header_line (string, not including newline)
+    collections.defaultdict[str, list[tuple[int, int]]],
+    list[dict],
+    str
 ]:
     """
-    Reads the input TSV. Validates all regions and builds an exclusion map
-    from these original regions. Collects regions for permutation.
-    Raises errors on invalid data or file issues.
+    Reads input TSV, validates regions, builds exclusion map from these regions.
+    Returns: exclusion_map, list of regions_to_process, header_line string.
+    Raises errors on invalid data/file issues.
     Input TSV: first 3 cols chr, start, end (1-based). Others carried over.
     """
     exclusion_map = collections.defaultdict(list)
     regions_to_process = []
     
-    # If input_tsv_path doesn't exist, open() will raise FileNotFoundError.
     with open(input_tsv_path, 'r') as infile:
         header_line_content = infile.readline()
         if not header_line_content.strip():
-            raise ValueError(f"Error: Input file '{input_tsv_path}' is empty or has no header line.")
+            raise ValueError(f"Error: Input file '{input_tsv_path}' is empty or lacks a header.")
         header = header_line_content.strip()
 
         for line_number, line_content in enumerate(infile, 2):
             line_strip = line_content.strip()
-            if not line_strip: # Skip purely empty lines if any
-                continue
+            if not line_strip:
+                continue 
             
             fields = line_strip.split('\t')
 
             if len(fields) < 3:
-                raise ValueError(f"Error (L{line_number}): Insufficient columns ({len(fields)}). Expected >=3. Line: '{line_strip}'")
+                raise ValueError(f"Error (L{line_number}): Insufficient columns ({len(fields)}). Line: '{line_strip}'")
 
             seqnames = fields[0]
             try:
                 original_start = int(fields[1])
                 original_end = int(fields[2])
             except ValueError as e:
-                raise ValueError(f"Error (L{line_number}): Non-integer start/end coordinates. Line: '{line_strip}'. Details: {e}")
+                raise ValueError(f"Error (L{line_number}): Non-integer coordinates. Line: '{line_strip}'. {e}")
 
             if seqnames not in HG38_CHROM_LENGTHS:
                 raise ValueError(f"Error (L{line_number}): Chromosome '{seqnames}' unknown. Line: '{line_strip}'")
@@ -63,12 +64,10 @@ def parse_and_validate_input(input_tsv_path: str) -> tuple[
             
             if not (1 <= original_start <= original_end <= chromosome_length):
                 raise ValueError(
-                    f"Error (L{line_number}): Invalid coordinates {seqnames}:{original_start}-{original_end}. "
-                    f"Must be 1 <= start <= end <= chromosome_length ({chromosome_length}). Line: '{line_strip}'"
+                    f"Error (L{line_number}): Invalid coords {seqnames}:{original_start}-{original_end}. "
+                    f"Constraint: 1 <= start <= end <= chrom_len ({chromosome_length}). Line: '{line_strip}'"
                 )
             
-            # span_val is (length - 1). For a 1bp region (start=1, end=1), span_val is 0.
-            # For a 2bp region (start=1, end=2), span_val is 1.
             span_val = original_end - original_start 
 
             exclusion_map[seqnames].append((original_start, original_end))
@@ -84,24 +83,23 @@ def parse_and_validate_input(input_tsv_path: str) -> tuple[
             })
 
     if not regions_to_process:
-        raise ValueError(f"Error: No valid data lines found in '{input_tsv_path}' after the header.")
+        raise ValueError(f"Error: No valid data lines found in '{input_tsv_path}' post-header.")
 
-    for chrom_key in exclusion_map: # Sort for consistent behavior if needed later, minor impact.
+    for chrom_key in exclusion_map:
         exclusion_map[chrom_key].sort()
         
-    print(f"Parsed and validated {len(regions_to_process)} regions from '{input_tsv_path}'. These will also form the exclusion set.")
+    print(f"Validated {len(regions_to_process)} regions from '{input_tsv_path}' for permutation and exclusion.")
     return exclusion_map, regions_to_process, header
 
 
 def permute_coordinates_with_self_exclusion(
     input_tsv_path: str,
-    output_tsv_path: str = "permuted.tsv", # Fixed default output path
+    output_tsv_path: str = "permuted.tsv",
     max_retries_per_region: int = 1000
 ):
     """
-    Permutes regions from input_tsv_path, ensuring permuted regions do not
-    overlap with ANY original region from the same input_tsv_path.
-    Carries over all columns. Crashes on failure to find a placement.
+    Permutes regions from input_tsv_path, excluding overlaps with ANY original region
+    from the same input file. Carries over all columns. Crashes on placement failure.
     """
     
     exclusion_map, regions_to_process, header = parse_and_validate_input(input_tsv_path)
@@ -120,20 +118,13 @@ def permute_coordinates_with_self_exclusion(
             span = region_info['span_val'] 
             chromosome_length = region_info['chromosome_length']
 
-            # new_start is 1-based. max_possible_new_start allows new_end to reach chromosome_length.
-            # new_end = new_start + span. So, new_start + span <= chromosome_length.
-            # new_start <= chromosome_length - span.
             max_possible_new_start = chromosome_length - span
             
             if max_possible_new_start < 1:
-                # This implies region is effectively the entire chromosome or too large to place.
-                # Given prior validation (1 <= start <= end <= chrom_length),
-                # this means start=1 and end=chromosome_length (span = chromosome_length - 1).
-                # Such a region cannot be moved to a new location that doesn't overlap an original region (itself).
                 raise RuntimeError(
                     f"Error (L{line_num}): Region {seqnames}:{region_info['original_start']}-{region_info['original_end']} "
-                    f"(span {span}) effectively covers the entire usable chromosome length or cannot be placed given "
-                    f"max_possible_new_start is {max_possible_new_start}. Non-overlapping permutation is impossible."
+                    f"(span {span}) cannot be placed. Max new start {max_possible_new_start}. "
+                    f"Likely too large or covers entire chromosome, making non-overlapping permutation impossible."
                 )
 
             found_placement = False
@@ -142,7 +133,7 @@ def permute_coordinates_with_self_exclusion(
                 new_end = new_start + span 
 
                 is_overlapping = False
-                if seqnames in exclusion_map: # Should always be true if region_info exists
+                if seqnames in exclusion_map:
                     for ex_start, ex_end in exclusion_map[seqnames]:
                         if do_regions_overlap(new_start, new_end, ex_start, ex_end):
                             is_overlapping = True
@@ -159,23 +150,42 @@ def permute_coordinates_with_self_exclusion(
             
             if not found_placement:
                 raise RuntimeError(
-                    f"Error (L{line_num}): Max retries ({max_retries_per_region}) exhausted for region "
+                    f"Error (L{line_num}): Max retries ({max_retries_per_region}) for region "
                     f"{seqnames}:{region_info['original_start']}-{region_info['original_end']}. "
-                    f"Could not find a random non-overlapping placement. CRASHING."
+                    f"Could not find non-overlapping placement. CRASHING."
                 )
 
     print(f"\nProcessing complete. Successfully permuted {permuted_count} lines to '{output_tsv_path}'.")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python your_script_name.py <input_tsv_file>")
-        print("Example: python your_script_name.py original_inversions_with_ids.tsv")
-        print("       (Output will be 'permuted.tsv' by default in the current directory)")
+    input_filename = None
+    # os.getcwd() is not strictly needed if glob is called without a path, it defaults to cwd.
+    tsv_files_in_cwd = glob.glob("*.tsv") 
+
+    if len(sys.argv) == 2: # User explicitly provided an input file
+        input_filename = sys.argv[1]
+        print(f"Using explicitly provided input TSV file: {input_filename}")
+    elif len(sys.argv) == 1: # No arguments provided, try auto-detection
+        if len(tsv_files_in_cwd) == 1:
+            input_filename = tsv_files_in_cwd[0]
+            print(f"Automatically using the single TSV file found in current directory: {input_filename}")
+        elif len(tsv_files_in_cwd) == 0:
+            print("Error: No .tsv files found in the current directory and no input file provided.")
+            print("Usage: python shuffle_coords.py [<input_tsv_file>]")
+            print("       If <input_tsv_file> is omitted, and only one .tsv file exists here, it's used automatically.")
+            sys.exit(1)
+        else: # More than one .tsv file found
+            print("Error: Multiple .tsv files found in the current directory. Please specify which one to use.")
+            print("Found: " + ", ".join(tsv_files_in_cwd))
+            print("Usage: python shuffle_coords.py <input_tsv_file>")
+            sys.exit(1)
+    else: # Incorrect number of arguments (e.g. python shuffle_coords.py file1 file2)
+        print("Usage: python shuffle_coords.py [<input_tsv_file>]")
+        print("       Provide zero arguments to auto-detect a single .tsv file, or one argument for the input file path.")
         sys.exit(1)
     
-    input_filename = sys.argv[1]
+    output_file = "permuted.tsv" # Default output name
+    print(f"Output will be written to '{output_file}' (default) in the current directory.")
     
-    print(f"Input TSV file: {input_filename}")
-    
-    permute_coordinates_with_self_exclusion(input_filename) # Output defaults to "permuted.tsv"
+    permute_coordinates_with_self_exclusion(input_filename, output_tsv_path=output_file)
