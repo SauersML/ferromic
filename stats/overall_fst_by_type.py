@@ -3,6 +3,7 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import logging
+import subprocess
 import sys
 import time
 import seaborn as sns
@@ -94,6 +95,8 @@ VIOLIN_PLOT_FILTERED_TEMPLATE = 'comparison_violin_filtered_hap_min_{column_safe
 # Suffix for logging and identifying filtered analysis runs
 FILTER_SUFFIX = "_filtered_hap_min"
 
+generated_png_paths = [] # List to store paths of generated PNGs
+
 # Specific FST component columns for summary
 FST_WC_COMPONENT_COLUMNS = [
     'haplotype_between_pop_variance_wc',
@@ -110,7 +113,7 @@ ALL_FST_COMPONENT_COLUMNS = FST_WC_COMPONENT_COLUMNS + FST_HUDSON_COMPONENT_COLU
 
 # --- Logging Setup ---
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING, # Changed default logging level
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
@@ -393,6 +396,7 @@ def _draw_boxplots(ax, valid_series, valid_pos, valid_colors):
 def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summary, analysis_column_name, plot_type,
                                output_filename_template_override=None,
                                plot_suffix_for_logging=""):
+    global generated_png_paths
     fig, ax = plt.subplots(figsize=(7, 7))
     output_filename = ""
     plot_specific_draw_func = None
@@ -487,11 +491,12 @@ def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summar
         
         plt.tight_layout(pad=1.5)
         plt.savefig(output_filename, dpi=350, bbox_inches='tight')
-        logger.info(f"Saved {plot_type} plot{plot_suffix_for_logging} for '{analysis_column_name}' to '{output_filename}'")
+        generated_png_paths.append(output_filename)
+        logger.warning(f"Saved {plot_type} plot{plot_suffix_for_logging} for '{analysis_column_name}' to '{output_filename}'") # Changed to warning
         
         # Display FST plots if they are part of the specific list (original behavior, no suffix needed for this specific log message)
         if analysis_column_name in FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT and plot_type == 'violin':
-            logger.info(f"Displaying FST plot for '{analysis_column_name}'. Close plot window to continue...")
+            logger.info(f"Displaying FST plot for '{analysis_column_name}'. Close plot window to continue...") # This INFO is for a specific user action, might be ok
             # plt.show() # Disabled for non-interactive run
     
     except Exception as e:
@@ -502,6 +507,7 @@ def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summar
     return returned_summary
 
 def create_fst_vs_attribute_scatterplot(summary_df_with_types, fst_col, attr_col, attr_name):
+    global generated_png_paths
     fig, ax = plt.subplots(figsize=(8, 7))
     fst_col_name_pretty = fst_col.replace('_', ' ').title()
     title = f'{fst_col_name_pretty} vs. {attr_name}'
@@ -572,7 +578,8 @@ def create_fst_vs_attribute_scatterplot(summary_df_with_types, fst_col, attr_col
     
     try:
         plt.savefig(output_filename, dpi=350, bbox_inches='tight')
-        logger.info(f"Saved scatter plot to '{output_filename}'")
+        generated_png_paths.append(output_filename)
+        logger.warning(f"Saved scatter plot to '{output_filename}'") # Changed to warning
     except Exception as e:
         logger.error(f"Failed to save scatter plot '{output_filename}': {e}", exc_info=True)
     finally:
@@ -583,10 +590,11 @@ def create_fst_vs_attribute_scatterplot(summary_df_with_types, fst_col, attr_col
 
 # --- Main Execution Block ---
 def main():
-    global SCATTER_PLOT_SUMMARIES # Declare we are modifying the global list
+    global generated_png_paths, FST_TEST_SUMMARIES, FST_TEST_SUMMARIES_FILTERED, SCATTER_PLOT_SUMMARIES # Add generated_png_paths here
+    generated_png_paths = []
     overall_start = time.time()
-    logger.info(f"--- Starting Inversion Comparison Analysis ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---")
-    logger.info(f"Summary Statistics File: '{SUMMARY_STATS_FILE}'")
+    logger.info(f"--- Starting Inversion Comparison Analysis ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---") # Keep this as info
+    logger.info(f"Summary Statistics File: '{SUMMARY_STATS_FILE}'") # Keep this as info
     logger.info(f"Inversion Information File: '{INVERSION_FILE}'")
     logger.info(f"All columns processed for data quality: {ANALYSIS_COLUMNS}")
     logger.info(f"Violin/Box plots will be generated ONLY for: {COLUMNS_FOR_PLOTTING}")
@@ -893,7 +901,33 @@ def main():
     else:
         logger.info(f"\n====== No FILTERED FST Test Summary Statistics ({FILTER_SUFFIX}) to display (list is empty or no data passed filter) ======")
 
-    logger.info(f"====== Full Analysis Script completed in {time.time()-overall_start:.2f}s ======")
+    if generated_png_paths:
+        logger.warning("\n====== Generated PNG Files ======") # Use warning to ensure it's visible with new default level
+        for path in generated_png_paths:
+            logger.warning(path) # Use warning for visibility
+
+    if generated_png_paths:
+        logger.warning("Attempting to open generated PNG files...") # Use warning for visibility
+        for path in generated_png_paths:
+            try:
+                if sys.platform == "win32":
+                    # For Windows, shell=True might be needed if 'start' is a shell builtin
+                    # Also, using the full path might be more robust.
+                    # No need to capture output unless debugging.
+                    subprocess.run(["start", path], check=True, shell=True)
+                elif sys.platform == "darwin": # macOS
+                    subprocess.run(["open", path], check=True)
+                else: # Assuming Linux or other Unix-like
+                    subprocess.run(["xdg-open", path], check=True)
+                logger.warning(f"Successfully requested opening of: {path}") # Use warning for visibility
+            except FileNotFoundError:
+                logger.error(f"Could not open '{path}': Command (e.g., xdg-open, start, open) not found. Please ensure it's in your PATH.")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Error opening '{path}': {e}")
+            except Exception as e:
+                logger.error(f"An unexpected error occurred while trying to open '{path}': {e}")
+
+    logger.info(f"====== Full Analysis Script completed in {time.time()-overall_start:.2f}s ======") # Keep as info
 
 if __name__ == "__main__":
     main()
