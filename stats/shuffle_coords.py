@@ -95,18 +95,21 @@ def parse_and_validate_input(input_tsv_path: str) -> tuple[
 def permute_coordinates_with_self_exclusion(
     input_tsv_path: str,
     output_tsv_path: str = "permuted.tsv",
+    mapping_tsv_path: str = "map.tsv", # New parameter for the mapping file
     max_retries_per_region: int = 1000
 ):
     """
     Permutes regions from input_tsv_path, excluding overlaps with ANY original region
     from the same input file. Carries over all columns. Crashes on placement failure.
+    Outputs a permuted TSV and a mapping TSV.
     """
     
     exclusion_map, regions_to_process, header = parse_and_validate_input(input_tsv_path)
     
     permuted_count = 0
-    
-    print(f"Starting permutation for {len(regions_to_process)} regions. Output: '{output_tsv_path}'.")
+    coordinate_mappings = [] # To store original and new coordinate pairs
+
+    print(f"Starting permutation for {len(regions_to_process)} regions. Output: '{output_tsv_path}'. Mapping: '{mapping_tsv_path}'.")
     
     with open(output_tsv_path, 'w') as outfile:
         outfile.write(header + '\n')
@@ -117,12 +120,15 @@ def permute_coordinates_with_self_exclusion(
             seqnames = region_info['seqnames']
             span = region_info['span_val'] 
             chromosome_length = region_info['chromosome_length']
+            
+            original_start_val = region_info['original_start']
+            original_end_val = region_info['original_end']
 
             max_possible_new_start = chromosome_length - span
             
             if max_possible_new_start < 1:
                 raise RuntimeError(
-                    f"Error (L{line_num}): Region {seqnames}:{region_info['original_start']}-{region_info['original_end']} "
+                    f"Error (L{line_num}): Region {seqnames}:{original_start_val}-{original_end_val} "
                     f"(span {span}) cannot be placed. Max new start {max_possible_new_start}. "
                     f"Likely too large or covers entire chromosome, making non-overlapping permutation impossible."
                 )
@@ -145,17 +151,37 @@ def permute_coordinates_with_self_exclusion(
                     permuted_fields[2] = str(new_end)
                     outfile.write('\t'.join(permuted_fields) + '\n')
                     permuted_count += 1
+                    
+                    # Store mapping information
+                    coordinate_mappings.append({
+                        'original_chr': seqnames,
+                        'original_start': original_start_val,
+                        'original_end': original_end_val,
+                        'new_chr': seqnames,  # Chromosome remains the same
+                        'new_start': new_start,
+                        'new_end': new_end
+                    })
                     found_placement = True
                     break 
             
             if not found_placement:
                 raise RuntimeError(
                     f"Error (L{line_num}): Max retries ({max_retries_per_region}) for region "
-                    f"{seqnames}:{region_info['original_start']}-{region_info['original_end']}. "
+                    f"{seqnames}:{original_start_val}-{original_end_val}. "
                     f"Could not find non-overlapping placement. CRASHING."
                 )
 
     print(f"\nProcessing complete. Successfully permuted {permuted_count} lines to '{output_tsv_path}'.")
+
+    # Write the mapping file
+    with open(mapping_tsv_path, 'w') as mapfile:
+        mapfile.write("Original_Chr\tOriginal_Start\tOriginal_End\tNew_Chr\tNew_Start\tNew_End\n")
+        for mapping_entry in coordinate_mappings:
+            mapfile.write(
+                f"{mapping_entry['original_chr']}\t{mapping_entry['original_start']}\t{mapping_entry['original_end']}\t"
+                f"{mapping_entry['new_chr']}\t{mapping_entry['new_start']}\t{mapping_entry['new_end']}\n"
+            )
+    print(f"Coordinate mapping written to '{mapping_tsv_path}'.")
 
 
 if __name__ == "__main__":
@@ -172,20 +198,27 @@ if __name__ == "__main__":
             print(f"Automatically using the single TSV file found in current directory: {input_filename}")
         elif len(tsv_files_in_cwd) == 0:
             print("Error: No .tsv files found in the current directory and no input file provided.")
-            print("Usage: python shuffle_coords.py [<input_tsv_file>]")
+            print("Usage: python script_name.py [<input_tsv_file>]") # Assuming script_name.py
             print("       If <input_tsv_file> is omitted, and only one .tsv file exists here, it's used automatically.")
             sys.exit(1)
         else: # More than one .tsv file found
             print("Error: Multiple .tsv files found in the current directory. Please specify which one to use.")
             print("Found: " + ", ".join(tsv_files_in_cwd))
-            print("Usage: python shuffle_coords.py <input_tsv_file>")
+            print("Usage: python script_name.py <input_tsv_file>") # Assuming script_name.py
             sys.exit(1)
-    else: # Incorrect number of arguments (e.g. python shuffle_coords.py file1 file2)
-        print("Usage: python shuffle_coords.py [<input_tsv_file>]")
+    else: # Incorrect number of arguments
+        print("Usage: python script_name.py [<input_tsv_file>]") # Assuming script_name.py
         print("       Provide zero arguments to auto-detect a single .tsv file, or one argument for the input file path.")
         sys.exit(1)
     
-    output_file = "permuted.tsv" # Default output name
-    print(f"Output will be written to '{output_file}' (default) in the current directory.")
+    output_file = "permuted.tsv" # Default output name for permuted regions
+    mapping_file = "map.tsv"     # Default output name for the coordinate map
     
-    permute_coordinates_with_self_exclusion(input_filename, output_tsv_path=output_file)
+    print(f"Permuted output will be written to '{output_file}' in the current directory.")
+    print(f"Coordinate mapping will be written to '{mapping_file}' in the current directory.")
+    
+    permute_coordinates_with_self_exclusion(
+        input_filename, 
+        output_tsv_path=output_file,
+        mapping_tsv_path=mapping_file # Pass the mapping file name
+    )
