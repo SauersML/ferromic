@@ -702,6 +702,11 @@ def main():
     if os.path.exists(COORDINATE_MAP_FILE):
         logger.info(f"'{COORDINATE_MAP_FILE}' found. Attempting to process for coordinate mapping.")
         map_df_temp = pd.read_csv(COORDINATE_MAP_FILE, sep='\t')
+        # Normalize chromosome prefixes in mapping file
+        map_df_temp['Original_Chr'] = map_df_temp['Original_Chr'].apply(normalize_chromosome_name)
+        map_df_temp['New_Chr'] = map_df_temp['New_Chr'].apply(normalize_chromosome_name)
+        # Omit mappings for chromosome Y
+        map_df_temp = map_df_temp[~map_df_temp['Original_Chr'].eq('y') & ~map_df_temp['New_Chr'].eq('y')]
         
         # Validate map_df_temp columns
         if not all(col in map_df_temp.columns for col in MAP_FILE_COLUMNS):
