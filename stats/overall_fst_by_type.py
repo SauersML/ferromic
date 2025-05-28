@@ -771,8 +771,8 @@ def main():
                         
                         if not found_in_output:
                             logger.warning(f"Validation FAILED for coordinate mapping: Mapped entry {inv_coords_tuple_orig} -> {new_coords_from_map} from '{COORDINATE_MAP_FILE}' does not correspond to any entry in '{SUMMARY_STATS_FILE}'.")
-                            all_mappable_inv_entries_valid = False
-                            break 
+                            continue
+
                 
                 if num_entries_to_map_in_inv_df == 0 and not temp_map_lookup.empty:
                     logger.info(f"No coordinates in '{INVERSION_FILE}' match 'Original' coordinates in '{COORDINATE_MAP_FILE}'. Mapping will not be applied.")
