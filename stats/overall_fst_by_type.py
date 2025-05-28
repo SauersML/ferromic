@@ -237,7 +237,6 @@ def map_coordinates_to_inversion_types(inversion_info_df, map_df, perform_mappin
         mapped_coords_key = (chrom_norm, original_start_val, original_end_val)
         if perform_mapping_flag and map_lookup and mapped_coords_key in map_lookup:
             current_chrom, current_start, current_end = map_lookup[mapped_coords_key]
-            # logger.debug(f"Row {index+2}: Mapped ({chrom_norm},{original_start_val},{original_end_val}) to ({current_chrom},{current_start},{current_end})")
 
         if current_start > current_end:
             global_warning_tracker.log_warning(warn_key, lambda r, i, c, s, e: f"Skipping row {i+2} in inversion data: Start ({s}) > End ({e}) for coordinates ({c}). Row: {r.to_dict()}", row, index, current_chrom, current_start, current_end)
@@ -245,9 +244,9 @@ def map_coordinates_to_inversion_types(inversion_info_df, map_df, perform_mappin
             continue
         
         if cat_code_val == 1:
-            recurrent_regions.setdefault(current_chrom, []).append((current_start, current_end))
+            recurrent_regions.setdefault(current_chrom, []).append((current_chrom, current_start, current_end))
         elif cat_code_val == 0:
-            single_event_regions.setdefault(current_chrom, []).append((current_start, current_end))
+            single_event_regions.setdefault(current_chrom, []).append((current_chrom, current_start, current_end))
         else:
             global_warning_tracker.log_warning(warn_key, lambda r, i, cc: f"Skipping row {i+2} in inversion data: Unrecognized category code '{cc}'. Row: {r.to_dict()}", row, index, cat_code_val)
             skipped_count +=1
