@@ -7,7 +7,7 @@ import sys
 import time
 import seaborn as sns
 from scipy.stats import mannwhitneyu
-import os # Added for os.path.exists
+import os
 
 # --- Configuration ---
 
@@ -70,7 +70,6 @@ SCATTER_PLOT_CONFIG = [
 ]
 
 SUMMARY_STATS_COORDINATE_COLUMNS = {'chr': 'chr', 'start': 'region_start', 'end': 'region_end'}
-# Ensure INVERSION_FILE_COLUMNS includes all columns needed from inv_info.csv for mapping and processing
 INVERSION_FILE_COLUMNS = ['Chromosome', 'Start', 'End', '0_single_1_recur']
 MAP_FILE_COLUMNS = ['Original_Chr', 'Original_Start', 'Original_End', 'New_Chr', 'New_Start', 'New_End']
 
@@ -707,7 +706,7 @@ def main():
         # Validate map_df_temp columns
         if not all(col in map_df_temp.columns for col in MAP_FILE_COLUMNS):
             logger.warning(f"'{COORDINATE_MAP_FILE}' is missing one or more required columns: {MAP_FILE_COLUMNS}. Coordinate mapping will be disabled.")
-            map_df = None # Ensure map_df remains None
+            map_df = None
         else:
             map_df = map_df_temp # Assign if columns are okay
             logger.info(f"Loaded '{COORDINATE_MAP_FILE}' with {len(map_df)} mapping entries.")
