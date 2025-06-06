@@ -427,7 +427,7 @@ def summarize_and_test_dnds_effects():
             print(f"  Shape after dropping NaN summary grouping columns: {agg_omega_per_seq.shape}")
 
         if not agg_omega_per_seq.empty:
-            raw_summary = agg_omega_per_seq.groupby(summary_group_cols)['median_omega_per_sequence'].agg(['median'])
+            raw_summary = agg_omega_per_seq.groupby(summary_group_cols)['median_omega_per_sequence'].agg(['median', 'mean'])
             raw_summary = raw_summary.rename(columns={'median': 'Median of Per-Sequence Medians (Omega, -1 mapped to 0)'})
             print(raw_summary.unstack().to_string(float_format="%.6f"))
             raw_summary_available_for_test = True
