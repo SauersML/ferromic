@@ -349,12 +349,18 @@ def categorize_median_omega_values(median_df, cds_to_type):
 
 
 def _calculate_omega_stats_for_plotting(pairwise_df):
+    """
+    Helper function to calculate omega statistics for different comparison groups.
+    Groups are 'Inverted' (within-inversion), 'Direct' (within-direct),
+    and 'Between' (inverted vs. direct).
+    """
     required_cols = ['Group1', 'Group2', 'InversionType', 'omega']
     if not all(col in pairwise_df.columns for col in required_cols):
         print(f"ERROR: Helper input DataFrame missing required columns: {required_cols}")
         return None
 
     def categorize_omega(omega):
+        """Categorize a single omega value."""
         if pd.isna(omega):
             return None
         if omega == -1:
@@ -364,7 +370,9 @@ def _calculate_omega_stats_for_plotting(pairwise_df):
         elif omega > 1:
             return "Above 1"
         else:
-            print(f"WARNING: Unexpected omega value encountered during categorization: {omega}")
+            # Don't print for omega=99 as it's a known code, not an unexpected value
+            if omega != 99:
+                 print(f"WARNING: Unexpected omega value encountered during categorization: {omega}")
             return None
 
     pairwise_df_copy = pairwise_df.copy()
@@ -375,10 +383,11 @@ def _calculate_omega_stats_for_plotting(pairwise_df):
         print("WARNING: No valid omega categories found after categorization in helper.")
         empty_counts = {"Exactly -1": 0, "0 to 1": 0, "Above 1": 0}
         empty_type_counts = {'Recurrent': empty_counts.copy(), 'Single-event': empty_counts.copy()}
-        return {'Inverted': empty_type_counts.copy(), 'Direct': empty_type_counts.copy()}
+        return {'Inverted': empty_type_counts.copy(), 'Direct': empty_type_counts.copy(), 'Between': empty_type_counts.copy()}
 
-    results = {'Inverted': {}, 'Direct': {}}
+    results = {'Inverted': {}, 'Direct': {}, 'Between': {}}
 
+    # Inverted pairs (within-group: 1 vs 1)
     inverted_df = pairwise_df_categorized[
         (pairwise_df_categorized['Group1'] == 1) & (pairwise_df_categorized['Group2'] == 1)
     ]
@@ -386,8 +395,9 @@ def _calculate_omega_stats_for_plotting(pairwise_df):
         inverted_counts = inverted_df.groupby(['InversionType', 'omega_category']).size().unstack(fill_value=0)
         results['Inverted'] = inverted_counts.to_dict('index')
     else:
-        print("WARNING: No INVERTED pairs found (Group1=1 & Group2=1) in helper.")
+        print("INFO: No INVERTED pairs found (Group1=1 & Group2=1).")
 
+    # Direct pairs (within-group: 0 vs 0)
     direct_df = pairwise_df_categorized[
         (pairwise_df_categorized['Group1'] == 0) & (pairwise_df_categorized['Group2'] == 0)
     ]
@@ -395,12 +405,24 @@ def _calculate_omega_stats_for_plotting(pairwise_df):
         direct_counts = direct_df.groupby(['InversionType', 'omega_category']).size().unstack(fill_value=0)
         results['Direct'] = direct_counts.to_dict('index')
     else:
-        print("WARNING: No DIRECT pairs found (Group1=0 & Group2=0) in helper.")
+        print("INFO: No DIRECT pairs found (Group1=0 & Group2=0).")
 
+    # Between-group pairs (1 vs 0 or 0 vs 1)
+    between_df = pairwise_df_categorized[
+        pairwise_df_categorized['Group1'] != pairwise_df_categorized['Group2']
+    ]
+    if not between_df.empty:
+        between_counts = between_df.groupby(['InversionType', 'omega_category']).size().unstack(fill_value=0)
+        results['Between'] = between_counts.to_dict('index')
+    else:
+        print("INFO: No BETWEEN pairs found (Group1 != Group2).")
+
+    # Ensure all dictionaries have the full structure to avoid KeyErrors later
     internal_categories = ["Exactly -1", "0 to 1", "Above 1"]
     inv_types = ["Recurrent", "Single-event"]
+    groups = ['Inverted', 'Direct', 'Between']
 
-    for group in ['Inverted', 'Direct']:
+    for group in groups:
         if group not in results:
              results[group] = {}
         for inv_type in inv_types:
@@ -413,8 +435,13 @@ def _calculate_omega_stats_for_plotting(pairwise_df):
 
     return results
 
-
 def plot_median_omega_distribution(pairwise_df, output_plot_path, config):
+    """
+    Plots the distribution of pairwise omega values, categorized by comparison type.
+    - Bars: Inverted pairs (within-group comparisons inside inversions).
+    - Solid lines: Direct pairs (within-group comparisons outside inversions).
+    - Dashed lines: Between-group pairs (inverted vs. direct comparisons).
+    """
     print("Calculating statistics and creating plot for pairwise omega distribution...")
 
     plot_data = _calculate_omega_stats_for_plotting(pairwise_df)
@@ -427,35 +454,43 @@ def plot_median_omega_distribution(pairwise_df, output_plot_path, config):
     internal_categories = ["Exactly -1", "0 to 1", "Above 1"]
     n_categories = len(display_categories)
 
+    # --- Inverted (within-group) data for BARS ---
     inv_rec_counts = plot_data.get('Inverted', {}).get('Recurrent', {})
     inv_single_counts = plot_data.get('Inverted', {}).get('Single-event', {})
-
     inv_rec_values = [inv_rec_counts.get(cat, 0) for cat in internal_categories]
     inv_single_values = [inv_single_counts.get(cat, 0) for cat in internal_categories]
-
     inv_rec_total = sum(inv_rec_values)
     inv_single_total = sum(inv_single_values)
-
     inv_rec_percentages = [(v / inv_rec_total * 100) if inv_rec_total > 0 else 0 for v in inv_rec_values]
     inv_single_percentages = [(v / inv_single_total * 100) if inv_single_total > 0 else 0 for v in inv_single_values]
 
+    # --- Direct (within-group) data for SOLID LINES ---
     dir_rec_counts = plot_data.get('Direct', {}).get('Recurrent', {})
     dir_single_counts = plot_data.get('Direct', {}).get('Single-event', {})
-
     dir_rec_values = [dir_rec_counts.get(cat, 0) for cat in internal_categories]
     dir_single_values = [dir_single_counts.get(cat, 0) for cat in internal_categories]
-
     dir_rec_total = sum(dir_rec_values)
     dir_single_total = sum(dir_single_values)
-
     dir_rec_percentages = [(v / dir_rec_total * 100) if dir_rec_total > 0 else 0 for v in dir_rec_values]
     dir_single_percentages = [(v / dir_single_total * 100) if dir_single_total > 0 else 0 for v in dir_single_values]
 
-    if inv_rec_total == 0 and inv_single_total == 0 and dir_rec_total == 0 and dir_single_total == 0:
-         print("WARNING: No data found for any category (Inverted/Direct, Recurrent/Single-event). Skipping plot.")
+    # --- Between-group data for DASHED LINES ---
+    btw_rec_counts = plot_data.get('Between', {}).get('Recurrent', {})
+    btw_single_counts = plot_data.get('Between', {}).get('Single-event', {})
+    btw_rec_values = [btw_rec_counts.get(cat, 0) for cat in internal_categories]
+    btw_single_values = [btw_single_counts.get(cat, 0) for cat in internal_categories]
+    btw_rec_total = sum(btw_rec_values)
+    btw_single_total = sum(btw_single_values)
+    btw_rec_percentages = [(v / btw_rec_total * 100) if btw_rec_total > 0 else 0 for v in btw_rec_values]
+    btw_single_percentages = [(v / btw_single_total * 100) if btw_single_total > 0 else 0 for v in btw_single_values]
+
+    # --- Check if there's any data to plot at all ---
+    total_comparisons = inv_rec_total + inv_single_total + dir_rec_total + dir_single_total + btw_rec_total + btw_single_total
+    if total_comparisons == 0:
+         print("WARNING: No data found for any category. Skipping plot.")
          return None
     elif inv_rec_total == 0 and inv_single_total == 0:
-        print("WARNING: No INVERTED data available for plotting main bars. Plot will only show Direct lines if available.")
+        print("WARNING: No INVERTED data available for plotting main bars. Plot will show lines only.")
 
     fig, ax = plt.subplots(figsize=(10, 7))
     x = np.arange(n_categories)
@@ -470,48 +505,69 @@ def plot_median_omega_distribution(pairwise_df, output_plot_path, config):
                     color=config.get('SINGLE_EVENT_COLOR', 'orange'),
                     hatch=config.get('SINGLE_EVENT_HATCH', '\\'), alpha=0.85, edgecolor='grey')
 
-    #if inv_rec_total > 0:
-        #ax.bar_label(rects1, fmt='%.1f%%', padding=3, fontsize=11)
-    #if inv_single_total > 0:
-        #ax.bar_label(rects2, fmt='%.1f%%', padding=3, fontsize=11)
-
-    line_color = 'black'
+    direct_line_color = 'black'
+    between_line_color = 'dimgray' # Use a distinct gray color
     line_width = 2.0
     zorder = 3
 
+    # Add dummy plots for line legends
     if dir_rec_total > 0 or dir_single_total > 0:
-        ax.plot([], [], color=line_color, linewidth=line_width, linestyle='-',
+        ax.plot([], [], color=direct_line_color, linewidth=line_width, linestyle='-',
                 label=f'Direct Pairs (N Rec={dir_rec_total}, N Single={dir_single_total})')
+    if btw_rec_total > 0 or btw_single_total > 0:
+        ax.plot([], [], color=between_line_color, linewidth=line_width, linestyle='--',
+                label=f'Between Pairs (N Rec={btw_rec_total}, N Single={btw_single_total})')
 
+    # Draw horizontal lines over bars
     for i in range(n_categories):
+        # Direct (solid) lines
         if dir_rec_total > 0:
              bar1 = rects1[i]
              y_val1 = dir_rec_percentages[i]
              xmin1 = bar1.get_x()
              xmax1 = bar1.get_x() + bar1.get_width()
-             ax.hlines(y_val1, xmin=xmin1, xmax=xmax1, color=line_color,
+             ax.hlines(y_val1, xmin=xmin1, xmax=xmax1, color=direct_line_color,
                        linewidth=line_width, linestyle='-', zorder=zorder)
-
         if dir_single_total > 0:
             bar2 = rects2[i]
             y_val2 = dir_single_percentages[i]
             xmin2 = bar2.get_x()
             xmax2 = bar2.get_x() + bar2.get_width()
-            ax.hlines(y_val2, xmin=xmin2, xmax=xmax2, color=line_color,
+            ax.hlines(y_val2, xmin=xmin2, xmax=xmax2, color=direct_line_color,
                       linewidth=line_width, linestyle='-', zorder=zorder)
 
+        # Between (dashed) lines
+        if btw_rec_total > 0:
+             bar1 = rects1[i]
+             y_val1 = btw_rec_percentages[i]
+             xmin1 = bar1.get_x()
+             xmax1 = bar1.get_x() + bar1.get_width()
+             ax.hlines(y_val1, xmin=xmin1, xmax=xmax1, color=between_line_color,
+                       linewidth=line_width, linestyle='--', zorder=zorder)
+        if btw_single_total > 0:
+            bar2 = rects2[i]
+            y_val2 = btw_single_percentages[i]
+            xmin2 = bar2.get_x()
+            xmax2 = bar2.get_x() + bar2.get_width()
+            ax.hlines(y_val2, xmin=xmin2, xmax=xmax2, color=between_line_color,
+                      linewidth=line_width, linestyle='--', zorder=zorder)
+
     ax.set_ylabel('Percentage of Pairwise Comparisons (%)', fontsize=14)
-    ax.set_title('Distribution of Pairwise ω by Inversion Type (Inverted vs Direct)', fontsize=16, pad=15)
+    ax.set_title('Distribution of Pairwise ω by Comparison Type and Inversion Class', fontsize=16, pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(display_categories, fontsize=12)
-    ax.legend(fontsize=11, title='Pair Type & Inversion Class', title_fontsize=12)
+    ax.legend(fontsize=11, title='Comparison Type & Inversion Class', title_fontsize=12)
 
     ax.grid(axis='y', linestyle='--', alpha=0.6)
+    
+    # Dynamically set Y-axis limit
     visible_percentages = []
     if inv_rec_total > 0: visible_percentages.extend(inv_rec_percentages)
     if inv_single_total > 0: visible_percentages.extend(inv_single_percentages)
     if dir_rec_total > 0: visible_percentages.extend(dir_rec_percentages)
     if dir_single_total > 0: visible_percentages.extend(dir_single_percentages)
+    if btw_rec_total > 0: visible_percentages.extend(btw_rec_percentages)
+    if btw_single_total > 0: visible_percentages.extend(btw_single_percentages)
 
     max_perc = max(visible_percentages) if visible_percentages else 10
     ax.set_ylim(0, max(10, max_perc * 1.18))
