@@ -112,13 +112,26 @@ def load_and_prepare_data():
         # --- Analysis of CDS with median dN/dS > 1 ---
         logger.info(f"--- Analysis of CDS with Median dN/dS > 1 for {event_name} ---")
         if not valid_omega_df.empty:
-            # For each unique CDS within each comparison group, calculate the median omega across all its pairwise comparisons.
+            # For each unique CDS within each comparison group, calculate the median omega across its pairwise comparisons.
             median_omega_per_cds = valid_omega_df.groupby(['CDS', 'ComparisonGroup'])['omega'].median()
-            positively_selected_cds_groups = median_omega_per_cds[median_omega_per_cds > 1]
-            positive_selection_counts = positively_selected_cds_groups.groupby('ComparisonGroup').size()
 
-            if not positive_selection_counts.empty:
-                logger.info(f"Count of CDS with median dN/dS > 1 by category:\n{positive_selection_counts.to_string()}")
+            # Filter for CDS-group combinations where the median omega is > 1, indicating positive selection pressure.
+            positively_selected_cds_groups = median_omega_per_cds[median_omega_per_cds > 1]
+
+            if not positively_selected_cds_groups.empty:
+                unique_selected_cds = positively_selected_cds_groups.index.get_level_values('CDS').unique()
+                logger.info(f"Found {len(unique_selected_cds)} total unique CDS with median dN/dS > 1.")
+
+                # Provide a detailed breakdown by comparison group, listing the actual CDS names.
+                logger.info("Detailed breakdown by comparison group, with CDS names:")
+                
+                # Convert the result Series to a DataFrame for easier iteration.
+                detailed_selection_df = positively_selected_cds_groups.reset_index()
+
+                for group_name, group_df in detailed_selection_df.groupby('ComparisonGroup'):
+                    # For each group, list the CDS names that met the criterion.
+                    cds_list = group_df['CDS'].tolist()
+                    logger.info(f"  - {group_name} ({len(cds_list)} CDS): {', '.join(cds_list)}")
             else:
                 logger.info("No CDS found with median dN/dS > 1 for any category.")
         else:
