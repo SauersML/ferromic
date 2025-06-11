@@ -109,7 +109,22 @@ def load_and_prepare_data():
             if initial_inverted_count > 0:
                 logger.warning(f"For '{event_name}', all {initial_inverted_count} 'Inverted' pairs were filtered out due to invalid omega values.")
 
-        logger.info(f"Final valid counts for {event_name} plotting: \n{valid_omega_df['ComparisonGroup'].value_counts().to_string()}")
+        # --- Analysis of CDS with median dN/dS > 1 ---
+        logger.info(f"--- Analysis of CDS with Median dN/dS > 1 for {event_name} ---")
+        if not valid_omega_df.empty:
+            # For each unique CDS within each comparison group, calculate the median omega across all its pairwise comparisons.
+            median_omega_per_cds = valid_omega_df.groupby(['CDS', 'ComparisonGroup'])['omega'].median()
+            positively_selected_cds_groups = median_omega_per_cds[median_omega_per_cds > 1]
+            positive_selection_counts = positively_selected_cds_groups.groupby('ComparisonGroup').size()
+
+            if not positive_selection_counts.empty:
+                logger.info(f"Count of CDS with median dN/dS > 1 by category:\n{positive_selection_counts.to_string()}")
+            else:
+                logger.info("No CDS found with median dN/dS > 1 for any category.")
+        else:
+            logger.info("Skipping analysis as no valid omega data is available.")
+
+        logger.info(f"Final valid pairwise counts for {event_name} plotting: \n{valid_omega_df['ComparisonGroup'].value_counts().to_string()}")
         processed_dfs.append(valid_omega_df)
 
     if not processed_dfs:
