@@ -185,7 +185,7 @@ def read_and_preprocess_data(file_path):
     return df
 
 
-def get_pairwise_value(seq1, seq2, pairwise_dict):
+def get_pairwise_value(Seq1, Seq2, pairwise_dict):
     """
     Retrieve the omega value for a specific pair of sequences from the pairwise dictionary.
     
@@ -194,7 +194,7 @@ def get_pairwise_value(seq1, seq2, pairwise_dict):
     
     Parameters:
     -----------
-    seq1, seq2 : str
+    Seq1, Seq2 : str
         Identifiers for the two sequences being compared
     pairwise_dict : dict
         Dictionary with sequence pairs as keys and omega values as values
@@ -206,9 +206,9 @@ def get_pairwise_value(seq1, seq2, pairwise_dict):
         
     -----
     Since sequence comparisons can be stored with sequences in either order,
-    this function checks both (seq1, seq2) and (seq2, seq1) as potential keys.
+    this function checks both (Seq1, Seq2) and (Seq2, Seq1) as potential keys.
     """
-    key = (seq1, seq2) if (seq1, seq2) in pairwise_dict else (seq2, seq1)
+    key = (Seq1, Seq2) if (Seq1, Seq2) in pairwise_dict else (Seq2, Seq1)
     val = pairwise_dict.get(key)
     return val
 
@@ -816,10 +816,10 @@ def analysis_worker(args):
 
     # --- 5. Prepare Sequence Codes for Random Effects ---
     print(f"[{datetime.now()}] Preparing sequence codes for random effects...")
-    all_unique_seqs = pd.unique(pd.concat([df['seq1'], df['seq2']]))
+    all_unique_seqs = pd.unique(pd.concat([df['Seq1'], df['Seq2']]))
     seq_to_code = {seq: i for i, seq in enumerate(all_unique_seqs)}
-    df['seq1_code'] = df['seq1'].map(seq_to_code).astype('category')
-    df['seq2_code'] = df['seq2'].map(seq_to_code).astype('category')
+    df['Seq1_code'] = df['Seq1'].map(seq_to_code).astype('category')
+    df['Seq2_code'] = df['Seq2'].map(seq_to_code).astype('category')
     print(f"[{datetime.now()}] Codes prepared for {len(all_unique_seqs)} unique sequences.")
 
     # --- 6. Prepare Model Formula (Fixed Effects + Optional PCs) ---
@@ -852,13 +852,13 @@ def analysis_worker(args):
             pc_cols_s2 = [f"{pc}_s2" for pc in pc_cols_base]
             all_pc_cols = pc_cols_s1 + pc_cols_s2
 
-            # Merge for seq1
-            df = pd.merge(df, pc_df, left_on='seq1', right_index=True, how='left', suffixes=('', '_s1_temp'))
+            # Merge for Seq1
+            df = pd.merge(df, pc_df, left_on='Seq1', right_index=True, how='left', suffixes=('', '_s1_temp'))
             rename_dict_s1 = {old: new for old, new in zip(pc_cols_base, pc_cols_s1)}
             df.rename(columns=rename_dict_s1, inplace=True)
 
-            # Merge for seq2
-            df = pd.merge(df, pc_df, left_on='seq2', right_index=True, how='left', suffixes=('', '_s2_temp'))
+            # Merge for Seq2
+            df = pd.merge(df, pc_df, left_on='Seq2', right_index=True, how='left', suffixes=('', '_s2_temp'))
             rename_dict_s2 = {old: new for old, new in zip(pc_cols_base, pc_cols_s2)}
             df.rename(columns=rename_dict_s2, inplace=True)
 
@@ -887,8 +887,8 @@ def analysis_worker(args):
     formula = f"analysis_var ~ {' + '.join(fixed_effects)}"
 
     # --- 7. Define and Fit the Mixed Model ---
-    # Random effects structure (crossed effects for seq1 and seq2)
-    vc_formula = {'seq1': '0 + C(seq1_code)', 'seq2': '0 + C(seq2_code)'}
+    # Random effects structure (crossed effects for Seq1 and Seq2)
+    vc_formula = {'Seq1': '0 + C(Seq1_code)', 'Seq2': '0 + C(Seq2_code)'}
 
     print(f"[{datetime.now()}] Preparing to fit MixedLM model.")
     print(f"  Data dimensions: {df.shape[0]} rows, {df.shape[1]} columns")
