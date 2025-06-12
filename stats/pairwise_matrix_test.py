@@ -93,16 +93,10 @@ def read_and_preprocess_data(file_path):
     # Store original CDS as full_cds for reference and troubleshooting
     df['full_cds'] = df['CDS']
 
-    # Determine comparison group based on Group1 and Group2 columns
-    df['group'] = None
-    
-    # Within-group comparisons
-    df.loc[(df['Group1'] == 0) & (df['Group2'] == 0), 'group'] = 0  # Group 0 vs Group 0
-    df.loc[(df['Group1'] == 1) & (df['Group2'] == 1), 'group'] = 1  # Group 1 vs Group 1
-    
-    # Cross-group comparisons - used for better random effect estimation
-    df.loc[((df['Group1'] == 0) & (df['Group2'] == 1)) | 
-           ((df['Group1'] == 1) & (df['Group2'] == 0)), 'group'] = 2  # Cross-group
+    # Determine comparison group for the main analysis.
+    # 0 = Within-Group Comparison (i.e., Group0 vs Group0 or Group1 vs Group1)
+    # 1 = Between-Group Comparison (i.e., Group0 vs Group1)
+    df['group'] = np.where(df['Group1'] == df['Group2'], 0, 1).astype(int)
 
     # Extract genomic coordinates using regex pattern
     # Format expected: chrX_startNNN_endNNN where X is chromosome and NNN are positions
@@ -158,8 +152,14 @@ def read_and_preprocess_data(file_path):
         filtered_count = original_len - len(df)
         print(f"Filtered out {filtered_count} rows with omega=99")
 
+    # Filter out omega=-1 values (identical sequences) before statistical modeling
+    # as these special cases are not suitable for the linear model.
+    original_len = len(df)
+    df = df[df['omega'] != -1.0]
+    filtered_count = original_len - len(df)
+    print(f"Filtered out {filtered_count} rows with omega=-1")
+
     # Keep all valid omega values, only dropping NaN entries
-    # This preserves special codes while ensuring numeric analysis
     df = df.dropna(subset=['omega'])
 
     # Report dataset dimensions after preprocessing
@@ -175,12 +175,12 @@ def read_and_preprocess_data(file_path):
     inv_info_df = pd.read_csv('inv_info.csv')
 
 
-    # Summarize sequence counts by group assignment
+    # Summarize comparison counts by the new grouping scheme
     # This is important to verify sufficient sample sizes for statistical analysis
-    group0_seqs = set(pd.concat([df[df['group'] == 0]['Seq1'], df[df['group'] == 0]['Seq2']]).unique())
-    group1_seqs = set(pd.concat([df[df['group'] == 1]['Seq1'], df[df['group'] == 1]['Seq2']]).unique())
-    print(f"Sequences in group 0: {len(group0_seqs)}")
-    print(f"Sequences in group 1: {len(group1_seqs)}")
+    within_group_comps = (df['group'] == 0).sum()
+    between_group_comps = (df['group'] == 1).sum()
+    print(f"Total Within-Group Comparisons: {within_group_comps}")
+    print(f"Total Between-Group Comparisons: {between_group_comps}")
 
     return df
 
@@ -372,119 +372,90 @@ def categorize_omega(omega_value):
     else:
         return 'Middle'
 
-def analyze_omega_categories(group_0_df, group_1_df):
+def analyze_omega_categories(within_group_df, between_group_df):
     """
-    Analyze the conservation differences between two groups.
-    Uses sequence-level median omega values directly for a more powerful
-    continuous value analysis rather than categorical binning.
-    
+    Analyze conservation differences between within-group and between-group comparisons.
+    This non-parametric test compares the distributions of omega values directly.
+
     Parameters:
     -----------
-    group_0_df : DataFrame
-        DataFrame containing group 0 pairwise comparisons
-    group_1_df : DataFrame
-        DataFrame containing group 1 pairwise comparisons
-        
+    within_group_df : DataFrame
+        DataFrame containing within-group pairwise comparisons
+    between_group_df : DataFrame
+        DataFrame containing between-group pairwise comparisons
+
     Returns:
     --------
     dict
-        Dictionary with sequence-level conservation analysis results:
-        - median_values: Median omega values for each group
+        Dictionary with the non-parametric analysis results:
+        - median_values: Median omega values for each category
         - p_value: Statistical test p-value
         - test_used: Name of statistical test used
         - dominant_difference: Simple conservation comparison
     """
-    # Skip analysis if either group is empty
-    if group_0_df.empty or group_1_df.empty:
+    # Skip analysis if either group of comparisons is empty
+    if within_group_df.empty or between_group_df.empty:
         return {
             'median_values': None,
             'p_value': np.nan,
-            'test_used': None,
+            'test_used': 'No comparisons in one or both groups',
             'dominant_difference': None
         }
+
+    # Use the omega values directly from the dataframes for comparison
+    within_omegas = within_group_df['omega'].dropna()
+    between_omegas = between_group_df['omega'].dropna()
     
-    # Extract all unique sequences in each group
-    g0_seqs = set(pd.concat([group_0_df['Seq1'], group_0_df['Seq2']]))
-    g1_seqs = set(pd.concat([group_1_df['Seq1'], group_1_df['Seq2']]))
-    
-    # Calculate median omega for each sequence in Group 0
-    g0_seq_medians = []
-    for seq in g0_seqs:
-        # Find all pairwise comparisons involving this sequence
-        seq_comparisons = group_0_df[(group_0_df['Seq1'] == seq) | (group_0_df['Seq2'] == seq)]
-        if not seq_comparisons.empty:
-            g0_seq_medians.append(seq_comparisons['omega'].median())
-    
-    # Calculate median omega for each sequence in Group 1
-    g1_seq_medians = []
-    for seq in g1_seqs:
-        # Find all pairwise comparisons involving this sequence
-        seq_comparisons = group_1_df[(group_1_df['Seq1'] == seq) | (group_1_df['Seq2'] == seq)]
-        if not seq_comparisons.empty:
-            g1_seq_medians.append(seq_comparisons['omega'].median())
-    
-    # Check if we have enough sequences for analysis
-    g0_total = len(g0_seq_medians)
-    g1_total = len(g1_seq_medians)
-    
-    if g0_total < MIN_SEQUENCES_PER_GROUP or g1_total < MIN_SEQUENCES_PER_GROUP:
+    num_within = len(within_omegas)
+    num_between = len(between_omegas)
+
+    # Check if we have enough comparisons for analysis
+    if num_within < MIN_SEQUENCES_PER_GROUP or num_between < MIN_SEQUENCES_PER_GROUP:
         return {
             'median_values': {
-                'group_0': np.nan,
-                'group_1': np.nan
+                'within_group': np.nan,
+                'between_group': np.nan
             },
             'p_value': np.nan,
-            'test_used': "Insufficient sequences",
+            'test_used': "Insufficient comparisons",
             'dominant_difference': None,
-            'sequences_per_group': {
-                'group_0': g0_total,
-                'group_1': g1_total
+            'sequences_per_group': { # This key is kept for structure, but holds comparison counts
+                'within_group': num_within,
+                'between_group': num_between
             }
         }
     
     # Calculate group-level median values
-    median_0 = np.median(g0_seq_medians) if g0_seq_medians else np.nan
-    median_1 = np.median(g1_seq_medians) if g1_seq_medians else np.nan
+    median_within = np.median(within_omegas)
+    median_between = np.median(between_omegas)
     
     # Determine conservation difference (lower omega = more conservation)
-    if not np.isnan(median_0) and not np.isnan(median_1):
-        if median_1 < median_0:
-            dominant_difference = "Group 1 more conserved than Group 0"
-        else:
-            dominant_difference = "Group 1 less conserved than Group 0"
+    if median_between < median_within:
+        dominant_difference = "Between-group more conserved than Within-group"
     else:
-        dominant_difference = None
+        dominant_difference = "Between-group less conserved than Within-group"
     
-    # Perform Mann-Whitney U test (more robust for non-normal distributions)
+    # Perform Mann-Whitney U test
     test_used = "Mann-Whitney U"
     p_value = np.nan
     
     try:
-        # Only perform test if we have enough sequences
-        if g0_total >= MIN_SEQUENCES_PER_GROUP and g1_total >= MIN_SEQUENCES_PER_GROUP:
-            # Handle special omega values (-1 and 99) by converting to ranks internally
-            g0_array = np.array(g0_seq_medians)
-            g1_array = np.array(g1_seq_medians)
-            
-            # Mann-Whitney U test (non-parametric, robust to non-normal distributions)
-            _, p_value = stats.mannwhitneyu(g0_array, g1_array, alternative='two-sided')
-        else:
-            test_used = "Insufficient sequences"
+        _, p_value = stats.mannwhitneyu(within_omegas, between_omegas, alternative='two-sided')
     except Exception as e:
         test_used = f"Failed: {str(e)[:50]}"
     
     # Return results
     return {
         'median_values': {
-            'group_0': median_0,
-            'group_1': median_1
+            'within_group': median_within,
+            'between_group': median_between
         },
         'p_value': p_value,
         'test_used': test_used,
         'dominant_difference': dominant_difference,
         'sequences_per_group': {
-            'group_0': g0_total,
-            'group_1': g1_total
+            'within_group': num_within,
+            'between_group': num_between
         }
     }
 
@@ -763,21 +734,17 @@ def get_gene_annotation(coordinates):
 
 def analysis_worker(args):
     """
-    Perform mixed-effects statistical analysis for a group of sequences.
+    Perform mixed-effects statistical analysis comparing within-group vs. between-group omega.
 
     This worker function implements a crossed random effects model to compare
-    omega values between two groups while accounting for sequence-specific effects
-    and controlling for population structure using principal components.
-    It's designed to be used with parallel processing.
+    omega values between two categories ('within-group' vs 'between-group') while
+    accounting for sequence-specific effects and controlling for population structure.
 
     Parameters:
     -----------
     args : tuple
         Tuple containing:
-        - all_sequences: Combined list of all sequence IDs (Not directly used in this version, but part of signature)
-        - pairwise_dict: Dictionary of pairwise omega values
-        - sequences_0: List of sequence IDs in group 0
-        - sequences_1: List of sequence IDs in group 1
+        - df: DataFrame for a single transcript with a 'group' column (0=within, 1=between)
         - chromosome: Chromosome identifier for PCA matching
         - pc_data: Dictionary of PC values by chromosome and sample {chr: {sample: [PC1,..]}}
         - enable_pc_correction: Flag to enable PC-based correction
@@ -786,54 +753,39 @@ def analysis_worker(args):
     --------
     dict
         Dictionary with analysis results including:
-        - effect_size: Estimated difference in omega between groups
+        - effect_size: Estimated difference in omega (between vs. within)
         - p_value: Statistical significance of the effect
-        - n0, n1: Number of sequences in each group
-        - num_comp_group_0, num_comp_group_1: Number of comparisons in each group
+        - num_comp_within, num_comp_between: Number of comparisons in each category
         - std_err: Standard error of the effect size estimate
         - failure_reason: Description of analysis failure (if any)
         - pc_corrected: Boolean indicating if PC correction was applied
 
     Note:
     -----
-    - Uses mixed linear model with crossed random effects for sequence identities
-    - Includes PCs as covariates when PC data is available (using optimized merge)
-    - Returns NaN for effect_size and p_value if analysis cannot be completed
-    - Analysis may fail due to insufficient sequences, lack of variation, or model errors
+    - The main fixed effect tests the difference between 'between-group' and 'within-group' omega.
+    - The input DataFrame `df` is expected to have special omega values (-1, 99) already filtered out.
     """
-    # Unpack arguments
-    all_sequences, pairwise_dict, sequences_0, sequences_1, chromosome, pc_data, enable_pc_correction = args
+    # --- 1. Unpack Arguments and Initialize ---
+    df, chromosome, pc_data, enable_pc_correction = args
     func_start_time = datetime.now()
     print(f"[{func_start_time}] Worker started for chromosome {chromosome}.")
 
-    n0, n1 = len(sequences_0), len(sequences_1)
+    # --- 2. Validate Minimum Comparison Requirements ---
+    # The minimum is now on the number of comparisons in each category.
+    num_comp_within = (df['group'] == 0).sum()
+    num_comp_between = (df['group'] == 1).sum()
 
-    # --- 1. Validate minimum sequence requirements ---
-    if n0 < MIN_SEQUENCES_PER_GROUP or n1 < MIN_SEQUENCES_PER_GROUP:
-        insufficient_groups = [g for g, count in [('0', n0), ('1', n1)] if count < MIN_SEQUENCES_PER_GROUP]
-        groups_str = " and ".join(insufficient_groups)
-        reason = f"Insufficient sequences in group(s) {groups_str} ({n0=}, {n1=}, minimum {MIN_SEQUENCES_PER_GROUP} required)"
+    # MIN_SEQUENCES_PER_GROUP is used here to mean minimum comparisons per group.
+    if num_comp_within < MIN_SEQUENCES_PER_GROUP or num_comp_between < MIN_SEQUENCES_PER_GROUP:
+        reason = (f"Insufficient comparisons in 'within' ({num_comp_within}) "
+                  f"or 'between' ({num_comp_between}) groups. "
+                  f"Minimum {MIN_SEQUENCES_PER_GROUP} required in each.")
         print(f"[{datetime.now()}] Worker exiting early: {reason}")
-        num_comp_0 = sum(1 for (s1, s2) in pairwise_dict.keys() if s1 in sequences_0 and s2 in sequences_0)
-        num_comp_1 = sum(1 for (s1, s2) in pairwise_dict.keys() if s1 in sequences_1 and s2 in sequences_1)
         return {
-            'effect_size': np.nan, 'p_value': np.nan, 'n0': n0, 'n1': n1,
-            'num_comp_group_0': num_comp_0, 'num_comp_group_1': num_comp_1,
+            'effect_size': np.nan, 'p_value': np.nan,
+            'num_comp_within': num_comp_within, 'num_comp_between': num_comp_between,
             'std_err': np.nan, 'failure_reason': reason, 'pc_corrected': False
         }
-
-    # --- 2. Prepare DataFrame from pairwise data ---
-    print(f"[{datetime.now()}] Preparing DataFrame for {len(pairwise_dict)} comparisons...")
-    # Using list comprehension for potentially slightly better performance than append loop
-    data = [
-        {'omega_value': omega,
-         'group': 0 if seq1 in sequences_0 and seq2 in sequences_0 else (1 if seq1 in sequences_1 and seq2 in sequences_1 else 2),
-         'seq1': seq1,
-         'seq2': seq2}
-        for (seq1, seq2), omega in pairwise_dict.items()
-    ]
-    df = pd.DataFrame(data)
-    print(f"[{datetime.now()}] DataFrame prepared with {len(df)} rows.")
 
     # --- 3. Determine Analysis Variable (Ranked or Raw) ---
     if USE_RANKED_OMEGA_ANALYSIS:
@@ -850,17 +802,15 @@ def analysis_worker(args):
 
     # Check for sufficient data variance and groups *before* complex steps
     if df.empty or df['group'].nunique() < 2 or df['analysis_var'].nunique() < 2:
-        if df.empty: failure_reason = "No valid pairwise comparisons found after initial prep"
-        elif df['group'].nunique() < 2: failure_reason = "Missing one of the comparison groups (0 or 1)"
+        if df.empty: failure_reason = "No valid pairwise comparisons found after filtering"
+        elif df['group'].nunique() < 2: failure_reason = "Missing one of the comparison categories (within or between)"
         elif df['analysis_var'].nunique() < 2:
-             print("DEBUG: Data with low variation:")
-             print(df[['omega_value', 'group', 'analysis_var']].head())
-             failure_reason = f"Not enough variation in '{'ranked_omega' if USE_RANKED_OMEGA_ANALYSIS else 'omega_value'}' for statistical analysis (nunique={df['analysis_var'].nunique()})"
+            failure_reason = f"Not enough variation in '{'ranked_omega' if USE_RANKED_OMEGA_ANALYSIS else 'omega_value'}' for statistical analysis (nunique={df['analysis_var'].nunique()})"
         print(f"[{datetime.now()}] WARNING: {failure_reason}")
         return {
-            'effect_size': np.nan, 'p_value': np.nan, 'n0': n0, 'n1': n1,
-            'num_comp_group_0': (df['group'] == 0).sum() if not df.empty else 0,
-            'num_comp_group_1': (df['group'] == 1).sum() if not df.empty else 0,
+            'effect_size': np.nan, 'p_value': np.nan,
+            'num_comp_within': num_comp_within,
+            'num_comp_between': num_comp_between,
             'std_err': np.nan, 'failure_reason': failure_reason, 'pc_corrected': False
         }
 
@@ -868,16 +818,15 @@ def analysis_worker(args):
     print(f"[{datetime.now()}] Preparing sequence codes for random effects...")
     all_unique_seqs = pd.unique(pd.concat([df['seq1'], df['seq2']]))
     seq_to_code = {seq: i for i, seq in enumerate(all_unique_seqs)}
-    df['seq1_code'] = df['seq1'].map(seq_to_code).astype('category') # Using category might help statsmodels slightly
+    df['seq1_code'] = df['seq1'].map(seq_to_code).astype('category')
     df['seq2_code'] = df['seq2'].map(seq_to_code).astype('category')
     print(f"[{datetime.now()}] Codes prepared for {len(all_unique_seqs)} unique sequences.")
 
     # --- 6. Prepare Model Formula (Fixed Effects + Optional PCs) ---
     print(f"[{datetime.now()}] Preparing model formula...")
-    # Base fixed effects: intercept is implicit, test group 1 vs group 0 (ref), include group 2
-    df['is_group1'] = (df['group'] == 1).astype(int)
-    df['is_group2'] = (df['group'] == 2).astype(int) # Cross-group comparisons
-    fixed_effects = ['is_group1', 'is_group2']
+    # The main fixed effect tests the difference of between-group (group=1) vs. within-group (group=0, which is the reference).
+    df['is_between_group'] = (df['group'] == 1).astype(int)
+    fixed_effects = ['is_between_group']
     all_pc_cols = []
 
     # --- 6a. PC Addition ---
@@ -923,8 +872,8 @@ def analysis_worker(args):
         except Exception as e:
             print(f"[{datetime.now()}] ERROR during PC data merge for chr {chromosome}: {e}. Proceeding without PC correction.")
             pc_corrected = False
-            # Ensure fixed_effects only contains base group indicators if PC merge failed
-            fixed_effects = ['is_group1', 'is_group2']
+            # Ensure fixed_effects only contains the base group indicator if PC merge failed
+            fixed_effects = ['is_between_group']
     else:
         # Log why PC wasn't applied
         if not enable_pc_correction: reason = "PC correction disabled globally"
@@ -967,9 +916,10 @@ def analysis_worker(args):
         # --- 8. Extract Results ---
         print(f"[{datetime.now()}] Extracting results from fitted model.")
         # Use .get() with default np.nan for robustness if a term wasn't estimated
-        effect_size = result.params.get('is_group1', np.nan)
-        p_value = result.pvalues.get('is_group1', np.nan)
-        std_err = result.bse.get('is_group1', np.nan)
+        # The term 'is_between_group' captures the effect of between-group vs. within-group comparisons.
+        effect_size = result.params.get('is_between_group', np.nan)
+        p_value = result.pvalues.get('is_between_group', np.nan)
+        std_err = result.bse.get('is_between_group', np.nan)
 
         # Sanity check for NaN results which might indicate fit issues
         if pd.isna(p_value) and pd.isna(effect_size):
@@ -990,11 +940,9 @@ def analysis_worker(args):
     final_result = {
         'effect_size': effect_size,
         'p_value': p_value,
-        'n0': n0,
-        'n1': n1,
         'std_err': std_err,
-        'num_comp_group_0': (df['group'] == 0).sum(),
-        'num_comp_group_1': (df['group'] == 1).sum(),
+        'num_comp_within': (df['group'] == 0).sum(),
+        'num_comp_between': (df['group'] == 1).sum(),
         'failure_reason': failure_reason,
         'pc_corrected': pc_corrected # Use the flag set during PC processing
     }
@@ -1004,75 +952,53 @@ def analysis_worker(args):
 
 def analyze_transcript(args):
     """
-    Analyze evolutionary rates for a specific transcript.
-    
-    This function processes all pairwise comparisons for a single transcript,
-    organizing sequences by group, performing statistical analysis, retrieving
-    gene annotations, and controlling for population structure via PCs.
-    
+    Analyze evolutionary rates for a specific transcript, comparing within-group vs. between-group rates.
+
+    This function processes all pairwise comparisons for a single transcript.
+    It separates comparisons into "within-group" (0 vs 0, 1 vs 1) and "between-group" (0 vs 1),
+    then performs statistical analysis to test for differences in evolutionary rates (omega).
+    It retrieves gene annotations and controls for population structure via PCs.
+
     Parameters:
     -----------
     args : tuple
         Tuple containing:
-        - df_transcript: DataFrame subset for this transcript
+        - df_transcript: DataFrame subset for this transcript with 'group' column (0=within, 1=between)
         - transcript_id: Identifier of the transcript being analyzed
         - pc_data: Dictionary of PC values by chromosome and sample
-        
+
     Returns:
     --------
     dict
-        Dictionary with analysis results including:
-        - transcript_id: Ensembl transcript identifier
-        - coordinates: Genomic coordinates of the transcript
-        - gene_symbol: Gene symbol if annotation available
-        - gene_name: Full gene name if annotation available
-        - n0, n1: Number of sequences in each group
-        - num_comp_group_0, num_comp_group_1: Number of comparisons in each group
-        - effect_size: Estimated difference in omega between groups
-        - p_value: Statistical significance of the effect
-        - std_err: Standard error of the effect size estimate
-        - failure_reason: Description of analysis failure (if any)
-        - pc_corrected: Boolean indicating if PC correction was applied
-        
-    Note:
-    -----
-    - Creates pairwise dictionary of omega values for statistical analysis
-    - Identifies gene annotations using UCSC and MyGene.info APIs
-    - Delegates statistical analysis to analysis_worker function
-    - Controls for population structure using PCA data when available
+        Dictionary with analysis results for the within-group vs. between-group comparison.
     """
     df_transcript, transcript_id, pc_data = args
 
-    print(f"\nAnalyzing transcript: {transcript_id}")
+    print(f"
+Analyzing transcript: {transcript_id}")
 
-    # Separate sequences by their group assignment
-    group_0_df = df_transcript[df_transcript['group'] == 0]
-    group_1_df = df_transcript[df_transcript['group'] == 1]
+    # Separate comparisons into within-group (group=0) and between-group (group=1)
+    within_group_df = df_transcript[df_transcript['group'] == 0]
+    between_group_df = df_transcript[df_transcript['group'] == 1]
 
-    # Get unique sequence identifiers for each group
-    sequences_0 = pd.concat([group_0_df['Seq1'], group_0_df['Seq2']]).unique()
-    sequences_1 = pd.concat([group_1_df['Seq1'], group_1_df['Seq2']]).unique()
+    # Get unique sequence identifiers from the original groupings for reporting purposes.
+    seqs_in_orig_group0 = set(df_transcript[df_transcript['Group1'] == 0]['Seq1']) | set(df_transcript[df_transcript['Group2'] == 0]['Seq2'])
+    seqs_in_orig_group1 = set(df_transcript[df_transcript['Group1'] == 1]['Seq1']) | set(df_transcript[df_transcript['Group2'] == 1]['Seq2'])
+    num_seqs_in_group0 = len(seqs_in_orig_group0)
+    num_seqs_in_group1 = len(seqs_in_orig_group1)
 
-    # Create pairwise dictionary mapping sequence pairs to their omega values
-    pairwise_dict = {}
-    for _, row in df_transcript.iterrows():
-        pairwise_dict[(row['Seq1'], row['Seq2'])] = row['omega']
+    # The `create_matrices` function is based on the old grouping and is not used by the new model.
+    # We set its output to None to avoid confusion.
+    matrix_0, matrix_1 = None, None
+    # For record-keeping, we still need the set of all comparisons.
+    pairwise_comparisons = set(zip(df_transcript['Seq1'], df_transcript['Seq2']))
 
-    # Combine all sequences for comprehensive analysis
-    all_sequences = (
-        np.concatenate([sequences_0, sequences_1])
-        if len(sequences_0) > 0 and len(sequences_1) > 0
-        else (sequences_0 if len(sequences_0) > 0 else sequences_1)
-    )
 
     # Collect unique genomic coordinates for reporting
     unique_coords = set(
         f"{r['chrom']}:{r['start']}-{r['end']}" for _, r in df_transcript.iterrows()
     )
     coords_str = ";".join(sorted(unique_coords))
-
-    # Create matrices for possible visualization or additional analysis
-    matrix_0, matrix_1 = create_matrices(sequences_0, sequences_1, pairwise_dict)
 
     # Get gene information directly from transcript ID
     gene_symbol, gene_name = get_gene_info_from_transcript(transcript_id)
@@ -1081,73 +1007,62 @@ def analyze_transcript(args):
     chromosome = df_transcript['chromosome'].iloc[0] if not df_transcript.empty else None
 
     # --- Apply Filter Logic (if global flag is True) ---
-    perform_main_analysis = True # Default: perform analysis
+    # This filter was on 'cross-group' omega, which is now 'between-group' omega.
+    perform_main_analysis = True
     skip_reason = None
-    # Calculate cross-group median omega
-    cross_group_df = df_transcript[df_transcript['group'] == 2]
-    num_comp_cross_group = len(cross_group_df)
-    median_cross_group_omega = np.nan
-    if not cross_group_df.empty:
-        median_cross_group_omega = cross_group_df['omega'].median() # Includes -1, 99
+    median_between_group_omega_for_filter = np.nan
+    if not between_group_df.empty:
+        median_between_group_omega_for_filter = between_group_df['omega'].median()
 
     if FILTER_ON_CROSS_GROUP_OMEGA:
-        if num_comp_cross_group == 0:
+        if between_group_df.empty:
             perform_main_analysis = False
-            skip_reason = 'Skipped (Filter Active): No cross-group comparisons'
-        elif pd.isna(median_cross_group_omega): # Handles edge case if all cross-group omegas were NaN initially
-             perform_main_analysis = False
-             skip_reason = 'Skipped (Filter Active): Median cross-group omega is NaN'
-        elif median_cross_group_omega <= 0.0:
+            skip_reason = 'Skipped (Filter Active): No between-group comparisons'
+        elif pd.isna(median_between_group_omega_for_filter):
             perform_main_analysis = False
-            skip_reason = f'Skipped (Filter Active): Median cross-group omega ({median_cross_group_omega:.4f}) <= 0.0'
+            skip_reason = 'Skipped (Filter Active): Median between-group omega is NaN'
+        elif median_between_group_omega_for_filter <= 0.0:
+            perform_main_analysis = False
+            skip_reason = f'Skipped (Filter Active): Median between-group omega ({median_between_group_omega_for_filter:.4f}) <= 0.0'
 
         if not perform_main_analysis:
-             print(f"  {skip_reason} for {transcript_id}.")
+                print(f"  {skip_reason} for {transcript_id}.")
         else:
-             # Only print proceed message if filter was active and passed
-             print(f"  Proceeding with main analysis for {transcript_id}: Median cross-group omega ({median_cross_group_omega:.4f}) > 0.0.")
+                print(f"  Proceeding with main analysis for {transcript_id}: Median between-group omega ({median_between_group_omega_for_filter:.4f}) > 0.0.")
 
     # --- Perform Main Statistical Analysis (if not skipped) ---
     if perform_main_analysis:
-        # Call the worker function for the main statistical test
-        analysis_result = analysis_worker((all_sequences, pairwise_dict, sequences_0, sequences_1,
-                                          chromosome, pc_data, ENABLE_PC_CORRECTION))
+        # Call the worker function with the pre-filtered and pre-grouped DataFrame
+        analysis_result = analysis_worker((df_transcript, chromosome, pc_data, ENABLE_PC_CORRECTION))
     else:
-        # If skipped, create a placeholder analysis_result dictionary with NaNs and the skip reason
+        # If skipped, create a placeholder analysis_result dictionary
         analysis_result = {
             'effect_size': np.nan, 'p_value': np.nan, 'std_err': np.nan,
-            'failure_reason': skip_reason, # Use the reason determined by the filter
+            'failure_reason': skip_reason,
             'pc_corrected': False,
-            # Ensure keys expected downstream exist, even if NaN
-             'num_comp_group_0': len(group_0_df), # Use counts calculated earlier
-             'num_comp_group_1': len(group_1_df)
+            'num_comp_within': len(within_group_df),
+            'num_comp_between': len(between_group_df)
         }
 
 
-    # Compute normal-only median and mean for each group (excluding -1 and 99) - for reporting
-    group_0_normal = group_0_df[(group_0_df['omega'] > -1) & (group_0_df['omega'] < 99)]
-    median_0_normal = group_0_normal['omega'].median()
-    mean_0_normal = group_0_normal['omega'].mean()
-    group_1_normal = group_1_df[(group_1_df['omega'] != -1) & (group_1_df['omega'] != 99)]
-    median_1_normal = group_1_normal['omega'].median()
-    mean_1_normal = group_1_normal['omega'].mean()
+    # Compute median and mean for each new group for reporting.
+    # Note: Special omega values were filtered out in read_and_preprocess_data.
+    median_within_normal = within_group_df['omega'].median()
+    mean_within_normal = within_group_df['omega'].mean()
+    median_between_normal = between_group_df['omega'].median()
+    mean_between_normal = between_group_df['omega'].mean()
 
-    # Compute percentage of identical (-1) and no synonymous variation (99) in each group
-    pct_identical_0 = 100.0 * (group_0_df['omega'] == -1).mean()
-    pct_nosyn_0 = 100.0 * (group_0_df['omega'] == 99).mean()
-    pct_identical_1 = 100.0 * (group_1_df['omega'] == -1).mean()
-    pct_nosyn_1 = 100.0 * (group_1_df['omega'] == 99).mean()
-    
+    # Assemble the final result dictionary with the new structure
     result = {
             'transcript_id': transcript_id,
             'coordinates': coords_str,
             'chromosome': chromosome,
             'gene_symbol': gene_symbol,
             'gene_name': gene_name,
-            'n0': len(sequences_0),
-            'n1': len(sequences_1),
-            'num_comp_group_0': analysis_result['num_comp_group_0'],
-            'num_comp_group_1': analysis_result['num_comp_group_1'],
+            'num_seqs_in_group0': num_seqs_in_group0,
+            'num_seqs_in_group1': num_seqs_in_group1,
+            'num_comp_within': analysis_result['num_comp_within'],
+            'num_comp_between': analysis_result['num_comp_between'],
             'effect_size': analysis_result['effect_size'],
             'p_value': analysis_result['p_value'],
             'std_err': analysis_result['std_err'],
@@ -1155,22 +1070,23 @@ def analyze_transcript(args):
             'pc_corrected': analysis_result.get('pc_corrected', False),
             'matrix_0': matrix_0,
             'matrix_1': matrix_1,
-            'pairwise_comparisons': set(pairwise_dict.keys()),
-            'median_0_normal': median_0_normal,
-            'mean_0_normal': mean_0_normal,
-            'median_1_normal': median_1_normal,
-            'mean_1_normal': mean_1_normal,
-            'pct_identical_0': pct_identical_0,
-            'pct_nosyn_0': pct_nosyn_0,
-            'pct_identical_1': pct_identical_1,
-            'pct_nosyn_1': pct_nosyn_1,
-            'num_comp_cross_group': num_comp_cross_group,
-            'median_cross_group_omega': median_cross_group_omega
+            'pairwise_comparisons': pairwise_comparisons,
+            'median_within_normal': median_within_normal,
+            'mean_within_normal': mean_within_normal,
+            'median_between_normal': median_between_normal,
+            'mean_between_normal': mean_between_normal,
+            # Deprecated stats, kept as NaN for consistent column structure
+            'pct_identical_0': np.nan,
+            'pct_nosyn_0': np.nan,
+            'pct_identical_1': np.nan,
+            'pct_nosyn_1': np.nan,
+            'num_comp_cross_group': len(between_group_df), # Kept for consistency, same as num_comp_between
+            'median_cross_group_omega': median_between_group_omega_for_filter
         }
 
-    # Perform omega category analysis if enabled
+    # Perform omega category analysis if enabled, now comparing within vs. between
     if PERFORM_OMEGA_CATEGORY_ANALYSIS:
-        category_result = analyze_omega_categories(group_0_df, group_1_df)
+        category_result = analyze_omega_categories(within_group_df, between_group_df)
         
         # Add category analysis results to the output
         result.update({
@@ -1339,16 +1255,17 @@ def main():
     csv_sorted_by_effect.to_csv('results/significant_by_effect.csv', index=False)
 
     
-    # Calculate total sequence counts by group
-    total_group_0 = results_df['n0'].sum()
-    total_group_1 = results_df['n1'].sum()
+    # Calculate total sequence counts by group for reference.
+    # These are counts of unique sequences in the original Group 0 and Group 1 categories.
+    total_group_0 = results_df['num_seqs_in_group0'].sum()
+    total_group_1 = results_df['num_seqs_in_group1'].sum()
     
     # Sort results by p-value for more intuitive display
     sorted_results = results_df.sort_values('p_value')
     
     # Print detailed header for main results table
-    print("\n=== Group Assignment Summary by Transcript ===")
-    print(f"{'Transcript/Coordinates':<50} {'Group 0':<10} {'Group 1':<10} {'Total':<10} {'P-value/Status':<40} {'Effect Size':<15}")
+    print("\n=== Within vs. Between Group Comparison Summary by Transcript ===")
+    print(f"{'Transcript/Coordinates':<50} {'N_Comp_Within':<15} {'N_Comp_Between':<15} {'P-value/Status':<40} {'Effect Size':<15}")
     print("-" * 160)
     
     # Print detailed information for each transcript
@@ -1357,9 +1274,8 @@ def main():
         coords_str = str(row['coordinates']) if 'coordinates' in row and pd.notna(row['coordinates']) else ""
         summary_label = f"{transcript_str} / {coords_str}".strip(" /")
     
-        group_0_count = row['n0']
-        group_1_count = row['n1']
-        total = group_0_count + group_1_count
+        comp_within_count = row['num_comp_within']
+        comp_between_count = row['num_comp_between']
         
         # Format p-value display, showing failure reason if analysis failed
         if pd.isna(row['p_value']) and pd.notna(row['failure_reason']):
@@ -1377,11 +1293,13 @@ def main():
         gene_info = f"{row['gene_symbol']}" if 'gene_symbol' in row and pd.notna(row['gene_symbol']) else ""
         
         # Print row of results table
-        print(f"{summary_label:<50} {group_0_count:<10} {group_1_count:<10} {total:<10} {p_value:<40} {effect_size:<15} {gene_info:<15}")
+        print(f"{summary_label:<50} {comp_within_count:<15} {comp_between_count:<15} {p_value:<40} {effect_size:<15} {gene_info:<15}")
     
     # Print table footer with totals
     print("-" * 160)
-    print(f"{'TOTAL':<50} {total_group_0:<10} {total_group_1:<10} {total_group_0 + total_group_1:<10}")
+    total_comp_within = results_df['num_comp_within'].sum()
+    total_comp_between = results_df['num_comp_between'].sum()
+    print(f"{'TOTAL COMPARISONS':<50} {total_comp_within:<15} {total_comp_between:<15}")
     
     # Summarize significant results after multiple testing correction for the main analysis
     significant_count = (results_df['corrected_p_value'] < 0.05).sum()
@@ -1417,7 +1335,7 @@ def main():
             
             # Print simple list of significant hits
             print("\nSignificant conservation differences (after correction):")
-            print(f"{'Gene':<15} {'Raw P':<15} {'Corrected P':<15} {'Median Grp0':<12} {'Median Grp1':<12} {'Pattern':<30}")
+            print(f"{'Gene':<15} {'Raw P':<15} {'Corrected P':<15} {'Median Within':<12} {'Median Between':<12} {'Pattern':<30}")
             print("-" * 95)
             for _, row in cat_results.sort_values('corrected_category_p_value').iterrows():
                 gene_name = row['gene_symbol'] if pd.notna(row['gene_symbol']) else "Unknown"
@@ -1425,15 +1343,15 @@ def main():
                 cat_corr_p_val = f"{row['corrected_category_p_value']:.6e}" if pd.notna(row['corrected_category_p_value']) else "N/A"
                 cat_diff = row.get('category_difference', 'N/A')
                 
-                # Get median values if available
-                median_0 = median_1 = "N/A"
+                # Get median values if available, using the new keys from the updated analysis
+                median_within = median_between = "N/A"
                 if (row.get('median_values') is not None and 
-                    'group_0' in row['median_values'] and 
-                    'group_1' in row['median_values']):
-                    median_0 = f"{row['median_values']['group_0']:.4f}" if pd.notna(row['median_values']['group_0']) else "N/A"
-                    median_1 = f"{row['median_values']['group_1']:.4f}" if pd.notna(row['median_values']['group_1']) else "N/A"
+                    'within_group' in row['median_values'] and
+                    'between_group' in row['median_values']):
+                    median_within = f"{row['median_values']['within_group']:.4f}" if pd.notna(row['median_values']['within_group']) else "N/A"
+                    median_between = f"{row['median_values']['between_group']:.4f}" if pd.notna(row['median_values']['between_group']) else "N/A"
                 
-                print(f"{gene_name:<15} {cat_p_val:<15} {cat_corr_p_val:<15} {median_0:<12} {median_1:<12} {cat_diff:<30}")
+                print(f"{gene_name:<15} {cat_p_val:<15} {cat_corr_p_val:<15} {median_within:<12} {median_between:<12} {cat_diff:<30}")
     
     # Print detailed information for significant results
     if significant_count > 0:
@@ -1444,14 +1362,10 @@ def main():
             f"{'Corrected P':<15} "
             f"{'Effect Size':<15} "
             f"{'PC Corrected':<12} "
-            f"{'Median_0':<10} "
-            f"{'Mean_0':<10} "
-            f"{'Median_1':<10} "
-            f"{'Mean_1':<10} "
-            f"{'Pct_id_0':<10} "
-            f"{'Pct_noSyn_0':<10} "
-            f"{'Pct_id_1':<10} "
-            f"{'Pct_noSyn_1':<10} "
+            f"{'Median_Within':<15} "
+            f"{'Mean_Within':<15} "
+            f"{'Median_Between':<15} "
+            f"{'Mean_Between':<15} "
             f"{'Gene':<15} "
         )
         print("-" * 160)
@@ -1466,23 +1380,14 @@ def main():
             corrected_p = f"{row['corrected_p_value']:.6e}" if not pd.isna(row['corrected_p_value']) else "N/A"
             effect_size = f"{row['effect_size']:.4f}" if not pd.isna(row['effect_size']) else "N/A"
             
-            median_0 = row['median_0_normal']
-            mean_0 = row['mean_0_normal']
-            median_1 = row['median_1_normal']
-            mean_1 = row['mean_1_normal']
-            median_0_str = f"{median_0:.3f}" if not pd.isna(median_0) else "N/A"
-            mean_0_str = f"{mean_0:.3f}" if not pd.isna(mean_0) else "N/A"
-            median_1_str = f"{median_1:.3f}" if not pd.isna(median_1) else "N/A"
-            mean_1_str = f"{mean_1:.3f}" if not pd.isna(mean_1) else "N/A"
-
-            pct_id_0_val = row['pct_identical_0']
-            pct_noSyn_0_val = row['pct_nosyn_0']
-            pct_id_1_val = row['pct_identical_1']
-            pct_noSyn_1_val = row['pct_nosyn_1']
-            pct_id_0_str = f"{pct_id_0_val:.2f}%" if not pd.isna(pct_id_0_val) else "N/A"
-            pct_noSyn_0_str = f"{pct_noSyn_0_val:.2f}%" if not pd.isna(pct_noSyn_0_val) else "N/A"
-            pct_id_1_str = f"{pct_id_1_val:.2f}%" if not pd.isna(pct_id_1_val) else "N/A"
-            pct_noSyn_1_str = f"{pct_noSyn_1_val:.2f}%" if not pd.isna(pct_noSyn_1_val) else "N/A"
+            median_within = row['median_within_normal']
+            mean_within = row['mean_within_normal']
+            median_between = row['median_between_normal']
+            mean_between = row['mean_between_normal']
+            median_within_str = f"{median_within:.4f}" if not pd.isna(median_within) else "N/A"
+            mean_within_str = f"{mean_within:.4f}" if not pd.isna(mean_within) else "N/A"
+            median_between_str = f"{median_between:.4f}" if not pd.isna(median_between) else "N/A"
+            mean_between_str = f"{mean_between:.4f}" if not pd.isna(mean_between) else "N/A"
 
             chrom_str = ""
             if pd.notna(coords_str):
@@ -1503,14 +1408,10 @@ def main():
                 f"{corrected_p:<15} "
                 f"{effect_size:<15} "
                 f"{pc_str:<12} "
-                f"{median_0_str:<10} "
-                f"{mean_0_str:<10} "
-                f"{median_1_str:<10} "
-                f"{mean_1_str:<10} "
-                f"{pct_id_0_str:<10} "
-                f"{pct_noSyn_0_str:<10} "
-                f"{pct_id_1_str:<10} "
-                f"{pct_noSyn_1_str:<10} "
+                f"{median_within_str:<15} "
+                f"{mean_within_str:<15} "
+                f"{median_between_str:<15} "
+                f"{mean_between_str:<15} "
                 f"{gene_info:<15}"
             )
                  
