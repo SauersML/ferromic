@@ -974,8 +974,7 @@ def analyze_transcript(args):
     """
     df_transcript, transcript_id, pc_data = args
 
-    print(f"
-Analyzing transcript: {transcript_id}")
+    print(f"Analyzing transcript: {transcript_id}")
 
     # Separate comparisons into within-group (group=0) and between-group (group=1)
     within_group_df = df_transcript[df_transcript['group'] == 0]
