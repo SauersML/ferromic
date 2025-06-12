@@ -789,11 +789,11 @@ def analysis_worker(args):
 
     # --- 3. Determine Analysis Variable (Ranked or Raw) ---
     if USE_RANKED_OMEGA_ANALYSIS:
-        print(f"[{datetime.now()}] Using RANKED omega values for analysis.")
-        df['analysis_var'] = df['omega_value'].rank(method='average')
-    else:
-        print(f"[{datetime.now()}] Using RAW omega values for analysis.")
-        df['analysis_var'] = df['omega_value']
+        print(f"[{datetime.now()}] Using RANKED omega values for analysis.")
+        df['analysis_var'] = df['omega'].rank(method='average')
+    else:
+        print(f"[{datetime.now()}] Using RAW omega values for analysis.")
+        df['analysis_var'] = df['omega']
 
     # --- 4. Initialize Results & Validate Data for Model ---
     effect_size, p_value, std_err = np.nan, np.nan, np.nan
