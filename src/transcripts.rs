@@ -9,11 +9,46 @@ use crate::progress::{
 };
 
 use parking_lot::Mutex;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write, BufWriter};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::sync::Arc;
 use std::time::SystemTime;
+use csv::Writer;
+
+// A simple struct to hold the data for one row of our TSV file.
+#[derive(Debug, Clone)]
+struct PhyMetadata {
+    phy_filename: String,
+    transcript_id: String,
+    gene_name: String,
+    chromosome: String,
+    haplotype_group: u8,
+    overall_start: i64,
+    overall_end: i64,
+    spliced_length: usize,
+    segment_coords: String,
+}
+
+// This static variable holds our single, shared TSV writer.
+// It's initialized only once, on the first use, making it thread-safe.
+static METADATA_WRITER: Lazy<Mutex<Writer<BufWriter<File>>>> = Lazy::new(|| {
+    let file = File::create("phy_metadata.tsv").expect("Failed to create phy_metadata.tsv");
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(b'\t') // Ensure this is a backslash followed by t for the tab character
+        .from_writer(BufWriter::new(file));
+
+    // Write the header immediately upon creation.
+    writer.write_record(&[
+        "phy_filename", "transcript_id", "gene_name", "chromosome", "haplotype_group",
+        "overall_cds_start_1based", "overall_cds_end_1based", "spliced_cds_length", "cds_segment_coords_1based"
+    ]).expect("Failed to write header to phy_metadata.tsv");
+
+    // Return the writer wrapped in a Mutex for thread-safety.
+    Mutex::new(writer)
+});
+
 
 /// A CDS sequence guaranteed to have length divisible by 3 and no internal stops.
 #[derive(Debug)]
@@ -609,6 +644,41 @@ pub fn prepare_to_write_cds(
             haplotype_group, safe_gene_name, cds.gene_id, cds.transcript_id, 
             chromosome, cds_start, cds_end
         );
+
+        // --- NEW METADATA LOGIC ---
+        let segment_coords_str = cds.segments.iter()
+            .map(|seg| format!("{}-{}", seg.start_1based_inclusive(), seg.get_1based_inclusive_end_coord()))
+            .collect::<Vec<String>>()
+            .join(";");
+
+        let spliced_length = filtered_map.values().next().map_or(0, |seq| seq.len());
+
+        let metadata = PhyMetadata {
+            phy_filename: filename.clone(),
+            transcript_id: cds.transcript_id.clone(),
+            gene_name: cds.gene_name.clone(),
+            chromosome: chromosome.to_string(),
+            haplotype_group,
+            overall_start: cds_start,
+            overall_end: cds_end,
+            spliced_length,
+            segment_coords: segment_coords_str,
+        };
+
+        // Lock the shared writer and write the single record.
+        METADATA_WRITER.lock().write_record(&[
+            &metadata.phy_filename,
+            &metadata.transcript_id,
+            &metadata.gene_name,
+            &metadata.chromosome,
+            &metadata.haplotype_group.to_string(),
+            &metadata.overall_start.to_string(),
+            &metadata.overall_end.to_string(),
+            &metadata.spliced_length.to_string(),
+            &metadata.segment_coords,
+        ]).map_err(|e| VcfError::Parse(format!("Failed to write metadata record: {}", e)))?;
+        // --- END OF NEW LOGIC ---
+
         write_phylip_file(&filename, &filtered_map, &cds.transcript_id)?;
     }
     Ok(())
