@@ -67,10 +67,22 @@ def ungzip_file():
         print(f"FATAL: Error decompressing file: {e}"); exit(1)
 
 def read_phy_sequence(filename):
+    """
+    Robustly reads a sequence from a phylip file, correctly handling cases
+    where there is no space between the sample name and the sequence data.
+    """
     try:
         with open(filename, 'r') as f:
             lines = f.readlines()
-            if len(lines) > 1: return lines[1].strip().split()[-1]
+            if len(lines) < 2:
+                return ""
+            line = lines[1].strip()
+            # This regex finds the sequence part by looking for a contiguous
+            # block of valid sequence characters at the end of the line.
+            # This correctly separates the name from the sequence.
+            match = re.search(r'[ACGTN-]+$', line, re.IGNORECASE)
+            if match:
+                return match.group(0)
     except Exception:
         pass
     return ""
@@ -80,7 +92,8 @@ def read_phy_sequence(filename):
 def validate_inputs_and_parse_metadata():
     """
     Parses metadata, calculating expected length from coordinate chunks and
-    validating input .phy files against this calculated length.
+    validating input .phy files against this calculated length using the
+    new robust parser.
     """
     if not os.path.exists(METADATA_FILE):
         print(f"FATAL: Metadata file '{METADATA_FILE}' not found."); exit(1)
@@ -95,7 +108,8 @@ def validate_inputs_and_parse_metadata():
             parts = [p.strip() for p in line.strip().split('\t')]
             if len(parts) < 9: continue
             
-            phy_fname, t_id, gene, chrom, _, _, _, _, coords_str = parts[:9]
+            # We need the full phy_filename to find the corresponding files
+            phy_fname, t_id, gene, chrom, _, start, end, _, coords_str = parts[:9]
 
             cds_key = (t_id, coords_str)
             if cds_key in seen_cds_keys: continue
@@ -103,7 +117,6 @@ def validate_inputs_and_parse_metadata():
 
             try:
                 segments = [(int(s), int(e)) for s, e in (p.split('-') for p in coords_str.split(';'))]
-                # Authoritative length is calculated directly from the coordinate chunks.
                 expected_len = sum(e - s + 1 for s, e in segments)
                 if expected_len == 0: continue
             except (ValueError, IndexError):
@@ -112,6 +125,8 @@ def validate_inputs_and_parse_metadata():
             
             g0_fname = phy_fname.replace("group1_", "group0_") if "group1_" in phy_fname else phy_fname
             g1_fname = phy_fname.replace("group0_", "group1_") if "group0_" in phy_fname else phy_fname
+            
+            # Use the NEW, corrected parser
             g0_seq = read_phy_sequence(g0_fname)
             g1_seq = read_phy_sequence(g1_fname)
             
@@ -119,23 +134,21 @@ def validate_inputs_and_parse_metadata():
                 logger.add("Missing Input File", f"{t_id}: group0 or group1 .phy file not found or is empty.")
                 continue
 
+            # This validation should now pass for all files.
             if len(g0_seq) != expected_len or len(g1_seq) != expected_len:
                 logger.add("Input Length Mismatch", f"{t_id}: Phy length (g0:{len(g0_seq)}, g1:{len(g1_seq)}) != calculated length from coords ({expected_len}).")
                 continue
 
             cds_info = {
-                'gene_name': gene, 'transcript_id': t_id,
-                'chromosome': 'chr' + chrom, 'expected_len': expected_len
+                'gene_name': gene, 'transcript_id': t_id, 'chromosome': 'chr' + chrom,
+                'expected_len': expected_len, 'start': start, 'end': end
             }
             validated_transcripts.append({'info': cds_info, 'segments': segments})
     
     return validated_transcripts
 
 def process_axt_chunk(chunk_start, chunk_end, coord_map):
-    """
-    Worker process. Iterates over its AXT chunk and fills a results dictionary.
-    Handles coordinate overlaps by design.
-    """
+    """Worker process. Iterates over its AXT chunk and fills a results dictionary."""
     results = defaultdict(dict)
     with open(AXT_FILENAME, 'r') as f:
         f.seek(chunk_start)
@@ -148,15 +161,14 @@ def process_axt_chunk(chunk_start, chunk_end, coord_map):
             header = line.strip().split()
             human_seq = f.readline().strip().upper()
             chimp_seq = f.readline().strip().upper()
-
             axt_chr, human_pos = header[1], int(header[2])
+
             if axt_chr not in coord_map: continue
 
             chr_coord_map = coord_map[axt_chr]
             for h_char, c_char in zip(human_seq, chimp_seq):
                 if h_char != '-':
                     if human_pos in chr_coord_map:
-                        # Iterate over all transcripts that need this coordinate
                         for t_id, target_idx in chr_coord_map[human_pos]:
                             if target_idx not in results[t_id]:
                                  results[t_id][target_idx] = c_char
@@ -171,8 +183,6 @@ def build_chimp_sequences(validated_transcripts):
     if not validated_transcripts: return
 
     print("Pre-computing overlap-aware coordinate map...")
-    # This new map design is CRITICAL for correctness.
-    # coord_map = { 'chr1': {12345: [('ENST_A', 0), ('ENST_B', 55)], ...} }
     coord_map = defaultdict(lambda: defaultdict(list))
     scaffold_map = {}
     
@@ -180,11 +190,9 @@ def build_chimp_sequences(validated_transcripts):
         info, segments = t['info'], t['segments']
         t_id = info['transcript_id']
         scaffold_map[t_id] = ['-'] * info['expected_len']
-        
         target_idx = 0
         for seg_start, seg_end in segments:
             for coord in range(seg_start, seg_end + 1):
-                # Append, don't assign, to handle multiple transcripts at one location.
                 coord_map[info['chromosome']][coord].append((t_id, target_idx))
                 target_idx += 1
 
@@ -214,10 +222,8 @@ def build_chimp_sequences(validated_transcripts):
     files_written = 0
     for t in validated_transcripts:
         info = t['info']
-        t_id, gene_name = info['transcript_id'], info['gene_name']
-        start_coord, end_coord = t['info']['start'], t['info']['end'] # Use info from this loop
-        chrom = info['chromosome']
-
+        t_id, gene, chrom, start, end = info['transcript_id'], info['gene_name'], info['chromosome'], info['start'], info['end']
+        
         final_sequence = "".join(scaffold_map[t_id])
 
         if not final_sequence or final_sequence.count('-') == len(final_sequence):
@@ -227,10 +233,11 @@ def build_chimp_sequences(validated_transcripts):
         if DEBUG_TRANSCRIPT == t_id:
             print(f"\n--- DEBUG: {t_id} ---\nFinal sequence (len={len(final_sequence)}): {final_sequence[:100]}...\n")
 
-        fname = f"outgroup_{gene_name}_{t_id}_{chrom}_start{start_coord}_end{end_coord}.phy"
+        fname = f"outgroup_{gene}_{t_id}_{chrom}_start{start}_end{end}.phy"
         with open(fname, 'w') as f_out:
             f_out.write(f" 1 {len(final_sequence)}\n")
-            f_out.write(f"panTro5    {final_sequence}\n")
+            # Write in a standard, padded format.
+            f_out.write(f"{'panTro5':<10}{final_sequence}\n")
         files_written += 1
     
     print(f"Wrote {files_written} outgroup phylip files.")
@@ -253,7 +260,7 @@ def calculate_and_print_differences():
             out_seq = read_phy_sequence(group_files['outgroup'])
             
             if not (seq0 and seq1 and out_seq and len(seq0) == len(seq1) == len(out_seq)):
-                logger.add("Final Comparison Error", f"Length mismatch or empty file for {identifier[0]}. This should not happen with the scaffold method.")
+                logger.add("Final Comparison Error", f"Length mismatch for {identifier[0]}. This should not happen now.")
                 continue
 
             comparable_sets += 1
@@ -279,7 +286,7 @@ def calculate_and_print_differences():
     print(f"{'outgroup':<10} {'-':<10} {'-':<10} {'-':<10}\n")
 
 def main():
-    print("--- Starting Definitive Chimp CDS Phylip Generation ---")
+    print("--- Starting Corrected Chimp CDS Phylip Generation ---")
     download_axt_file()
     ungzip_file()
     validated_transcripts = validate_inputs_and_parse_metadata()
