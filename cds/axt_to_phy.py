@@ -67,19 +67,14 @@ def ungzip_file():
         print(f"FATAL: Error decompressing file: {e}"); exit(1)
 
 def read_phy_sequence(filename):
-    """
-    Robustly reads a sequence from a phylip file, correctly handling cases
-    where there is no space between the sample name and the sequence data.
-    """
+    """Robustly reads a sequence from a phylip file using regex."""
     try:
         with open(filename, 'r') as f:
             lines = f.readlines()
-            if len(lines) < 2:
-                return ""
+            if len(lines) < 2: return ""
             line = lines[1].strip()
             match = re.search(r'[ACGTN-]+$', line, re.IGNORECASE)
-            if match:
-                return match.group(0)
+            if match: return match.group(0)
     except Exception:
         pass
     return ""
@@ -87,10 +82,6 @@ def read_phy_sequence(filename):
 # --- Core Logic ---
 
 def validate_inputs_and_parse_metadata():
-    """
-    Parses metadata, calculating expected length from coordinate chunks and
-    validating input .phy files against this calculated length.
-    """
     if not os.path.exists(METADATA_FILE):
         print(f"FATAL: Metadata file '{METADATA_FILE}' not found."); exit(1)
     
@@ -105,7 +96,6 @@ def validate_inputs_and_parse_metadata():
             if len(parts) < 9: continue
             
             phy_fname, t_id, gene, chrom, _, start, end, _, coords_str = parts[:9]
-
             cds_key = (t_id, coords_str)
             if cds_key in seen_cds_keys: continue
             seen_cds_keys.add(cds_key)
@@ -120,7 +110,6 @@ def validate_inputs_and_parse_metadata():
             
             g0_fname = phy_fname.replace("group1_", "group0_") if "group1_" in phy_fname else phy_fname
             g1_fname = phy_fname.replace("group0_", "group1_") if "group0_" in phy_fname else phy_fname
-            
             g0_seq = read_phy_sequence(g0_fname)
             g1_seq = read_phy_sequence(g1_fname)
             
@@ -132,59 +121,69 @@ def validate_inputs_and_parse_metadata():
                 logger.add("Input Length Mismatch", f"{t_id}: Phy length (g0:{len(g0_seq)}, g1:{len(g1_seq)}) != calculated length from coords ({expected_len}).")
                 continue
 
-            cds_info = {
-                'gene_name': gene, 'transcript_id': t_id, 'chromosome': 'chr' + chrom,
-                'expected_len': expected_len, 'start': start, 'end': end
-            }
+            cds_info = {'gene_name': gene, 'transcript_id': t_id, 'chromosome': 'chr' + chrom,
+                        'expected_len': expected_len, 'start': start, 'end': end}
             validated_transcripts.append({'info': cds_info, 'segments': segments})
     
     return validated_transcripts
 
 def process_axt_chunk(chunk_start, chunk_end, coord_map):
     """
-    Worker process. Uses the coord_map to find relevant alignment blocks
-    and returns a dictionary of found sequence pieces.
+    Worker process with robust AXT block parsing to prevent IndexErrors.
     """
     results = defaultdict(dict)
     with open(AXT_FILENAME, 'r') as f:
         f.seek(chunk_start)
+        # Ensure we start on a full line, not mid-line
         if chunk_start != 0: f.readline()
 
         while f.tell() < chunk_end:
             line = f.readline()
-            if not line or not line.strip() or line.startswith('#'): continue
+            if not line: break
 
+            if not line.strip() or line.startswith('#'): continue
+
+            # --- ROBUSTNESS FIX ---
+            # A valid header line MUST have 9 columns. If not, skip it entirely
+            # and do NOT attempt to read the next two lines as sequences.
             header = line.strip().split()
-            human_seq = f.readline().strip().upper()
-            chimp_seq = f.readline().strip().upper()
-            axt_chr, human_pos = header[1], int(header[2])
+            if len(header) != 9:
+                # This is a malformed line, not a real header.
+                # Simply continue to the next line to resynchronize.
+                continue
+            
+            # If we are here, we have a valid 9-column header.
+            # Now it is safe to read the next two lines.
+            human_seq = f.readline()
+            chimp_seq = f.readline()
+            
+            # Check that we didn't hit the end of the file/chunk prematurely
+            if not human_seq or not chimp_seq:
+                break
+            
+            human_seq = human_seq.strip().upper()
+            chimp_seq = chimp_seq.strip().upper()
+            # --- END OF FIX ---
 
-            # Use .get() for safe access since coord_map is a standard dict
+            axt_chr, human_pos = header[1], int(header[2])
             chr_coord_map = coord_map.get(axt_chr)
             if not chr_coord_map: continue
 
             for h_char, c_char in zip(human_seq, chimp_seq):
                 if h_char != '-':
-                    # Use .get() for safe access here as well
                     target_list = chr_coord_map.get(human_pos)
                     if target_list:
                         for t_id, target_idx in target_list:
                             if target_idx not in results[t_id]:
                                  results[t_id][target_idx] = c_char
                     human_pos += 1
-    # Convert defaultdict to standard dict for pickling safety before returning
+    
     return dict(results)
 
 def build_chimp_sequences(validated_transcripts):
-    """
-    Main coordinator. Builds an overlap-aware coordinate map using standard dicts,
-    runs parallel jobs, and assembles the final chimp sequences.
-    """
     if not validated_transcripts: return
 
     print("Pre-computing overlap-aware coordinate map...")
-    # THIS IS THE FIX: Use standard dicts, which are pickleable.
-    # coord_map = { 'chr1': {12345: [('ENST_A', 0), ('ENST_B', 55)], ...} }
     coord_map = {}
     scaffold_map = {}
     
@@ -193,15 +192,12 @@ def build_chimp_sequences(validated_transcripts):
         t_id, chrom = info['transcript_id'], info['chromosome']
         scaffold_map[t_id] = ['-'] * info['expected_len']
         
-        # Manually handle creation of nested dictionaries
-        if chrom not in coord_map:
-            coord_map[chrom] = {}
+        if chrom not in coord_map: coord_map[chrom] = {}
         
         target_idx = 0
         for seg_start, seg_end in segments:
             for coord in range(seg_start, seg_end + 1):
-                if coord not in coord_map[chrom]:
-                    coord_map[chrom][coord] = []
+                if coord not in coord_map[chrom]: coord_map[chrom][coord] = []
                 coord_map[chrom][coord].append((t_id, target_idx))
                 target_idx += 1
 
@@ -256,8 +252,7 @@ def calculate_and_print_differences():
     cds_groups = defaultdict(dict)
     for f in glob.glob('*.phy'):
         match = key_regex.search(os.path.basename(f))
-        if match:
-            cds_groups[match.groups()][os.path.basename(f).split('_')[0]] = f
+        if match: cds_groups[match.groups()][os.path.basename(f).split('_')[0]] = f
 
     diffs = defaultdict(list)
     comparable_sets = 0
