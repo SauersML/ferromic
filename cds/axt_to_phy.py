@@ -249,7 +249,7 @@ def build_chimp_sequences(validated_transcripts):
     print(f"Wrote {files_written} outgroup phylip files.")
 
 def calculate_and_print_differences():
-    print("\n--- Final Difference Calculation & Advanced Statistics ---")
+    print("\n--- Final Difference Calculation & Statistics ---")
     key_regex = re.compile(r"(ENST[0-9]+\.[0-9]+)_(chr.+?)_start([0-9]+)_end([0-9]+)")
     cds_groups = defaultdict(dict)
     for f in glob.glob('*.phy'):
@@ -331,7 +331,7 @@ def calculate_and_print_differences():
 
     # --- Print All New Statistics ---
     print("\n" + "="*50)
-    print("ADVANCED STATISTICAL REPORT")
+    print(" REPORT")
     print("="*50)
     
     # Report Substitution Divergence
@@ -370,7 +370,7 @@ def calculate_and_print_differences():
 
 
 def main():
-    print("--- Starting Corrected Chimp CDS Phylip Generation with Advanced Stats ---")
+    print("--- Starting Corrected Chimp CDS Phylip Generation with Stats ---")
     download_axt_file()
     ungzip_file()
     validated_transcripts = validate_inputs_and_parse_metadata()
