@@ -4,6 +4,17 @@ from collections import defaultdict
 import sys
 
 def parse_specific_phy_file(filename, group_type):
+    """
+    Parses a PHYLIP-like file based on specific rules for different group types.
+
+    Args:
+        filename (str): The path to the file to parse.
+        group_type (str): The type of file ('group0', 'group1', 'outgroup'),
+                          which determines the parsing rules.
+
+    Returns:
+        list: A list of (taxon_name, sequence) tuples, or None if a fatal error occurs.
+    """
     sequences = []
     try:
         with open(filename, 'r') as f:
@@ -16,7 +27,7 @@ def parse_specific_phy_file(filename, group_type):
         print(f"  [!] FAILURE: File '{filename}' is empty or contains only whitespace.", file=sys.stderr)
         return None
 
-    # Determine if the first line is a header (e.g., "2 372") and should be skipped.
+    # Determine if the first line is a PHYLIP header (e.g., "2 372") and should be skipped.
     first_line_parts = lines[0].split()
     start_index = 0
     if len(first_line_parts) == 2:
@@ -69,6 +80,9 @@ def parse_specific_phy_file(filename, group_type):
 def find_and_combine_phy_files():
     """
     Finds and processes trios of .phy files, providing detailed logs.
+    It identifies file trios (group0, group1, outgroup) by a common identifier,
+    parses them, validates sequence length consistency, and combines them into a
+    single new .phy file with a correct header.
     """
     # Regex to extract key parts from filenames, handling the optional ENSG ID.
     file_pattern = re.compile(
@@ -77,6 +91,7 @@ def find_and_combine_phy_files():
 
     file_groups = defaultdict(dict)
     
+    # Group files by a common identifier derived from the filename
     for filename in os.listdir('.'):
         match = file_pattern.match(filename)
         if match:
@@ -120,6 +135,10 @@ def find_and_combine_phy_files():
 
         # Step 2: Validate the collected sequences for length and consistency.
         print("  - All files parsed. Validating sequence consistency...")
+        if not all_sequences_for_trio:
+            print(f"  [!] FAILURE: No sequences found for trio '{identifier}'. Skipping.", file=sys.stderr)
+            continue
+            
         for taxon, seq in all_sequences_for_trio:
             # The first valid sequence sets the standard length.
             if expected_dna_length is None:
@@ -137,15 +156,20 @@ def find_and_combine_phy_files():
         if not is_valid_trio:
             continue
 
-        # Step 3: If all checks pass, write the combined file.
+        # Step 3: If all checks pass, write the combined file with the CORRECT header.
         print("  - Validation successful.")
         num_sequences = len(all_sequences_for_trio)
-        alignment_length_codons = expected_dna_length // 3
+        
+        # The alignment length in the header must match the actual length of the 
+        # sequences being written. Since we are writing the full DNA sequences,
+        # we must use `expected_dna_length`.
+        alignment_length = expected_dna_length
         output_filename = f"combined_{identifier}.phy"
         
         try:
             with open(output_filename, 'w') as f_out:
-                f_out.write(f"{num_sequences} {alignment_length_codons}\n")
+                # Write the header with the number of sequences and the CORRECT sequence length.
+                f_out.write(f"{num_sequences} {alignment_length}\n")
                 for taxon, seq in all_sequences_for_trio:
                     f_out.write(f"{taxon} {seq}\n")
             print(f"  -> SUCCESS: Created '{output_filename}'")
