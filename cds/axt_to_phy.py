@@ -340,8 +340,8 @@ def calculate_and_print_differences():
     print("Top 5 LOWEST Divergence (Most Conserved):")
     for (gene_id, div) in sorted_divergence[:5]:
         print(f"  - {gene_id:<40}: {div:.4f}%")
-    print("\nTop 5 HIGHEST Divergence (Most Divergent):")
-    for (gene_id, div) in sorted_divergence[-5:]:
+    print("\nTop HIGHEST Divergence (Most Divergent):")
+    for (gene_id, div) in sorted_divergence[-50:]:
         print(f"  - {gene_id:<40}: {div:.4f}%")
     avg_div = sum(substitution_diffs['g0_out']) / len(substitution_diffs['g0_out'])
     print(f"\nOverall Average Substitution Divergence: {avg_div:.4f}%")
