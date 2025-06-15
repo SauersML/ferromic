@@ -66,22 +66,35 @@ def ungzip_file():
     except Exception as e:
         print(f"FATAL: Error decompressing file: {e}"); exit(1)
 
-def read_phy_sequence(filename):
-    """Robustly reads a sequence from a phylip file using regex."""
+def read_phy_sequences(filename):
+    """
+    Robustly reads ALL sequences from a phylip file, handling cases
+    where there is no space between the sample name and the sequence data.
+    Returns a list of sequence strings.
+    """
+    sequences = []
     try:
         with open(filename, 'r') as f:
             lines = f.readlines()
-            if len(lines) < 2: return ""
-            line = lines[1].strip()
-            match = re.search(r'[ACGTN-]+$', line, re.IGNORECASE)
-            if match: return match.group(0)
+            if len(lines) < 2: return []
+            # Skip the header line (lines[0])
+            for line in lines[1:]:
+                line = line.strip()
+                if not line: continue
+                match = re.search(r'[ACGTN-]+$', line, re.IGNORECASE)
+                if match:
+                    sequences.append(match.group(0).upper())
     except Exception:
         pass
-    return ""
+    return sequences
 
 # --- Core Logic ---
 
 def validate_inputs_and_parse_metadata():
+    """
+    Parses metadata, calculating expected length from coordinate chunks and
+    validating that ALL sequences in the input .phy files match this length.
+    """
     if not os.path.exists(METADATA_FILE):
         print(f"FATAL: Metadata file '{METADATA_FILE}' not found."); exit(1)
     
@@ -110,15 +123,22 @@ def validate_inputs_and_parse_metadata():
             
             g0_fname = phy_fname.replace("group1_", "group0_") if "group1_" in phy_fname else phy_fname
             g1_fname = phy_fname.replace("group0_", "group1_") if "group0_" in phy_fname else phy_fname
-            g0_seq = read_phy_sequence(g0_fname)
-            g1_seq = read_phy_sequence(g1_fname)
             
-            if not g0_seq or not g1_seq:
+            g0_seqs = read_phy_sequences(g0_fname)
+            g1_seqs = read_phy_sequences(g1_fname)
+            
+            if not g0_seqs or not g1_seqs:
                 logger.add("Missing Input File", f"{t_id}: group0 or group1 .phy file not found or is empty.")
                 continue
 
-            if len(g0_seq) != expected_len or len(g1_seq) != expected_len:
-                logger.add("Input Length Mismatch", f"{t_id}: Phy length (g0:{len(g0_seq)}, g1:{len(g1_seq)}) != calculated length from coords ({expected_len}).")
+            # Validate ALL sequences in each file
+            valid_g0 = all(len(s) == expected_len for s in g0_seqs)
+            valid_g1 = all(len(s) == expected_len for s in g1_seqs)
+
+            if not valid_g0 or not valid_g1:
+                g0_lengths = set(len(s) for s in g0_seqs)
+                g1_lengths = set(len(s) for s in g1_seqs)
+                logger.add("Input Length Mismatch", f"{t_id}: Phy lengths (g0:{g0_lengths}, g1:{g1_lengths}) != calculated length from coords ({expected_len}).")
                 continue
 
             cds_info = {'gene_name': gene, 'transcript_id': t_id, 'chromosome': 'chr' + chrom,
@@ -128,42 +148,26 @@ def validate_inputs_and_parse_metadata():
     return validated_transcripts
 
 def process_axt_chunk(chunk_start, chunk_end, coord_map):
-    """
-    Worker process with robust AXT block parsing to prevent IndexErrors.
-    """
+    """Worker process with robust AXT block parsing."""
     results = defaultdict(dict)
     with open(AXT_FILENAME, 'r') as f:
         f.seek(chunk_start)
-        # Ensure we start on a full line, not mid-line
         if chunk_start != 0: f.readline()
 
         while f.tell() < chunk_end:
             line = f.readline()
             if not line: break
-
             if not line.strip() or line.startswith('#'): continue
 
-            # --- ROBUSTNESS FIX ---
-            # A valid header line MUST have 9 columns. If not, skip it entirely
-            # and do NOT attempt to read the next two lines as sequences.
             header = line.strip().split()
-            if len(header) != 9:
-                # This is a malformed line, not a real header.
-                # Simply continue to the next line to resynchronize.
-                continue
+            if len(header) != 9: continue
             
-            # If we are here, we have a valid 9-column header.
-            # Now it is safe to read the next two lines.
-            human_seq = f.readline()
-            chimp_seq = f.readline()
+            human_seq_line = f.readline()
+            chimp_seq_line = f.readline()
+            if not human_seq_line or not chimp_seq_line: break
             
-            # Check that we didn't hit the end of the file/chunk prematurely
-            if not human_seq or not chimp_seq:
-                break
-            
-            human_seq = human_seq.strip().upper()
-            chimp_seq = chimp_seq.strip().upper()
-            # --- END OF FIX ---
+            human_seq = human_seq_line.strip().upper()
+            chimp_seq = chimp_seq_line.strip().upper()
 
             axt_chr, human_pos = header[1], int(header[2])
             chr_coord_map = coord_map.get(axt_chr)
@@ -184,8 +188,7 @@ def build_chimp_sequences(validated_transcripts):
     if not validated_transcripts: return
 
     print("Pre-computing overlap-aware coordinate map...")
-    coord_map = {}
-    scaffold_map = {}
+    coord_map, scaffold_map = {}, {}
     
     for t in validated_transcripts:
         info, segments = t['info'], t['segments']
@@ -208,8 +211,8 @@ def build_chimp_sequences(validated_transcripts):
     print(f"Using {num_procs} available CPU cores.")
     
     chunk_size = file_size // num_procs
-    chunk_boundaries = [0] + [i * chunk_size for i in range(1, num_procs)] + [file_size]
-    chunks = [(chunk_boundaries[i], chunk_boundaries[i+1], coord_map) for i in range(num_procs)]
+    chunks = [(i * chunk_size, (i + 1) * chunk_size, coord_map) for i in range(num_procs)]
+    chunks[-1] = (chunks[-1][0], file_size, coord_map) # Ensure last chunk goes to the end
 
     start_time = time.time()
     with multiprocessing.Pool(processes=num_procs) as pool:
@@ -219,16 +222,15 @@ def build_chimp_sequences(validated_transcripts):
     print("Merging results and writing outgroup files...")
     for results_dict in list_of_results_dicts:
         for t_id, positions in results_dict.items():
-            if t_id not in scaffold_map: continue
-            for target_idx, base in positions.items():
-                if scaffold_map[t_id][target_idx] == '-':
-                    scaffold_map[t_id][target_idx] = base
+            if t_id in scaffold_map:
+                for target_idx, base in positions.items():
+                    if scaffold_map[t_id][target_idx] == '-':
+                        scaffold_map[t_id][target_idx] = base
 
     files_written = 0
     for t in validated_transcripts:
         info = t['info']
         t_id, gene, chrom, start, end = info['transcript_id'], info['gene_name'], info['chromosome'], info['start'], info['end']
-        
         final_sequence = "".join(scaffold_map[t_id])
 
         if not final_sequence or final_sequence.count('-') == len(final_sequence):
@@ -247,49 +249,128 @@ def build_chimp_sequences(validated_transcripts):
     print(f"Wrote {files_written} outgroup phylip files.")
 
 def calculate_and_print_differences():
-    print("\n--- Final Difference Calculation ---")
+    print("\n--- Final Difference Calculation & Advanced Statistics ---")
     key_regex = re.compile(r"(ENST[0-9]+\.[0-9]+)_(chr.+?)_start([0-9]+)_end([0-9]+)")
     cds_groups = defaultdict(dict)
     for f in glob.glob('*.phy'):
         match = key_regex.search(os.path.basename(f))
         if match: cds_groups[match.groups()][os.path.basename(f).split('_')[0]] = f
 
-    diffs = defaultdict(list)
+    # Data structures for new stats
+    per_transcript_divergence = {}
+    total_fixed_diffs = 0
+    g0_matches_chimp_at_fixed = 0
+    g1_matches_chimp_at_fixed = 0
+    per_transcript_g0_match_scores = {}
+    per_transcript_g1_match_scores = {}
+    
+    substitution_diffs = defaultdict(list)
     comparable_sets = 0
+    
+    print("Analyzing each comparable transcript set...")
     for identifier, group_files in cds_groups.items():
         if 'group0' in group_files and 'group1' in group_files and 'outgroup' in group_files:
-            seq0 = read_phy_sequence(group_files['group0'])
-            seq1 = read_phy_sequence(group_files['group1'])
-            out_seq = read_phy_sequence(group_files['outgroup'])
+            g0_seqs = read_phy_sequences(group_files['group0'])
+            g1_seqs = read_phy_sequences(group_files['group1'])
+            out_seq = read_phy_sequences(group_files['outgroup'])[0] # Chimp is single sequence
             
-            if not (seq0 and seq1 and out_seq and len(seq0) == len(seq1) == len(out_seq)):
-                logger.add("Final Comparison Error", f"Length mismatch for {identifier[0]}. This should not happen now.")
+            # --- Verification Step ---
+            g0_len_set = set(len(s) for s in g0_seqs)
+            g1_len_set = set(len(s) for s in g1_seqs)
+            if not (len(g0_len_set) == 1 and len(g1_len_set) == 1):
+                logger.add("Intra-file Length Mismatch", f"Not all sequences in a .phy file have the same length for {identifier[0]}.")
                 continue
-
+            
+            expected_len = g0_len_set.pop()
+            if expected_len != g1_len_set.pop() or expected_len != len(out_seq):
+                logger.add("Final Comparison Error", f"Length mismatch between groups for {identifier[0]}.")
+                continue
+            
             comparable_sets += 1
-            n = len(seq0)
-            diffs['g0_g1'].append(sum(1 for a, b in zip(seq0, seq1) if a.upper() != b.upper()) / n * 100)
-            diffs['g0_out'].append(sum(1 for a, b in zip(seq0, out_seq) if a.upper() != b.upper()) / n * 100)
-            diffs['g1_out'].append(sum(1 for a, b in zip(seq1, out_seq) if a.upper() != b.upper()) / n * 100)
+            n = expected_len
+            t_id = identifier[0]
+            gene_name = group_files['group0'].split('_')[1]
+            
+            # --- Stat 1: Substitution Divergence (Ignoring Dashes) ---
+            diff_count = sum(1 for a, b in zip(g0_seqs[0], out_seq) if a != b and '-' not in (a, b))
+            sub_div = (diff_count / n) * 100
+            per_transcript_divergence[f"{gene_name} ({t_id})"] = sub_div
+            substitution_diffs['g0_out'].append(sub_div)
+
+            # --- Stat 2: Fixed Difference Analysis ---
+            local_fixed_diffs = 0
+            local_g0_matches = 0
+            local_g1_matches = 0
+
+            for i in range(n):
+                g0_alleles = {s[i] for s in g0_seqs if s[i] != '-'}
+                g1_alleles = {s[i] for s in g1_seqs if s[i] != '-'}
+
+                if len(g0_alleles) == 1 and len(g1_alleles) == 1 and g0_alleles != g1_alleles:
+                    # This is a fixed difference
+                    local_fixed_diffs += 1
+                    total_fixed_diffs += 1
+                    g0_allele = g0_alleles.pop()
+                    g1_allele = g1_alleles.pop()
+                    chimp_allele = out_seq[i]
+
+                    if chimp_allele == g0_allele:
+                        g0_matches_chimp_at_fixed += 1
+                        local_g0_matches += 1
+                    elif chimp_allele == g1_allele:
+                        g1_matches_chimp_at_fixed += 1
+                        local_g1_matches += 1
+            
+            if local_fixed_diffs > 0:
+                per_transcript_g0_match_scores[f"{gene_name} ({t_id})"] = (local_g0_matches / local_fixed_diffs) * 100
+                per_transcript_g1_match_scores[f"{gene_name} ({t_id})"] = (local_g1_matches / local_fixed_diffs) * 100
 
     if comparable_sets == 0:
         print("CRITICAL: No complete sets found to compare after processing."); return
+    print(f"Successfully analyzed {comparable_sets} complete CDS sets.")
 
-    print(f"Successfully compared {comparable_sets} complete CDS sets.")
+    # --- Print All New Statistics ---
+    print("\n" + "="*50)
+    print("ADVANCED STATISTICAL REPORT")
+    print("="*50)
     
-    avg_g0_g1 = sum(diffs['g0_g1']) / len(diffs['g0_g1']) if diffs['g0_g1'] else 0
-    avg_g0_out = sum(diffs['g0_out']) / len(diffs['g0_out']) if diffs['g0_out'] else 0
-    avg_g1_out = sum(diffs['g1_out']) / len(diffs['g1_out']) if diffs['g1_out'] else 0
+    # Report Substitution Divergence
+    sorted_divergence = sorted(per_transcript_divergence.items(), key=lambda item: item[1])
+    print("\n--- Human-Chimp Substitution Divergence (Ignoring Indels) ---")
+    print("Top 5 LOWEST Divergence (Most Conserved):")
+    for (gene_id, div) in sorted_divergence[:5]:
+        print(f"  - {gene_id:<40}: {div:.4f}%")
+    print("\nTop 5 HIGHEST Divergence (Most Divergent):")
+    for (gene_id, div) in sorted_divergence[-5:]:
+        print(f"  - {gene_id:<40}: {div:.4f}%")
+    avg_div = sum(substitution_diffs['g0_out']) / len(substitution_diffs['g0_out'])
+    print(f"\nOverall Average Substitution Divergence: {avg_div:.4f}%")
 
-    print("\nAverage Pairwise Sequence Difference (%)\n")
-    print(f"{'':<10} {'group0':<10} {'group1':<10} {'outgroup':<10}")
-    print("-" * 45)
-    print(f"{'group0':<10} {'-':<10} {avg_g0_g1:<10.4f} {avg_g0_out:<10.4f}")
-    print(f"{'group1':<10} {'-':<10} {'-':<10} {avg_g1_out:<10.4f}")
-    print(f"{'outgroup':<10} {'-':<10} {'-':<10} {'-':<10}\n")
+    # Report Fixed Difference Statistics
+    print("\n--- Fixed Difference Ancestry Analysis ---")
+    if total_fixed_diffs > 0:
+        g0_match_perc = (g0_matches_chimp_at_fixed / total_fixed_diffs) * 100
+        g1_match_perc = (g1_matches_chimp_at_fixed / total_fixed_diffs) * 100
+        print(f"Total fixed differences found between group0 and group1: {total_fixed_diffs}")
+        print(f"  - Group 0 allele matched Chimp: {g0_match_perc:.2f}% of the time.")
+        print(f"  - Group 1 allele matched Chimp: {g1_match_perc:.2f}% of the time.")
+
+        sorted_g0_scores = sorted(per_transcript_g0_match_scores.items(), key=lambda item: item[1])
+        print("\nTop 5 CDS where Group 0 allele LEAST resembles Chimp (at fixed diffs):")
+        for (gene_id, score) in sorted_g0_scores[:5]:
+            print(f"  - {gene_id:<40}: {score:.2f}% match")
+
+        sorted_g1_scores = sorted(per_transcript_g1_match_scores.items(), key=lambda item: item[1])
+        print("\nTop 5 CDS where Group 1 allele LEAST resembles Chimp (at fixed diffs):")
+        for (gene_id, score) in sorted_g1_scores[:5]:
+            print(f"  - {gene_id:<40}: {score:.2f}% match")
+    else:
+        print("No fixed differences were found between group0 and group1.")
+    print("="*50 + "\n")
+
 
 def main():
-    print("--- Starting Corrected Chimp CDS Phylip Generation ---")
+    print("--- Starting Corrected Chimp CDS Phylip Generation with Advanced Stats ---")
     download_axt_file()
     ungzip_file()
     validated_transcripts = validate_inputs_and_parse_metadata()
