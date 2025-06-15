@@ -338,7 +338,7 @@ def calculate_and_print_differences():
     sorted_divergence = sorted(per_transcript_divergence.items(), key=lambda item: item[1])
     print("\n--- Human-Chimp Substitution Divergence (Ignoring Indels) ---")
     print("Top LOWEST Divergence (Most Conserved):")
-    for (gene_id, div) in sorted_divergence[:50]:
+    for (gene_id, div) in sorted_divergence[:500]:
         print(f"  - {gene_id:<40}: {div:.4f}%")
     print("\nTop HIGHEST Divergence (Most Divergent):")
     for (gene_id, div) in sorted_divergence[-50:]:
