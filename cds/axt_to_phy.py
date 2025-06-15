@@ -77,9 +77,6 @@ def read_phy_sequence(filename):
             if len(lines) < 2:
                 return ""
             line = lines[1].strip()
-            # This regex finds the sequence part by looking for a contiguous
-            # block of valid sequence characters at the end of the line.
-            # This correctly separates the name from the sequence.
             match = re.search(r'[ACGTN-]+$', line, re.IGNORECASE)
             if match:
                 return match.group(0)
@@ -92,8 +89,7 @@ def read_phy_sequence(filename):
 def validate_inputs_and_parse_metadata():
     """
     Parses metadata, calculating expected length from coordinate chunks and
-    validating input .phy files against this calculated length using the
-    new robust parser.
+    validating input .phy files against this calculated length.
     """
     if not os.path.exists(METADATA_FILE):
         print(f"FATAL: Metadata file '{METADATA_FILE}' not found."); exit(1)
@@ -108,7 +104,6 @@ def validate_inputs_and_parse_metadata():
             parts = [p.strip() for p in line.strip().split('\t')]
             if len(parts) < 9: continue
             
-            # We need the full phy_filename to find the corresponding files
             phy_fname, t_id, gene, chrom, _, start, end, _, coords_str = parts[:9]
 
             cds_key = (t_id, coords_str)
@@ -126,7 +121,6 @@ def validate_inputs_and_parse_metadata():
             g0_fname = phy_fname.replace("group1_", "group0_") if "group1_" in phy_fname else phy_fname
             g1_fname = phy_fname.replace("group0_", "group1_") if "group0_" in phy_fname else phy_fname
             
-            # Use the NEW, corrected parser
             g0_seq = read_phy_sequence(g0_fname)
             g1_seq = read_phy_sequence(g1_fname)
             
@@ -134,7 +128,6 @@ def validate_inputs_and_parse_metadata():
                 logger.add("Missing Input File", f"{t_id}: group0 or group1 .phy file not found or is empty.")
                 continue
 
-            # This validation should now pass for all files.
             if len(g0_seq) != expected_len or len(g1_seq) != expected_len:
                 logger.add("Input Length Mismatch", f"{t_id}: Phy length (g0:{len(g0_seq)}, g1:{len(g1_seq)}) != calculated length from coords ({expected_len}).")
                 continue
@@ -148,7 +141,10 @@ def validate_inputs_and_parse_metadata():
     return validated_transcripts
 
 def process_axt_chunk(chunk_start, chunk_end, coord_map):
-    """Worker process. Iterates over its AXT chunk and fills a results dictionary."""
+    """
+    Worker process. Uses the coord_map to find relevant alignment blocks
+    and returns a dictionary of found sequence pieces.
+    """
     results = defaultdict(dict)
     with open(AXT_FILENAME, 'r') as f:
         f.seek(chunk_start)
@@ -163,37 +159,50 @@ def process_axt_chunk(chunk_start, chunk_end, coord_map):
             chimp_seq = f.readline().strip().upper()
             axt_chr, human_pos = header[1], int(header[2])
 
-            if axt_chr not in coord_map: continue
+            # Use .get() for safe access since coord_map is a standard dict
+            chr_coord_map = coord_map.get(axt_chr)
+            if not chr_coord_map: continue
 
-            chr_coord_map = coord_map[axt_chr]
             for h_char, c_char in zip(human_seq, chimp_seq):
                 if h_char != '-':
-                    if human_pos in chr_coord_map:
-                        for t_id, target_idx in chr_coord_map[human_pos]:
+                    # Use .get() for safe access here as well
+                    target_list = chr_coord_map.get(human_pos)
+                    if target_list:
+                        for t_id, target_idx in target_list:
                             if target_idx not in results[t_id]:
                                  results[t_id][target_idx] = c_char
                     human_pos += 1
-    return results
+    # Convert defaultdict to standard dict for pickling safety before returning
+    return dict(results)
 
 def build_chimp_sequences(validated_transcripts):
     """
-    Main coordinator. Builds an overlap-aware coordinate map, runs parallel jobs,
-    and assembles the final, correctly-aligned chimp sequences.
+    Main coordinator. Builds an overlap-aware coordinate map using standard dicts,
+    runs parallel jobs, and assembles the final chimp sequences.
     """
     if not validated_transcripts: return
 
     print("Pre-computing overlap-aware coordinate map...")
-    coord_map = defaultdict(lambda: defaultdict(list))
+    # THIS IS THE FIX: Use standard dicts, which are pickleable.
+    # coord_map = { 'chr1': {12345: [('ENST_A', 0), ('ENST_B', 55)], ...} }
+    coord_map = {}
     scaffold_map = {}
     
     for t in validated_transcripts:
         info, segments = t['info'], t['segments']
-        t_id = info['transcript_id']
+        t_id, chrom = info['transcript_id'], info['chromosome']
         scaffold_map[t_id] = ['-'] * info['expected_len']
+        
+        # Manually handle creation of nested dictionaries
+        if chrom not in coord_map:
+            coord_map[chrom] = {}
+        
         target_idx = 0
         for seg_start, seg_end in segments:
             for coord in range(seg_start, seg_end + 1):
-                coord_map[info['chromosome']][coord].append((t_id, target_idx))
+                if coord not in coord_map[chrom]:
+                    coord_map[chrom][coord] = []
+                coord_map[chrom][coord].append((t_id, target_idx))
                 target_idx += 1
 
     print(f"Processing '{AXT_FILENAME}' in parallel...")
@@ -236,7 +245,6 @@ def build_chimp_sequences(validated_transcripts):
         fname = f"outgroup_{gene}_{t_id}_{chrom}_start{start}_end{end}.phy"
         with open(fname, 'w') as f_out:
             f_out.write(f" 1 {len(final_sequence)}\n")
-            # Write in a standard, padded format.
             f_out.write(f"{'panTro5':<10}{final_sequence}\n")
         files_written += 1
     
