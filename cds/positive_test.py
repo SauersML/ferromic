@@ -1,5 +1,3 @@
-#DRAFT
-
 import os
 import re
 import sys
@@ -10,7 +8,7 @@ import tempfile
 import shutil
 import warnings
 from collections import defaultdict
-from ete3 import Tree, NodeStyle, TreeStyle
+from ete3 import Tree, NodeStyle, TreeStyle, TextFace, CircleFace, RectFace, AttrFace
 import numpy as np
 from scipy.stats import chi2
 from statsmodels.stats.multitest import fdrcorrection
@@ -38,21 +36,24 @@ FINAL_REPORT_FILE = "final_selection_report.txt"
 
 # --- Main Script Logic ---
 
-def run_command(command, work_dir):
+def run_command(command_list, work_dir):
     """Executes a command in a specified directory and handles errors."""
     try:
+        # Using shell=False is best practice for security and robustness
         result = subprocess.run(
-            command,
+            command_list,
             cwd=work_dir,
             check=True,
             capture_output=True,
             text=True,
-            shell=True # Using shell=True for simpler command strings
+            shell=False
         )
         return result
     except subprocess.CalledProcessError as e:
+        # Use ' '.join for a readable command string in the error message
+        cmd_str = ' '.join(e.cmd)
         error_message = (
-            f"Command '{e.cmd}' failed with exit code {e.returncode}.\n"
+            f"Command '{cmd_str}' failed with exit code {e.returncode}.\n"
             f"Working Directory: {work_dir}\n"
             f"--- STDOUT ---\n{e.stdout}\n"
             f"--- STDERR ---\n{e.stderr}"
@@ -66,7 +67,7 @@ def perform_qc(phy_file_path):
     """
     with open(phy_file_path, 'r') as f:
         lines = f.readlines()
-    
+
     header = lines[0].strip().split()
     seq_length = int(header[1])
 
@@ -80,7 +81,7 @@ def perform_qc(phy_file_path):
         if 'pantro' in parts[0].lower():
             chimp_seq = parts[1]
             break
-    
+
     if not human_seqs or not chimp_seq:
         return False, "Could not find both human and chimp sequences.", None
 
@@ -102,90 +103,134 @@ def perform_qc(phy_file_path):
 
     return True, "QC Passed", seq_length
 
+def _tree_layout(node):
+    """A layout function to dynamically style nodes for generate_tree_figure."""
+    if node.is_leaf():
+        name = node.name
+        pop_match = re.search(r'_(AFR|EUR|EAS|SAS|AMR)_', name)
+        pop = pop_match.group(1) if pop_match else 'CHIMP'
+        
+        # Create a new NodeStyle for each leaf to avoid cross-talk
+        nstyle = NodeStyle()
+        nstyle["fgcolor"] = POP_COLORS.get(pop, "#C0C0C0") # Default to light grey
+        nstyle["size"] = 10
+        nstyle["shape"] = "circle" # Default shape
+        
+        if name.startswith('1'):
+            nstyle["shape"] = "triangle"
+        elif 'pantro' in name.lower():
+            nstyle["shape"] = "square"
+        
+        # Add a border for better visibility
+        nstyle["hz_line_width"] = 1
+        nstyle["vt_line_width"] = 1
+        nstyle["stroke"] = "#333333" # Dark grey border
+        nstyle["strokewidth"] = 1
+        
+        node.set_style(nstyle)
+    
+    # Style internal nodes to show branch support
+    elif node.support > 0:
+        # Only show support values above a threshold, e.g., 50
+        if node.support > 50:
+            support_face = TextFace(f"{node.support:.0f}", fsize=7, fgcolor="grey")
+            support_face.margin_left = 2
+            node.add_face(support_face, column=0, position="branch-top")
+
 def generate_tree_figure(tree_file, gene_name):
-    """Creates a styled phylogenetic tree figure using ete3."""
+    """Creates a beautiful and robust phylogenetic tree figure using ete3."""
     try:
         t = Tree(tree_file, format=1)
         
-        direct_style = NodeStyle(shape="circle", size=8)
-        inverted_style = NodeStyle(shape="triangle", size=8)
-        chimp_style = NodeStyle(shape="square", size=8)
-        
-        for leaf in t.iter_leaves():
-            name = leaf.name
-            pop_match = re.search(r'_(AFR|EUR|EAS|SAS|AMR)_', name)
-            pop = pop_match.group(1) if pop_match else 'CHIMP'
-            
-            if name.startswith('0'):
-                style = direct_style.copy()
-            elif name.startswith('1'):
-                style = inverted_style.copy()
-            else:
-                style = chimp_style.copy()
-            
-            style["fgcolor"] = POP_COLORS.get(pop, "grey")
-            leaf.set_style(style)
-        
-        # Use TreeStyle for overall tree layout
+        # Create the main TreeStyle object
         ts = TreeStyle()
-        ts.show_leaf_name = False
-        ts.scale = 10 * t.get_farthest_leaf()[1] # Auto-scale
+        ts.layout_fn = _tree_layout  # Use the dynamic layout function
+        ts.show_leaf_name = False    # We use shapes/colors, not names
+        ts.show_scale = False        # We'll draw our own scale bar
+        ts.branch_vertical_margin = 8 # Add space between leaves
         
+        # --- Add a Title ---
+        ts.title.add_face(TextFace(f"Phylogeny of {gene_name}", fsize=16, ftype="Arial"), column=0)
+        
+        # --- Build a comprehensive Legend ---
+        # Haplotype Status Legend
+        ts.legend.add_face(TextFace("Haplotype Status", fsize=10, ftype="Arial", fstyle="Bold"), column=0)
+        ts.legend.add_face(CircleFace(10, "black", "circle"), column=0)
+        ts.legend.add_face(TextFace(" Direct", fsize=9), column=1)
+        ts.legend.add_face(CircleFace(10, "black", "triangle"), column=0)
+        ts.legend.add_face(TextFace(" Inverted", fsize=9), column=1)
+        ts.legend.add_face(RectFace(10, 10, "black", "black"), column=0)
+        ts.legend.add_face(TextFace(" Chimpanzee (Outgroup)", fsize=9), column=1)
+        
+        # Add a spacer column
+        ts.legend.add_face(TextFace(" "), column=2)
+
+        # Population Legend
+        ts.legend.add_face(TextFace("Super-population", fsize=10, ftype="Arial", fstyle="Bold"), column=3)
+        for pop, color in POP_COLORS.items():
+            ts.legend.add_face(CircleFace(10, color), column=3)
+            ts.legend.add_face(TextFace(f" {pop}", fsize=9), column=4)
+        ts.legend_position = 1 # Top-right
+
+        # --- Add a Scale Bar ---
+        ts.scale_length = 0.01 # The length of the bar in branch length units
+        
+        # Render the final figure with high resolution
         figure_path = os.path.join(FIGURE_DIR, f"{gene_name}.png")
-        t.render(figure_path, w=183, units="mm", tree_style=ts)
+        t.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
+
     except Exception as e:
         return f"Figure generation failed for {gene_name}: {e}"
     return None
 
 def annotate_tree_for_paml(tree_file, work_dir, gene_name):
-    """Annotates a tree file correctly for PAML's branch-site test."""
+    """
+    Robustly annotates a tree file for PAML's branch-site test using ETE's
+    object-oriented manipulation to avoid fragile string replacement.
+    """
     t = Tree(tree_file, format=1)
     
+    # --- Process Direct Haplotypes ---
     direct_leaves = [leaf.name for leaf in t if leaf.name.startswith('0')]
-    inverted_leaves = [leaf.name for leaf in t if leaf.name.startswith('1')]
-    
-    direct_fg_tree_path = os.path.join(work_dir, f"{gene_name}_direct_fg.tree")
-    if direct_leaves:
-        t_direct = t.copy()
+    direct_fg_tree_path = None
+    if len(direct_leaves) > 1: # A clade needs at least 2 members
+        t_direct = t.copy("newick") # Work on a clean copy
         mrca = t_direct.get_common_ancestor(direct_leaves)
-        if mrca and not mrca.is_root():
-            mrca_newick = mrca.write(format=1)
-            # Create a pattern including the branch length to ensure correct replacement
-            pattern_to_replace = f"{mrca_newick}:{mrca.dist}"
-            replacement = f"{pattern_to_replace} #1"
-            
-            full_tree_newick = t_direct.write(format=1)
-            marked_newick = full_tree_newick.replace(pattern_to_replace, replacement)
-
+        
+        # PAML cannot mark the root or a leaf branch
+        if mrca and not mrca.is_root() and not mrca.is_leaf():
+            mrca.add_feature("paml_mark", "#1")
+            direct_fg_tree_path = os.path.join(work_dir, f"{gene_name}_direct_fg.tree")
+            # The 'format=1' preserves internal node names if they exist.
+            # The 'features' argument uses NHX format for annotations.
+            newick_str = t_direct.write(format=1, features=["paml_mark"])
+            # PAML expects '#1' directly, so we clean up the NHX syntax.
+            paml_friendly_str = re.sub(r"\[&&NHX:paml_mark=#1\]", " #1", newick_str)
             with open(direct_fg_tree_path, 'w') as f:
-                f.write(marked_newick)
-        else: # Handle case where all leaves form the root
-             direct_fg_tree_path = None
-
-    inverted_fg_tree_path = os.path.join(work_dir, f"{gene_name}_inverted_fg.tree")
-    if inverted_leaves:
-        t_inverted = t.copy()
+                f.write(paml_friendly_str)
+                
+    # --- Process Inverted Haplotypes ---
+    inverted_leaves = [leaf.name for leaf in t if leaf.name.startswith('1')]
+    inverted_fg_tree_path = None
+    if len(inverted_leaves) > 1:
+        t_inverted = t.copy("newick")
         mrca = t_inverted.get_common_ancestor(inverted_leaves)
-        if mrca and not mrca.is_root():
-            mrca_newick = mrca.write(format=1)
-            pattern_to_replace = f"{mrca_newick}:{mrca.dist}"
-            replacement = f"{pattern_to_replace} #1"
-
-            full_tree_newick = t_inverted.write(format=1)
-            marked_newick = full_tree_newick.replace(pattern_to_replace, replacement)
-
+        
+        if mrca and not mrca.is_root() and not mrca.is_leaf():
+            mrca.add_feature("paml_mark", "#1")
+            inverted_fg_tree_path = os.path.join(work_dir, f"{gene_name}_inverted_fg.tree")
+            newick_str = t_inverted.write(format=1, features=["paml_mark"])
+            paml_friendly_str = re.sub(r"\[&&NHX:paml_mark=#1\]", " #1", newick_str)
             with open(inverted_fg_tree_path, 'w') as f:
-                f.write(marked_newick)
-        else:
-             inverted_fg_tree_path = None
+                f.write(paml_friendly_str)
 
-    return direct_fg_tree_path if direct_leaves else None, inverted_fg_tree_path if inverted_leaves else None
+    return direct_fg_tree_path, inverted_fg_tree_path
 
 def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, is_null_model):
     """Programmatically generates a codeml.ctl file."""
     omega_val = "1.0" if is_null_model else "1.5"
     fix_omega_val = "1" if is_null_model else "0"
-    
+
     ctl_content = f"""
       seqfile = {phy_file}
       treefile = {tree_file}
@@ -205,7 +250,8 @@ def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, is_null_model):
       cleandata = 0
     """
     with open(ctl_path, 'w') as f:
-        f.write(ctl_content)
+        # Use strip() to remove leading/trailing whitespace from the multiline string
+        f.write(ctl_content.strip())
 
 def parse_paml_lnl(outfile_path):
     """Extracts the log-likelihood (lnL) from a PAML output file robustly."""
@@ -220,35 +266,35 @@ def parse_paml_lnl(outfile_path):
 def run_paml_test(phy_file_abs_path, annotated_tree, work_dir):
     """Runs a full PAML alt vs null test and returns the p-value."""
     base_name = os.path.basename(annotated_tree).replace('.tree', '')
-    
+
     alt_ctl = os.path.join(work_dir, f"{base_name}_alt.ctl")
     alt_out = os.path.join(work_dir, f"{base_name}_alt.out")
     generate_paml_ctl(alt_ctl, phy_file_abs_path, annotated_tree, alt_out, is_null_model=False)
-    run_command(f"{PAML_PATH} {alt_ctl}", work_dir)
+    run_command([PAML_PATH, alt_ctl], work_dir)
     lnl_alt = parse_paml_lnl(alt_out)
 
     null_ctl = os.path.join(work_dir, f"{base_name}_null.ctl")
     null_out = os.path.join(work_dir, f"{base_name}_null.out")
     generate_paml_ctl(null_ctl, phy_file_abs_path, annotated_tree, null_out, is_null_model=True)
-    run_command(f"{PAML_PATH} {null_ctl}", work_dir)
+    run_command([PAML_PATH, null_ctl], work_dir)
     lnl_null = parse_paml_lnl(null_out)
 
     if lnl_alt < lnl_null:
         warnings.warn(f"PAML optimization issue in {base_name}: "
                       f"Alternative model Likelihood ({lnl_alt}) is less than Null ({lnl_null}). Skipping.")
         return np.nan
-        
+
     lr_stat = 2 * (lnl_alt - lnl_null)
     # p-value from a 50:50 mixture of chi-squared (df=0) and chi-squared (df=1)
     p_value = 0.5 * chi2.sf(lr_stat, df=1)
-    
+
     return p_value
 
 def worker_function(phy_filepath):
     """The main worker process that runs the entire pipeline for one CDS file."""
     gene_name = os.path.basename(phy_filepath).replace('combined_', '').replace('.phy', '')
     phy_file_abs_path = os.path.abspath(phy_filepath)
-    
+
     try:
         qc_passed, qc_message, _ = perform_qc(phy_filepath)
         if not qc_passed:
@@ -256,16 +302,27 @@ def worker_function(phy_filepath):
 
         with tempfile.TemporaryDirectory(prefix=f"{gene_name}_") as temp_dir:
             iqtree_out_prefix = os.path.join(temp_dir, gene_name)
-            
-            with open(phy_filepath, 'r') as f:
-                chimp_name = [line.strip().split()[0] for line in f if 'pantro' in line.lower()][0]
 
-            iqtree_cmd = (
-                f"{IQTREE_PATH} -s {phy_file_abs_path} -o {chimp_name} "
-                f"-m MFP -T 1 --prefix {iqtree_out_prefix}"
-            )
-            run_command(iqtree_cmd, temp_dir)
-            
+            chimp_name = ""
+            with open(phy_filepath, 'r') as f:
+                # Find the exact name of the chimp sequence to use as outgroup
+                for line in f:
+                    if 'pantro' in line.lower():
+                        chimp_name = line.strip().split()[0]
+                        break
+            if not chimp_name:
+                raise ValueError("Chimp sequence name not found in .phy file")
+
+            iqtree_cmd_list = [
+                IQTREE_PATH,
+                '-s', phy_file_abs_path,
+                '-o', chimp_name,
+                '-m', 'MFP',  # ModelFinder Plus
+                '-T', '1',     # Use 1 thread per job
+                '--prefix', iqtree_out_prefix
+            ]
+            run_command(iqtree_cmd_list, temp_dir)
+
             tree_file = f"{iqtree_out_prefix}.treefile"
             if not os.path.exists(tree_file):
                 raise FileNotFoundError("IQ-TREE did not produce a .treefile")
@@ -273,9 +330,9 @@ def worker_function(phy_filepath):
             figure_error = generate_tree_figure(tree_file, gene_name)
             if figure_error:
                 warnings.warn(f"For {gene_name}: {figure_error}")
-            
+
             direct_fg_tree, inverted_fg_tree = annotate_tree_for_paml(tree_file, temp_dir, gene_name)
-            
+
             p_direct, p_inverted = np.nan, np.nan
             if direct_fg_tree:
                 p_direct = run_paml_test(phy_file_abs_path, direct_fg_tree, temp_dir)
@@ -288,6 +345,9 @@ def worker_function(phy_filepath):
             }
 
     except Exception as e:
+        # Capture the full traceback for better debugging if needed, but return clean string
+        # import traceback
+        # return {'status': 'error', 'gene': gene_name, 'reason': traceback.format_exc()}
         return {'status': 'error', 'gene': gene_name, 'reason': str(e)}
 
 def main():
@@ -304,13 +364,14 @@ def main():
     phy_files = glob.glob('combined_*.phy')
     if not phy_files:
         sys.exit("FATAL: No 'combined_*.phy' files found in the current directory.")
-    
+
     print(f"Found {len(phy_files)} CDS files to process.")
 
     results = []
-    cpu_cores = os.cpu_count()
+    # Use one fewer core to leave system responsive, or os.cpu_count() for max power
+    cpu_cores = max(1, os.cpu_count() - 1) 
     print(f"Using {cpu_cores} CPU cores for parallel processing.")
-    
+
     with multiprocessing.Pool(processes=cpu_cores) as pool:
         with tqdm(total=len(phy_files), desc="Processing CDSs") as pbar:
             for result in pool.imap_unordered(worker_function, phy_files):
@@ -318,23 +379,29 @@ def main():
                 pbar.update(1)
 
     print("\n--- Analysis Complete. Aggregating results... ---")
-    
+
     successful_runs = [r for r in results if r['status'] == 'success']
     qc_failures = [r for r in results if r['status'] == 'qc_fail']
     errors = [r for r in results if r['status'] == 'error']
     
-    genes_direct, pvals_direct = zip(*[(r['gene'], r['p_direct']) for r in successful_runs if not np.isnan(r.get('p_direct'))])
-    genes_inverted, pvals_inverted = zip(*[(r['gene'], r['p_inverted']) for r in successful_runs if not np.isnan(r.get('p_inverted'))])
+    # Safely handle cases where no tests could be run
+    pvals_direct, genes_direct = [], []
+    if any(not np.isnan(r.get('p_direct', np.nan)) for r in successful_runs):
+        genes_direct, pvals_direct = zip(*[(r['gene'], r['p_direct']) for r in successful_runs if not np.isnan(r.get('p_direct'))])
+
+    pvals_inverted, genes_inverted = [], []
+    if any(not np.isnan(r.get('p_inverted', np.nan)) for r in successful_runs):
+        genes_inverted, pvals_inverted = zip(*[(r['gene'], r['p_inverted']) for r in successful_runs if not np.isnan(r.get('p_inverted'))])
 
     significant_direct, significant_inverted = {}, {}
     if pvals_direct:
-        rejected, qvals = fdrcorrection(pvals_direct, alpha=FDR_ALPHA, method='indep')
+        rejected, qvals = fdrcorrection(list(pvals_direct), alpha=FDR_ALPHA, method='indep')
         for i, is_sig in enumerate(rejected):
             if is_sig:
                 significant_direct[genes_direct[i]] = (pvals_direct[i], qvals[i])
-                
+
     if pvals_inverted:
-        rejected, qvals = fdrcorrection(pvals_inverted, alpha=FDR_ALPHA, method='indep')
+        rejected, qvals = fdrcorrection(list(pvals_inverted), alpha=FDR_ALPHA, method='indep')
         for i, is_sig in enumerate(rejected):
             if is_sig:
                 significant_inverted[genes_inverted[i]] = (pvals_inverted[i], qvals[i])
@@ -353,7 +420,7 @@ def main():
         else:
             f.write("  None\n")
         f.write("\n")
-        
+
         f.write(f"--- SIGNIFICANT POSITIVE SELECTION in INVERTED Haplotypes (q < {FDR_ALPHA}) ---\n")
         if significant_inverted:
             for gene, (p, q) in sorted(significant_inverted.items(), key=lambda item: item[1][1]):
@@ -367,7 +434,7 @@ def main():
             for r in sorted(qc_failures, key=lambda x: x['gene']):
                 f.write(f"  - {r['gene']:<40} Reason: {r['reason']}\n")
             f.write("\n")
-            
+
         if errors:
             f.write("--- CDSs that ERRORED During Analysis ---\n")
             for r in sorted(errors, key=lambda x: x['gene']):
