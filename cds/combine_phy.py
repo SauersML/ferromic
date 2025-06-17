@@ -3,6 +3,13 @@ import re
 from collections import defaultdict
 import sys
 
+
+# TODO:
+# add at least 2 whitespace chars as separation
+# prepend 1 in front of inv, 0 in front of dir
+
+
+
 def parse_specific_phy_file(filename, group_type):
     """
     Parses a PHYLIP-like file based on specific rules for different group types.
