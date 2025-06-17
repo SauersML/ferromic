@@ -13,6 +13,7 @@ METADATA_FILE = 'phy_metadata.tsv'
 AXT_URL = 'http://hgdownload.soe.ucsc.edu/goldenpath/hg38/vsPanTro5/hg38.panTro5.net.axt.gz'
 AXT_GZ_FILENAME = 'hg38.panTro5.net.axt.gz'
 AXT_FILENAME = 'hg38.panTro5.net.axt'
+DIVERGENCE_THRESHOLD = 10.0
 
 # --- For diagnostics: Set to an ENST ID string to get verbose logs for one transcript ---
 DEBUG_TRANSCRIPT = None 
@@ -21,7 +22,7 @@ DEBUG_TRANSCRIPT = None
 
 class Logger:
     """A simple class to manage and summarize warnings."""
-    def __init__(self, max_prints=15):
+    def __init__(self, max_prints=500): # Increased max_prints to show all filtered genes
         self.warnings = defaultdict(list)
         self.max_prints = max_prints
 
@@ -34,11 +35,13 @@ class Logger:
             print("All checks passed without warnings.")
             return
         for category, messages in self.warnings.items():
-            print(f"\nCategory '{category}': {len(messages)} total warnings.")
-            for msg in messages[:self.max_prints]:
+            print(f"\nCategory '{category}': {len(messages)} total warnings/notifications.")
+            # Sort messages for consistent output, especially for filtered genes
+            sorted_messages = sorted(messages)
+            for msg in sorted_messages[:self.max_prints]:
                 print(f"  - {msg}")
-            if len(messages) > self.max_prints:
-                print(f"  ... and {len(messages) - self.max_prints} more.")
+            if len(sorted_messages) > self.max_prints:
+                print(f"  ... and {len(sorted_messages) - self.max_prints} more.")
         print("-" * 35)
 
 logger = Logger()
@@ -131,7 +134,6 @@ def validate_inputs_and_parse_metadata():
                 logger.add("Missing Input File", f"{t_id}: group0 or group1 .phy file not found or is empty.")
                 continue
 
-            # Validate ALL sequences in each file
             valid_g0 = all(len(s) == expected_len for s in g0_seqs)
             valid_g1 = all(len(s) == expected_len for s in g1_seqs)
 
@@ -142,7 +144,8 @@ def validate_inputs_and_parse_metadata():
                 continue
 
             cds_info = {'gene_name': gene, 'transcript_id': t_id, 'chromosome': 'chr' + chrom,
-                        'expected_len': expected_len, 'start': start, 'end': end}
+                        'expected_len': expected_len, 'start': start, 'end': end,
+                        'g0_fname': g0_fname} # Store g0 filename for later QC
             validated_transcripts.append({'info': cds_info, 'segments': segments})
     
     return validated_transcripts
@@ -184,7 +187,7 @@ def process_axt_chunk(chunk_start, chunk_end, coord_map):
     
     return dict(results)
 
-def build_chimp_sequences(validated_transcripts):
+def build_chimp_sequences_and_filter(validated_transcripts):
     if not validated_transcripts: return
 
     print("Pre-computing overlap-aware coordinate map...")
@@ -212,14 +215,14 @@ def build_chimp_sequences(validated_transcripts):
     
     chunk_size = file_size // num_procs
     chunks = [(i * chunk_size, (i + 1) * chunk_size, coord_map) for i in range(num_procs)]
-    chunks[-1] = (chunks[-1][0], file_size, coord_map)
+    chunks[-1] = (chunks[-1][0], file_size, coord_map) # Ensure last chunk goes to the end
 
     start_time = time.time()
     with multiprocessing.Pool(processes=num_procs) as pool:
         list_of_results_dicts = pool.starmap(process_axt_chunk, chunks)
     print(f"Finished parallel AXT processing in {time.time() - start_time:.2f} seconds.")
 
-    print("Merging results, applying QC filter, and writing outgroup files...")
+    print("Merging results, applying divergence filter, and writing outgroup files...")
     for results_dict in list_of_results_dicts:
         for t_id, positions in results_dict.items():
             if t_id in scaffold_map:
@@ -227,105 +230,79 @@ def build_chimp_sequences(validated_transcripts):
                     if scaffold_map[t_id][target_idx] == '-':
                         scaffold_map[t_id][target_idx] = base
 
-    # Create a quick lookup map to get info from a transcript ID
-    transcript_info_map = {t['info']['transcript_id']: t['info'] for t in validated_transcripts}
     files_written = 0
-    filtered_out_count = 0
-
-    for t_id, final_sequence_list in scaffold_map.items():
-        info = transcript_info_map.get(t_id)
-        if not info: continue
-
-        final_sequence = "".join(final_sequence_list)
+    for t in validated_transcripts:
+        info = t['info']
+        t_id, gene, chrom, start, end = info['transcript_id'], info['gene_name'], info['chromosome'], info['start'], info['end']
+        g0_fname = info['g0_fname']
+        final_sequence = "".join(scaffold_map[t_id])
 
         if not final_sequence or final_sequence.count('-') == len(final_sequence):
             logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
             continue
             
-        # --- NEW QC STEP: Check divergence against a human sequence ---
-        gene, chrom, start, end = info['gene_name'], info['chromosome'], info['start'], info['end']
-        
-        # We need a representative human sequence to compare against
-        g0_fname = f"group0_{gene}_{t_id}_{chrom}_start{start}_end{end}.phy"
-        
-        if not os.path.exists(g0_fname):
-             logger.add("Missing Human File for QC", f"Could not find {g0_fname} to perform divergence check.")
-             continue
-        
+        # --- QC STEP: HUMAN/CHIMP DIVERGENCE FILTER ---
         human_seqs = read_phy_sequences(g0_fname)
         if not human_seqs:
-            logger.add("Empty Human File for QC", f"File {g0_fname} is empty, cannot perform divergence check.")
+            logger.add("Human File Missing for QC", f"Could not read human seqs from {g0_fname} for divergence check on {t_id}.")
             continue
         
-        human_seq_for_comp = human_seqs[0]
+        human_ref_seq = human_seqs[0]
         
-        # Calculate divergence, ignoring sites with gaps in either sequence for a fair comparison
-        n_comparable_sites = 0
         diff_count = 0
-        for h_base, c_base in zip(human_seq_for_comp, final_sequence):
+        comparable_sites = 0
+        for h_base, c_base in zip(human_ref_seq, final_sequence):
             if h_base != '-' and c_base != '-':
-                n_comparable_sites += 1
+                comparable_sites += 1
                 if h_base != c_base:
                     diff_count += 1
         
-        divergence_perc = (diff_count / n_comparable_sites) * 100 if n_comparable_sites > 0 else 0
+        divergence = (diff_count / comparable_sites) * 100 if comparable_sites > 0 else 0
         
-        outgroup_fname = f"outgroup_{gene}_{t_id}_{chrom}_start{start}_end{end}.phy"
-
-        # Apply the filter: if divergence is too high, log it, delete old file, and skip
-        if divergence_perc > 10.0:
-            filtered_out_count += 1
-            logger.add("High Divergence Filter", f"{t_id} ({gene}) filtered out. Divergence: {divergence_perc:.2f}% (> 10%).")
-            if os.path.exists(outgroup_fname):
-                try:
-                    os.remove(outgroup_fname)
-                except OSError as e:
-                    logger.add("File Deletion Error", f"Could not delete old high-divergence file {outgroup_fname}: {e}")
+        fname = f"outgroup_{gene}_{t_id}_{chrom}_start{start}_end{end}.phy"
+        if divergence > DIVERGENCE_THRESHOLD:
+            logger.add("QC Filter: High Divergence", f"'{gene} ({t_id})' removed. Divergence vs chimp: {divergence:.2f}% (> {DIVERGENCE_THRESHOLD}%).")
+            # Ensure file from a previous run is removed for consistency
+            if os.path.exists(fname):
+                os.remove(fname)
             continue
-
-        # --- End of new QC step ---
 
         if DEBUG_TRANSCRIPT == t_id:
             print(f"\n--- DEBUG: {t_id} ---\nFinal sequence (len={len(final_sequence)}): {final_sequence[:100]}...\n")
-
-        # If the script reaches here, the CDS passed the QC, so we write the file
-        with open(outgroup_fname, 'w') as f_out:
-            # The header correctly uses the full DNA sequence length
+            
+        with open(fname, 'w') as f_out:
             f_out.write(f" 1 {len(final_sequence)}\n")
             f_out.write(f"{'panTro5':<10}{final_sequence}\n")
         files_written += 1
     
-    print(f"\nWrote {files_written} outgroup phylip files.")
-    if filtered_out_count > 0:
-        print(f"Filtered out and removed {filtered_out_count} CDS due to >10% divergence with Chimp.")
+    print(f"Wrote {files_written} outgroup phylip files that passed the divergence filter.")
 
 def calculate_and_print_differences():
-    print("\n--- Final Difference Calculation & Statistics (on QC-passed data) ---")
+    print("\n--- Final Difference Calculation & Statistics ---")
     key_regex = re.compile(r"(ENST[0-9]+\.[0-9]+)_(chr.+?)_start([0-9]+)_end([0-9]+)")
     cds_groups = defaultdict(dict)
     for f in glob.glob('*.phy'):
         match = key_regex.search(os.path.basename(f))
         if match: cds_groups[match.groups()][os.path.basename(f).split('_')[0]] = f
 
-    # Data structures for new stats
-    per_transcript_divergence = {}
     total_fixed_diffs = 0
     g0_matches_chimp_at_fixed = 0
     g1_matches_chimp_at_fixed = 0
     per_transcript_g0_match_scores = {}
     per_transcript_g1_match_scores = {}
     
-    substitution_diffs = defaultdict(list)
     comparable_sets = 0
     
-    print("Analyzing each comparable transcript set...")
+    print("Analyzing each comparable transcript set (that passed the divergence filter)...")
     for identifier, group_files in cds_groups.items():
         if 'group0' in group_files and 'group1' in group_files and 'outgroup' in group_files:
             g0_seqs = read_phy_sequences(group_files['group0'])
             g1_seqs = read_phy_sequences(group_files['group1'])
-            out_seq = read_phy_sequences(group_files['outgroup'])[0]
+            out_seq_list = read_phy_sequences(group_files['outgroup'])
             
-            # --- Verification Step ---
+            if not out_seq_list: continue
+            out_seq = out_seq_list[0]
+            
             g0_len_set = set(len(s) for s in g0_seqs)
             g1_len_set = set(len(s) for s in g1_seqs)
             if not (len(g0_len_set) == 1 and len(g1_len_set) == 1):
@@ -342,13 +319,6 @@ def calculate_and_print_differences():
             t_id = identifier[0]
             gene_name = group_files['group0'].split('_')[1]
             
-            # --- Stat 1: Substitution Divergence (Ignoring Dashes) ---
-            diff_count = sum(1 for a, b in zip(g0_seqs[0], out_seq) if a != b and '-' not in (a, b))
-            sub_div = (diff_count / n) * 100 if n > 0 else 0
-            per_transcript_divergence[f"{gene_name} ({t_id})"] = sub_div
-            substitution_diffs['g0_out'].append(sub_div)
-
-            # --- Stat 2: Fixed Difference Analysis ---
             local_fixed_diffs = 0
             local_g0_matches = 0
             local_g1_matches = 0
@@ -376,28 +346,13 @@ def calculate_and_print_differences():
                 per_transcript_g1_match_scores[f"{gene_name} ({t_id})"] = (local_g1_matches / local_fixed_diffs) * 100
 
     if comparable_sets == 0:
-        print("CRITICAL: No complete sets found to compare after processing."); return
+        print("CRITICAL: No complete sets found to compare after filtering."); return
     print(f"Successfully analyzed {comparable_sets} complete CDS sets.")
 
-    # --- Print All New Statistics ---
     print("\n" + "="*50)
-    print(" REPORT (on QC-passed data)")
+    print(f" REPORT (on data with < {DIVERGENCE_THRESHOLD}% human-chimp divergence)")
     print("="*50)
     
-    # Report Substitution Divergence
-    if per_transcript_divergence:
-        sorted_divergence = sorted(per_transcript_divergence.items(), key=lambda item: item[1])
-        print("\n--- Human-Chimp Substitution Divergence (Ignoring Indels) ---")
-        print("Top LOWEST Divergence (Most Conserved):")
-        for (gene_id, div) in sorted_divergence[:500]:
-            print(f"  - {gene_id:<40}: {div:.4f}%")
-        print("\nTop HIGHEST Divergence (Most Divergent):")
-        for (gene_id, div) in sorted_divergence[-50:]:
-            print(f"  - {gene_id:<40}: {div:.4f}%")
-        avg_div = sum(substitution_diffs['g0_out']) / len(substitution_diffs['g0_out'])
-        print(f"\nOverall Average Substitution Divergence: {avg_div:.4f}%")
-
-    # Report Fixed Difference Statistics
     print("\n--- Fixed Difference Ancestry Analysis ---")
     if total_fixed_diffs > 0:
         g0_match_perc = (g0_matches_chimp_at_fixed / total_fixed_diffs) * 100
@@ -416,7 +371,7 @@ def calculate_and_print_differences():
         for (gene_id, score) in sorted_g1_scores[:5]:
             print(f"  - {gene_id:<40}: {score:.2f}% match")
     else:
-        print("No fixed differences were found between group0 and group1.")
+        print("No fixed differences were found between group0 and group1 among the filtered genes.")
     print("="*50 + "\n")
 
 
@@ -428,7 +383,7 @@ def main():
     if not validated_transcripts:
         print("No valid transcripts found after initial validation.")
     else:
-        build_chimp_sequences(validated_transcripts)
+        build_chimp_sequences_and_filter(validated_transcripts)
         calculate_and_print_differences()
     logger.report()
     print("--- Script finished. ---")
