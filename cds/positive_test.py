@@ -1,5 +1,3 @@
-# REWRITTEN SCRIPT - No Exception Handling, Dependencies Corrected
-
 import os
 import re
 import sys
@@ -9,9 +7,6 @@ import multiprocessing
 import tempfile
 import warnings
 from collections import defaultdict
-
-# --- ETE3 Imports ---
-# Core tree functionality is imported from the top-level.
 from ete3 import Tree
 from ete3.treeview import TreeStyle, NodeStyle, TextFace, CircleFace, RectFace
 
@@ -27,8 +22,8 @@ IQTREE_PATH = './iqtree-3.0.1-Linux/bin/iqtree3'
 PAML_PATH = '../paml/bin/codeml'
 
 # QC and analysis parameters
-DIVERGENCE_THRESHOLD = 0.10  # 10%
-FDR_ALPHA = 0.05             # Significance level for FDR-corrected p-values
+DIVERGENCE_THRESHOLD = 0.10
+FDR_ALPHA = 0.05
 
 # Superpopulation colors for tree figures
 POP_COLORS = {
@@ -37,28 +32,21 @@ POP_COLORS = {
 }
 
 # --- Output Directories ---
-# These will be created in the current working directory.
 FIGURE_DIR = "tree_figures"
-FINAL_REPORT_FILE = "final_selection_report.txt"
 
 # --- Main Script Logic ---
 
 def run_command(command_list, work_dir):
     """
     Executes a command and lets it crash on failure, raising a detailed error.
-    This does not suppress exceptions.
+    This function does NOT suppress exceptions.
     """
     try:
         subprocess.run(
-            command_list,
-            cwd=work_dir,
-            check=True,       # This will raise CalledProcessError on non-zero exit codes
-            capture_output=True,
-            text=True,
-            shell=False       # Safer and more robust
+            command_list, cwd=work_dir, check=True,
+            capture_output=True, text=True, shell=False
         )
     except subprocess.CalledProcessError as e:
-        # Re-raise the error with a more informative message. The program WILL crash.
         cmd_str = ' '.join(e.cmd)
         error_message = (
             f"\n--- COMMAND FAILED ---\n"
@@ -73,7 +61,8 @@ def run_command(command_list, work_dir):
 
 def perform_qc(phy_file_path):
     """
-    Performs quality control. Returns False if QC fails, True otherwise.
+    Performs quality control. Returns (False, reason) if QC fails,
+    (True, "QC Passed") otherwise.
     """
     with open(phy_file_path, 'r') as f:
         lines = f.readlines()
@@ -88,7 +77,9 @@ def perform_qc(phy_file_path):
     chimp_seq = None
     for line in lines[1:]:
         parts = line.strip().split()
-        if 'pantro' in parts[0].lower():
+        name_lower = parts[0].lower()
+        # ROBUSTNESS FIX: Check for common chimp identifiers.
+        if 'pantro' in name_lower or 'pan_troglodytes' in name_lower:
             chimp_seq = parts[1]
             break
 
@@ -113,7 +104,7 @@ def perform_qc(phy_file_path):
     return True, "QC Passed"
 
 def _tree_layout(node):
-    """A layout function to dynamically style nodes for generate_tree_figure."""
+    """A layout function to dynamically style nodes for the tree figure."""
     if node.is_leaf():
         name = node.name
         pop_match = re.search(r'_(AFR|EUR|EAS|SAS|AMR)_', name)
@@ -130,12 +121,12 @@ def _tree_layout(node):
 
         if name.startswith('1'):
             nstyle["shape"] = "triangle"
-        elif 'pantro' in name.lower():
+        elif 'pantro' in name.lower() or 'pan_troglodytes' in name.lower():
             nstyle["shape"] = "square"
         
         node.set_style(nstyle)
 
-    elif node.support > 50: # Only show reasonably high support values
+    elif node.support > 50:
         support_face = TextFace(f"{node.support:.0f}", fsize=7, fgcolor="grey")
         support_face.margin_left = 2
         node.add_face(support_face, column=0, position="branch-top")
@@ -147,7 +138,7 @@ def generate_tree_figure(tree_file, gene_name):
     ts = TreeStyle()
     ts.layout_fn = _tree_layout
     ts.show_leaf_name = False
-    ts.show_scale = False # Manually add a scale bar for better control
+    ts.show_scale = False
     ts.branch_vertical_margin = 8
     
     ts.title.add_face(TextFace(f"Phylogeny of {gene_name}", fsize=16, ftype="Arial"), column=0)
@@ -167,9 +158,9 @@ def generate_tree_figure(tree_file, gene_name):
     for pop, color in POP_COLORS.items():
         ts.legend.add_face(CircleFace(10, color), column=3)
         ts.legend.add_face(TextFace(f" {pop}", fsize=9), column=4)
-    ts.legend_position = 1 # Top-right
+    ts.legend_position = 1
 
-    ts.scale_length = 0.01 # Length of the scale bar in substitution units
+    ts.scale_length = 0.01
     
     figure_path = os.path.join(FIGURE_DIR, f"{gene_name}.png")
     t.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
@@ -239,14 +230,12 @@ def run_paml_test(phy_file_abs_path, annotated_tree, work_dir):
     """Runs a full PAML alt vs null test and returns the p-value."""
     base_name = os.path.basename(annotated_tree).replace('.tree', '')
 
-    # Alternative Model
     alt_ctl = os.path.join(work_dir, f"{base_name}_alt.ctl")
     alt_out = os.path.join(work_dir, f"{base_name}_alt.out")
     generate_paml_ctl(alt_ctl, phy_file_abs_path, annotated_tree, alt_out, is_null_model=False)
     run_command([PAML_PATH, alt_ctl], work_dir)
     lnl_alt = parse_paml_lnl(alt_out)
 
-    # Null Model
     null_ctl = os.path.join(work_dir, f"{base_name}_null.ctl")
     null_out = os.path.join(work_dir, f"{base_name}_null.out")
     generate_paml_ctl(null_ctl, phy_file_abs_path, annotated_tree, null_out, is_null_model=True)
@@ -277,8 +266,17 @@ def worker_function(phy_filepath):
     with tempfile.TemporaryDirectory(prefix=f"{gene_name}_") as temp_dir:
         iqtree_out_prefix = os.path.join(temp_dir, gene_name)
 
+        chimp_name = None
         with open(phy_filepath, 'r') as f:
-            chimp_name = [line.strip().split()[0] for line in f if 'pantro' in line.lower()][0]
+            for line in f:
+                name_lower = line.strip().split()[0].lower()
+                if 'pantro' in name_lower or 'pan_troglodytes' in name_lower:
+                    chimp_name = line.strip().split()[0]
+                    break
+        
+        # This will now crash if chimp is not found, as requested.
+        if chimp_name is None:
+             raise ValueError(f"Chimp sequence name not found in {phy_filepath}")
 
         iqtree_cmd_list = [
             IQTREE_PATH, '-s', phy_file_abs_path, '-o', chimp_name, '-m', 'MFP',
@@ -321,9 +319,9 @@ def main():
     print(f"Using {cpu_cores} CPU cores for parallel processing.")
     
     results = []
-    # Any crash inside a worker will now propagate and halt the entire script.
     with multiprocessing.Pool(processes=cpu_cores) as pool:
         with tqdm(total=len(phy_files), desc="Processing CDSs") as pbar:
+            # imap_unordered will raise any exception from a worker immediately
             for result in pool.imap_unordered(worker_function, phy_files):
                 results.append(result)
                 pbar.update(1)
@@ -352,33 +350,33 @@ def main():
         for i, is_sig in enumerate(rejected):
             if is_sig: significant_inverted[genes_inverted[i]] = (pvals_inverted[i], qvals[i])
 
-    with open(FINAL_REPORT_FILE, 'w') as f:
-        f.write("--- FINAL POSITIVE SELECTION PIPELINE REPORT ---\n\n")
-        f.write(f"Total CDSs processed: {len(phy_files)}\n")
-        f.write(f"  - Successful runs: {len(successful_runs)}\n")
-        f.write(f"  - Failed QC: {len(qc_failures)}\n\n")
+    # Print report directly to the console
+    print("\n\n--- FINAL POSITIVE SELECTION PIPELINE REPORT ---\n")
+    print(f"Total CDSs processed: {len(phy_files)}")
+    print(f"  - Successful runs: {len(successful_runs)}")
+    print(f"  - Failed QC: {len(qc_failures)}\n")
 
-        f.write(f"--- SIGNIFICANT POSITIVE SELECTION in DIRECT Haplotypes (q < {FDR_ALPHA}) ---\n")
-        if significant_direct:
-            for gene, (p, q) in sorted(significant_direct.items(), key=lambda item: item[1][1]):
-                f.write(f"  - {gene:<40} (p={p:.4g}, q={q:.4g})\n")
-        else: f.write("  None\n")
-        f.write("\n")
+    print(f"--- SIGNIFICANT POSITIVE SELECTION in DIRECT Haplotypes (q < {FDR_ALPHA}) ---")
+    if significant_direct:
+        for gene, (p, q) in sorted(significant_direct.items(), key=lambda item: item[1][1]):
+            print(f"  - {gene:<40} (p={p:.4g}, q={q:.4g})")
+    else: print("  None")
+    print("")
+    
+    print(f"--- SIGNIFICANT POSITIVE SELECTION in INVERTED H haplotypes (q < {FDR_ALPHA}) ---")
+    if significant_inverted:
+        for gene, (p, q) in sorted(significant_inverted.items(), key=lambda item: item[1][1]):
+            print(f"  - {gene:<40} (p={p:.4g}, q={q:.4g})")
+    else: print("  None")
+    print("")
+
+    if qc_failures:
+        print("--- CDSs that FAILED Quality Control ---")
+        for r in sorted(qc_failures, key=lambda x: x['gene']):
+            print(f"  - {r['gene']:<40} Reason: {r['reason']}")
+        print("")
         
-        f.write(f"--- SIGNIFICANT POSITIVE SELECTION in INVERTED Haplotypes (q < {FDR_ALPHA}) ---\n")
-        if significant_inverted:
-            for gene, (p, q) in sorted(significant_inverted.items(), key=lambda item: item[1][1]):
-                f.write(f"  - {gene:<40} (p={p:.4g}, q={q:.4g})\n")
-        else: f.write("  None\n")
-        f.write("\n")
-
-        if qc_failures:
-            f.write("--- CDSs that FAILED Quality Control ---\n")
-            for r in sorted(qc_failures, key=lambda x: x['gene']):
-                f.write(f"  - {r['gene']:<40} Reason: {r['reason']}\n")
-            f.write("\n")
-            
-    print(f"\nPipeline finished. A detailed summary has been written to '{FINAL_REPORT_FILE}'.")
+    print(f"\nPipeline finished. Report printed above.")
     print(f"Tree figures have been saved to the '{FIGURE_DIR}/' directory.")
 
 if __name__ == '__main__':
