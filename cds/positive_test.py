@@ -132,6 +132,14 @@ def _tree_layout(node):
         node.set_style(nstyle)
 
     elif node.support > 50:
+        # First, set a base style for the node itself (e.g., a dark grey circle).
+        nstyle = NodeStyle()
+        nstyle["shape"] = "circle"
+        nstyle["size"] = 5
+        nstyle["fgcolor"] = "#444444"
+        node.set_style(nstyle)
+
+        # Then, add the support value text label next to it.
         support_face = TextFace(f"{node.support:.0f}", fsize=7, fgcolor="grey")
         support_face.margin_left = 2
         node.add_face(support_face, column=0, position="branch-top")
