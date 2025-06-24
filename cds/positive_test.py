@@ -116,20 +116,33 @@ def _tree_layout(node):
         name = node.name
         pop_match = re.search(r'_(AFR|EUR|EAS|SAS|AMR)_', name)
         pop = pop_match.group(1) if pop_match else 'CHIMP'
-
+        color = POP_COLORS.get(pop, "#C0C0C0")
+    
+        # Create a base style for all leaf nodes
         nstyle = NodeStyle()
-        nstyle["fgcolor"] = POP_COLORS.get(pop, "#C0C0C0")
-        nstyle["size"] = 10
-        nstyle["shape"] = "circle"
+        nstyle["fgcolor"] = color
         nstyle["hz_line_width"] = 1
         nstyle["vt_line_width"] = 1
-
-        if name.startswith('1'):
-            nstyle["shape"] = "triangle"
-        elif 'pantro' in name.lower() or 'pan_troglodytes' in name.lower():
-            nstyle["shape"] = "square"
-
         node.set_style(nstyle)
+    
+        # Set shape based on haplotype type
+        if name.startswith('1'): # Inverted Haplotype
+            # The 'shape' property does not support "triangle".
+            # We make the node invisible and add a styled Face instead.
+            nstyle["size"] = 0
+            # For a "size 10" look, the radius should be 5.
+            # The 'style="triangle"' argument tells the face to render as a triangle.
+            triangle_face = CircleFace(radius=5, color=color, style="triangle")
+            # Places the face where the node would normally be
+            node.add_face(triangle_face, column=0, position="aligned")
+    
+        elif 'pantro' in name.lower() or 'pan_troglodytes' in name.lower(): # Chimpanzee
+            nstyle["shape"] = "square"
+            nstyle["size"] = 10
+
+    else: # Direct Haplotype
+        nstyle["shape"] = "circle"
+        nstyle["size"] = 10
 
     elif node.support > 50:
         # First, set a base style for the node itself (e.g., a dark grey circle).
