@@ -128,13 +128,20 @@ def _tree_layout(node):
             nstyle["shape"] = "triangle"
         elif 'pantro' in name.lower() or 'pan_troglodytes' in name.lower():
             nstyle["shape"] = "square"
-        
+
         node.set_style(nstyle)
 
     elif node.support > 50:
         support_face = TextFace(f"{node.support:.0f}", fsize=7, fgcolor="grey")
         support_face.margin_left = 2
         node.add_face(support_face, column=0, position="branch-top")
+    
+    else:
+        nstyle = NodeStyle()
+        nstyle["shape"] = "circle"
+        nstyle["size"] = 3  # Make them small
+        nstyle["fgcolor"] = "#CCCCCC" # Make them light grey
+        node.set_style(nstyle)
 
 def generate_tree_figure(tree_file, gene_name):
     """Creates a publication-quality phylogenetic tree figure using ete3."""
