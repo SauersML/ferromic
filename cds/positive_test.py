@@ -140,9 +140,6 @@ def _tree_layout(node):
             nstyle["shape"] = "circle"
             nstyle["size"] = 10
             
-        else:  # Direct Haplotype
-            nstyle["shape"] = "circle"
-            nstyle["size"] = 10
 
     # --- Style Internal Nodes with High Support ---
     elif node.support > 50:
