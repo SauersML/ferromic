@@ -214,7 +214,11 @@ def annotate_tree_for_paml(tree_file, work_dir, gene_name):
             direct_fg_tree_path = os.path.join(work_dir, f"{gene_name}_direct_fg.tree")
             newick_str = t_direct.write(format=1, features=["paml_mark"])
             paml_friendly_str = re.sub(r"\[&&NHX:paml_mark=#1\]", " #1", newick_str)
-            with open(direct_fg_tree_path, 'w') as f: f.write(paml_friendly_str)
+            with open(direct_fg_tree_path, 'w') as f:
+                # Write the PAML header: (Number of Sequences) (Number of Trees)
+                num_seqs = len(t_direct)
+                f.write(f"{num_seqs} 1\n")
+                f.write(paml_friendly_str)
                 
     inverted_leaves = [leaf.name for leaf in t if leaf.name.startswith('1')]
     inverted_fg_tree_path = None
