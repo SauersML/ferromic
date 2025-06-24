@@ -109,43 +109,44 @@ def perform_qc(phy_file_path):
         return False, f"Median divergence {median_divergence:.2%} > {DIVERGENCE_THRESHOLD:.0%}."
 
     return True, "QC Passed"
-
 def _tree_layout(node):
     """A layout function to dynamically style nodes for the tree figure."""
+    # --- Style Leaf Nodes (Haplotypes and Outgroup) ---
     if node.is_leaf():
         name = node.name
         pop_match = re.search(r'_(AFR|EUR|EAS|SAS|AMR)_', name)
         pop = pop_match.group(1) if pop_match else 'CHIMP'
         color = POP_COLORS.get(pop, "#C0C0C0")
-    
+
         # Create a base style for all leaf nodes
         nstyle = NodeStyle()
         nstyle["fgcolor"] = color
         nstyle["hz_line_width"] = 1
         nstyle["vt_line_width"] = 1
         node.set_style(nstyle)
-    
+
         # Set shape based on haplotype type
-        if name.startswith('1'): # Inverted Haplotype
-            # The 'shape' property does not support "triangle".
+        if name.startswith('1'):  # Inverted Haplotype
+            # The 'shape' property doesn't support "triangle".
             # We make the node invisible and add a styled Face instead.
             nstyle["size"] = 0
             # For a "size 10" look, the radius should be 5.
-            # The 'style="triangle"' argument tells the face to render as a triangle.
+            # The 'style="triangle"' argument renders the face as a triangle.
             triangle_face = CircleFace(radius=5, color=color, style="triangle")
             # Places the face where the node would normally be
             node.add_face(triangle_face, column=0, position="aligned")
-    
-        elif 'pantro' in name.lower() or 'pan_troglodytes' in name.lower(): # Chimpanzee
+
+        elif 'pantro' in name.lower() or 'pan_troglodytes' in name.lower():  # Chimpanzee
             nstyle["shape"] = "square"
             nstyle["size"] = 10
 
-    else: # Direct Haplotype
-        nstyle["shape"] = "circle"
-        nstyle["size"] = 10
+        else:  # Direct Haplotype
+            nstyle["shape"] = "circle"
+            nstyle["size"] = 10
 
+    # --- Style Internal Nodes with High Support ---
     elif node.support > 50:
-        # First, set a base style for the node itself (e.g., a dark grey circle).
+        # First, set a base style for the node itself (a dark grey circle).
         nstyle = NodeStyle()
         nstyle["shape"] = "circle"
         nstyle["size"] = 5
@@ -156,12 +157,13 @@ def _tree_layout(node):
         support_face = TextFace(f"{node.support:.0f}", fsize=7, fgcolor="grey")
         support_face.margin_left = 2
         node.add_face(support_face, column=0, position="branch-top")
-    
+
+    # --- Style Internal Nodes with Low Support ---
     else:
         nstyle = NodeStyle()
         nstyle["shape"] = "circle"
         nstyle["size"] = 3  # Make them small
-        nstyle["fgcolor"] = "#CCCCCC" # Make them light grey
+        nstyle["fgcolor"] = "#CCCCCC"  # Make them light grey
         node.set_style(nstyle)
 
 def generate_tree_figure(tree_file, gene_name):
