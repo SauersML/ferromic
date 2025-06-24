@@ -74,6 +74,9 @@ def perform_qc(phy_file_path):
     with open(phy_file_path, 'r') as f:
         lines = f.readlines()
 
+    if not lines or len(lines[0].strip().split()) < 2:
+        return False, f"File is empty or header is missing/malformed."
+
     header = lines[0].strip().split()
     seq_length = int(header[1])
 
