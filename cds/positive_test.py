@@ -18,8 +18,8 @@ from tqdm import tqdm
 
 # --- Configuration ---
 # Relative paths to the executable files from where this script is run.
-IQTREE_PATH = './iqtree-3.0.1-Linux/bin/iqtree3'
-PAML_PATH = '../paml/bin/codeml'
+IQTREE_PATH = os.path.abspath('./iqtree-3.0.1-Linux/bin/iqtree3')
+PAML_PATH = os.path.abspath('../paml/bin/codeml')
 
 # QC and analysis parameters
 DIVERGENCE_THRESHOLD = 0.10
