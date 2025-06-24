@@ -226,7 +226,9 @@ def annotate_tree_for_paml(tree_file, work_dir, gene_name):
             inverted_fg_tree_path = os.path.join(work_dir, f"{gene_name}_inverted_fg.tree")
             newick_str = t_inverted.write(format=1, features=["paml_mark"])
             paml_friendly_str = re.sub(r"\[&&NHX:paml_mark=#1\]", " #1", newick_str)
-            with open(inverted_fg_tree_path, 'w') as f: f.write(paml_friendly_str)
+            with open(inverted_fg_tree_path, 'w') as f:
+                f.write("1 1\n")  # PAML bug
+                f.write(paml_friendly_str)
 
     return direct_fg_tree_path, inverted_fg_tree_path
 
