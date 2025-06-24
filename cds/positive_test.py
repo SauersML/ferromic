@@ -177,10 +177,13 @@ def generate_tree_figure(tree_file, gene_name):
     
     # Haplotype Status Legend
     ts.legend.add_face(TextFace("Haplotype Status", fsize=10, ftype="Arial", fstyle="Bold"), column=0)
-    ts.legend.add_face(CircleFace(10, "black"), column=0)
+    # Direct = Circle. A radius of 5 creates a 10px diameter shape, matching node size.
+    ts.legend.add_face(CircleFace(5, "black", style="circle"), column=0)
     ts.legend.add_face(TextFace(" Direct", fsize=9), column=1)
-    ts.legend.add_face(CircleFace(10, "black", "triangle"), column=0)
+    # Inverted = Sphere
+    ts.legend.add_face(CircleFace(5, "black", style="sphere"), column=0)
     ts.legend.add_face(TextFace(" Inverted", fsize=9), column=1)
+    # Chimp = Square
     ts.legend.add_face(RectFace(10, 10, "black", "black"), column=0)
     ts.legend.add_face(TextFace(" Chimpanzee (Outgroup)", fsize=9), column=1)
     ts.legend.add_face(TextFace(" "), column=2) # Spacer
