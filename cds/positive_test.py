@@ -17,6 +17,10 @@ from statsmodels.stats.multitest import fdrcorrection
 from tqdm import tqdm
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+user = getpass.getuser()
+runtime_dir = f"/tmp/runtime-{user}"
+os.makedirs(runtime_dir, exist_ok=True, mode=0o700)
+os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 
 # --- Configuration ---
 # Relative paths to the executable files from where this script is run.
@@ -118,8 +122,6 @@ def _tree_layout(node):
         nstyle["shape"] = "circle"
         nstyle["hz_line_width"] = 1
         nstyle["vt_line_width"] = 1
-        nstyle["stroke"] = "#333333"
-        nstyle["strokewidth"] = 1
 
         if name.startswith('1'):
             nstyle["shape"] = "triangle"
