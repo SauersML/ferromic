@@ -128,21 +128,18 @@ def _tree_layout(node):
         nstyle["vt_line_width"] = 1
         node.set_style(nstyle)
 
-        # Set shape based on haplotype type
         if name.startswith('1'):  # Inverted Haplotype
-            # The 'shape' property doesn't support "triangle".
-            # We make the node invisible and add a styled Face instead.
-            nstyle["size"] = 0
-            # For a "size 10" look, the radius should be 5.
-            # The 'style="triangle"' argument renders the face as a triangle.
-            triangle_face = CircleFace(radius=5, color=color, style="triangle")
-            # Places the face where the node would normally be
-            node.add_face(triangle_face, column=0, position="aligned")
+            nstyle["shape"] = "sphere"
+            nstyle["size"] = 10
 
         elif 'pantro' in name.lower() or 'pan_troglodytes' in name.lower():  # Chimpanzee
             nstyle["shape"] = "square"
             nstyle["size"] = 10
 
+        else:  # Direct Haplotype
+            nstyle["shape"] = "circle"
+            nstyle["size"] = 10
+            
         else:  # Direct Haplotype
             nstyle["shape"] = "circle"
             nstyle["size"] = 10
