@@ -9,6 +9,7 @@ import warnings
 from collections import defaultdict
 from ete3 import Tree
 from ete3.treeview import TreeStyle, NodeStyle, TextFace, CircleFace, RectFace
+import getpass
 
 # --- Scientific Computing Imports ---
 import numpy as np
