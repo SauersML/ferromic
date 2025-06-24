@@ -16,6 +16,8 @@ from scipy.stats import chi2
 from statsmodels.stats.multitest import fdrcorrection
 from tqdm import tqdm
 
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
 # --- Configuration ---
 # Relative paths to the executable files from where this script is run.
 IQTREE_PATH = os.path.abspath('./iqtree-3.0.1-Linux/bin/iqtree3')
@@ -285,6 +287,7 @@ def worker_function(phy_filepath):
         run_command(iqtree_cmd_list, temp_dir)
         
         tree_file = f"{iqtree_out_prefix}.treefile"
+        print(f"Worker {os.getpid()}: Generating figure for {gene_name}...", flush=True)
         generate_tree_figure(tree_file, gene_name)
         
         direct_fg_tree, inverted_fg_tree = annotate_tree_for_paml(tree_file, temp_dir, gene_name)
