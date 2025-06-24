@@ -3,13 +3,6 @@ import re
 from collections import defaultdict
 import sys
 
-
-# TODO:
-# add at least 2 whitespace chars as separation
-# prepend 1 in front of inv, 0 in front of dir
-
-
-
 def parse_specific_phy_file(filename, group_type):
     """
     Parses a PHYLIP-like file based on specific rules for different group types.
@@ -76,9 +69,10 @@ def parse_specific_phy_file(filename, group_type):
         if taxon_name and seq:
             # Clean any whitespace from within the sequence string itself
             cleaned_seq = ''.join(seq.split())
-            sequences.append((taxon_name.strip(), cleaned_seq))
+            # Add the group_type to the returned data structure
+            sequences.append((taxon_name.strip(), cleaned_seq, group_type))
         else:
-             # This case should not be reached with the logic above, but is a safeguard.
+            # This case should not be reached with the logic above, but is a safeguard.
             print(f"  [!] FAILURE: In '{filename}' (line {i}), parsing logic failed unexpectedly.", file=sys.stderr)
             return None
 
@@ -146,7 +140,7 @@ def find_and_combine_phy_files():
             print(f"  [!] FAILURE: No sequences found for trio '{identifier}'. Skipping.", file=sys.stderr)
             continue
             
-        for taxon, seq in all_sequences_for_trio:
+        for taxon, seq, _ in all_sequences_for_trio:
             # The first valid sequence sets the standard length.
             if expected_dna_length is None:
                 if len(seq) % 3 != 0:
@@ -177,8 +171,20 @@ def find_and_combine_phy_files():
             with open(output_filename, 'w') as f_out:
                 # Write the header with the number of sequences and the CORRECT sequence length.
                 f_out.write(f"{num_sequences} {alignment_length}\n")
-                for taxon, seq in all_sequences_for_trio:
-                    f_out.write(f"{taxon} {seq}\n")
+                
+                # Iterate through all sequences, now including the group_type
+                for taxon, seq, group_type in all_sequences_for_trio:
+                    final_taxon_name = taxon
+                    
+                    # Prepend 0 for direct (group0) and 1 for inverted (group1)
+                    if group_type == 'group0':
+                        final_taxon_name = f"0{taxon}"
+                    elif group_type == 'group1':
+                        final_taxon_name = f"1{taxon}"
+                    
+                    # Write with the modified taxon name and two spaces for separation
+                    f_out.write(f"{final_taxon_name}  {seq}\n")
+                    
             print(f"  -> SUCCESS: Created '{output_filename}'")
             trios_processed_count += 1
         except IOError as e:
