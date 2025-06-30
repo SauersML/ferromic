@@ -20,6 +20,7 @@ COORDINATE_MAP_FILE = 'map.tsv' # New configuration for the map file
 VIOLIN_PLOT_TEMPLATE = 'comparison_violin_{column_safe_name}.png'
 BOX_PLOT_TEMPLATE = 'comparison_boxplot_{column_safe_name}.png'
 SCATTER_PLOT_TEMPLATE = 'scatter_fst_{fst_col_safe}_vs_{attr_col_safe}.png'
+FST_OUTPUT_TSV = 'inversion_fst_estimates.tsv' # Output for inversion FST list
 
 
 # Columns for Analysis (all columns to process for data quality checks)
@@ -388,6 +389,46 @@ def prepare_data_for_analysis(summary_df_with_types, column_name):
                 pf2 = s2_stats['flagged_oos'] / s2_stats['numeric_for_analysis']
                 if abs(pf1 - pf2) > DATA_QUALITY_DISCREPANCY_THRESHOLD:
                     logger.warning(f"DISCREPANCY FlaggedAsOutOfSpec for '{column_name}': {keys[0]} {pf1:.2%}, {keys[1]} {pf2:.2%}.")
+
+def write_inversion_fst_to_tsv(summary_df_with_types, output_filename):
+    """
+    Filters for classified inversions and writes their coordinates, type, and FST estimates to a TSV file.
+
+    Args:
+        summary_df_with_types (pd.DataFrame): The main dataframe after inversion types have been assigned.
+        output_filename (str): The path to the output TSV file.
+    """
+    logger.info(f"\n====== Writing Inversion FST Estimates to TSV ======")
+
+    # Define the inversion types to be included in the output
+    valid_inversion_types = list(INVERSION_CATEGORY_MAPPING.values())
+
+    # Filter the DataFrame to include only rows with valid inversion types
+    inversion_df = summary_df_with_types[summary_df_with_types['inversion_type'].isin(valid_inversion_types)].copy()
+
+    if inversion_df.empty:
+        logger.warning(f"No classified inversions found. The output TSV file '{output_filename}' will not be created.")
+        return
+
+    # Define the columns for the output file from existing constants
+    coord_cols = list(SUMMARY_STATS_COORDINATE_COLUMNS.values())
+    fst_cols = FST_COLUMNS_FOR_TEST_AND_VIOLIN_PLOT
+    output_columns = coord_cols + ['inversion_type'] + fst_cols
+
+    # Check if all desired columns exist in the dataframe
+    missing_cols = [col for col in output_columns if col not in inversion_df.columns]
+    if missing_cols:
+        logger.error(f"Cannot create FST output TSV. The following required columns are missing from the data: {missing_cols}. Skipping TSV generation.")
+        return
+
+    # Select the columns for the output file
+    output_df = inversion_df[output_columns]
+
+    try:
+        output_df.to_csv(output_filename, sep='\t', index=False, float_format='%.6f', na_rep='NA')
+        logger.info(f"Successfully wrote {len(output_df)} inversion records to '{output_filename}'")
+    except IOError as e:
+        logger.error(f"Failed to write FST estimates to TSV file '{output_filename}': {e}")
 
 def _plot_common_elements(ax, plot_data_for_current_col, analysis_column_name, plot_type_specific_func):
     plot_labels = list(INVERSION_CATEGORY_MAPPING.keys())
@@ -811,10 +852,13 @@ def main():
         if sup_c > 0: logger.info(f"{sup_c} warnings for '{k_warn}' suppressed during summary typing.")
 
     type_cts = sum_df['inversion_type'].value_counts()
-    logger.info(f"Counts of regions by assigned inversion type:\n{type_cts.to_string()}")
-    if 'coordinate_error' in type_cts: logger.warning(f"{type_cts['coordinate_error']} regions in '{SUMMARY_STATS_FILE}' had coordinate errors during type assignment.")
-    if not any(c_type in type_cts for c_type in INVERSION_CATEGORY_MAPPING.values()): 
-        logger.warning(f"No regions were classified into known inversion types ('{list(INVERSION_CATEGORY_MAPPING.values())}'). Check inputs and mapping results.")
+    logger.info(f"Counts of regions by assigned inversion type:\n{type_cts.to_string()}")
+    if 'coordinate_error' in type_cts: logger.warning(f"{type_cts['coordinate_error']} regions in '{SUMMARY_STATS_FILE}' had coordinate errors during type assignment.")
+    if not any(c_type in type_cts for c_type in INVERSION_CATEGORY_MAPPING.values()): 
+        logger.warning(f"No regions were classified into known inversion types ('{list(INVERSION_CATEGORY_MAPPING.values())}'). Check inputs and mapping results.")
+
+    # Generate the TSV output file with inversion FST estimates
+    write_inversion_fst_to_tsv(sum_df, FST_OUTPUT_TSV)
 
     categorized_dfs = {}
     for inv_type_display_name, inv_type_internal_key in INVERSION_CATEGORY_MAPPING.items():
