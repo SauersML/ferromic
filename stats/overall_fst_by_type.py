@@ -852,13 +852,13 @@ def main():
         if sup_c > 0: logger.info(f"{sup_c} warnings for '{k_warn}' suppressed during summary typing.")
 
     type_cts = sum_df['inversion_type'].value_counts()
-    logger.info(f"Counts of regions by assigned inversion type:\n{type_cts.to_string()}")
-    if 'coordinate_error' in type_cts: logger.warning(f"{type_cts['coordinate_error']} regions in '{SUMMARY_STATS_FILE}' had coordinate errors during type assignment.")
-    if not any(c_type in type_cts for c_type in INVERSION_CATEGORY_MAPPING.values()): 
-        logger.warning(f"No regions were classified into known inversion types ('{list(INVERSION_CATEGORY_MAPPING.values())}'). Check inputs and mapping results.")
+    logger.info(f"Counts of regions by assigned inversion type:\n{type_cts.to_string()}")
+    if 'coordinate_error' in type_cts: logger.warning(f"{type_cts['coordinate_error']} regions in '{SUMMARY_STATS_FILE}' had coordinate errors during type assignment.")
+    if not any(c_type in type_cts for c_type in INVERSION_CATEGORY_MAPPING.values()): 
+        logger.warning(f"No regions were classified into known inversion types ('{list(INVERSION_CATEGORY_MAPPING.values())}'). Check inputs and mapping results.")
 
-    # Generate the TSV output file with inversion FST estimates
-    write_inversion_fst_to_tsv(sum_df, FST_OUTPUT_TSV)
+    # Generate the TSV output file with inversion FST estimates
+    write_inversion_fst_to_tsv(sum_df, FST_OUTPUT_TSV)
 
     categorized_dfs = {}
     for inv_type_display_name, inv_type_internal_key in INVERSION_CATEGORY_MAPPING.items():
