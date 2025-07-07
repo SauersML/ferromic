@@ -189,57 +189,91 @@ def generate_tree_figure(tree_file, gene_name):
     t.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
 
 # ==============================================================================
-# === CORE ANALYSIS FUNCTIONS (REWRITTEN) ======================================
+# === CORE ANALYSIS FUNCTIONS  ======================================
 # ==============================================================================
 
 def create_paml_tree_files(iqtree_file, work_dir, gene_name):
-    """
-    Creates two PAML-formatted tree files for the Likelihood Ratio Test.
-
-    Args:
-        iqtree_file (str): Path to the input tree file from IQ-TREE.
-        work_dir (str): Directory to write the new tree files.
-        gene_name (str): The name of the gene for file naming.
-
-    Returns:
-        tuple: (h1_tree_path, h0_tree_path)
-        - H1 (Alternative): Inverted (#1) and Direct (#0) branches labeled differently.
-        - H0 (Null): Inverted and Direct branches labeled the same (#0).
-    """
+    logging.info(f"[{gene_name}] Labeling internal branches conservatively...")
     t = Tree(iqtree_file, format=1)
 
-    # --- H1 (Alternative Model) Tree: 3-omega model ---
+    # Step 1: Propagate status up from the leaves ("post-order" traversal).
+    # A temporary attribute 'group_status' is added to each node.
+    for node in t.traverse("postorder"):
+        if node.is_leaf():
+            if node.name.startswith('0'):
+                node.add_feature("group_status", "direct")
+            elif node.name.startswith('1'):
+                node.add_feature("group_status", "inverted")
+            else:
+                node.add_feature("group_status", "outgroup")
+        else:  # This is an internal node.
+            # Collect the statuses of all its immediate children.
+            child_statuses = {child.group_status for child in node.children}
+
+            if len(child_statuses) == 1:
+                # If all children have the exact same status (e.g., all are 'inverted'),
+                # this internal node inherits that "pure" status.
+                node.add_feature("group_status", child_statuses.pop())
+            else:
+                # If children have different statuses (e.g., one is 'inverted' and one is 'direct',
+                # or one is 'direct' and one is 'both'), this is a shared/ambiguous ancestor.
+                node.add_feature("group_status", "both")
+
+    # Step 2: Check if the analysis will be informative by counting pure internal branches.
+    internal_direct_count = 0
+    internal_inverted_count = 0
+    for node in t.traverse():
+        # We only care about internal nodes for this count.
+        if not node.is_leaf():
+            status = getattr(node, "group_status", "both")
+            if status == "direct":
+                internal_direct_count += 1
+            elif status == "inverted":
+                internal_inverted_count += 1
+
+    logging.info(f"[{gene_name}] Found {internal_direct_count} pure 'direct' internal branches.")
+    logging.info(f"[{gene_name}] Found {internal_inverted_count} pure 'inverted' internal branches.")
+
+    # The analysis is only considered informative if BOTH groups have at least one pure internal branch.
+    analysis_is_informative = (internal_direct_count > 0 and internal_inverted_count > 0)
+    if not analysis_is_informative:
+        logging.warning(f"[{gene_name}] Topology is uninformative for internal branch analysis.")
+
+    # Step 3: Create H1 (Alternative Model) Tree.
+    # This traversal applies the PAML labels based on the determined 'group_status'.
+    # This labels both pure internal nodes AND the terminal leaf branches.
     t_h1 = t.copy()
-    for leaf in t_h1:
-        if leaf.name.startswith('0'):
-            leaf.add_feature("paml_mark", "#0")
-        elif leaf.name.startswith('1'):
-            leaf.add_feature("paml_mark", "#1")
-    
+    for node in t_h1.traverse():
+        status = getattr(node, "group_status", "both")
+        if status == "direct":
+            node.add_feature("paml_mark", "#0")
+        elif status == "inverted":
+            node.add_feature("paml_mark", "#1")
+        # Any node with 'both' or 'outgroup' status remains unlabeled, defaulting to background.
+
     h1_newick = t_h1.write(format=1, features=["paml_mark"])
+    # The regex cleans up the ete3 output to be PAML-compatible.
     h1_paml_str = re.sub(r"\[&&NHX:paml_mark=(#[01])\]", r" \1", h1_newick)
     h1_tree_path = os.path.join(work_dir, f"{gene_name}_H1.tree")
     with open(h1_tree_path, 'w') as f:
         f.write(f"{len(t_h1)} 1\n{h1_paml_str}")
 
-    # --- H0 (Null Model) Tree: 2-omega model ---
-    # Creates the null model tree where all human branches (both direct and
-    # inverted) are assigned to a single foreground group, labeled #1. The
-    # outgroup branch is left unlabeled, creating the background group. This
-    # results in a 2-rate model (foreground vs. background) to test against
-    # the 3-rate alternative model.
+
+    # Step 4: Create H0 (Null Model) Tree.
+    # Same logic: lump all pure human branches (internal and terminal) into one foreground group.
     t_h0 = t.copy()
-    for leaf in t_h0:
-        if leaf.name.startswith('0') or leaf.name.startswith('1'):
-            leaf.add_feature("paml_mark", "#1")
-    
+    for node in t_h0.traverse():
+        status = getattr(node, "group_status", "both")
+        if status in ["direct", "inverted"]:
+            node.add_feature("paml_mark", "#1") # Foreground group
+
     h0_newick = t_h0.write(format=1, features=["paml_mark"])
     h0_paml_str = re.sub(r"\[&&NHX:paml_mark=(#1)\]", r" \1", h0_newick)
     h0_tree_path = os.path.join(work_dir, f"{gene_name}_H0.tree")
     with open(h0_tree_path, 'w') as f:
         f.write(f"{len(t_h0)} 1\n{h0_paml_str}")
 
-    return h1_tree_path, h0_tree_path
+    return h1_tree_path, h0_tree_path, analysis_is_informative
 
 def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, model_num):
     """
@@ -358,7 +392,16 @@ def worker_function(phy_filepath):
         generate_tree_figure(tree_file, gene_name)
 
         # --- 2. Prepare Trees for PAML LRT ---
-        h1_tree, h0_tree = create_paml_tree_files(tree_file, temp_dir, gene_name)
+        h1_tree, h0_tree, is_informative = create_paml_tree_files(tree_file, temp_dir, gene_name)
+
+        # --- New QC Step: Skip PAML if the tree topology is not informative ---
+        # This check is based on whether pure internal branches were found for both groups.
+        if not is_informative:
+            reason = "No pure internal branches found for both direct and inverted groups."
+            result.update({'status': 'uninformative_topology', 'reason': reason})
+            # Keep the temporary directory for inspection upon this type of failure.
+            logging.info(f"Intermediate files for uninformative gene '{gene_name}' are in: {temp_dir}")
+            return result
 
         # --- 3. Run H1 (Alternative Model) ---
         logging.info(f"[{gene_name}] Running PAML H1 (Alternative)...")
