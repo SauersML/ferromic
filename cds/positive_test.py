@@ -9,6 +9,7 @@ import getpass
 import logging
 import traceback
 from datetime import datetime
+import shutil
 
 # --- Scientific Computing Imports ---
 import numpy as np
@@ -312,79 +313,88 @@ def parse_h1_paml_output(outfile_path):
 
 def worker_function(phy_filepath):
     """
-    FAIL-SAFE worker process for a single gene.
+    Worker process for a single gene.
     Runs QC, IQ-TREE, and a PAML LRT comparing a 3-omega vs 2-omega branch model.
     Catches all exceptions and returns a structured dictionary result.
     """
     gene_name = os.path.basename(phy_filepath).replace('combined_', '').replace('.phy', '')
     result = {'gene': gene_name, 'status': 'runtime_error', 'reason': 'Unknown failure'}
+    temp_dir = None  # Initialize to None
 
     try:
         phy_file_abs_path = os.path.abspath(phy_filepath)
-        
+
         qc_passed, qc_message = perform_qc(phy_filepath)
         if not qc_passed:
             result.update({'status': 'qc_fail', 'reason': qc_message})
             return result
 
-            temp_dir = tempfile.mkdtemp(prefix=f"{gene_name}_")
-            # --- 1. Build Phylogeny with IQ-TREE ---
-            logging.info(f"[{gene_name}] Starting IQ-TREE...")
-            iqtree_out_prefix = os.path.join(temp_dir, gene_name)
-            chimp_name = next((line.split()[0] for line in open(phy_filepath) if 'pantro' in line.lower() or 'pan_troglodytes' in line.lower()), None)
-            if chimp_name is None: raise ValueError("Chimp outgroup name not found.")
+        # Main analysis block - runs only if QC passes
+        temp_dir = tempfile.mkdtemp(prefix=f"{gene_name}_")
 
-            run_command([IQTREE_PATH, '-s', phy_file_abs_path, '-o', chimp_name, '-m', 'MFP', '-T', '1', '--prefix', iqtree_out_prefix, '-quiet'], temp_dir)
-            tree_file = f"{iqtree_out_prefix}.treefile"
-            if not os.path.exists(tree_file): raise FileNotFoundError("IQ-TREE did not produce a treefile.")
-            
-            logging.info(f"[{gene_name}] Generating figure...")
-            generate_tree_figure(tree_file, gene_name)
-            
-            # --- 2. Prepare Trees for PAML LRT ---
-            h1_tree, h0_tree = create_paml_tree_files(tree_file, temp_dir, gene_name)
-            
-            # --- 3. Run H1 (Alternative Model) ---
-            logging.info(f"[{gene_name}] Running PAML H1 (Alternative)...")
-            h1_ctl = os.path.join(temp_dir, f"{gene_name}_H1.ctl")
-            h1_out = os.path.join(temp_dir, f"{gene_name}_H1.out")
-            generate_paml_ctl(h1_ctl, phy_file_abs_path, h1_tree, h1_out)
-            run_command([PAML_PATH, h1_ctl], temp_dir)
-            lnl_h1 = parse_paml_lnl(h1_out)
-            paml_params = parse_h1_paml_output(h1_out)
-            
-            # --- 4. Run H0 (Null Model) ---
-            logging.info(f"[{gene_name}] Running PAML H0 (Null)...")
-            h0_ctl = os.path.join(temp_dir, f"{gene_name}_H0.ctl")
-            h0_out = os.path.join(temp_dir, f"{gene_name}_H0.out")
-            generate_paml_ctl(h0_ctl, phy_file_abs_path, h0_tree, h0_out)
-            run_command([PAML_PATH, h0_ctl], temp_dir)
-            lnl_h0 = parse_paml_lnl(h0_out)
+        # --- 1. Build Phylogeny with IQ-TREE ---
+        logging.info(f"[{gene_name}] Starting IQ-TREE...")
+        iqtree_out_prefix = os.path.join(temp_dir, gene_name)
+        chimp_name = next((line.split()[0] for line in open(phy_filepath) if 'pantro' in line.lower() or 'pan_troglodytes' in line.lower()), None)
+        if chimp_name is None: raise ValueError("Chimp outgroup name not found.")
 
-            # --- 5. Perform Likelihood Ratio Test ---
-            if lnl_h1 < lnl_h0:
-                reason = f'lnL_H1({lnl_h1}) < lnL_H0({lnl_h0})'
-                logging.warning(f"[{gene_name}] PAML optimization issue: {reason}. Skipping.")
-                result.update({'status': 'paml_optim_fail', 'reason': reason})
-                return result
+        run_command([IQTREE_PATH, '-s', phy_file_abs_path, '-o', chimp_name, '-m', 'MFP', '-T', '1', '--prefix', iqtree_out_prefix, '-quiet'], temp_dir)
+        tree_file = f"{iqtree_out_prefix}.treefile"
+        if not os.path.exists(tree_file): raise FileNotFoundError("IQ-TREE did not produce a treefile.")
 
-            lrt_stat = 2 * (lnl_h1 - lnl_h0)
-            p_value = chi2.sf(lrt_stat, df=1) # df = (3 omegas in H1) - (2 omegas in H0)
+        logging.info(f"[{gene_name}] Generating figure...")
+        generate_tree_figure(tree_file, gene_name)
 
-            result.update({
-                'status': 'success',
-                'p_value': p_value,
-                'lrt_stat': lrt_stat,
-                'lnl_h1': lnl_h1,
-                'lnl_h0': lnl_h0,
-                'reason': 'OK',
-                **paml_params
-            })
+        # --- 2. Prepare Trees for PAML LRT ---
+        h1_tree, h0_tree = create_paml_tree_files(tree_file, temp_dir, gene_name)
+
+        # --- 3. Run H1 (Alternative Model) ---
+        logging.info(f"[{gene_name}] Running PAML H1 (Alternative)...")
+        h1_ctl = os.path.join(temp_dir, f"{gene_name}_H1.ctl")
+        h1_out = os.path.join(temp_dir, f"{gene_name}_H1.out")
+        generate_paml_ctl(h1_ctl, phy_file_abs_path, h1_tree, h1_out)
+        run_command([PAML_PATH, h1_ctl], temp_dir)
+        lnl_h1 = parse_paml_lnl(h1_out)
+        paml_params = parse_h1_paml_output(h1_out)
+
+        # --- 4. Run H0 (Null Model) ---
+        logging.info(f"[{gene_name}] Running PAML H0 (Null)...")
+        h0_ctl = os.path.join(temp_dir, f"{gene_name}_H0.ctl")
+        h0_out = os.path.join(temp_dir, f"{gene_name}_H0.out")
+        generate_paml_ctl(h0_ctl, phy_file_abs_path, h0_tree, h0_out)
+        run_command([PAML_PATH, h0_ctl], temp_dir)
+        lnl_h0 = parse_paml_lnl(h0_out)
+
+        # --- 5. Perform Likelihood Ratio Test ---
+        if lnl_h1 < lnl_h0:
+            reason = f'lnL_H1({lnl_h1}) < lnL_H0({lnl_h0})'
+            logging.warning(f"[{gene_name}] PAML optimization issue: {reason}. Skipping.")
+            result.update({'status': 'paml_optim_fail', 'reason': reason})
+            # Keep temp_dir for inspection on optimization failure
+            logging.info(f"Intermediate files for failed gene '{gene_name}' are in: {temp_dir}")
             return result
-            
+
+        lrt_stat = 2 * (lnl_h1 - lnl_h0)
+        p_value = chi2.sf(lrt_stat, df=1)
+
+        result.update({
+            'status': 'success',
+            'p_value': p_value,
+            'lrt_stat': lrt_stat,
+            'lnl_h1': lnl_h1,
+            'lnl_h0': lnl_h0,
+            'reason': 'OK',
+            **paml_params
+        })
+        # shutil.rmtree(temp_dir)  # Just don't clean up directory
+        return result
+
     except Exception as e:
         logging.error(f"FATAL ERROR in worker for gene '{gene_name}'.\n{traceback.format_exc()}")
         result.update({'status': 'runtime_error', 'reason': str(e)})
+        # On error, do NOT delete temp_dir
+        if temp_dir:
+            logging.info(f"Intermediate files for failed gene '{gene_name}' are in: {temp_dir}")
         return result
 
 # ==============================================================================
