@@ -407,16 +407,50 @@ def main():
     if not phy_files:
         logging.critical("FATAL: No 'combined_*.phy' files found in the current directory.")
         sys.exit(1)
+
+    # --- Prioritize the MAPT gene by moving it to the front of the processing queue ---
+    mapt_file_path = None
+    for f in phy_files:
+        if 'MAPT' in os.path.basename(f):
+            mapt_file_path = f
+            break
     
+    if mapt_file_path:
+        logging.info(f"Prioritizing gene MAPT found at: {mapt_file_path}")
+        phy_files.remove(mapt_file_path)
+        phy_files.insert(0, mapt_file_path)
+    else:
+        logging.warning("Could not find a specific file for gene MAPT to prioritize.")
+
     logging.info(f"Found {len(phy_files)} CDS files to process.")
     cpu_cores = max(1, os.cpu_count() - 1 if os.cpu_count() else 1)
     logging.info(f"Using {cpu_cores} CPU cores for parallel processing.")
-    
+
     all_results = []
     with multiprocessing.Pool(processes=cpu_cores) as pool:
         with tqdm(total=len(phy_files), desc="Processing CDSs", file=sys.stdout) as pbar:
             for result in pool.imap_unordered(worker_function, phy_files):
                 all_results.append(result)
+
+                # --- Immediate Reporting for Significant Findings ---
+                # Checks each completed job and prints a notice if the raw p-value is significant.
+                # Note: This uses the raw p-value. The FDR-corrected q-value is only
+                # available after all jobs are complete.
+                if result.get('status') == 'success' and result.get('p_value', 1.0) < FDR_ALPHA:
+                    gene = result.get('gene')
+                    pval = result.get('p_value')
+                    w_inv = result.get('omega_inverted', 'N/A')
+                    w_dir = result.get('omega_direct', 'N/A')
+                    immediate_report = (
+                        f"\n{'='*10} Result {'='*10}\n"
+                        f"Gene: {gene}\n"
+                        f"p-value: {pval:.4g}\n"
+                        f"Omega Inverted: {w_inv:.4f}\n"
+                        f"Omega Direct:   {w_dir:.4f}\n"
+                        f"{'='*75}"
+                    )
+                    logging.info(immediate_report)
+
                 pbar.update(1)
 
     logging.info("\n--- Analysis Complete. Aggregating results... ---")
