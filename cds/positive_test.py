@@ -327,7 +327,7 @@ def worker_function(phy_filepath):
             result.update({'status': 'qc_fail', 'reason': qc_message})
             return result
 
-        with tempfile.TemporaryDirectory(prefix=f"{gene_name}_") as temp_dir:
+        temp_dir = tempfile.mkdtemp(prefix=f"{gene_name}_")
             # --- 1. Build Phylogeny with IQ-TREE ---
             logging.info(f"[{gene_name}] Starting IQ-TREE...")
             iqtree_out_prefix = os.path.join(temp_dir, gene_name)
