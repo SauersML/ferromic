@@ -357,33 +357,32 @@ def parse_h1_paml_output(outfile_path):
 # === MAIN WORKER FUNCTION =====================================================
 # ==============================================================================
 
-def worker_function(phy_filepath):
+def worker_function(phy_filepath, status_summary):
     """
     Worker process for a single gene.
-    Runs QC, IQ-TREE, and a PAML LRT comparing a 3-omega vs 2-omega branch model.
-    Catches all exceptions and returns a structured dictionary result.
+    This function is now designed to be called via functools.partial to include
+    a shared status_summary dictionary from a multiprocessing.Manager.
     """
     gene_name = os.path.basename(phy_filepath).replace('combined_', '').replace('.phy', '')
     result = {'gene': gene_name, 'status': 'runtime_error', 'reason': 'Unknown failure'}
-    temp_dir = None  # Initialize to None
+    temp_dir = None
+    # This flag ensures we only decrement the 'running_paml' counter if it was first incremented.
+    paml_was_started = False
 
     try:
-        phy_file_abs_path = os.path.abspath(phy_filepath)
-
         qc_passed, qc_message = perform_qc(phy_filepath)
         if not qc_passed:
             result.update({'status': 'qc_fail', 'reason': qc_message})
             return result
 
-        # Main analysis block - runs only if QC passes
         temp_dir = tempfile.mkdtemp(prefix=f"{gene_name}_")
+        phy_file_abs_path = os.path.abspath(phy_filepath)
 
         # --- 1. Build Phylogeny with IQ-TREE ---
         logging.info(f"[{gene_name}] Starting IQ-TREE...")
         iqtree_out_prefix = os.path.join(temp_dir, gene_name)
         chimp_name = next((line.split()[0] for line in open(phy_filepath) if 'pantro' in line.lower() or 'pan_troglodytes' in line.lower()), None)
         if chimp_name is None: raise ValueError("Chimp outgroup name not found.")
-
         run_command([IQTREE_PATH, '-s', phy_file_abs_path, '-o', chimp_name, '-m', 'MFP', '-T', '1', '--prefix', iqtree_out_prefix, '-quiet'], temp_dir)
         tree_file = f"{iqtree_out_prefix}.treefile"
         if not os.path.exists(tree_file): raise FileNotFoundError("IQ-TREE did not produce a treefile.")
@@ -391,17 +390,20 @@ def worker_function(phy_filepath):
         logging.info(f"[{gene_name}] Generating figure...")
         generate_tree_figure(tree_file, gene_name)
 
-        # --- 2. Prepare Trees for PAML LRT ---
+        # --- 2. Prepare Trees for PAML and check if informative ---
         h1_tree, h0_tree, is_informative = create_paml_tree_files(tree_file, temp_dir, gene_name)
 
-        # --- New QC Step: Skip PAML if the tree topology is not informative ---
-        # This check is based on whether pure internal branches were found for both groups.
         if not is_informative:
             reason = "No pure internal branches found for both direct and inverted groups."
             result.update({'status': 'uninformative_topology', 'reason': reason})
-            # Keep the temporary directory for inspection upon this type of failure.
             logging.info(f"Intermediate files for uninformative gene '{gene_name}' are in: {temp_dir}")
             return result
+
+        # --- This gene PASSED the filter. Update the live counter and proceed. ---
+        logging.info(f"[{gene_name}] Topology is INFORMATIVE. Proceeding to PAML analysis.")
+        # Safely increment the shared 'running_paml' counter.
+        status_summary['running_paml'] = status_summary.get('running_paml', 0) + 1
+        paml_was_started = True
 
         # --- 3. Run H1 (Alternative Model) ---
         logging.info(f"[{gene_name}] Running PAML H1 (Alternative)...")
@@ -425,7 +427,6 @@ def worker_function(phy_filepath):
             reason = f'lnL_H1({lnl_h1}) < lnL_H0({lnl_h0})'
             logging.warning(f"[{gene_name}] PAML optimization issue: {reason}. Skipping.")
             result.update({'status': 'paml_optim_fail', 'reason': reason})
-            # Keep temp_dir for inspection on optimization failure
             logging.info(f"Intermediate files for failed gene '{gene_name}' are in: {temp_dir}")
             return result
 
@@ -433,24 +434,23 @@ def worker_function(phy_filepath):
         p_value = chi2.sf(lrt_stat, df=1)
 
         result.update({
-            'status': 'success',
-            'p_value': p_value,
-            'lrt_stat': lrt_stat,
-            'lnl_h1': lnl_h1,
-            'lnl_h0': lnl_h0,
-            'reason': 'OK',
-            **paml_params
+            'status': 'success', 'p_value': p_value, 'lrt_stat': lrt_stat,
+            'lnl_h1': lnl_h1, 'lnl_h0': lnl_h0, 'reason': 'OK', **paml_params
         })
-        # shutil.rmtree(temp_dir)  # Just don't clean up directory
         return result
 
     except Exception as e:
         logging.error(f"FATAL ERROR in worker for gene '{gene_name}'.\n{traceback.format_exc()}")
         result.update({'status': 'runtime_error', 'reason': str(e)})
-        # On error, do NOT delete temp_dir
         if temp_dir:
             logging.info(f"Intermediate files for failed gene '{gene_name}' are in: {temp_dir}")
         return result
+    
+    finally:
+        # This 'finally' block ensures that the running counter is always decremented
+        # when a worker finishes, regardless of whether it succeeded or failed.
+        if paml_was_started:
+            status_summary['running_paml'] = status_summary.get('running_paml', 1) - 1
 
 # ==============================================================================
 # === MAIN EXECUTION AND REPORTING =============================================
@@ -458,6 +458,9 @@ def worker_function(phy_filepath):
 
 def main():
     """Main function to discover files, run the pipeline in parallel, and report results."""
+    # This import is needed here for the partial function wrapper.
+    from functools import partial
+
     logging.info("--- Starting Differential Selection Pipeline (Branch Model) ---")
 
     if not (os.path.exists(IQTREE_PATH) and os.access(IQTREE_PATH, os.X_OK)):
@@ -473,13 +476,11 @@ def main():
         logging.critical("FATAL: No 'combined_*.phy' files found in the current directory.")
         sys.exit(1)
 
-    # --- Prioritize the MAPT gene by moving it to the front of the processing queue ---
     mapt_file_path = None
     for f in phy_files:
         if 'MAPT' in os.path.basename(f):
             mapt_file_path = f
             break
-    
     if mapt_file_path:
         logging.info(f"Prioritizing gene MAPT found at: {mapt_file_path}")
         phy_files.remove(mapt_file_path)
@@ -492,71 +493,70 @@ def main():
     logging.info(f"Using {cpu_cores} CPU cores for parallel processing.")
 
     all_results = []
-
-    # --- Initialize a dictionary to hold the running summary of job statuses ---
-    # This dictionary will be updated after each job completes.
-    status_summary = {
-        'success': 0,
-        'qc_fail': 0,
-        'uninformative_topology': 0,
-        'paml_optim_fail': 0,
-        'runtime_error': 0,
-    }
-
-    with multiprocessing.Pool(processes=cpu_cores) as pool:
-        # The tqdm progress bar now only shows the simple job count.
-        with tqdm(total=len(phy_files), desc="Processing CDSs", file=sys.stdout) as pbar:
-            for result in pool.imap_unordered(worker_function, phy_files):
-                all_results.append(result)
-                pbar.update(1) # Manually update the progress bar count.
-
-                # --- Update Live Summary Counters ---
-                status = result.get('status', 'runtime_error') # Get status once
-                if status in status_summary:
-                    status_summary[status] += 1
-                else: # Handle any unexpected statuses
-                    status_summary['runtime_error'] += 1
-
-                # --- Format and Log the Live Aggregate Summary ---
-                # This summary is printed as a distinct log message after each job finishes.
-                summary_str = (
-                    f"Success: {status_summary['success']} | "
-                    f"Filtered (Uninformative): {status_summary['uninformative_topology']} | "
-                    f"Failed (QC): {status_summary['qc_fail']} | "
-                    f"Failed (PAML): {status_summary['paml_optim_fail']} | "
-                    f"Failed (Error): {status_summary['runtime_error']}"
-                )
-                logging.info(f"[PIPELINE STATUS] {summary_str}")
-
-
-                # --- Log the Detailed Report for the INDIVIDUAL Job That Just Finished ---
-                gene = result.get('gene', 'unknown_gene')
-                
-                # Create a standard header for the report
-                report_header = f"\n{'='*10} Job Finished {'='*10}\nGene: {gene}\nStatus: {status.upper()}"
-                report_body = ""
-                
-                # Add details based on whether the job succeeded or failed
-                if status == 'success':
-                    pval = result.get('p_value')
-                    w_inv = result.get('omega_inverted', 'N/A')
-                    w_dir = result.get('omega_direct', 'N/A')
-                    report_body = (
-                        f"p-value: {pval:.4g}\n"
-                        f"Omega Inverted: {w_inv:.4f}\n"
-                        f"Omega Direct:   {w_dir:.4f}"
-                    )
-                else: # This handles 'qc_fail', 'paml_optim_fail', 'runtime_error', 'uninformative_topology', etc.
-                    reason = result.get('reason', 'No reason provided.')
-                    # Truncate very long error messages for cleaner logging
-                    if len(reason) > 150:
-                         reason = reason[:150] + "..."
-                    report_body = f"Reason: {reason}"
-                
-                # Combine and print the full report
-                full_report = f"{report_header}\n{report_body}\n{'='*35}"
-                logging.info(full_report)
     
+    # Use a Manager to create a shared dictionary for live status tracking.
+    with multiprocessing.Manager() as manager:
+        status_summary = manager.dict({
+            'running_paml': 0,
+            'success': 0,
+            'qc_fail': 0,
+            'uninformative_topology': 0,
+            'paml_optim_fail': 0,
+            'runtime_error': 0,
+        })
+
+        # Use functools.partial to create a new function-like object that has the
+        # status_summary dictionary "baked in". This is the clean way to pass
+        # extra, constant arguments to a worker function in a map call.
+        worker_with_summary = partial(worker_function, status_summary=status_summary)
+
+        with multiprocessing.Pool(processes=cpu_cores) as pool:
+            with tqdm(total=len(phy_files), desc="Processing CDSs", file=sys.stdout) as pbar:
+                for result in pool.imap_unordered(worker_with_summary, phy_files):
+                    all_results.append(result)
+                    pbar.update(1)
+
+                    status = result.get('status', 'runtime_error')
+                    status_summary[status] = status_summary.get(status, 0) + 1
+
+                    # --- Format and Log the Live Aggregate Summary ---
+                    summary_str = (
+                        f"Running PAML: {status_summary['running_paml']} | "
+                        f"Success: {status_summary['success']} | "
+                        f"Filtered (Uninformative): {status_summary['uninformative_topology']} | "
+                        f"Failed (QC/PAML/Error): {status_summary['qc_fail']}/{status_summary['paml_optim_fail']}/{status_summary['runtime_error']}"
+                    )
+                    logging.info(f"[PIPELINE STATUS] {summary_str}")
+
+                    # --- Log the Detailed Report for the INDIVIDUAL Job That Just Finished ---
+                    gene = result.get('gene', 'unknown_gene')
+                    report_header = f"\n{'='*10} Job Finished {'='*10}\nGene: {gene}\nStatus: {status.upper()}"
+                    report_body = ""
+                    if status == 'success':
+                        pval = result.get('p_value')
+                        w_inv = result.get('omega_inverted', 'N/A')
+                        w_dir = result.get('omega_direct', 'N/A')
+                        report_body = (
+                            f"p-value: {pval:.4g}\n"
+                            f"Omega Inverted: {w_inv:.4f}\n"
+                            f"Omega Direct:   {w_dir:.4f}"
+                        )
+                    else:
+                        reason = result.get('reason', 'No reason provided.')
+                        if len(reason) > 150:
+                            reason = reason[:150] + "..."
+                        report_body = f"Reason: {reason}"
+                    
+                    full_report = f"{report_header}\n{report_body}\n{'='*35}"
+                    logging.info(full_report)
+
+        # --- Final Report Section (after all jobs are complete) ---
+        # Convert the managed dict back to a regular dict for the final report.
+        final_status_counts = dict(status_summary)
+        # We don't need the 'running_paml' in the final summary table.
+        del final_status_counts['running_paml']
+
+
     # --- Create a comprehensive DataFrame and perform FDR Correction ---
     results_df = pd.DataFrame(all_results)
     
@@ -565,7 +565,7 @@ def main():
         pvals = successful_runs['p_value'].dropna()
         if not pvals.empty:
             rejected, qvals = fdrcorrection(pvals, alpha=FDR_ALPHA, method='indep')
-            qval_map = {gene: q for gene, q in zip(pvals.index, qvals)}
+            qval_map = {pvals.index[i]: q for i, q in enumerate(qvals)}
             results_df['q_value'] = results_df.index.map(qval_map)
 
     # --- Write Full TSV Report ---
@@ -574,7 +574,6 @@ def main():
         'omega_inverted', 'omega_direct', 'omega_background', 'kappa', 
         'lnl_h1', 'lnl_h0', 'reason'
     ]
-    # Ensure all expected columns exist, adding them with NaN if not
     for col in ordered_columns:
         if col not in results_df.columns:
             results_df[col] = np.nan
@@ -587,8 +586,7 @@ def main():
     logging.info("\n\n" + "="*75)
     logging.info("--- FINAL PIPELINE REPORT ---")
     logging.info(f"Total CDSs Found: {len(phy_files)}")
-    status_counts = results_df['status'].value_counts()
-    for status, count in status_counts.items():
+    for status, count in final_status_counts.items():
         logging.info(f"  - {status.replace('_', ' ').title()}: {count}")
     logging.info("="*75 + "\n")
 
