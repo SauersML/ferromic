@@ -236,9 +236,16 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
 
     return h1_tree_path, h0_tree_path
 
-def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file):
+def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, model_num):
     """
-    Generates a codeml.ctl file for the pure branch model (model=2, NSsites=0).
+    Generates a codeml.ctl file with a specified evolutionary model.
+
+    Args:
+        ctl_path (str): The full path where the control file will be written.
+        phy_file (str): The absolute path to the input sequence file (phylip format).
+        tree_file (str): The absolute path to the input tree file.
+        out_file (str): The absolute path for the PAML output file.
+        model_num (int): The PAML model number to use (e.g., 0 for one-ratio, 2 for branch).
     """
     ctl_content = f"""
       seqfile = {phy_file}
@@ -251,7 +258,7 @@ def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file):
 
       seqtype = 1
     CodonFreq = 2
-        model = 2
+        model = {model_num}
       NSsites = 0
         icode = 0
     cleandata = 0
@@ -352,7 +359,7 @@ def worker_function(phy_filepath):
         logging.info(f"[{gene_name}] Running PAML H1 (Alternative)...")
         h1_ctl = os.path.join(temp_dir, f"{gene_name}_H1.ctl")
         h1_out = os.path.join(temp_dir, f"{gene_name}_H1.out")
-        generate_paml_ctl(h1_ctl, phy_file_abs_path, h1_tree, h1_out)
+        generate_paml_ctl(h1_ctl, phy_file_abs_path, h1_tree, h1_out, model_num=2)
         run_command([PAML_PATH, h1_ctl], temp_dir)
         lnl_h1 = parse_paml_lnl(h1_out)
         paml_params = parse_h1_paml_output(h1_out)
@@ -361,7 +368,7 @@ def worker_function(phy_filepath):
         logging.info(f"[{gene_name}] Running PAML H0 (Null)...")
         h0_ctl = os.path.join(temp_dir, f"{gene_name}_H0.ctl")
         h0_out = os.path.join(temp_dir, f"{gene_name}_H0.out")
-        generate_paml_ctl(h0_ctl, phy_file_abs_path, h0_tree, h0_out)
+        generate_paml_ctl(h0_ctl, phy_file_abs_path, h0_tree, h0_out, model_num=0)
         run_command([PAML_PATH, h0_ctl], temp_dir)
         lnl_h0 = parse_paml_lnl(h0_out)
 
