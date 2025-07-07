@@ -458,7 +458,7 @@ def main():
                 # Checks each completed job and prints a notice if the raw p-value is significant.
                 # Note: This uses the raw p-value. The FDR-corrected q-value is only
                 # available after all jobs are complete.
-                if result.get('status') == 'success' and result.get('p_value', 1.0) < FDR_ALPHA:
+                if result.get('status') == 'success':
                     gene = result.get('gene')
                     pval = result.get('p_value')
                     w_inv = result.get('omega_inverted', 'N/A')
