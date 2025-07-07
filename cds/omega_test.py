@@ -494,6 +494,7 @@ def main():
     all_results = []
 
     # --- Initialize a dictionary to hold the running summary of job statuses ---
+    # This dictionary will be updated after each job completes.
     status_summary = {
         'success': 0,
         'qc_fail': 0,
@@ -503,30 +504,32 @@ def main():
     }
 
     with multiprocessing.Pool(processes=cpu_cores) as pool:
+        # The tqdm progress bar now only shows the simple job count.
         with tqdm(total=len(phy_files), desc="Processing CDSs", file=sys.stdout) as pbar:
             for result in pool.imap_unordered(worker_function, phy_files):
                 all_results.append(result)
+                pbar.update(1) # Manually update the progress bar count.
 
-                # --- Update and Display Live Summary on Progress Bar ---
-                # 1. Get the status of the job that just finished.
-                status = result.get('status', 'runtime_error')
+                # --- Update Live Summary Counters ---
+                status = result.get('status', 'runtime_error') # Get status once
                 if status in status_summary:
                     status_summary[status] += 1
-                
-                # 2. Create a dictionary for display on the tqdm progress bar.
-                display_summary = {
-                    'Success': status_summary['success'],
-                    'Filt_Uninf': status_summary['uninformative_topology'],
-                    'F_QC': status_summary['qc_fail'],
-                    'F_PAML': status_summary['paml_optim_fail'],
-                    'F_Err': status_summary['runtime_error']
-                }
+                else: # Handle any unexpected statuses
+                    status_summary['runtime_error'] += 1
 
-                # 3. Set the postfix of the progress bar to show the live summary.
-                pbar.set_postfix(display_summary)
+                # --- Format and Log the Live Aggregate Summary ---
+                # This summary is printed as a distinct log message after each job finishes.
+                summary_str = (
+                    f"Success: {status_summary['success']} | "
+                    f"Filtered (Uninformative): {status_summary['uninformative_topology']} | "
+                    f"Failed (QC): {status_summary['qc_fail']} | "
+                    f"Failed (PAML): {status_summary['paml_optim_fail']} | "
+                    f"Failed (Error): {status_summary['runtime_error']}"
+                )
+                logging.info(f"[PIPELINE STATUS] {summary_str}")
 
-                # --- Immediate Reporting for Individual Job Outcomes (Unchanged) ---
-                # This block still reports on every single job that finishes.
+
+                # --- Log the Detailed Report for the INDIVIDUAL Job That Just Finished ---
                 gene = result.get('gene', 'unknown_gene')
                 
                 # Create a standard header for the report
