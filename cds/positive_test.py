@@ -454,28 +454,35 @@ def main():
             for result in pool.imap_unordered(worker_function, phy_files):
                 all_results.append(result)
 
-                # --- Immediate Reporting for Significant Findings ---
-                # Checks each completed job and prints a notice if the raw p-value is significant.
-                # Note: This uses the raw p-value. The FDR-corrected q-value is only
-                # available after all jobs are complete.
-                if result.get('status') == 'success':
-                    gene = result.get('gene')
+                # --- Immediate Reporting for ALL Outcomes ---
+                # This block now reports on every single job that finishes.
+                status = result.get('status', 'unknown_status')
+                gene = result.get('gene', 'unknown_gene')
+                
+                # Create a standard header for the report
+                report_header = f"\n{'='*10} Job Finished {'='*10}\nGene: {gene}\nStatus: {status.upper()}"
+                report_body = ""
+                
+                # Add details based on whether the job succeeded or failed
+                if status == 'success':
                     pval = result.get('p_value')
                     w_inv = result.get('omega_inverted', 'N/A')
                     w_dir = result.get('omega_direct', 'N/A')
-                    immediate_report = (
-                        f"\n{'='*10} Result {'='*10}\n"
-                        f"Gene: {gene}\n"
+                    report_body = (
                         f"p-value: {pval:.4g}\n"
                         f"Omega Inverted: {w_inv:.4f}\n"
-                        f"Omega Direct:   {w_dir:.4f}\n"
-                        f"{'='*75}"
+                        f"Omega Direct:   {w_dir:.4f}"
                     )
-                    logging.info(immediate_report)
-
-                pbar.update(1)
-
-    logging.info("\n--- Analysis Complete. Aggregating results... ---")
+                else: # This handles 'qc_fail', 'paml_optim_fail', 'runtime_error', etc.
+                    reason = result.get('reason', 'No reason provided.')
+                    # Truncate very long error messages for cleaner logging
+                    if len(reason) > 150:
+                         reason = reason[:150] + "..."
+                    report_body = f"Reason: {reason}"
+                
+                # Combine and print the full report
+                full_report = f"{report_header}\n{report_body}\n{'='*35}"
+                logging.info(full_report)
     
     # --- Create a comprehensive DataFrame and perform FDR Correction ---
     results_df = pd.DataFrame(all_results)
