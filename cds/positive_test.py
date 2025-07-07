@@ -223,13 +223,18 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
         f.write(f"{len(t_h1)} 1\n{h1_paml_str}")
 
     # --- H0 (Null Model) Tree: 2-omega model ---
+    # Creates the null model tree where all human branches (both direct and
+    # inverted) are assigned to a single foreground group, labeled #1. The
+    # outgroup branch is left unlabeled, creating the background group. This
+    # results in a 2-rate model (foreground vs. background) to test against
+    # the 3-rate alternative model.
     t_h0 = t.copy()
     for leaf in t_h0:
         if leaf.name.startswith('0') or leaf.name.startswith('1'):
-            leaf.add_feature("paml_mark", "#0")
+            leaf.add_feature("paml_mark", "#1")
     
     h0_newick = t_h0.write(format=1, features=["paml_mark"])
-    h0_paml_str = re.sub(r"\[&&NHX:paml_mark=(#0)\]", r" \1", h0_newick)
+    h0_paml_str = re.sub(r"\[&&NHX:paml_mark=(#1)\]", r" \1", h0_newick)
     h0_tree_path = os.path.join(work_dir, f"{gene_name}_H0.tree")
     with open(h0_tree_path, 'w') as f:
         f.write(f"{len(t_h0)} 1\n{h0_paml_str}")
@@ -368,7 +373,7 @@ def worker_function(phy_filepath):
         logging.info(f"[{gene_name}] Running PAML H0 (Null)...")
         h0_ctl = os.path.join(temp_dir, f"{gene_name}_H0.ctl")
         h0_out = os.path.join(temp_dir, f"{gene_name}_H0.out")
-        generate_paml_ctl(h0_ctl, phy_file_abs_path, h0_tree, h0_out, model_num=0)
+        generate_paml_ctl(h0_ctl, phy_file_abs_path, h0_tree, h0_out, model_num=2)
         run_command([PAML_PATH, h0_ctl], temp_dir)
         lnl_h0 = parse_paml_lnl(h0_out)
 
