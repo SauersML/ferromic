@@ -492,14 +492,41 @@ def main():
     logging.info(f"Using {cpu_cores} CPU cores for parallel processing.")
 
     all_results = []
+
+    # --- Initialize a dictionary to hold the running summary of job statuses ---
+    status_summary = {
+        'success': 0,
+        'qc_fail': 0,
+        'uninformative_topology': 0,
+        'paml_optim_fail': 0,
+        'runtime_error': 0,
+    }
+
     with multiprocessing.Pool(processes=cpu_cores) as pool:
         with tqdm(total=len(phy_files), desc="Processing CDSs", file=sys.stdout) as pbar:
             for result in pool.imap_unordered(worker_function, phy_files):
                 all_results.append(result)
 
-                # --- Immediate Reporting for ALL Outcomes ---
-                # This block now reports on every single job that finishes.
-                status = result.get('status', 'unknown_status')
+                # --- Update and Display Live Summary on Progress Bar ---
+                # 1. Get the status of the job that just finished.
+                status = result.get('status', 'runtime_error')
+                if status in status_summary:
+                    status_summary[status] += 1
+                
+                # 2. Create a dictionary for display on the tqdm progress bar.
+                display_summary = {
+                    'Success': status_summary['success'],
+                    'Filt_Uninf': status_summary['uninformative_topology'],
+                    'F_QC': status_summary['qc_fail'],
+                    'F_PAML': status_summary['paml_optim_fail'],
+                    'F_Err': status_summary['runtime_error']
+                }
+
+                # 3. Set the postfix of the progress bar to show the live summary.
+                pbar.set_postfix(display_summary)
+
+                # --- Immediate Reporting for Individual Job Outcomes (Unchanged) ---
+                # This block still reports on every single job that finishes.
                 gene = result.get('gene', 'unknown_gene')
                 
                 # Create a standard header for the report
@@ -516,7 +543,7 @@ def main():
                         f"Omega Inverted: {w_inv:.4f}\n"
                         f"Omega Direct:   {w_dir:.4f}"
                     )
-                else: # This handles 'qc_fail', 'paml_optim_fail', 'runtime_error', etc.
+                else: # This handles 'qc_fail', 'paml_optim_fail', 'runtime_error', 'uninformative_topology', etc.
                     reason = result.get('reason', 'No reason provided.')
                     # Truncate very long error messages for cleaner logging
                     if len(reason) > 150:
