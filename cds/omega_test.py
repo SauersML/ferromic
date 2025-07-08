@@ -61,6 +61,7 @@ POP_COLORS = {
 
 # --- Output Directories and Files ---
 FIGURE_DIR = "tree_figures"
+ANNOTATED_FIGURE_DIR = "annotated_tree_figures"
 RESULTS_TSV = f"full_paml_results_{datetime.now().strftime('%Y-%m-%d')}.tsv"
 
 # ==============================================================================
@@ -188,6 +189,63 @@ def generate_tree_figure(tree_file, gene_name):
     figure_path = os.path.join(FIGURE_DIR, f"{gene_name}.png")
     t.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
 
+def generate_colored_branch_figure(gene_name, t):
+    """
+    Creates a tree figure with branches colored by their inferred group status.
+    This uses the tree object directly after statuses have been assigned.
+    """
+    # Define colors for each selection group category
+    BRANCH_COLORS = {
+        'direct': '#0072B2',   # Blue
+        'inverted': '#D55E00',  # Vermillion
+        'both': '#E69F00',      # Orange (for mixed/ancestral)
+        'outgroup': '#56B4E9'   # Sky Blue
+    }
+
+    # A layout function to color branches based on the 'group_status' feature
+    def _branch_color_layout(node):
+        # Default style for all branches
+        nstyle = NodeStyle()
+        nstyle["hz_line_width"] = 2
+        nstyle["vt_line_width"] = 2
+        
+        # Get the group status computed earlier; default to 'both' if not present
+        status = getattr(node, "group_status", "both")
+        color = BRANCH_COLORS.get(status, "#000000") # Default to black if status is unknown
+
+        nstyle["hz_line_color"] = color
+        nstyle["vt_line_color"] = color
+
+        # Style leaves to show their population identity
+        if node.is_leaf():
+            name = node.name
+            pop_match = re.search(r'_(AFR|EUR|EAS|SAS|AMR)_', name)
+            pop = pop_match.group(1) if pop_match else 'CHIMP'
+            leaf_color = POP_COLORS.get(pop, "#C0C0C0")
+            nstyle["fgcolor"] = leaf_color
+            nstyle["size"] = 5
+        else:
+            nstyle["size"] = 0 # Make internal nodes invisible for a clean look
+
+        node.set_style(nstyle)
+
+    ts = TreeStyle()
+    ts.layout_fn = _branch_color_layout
+    ts.show_leaf_name = False
+    ts.show_scale = False
+    ts.branch_vertical_margin = 8
+    ts.title.add_face(TextFace(f"Selection Groups for {gene_name}", fsize=16, ftype="Arial"), column=0)
+    
+    # Create a legend describing the branch colors
+    ts.legend.add_face(TextFace("Branch Category", fsize=10, ftype="Arial", fstyle="Bold"), column=0)
+    for status, color in BRANCH_COLORS.items():
+        ts.legend.add_face(RectFace(10, 10, fgcolor=color, bgcolor=color), column=0)
+        ts.legend.add_face(TextFace(f" {status.capitalize()}", fsize=9), column=1)
+    ts.legend_position = 4 # Position the legend in the top-right
+
+    figure_path = os.path.join(ANNOTATED_FIGURE_DIR, f"{gene_name}_branches.png")
+    t.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
+
 # ==============================================================================
 # === CORE ANALYSIS FUNCTIONS  ======================================
 # ==============================================================================
@@ -273,7 +331,8 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
     with open(h0_tree_path, 'w') as f:
         f.write(f"{len(t_h0)} 1\n{h0_paml_str}")
 
-    return h1_tree_path, h0_tree_path, analysis_is_informative
+    # Return the tree object 't' which now has the 'group_status' features attached.
+    return h1_tree_path, h0_tree_path, analysis_is_informative, t
 
 def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, model_num):
     """
@@ -391,7 +450,13 @@ def worker_function(phy_filepath, status_summary):
         generate_tree_figure(tree_file, gene_name)
 
         # --- 2. Prepare Trees for PAML and check if informative ---
-        h1_tree, h0_tree, is_informative = create_paml_tree_files(tree_file, temp_dir, gene_name)
+        h1_tree, h0_tree, is_informative, status_annotated_tree = create_paml_tree_files(tree_file, temp_dir, gene_name)
+
+        # --- Generate the colored branch figure for diagnostics ---
+        # This is done for all genes that pass QC, regardless of whether they are
+        # informative for the LRT, as it provides a useful visual.
+        logging.info(f"[{gene_name}] Generating colored branch figure...")
+        generate_colored_branch_figure(gene_name, status_annotated_tree)
 
         if not is_informative:
             reason = "No pure internal branches found for both direct and inverted groups."
