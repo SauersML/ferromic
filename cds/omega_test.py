@@ -189,34 +189,50 @@ def generate_tree_figure(tree_file, gene_name):
     figure_path = os.path.join(FIGURE_DIR, f"{gene_name}.png")
     t.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
 
-def generate_colored_branch_figure(gene_name, t):
+def generate_omega_result_figure(gene_name, status_annotated_tree, paml_params):
     """
-    Creates a tree figure with branches colored by their inferred group status.
-    This uses the tree object directly after statuses have been assigned.
-    """
-    # Define colors for each selection group category
-    BRANCH_COLORS = {
-        'direct': '#0072B2',   # Blue
-        'inverted': '#D55E00',  # Vermillion
-        'both': '#E69F00',      # Orange (for mixed/ancestral)
-        'outgroup': '#56B4E9'   # Sky Blue
-    }
+    Creates a tree figure with branches colored by their estimated omega (dN/dS) value.
+    This function visualizes the final results from the PAML model=2 analysis.
 
-    # A layout function to color branches based on the 'group_status' feature
-    def _branch_color_layout(node):
-        # Default style for all branches
+    Args:
+        gene_name (str): The name of the gene, used for the figure title.
+        status_annotated_tree (ete3.Tree): The tree object with 'group_status' on each node.
+        paml_params (dict): A dictionary of parsed omega values from the PAML H1 run.
+    """
+    # Define colors for selection regimes based on omega values
+    PURIFYING_COLOR = "#0072B2" # Blue
+    POSITIVE_COLOR = "#D55E00"  # Vermillion
+    NEUTRAL_COLOR = "#000000"   # Black
+
+    # This layout function determines the color of each branch based on its
+    # group's estimated omega value.
+    def _omega_color_layout(node):
         nstyle = NodeStyle()
         nstyle["hz_line_width"] = 2
         nstyle["vt_line_width"] = 2
-        
-        # Get the group status computed earlier; default to 'both' if not present
-        status = getattr(node, "group_status", "both")
-        color = BRANCH_COLORS.get(status, "#000000") # Default to black if status is unknown
 
+        # Determine which omega value applies to this branch
+        status = getattr(node, "group_status", "both")
+        omega_val = 1.0 # Default to neutral
+        if status == 'direct':
+            omega_val = paml_params.get('omega_direct', 1.0)
+        elif status == 'inverted':
+            omega_val = paml_params.get('omega_inverted', 1.0)
+        else: # 'both' and 'outgroup' fall into the background category
+            omega_val = paml_params.get('omega_background', 1.0)
+
+        # Assign color based on the omega value
+        if omega_val > 1.0:
+            color = POSITIVE_COLOR
+        elif omega_val < 1.0:
+            color = PURIFYING_COLOR
+        else:
+            color = NEUTRAL_COLOR
+        
         nstyle["hz_line_color"] = color
         nstyle["vt_line_color"] = color
 
-        # Style leaves to show their population identity
+        # Style leaves to show their population identity, as before
         if node.is_leaf():
             name = node.name
             pop_match = re.search(r'_(AFR|EUR|EAS|SAS|AMR)_', name)
@@ -225,26 +241,39 @@ def generate_colored_branch_figure(gene_name, t):
             nstyle["fgcolor"] = leaf_color
             nstyle["size"] = 5
         else:
-            nstyle["size"] = 0 # Make internal nodes invisible for a clean look
+            nstyle["size"] = 0 # Keep internal nodes invisible for a clean look
 
         node.set_style(nstyle)
 
     ts = TreeStyle()
-    ts.layout_fn = _branch_color_layout
+    ts.layout_fn = _omega_color_layout
     ts.show_leaf_name = False
     ts.show_scale = False
     ts.branch_vertical_margin = 8
-    ts.title.add_face(TextFace(f"Selection Groups for {gene_name}", fsize=16, ftype="Arial"), column=0)
+    ts.title.add_face(TextFace(f"dN/dS Results for {gene_name}", fsize=16, ftype="Arial"), column=0)
     
-    # Create a legend describing the branch colors
-    ts.legend.add_face(TextFace("Branch Category", fsize=10, ftype="Arial", fstyle="Bold"), column=0)
-    for status, color in BRANCH_COLORS.items():
-        ts.legend.add_face(RectFace(10, 10, fgcolor=color, bgcolor=color), column=0)
-        ts.legend.add_face(TextFace(f" {status.capitalize()}", fsize=9), column=1)
+    # --- Create a dynamic legend based on the actual PAML results ---
+    ts.legend.add_face(TextFace("Selection Regime (ω = dN/dS)", fsize=10, ftype="Arial", fstyle="Bold"), column=0)
+    
+    legend_map = {
+        'Direct Group': paml_params.get('omega_direct'),
+        'Inverted Group': paml_params.get('omega_inverted'),
+        'Background': paml_params.get('omega_background'),
+    }
+
+    for name, omega in legend_map.items():
+        if omega is not None and not np.isnan(omega):
+            if omega > 1.0: color = POSITIVE_COLOR
+            elif omega < 1.0: color = PURIFYING_COLOR
+            else: color = NEUTRAL_COLOR
+            legend_text = f" {name} (ω = {omega:.3f})"
+            ts.legend.add_face(RectFace(10, 10, fgcolor=color, bgcolor=color), column=0)
+            ts.legend.add_face(TextFace(legend_text, fsize=9), column=1)
+
     ts.legend_position = 4 # Position the legend in the top-right
 
-    figure_path = os.path.join(ANNOTATED_FIGURE_DIR, f"{gene_name}_branches.png")
-    t.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
+    figure_path = os.path.join(ANNOTATED_FIGURE_DIR, f"{gene_name}_omega_results.png")
+    status_annotated_tree.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
 
 # ==============================================================================
 # === CORE ANALYSIS FUNCTIONS  ======================================
@@ -452,12 +481,6 @@ def worker_function(phy_filepath, status_summary):
         # --- 2. Prepare Trees for PAML and check if informative ---
         h1_tree, h0_tree, is_informative, status_annotated_tree = create_paml_tree_files(tree_file, temp_dir, gene_name)
 
-        # --- Generate the colored branch figure for diagnostics ---
-        # This is done for all genes that pass QC, regardless of whether they are
-        # informative for the LRT, as it provides a useful visual.
-        logging.info(f"[{gene_name}] Generating colored branch figure...")
-        generate_colored_branch_figure(gene_name, status_annotated_tree)
-
         if not is_informative:
             reason = "No pure internal branches found for both direct and inverted groups."
             result.update({'status': 'uninformative_topology', 'reason': reason})
@@ -478,6 +501,14 @@ def worker_function(phy_filepath, status_summary):
         run_command([PAML_PATH, h1_ctl], temp_dir)
         lnl_h1 = parse_paml_lnl(h1_out)
         paml_params = parse_h1_paml_output(h1_out)
+
+        # --- Generate the figure visualizing the PAML dN/dS results ---
+        # This is done only for genes that are informative and successfully run the H1 model.
+        try:
+            logging.info(f"[{gene_name}] Generating PAML results figure...")
+            generate_omega_result_figure(gene_name, status_annotated_tree, paml_params)
+        except Exception as fig_exc:
+            logging.error(f"[{gene_name}] Failed to generate PAML results figure: {fig_exc}")
 
         # --- 4. Run H0 (Null Model) ---
         logging.info(f"[{gene_name}] Running PAML H0 (Null)...")
@@ -536,6 +567,7 @@ def main():
         sys.exit(1)
 
     os.makedirs(FIGURE_DIR, exist_ok=True)
+    os.makedirs(ANNOTATED_FIGURE_DIR, exist_ok=True)
     phy_files = glob.glob('combined_*.phy')
     if not phy_files:
         logging.critical("FATAL: No 'combined_*.phy' files found in the current directory.")
