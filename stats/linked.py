@@ -334,9 +334,9 @@ if __name__ == '__main__':
         if not model_df.empty:
             print(f"\n--- Aggregate Performance (Multi-SNP Model) ---")
             print(f"  Mean Unbiased Test AUC: {model_df['model_auc'].mean():.4f} (estimated from nested cross-validation)")
-            print(f"  Models with Est. AUC > 0.75: {(model_df['model_auc'] > 0.75).sum()} / {len(model_df)}")
+            print(f"  Models with Est. AUC > 0.70: {(model_df['model_auc'] > 0.70).sum()} / {len(model_df)}")
             
-            high_perf_df = model_df[(model_df['model_auc'] > 0.75) & (model_df['model_p_value'] < 0.01)].sort_values('model_auc', ascending=False)
+            high_perf_df = model_df[(model_df['model_auc'] > 0.70) & (model_df['model_p_value'] < 0.01)].sort_values('model_auc', ascending=False)
             
             if not high_perf_df.empty:
                 # MODIFICATION: Create separate summary TSV and detailed TOML files
@@ -346,7 +346,7 @@ if __name__ == '__main__':
                 summary_df = high_perf_df[summary_cols]
                 summary_filename = "high_performance_models_summary.tsv"
                 summary_df.to_csv(summary_filename, sep='\t', float_format='%.4g')
-                print(f"\n--- High-Performance Models Summary (Est. Test AUC > 0.75 and p < 0.01) ---")
+                print(f"\n--- High-Performance Models Summary (Est. Test AUC > 0.70 and p < 0.01) ---")
                 print(summary_df)
                 print(f"\n[SUCCESS] Saved summary for {len(high_perf_df)} models to '{summary_filename}'")
 
@@ -373,7 +373,7 @@ if __name__ == '__main__':
                     print(f"\n[ERROR] Could not save TOML model file: {e}")
 
             else: 
-                print("\n--- High-Performance Imputation Models (Est. Test AUC > 0.75 and Final Model p < 0.01) ---")
+                print("\n--- High-Performance Imputation Models (Est. Test AUC > 0.70 and Final Model p < 0.01) ---")
                 print("  None found meeting criteria.")
         else: 
             print("  No valid models were built.")
