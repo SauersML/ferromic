@@ -12,19 +12,21 @@ import subprocess
 from joblib import Parallel, delayed, cpu_count
 
 # Scikit-learn for modeling and evaluation
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.model_selection import StratifiedKFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, ttest_ind
 
 # --- SETUP ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-warnings.filterwarnings("ignore")
+# Suppress expected warnings to keep output clean. The code now handles these cases.
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 class FatalSampleMappingError(Exception):
     pass
 
-# --- CORE HELPER FUNCTIONS (UNCHANGED) ---
+# --- CORE HELPER FUNCTIONS ---
 
 def _safe_pearsonr(x, y):
     """A robust pearsonr function that handles constant inputs, preventing crashes."""
@@ -32,6 +34,37 @@ def _safe_pearsonr(x, y):
         return 1.0, 0.0 # p-value, r-value
     r, p = pearsonr(x, y)
     return p, r
+
+def _safe_ttest_ind(data, group_indicator):
+    """
+    Performs a robust two-sample t-test, handling common data issues including
+    catastrophic cancellation warnings by treating them as uninformative tests.
+    """
+    if np.std(group_indicator) == 0:
+        return 0.0, 1.0
+
+    group0 = data[group_indicator == 0]
+    group1 = data[group_indicator == 1]
+
+    if len(group0) < 2 or len(group1) < 2:
+        return 0.0, 1.0
+
+    if np.std(group0) == 0 and np.std(group1) == 0 and np.mean(group0) != np.mean(group1):
+        return np.inf, 0.0
+
+    # FIX: Catch the specific "Precision loss" warning and treat it as a non-significant result.
+    with warnings.catch_warnings():
+        # Temporarily treat this specific warning as an error so we can catch it.
+        warnings.filterwarnings('error', category=RuntimeWarning, message=".*Precision loss.*")
+        try:
+            stat, p = ttest_ind(group0, group1, equal_var=False, nan_policy='omit')
+            if np.isnan(stat):
+                return 0.0, 1.0
+            return stat, p
+        except RuntimeWarning:
+            # If the warning was caught, it means the data groups were nearly identical.
+            # This SNP is uninformative, so we return a t-statistic of 0.
+            return 0.0, 1.0
 
 def calculate_auc_p_value(y_true, y_pred_proba, n_permutations=1000):
     """Calculates the p-value of an AUC score via permutation testing."""
@@ -41,48 +74,93 @@ def calculate_auc_p_value(y_true, y_pred_proba, n_permutations=1000):
     p_value = (np.sum(np.array(null_aucs) >= observed_auc) + 1) / (n_permutations + 1)
     return observed_auc, p_value
 
-def hybrid_forward_selection(X_train, y_train, snp_indices_to_consider, inner_cv_folds=5, top_n_candidates=30):
-    """A faster, hybrid forward selection using a robust correlation filter."""
-    selected_indices = []
-    best_overall_cv_score = 0.5
-    model = LogisticRegression(solver='liblinear', class_weight='balanced', max_iter=2000)
+# --- REVISED CORE MODELING FUNCTION (FIXED & ROBUST) ---
 
-    min_class_count = min(np.bincount(y_train))
-    n_splits = min(inner_cv_folds, min_class_count)
-    if n_splits < 2: return []
+def cv_forward_selection(X, y, snp_indices_to_consider, n_inner_folds=3, shortlist_k=20):
+    """
+    Performs robust, cross-validation-based forward feature selection.
+
+    This version is robust to perfect separation and adaptive to class imbalance.
+
+    The process is iterative:
+    1. T-test Pre-Filter: At each step, it uses a t-test to find SNPs that are
+       most associated with the model's unexplained signal (residuals). This is
+       fast and robustly handles perfect predictors.
+    2. CV-AUC Selection: It then performs an inner cross-validation loop on the
+       shortlisted SNPs. The number of folds is adapted to the class size to
+       prevent errors. The SNP providing the highest average AUC is added.
+    3. Termination: The process stops when no candidate SNP can improve the AUC.
+    """
+    selected_indices = []
+    remaining_indices = list(snp_indices_to_consider)
+    best_overall_auc = 0.5 # Baseline AUC for a random classifier
     
-    inner_cv_splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=123)
+    if len(y) == 0: return []
+    class_counts = np.bincount(y)
+    if len(class_counts) < 2 or np.any(class_counts < 2):
+        return []
+    min_class_count = min(class_counts)
 
     while True:
-        remaining_indices = [idx for idx in snp_indices_to_consider if idx not in selected_indices]
-        if not remaining_indices: break
-        
-        if not selected_indices:
-            residuals = y_train
-        else:
-            temp_model = LogisticRegression(solver='liblinear', class_weight='balanced', max_iter=2000).fit(X_train[:, selected_indices], y_train)
-            residuals = y_train - temp_model.predict_proba(X_train[:, selected_indices])[:, 1]
-        
-        p_values = [_safe_pearsonr(X_train[:, idx], residuals)[0] for idx in remaining_indices]
-        promising_indices = [idx for _, idx in sorted(zip(p_values, remaining_indices))[:top_n_candidates]]
-        
-        scores = []
-        for candidate_index in promising_indices:
-            temp_indices = selected_indices + [candidate_index]
+        # --- Stage 1: Robust t-test pre-filter to create a shortlist ---
+        target_for_test = y
+        if selected_indices:
             try:
-                cv_scores = cross_val_score(model, X_train[:, temp_indices], y_train, cv=inner_cv_splitter, scoring='roc_auc', n_jobs=1)
-                scores.append(np.nanmean(cv_scores))
-            except ValueError: scores.append(0.5)
+                temp_model = LogisticRegression(penalty='l2', solver='lbfgs', class_weight='balanced')
+                temp_model.fit(X[:, selected_indices], y)
+                predictions = temp_model.predict_proba(X[:, selected_indices])[:, 1]
+                target_for_test = y - predictions
+            except Exception:
+                break
 
-        scores = [s if not np.isnan(s) else 0.5 for s in scores]
-        if not scores: break
+        shortlist_candidates = []
+        for candidate_index in remaining_indices:
+            t_stat, p_val = _safe_ttest_ind(data=target_for_test, group_indicator=X[:, candidate_index])
+            shortlist_candidates.append((abs(t_stat), candidate_index))
+        
+        if not shortlist_candidates: break
 
-        best_score_this_step = max(scores)
-        if best_score_this_step > best_overall_cv_score:
-            best_candidate_index = promising_indices[np.argmax(scores)]
+        shortlist_candidates.sort(key=lambda x: x[0], reverse=True)
+        shortlist_indices = [idx for t_stat, idx in shortlist_candidates[:shortlist_k]]
+        
+        if not shortlist_indices: break
+
+        # --- Stage 2: Robust CV-AUC selection on the shortlist ---
+        n_splits_for_inner_cv = min(n_inner_folds, min_class_count)
+        if n_splits_for_inner_cv < 2:
+            break
+
+        inner_cv = StratifiedKFold(n_splits=n_splits_for_inner_cv, shuffle=True, random_state=123)
+        auc_scores_for_shortlist = {}
+        
+        for candidate_index in shortlist_indices:
+            temp_indices = selected_indices + [candidate_index]
+            fold_aucs = []
+            
+            for inner_train_idx, inner_test_idx in inner_cv.split(X, y):
+                X_inner_train = X[inner_train_idx][:, temp_indices]
+                X_inner_test = X[inner_test_idx][:, temp_indices]
+                y_inner_train, y_inner_test = y[inner_train_idx], y[inner_test_idx]
+
+                if len(np.unique(y_inner_test)) < 2: continue
+                
+                model = LogisticRegression(penalty='l2', solver='lbfgs', class_weight='balanced')
+                model.fit(X_inner_train, y_inner_train)
+                fold_aucs.append(roc_auc_score(y_inner_test, model.predict_proba(X_inner_test)[:, 1]))
+            
+            if fold_aucs: auc_scores_for_shortlist[candidate_index] = np.mean(fold_aucs)
+        
+        if not auc_scores_for_shortlist: break
+
+        best_candidate_index = max(auc_scores_for_shortlist, key=auc_scores_for_shortlist.get)
+        best_auc_this_step = auc_scores_for_shortlist[best_candidate_index]
+        
+        if best_auc_this_step > best_overall_auc:
             selected_indices.append(best_candidate_index)
-            best_overall_cv_score = best_score_this_step
-        else: break
+            remaining_indices.remove(best_candidate_index)
+            best_overall_auc = best_auc_this_step
+        else:
+            break
             
     return selected_indices
 
@@ -91,11 +169,12 @@ def hybrid_forward_selection(X_train, y_train, snp_indices_to_consider, inner_cv
 def extract_data_for_locus(inversion_job: dict):
     """
     SEQUENTIAL I/O-HEAVY PHASE: Extracts data from VCF for one locus.
-    This function is run sequentially to prevent VCF library deadlocks.
     """
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     try:
         chrom = inversion_job['seqnames']
+        start = inversion_job['start']
+        end = inversion_job['end']
         vcf_path = f"../vcfs/{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
         
         vcf_for_samples = VCF(vcf_path, lazy=True)
@@ -120,17 +199,32 @@ def extract_data_for_locus(inversion_job: dict):
         
         y_haplotypes = np.array(haplotype_inv_status, dtype=int)
         
-        region_str = f"{chrom}:{max(0, inversion_job['start'] - 50000)}-{inversion_job['end'] + 50000}"
+        regions_to_process = []
+        left_bp_start = max(0, start - 50000)
+        left_bp_end = start + 50000
+        right_bp_start = end - 50000
+        right_bp_end = end + 50000
+
+        if left_bp_end >= right_bp_start:
+            regions_to_process.append(f"{chrom}:{left_bp_start}-{right_bp_end}")
+        else:
+            regions_to_process.append(f"{chrom}:{left_bp_start}-{left_bp_end}")
+            regions_to_process.append(f"{chrom}:{right_bp_start}-{right_bp_end}")
+
         vcf_subset = VCF(vcf_path, samples=valid_vcf_samples_in_order)
-        
         snp_data_list, snp_metadata = [], []
-        for variant in vcf_subset(region_str):
-             if variant.is_snp and not variant.is_indel and len(variant.ALT) == 1:
-                snp_data_list.append([allele for gt in variant.genotypes for allele in gt[0:2]])
-                snp_metadata.append({'id': variant.ID or f"{variant.CHROM}:{variant.POS}", 'ref': variant.REF, 'alt': variant.ALT[0]})
+        processed_positions = set()
+
+        for region_str in regions_to_process:
+            for variant in vcf_subset(region_str):
+                if variant.POS in processed_positions: continue
+                if variant.is_snp and not variant.is_indel and len(variant.ALT) == 1:
+                    snp_data_list.append([allele for gt in variant.genotypes for allele in gt[0:2]])
+                    snp_metadata.append({'id': variant.ID or f"{variant.CHROM}:{variant.POS}", 'ref': variant.REF, 'alt': variant.ALT[0]})
+                    processed_positions.add(variant.POS)
         
         if not snp_metadata: 
-             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No biallelic SNPs in region'}
+             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No biallelic SNPs in breakpoint regions'}
 
         X_haplotypes = np.array(snp_data_list, dtype=int).T
         return {
@@ -141,10 +235,9 @@ def extract_data_for_locus(inversion_job: dict):
         import traceback
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Data Extraction Error: {type(e).__name__}: {e}\n{traceback.format_exc()}"}
 
-def analyze_and_model_locus(preloaded_data: dict, outer_cv_folds: int = 5, stability_threshold: float = 0.6):
+def analyze_and_model_locus(preloaded_data: dict, outer_cv_folds: int = 5):
     """
-    PARALLEL CPU-HEAVY PHASE: Analyzes pre-loaded in-memory data.
-    This function is safe to run in parallel as it performs no file I/O.
+    PARALLEL CPU-HEAVY PHASE: Analyzes pre-loaded data using a principled "Audit then Build" workflow.
     """
     inversion_id = preloaded_data['id']
     try:
@@ -152,7 +245,6 @@ def analyze_and_model_locus(preloaded_data: dict, outer_cv_folds: int = 5, stabi
         X_haplotypes = preloaded_data['X_haplotypes']
         snp_metadata = preloaded_data['snp_metadata']
         
-        # --- Robust Pre-filtering on the loaded data ---
         if len(y_haplotypes) == 0: return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No samples with valid genotypes.'}
         if len(np.unique(y_haplotypes)) < 2: return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'Only one inversion class present.'}
         class_counts = np.bincount(y_haplotypes)
@@ -161,15 +253,14 @@ def analyze_and_model_locus(preloaded_data: dict, outer_cv_folds: int = 5, stabi
         high_quality_indices = np.where(np.std(X_haplotypes, axis=0) > 0)[0]
         if len(high_quality_indices) == 0: return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No variant SNPs.'}
 
-        # --- Analysis with StratifiedKFold ---
         n_splits_outer = min(outer_cv_folds, min(class_counts))
         if n_splits_outer < 2: return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Minority class too small ({min(class_counts)}) for CV.'}
-        skf = StratifiedKFold(n_splits=n_splits_outer, shuffle=True, random_state=42)
-
-        # 1. Tag SNP Analysis
+        
+        # --- TAG SNP ANALYSIS ---
         tag_snp_results = {}
+        skf_tag = StratifiedKFold(n_splits=n_splits_outer, shuffle=True, random_state=42)
         p_vals_per_fold = []
-        for train_idx, _ in skf.split(X_haplotypes, y_haplotypes):
+        for train_idx, _ in skf_tag.split(X_haplotypes, y_haplotypes):
             if len(train_idx) > 1:
                 p_vals = [_safe_pearsonr(X_haplotypes[train_idx, i], y_haplotypes[train_idx])[0] for i in high_quality_indices]
                 p_vals_per_fold.append(high_quality_indices[np.nanargmin(p_vals)])
@@ -180,25 +271,40 @@ def analyze_and_model_locus(preloaded_data: dict, outer_cv_folds: int = 5, stabi
             meta = snp_metadata[best_tag_idx]
             tag_snp_results = {'best_tag_snp': meta['id'], 'tag_snp_r_squared': r**2, 'tag_snp_allele_direct': (f"{meta['alt']}(A)" if r<0 else f"{meta['ref']}(R)"), 'tag_snp_allele_inverted': (f"{meta['ref']}(R)" if r<0 else f"{meta['alt']}(A)")}
 
-        # 2. Multi-SNP Model Analysis (Nested CV)
-        outer_loop_scores, all_selected_indices = [], []
-        for train_idx, test_idx in skf.split(X_haplotypes, y_haplotypes):
-            selected = hybrid_forward_selection(X_haplotypes[train_idx], y_haplotypes[train_idx], high_quality_indices)
-            all_selected_indices.extend(selected)
-            if selected and len(np.unique(y_haplotypes[test_idx])) > 1:
-                fold_model = LogisticRegression(solver='liblinear', class_weight='balanced', max_iter=2000).fit(X_haplotypes[train_idx][:, selected], y_haplotypes[train_idx])
-                outer_loop_scores.append(roc_auc_score(y_haplotypes[test_idx], fold_model.predict_proba(X_haplotypes[test_idx][:, selected])[:, 1]))
+        # --- MULTI-SNP MODEL: PHASE 1 - THE AUDIT (Nested Cross-Validation) ---
+        skf_model_outer = StratifiedKFold(n_splits=n_splits_outer, shuffle=True, random_state=42)
+        outer_loop_scores, all_selected_indices_from_cv = [], []
+        for train_idx, test_idx in skf_model_outer.split(X_haplotypes, y_haplotypes):
+            selected_in_fold = cv_forward_selection(X_haplotypes[train_idx], y_haplotypes[train_idx], high_quality_indices)
+            all_selected_indices_from_cv.extend(selected_in_fold)
+            
+            if selected_in_fold and len(np.unique(y_haplotypes[test_idx])) > 1:
+                try:
+                    fold_model = LogisticRegression(penalty=None, solver='newton-cg', class_weight='balanced', max_iter=2000).fit(X_haplotypes[train_idx][:, selected_in_fold], y_haplotypes[train_idx])
+                    outer_loop_scores.append(roc_auc_score(y_haplotypes[test_idx], fold_model.predict_proba(X_haplotypes[test_idx][:, selected_in_fold])[:, 1]))
+                except Exception:
+                    outer_loop_scores.append(0.5)
 
         unbiased_auc = np.mean(outer_loop_scores) if outer_loop_scores else 0.5
-        snp_stability_counts = Counter(all_selected_indices)
-        final_indices = [idx for idx, count in snp_stability_counts.items() if (count / n_splits_outer) >= stability_threshold]
+        snp_stability_counts = Counter(all_selected_indices_from_cv)
+
+        # --- MULTI-SNP MODEL: PHASE 2 - THE FINAL BUILD ---
+        final_indices = cv_forward_selection(X_haplotypes, y_haplotypes, high_quality_indices)
         
         model_results = {}
         if final_indices:
-            model = LogisticRegression(solver='liblinear', class_weight='balanced', max_iter=2000).fit(X_haplotypes[:, final_indices], y_haplotypes)
-            _, p_val = calculate_auc_p_value(y_haplotypes, model.predict_proba(X_haplotypes[:, final_indices])[:, 1])
-            details = [{'snp_id': snp_metadata[idx]['id'], 'coefficient': coef, 'stability': snp_stability_counts.get(idx, 0) / n_splits_outer} for idx, coef in sorted(zip(final_indices, model.coef_[0]), key=lambda x: abs(x[1]), reverse=True)]
-            model_results = {'model_auc': unbiased_auc, 'model_p_value': p_val, 'num_snps_in_model': len(details), 'model_details': details}
+            try:
+                final_model = LogisticRegression(penalty=None, solver='newton-cg', class_weight='balanced', max_iter=2000).fit(X_haplotypes[:, final_indices], y_haplotypes)
+                _, p_val = calculate_auc_p_value(y_haplotypes, final_model.predict_proba(X_haplotypes[:, final_indices])[:, 1])
+                
+                details = []
+                for idx, coef in sorted(zip(final_indices, final_model.coef_[0]), key=lambda x: abs(x[1]), reverse=True):
+                    stability = snp_stability_counts.get(idx, 0) / n_splits_outer
+                    details.append({'snp_id': snp_metadata[idx]['id'], 'coefficient': coef, 'stability': stability})
+
+                model_results = {'model_auc': unbiased_auc, 'model_p_value': p_val, 'num_snps_in_model': len(details), 'model_details': details}
+            except Exception:
+                model_results = {'model_auc': unbiased_auc, 'model_p_value': 1.0, 'num_snps_in_model': len(final_indices), 'model_details': [], 'reason': 'Final unpenalized model failed to converge'}
         else:
             model_results = {'model_auc': unbiased_auc, 'model_p_value': 1.0, 'num_snps_in_model': 0, 'model_details': []}
 
@@ -231,7 +337,7 @@ if __name__ == '__main__':
     if not all_jobs: logging.warning("No valid jobs to run. Exiting."); sys.exit(0)
 
     num_procs = cpu_count()
-    batch_size = num_procs # Process a batch of jobs equal to the number of cores.
+    batch_size = num_procs
     logging.info(f"Loaded {num_jobs} inversions. Processing in batches of {batch_size} using {num_procs} cores.")
     
     all_results = []
@@ -244,7 +350,6 @@ if __name__ == '__main__':
         
         logging.info(f"--- Starting Batch {i+1}/{num_batches} (Inversions {batch_start_index+1}-{batch_end_index}) ---")
         
-        # --- PHASE 1: SEQUENTIAL Data Extraction for the current batch ---
         logging.info(f"Phase 1: Sequentially extracting data for {len(current_batch_jobs)} inversions...")
         preloaded_data_for_batch = []
         for job in current_batch_jobs:
@@ -252,7 +357,6 @@ if __name__ == '__main__':
             if data_result.get('status') == 'PREPROCESSED':
                 preloaded_data_for_batch.append(data_result)
             else:
-                # If extraction fails, it's a final result. Add it and print.
                 all_results.append(data_result)
                 reason = data_result.get('reason', 'Unknown').splitlines()[0]
                 id_str = data_result.get('id', 'Unknown')
@@ -260,13 +364,11 @@ if __name__ == '__main__':
                 sys.stdout.write(f"\rProgress: [{len(all_results)}/{num_jobs}] ({progress:.1%}) | ❌ {id_str:<25} | {data_result.get('status', 'N/A')}: {reason[:50]}...\n")
                 sys.stdout.flush()
 
-        # --- PHASE 2: PARALLEL Analysis on the in-memory data for the batch ---
         if preloaded_data_for_batch:
             logging.info(f"Phase 2: Parallel analysis of {len(preloaded_data_for_batch)} pre-loaded inversions...")
             with Parallel(n_jobs=num_procs, backend='loky') as parallel:
                 batch_results = parallel(delayed(analyze_and_model_locus)(data) for data in preloaded_data_for_batch)
                 
-                # --- Immediate printing of batch results ---
                 for result in batch_results:
                     all_results.append(result)
                     progress = (len(all_results)) / num_jobs
@@ -277,7 +379,7 @@ if __name__ == '__main__':
                         pval = result.get('model_p_value', 1)
                         r2 = result.get('tag_snp_r_squared', 0)
                         n_snps = result.get('num_snps_in_model', 0)
-                        sys.stdout.write(f"\rProgress: [{len(all_results)}/{num_jobs}] ({progress:.1%}) | ✅ {id_str:<25} | Test AUC={auc:.3f} p={pval:.3f} ({n_snps} SNPs) | Tag R²={r2:.3f}\n")
+                        sys.stdout.write(f"\rProgress: [{len(all_results)}/{num_jobs}] ({progress:.1%}) | ✅ {id_str:<25} | Unbiased Test AUC={auc:.3f} p={pval:.3f} ({n_snps} SNPs) | Tag R²={r2:.3f}\n")
                     else:
                         reason = result.get('reason', 'Unknown').splitlines()[0]
                         sys.stdout.write(f"\rProgress: [{len(all_results)}/{num_jobs}] ({progress:.1%}) | ❌ {id_str:<25} | {result.get('status', 'N/A')}: {reason[:50]}...\n")
@@ -286,7 +388,6 @@ if __name__ == '__main__':
 
     logging.info(f"--- All Batches Complete in {time.time() - start_time:.2f} seconds ---")
     
-    # --- FINAL REPORTING (uses all_results list) ---
     successful_runs = [r for r in all_results if r and r.get('status') == 'SUCCESS']
     failed_runs = [r for r in all_results if r and r.get('status') != 'SUCCESS']
 
@@ -318,15 +419,15 @@ if __name__ == '__main__':
         model_df = results_df[results_df['model_auc'].notna()]
         if not model_df.empty:
             print(f"\n--- Aggregate Performance (Multi-SNP Model) ---")
-            print(f"  Mean Unbiased Test AUC: {model_df['model_auc'].mean():.4f}")
-            print(f"  Models with AUC > 0.95: {(model_df['model_auc'] > 0.95).sum()} / {len(model_df)}")
+            print(f"  Mean Unbiased Test AUC: {model_df['model_auc'].mean():.4f} (estimated from nested cross-validation)")
+            print(f"  Models with Est. AUC > 0.75: {(model_df['model_auc'] > 0.75).sum()} / {len(model_df)}")
             
-            print("\n--- High-Performance Imputation Models (Test AUC > 0.95 and p < 0.01) ---")
-            high_perf_df = model_df[(model_df['model_auc'] > 0.95) & (model_df['model_p_value'] < 0.01)].sort_values('model_auc', ascending=False)
+            print("\n--- High-Performance Imputation Models (Est. Test AUC > 0.75 and Final Model p < 0.01) ---")
+            high_perf_df = model_df[(model_df['model_auc'] > 0.75) & (model_df['model_p_value'] < 0.01)].sort_values('model_auc', ascending=False)
             if not high_perf_df.empty:
                 all_snp_details = []
                 for inv_id, row in high_perf_df.iterrows():
-                    print(f"\n--- Inversion: {inv_id} | Test AUC: {row['model_auc']:.4f} | p-value: {row['model_p_value']:.4g} | #SNPs: {row['num_snps_in_model']} ---")
+                    print(f"\n--- Inversion: {inv_id} | Est. Test AUC: {row['model_auc']:.4f} | Final Model p-value: {row['model_p_value']:.4g} | #SNPs: {row['num_snps_in_model']} ---")
                     if 'model_details' in row and row['model_details']:
                         details_df = pd.DataFrame(row['model_details'])
                         print(details_df.to_string(index=False))
