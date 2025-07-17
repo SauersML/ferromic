@@ -2416,7 +2416,7 @@ fn process_single_config_entry(
             };
             log(LogLevel::Warning, &format!(
                 "No haplotypes found for {} in region {}-{}",
-                label, region_start, region_end
+                label, entry.interval.start, entry.interval.end
             ));
             // finish_step_progress("No matching haplotypes found");
             // return Ok(None);
