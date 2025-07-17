@@ -66,28 +66,38 @@ def extract_diploid_data_for_locus(inversion_job: dict):
         if not sample_map:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': "No TSV samples could be mapped to VCF samples."}
 
-        def parse_hap_gt(gt_str: any):
+        def parse_hap_gt_with_confidence(gt_str: any):
             """
-            Parses a genotype string, strictly requiring an exact match to
-            '0|0', '0|1', '1|0', or '1|1'. Returns the integer dosage or None.
+            Parses a genotype string, identifying high and low confidence calls.
+            High confidence (for validation & training): '0|0', '0|1', '1|0', '1|1'.
+            Low confidence (for training only): '0|0_lowconf', '1|0_lowconf', '0|1_lowconf', '1|1_lowconf'.
+            Returns a tuple (dosage, is_high_confidence) or (None, None) if invalid.
             """
-            # Define the map of valid genotypes to their integer dosage.
-            valid_genotypes = {
-                "0|0": 0,
-                "0|1": 1,
-                "1|0": 1,
-                "1|1": 2
+            high_conf_map = {
+                "0|0": 0, "1|0": 1, "0|1": 1, "1|1": 2
             }
-            # .get() returns the value for the key if it exists, otherwise it returns None.
-            # This is a concise and safe way to enforce the exact match requirement.
-            return valid_genotypes.get(gt_str)
+            low_conf_map = {
+                "0|0_lowconf": 0, "1|0_lowconf": 1, "0|1_lowconf": 1, "1|1_lowconf": 2
+            }
+            
+            if gt_str in high_conf_map:
+                return (high_conf_map[gt_str], True)
+            if gt_str in low_conf_map:
+                return (low_conf_map[gt_str], False)
+            
+            return (None, None)
 
-        # Create a map from VCF sample ID directly to its ground truth dosage.
-        gt_map = {vcf_s: parse_hap_gt(inversion_job.get(tsv_s)) for tsv_s, vcf_s in sample_map.items()}
-        gt_map = {sample: dosage for sample, dosage in gt_map.items() if dosage is not None}
-
-        if not gt_map:
+        # Create a map from VCF sample ID to its ground truth dosage and confidence level.
+        gt_data = {}
+        for tsv_s, vcf_s in sample_map.items():
+            dosage, is_high_conf = parse_hap_gt_with_confidence(inversion_job.get(tsv_s))
+            if dosage is not None:
+                gt_data[vcf_s] = {'dosage': dosage, 'is_high_conf': is_high_conf}
+        
+        if not gt_data:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No samples with a valid inversion dosage.'}
+
+        gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
 
         # Define flanking regions for SNP extraction.
         flank_size = 50000
@@ -98,7 +108,7 @@ def extract_diploid_data_for_locus(inversion_job: dict):
                        f"{chrom}:{end - flank_size}-{end + flank_size}"]
 
         # Extract SNP data for all mapped samples.
-        vcf_subset = VCF(vcf_path, samples=list(gt_map.keys()))
+        vcf_subset = VCF(vcf_path, samples=list(gt_df.index))
         vcf_samples_ordered = vcf_subset.samples # This order defines the columns of our SNP matrix.
         snp_data_list, snp_metadata, processed_positions = [], [], set()
 
@@ -118,20 +128,28 @@ def extract_diploid_data_for_locus(inversion_job: dict):
         # Align X and y using pandas for safety and clarity.
         df_X = pd.DataFrame(np.array(snp_data_list).T, index=vcf_samples_ordered)
         
-        # Filter both X (SNP data) and y (dosages) to the common set of samples.
-        y_series = pd.Series(gt_map)
+        # Filter both X (SNP data) and y (dosages/confidence) to the common set of samples.
+        y_series = gt_df['dosage']
+        conf_series = gt_df['is_high_conf'].astype(bool)
         common_samples = df_X.index.intersection(y_series.index)
 
         if len(common_samples) < 20:
              return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient overlapping samples ({len(common_samples)}) for modeling.'}
 
+        # Check for minimum number of high-confidence samples needed for validation folds.
+        num_high_conf = conf_series.loc[common_samples].sum()
+        if num_high_conf < 20:
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient high-confidence samples ({num_high_conf}) for validation.'}
+
         df_X_final = df_X.loc[common_samples]
         y_final = y_series.loc[common_samples].values
+        confidence_final = conf_series.loc[common_samples].values
 
         return {
             'status': 'PREPROCESSED', 'id': inversion_id,
             'y_diploid': y_final.astype(int),
             'X_diploid': df_X_final.values,
+            'confidence_mask': confidence_final, # Boolean array: True=HighConf, False=LowConf
             'snp_metadata': snp_metadata
         }
     except Exception as e:
@@ -141,23 +159,32 @@ def extract_diploid_data_for_locus(inversion_job: dict):
 def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
     """
     Performs nested cross-validation, model evaluation, and final model training.
+    Uses high-confidence data for validation and all data (high+low conf) for training.
     """
     inversion_id = preloaded_data['id']
     try:
-        y_full, X_full, snp_meta = preloaded_data['y_diploid'], preloaded_data['X_diploid'], preloaded_data['snp_metadata']
+        y_full, X_full = preloaded_data['y_diploid'], preloaded_data['X_diploid']
+        confidence_mask = preloaded_data['confidence_mask']
+        snp_meta = preloaded_data['snp_metadata']
 
-        # --- Pre-computation Sanity Checks ---
-        if X_full.shape[0] < 20 or X_full.shape[1] < 1:
-            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient data (samples={X_full.shape[0]}, snps={X_full.shape[1]})'}
-        if len(np.unique(y_full)) < 2:
-            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'Only one inversion dosage class present.'}
+        # --- Define Datasets ---
+        # Validation set (high-confidence only) for unbiased performance estimation.
+        X_val, y_val = X_full[confidence_mask], y_full[confidence_mask]
+        # Low-confidence set to be added to training data in each fold.
+        X_lowconf, y_lowconf = X_full[~confidence_mask], y_full[~confidence_mask]
+
+        # --- Pre-computation Sanity Checks (on the validation set) ---
+        if X_val.shape[0] < 20 or X_val.shape[1] < 1:
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient high-conf data (samples={X_val.shape[0]}, snps={X_val.shape[1]})'}
+        if len(np.unique(y_val)) < 2:
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'Only one inversion dosage class present in validation set.'}
         
-        global_min_class_count = min(Counter(y_full).values())
-        if global_min_class_count < 2:
-            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Global minority class count ({global_min_class_count}) is less than 2.'}
+        val_min_class_count = min(Counter(y_val).values())
+        if val_min_class_count < 2:
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Validation set minority class count ({val_min_class_count}) is less than 2.'}
 
         # --- Nested Cross-Validation for Unbiased Performance Estimation ---
-        outer_cv_folds = min(5, global_min_class_count)
+        outer_cv_folds = min(5, val_min_class_count)
         outer_cv = StratifiedKFold(n_splits=outer_cv_folds, shuffle=True, random_state=42)
         
         pipeline = Pipeline([('imputer', SimpleImputer(strategy='mean')), ('pls', PLSRegression())])
@@ -165,16 +192,26 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         y_true_pooled, y_pred_pls_pooled, y_pred_dummy_pooled = [], [], []
         fold_failures = []
 
-        for i, (train_idx, test_idx) in enumerate(outer_cv.split(X_full, y_full)):
-            X_train, y_train = X_full[train_idx], y_full[train_idx]
-            X_test, y_test = X_full[test_idx], y_full[test_idx]
+        # The outer loop splits the VALIDATION data to create unbiased test sets.
+        for i, (train_val_idx, test_val_idx) in enumerate(outer_cv.split(X_val, y_val)):
+            # Test set is purely high-confidence, held-out samples.
+            X_test, y_test = X_val[test_val_idx], y_val[test_val_idx]
+
+            # The training set for this fold combines the high-confidence training split
+            # with ALL available low-confidence data to improve model robustness.
+            X_train_val, y_train_val = X_val[train_val_idx], y_val[train_val_idx]
+            
+            if X_lowconf.shape[0] > 0:
+                X_train = np.vstack((X_train_val, X_lowconf))
+                y_train = np.concatenate((y_train_val, y_lowconf))
+            else:
+                X_train, y_train = X_train_val, y_train_val
 
             train_min_class_count = min(Counter(y_train).values()) if len(y_train) > 0 else 0
             if train_min_class_count < 2:
-                fold_failures.append(f"Fold {i+1}: Training split has < 2 samples in minority class.")
+                fold_failures.append(f"Fold {i+1}: Combined training split has < 2 samples in minority class.")
                 continue
             
-            # The number of PLS components cannot exceed min(n_samples - 1, n_features).
             max_components = min(30, X_train.shape[1], X_train.shape[0] - 1)
             if max_components < 1:
                 fold_failures.append(f"Fold {i+1}: Not enough training samples to determine PLS components.")
@@ -192,11 +229,10 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
                 fold_failures.append(f"Fold {i+1}: GridSearchCV failed: {e}")
                 continue
 
-            # A separate DummyRegressor is trained on each fold's training data to
-            # create a fair, leak-free baseline for statistical comparison.
+            # Dummy model is trained on the same augmented data for a fair baseline.
             dummy_model_fold = DummyRegressor(strategy='mean').fit(X_train, y_train)
             
-            # Pool out-of-sample predictions
+            # Pool out-of-sample predictions (on the high-confidence test set).
             y_true_pooled.extend(y_test)
             y_pred_pls_pooled.extend(grid_search.best_estimator_.predict(X_test).flatten())
             y_pred_dummy_pooled.extend(dummy_model_fold.predict(X_test))
@@ -209,27 +245,28 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         y_true_pooled = np.array(y_true_pooled)
         y_pred_pls_pooled = np.array(y_pred_pls_pooled)
         
-        # Pearson r^2 (coefficient of determination)
         if np.std(y_pred_pls_pooled) < 1e-6 or np.std(y_true_pooled) < 1e-6:
-            pearson_r2 = 0.0 # Correlation is undefined if variance is zero
+            pearson_r2 = 0.0
         else:
             corr, _ = pearsonr(y_true_pooled, y_pred_pls_pooled)
             pearson_r2 = corr**2
         
         unbiased_rmse = np.sqrt(mean_squared_error(y_true_pooled, y_pred_pls_pooled))
 
-        # Statistical test: Is the PLS model significantly better than baseline?
         errors_pls = np.abs(y_true_pooled - y_pred_pls_pooled)
         errors_dummy = np.abs(np.array(y_pred_dummy_pooled) - y_true_pooled)
         try:
-            # One-sided test: PLS errors are 'less' than dummy errors.
             _, p_value = wilcoxon(errors_pls, errors_dummy, alternative='less', zero_method='zsplit')
         except ValueError:
-            p_value = 1.0 # Occurs if errors are identical or insufficient data.
+            p_value = 1.0
 
-        # --- Train and Save the Final Model on All Data ---
+        # --- Train and Save the Final Model on All Data (High + Low Confidence) ---
         output_dir = "final_imputation_models"
-        final_cv = StratifiedKFold(n_splits=min(3, global_min_class_count), shuffle=True, random_state=42)
+        full_data_min_class_count = min(Counter(y_full).values())
+        if full_data_min_class_count < 2:
+            return {'status': 'FAILED', 'id': inversion_id, 'reason': f'Full dataset minority class count ({full_data_min_class_count}) is < 2.'}
+
+        final_cv = StratifiedKFold(n_splits=min(3, full_data_min_class_count), shuffle=True, random_state=42)
         final_max_components = min(30, X_full.shape[1], X_full.shape[0] - 1)
         if final_max_components < 1:
             return {'status': 'FAILED', 'id': inversion_id, 'reason': 'Not enough data for final model build.'}
