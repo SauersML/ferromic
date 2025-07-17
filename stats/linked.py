@@ -9,7 +9,6 @@ import time
 import logging
 import sys
 import subprocess
-import argparse
 from joblib import Parallel, delayed, cpu_count, dump
 
 # Scikit-learn for modeling, evaluation, and preprocessing
@@ -31,7 +30,7 @@ class FatalSampleMappingError(Exception):
     pass
 
 # --- DATA EXTRACTION FUNCTION ---
-def extract_diploid_data_for_locus(inversion_job: dict, vcf_dir: str):
+def extract_diploid_data_for_locus(inversion_job: dict):
     """
     Extracts SNP data (X) and inversion dosage (y) for a single inversion locus.
 
@@ -43,7 +42,6 @@ def extract_diploid_data_for_locus(inversion_job: dict, vcf_dir: str):
     Args:
         inversion_job (dict): A dictionary representing one row from the
                               ground-truth TSV file.
-        vcf_dir (str): Path to the directory containing VCF files.
 
     Returns:
         dict: A dictionary containing the status and extracted data or error info.
@@ -51,7 +49,7 @@ def extract_diploid_data_for_locus(inversion_job: dict, vcf_dir: str):
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     try:
         chrom, start, end = inversion_job['seqnames'], inversion_job['start'], inversion_job['end']
-        vcf_path = os.path.join(vcf_dir, f"{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz")
+        vcf_path = f"../vcfs/{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
         if not os.path.exists(vcf_path):
             return {'status': 'FAILED', 'id': inversion_id, 'reason': f"VCF file not found: {vcf_path}"}
 
@@ -77,8 +75,9 @@ def extract_diploid_data_for_locus(inversion_job: dict, vcf_dir: str):
                                           f"Cannot proceed due to risk of data corruption. Details: {'; '.join(error_report)}")
 
         # Check mapping rate.
-        if not str(chrom).endswith('X') and (len(sample_map) / len(tsv_samples)) < 0.5:
-            raise FatalSampleMappingError(f"Autosomal sample mapping rate for {chrom} was below 50%.")
+        mapping_rate = len(sample_map) / len(tsv_samples) if tsv_samples else 0
+        if not str(chrom).endswith('X') and mapping_rate < 0.5:
+            raise FatalSampleMappingError(f"Autosomal sample mapping rate ({mapping_rate:.1%}) for {chrom} was below 50%.")
         if not sample_map:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': "No TSV samples could be mapped to VCF samples."}
 
@@ -236,6 +235,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
             p_value = 1.0 # Occurs if errors are identical or insufficient data.
 
         # --- Train and Save the Final Model on All Data ---
+        output_dir = "final_imputation_models"
         final_cv = StratifiedKFold(n_splits=min(3, global_min_class_count), shuffle=True, random_state=42)
         final_max_components = min(30, X_full.shape[1], X_full.shape[0] - 1)
         if final_max_components < 1:
@@ -246,7 +246,6 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
                                          cv=final_cv, n_jobs=n_jobs_inner, refit=True)
         final_grid_search.fit(X_full, y_full)
         
-        output_dir = "final_imputation_models"
         os.makedirs(output_dir, exist_ok=True)
         model_filename = os.path.join(output_dir, f"{inversion_id}.model.joblib")
         snp_list_filename = os.path.join(output_dir, f"{inversion_id}.snps.json")
@@ -267,29 +266,27 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}\n{traceback.format_exc()}"}
 
 # --- MAIN ORCHESTRATOR ---
-def main():
-    parser = argparse.ArgumentParser(description="PLS-Based Inversion Imputation Model Pipeline")
-    parser.add_argument('ground_truth_file', type=str, help="Path to the ground-truth TSV file for inversions.")
-    parser.add_argument('--vcf_dir', type=str, default='../vcfs/', help="Directory containing VCF files named by chromosome (e.g., 'chr1.vcf.gz').")
-    parser.add_argument('--output_dir', type=str, default='final_imputation_models', help="Directory to save final models and SNP lists.")
-    parser.add_argument('--cores', type=int, default=max(1, cpu_count() // 2), help="Number of cores to use for parallel processing.")
-    args = parser.parse_args()
-
+if __name__ == '__main__':
     logging.info("--- Starting PLS-Based Inversion Imputation Model Pipeline ---")
     start_time = time.time()
     
-    os.makedirs(args.output_dir, exist_ok=True)
+    # --- Hardcoded Configuration ---
+    output_dir = "final_imputation_models"
+    ground_truth_file = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
+    vcf_base_dir = "../vcfs/"
+
+    os.makedirs(output_dir, exist_ok=True)
     
-    if not os.path.exists(args.ground_truth_file): 
-        logging.critical(f"FATAL: Ground-truth file not found: '{args.ground_truth_file}'")
+    if not os.path.exists(ground_truth_file): 
+        logging.critical(f"FATAL: Ground-truth file not found: '{ground_truth_file}'")
         sys.exit(1)
     
-    config_df = pd.read_csv(args.ground_truth_file, sep='\t', on_bad_lines='warn', dtype={'seqnames': str})
+    config_df = pd.read_csv(ground_truth_file, sep='\t', on_bad_lines='warn', dtype={'seqnames': str})
     config_df = config_df[(config_df['verdict'] == 'pass') & (~config_df['seqnames'].isin(['chrY', 'chrM']))].copy()
     
     # Pre-flight check: Ensure VCF files are indexed with tabix.
     for chrom in config_df['seqnames'].unique():
-        vcf_path = os.path.join(args.vcf_dir, f"{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz")
+        vcf_path = os.path.join(vcf_base_dir, f"{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz")
         if os.path.exists(vcf_path) and not os.path.exists(f"{vcf_path}.tbi"):
             logging.info(f"Indexing VCF file: {vcf_path}")
             try: 
@@ -303,7 +300,7 @@ def main():
         logging.warning("No valid inversions to process after filtering. Exiting.")
         sys.exit(0)
 
-    num_procs = args.cores
+    num_procs = max(1, cpu_count() // 2)
     batch_size = num_procs * 4
     logging.info(f"Loaded {num_jobs} inversions. Processing in batches of {batch_size} using {num_procs} cores.")
     
@@ -312,10 +309,10 @@ def main():
         batch_jobs = all_jobs[i:min(i + batch_size, num_jobs)]
         logging.info(f"--- Starting Batch {i//batch_size + 1}/{(num_jobs + batch_size - 1) // batch_size} (Inversions {i+1}-{min(i + batch_size, num_jobs)}) ---")
         
-        # Phase 1: Data extraction can be run in parallel as well.
+        # Phase 1: Data extraction.
         logging.info(f"Phase 1: Parallel extraction of data for {len(batch_jobs)} inversions...")
         with Parallel(n_jobs=num_procs, backend='loky') as parallel:
-            preloaded_data_batch = parallel(delayed(extract_diploid_data_for_locus)(job, args.vcf_dir) for job in batch_jobs)
+            preloaded_data_batch = parallel(delayed(extract_diploid_data_for_locus)(job) for job in batch_jobs)
         
         successful_loads = [d for d in preloaded_data_batch if d.get('status') == 'PREPROCESSED']
         all_results.extend([d for d in preloaded_data_batch if d.get('status') != 'PREPROCESSED'])
@@ -327,7 +324,6 @@ def main():
                 analysis_results = parallel(delayed(analyze_and_model_locus_pls)(data) for data in successful_loads)
                 all_results.extend(analysis_results)
         
-        # Dynamic progress reporting for the batch.
         logging.info(f"--- Finished Batch {i//batch_size + 1} ---")
 
     logging.info(f"--- All Batches Complete in {time.time() - start_time:.2f} seconds ---")
@@ -357,18 +353,15 @@ def main():
         if not high_perf_df.empty:
             summary_cols = ['unbiased_pearson_r2', 'unbiased_rmse', 'model_p_value', 'best_n_components', 'num_snps_in_model']
             summary_df = high_perf_df[summary_cols]
-            summary_filename = os.path.join(args.output_dir, "high_performance_pls_models_summary.tsv")
+            summary_filename = os.path.join(output_dir, "high_performance_pls_models_summary.tsv")
             summary_df.to_csv(summary_filename, sep='\t', float_format='%.4g')
             print(f"\n--- High-Performance Models (Est. Unbiased r² > 0.3 & p < 0.05) ---")
             with pd.option_context('display.max_rows', None, 'display.width', 120):
                 print(summary_df)
             print(f"\n[SUCCESS] Saved summary for {len(high_perf_df)} models to '{summary_filename}'")
-            print(f"[SUCCESS] Full model objects and SNP lists saved in '{args.output_dir}/' directory.")
+            print(f"[SUCCESS] Full model objects and SNP lists saved in '{output_dir}/' directory.")
         else: 
             print("\n--- No high-performance models found meeting the specified criteria ---")
     else:
         print("\n--- No successful models were generated across all jobs. ---")
     print("\n" + "="*100)
-
-if __name__ == '__main__':
-    main()
