@@ -254,7 +254,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
             train_min_class_count = min(Counter(y_train).values()) if len(y_train) > 0 else 0
             if train_min_class_count < 2: continue
             
-            max_components = min(1000, X_train.shape[1], X_train.shape[0] - 1)
+            max_components = min(100, X_train.shape[1], X_train.shape[0] - 1)
             if max_components < 1: continue
 
             inner_cv = StratifiedKFold(n_splits=min(3, train_min_class_count), shuffle=True, random_state=123)
@@ -304,7 +304,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         
         final_min_class_count = min(Counter(y_final_train).values())
         final_cv = StratifiedKFold(n_splits=min(3, final_min_class_count), shuffle=True, random_state=42)
-        final_max_components = min(1000, X_final_train.shape[1], X_final_train.shape[0] - 1)
+        final_max_components = min(100, X_final_train.shape[1], X_final_train.shape[0] - 1)
         
         # Use a new GridSearchCV instance for the final model
         final_pipeline = Pipeline([('pls', PLSRegression())])
