@@ -229,7 +229,8 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
             # Assemble the training set for this fold
             X_train_val, y_train_val = X_val[train_val_idx], y_val[train_val_idx]
             
-            # --- LEAKAGE FIX: Generate Synthetic Data using ONLY this fold's training haplotypes ---
+
+            # so not leak
             # Create a mask that is True only for the high-confidence samples in this training fold
             fold_training_original_indices = original_hc_indices[train_val_idx]
             fold_specific_training_mask = np.zeros_like(confidence_mask, dtype=bool)
@@ -239,7 +240,6 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
                 X_hap1, X_hap2, preloaded_data['raw_gts'], fold_specific_training_mask, num_total_real_samples=len(y_full)
             )
             use_synth_fold = X_synth_fold is not None
-            # --- END LEAKAGE FIX ---
             
             # Combine real high-conf, real low-conf, and fold-specific synthetic data for training
             train_parts_X = [X_train_val, X_lowconf]
