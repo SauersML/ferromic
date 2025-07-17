@@ -178,7 +178,7 @@ def extract_haplotype_data_for_locus(inversion_job: dict):
              return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient overlapping samples ({len(common_samples)}) for modeling.'}
         
         num_high_conf = gt_df.loc[common_samples, 'is_high_conf'].sum()
-        if num_high_conf < 10: # Need enough high-conf samples to build pools and test folds. Change later
+        if num_high_conf < 3: # Need enough high-conf samples to build pools and test folds
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient high-confidence samples ({num_high_conf}) for haplotype pooling.'}
 
         return {
