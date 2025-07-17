@@ -17,7 +17,6 @@ from sklearn.model_selection import StratifiedKFold, GridSearchCV
 from sklearn.metrics import mean_squared_error
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
 from sklearn.dummy import DummyRegressor
 from scipy.stats import wilcoxon, pearsonr
 
@@ -41,13 +40,16 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
         X_hap1: Numpy array of first haplotypes for all real samples (samples x SNPs).
         X_hap2: Numpy array of second haplotypes for all real samples (samples x SNPs).
         raw_gts: Pandas Series of raw genotype strings ('0|0', '0|1', etc.) for real samples.
-        confidence_mask: Boolean array indicating high-confidence real samples.
+        confidence_mask: Boolean array indicating high-confidence real samples to be used for pooling.
         num_total_real_samples: The total number of real samples to match for the synthetic set size.
 
     Returns:
         A tuple (X_synth, y_synth) of numpy arrays for synthetic data, or (None, None) if creation fails.
     """
-    # Use only high-confidence haplotypes to build the pools
+    # Use only haplotypes from the provided confidence_mask to build the pools
+    if not np.any(confidence_mask):
+        return None, None
+    
     X_h1_hc = X_hap1[confidence_mask]
     X_h2_hc = X_hap2[confidence_mask]
     gts_hc = raw_gts[confidence_mask]
@@ -101,7 +103,7 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
         X_synth.append(new_diploid_dosage)
         y_synth.append(1)
 
-    logging.info(f"Successfully generated {len(y_synth)} synthetic samples.")
+    logging.info(f"Successfully generated {len(y_synth)} synthetic samples for this fold.")
     return np.array(X_synth), np.array(y_synth)
 
 
@@ -205,12 +207,6 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         X_val, y_val = X_full[confidence_mask], y_full[confidence_mask] # For testing
         X_lowconf, y_lowconf = X_full[~confidence_mask], y_full[~confidence_mask] # For training
 
-        # --- Generate Synthetic Data for Augmentation ---
-        X_synth, y_synth = create_synthetic_data(
-            X_hap1, X_hap2, preloaded_data['raw_gts'], confidence_mask, num_total_real_samples=len(y_full)
-        )
-        use_synth_data = X_synth is not None
-
         # --- Sanity Checks on Validation Set ---
         if X_val.shape[0] < 20 or X_val.shape[1] < 1:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient high-conf data (samples={X_val.shape[0]})'}
@@ -220,22 +216,37 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
 
         # --- Nested Cross-Validation for Unbiased Performance Estimation ---
         outer_cv = StratifiedKFold(n_splits=min(5, val_min_class_count), shuffle=True, random_state=42)
-        pipeline = Pipeline([('imputer', SimpleImputer(strategy='mean')), ('pls', PLSRegression())])
+        # Pipeline no longer needs an imputer since data extraction guarantees no missing values.
+        pipeline = Pipeline([('pls', PLSRegression())])
         y_true_pooled, y_pred_pls_pooled, y_pred_dummy_pooled = [], [], []
 
+        original_hc_indices = np.where(confidence_mask)[0]
+
         for i, (train_val_idx, test_val_idx) in enumerate(outer_cv.split(X_val, y_val)):
-            # Test set is PURELY real, high-confidence, held-out samples, without synthetic data
+            # Test set is PURELY real, high-confidence, held-out samples
             X_test, y_test = X_val[test_val_idx], y_val[test_val_idx]
 
             # Assemble the training set for this fold
             X_train_val, y_train_val = X_val[train_val_idx], y_val[train_val_idx]
             
-            # Combine real high-conf, real low-conf, and synthetic data for training
+            # --- LEAKAGE FIX: Generate Synthetic Data using ONLY this fold's training haplotypes ---
+            # Create a mask that is True only for the high-confidence samples in this training fold
+            fold_training_original_indices = original_hc_indices[train_val_idx]
+            fold_specific_training_mask = np.zeros_like(confidence_mask, dtype=bool)
+            fold_specific_training_mask[fold_training_original_indices] = True
+            
+            X_synth_fold, y_synth_fold = create_synthetic_data(
+                X_hap1, X_hap2, preloaded_data['raw_gts'], fold_specific_training_mask, num_total_real_samples=len(y_full)
+            )
+            use_synth_fold = X_synth_fold is not None
+            # --- END LEAKAGE FIX ---
+            
+            # Combine real high-conf, real low-conf, and fold-specific synthetic data for training
             train_parts_X = [X_train_val, X_lowconf]
             train_parts_y = [y_train_val, y_lowconf]
-            if use_synth_data:
-                train_parts_X.append(X_synth)
-                train_parts_y.append(y_synth)
+            if use_synth_fold:
+                train_parts_X.append(X_synth_fold)
+                train_parts_y.append(y_synth_fold)
             
             X_train = np.vstack([p for p in train_parts_X if p.shape[0] > 0])
             y_train = np.concatenate([p for p in train_parts_y if p.shape[0] > 0])
@@ -243,11 +254,12 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
             train_min_class_count = min(Counter(y_train).values()) if len(y_train) > 0 else 0
             if train_min_class_count < 2: continue
             
-            max_components = min(30, X_train.shape[1], X_train.shape[0] - 1)
+            max_components = min(1000, X_train.shape[1], X_train.shape[0] - 1)
             if max_components < 1: continue
 
             inner_cv = StratifiedKFold(n_splits=min(3, train_min_class_count), shuffle=True, random_state=123)
             
+            # Note: The 'pls__' prefix is still needed because the model is inside a Pipeline object
             grid_search = GridSearchCV(
                 estimator=pipeline, 
                 param_grid={'pls__n_components': range(1, max_components + 1)}, 
@@ -275,21 +287,29 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         _, p_value = wilcoxon(errors_pls, errors_dummy, alternative='less', zero_method='zsplit')
 
         # --- Train and Save Final Model on ALL available data ---
+        # Regenerate synthetic data using ALL high-confidence samples for the final model
+        X_synth_final, y_synth_final = create_synthetic_data(
+            X_hap1, X_hap2, preloaded_data['raw_gts'], confidence_mask, num_total_real_samples=len(y_full)
+        )
+        use_synth_final = X_synth_final is not None
+        
         final_train_X_parts = [X_full]
         final_train_y_parts = [y_full]
-        if use_synth_data:
-            final_train_X_parts.append(X_synth)
-            final_train_y_parts.append(y_synth)
+        if use_synth_final:
+            final_train_X_parts.append(X_synth_final)
+            final_train_y_parts.append(y_synth_final)
 
         X_final_train = np.vstack(final_train_X_parts)
         y_final_train = np.concatenate(final_train_y_parts)
         
         final_min_class_count = min(Counter(y_final_train).values())
         final_cv = StratifiedKFold(n_splits=min(3, final_min_class_count), shuffle=True, random_state=42)
-        final_max_components = min(30, X_final_train.shape[1], X_final_train.shape[0] - 1)
+        final_max_components = min(1000, X_final_train.shape[1], X_final_train.shape[0] - 1)
         
+        # Use a new GridSearchCV instance for the final model
+        final_pipeline = Pipeline([('pls', PLSRegression())])
         final_grid_search = GridSearchCV(
-            estimator=pipeline, 
+            estimator=final_pipeline, 
             param_grid={'pls__n_components': range(1, final_max_components + 1)},
             scoring='neg_mean_squared_error', 
             cv=final_cv, 
