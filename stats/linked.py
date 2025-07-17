@@ -31,21 +31,6 @@ class FatalSampleMappingError(Exception):
 
 # --- DATA EXTRACTION FUNCTION ---
 def extract_diploid_data_for_locus(inversion_job: dict):
-    """
-    Extracts SNP data (X) and inversion dosage (y) for a single inversion locus.
-
-    This function ensures a 1-to-1 mapping between samples in the ground-truth
-    file and the VCF file to prevent data-label misalignment. It will raise a
-    FatalSampleMappingError if any ground-truth sample ID ambiguously matches
-    multiple VCF sample IDs.
-
-    Args:
-        inversion_job (dict): A dictionary representing one row from the
-                              ground-truth TSV file.
-
-    Returns:
-        dict: A dictionary containing the status and extracted data or error info.
-    """
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     try:
         chrom, start, end = inversion_job['seqnames'], inversion_job['start'], inversion_job['end']
@@ -82,12 +67,20 @@ def extract_diploid_data_for_locus(inversion_job: dict):
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': "No TSV samples could be mapped to VCF samples."}
 
         def parse_hap_gt(gt_str: any):
-            if not isinstance(gt_str, str) or '|' not in gt_str: return None
-            try:
-                h1, h2 = gt_str.split('|')
-                return int(h1.split('_')[0]) + int(h2.split('_')[0])
-            except (ValueError, IndexError):
-                return None
+            """
+            Parses a genotype string, strictly requiring an exact match to
+            '0|0', '0|1', '1|0', or '1|1'. Returns the integer dosage or None.
+            """
+            # Define the map of valid genotypes to their integer dosage.
+            valid_genotypes = {
+                "0|0": 0,
+                "0|1": 1,
+                "1|0": 1,
+                "1|1": 2
+            }
+            # .get() returns the value for the key if it exists, otherwise it returns None.
+            # This is a concise and safe way to enforce the exact match requirement.
+            return valid_genotypes.get(gt_str)
 
         # Create a map from VCF sample ID directly to its ground truth dosage.
         gt_map = {vcf_s: parse_hap_gt(inversion_job.get(tsv_s)) for tsv_s, vcf_s in sample_map.items()}
@@ -143,7 +136,7 @@ def extract_diploid_data_for_locus(inversion_job: dict):
         }
     except Exception as e:
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Data Extraction Error: {type(e).__name__}: {e}"}
-
+        
 # --- CORE MODELING AND EVALUATION FUNCTION ---
 def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
     """
