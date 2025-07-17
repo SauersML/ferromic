@@ -205,6 +205,7 @@ pub fn make_sequences(
     cds_regions: &[TranscriptAnnotationCDS],
     position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: &str,
+    inversion_interval: ZeroBasedHalfOpen,
 ) -> Result<(), VcfError> {
     set_stage(ProcessingStage::CdsProcessing);
     log(LogLevel::Info, &format!(
@@ -274,6 +275,7 @@ pub fn make_sequences(
         &hap_sequences_u8,
         chromosome,
         extended_region,
+        inversion_interval,
     )?;
 
     finish_step_progress(&format!(
@@ -476,6 +478,7 @@ pub fn prepare_to_write_cds(
     hap_sequences: &HashMap<String, Vec<u8>>,
     chromosome: &str,
     hap_region: ZeroBasedHalfOpen,
+    inversion_interval: ZeroBasedHalfOpen,
 ) -> Result<(), VcfError> {
     log(LogLevel::Info, &format!("Preparing to write CDS files for group {} ({} regions)", 
         haplotype_group, cds_regions.len()));
@@ -640,10 +643,20 @@ pub fn prepare_to_write_cds(
          * - cds_start: 1-based inclusive start coordinate of the CDS
          * - cds_end: 1-based inclusive end coordinate of the CDS
          */
+        let inv_start_1based = inversion_interval.start_1based_inclusive();
+        let inv_end_1based = inversion_interval.get_1based_inclusive_end_coord();
+
         let filename = format!(
-            "group{}_{}_{}_{}_chr{}_start{}_end{}.phy",
-            haplotype_group, safe_gene_name, cds.gene_id, cds.transcript_id, 
-            chromosome, cds_start, cds_end
+            "group{}_{}_{}_{}_chr{}_cds_start{}_cds_end{}_inv_start{}_inv_end{}.phy",
+            haplotype_group,
+            safe_gene_name,
+            cds.gene_id,
+            cds.transcript_id,
+            chromosome,
+            cds_start, // This is the gene's CDS start
+            cds_end,   // This is the gene's CDS end
+            inv_start_1based,
+            inv_end_1based
         );
 
         // --- NEW METADATA LOGIC ---
