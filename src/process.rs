@@ -638,8 +638,7 @@ fn process_variants(
     sample_names: &[String],
     haplotype_group: u8,
     sample_filter: &HashMap<String, (u8, u8)>,
-    region_start: i64,
-    region_end: i64,
+    inversion_interval: ZeroBasedHalfOpen,
     extended_region: ZeroBasedHalfOpen,
     adjusted_sequence_length: Option<i64>,
     seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
@@ -652,8 +651,8 @@ fn process_variants(
     set_stage(ProcessingStage::VariantAnalysis);
     
     let group_type = if is_filtered_set { "filtered" } else { "unfiltered" };
-    log(LogLevel::Info, &format!("Processing {} variants for group {} in {}:{}-{}", 
-        variants.len(), haplotype_group, chromosome, region_start, region_end));
+    log(LogLevel::Info, &format!("Processing {} variants for group {} in {}:{}-{}",
+        variants.len(), haplotype_group, chromosome, inversion_interval.start, inversion_interval.end));
         
     // Map sample names to indices
     init_step_progress(&format!("Mapping samples for group {}", haplotype_group), 3);
@@ -709,19 +708,14 @@ fn process_variants(
     let region_hap_count = group_haps.len();
     
     if variants.is_empty() {
-        log(LogLevel::Info, &format!("No variants found for {}:{}-{} in group {}", 
-            chromosome, region_start, region_end, haplotype_group));
+        log(LogLevel::Info, &format!("No variants found for {}:{}-{} in group {}",
+            chromosome, inversion_interval.start, inversion_interval.end, haplotype_group));
         finish_step_progress("No variants to analyze");
         return Ok(Some((0, 0.0, 0.0, region_hap_count, Vec::new())));
     }
     
-    let region_interval = ZeroBasedHalfOpen {
-        start: region_start as usize,
-        end: region_end as usize,
-    };
-    
     let variants_in_region: Vec<Variant> = variants.iter()
-        .filter(|v| region_interval.contains(ZeroBasedPosition(v.position)))
+        .filter(|v| inversion_interval.contains(ZeroBasedPosition(v.position)))
         .cloned()
         .collect();
     
@@ -761,18 +755,12 @@ fn process_variants(
     
     // Define the precise QueryRegion for per-site diversity calculation,
     // matching the original entry.interval.
-    // region_start is entry.interval.start (0-based inclusive)
-    // region_end is entry.interval.end (0-based exclusive)
-    let current_entry_interval_zbh = ZeroBasedHalfOpen {
-        start: region_start as usize, // region_start is 0-based inclusive
-        end: region_end as usize,     // region_end is 0-based exclusive
-    };
-    let query_region_for_diversity = QueryRegion::from(current_entry_interval_zbh.to_zero_based_inclusive());
+    let query_region_for_diversity = QueryRegion::from(inversion_interval.to_zero_based_inclusive());
 
     // The 'final_length' for overall theta/pi should also be based on the precise entry.interval
     // 'adjusted_sequence_length' is already calculated based on entry.interval and passed in.
     // If 'adjusted_sequence_length' is None, it means we use the raw length of entry.interval.
-    let length_for_overall_stats = adjusted_sequence_length.unwrap_or(current_entry_interval_zbh.len() as i64);
+    let length_for_overall_stats = adjusted_sequence_length.unwrap_or(inversion_interval.len() as i64);
 
     let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, length_for_overall_stats);
     let final_pi = calculate_pi(&variants_in_region, &group_haps, length_for_overall_stats);
@@ -896,8 +884,8 @@ fn process_variants(
         
         if chromosome.contains("X") || chromosome.contains("x") {
             log(LogLevel::Info, &format!(
-                "DEBUG X: Processing sequence files for chrX:{}-{}, group {}, with {} CDS regions", 
-                region_start, region_end, haplotype_group, cds_regions.len()
+                "DEBUG X: Processing sequence files for chrX:{}-{}, group {}, with {} CDS regions",
+                inversion_interval.start, inversion_interval.end, haplotype_group, cds_regions.len()
             ));
         }
         
@@ -915,6 +903,7 @@ fn process_variants(
             cds_regions,
             position_allele_map.clone(),
             &chromosome,
+            inversion_interval,
         ) {
             log(LogLevel::Warning, &format!(
                 "ERROR generating sequences for group {} on {}: {}", 
@@ -2399,15 +2388,12 @@ fn process_single_config_entry(
             "Analyzing {} group {}", filter_type, call.group_id
         ));
         
-        let region_start = entry.interval.start as i64;
-        let region_end = entry.interval.end as i64;
         let stats_opt = process_variants(
             call.variants,
             &sample_names,
             call.group_id,
             call.sample_filter,
-            region_start,
-            region_end,
+            entry.interval,
             extended_region,
             call.maybe_adjusted_len,
             call.seqinfo_storage.clone(),
@@ -2430,7 +2416,7 @@ fn process_single_config_entry(
             };
             log(LogLevel::Warning, &format!(
                 "No haplotypes found for {} in region {}-{}",
-                label, region_start, region_end
+                label, entry.interval.start, entry.interval.end
             ));
             // finish_step_progress("No matching haplotypes found");
             // return Ok(None);
