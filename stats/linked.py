@@ -34,7 +34,9 @@ class FatalSampleMappingError(Exception):
     """Custom exception for critical, unrecoverable errors in sample mapping."""
     pass
 
-# --- SYNTHETIC DATA GENERATION FUNCTION ---
+
+
+
 def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Series, confidence_mask: np.ndarray, X_real_train_fold: np.ndarray):
     """
     Creates all possible unique synthetic diploid genomes by exhaustively combining existing high-confidence haplotypes,
@@ -94,8 +96,8 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
         return None, None
     return np.array(X_synth), np.array(y_synth)
 
+
 def extract_haplotype_data_for_locus(inversion_job: dict):
-    # This function remains largely the same, just without internal progress indicators.
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     try:
         chrom, start, end = inversion_job['seqnames'], inversion_job['start'], inversion_job['end']
@@ -118,11 +120,16 @@ def extract_haplotype_data_for_locus(inversion_job: dict):
             if gt_str in low_conf_map: return (low_conf_map[gt_str], False, gt_str.replace("_lowconf", ""))
             return (None, None, None)
 
-        gt_data = {
-            vcf_s: {'dosage': d, 'is_high_conf': hc, 'raw_gt': rgt}
-            for tsv_s, vcf_s in sample_map.items()
-            if (d, hc, rgt := parse_gt_for_synth(inversion_job.get(tsv_s)))[0] is not None
-        }
+        gt_data = {}
+        for tsv_s, vcf_s in sample_map.items():
+            dosage, is_high_conf, raw_gt = parse_gt_for_synth(inversion_job.get(tsv_s))
+            if dosage is not None:
+                gt_data[vcf_s] = {
+                    'dosage': dosage,
+                    'is_high_conf': is_high_conf,
+                    'raw_gt': raw_gt
+                }
+
         if not gt_data:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No samples with a valid inversion dosage.'}
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
@@ -163,7 +170,10 @@ def extract_haplotype_data_for_locus(inversion_job: dict):
     except Exception as e:
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Data Extraction Error: {type(e).__name__}: {e}"}
 
-# --- HELPER FUNCTION FOR EFFICIENT GRID SEARCH ---
+
+
+
+
 def get_effective_max_components(X_train, y_train, max_components):
     if max_components <= 1: return max_components
     with warnings.catch_warnings(record=True) as w:
@@ -175,9 +185,7 @@ def get_effective_max_components(X_train, y_train, max_components):
                     return min(max_components, int(match.group(1)))
     return max_components
 
-# --- CORE MODELING AND EVALUATION FUNCTION ---
 def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
-    # This function is now silent, with no progress bars or verbose printing.
     inversion_id = preloaded_data['id']
     try:
         y_full, confidence_mask = preloaded_data['y_diploid'], preloaded_data['confidence_mask']
@@ -322,7 +330,6 @@ if __name__ == '__main__':
 
     all_results = []
     
-    # --- DEFINE A SINGLE GLOBAL PROGRESS BAR ---
     # We estimate the total steps. Stage 1 is num_jobs, Stage 2 is at most num_jobs.
     # We will correct the total after Stage 1 for a more accurate ETA.
     pbar = tqdm(total=num_jobs * 2, desc="Overall Progress", unit="locus")
