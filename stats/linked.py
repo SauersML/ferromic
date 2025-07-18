@@ -25,7 +25,6 @@ from scipy.stats import wilcoxon, pearsonr
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=ConstantInputWarning)
 rng = np.random.default_rng(seed=42)
 
 def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Series, confidence_mask: np.ndarray, X_real_train_fold: np.ndarray):
