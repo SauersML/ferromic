@@ -25,11 +25,8 @@ from scipy.stats import wilcoxon, pearsonr
 
 # --- SETUP ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-# We will manage warnings programmatically, so we can ignore the general ones.
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning, message="y residual is constant")
-
-# Use a modern random number generator
 rng = np.random.default_rng(seed=42)
 
 class FatalSampleMappingError(Exception):
@@ -109,7 +106,6 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
                  f"(D0: {counts.get(0, 0)}, D1: {counts.get(1, 0)}, D2: {counts.get(2, 0)}).")
     return np.array(X_synth), np.array(y_synth)
 
-# --- DATA EXTRACTION FUNCTION ---
 def extract_haplotype_data_for_locus(inversion_job: dict):
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     try:
@@ -130,13 +126,15 @@ def extract_haplotype_data_for_locus(inversion_job: dict):
             high_conf_map = {"0|0": 0, "1|0": 1, "0|1": 1, "1|1": 2}
             low_conf_map = {"0|0_lowconf": 0, "1|0_lowconf": 1, "0|1_lowconf": 1, "1|1_lowconf": 2}
             if gt_str in high_conf_map: return (high_conf_map[gt_str], True, gt_str)
-            if gt_str in low_conf_map: return (low_conf_map[gt_str], False, None)
+            if gt_str in low_conf_map: return (low_conf_map[gt_str], False, gt_str.replace("_lowconf", ""))
             return (None, None, None)
 
-        gt_data = {vcf_s: {'dosage': d, 'is_high_conf': hc, 'raw_gt': rgt}
-                   for tsv_s, vcf_s in sample_map.items()
-                   if (d, hc, rgt := parse_gt_for_synth(inversion_job.get(tsv_s)))[0] is not None}
-        
+        gt_data = {}
+        for tsv_s, vcf_s in sample_map.items():
+            dosage, is_high_conf, raw_gt = parse_gt_for_synth(inversion_job.get(tsv_s))
+            if dosage is not None:
+                gt_data[vcf_s] = {'dosage': dosage, 'is_high_conf': is_high_conf, 'raw_gt': raw_gt}
+
         if not gt_data:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No samples with a valid inversion dosage.'}
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
@@ -186,7 +184,7 @@ def get_effective_max_components(X_train, y_train, max_components, fold_id="N/A"
         return max_components
 
     with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")  # Capture all warnings
+        warnings.simplefilter("always")
         probe_pls = PLSRegression(n_components=max_components)
         probe_pls.fit(X_train, y_train)
 
@@ -198,9 +196,9 @@ def get_effective_max_components(X_train, y_train, max_components, fold_id="N/A"
                     effective_max = min(max_components, k)
                     logging.info(f"Fold {fold_id}: y residual constant at k={k}. Limiting search to {effective_max} components.")
                     return effective_max
-    return max_components # No warning, use original max
+    return max_components
 
-# --- CORE MODELING AND EVALUATION FUNCTION (MODIFIED) ---
+# --- CORE MODELING AND EVALUATION FUNCTION ---
 def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
     inversion_id = preloaded_data['id']
     try:
@@ -330,9 +328,8 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         import traceback
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}\n{traceback.format_exc()}"}
 
-# --- MAIN ORCHESTRATOR ---
 if __name__ == '__main__':
-    logging.info("--- Starting PLS-Based Inversion Imputation Model Pipeline (Efficient Grid Search) ---")
+    logging.info("--- Starting PLS-Based Inversion Imputation Model Pipeline ---")
     start_time = time.time()
     
     output_dir = "final_imputation_models"
@@ -350,29 +347,40 @@ if __name__ == '__main__':
     if not all_jobs: 
         logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
 
-    num_procs = max(1, cpu_count() // 2)
-    batch_size = num_procs * 2
-    logging.info(f"Loaded {num_jobs} inversions. Processing in batches using {num_procs} cores.")
+    # --- Simple & Effective Parallelism Strategy ---
+    # Since there are many more loci than cores, the most efficient strategy
+    # is to assign one locus to each available core. We do not use nested parallelism.
+    total_cores = cpu_count()
+    outer_jobs = total_cores  # Use all available cores for processing different loci.
+    inner_jobs = 1            # Each locus job uses only one core for its internal tasks.
     
+    logging.info(f"Loaded {num_jobs} inversions. Using {outer_jobs} cores for parallel processing.")
+    logging.info("Each locus will be processed on a single core (no nested parallelism).")
+
     all_results = []
-    for i in range(0, num_jobs, batch_size):
-        batch_jobs = all_jobs[i:min(i + batch_size, num_jobs)]
-        logging.info(f"--- Starting Batch {i//batch_size + 1}/{(num_jobs + batch_size - 1) // batch_size} ---")
-        
-        with Parallel(n_jobs=num_procs, backend='loky') as parallel:
-            preloaded_data_batch = parallel(delayed(extract_haplotype_data_for_locus)(job) for job in batch_jobs)
-        
-        successful_loads = [d for d in preloaded_data_batch if d.get('status') == 'PREPROCESSED']
-        all_results.extend([d for d in preloaded_data_batch if d.get('status') != 'PREPROCESSED'])
+    
+    # --- Stage 1: Parallel Data Extraction ---
+    logging.info(f"--- Stage 1: Extracting data for {num_jobs} inversions... ---")
+    with Parallel(n_jobs=outer_jobs, backend='loky') as parallel:
+        preloaded_data_all = parallel(delayed(extract_haplotype_data_for_locus)(job) for job in all_jobs)
 
-        if successful_loads:
-            with Parallel(n_jobs=num_procs, backend='loky') as parallel:
-                analysis_results = parallel(delayed(analyze_and_model_locus_pls)(data) for data in successful_loads)
-                all_results.extend(analysis_results)
-        
-        logging.info(f"--- Finished Batch {i//batch_size + 1} ---")
+    # --- Stage 2: Parallel Model Analysis ---
+    successful_loads = [d for d in preloaded_data_all if d.get('status') == 'PREPROCESSED']
+    failed_or_skipped_loads = [d for d in preloaded_data_all if d.get('status') != 'PREPROCESSED']
+    all_results.extend(failed_or_skipped_loads)
 
-    logging.info(f"--- All Batches Complete in {time.time() - start_time:.2f} seconds ---")
+    if successful_loads:
+        logging.info(f"--- Stage 2: Analyzing and modeling {len(successful_loads)} successfully preprocessed inversions... ---")
+        with Parallel(n_jobs=outer_jobs, backend='loky') as parallel:
+            analysis_results = parallel(
+                delayed(analyze_and_model_locus_pls)(data, n_jobs_inner=inner_jobs) for data in successful_loads
+            )
+            all_results.extend(analysis_results)
+    else:
+        logging.warning("No inversions were successfully preprocessed. Skipping modeling stage.")
+
+    # --- Final Reporting ---
+    logging.info(f"--- All Processing Complete in {time.time() - start_time:.2f} seconds ---")
     successful_runs = [r for r in all_results if r and r.get('status') == 'SUCCESS']
     print("\n\n" + "="*100 + "\n---      FINAL PLS IMPUTATION MODEL REPORT (with Exhaustive Synthetic Data)      ---\n" + "="*100)
     
