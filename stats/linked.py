@@ -1,4 +1,3 @@
-# --- IMPORTS ---
 import pandas as pd
 import numpy as np
 from cyvcf2 import VCF
@@ -16,23 +15,18 @@ import re
 from tqdm.auto import tqdm
 from multiprocessing import Manager
 import threading
-
-# Scikit-learn for modeling, evaluation, and preprocessing
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
-from sklearn.metrics import mean_squared_error, get_scorer
+from sklearn.metrics import mean_squared_error
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.pipeline import Pipeline
 from sklearn.dummy import DummyRegressor
 from sklearn.utils.class_weight import compute_sample_weight
-from scipy.stats import wilcoxon, pearsonr, ConstantInputWarning
+from scipy.stats import wilcoxon, pearsonr
 
-# --- SETUP ---
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=ConstantInputWarning)
 rng = np.random.default_rng(seed=42)
-
-# --- WORKER FUNCTIONS ---
 
 def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Series, confidence_mask: np.ndarray, X_real_train_fold: np.ndarray):
     if not np.any(confidence_mask): return None, None
@@ -75,9 +69,7 @@ def extract_haplotype_data_for_locus(inversion_job: dict):
         vcf_reader = VCF(vcf_path, lazy=True)
         vcf_samples = vcf_reader.samples
         tsv_samples = [col for col in inversion_job.keys() if col.startswith(('HG', 'NA'))]
-        
         sample_map = {ts: p[0] for ts in tsv_samples if len(p := [vs for vs in vcf_samples if ts in vs]) == 1}
-        
         if not sample_map:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': "No TSV samples could be mapped to VCF samples."}
         def parse_gt_for_synth(gt_str: any):
@@ -119,10 +111,10 @@ def get_effective_max_components(X_train, y_train, max_components):
                 if match := re.search(r'iteration (\d+)', str(msg.message)): return min(max_components, int(match.group(1)))
     return max_components
 
-def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1, status_dict=None, worker_id=None):
+def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, status_dict, worker_id):
     inversion_id = preloaded_data['id']
     def update_status(message):
-        if status_dict: status_dict[worker_id] = f"[{inversion_id[:15]}] {message}"
+        status_dict[worker_id] = f"[{inversion_id[:15]}] {message}"
 
     try:
         y_full, confidence_mask = preloaded_data['y_diploid'], preloaded_data['confidence_mask']
@@ -142,7 +134,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1, sta
         original_hc_indices = np.where(confidence_mask)[0]
 
         for i, (train_val_idx, test_val_idx) in enumerate(outer_cv.split(X_val, y_val)):
-            update_status(f"Analyzing Fold {i+1}/{n_outer_splits}...")
+            update_status(f"CV Fold {i+1}/{n_outer_splits} (using {n_jobs_inner} cores)...")
             X_test, y_test = X_val[test_val_idx], y_val[test_val_idx]
             X_train_val_fold, y_train_val_fold = X_val[train_val_idx], y_val[train_val_idx]
             X_real_train_fold = np.vstack([p for p in [X_train_val_fold, X_lowconf] if p.shape[0] > 0])
@@ -170,12 +162,11 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1, sta
             y_true_pooled.extend(y_test); y_pred_pls_pooled.extend(grid_search.best_estimator_.predict(X_test).flatten()); y_pred_dummy_pooled.extend(dummy_model_fold.predict(X_test))
         
         if not y_true_pooled: return {'status': 'FAILED', 'id': inversion_id, 'reason': "Nested CV failed on all folds."}
-        update_status("Finalizing model...")
+        update_status(f"Finalizing model (using {n_jobs_inner} cores)...")
         y_true_arr, y_pred_arr = np.array(y_true_pooled), np.array(y_pred_pls_pooled)
         corr = 0.0 if (y_true_arr.size > 1 and np.all(y_true_arr == y_true_arr[0])) or (y_pred_arr.size > 1 and np.all(y_pred_arr == y_pred_arr[0])) else pearsonr(y_true_arr, y_pred_arr)[0]
         pearson_r2 = (corr if not np.isnan(corr) else 0.0)**2
         _, p_value = wilcoxon(np.abs(y_true_arr - y_pred_arr), np.abs(y_true_arr - np.array(y_pred_dummy_pooled)), alternative='less', zero_method='zsplit')
-
         X_synth_final, y_synth_final = create_synthetic_data(X_hap1, X_hap2, preloaded_data['raw_gts'], confidence_mask, X_full)
         final_train_X_parts, final_train_y_parts = [X_full], [y_full]
         if X_synth_final is not None: final_train_X_parts.append(X_synth_final); final_train_y_parts.append(y_synth_final)
@@ -205,24 +196,27 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1, sta
         update_status("Failed")
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}\n{traceback.format_exc()}"}
 
-def process_locus_end_to_end(job, status_dict, worker_id):
+def process_locus_end_to_end(job, status_dict, team_id, n_jobs_inner):
     inversion_id = job.get('orig_ID', 'Unknown_ID')
-    status_dict[worker_id] = f"[{inversion_id[:15]}] Extracting data..."
+    status_dict[team_id] = f"[{inversion_id[:15]}] Extracting data..."
     preloaded_data = extract_haplotype_data_for_locus(job)
     
     if preloaded_data.get('status') != 'PREPROCESSED':
-        status_dict[worker_id] = f"[{inversion_id[:15]}] Done ({preloaded_data.get('status')})"
+        status_dict[team_id] = f"[{inversion_id[:15]}] Done ({preloaded_data.get('status')})"
         return preloaded_data
 
-    return analyze_and_model_locus_pls(preloaded_data, status_dict=status_dict, worker_id=worker_id)
+    return analyze_and_model_locus_pls(preloaded_data, n_jobs_inner, status_dict, team_id)
 
-def progress_bar_updater(status_dict, pbar, num_workers):
-    while not getattr(threading.current_thread(), "should_stop", False):
-        descriptions = [status_dict.get(i, "Idle") for i in range(num_workers)]
-        active_workers = [desc for desc in descriptions if not desc.startswith("Idle")]
-        pbar.set_description(f"Active Workers: {len(active_workers)}/{num_workers}")
-        pbar.set_postfix_str("\n" + "\n".join(f"  - Core {i+1}: {desc}" for i, desc in enumerate(descriptions)))
-        time.sleep(0.2)
+def progress_bar_updater(status_dict, pbar, num_teams):
+    stop_event = threading.Event()
+    while not stop_event.is_set():
+        descriptions = [status_dict.get(i, "Idle") for i in range(num_teams)]
+        active_teams = len([desc for desc in descriptions if not desc.startswith("Idle") and "Done" not in desc])
+        pbar.set_description(f"Active Teams: {active_teams}/{num_teams}")
+        pbar.set_postfix_str("\n" + "\n".join(f"  - Team {i+1}: {desc}" for i, desc in enumerate(descriptions)))
+        if stop_event.wait(0.2):
+             break
+    pbar.set_postfix_str("All teams finished.")
 
 if __name__ == '__main__':
     script_start_time = time.time()
@@ -238,27 +232,34 @@ if __name__ == '__main__':
     if not all_jobs: logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
 
     total_cores = cpu_count()
-    logging.info(f"Loaded {len(all_jobs)} inversions. Using {total_cores} cores for parallel processing.")
+
+    N_INNER_JOBS = 8 
+    if total_cores < N_INNER_JOBS: N_INNER_JOBS = total_cores
+    N_OUTER_JOBS = total_cores // N_INNER_JOBS
+
+    logging.info(f"Loaded {len(all_jobs)} inversions. Using {total_cores} cores configured as {N_OUTER_JOBS} teams of {N_INNER_JOBS} cores each.")
     
     with Manager() as manager:
-        status_dict = manager.dict({i: "Idle" for i in range(total_cores)})
+        status_dict = manager.dict({i: "Idle" for i in range(N_OUTER_JOBS)})
         
         with tqdm(total=len(all_jobs), desc="Processing Loci", unit="locus") as pbar:
-            updater_thread = threading.Thread(target=progress_bar_updater, args=(status_dict, pbar, total_cores))
+            updater_thread = threading.Thread(target=progress_bar_updater, args=(status_dict, pbar, N_OUTER_JOBS))
             updater_thread.daemon = True
             updater_thread.start()
 
-            all_results = Parallel(n_jobs=total_cores, backend='loky')(
-                # Each worker gets a unique ID from 0 to num_cores-1
-                delayed(process_locus_end_to_end)(job, status_dict, i % total_cores)
-                for i, job in enumerate(all_jobs)
-            )
-            # Update the progress bar for each completed job after the parallel call returns
-            pbar.update(len(all_jobs) - pbar.n)
+            all_results = []
+            try:
+                with Parallel(n_jobs=N_OUTER_JOBS, backend='loky') as parallel:
+                    # The generator now includes the team ID and the number of inner jobs
+                    job_generator = (delayed(process_locus_end_to_end)(job, status_dict, i % N_OUTER_JOBS, N_INNER_JOBS) for i, job in enumerate(all_jobs))
+                    
+                    for result in parallel(job_generator):
+                        all_results.append(result)
+                        pbar.update(1)
 
-            # Cleanly stop the updater thread
-            getattr(updater_thread, "should_stop", True) # Set the stop signal
-            updater_thread.join()
+            finally:
+                updater_thread._target.__self__.stop_event.set()
+                updater_thread.join()
 
     logging.info(f"--- All Processing Complete in {time.time() - script_start_time:.2f} seconds ---")
     successful_runs = [r for r in all_results if r and r.get('status') == 'SUCCESS']
