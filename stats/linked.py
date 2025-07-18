@@ -13,7 +13,7 @@ from joblib import Parallel, delayed, cpu_count, dump
 import random
 import itertools
 import re
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 # Scikit-learn for modeling, evaluation, and preprocessing
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
@@ -25,9 +25,9 @@ from sklearn.utils.class_weight import compute_sample_weight
 from scipy.stats import wilcoxon, pearsonr
 
 # --- SETUP ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+# Configure logging to be minimal to not interfere with the progress bar
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=RuntimeWarning, message="y residual is constant")
 rng = np.random.default_rng(seed=42)
 
 class FatalSampleMappingError(Exception):
@@ -67,31 +67,23 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
     
     unique_hap_pool_0 = np.unique(np.array(hap_pool_0), axis=0) if hap_pool_0 else np.array([])
     unique_hap_pool_1 = np.unique(np.array(hap_pool_1), axis=0) if hap_pool_1 else np.array([])
-    
     n_unique_0, n_unique_1 = len(unique_hap_pool_0), len(unique_hap_pool_1)
-
     if n_unique_0 < 1 and n_unique_1 < 1:
-        logging.warning("Insufficient haplotype diversity (0 unique haplotypes found). Skipping augmentation.")
         return None, None
 
     existing_genomes_set = {tuple(genome) for genome in X_real_train_fold}
     X_synth, y_synth = [], []
 
-    # Dosage 2 (1|1)
     if n_unique_1 >= 2:
         for i, j in itertools.combinations_with_replacement(range(n_unique_1), 2):
             new_diploid = unique_hap_pool_1[i] + unique_hap_pool_1[j]
             if tuple(new_diploid) not in existing_genomes_set:
                 X_synth.append(new_diploid); y_synth.append(2)
-
-    # Dosage 0 (0|0)
     if n_unique_0 >= 2:
         for i, j in itertools.combinations_with_replacement(range(n_unique_0), 2):
             new_diploid = unique_hap_pool_0[i] + unique_hap_pool_0[j]
             if tuple(new_diploid) not in existing_genomes_set:
                 X_synth.append(new_diploid); y_synth.append(0)
-
-    # Dosage 1 (0|1)
     if n_unique_0 >= 1 and n_unique_1 >= 1:
         for i, j in itertools.product(range(n_unique_0), range(n_unique_1)):
             new_diploid = unique_hap_pool_0[i] + unique_hap_pool_1[j]
@@ -99,15 +91,11 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
                 X_synth.append(new_diploid); y_synth.append(1)
 
     if not X_synth:
-        logging.warning("No novel synthetic samples could be generated. All combinations may already exist.")
         return None, None
-
-    counts = Counter(y_synth)
-    logging.info(f"Generated {len(y_synth)} novel synthetic samples "
-                 f"(D0: {counts.get(0, 0)}, D1: {counts.get(1, 0)}, D2: {counts.get(2, 0)}).")
     return np.array(X_synth), np.array(y_synth)
 
 def extract_haplotype_data_for_locus(inversion_job: dict):
+    # This function remains largely the same, just without internal progress indicators.
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     try:
         chrom, start, end = inversion_job['seqnames'], inversion_job['start'], inversion_job['end']
@@ -130,12 +118,11 @@ def extract_haplotype_data_for_locus(inversion_job: dict):
             if gt_str in low_conf_map: return (low_conf_map[gt_str], False, gt_str.replace("_lowconf", ""))
             return (None, None, None)
 
-        gt_data = {}
-        for tsv_s, vcf_s in sample_map.items():
-            dosage, is_high_conf, raw_gt = parse_gt_for_synth(inversion_job.get(tsv_s))
-            if dosage is not None:
-                gt_data[vcf_s] = {'dosage': dosage, 'is_high_conf': is_high_conf, 'raw_gt': raw_gt}
-
+        gt_data = {
+            vcf_s: {'dosage': d, 'is_high_conf': hc, 'raw_gt': rgt}
+            for tsv_s, vcf_s in sample_map.items()
+            if (d, hc, rgt := parse_gt_for_synth(inversion_job.get(tsv_s)))[0] is not None
+        }
         if not gt_data:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No samples with a valid inversion dosage.'}
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
@@ -177,30 +164,20 @@ def extract_haplotype_data_for_locus(inversion_job: dict):
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Data Extraction Error: {type(e).__name__}: {e}"}
 
 # --- HELPER FUNCTION FOR EFFICIENT GRID SEARCH ---
-def get_effective_max_components(X_train, y_train, max_components, fold_id="N/A"):
-    """
-    Probes PLS to find the max components before y residual becomes constant.
-    """
-    if max_components <= 1:
-        return max_components
-
+def get_effective_max_components(X_train, y_train, max_components):
+    if max_components <= 1: return max_components
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        probe_pls = PLSRegression(n_components=max_components)
-        probe_pls.fit(X_train, y_train)
-
-        for warning_message in w:
-            if issubclass(warning_message.category, UserWarning) and "y residual is constant" in str(warning_message.message):
-                match = re.search(r'iteration (\d+)', str(warning_message.message))
-                if match:
-                    k = int(match.group(1))
-                    effective_max = min(max_components, k)
-                    logging.info(f"Fold {fold_id}: y residual constant at k={k}. Limiting search to {effective_max} components.")
-                    return effective_max
+        probe_pls = PLSRegression(n_components=max_components).fit(X_train, y_train)
+        for msg in w:
+            if issubclass(msg.category, UserWarning) and "y residual is constant" in str(msg.message):
+                if match := re.search(r'iteration (\d+)', str(msg.message)):
+                    return min(max_components, int(match.group(1)))
     return max_components
 
 # --- CORE MODELING AND EVALUATION FUNCTION ---
 def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
+    # This function is now silent, with no progress bars or verbose printing.
     inversion_id = preloaded_data['id']
     try:
         y_full, confidence_mask = preloaded_data['y_diploid'], preloaded_data['confidence_mask']
@@ -219,28 +196,23 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         y_true_pooled, y_pred_pls_pooled, y_pred_dummy_pooled = [], [], []
         original_hc_indices = np.where(confidence_mask)[0]
 
-        for i, (train_val_idx, test_val_idx) in enumerate(outer_cv.split(X_val, y_val)):
+        for train_val_idx, test_val_idx in outer_cv.split(X_val, y_val):
             X_test, y_test = X_val[test_val_idx], y_val[test_val_idx]
-            
             X_train_val_fold, y_train_val_fold = X_val[train_val_idx], y_val[train_val_idx]
             X_real_train_fold = np.vstack([p for p in [X_train_val_fold, X_lowconf] if p.shape[0] > 0])
             y_real_train_fold = np.concatenate([p for p in [y_train_val_fold, y_lowconf] if p.shape[0] > 0])
 
-            fold_training_original_indices = original_hc_indices[train_val_idx]
             fold_specific_training_mask = np.zeros_like(confidence_mask, dtype=bool)
-            fold_specific_training_mask[fold_training_original_indices] = True
+            fold_specific_training_mask[original_hc_indices[train_val_idx]] = True
             
             X_synth_fold, y_synth_fold = create_synthetic_data(
                 X_hap1, X_hap2, preloaded_data['raw_gts'], fold_specific_training_mask, X_real_train_fold
             )
             
-            train_parts_X = [X_real_train_fold]
-            train_parts_y = [y_real_train_fold]
-            if X_synth_fold is not None and y_synth_fold is not None:
+            train_parts_X, train_parts_y = [X_real_train_fold], [y_real_train_fold]
+            if X_synth_fold is not None:
                 train_parts_X.append(X_synth_fold); train_parts_y.append(y_synth_fold)
-
-            X_train_full = np.vstack(train_parts_X)
-            y_train_full = np.concatenate(train_parts_y)
+            X_train_full, y_train_full = np.vstack(train_parts_X), np.concatenate(train_parts_y)
 
             if len(X_train_full) == 0 or len(np.unique(y_train_full)) < 2: continue
 
@@ -252,20 +224,20 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
             if train_min_class_count < 2: continue
             
             max_components = min(100, X_train.shape[1], X_train.shape[0] - 1)
-            effective_max_components = get_effective_max_components(X_train, y_train, max_components, fold_id=f"{inversion_id}-{i}")
+            effective_max_components = get_effective_max_components(X_train, y_train, max_components)
             if effective_max_components < 1: continue
 
             inner_cv = StratifiedKFold(n_splits=min(3, train_min_class_count), shuffle=True, random_state=123)
-            
             grid_search = GridSearchCV(
                 estimator=pipeline, 
                 param_grid={'pls__n_components': range(1, effective_max_components + 1)}, 
                 scoring='neg_mean_squared_error', cv=inner_cv, n_jobs=n_jobs_inner, error_score='raise'
             )
-            grid_search.fit(X_train, y_train)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", "y residual is constant", UserWarning)
+                grid_search.fit(X_train, y_train)
             
             dummy_model_fold = DummyRegressor(strategy='mean').fit(X_train_full, y_train_full)
-            
             y_true_pooled.extend(y_test)
             y_pred_pls_pooled.extend(grid_search.best_estimator_.predict(X_test).flatten())
             y_pred_dummy_pooled.extend(dummy_model_fold.predict(X_test))
@@ -279,17 +251,11 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         errors_dummy = np.abs(np.array(y_true_pooled) - np.array(y_pred_dummy_pooled))
         _, p_value = wilcoxon(errors_pls, errors_dummy, alternative='less', zero_method='zsplit')
 
-        # --- Train and Save Final Model on ALL available data ---
-        X_synth_final, y_synth_final = create_synthetic_data(
-            X_hap1, X_hap2, preloaded_data['raw_gts'], confidence_mask, X_full
-        )
-        final_train_X_parts = [X_full]
-        final_train_y_parts = [y_full]
+        X_synth_final, y_synth_final = create_synthetic_data(X_hap1, X_hap2, preloaded_data['raw_gts'], confidence_mask, X_full)
+        final_train_X_parts, final_train_y_parts = [X_full], [y_full]
         if X_synth_final is not None:
             final_train_X_parts.append(X_synth_final); final_train_y_parts.append(y_synth_final)
-
-        X_final_train_full = np.vstack(final_train_X_parts)
-        y_final_train_full = np.concatenate(final_train_y_parts)
+        X_final_train_full, y_final_train_full = np.vstack(final_train_X_parts), np.concatenate(final_train_y_parts)
         
         final_sample_weights = compute_sample_weight("balanced", y=y_final_train_full)
         final_resampled_indices = rng.choice(len(X_final_train_full), size=len(X_final_train_full), replace=True, p=final_sample_weights / np.sum(final_sample_weights))
@@ -300,7 +266,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
             return {'status': 'FAILED', 'id': inversion_id, 'reason': "Final balanced training set lacks class diversity."}
             
         final_max_components = min(100, X_final_train.shape[1], X_final_train.shape[0] - 1)
-        final_effective_max = get_effective_max_components(X_final_train, y_final_train, final_max_components, fold_id=f"{inversion_id}-final")
+        final_effective_max = get_effective_max_components(X_final_train, y_final_train, final_max_components)
         if final_effective_max < 1:
             return {'status': 'FAILED', 'id': inversion_id, 'reason': "Final model training range is invalid."}
 
@@ -311,7 +277,9 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
             param_grid={'pls__n_components': range(1, final_effective_max + 1)},
             scoring='neg_mean_squared_error', cv=final_cv, n_jobs=n_jobs_inner, refit=True
         )
-        final_grid_search.fit(X_final_train, y_final_train)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "y residual is constant", UserWarning)
+            final_grid_search.fit(X_final_train, y_final_train)
         
         output_dir = "final_imputation_models"
         os.makedirs(output_dir, exist_ok=True)
@@ -319,19 +287,17 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1):
         dump(final_grid_search.best_estimator_, model_filename)
         pd.DataFrame(preloaded_data['snp_metadata']).to_json(os.path.join(output_dir, f"{inversion_id}.snps.json"), orient='records')
 
-        return {'status': 'SUCCESS', 'id': inversion_id,
-                'unbiased_pearson_r2': pearson_r2,
+        return {'status': 'SUCCESS', 'id': inversion_id, 'unbiased_pearson_r2': pearson_r2,
                 'unbiased_rmse': np.sqrt(mean_squared_error(y_true_pooled, y_pred_pls_pooled)),
-                'model_p_value': p_value,
-                'best_n_components': final_grid_search.best_params_['pls__n_components'],
+                'model_p_value': p_value, 'best_n_components': final_grid_search.best_params_['pls__n_components'],
                 'num_snps_in_model': X_full.shape[1], 'model_path': model_filename}
     except Exception as e:
         import traceback
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}\n{traceback.format_exc()}"}
 
 if __name__ == '__main__':
+    script_start_time = time.time()
     logging.info("--- Starting PLS-Based Inversion Imputation Model Pipeline ---")
-    start_time = time.time()
     
     output_dir = "final_imputation_models"
     ground_truth_file = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
@@ -348,48 +314,69 @@ if __name__ == '__main__':
     if not all_jobs: 
         logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
 
-    # --- Simple & Effective Parallelism Strategy ---
-    # Since there are many more loci than cores, the most efficient strategy
-    # is to assign one locus to each available core. We do not use nested parallelism.
     total_cores = cpu_count()
-    outer_jobs = total_cores  # Use all available cores for processing different loci.
-    inner_jobs = 1            # Each locus job uses only one core for its internal tasks.
+    outer_jobs = total_cores
+    inner_jobs = 1            
     
     logging.info(f"Loaded {num_jobs} inversions. Using {outer_jobs} cores for parallel processing.")
-    logging.info("Each locus will be processed on a single core (no nested parallelism).")
 
     all_results = []
     
-    # --- Stage 1: Parallel Data Extraction ---
-    logging.info(f"--- Stage 1: Extracting data for {num_jobs} inversions... ---")
-    with Parallel(n_jobs=outer_jobs, backend='loky') as parallel:
-        # Wrapped the generator with tqdm for a progress bar
-        preloaded_data_all = parallel(
-            delayed(extract_haplotype_data_for_locus)(job) 
-            for job in tqdm(all_jobs, desc="[Stage 1/2] Data Extraction", unit="locus")
-        )
-
-    # --- Stage 2: Parallel Model Analysis ---
-    successful_loads = [d for d in preloaded_data_all if d.get('status') == 'PREPROCESSED']
-    failed_or_skipped_loads = [d for d in preloaded_data_all if d.get('status') != 'PREPROCESSED']
-    all_results.extend(failed_or_skipped_loads)
-
-    if successful_loads:
-        logging.info(f"--- Stage 2: Analyzing and modeling {len(successful_loads)} successfully preprocessed inversions... ---")
+    # --- DEFINE A SINGLE GLOBAL PROGRESS BAR ---
+    # We estimate the total steps. Stage 1 is num_jobs, Stage 2 is at most num_jobs.
+    # We will correct the total after Stage 1 for a more accurate ETA.
+    pbar = tqdm(total=num_jobs * 2, desc="Overall Progress", unit="locus")
+    
+    try:
+        # --- Stage 1: Parallel Data Extraction with Manual Progress Update ---
+        pbar.set_description("Stage 1/2: Extracting Data")
+        
+        preloaded_data_all = []
         with Parallel(n_jobs=outer_jobs, backend='loky') as parallel:
-            # Wrapped the generator with tqdm for a progress bar
-            analysis_results = parallel(
-                delayed(analyze_and_model_locus_pls)(data, n_jobs_inner=inner_jobs) 
-                for data in tqdm(successful_loads, desc="[Stage 2/2] Model Training", unit="locus")
-            )
+            # Create a generator of jobs
+            extraction_generator = (delayed(extract_haplotype_data_for_locus)(job) for job in all_jobs)
+            # Iterate through the results as they complete, updating the bar each time
+            for result in parallel(extraction_generator):
+                preloaded_data_all.append(result)
+                pbar.update(1)
+
+        # --- Filter results and prepare for Stage 2 ---
+        successful_loads = [d for d in preloaded_data_all if d.get('status') == 'PREPROCESSED']
+        failed_or_skipped_loads = [d for d in preloaded_data_all if d.get('status') != 'PREPROCESSED']
+        all_results.extend(failed_or_skipped_loads)
+
+        # --- RECALIBRATE THE PROGRESS BAR ---
+        # The total number of steps is now known precisely.
+        pbar.total = num_jobs + len(successful_loads)
+        pbar.refresh() # Update the display with the new total
+
+        if successful_loads:
+            # --- Stage 2: Parallel Model Analysis with Manual Progress Update ---
+            pbar.set_description(f"Stage 2/2: Training Models ({len(successful_loads)} loci)")
+            
+            analysis_results = []
+            with Parallel(n_jobs=outer_jobs, backend='loky') as parallel:
+                modeling_generator = (delayed(analyze_and_model_locus_pls)(data, n_jobs_inner=inner_jobs) for data in successful_loads)
+                for result in parallel(modeling_generator):
+                    analysis_results.append(result)
+                    pbar.update(1)
             all_results.extend(analysis_results)
-    else:
-        logging.warning("No inversions were successfully preprocessed. Skipping modeling stage.")
+        else:
+            # If no jobs for stage 2, make sure the bar goes to 100%
+            pbar.n = pbar.total
+            pbar.refresh()
+            logging.warning("No inversions were successfully preprocessed. Skipping modeling stage.")
+
+    finally:
+        # Ensure the progress bar is closed cleanly even if an error occurs
+        pbar.close()
 
     # --- Final Reporting ---
-    logging.info(f"--- All Processing Complete in {time.time() - start_time:.2f} seconds ---")
+    logging.info(f"--- All Processing Complete in {time.time() - script_start_time:.2f} seconds ---")
     successful_runs = [r for r in all_results if r and r.get('status') == 'SUCCESS']
-    print("\n\n" + "="*100 + "\n---      FINAL PLS IMPUTATION MODEL REPORT (with Exhaustive Synthetic Data)      ---\n" + "="*100)
+    
+    # Use print for final report to ensure it's not mixed with logging
+    print("\n\n" + "="*100 + "\n---      FINAL PLS IMPUTATION MODEL REPORT      ---\n" + "="*100)
     
     reason_counts = Counter(f"({r.get('status', 'N/A')}) {r.get('reason', 'N/A').splitlines()[0]}" for r in all_results if r.get('status') != 'SUCCESS')
     if reason_counts:
@@ -411,6 +398,8 @@ if __name__ == '__main__':
             print(f"\n--- High-Performance Models (Est. Unbiased r² > 0.5 & p < 0.05) ---")
             with pd.option_context('display.max_rows', None, 'display.width', 120): print(high_perf_df[summary_cols])
             print(f"\n[SUCCESS] Saved summary for {len(high_perf_df)} models to '{summary_filename}'")
-        else: print("\n--- No high-performance models found meeting the r² > 0.5 criteria ---")
-    else: print("\n--- No successful models were generated across all jobs. ---")
+        else:
+            print("\n--- No high-performance models found meeting the r² > 0.5 criteria ---")
+    else:
+        print("\n--- No successful models were generated across all jobs. ---")
     print("\n" + "="*100)
