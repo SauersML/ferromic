@@ -35,8 +35,7 @@ rng = np.random.default_rng(seed=42)
 # --- WORKER FUNCTIONS ---
 
 def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Series, confidence_mask: np.ndarray, X_real_train_fold: np.ndarray):
-    if not np.any(confidence_mask):
-        return None, None
+    if not np.any(confidence_mask): return None, None
     X_h1_hc, X_h2_hc, gts_hc = X_hap1[confidence_mask], X_hap2[confidence_mask], raw_gts[confidence_mask]
     hap_pool_0, hap_pool_1 = [], []
     for i, gt in enumerate(gts_hc):
@@ -76,7 +75,7 @@ def extract_haplotype_data_for_locus(inversion_job: dict):
         vcf_reader = VCF(vcf_path, lazy=True)
         vcf_samples = vcf_reader.samples
         tsv_samples = [col for col in inversion_job.keys() if col.startswith(('HG', 'NA'))]
-
+        
         sample_map = {ts: p[0] for ts in tsv_samples if len(p := [vs for vs in vcf_samples if ts in vs]) == 1}
         
         if not sample_map:
@@ -87,11 +86,12 @@ def extract_haplotype_data_for_locus(inversion_job: dict):
             if gt_str in high_conf_map: return (high_conf_map[gt_str], True, gt_str)
             if gt_str in low_conf_map: return (low_conf_map[gt_str], False, gt_str.replace("_lowconf", ""))
             return (None, None, None)
-        gt_data = {vcf_s: {'dosage': d, 'is_high_conf': hc, 'raw_gt': rgt} for tsv_s, vcf_s in sample_map.items() if (d := parse_gt_for_synth(inversion_job.get(tsv_s))[0]) is not None for _, hc, rgt in [parse_gt_for_synth(inversion_job.get(tsv_s))]}
+        gt_data = {vcf_s: {'dosage': d, 'is_high_conf': hc, 'raw_gt': rgt} for tsv_s, vcf_s in sample_map.items() for d, hc, rgt in [parse_gt_for_synth(inversion_job.get(tsv_s))] if d is not None}
         if not gt_data:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No samples with a valid inversion dosage.'}
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
-        region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}" if (flank_size := 50000) else f"{chrom}:{start}-{end}"
+        flank_size = 50000
+        region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
         vcf_subset = VCF(vcf_path, samples=list(gt_df.index))
         h1_data, h2_data, snp_meta, processed_pos = [], [], [], set()
         for var in vcf_subset(region_str):
@@ -119,24 +119,21 @@ def get_effective_max_components(X_train, y_train, max_components):
                 if match := re.search(r'iteration (\d+)', str(msg.message)): return min(max_components, int(match.group(1)))
     return max_components
 
-def make_progress_scorer(scoring, progress_queue):
-    scorer = get_scorer(scoring)
-    def progress_scoring_func(estimator, X, y):
-        progress_queue.put(('UPDATE', 1))
-        return scorer(estimator, X, y)
-    return progress_scoring_func
-
-def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1, progress_scorer=None):
+def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1, status_dict=None, worker_id=None):
     inversion_id = preloaded_data['id']
+    def update_status(message):
+        if status_dict: status_dict[worker_id] = f"[{inversion_id[:15]}] {message}"
+
     try:
         y_full, confidence_mask = preloaded_data['y_diploid'], preloaded_data['confidence_mask']
         X_hap1, X_hap2 = preloaded_data['X_hap1'], preloaded_data['X_hap2']
-        X_full = X_hap1 + X_hap2
-        X_val, y_val = X_full[confidence_mask], y_full[confidence_mask]
-        X_lowconf, y_lowconf = X_full[~confidence_mask], y_full[~confidence_mask]
-
+        X_full, y_val = X_hap1 + X_hap2, y_full[confidence_mask]
+        X_val, X_lowconf, y_lowconf = X_full[confidence_mask], X_full[~confidence_mask], y_full[~confidence_mask]
+        
         val_min_class_count = min(Counter(y_val).values()) if y_val.size > 0 else 0
-        if val_min_class_count < 2: return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Validation set minority class count ({val_min_class_count}) is < 2.'}
+        if val_min_class_count < 2:
+            update_status(f"Skipping: {val_min_class_count} HC samples in minority class")
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Validation set minority class count ({val_min_class_count}) is < 2.'}
         
         n_outer_splits = min(5, val_min_class_count)
         outer_cv = StratifiedKFold(n_splits=n_outer_splits, shuffle=True, random_state=42)
@@ -144,7 +141,8 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1, pro
         y_true_pooled, y_pred_pls_pooled, y_pred_dummy_pooled = [], [], []
         original_hc_indices = np.where(confidence_mask)[0]
 
-        for train_val_idx, test_val_idx in outer_cv.split(X_val, y_val):
+        for i, (train_val_idx, test_val_idx) in enumerate(outer_cv.split(X_val, y_val)):
+            update_status(f"Analyzing Fold {i+1}/{n_outer_splits}...")
             X_test, y_test = X_val[test_val_idx], y_val[test_val_idx]
             X_train_val_fold, y_train_val_fold = X_val[train_val_idx], y_val[train_val_idx]
             X_real_train_fold = np.vstack([p for p in [X_train_val_fold, X_lowconf] if p.shape[0] > 0])
@@ -165,13 +163,14 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1, pro
             effective_max_components = get_effective_max_components(X_train, y_train, max_components)
             if effective_max_components < 1: continue
             inner_cv = StratifiedKFold(n_splits=min(3, train_min_class_count), shuffle=True, random_state=123)
-            grid_search = GridSearchCV(estimator=pipeline, param_grid={'pls__n_components': range(1, effective_max_components + 1)}, scoring=progress_scorer, cv=inner_cv, n_jobs=n_jobs_inner, error_score='raise')
+            grid_search = GridSearchCV(estimator=pipeline, param_grid={'pls__n_components': range(1, effective_max_components + 1)}, scoring='neg_mean_squared_error', cv=inner_cv, n_jobs=n_jobs_inner, error_score='raise')
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", "y residual is constant", UserWarning); grid_search.fit(X_train, y_train)
             dummy_model_fold = DummyRegressor(strategy='mean').fit(X_train_full, y_train_full)
             y_true_pooled.extend(y_test); y_pred_pls_pooled.extend(grid_search.best_estimator_.predict(X_test).flatten()); y_pred_dummy_pooled.extend(dummy_model_fold.predict(X_test))
         
         if not y_true_pooled: return {'status': 'FAILED', 'id': inversion_id, 'reason': "Nested CV failed on all folds."}
+        update_status("Finalizing model...")
         y_true_arr, y_pred_arr = np.array(y_true_pooled), np.array(y_pred_pls_pooled)
         corr = 0.0 if (y_true_arr.size > 1 and np.all(y_true_arr == y_true_arr[0])) or (y_pred_arr.size > 1 and np.all(y_pred_arr == y_pred_arr[0])) else pearsonr(y_true_arr, y_pred_arr)[0]
         pearson_r2 = (corr if not np.isnan(corr) else 0.0)**2
@@ -199,97 +198,67 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int = 1, pro
         model_filename = os.path.join(output_dir, f"{inversion_id}.model.joblib")
         dump(final_grid_search.best_estimator_, model_filename)
         pd.DataFrame(preloaded_data['snp_metadata']).to_json(os.path.join(output_dir, f"{inversion_id}.snps.json"), orient='records')
+        update_status("Success")
         return {'status': 'SUCCESS', 'id': inversion_id, 'unbiased_pearson_r2': pearson_r2, 'unbiased_rmse': np.sqrt(mean_squared_error(y_true_pooled, y_pred_pls_pooled)), 'model_p_value': p_value, 'best_n_components': final_grid_search.best_params_['pls__n_components'], 'num_snps_in_model': X_full.shape[1], 'model_path': model_filename}
     except Exception as e:
         import traceback
+        update_status("Failed")
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}\n{traceback.format_exc()}"}
 
-def process_locus_end_to_end(job, progress_queue):
-    """
-    Complete end-to-end processing for one locus.
-    Handles data extraction and, if successful, analysis with progress updates.
-    """
-    # Stage 1: Extraction
+def process_locus_end_to_end(job, status_dict, worker_id):
+    inversion_id = job.get('orig_ID', 'Unknown_ID')
+    status_dict[worker_id] = f"[{inversion_id[:15]}] Extracting data..."
     preloaded_data = extract_haplotype_data_for_locus(job)
+    
     if preloaded_data.get('status') != 'PREPROCESSED':
-        return preloaded_data # Return failure/skip result immediately
+        status_dict[worker_id] = f"[{inversion_id[:15]}] Done ({preloaded_data.get('status')})"
+        return preloaded_data
 
-    # Stage 2: Analysis
-    # Dynamically calculate the number of steps for THIS locus and update the global total
-    try:
-        y_full, confidence_mask = preloaded_data['y_diploid'], preloaded_data['confidence_mask']
-        X_full = preloaded_data['X_hap1'] + preloaded_data['X_hap2']
-        y_val = y_full[confidence_mask]
-        val_min_class_count = min(Counter(y_val).values()) if y_val.size > 0 else 0
-        if val_min_class_count < 2:
-            return analyze_and_model_locus_pls(preloaded_data) # Let the main func handle the skip
+    return analyze_and_model_locus_pls(preloaded_data, status_dict=status_dict, worker_id=worker_id)
 
-        n_outer_splits = min(5, val_min_class_count)
-        # This is a good faith estimate of inner loop iterations
-        train_min_class_count_est = 3 # Assume at least 3 for a robust estimate
-        n_inner_splits = min(3, train_min_class_count_est)
-        n_params_est = min(50, X_full.shape[1]) # Rough estimate of n_components
-        
-        total_locus_steps = n_outer_splits * n_inner_splits * n_params_est
-        progress_queue.put(('ADD_TOTAL', total_locus_steps))
-    except Exception:
-        # If calculation fails, just add 0 and let the analysis function fail formally
-        progress_queue.put(('ADD_TOTAL', 0))
-
-    progress_scorer = make_progress_scorer('neg_mean_squared_error', progress_queue)
-    return analyze_and_model_locus_pls(preloaded_data, progress_scorer=progress_scorer)
-
-def progress_listener(queue, pbar):
-    """Listens for messages and updates the progress bar total and value."""
-    while True:
-        message = queue.get()
-        if message == 'STOP': break
-        
-        msg_type, value = message
-        if msg_type == 'ADD_TOTAL':
-            pbar.total += value
-            pbar.refresh()
-        elif msg_type == 'UPDATE':
-            pbar.update(value)
+def progress_bar_updater(status_dict, pbar, num_workers):
+    while not getattr(threading.current_thread(), "should_stop", False):
+        descriptions = [status_dict.get(i, "Idle") for i in range(num_workers)]
+        active_workers = [desc for desc in descriptions if not desc.startswith("Idle")]
+        pbar.set_description(f"Active Workers: {len(active_workers)}/{num_workers}")
+        pbar.set_postfix_str("\n" + "\n".join(f"  - Core {i+1}: {desc}" for i, desc in enumerate(descriptions)))
+        time.sleep(0.2)
 
 if __name__ == '__main__':
     script_start_time = time.time()
     logging.info("--- Starting PLS-Based Inversion Imputation Model Pipeline ---")
     
-    output_dir = "final_imputation_models"
-    ground_truth_file = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
-    
+    output_dir, ground_truth_file = "final_imputation_models", "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
     os.makedirs(output_dir, exist_ok=True)
-    if not os.path.exists(ground_truth_file): 
-        logging.critical(f"FATAL: Ground-truth file not found: '{ground_truth_file}'"); sys.exit(1)
+    if not os.path.exists(ground_truth_file): logging.critical(f"FATAL: Ground-truth file not found: '{ground_truth_file}'"); sys.exit(1)
     
     config_df = pd.read_csv(ground_truth_file, sep='\t', on_bad_lines='warn', dtype={'seqnames': str})
     config_df = config_df[(config_df['verdict'] == 'pass') & (~config_df['seqnames'].isin(['chrY', 'chrM']))].copy()
     all_jobs = config_df.to_dict('records')
-    if not all_jobs: 
-        logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
+    if not all_jobs: logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
 
     total_cores = cpu_count()
-    outer_jobs = total_cores
-    logging.info(f"Loaded {len(all_jobs)} inversions. Using {outer_jobs} cores for parallel processing.")
+    logging.info(f"Loaded {len(all_jobs)} inversions. Using {total_cores} cores for parallel processing.")
     
     with Manager() as manager:
-        progress_queue = manager.Queue()
-        # Initialize pbar with total=0; it will be built dynamically.
-        with tqdm(total=0, desc="Processing loci", unit="iter") as pbar:
-            listener_thread = threading.Thread(target=progress_listener, args=(progress_queue, pbar))
-            listener_thread.daemon = True
-            listener_thread.start()
+        status_dict = manager.dict({i: "Idle" for i in range(total_cores)})
+        
+        with tqdm(total=len(all_jobs), desc="Processing Loci", unit="locus") as pbar:
+            updater_thread = threading.Thread(target=progress_bar_updater, args=(status_dict, pbar, total_cores))
+            updater_thread.daemon = True
+            updater_thread.start()
 
-            try:
-                # SINGLE parallel call with the end-to-end wrapper function
-                all_results = Parallel(n_jobs=outer_jobs, backend='loky')(
-                    delayed(process_locus_end_to_end)(job, progress_queue) for job in all_jobs
-                )
-            finally:
-                # Clean shutdown
-                progress_queue.put('STOP')
-                listener_thread.join()
+            all_results = Parallel(n_jobs=total_cores, backend='loky')(
+                # Each worker gets a unique ID from 0 to num_cores-1
+                delayed(process_locus_end_to_end)(job, status_dict, i % total_cores)
+                for i, job in enumerate(all_jobs)
+            )
+            # Update the progress bar for each completed job after the parallel call returns
+            pbar.update(len(all_jobs) - pbar.n)
+
+            # Cleanly stop the updater thread
+            getattr(updater_thread, "should_stop", True) # Set the stop signal
+            updater_thread.join()
 
     logging.info(f"--- All Processing Complete in {time.time() - script_start_time:.2f} seconds ---")
     successful_runs = [r for r in all_results if r and r.get('status') == 'SUCCESS']
