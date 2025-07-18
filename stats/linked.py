@@ -13,6 +13,7 @@ from joblib import Parallel, delayed, cpu_count, dump
 import random
 import itertools
 import re
+from tqdm import tqdm
 
 # Scikit-learn for modeling, evaluation, and preprocessing
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
@@ -362,7 +363,11 @@ if __name__ == '__main__':
     # --- Stage 1: Parallel Data Extraction ---
     logging.info(f"--- Stage 1: Extracting data for {num_jobs} inversions... ---")
     with Parallel(n_jobs=outer_jobs, backend='loky') as parallel:
-        preloaded_data_all = parallel(delayed(extract_haplotype_data_for_locus)(job) for job in all_jobs)
+        # Wrapped the generator with tqdm for a progress bar
+        preloaded_data_all = parallel(
+            delayed(extract_haplotype_data_for_locus)(job) 
+            for job in tqdm(all_jobs, desc="[Stage 1/2] Data Extraction", unit="locus")
+        )
 
     # --- Stage 2: Parallel Model Analysis ---
     successful_loads = [d for d in preloaded_data_all if d.get('status') == 'PREPROCESSED']
@@ -372,8 +377,10 @@ if __name__ == '__main__':
     if successful_loads:
         logging.info(f"--- Stage 2: Analyzing and modeling {len(successful_loads)} successfully preprocessed inversions... ---")
         with Parallel(n_jobs=outer_jobs, backend='loky') as parallel:
+            # Wrapped the generator with tqdm for a progress bar
             analysis_results = parallel(
-                delayed(analyze_and_model_locus_pls)(data, n_jobs_inner=inner_jobs) for data in successful_loads
+                delayed(analyze_and_model_locus_pls)(data, n_jobs_inner=inner_jobs) 
+                for data in tqdm(successful_loads, desc="[Stage 2/2] Model Training", unit="locus")
             )
             all_results.extend(analysis_results)
     else:
