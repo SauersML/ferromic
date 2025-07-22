@@ -212,80 +212,91 @@ def progress_bar_updater(status_dict, pbar, num_teams):
         descriptions = [status_dict.get(i, "Idle") for i in range(num_teams)]
         active_teams = len([desc for desc in descriptions if not desc.startswith("Idle") and "Done" not in desc])
         pbar.set_description(f"Active Teams: {active_teams}/{num_teams}")
+        # The progress bar itself writes to stderr, so its output will be in the log file.
+        # This will be verbose but fulfills the requirement.
         pbar.set_postfix_str("\n" + "\n".join(f"  - Team {i+1}: {desc}" for i, desc in enumerate(descriptions)))
         if stop_event.wait(0.2):
              break
     pbar.set_postfix_str("All teams finished.")
 
 if __name__ == '__main__':
-    script_start_time = time.time()
-    logging.info("--- Starting PLS-Based Inversion Imputation Model Pipeline ---")
-    
-    output_dir, ground_truth_file = "final_imputation_models", "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
-    os.makedirs(output_dir, exist_ok=True)
-    if not os.path.exists(ground_truth_file): logging.critical(f"FATAL: Ground-truth file not found: '{ground_truth_file}'"); sys.exit(1)
-    
-    config_df = pd.read_csv(ground_truth_file, sep='\t', on_bad_lines='warn', dtype={'seqnames': str})
-    config_df = config_df[(config_df['verdict'] == 'pass') & (~config_df['seqnames'].isin(['chrY', 'chrM']))].copy()
-    all_jobs = config_df.to_dict('records')
-    if not all_jobs: logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
+    with open("log.txt", "w") as log_file:
+        sys.stdout = log_file
+        sys.stderr = log_file
 
-    total_cores = cpu_count()
-
-    N_INNER_JOBS = 8 
-    if total_cores < N_INNER_JOBS: N_INNER_JOBS = total_cores
-    N_OUTER_JOBS = total_cores // N_INNER_JOBS
-
-    logging.info(f"Loaded {len(all_jobs)} inversions. Using {total_cores} cores configured as {N_OUTER_JOBS} teams of {N_INNER_JOBS} cores each.")
-    
-    with Manager() as manager:
-        status_dict = manager.dict({i: "Idle" for i in range(N_OUTER_JOBS)})
+        script_start_time = time.time()
+        logging.info("--- Starting PLS-Based Inversion Imputation Model Pipeline ---")
         
-        with tqdm(total=len(all_jobs), desc="Processing Loci", unit="locus") as pbar:
-            updater_thread = threading.Thread(target=progress_bar_updater, args=(status_dict, pbar, N_OUTER_JOBS))
-            updater_thread.daemon = True
-            updater_thread.start()
+        output_dir, ground_truth_file = "final_imputation_models", "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
+        os.makedirs(output_dir, exist_ok=True)
+        if not os.path.exists(ground_truth_file): logging.critical(f"FATAL: Ground-truth file not found: '{ground_truth_file}'"); sys.exit(1)
+        
+        config_df = pd.read_csv(ground_truth_file, sep='\t', on_bad_lines='warn', dtype={'seqnames': str})
+        config_df = config_df[(config_df['verdict'] == 'pass') & (~config_df['seqnames'].isin(['chrY', 'chrM']))].copy()
+        all_jobs = config_df.to_dict('records')
+        if not all_jobs: logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
 
-            all_results = []
-            try:
-                with Parallel(n_jobs=N_OUTER_JOBS, backend='loky') as parallel:
-                    # The generator now includes the team ID and the number of inner jobs
-                    job_generator = (delayed(process_locus_end_to_end)(job, status_dict, i % N_OUTER_JOBS, N_INNER_JOBS) for i, job in enumerate(all_jobs))
-                    
-                    for result in parallel(job_generator):
-                        all_results.append(result)
-                        pbar.update(1)
+        total_cores = cpu_count()
 
-            finally:
-                updater_thread._target.__self__.stop_event.set()
-                updater_thread.join()
+        N_INNER_JOBS = 8 
+        if total_cores < N_INNER_JOBS: N_INNER_JOBS = total_cores
+        N_OUTER_JOBS = total_cores // N_INNER_JOBS
 
-    logging.info(f"--- All Processing Complete in {time.time() - script_start_time:.2f} seconds ---")
-    successful_runs = [r for r in all_results if r and r.get('status') == 'SUCCESS']
-    
-    print("\n\n" + "="*100 + "\n---      FINAL PLS IMPUTATION MODEL REPORT      ---\n" + "="*100)
-    reason_counts = Counter(f"({r.get('status', 'N/A')}) {r.get('reason', 'N/A').splitlines()[0]}" for r in all_results if r.get('status') != 'SUCCESS')
-    if reason_counts:
-        print("\n--- FAILED OR SKIPPED LOCI SUMMARY ---")
-        for reason, count in sorted(reason_counts.items(), key=lambda item: item[1], reverse=True): 
-            print(f"  - ({count: >3} loci): {reason}")
+        logging.info(f"Loaded {len(all_jobs)} inversions. Using {total_cores} cores configured as {N_OUTER_JOBS} teams of {N_INNER_JOBS} cores each.")
+        
+        with Manager() as manager:
+            status_dict = manager.dict({i: "Idle" for i in range(N_OUTER_JOBS)})
+            
+            # The tqdm progress bar now writes to the log file because its default output (stderr) is redirected.
+            with tqdm(total=len(all_jobs), desc="Processing Loci", unit="locus") as pbar:
+                updater_thread = threading.Thread(target=progress_bar_updater, args=(status_dict, pbar, N_OUTER_JOBS))
+                updater_thread.daemon = True
+                updater_thread.start()
 
-    if successful_runs:
-        results_df = pd.DataFrame(successful_runs).set_index('id').sort_values('unbiased_pearson_r2', ascending=False)
-        print(f"\n--- Aggregate Performance ({len(successful_runs)} Successful Models) ---")
-        print(f"  Mean Unbiased Pearson r²: {results_df['unbiased_pearson_r2'].mean():.4f}")
-        print(f"  Models with Est. r² > 0.5: {(results_df['unbiased_pearson_r2'] > 0.5).sum()}")
-        print(f"  Models with p < 0.05 (vs. baseline): {(results_df['model_p_value'] < 0.05).sum()}")
-        high_perf_df = results_df[(results_df['unbiased_pearson_r2'] > 0.5) & (results_df['model_p_value'] < 0.05)]
-        if not high_perf_df.empty:
-            summary_cols = ['unbiased_pearson_r2', 'unbiased_rmse', 'model_p_value', 'best_n_components', 'num_snps_in_model']
-            summary_filename = os.path.join(output_dir, "high_performance_pls_models_summary.tsv")
-            high_perf_df[summary_cols].to_csv(summary_filename, sep='\t', float_format='%.4g')
-            print(f"\n--- High-Performance Models (Est. Unbiased r² > 0.5 & p < 0.05) ---")
-            with pd.option_context('display.max_rows', None, 'display.width', 120): print(high_perf_df[summary_cols])
-            print(f"\n[SUCCESS] Saved summary for {len(high_perf_df)} models to '{summary_filename}'")
+                all_results = []
+                try:
+                    with Parallel(n_jobs=N_OUTER_JOBS, backend='loky') as parallel:
+                        # The generator now includes the team ID and the number of inner jobs
+                        job_generator = (delayed(process_locus_end_to_end)(job, status_dict, i % N_OUTER_JOBS, N_INNER_JOBS) for i, job in enumerate(all_jobs))
+                        
+                        for result in parallel(job_generator):
+                            all_results.append(result)
+                            pbar.update(1)
+
+                finally:
+                    # Ensure the progress bar updater thread is stopped cleanly
+                    if hasattr(updater_thread, '_target') and hasattr(updater_thread._target, '__self__'):
+                         if hasattr(updater_thread._target.__self__, 'stop_event'):
+                            updater_thread._target.__self__.stop_event.set()
+                    updater_thread.join()
+
+        logging.info(f"--- All Processing Complete in {time.time() - script_start_time:.2f} seconds ---")
+        successful_runs = [r for r in all_results if r and r.get('status') == 'SUCCESS']
+        
+        # All print() statements below will now write to log.txt
+        print("\n\n" + "="*100 + "\n---      FINAL PLS IMPUTATION MODEL REPORT      ---\n" + "="*100)
+        reason_counts = Counter(f"({r.get('status', 'N/A')}) {r.get('reason', 'N/A').splitlines()[0]}" for r in all_results if r.get('status') != 'SUCCESS')
+        if reason_counts:
+            print("\n--- FAILED OR SKIPPED LOCI SUMMARY ---")
+            for reason, count in sorted(reason_counts.items(), key=lambda item: item[1], reverse=True): 
+                print(f"  - ({count: >3} loci): {reason}")
+
+        if successful_runs:
+            results_df = pd.DataFrame(successful_runs).set_index('id').sort_values('unbiased_pearson_r2', ascending=False)
+            print(f"\n--- Aggregate Performance ({len(successful_runs)} Successful Models) ---")
+            print(f"  Mean Unbiased Pearson r²: {results_df['unbiased_pearson_r2'].mean():.4f}")
+            print(f"  Models with Est. r² > 0.5: {(results_df['unbiased_pearson_r2'] > 0.5).sum()}")
+            print(f"  Models with p < 0.05 (vs. baseline): {(results_df['model_p_value'] < 0.05).sum()}")
+            high_perf_df = results_df[(results_df['unbiased_pearson_r2'] > 0.5) & (results_df['model_p_value'] < 0.05)]
+            if not high_perf_df.empty:
+                summary_cols = ['unbiased_pearson_r2', 'unbiased_rmse', 'model_p_value', 'best_n_components', 'num_snps_in_model']
+                summary_filename = os.path.join(output_dir, "high_performance_pls_models_summary.tsv")
+                high_perf_df[summary_cols].to_csv(summary_filename, sep='\t', float_format='%.4g')
+                print(f"\n--- High-Performance Models (Est. Unbiased r² > 0.5 & p < 0.05) ---")
+                with pd.option_context('display.max_rows', None, 'display.width', 120): print(high_perf_df[summary_cols])
+                print(f"\n[SUCCESS] Saved summary for {len(high_perf_df)} models to '{summary_filename}'")
+            else:
+                print("\n--- No high-performance models found meeting the r² > 0.5 criteria ---")
         else:
-            print("\n--- No high-performance models found meeting the r² > 0.5 criteria ---")
-    else:
-        print("\n--- No successful models were generated across all jobs. ---")
-    print("\n" + "="*100)
+            print("\n--- No successful models were generated across all jobs. ---")
+        print("\n" + "="*100)
