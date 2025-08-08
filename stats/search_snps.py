@@ -3,9 +3,7 @@ import sys
 import requests
 import subprocess
 
-# --- Configuration: Hardcoded paths as requested ---
-
-# The public URL to your list of target SNPs.
+# The public URL to list of target SNPs.
 TARGET_SNPS_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/stats/all_unique_snps_sorted.txt"
 
 # The GCS directory path for the All of Us ACAF Threshold PLINK dataset.
