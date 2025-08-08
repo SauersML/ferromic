@@ -99,12 +99,10 @@ def stream_and_find_matches(bim_gcs_path, target_snps_set):
                 chromosome = parts[0]
                 position = parts[3]
                 
-                # --- FIX: Construct the ID correctly ---
                 # The first column is the full chromosome name, so we don't add "chr".
                 current_snp_id = f"{chromosome}:{position}"
 
                 if current_snp_id in target_snps_set:
-                    print(f"\r  >>> MATCH FOUND: {current_snp_id} in {os.path.basename(bim_gcs_path)} <<<")
                     found_snps_in_file.append(current_snp_id)
             except IndexError:
                 print(f"\rWarning: Skipping malformed line #{lines_processed}: {line.strip()}", file=sys.stderr)
