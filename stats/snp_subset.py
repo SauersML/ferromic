@@ -1,197 +1,408 @@
 import os
 import sys
-import subprocess
 import math
-import requests
-from google.cloud import storage
+import re
+import shutil
+import tempfile
+import subprocess
+from typing import Dict, List, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+import requests
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION ------------------------------------------------------------
 
-# Input: list of SNPs to find.
+# Input: list of SNPs to find. Format: "CHR:BP" (e.g., "1:10583")
 TARGET_SNPS_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/stats/all_unique_snps_sorted.txt"
 
-# Input: The GCS directory containing the full PLINK fileset.
-# This points to the All of Us Controlled Tier ACAF Threshold dataset.
+# Input: Directory containing sharded PLINK files (BED/BIM/FAM)
 ACAF_PLINK_GCS_DIR = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/acaf_threshold/plink_bed/"
 
-# Output: The names for new, local, subsetted PLINK files.
+# Output filenames
 OUTPUT_BIM_FILENAME = "subset.bim"
 OUTPUT_FAM_FILENAME = "subset.fam"
 OUTPUT_BED_FILENAME = "subset.bed"
 
-def fetch_target_snps(url):
-    """Downloads the list of target SNPs into a set for fast lookups."""
+# Performance knobs
+MAX_GAP_SNPS = 64           # coalesce indices separated by <= this many SNPs into one range
+MAX_WORKERS = min(16, (os.cpu_count() or 8) * 2)  # parallel ranged reads
+
+# -----------------------------------------------------------------------------
+
+def _require_project() -> str:
+    pid = os.getenv("GOOGLE_PROJECT")
+    if not pid:
+        print("FATAL: GOOGLE_PROJECT environment variable is not set.", file=sys.stderr)
+        sys.exit(1)
+    return pid
+
+# ----------------------- gsutil helpers --------------------------------------
+
+def gsutil_run(args: List[str], *, capture: bool = True, text: bool = False) -> subprocess.CompletedProcess:
+    project_id = _require_project()
+    cmd = ["gsutil", "-u", project_id] + args
+    return subprocess.run(cmd, check=True, capture_output=capture, text=text)
+
+def gsutil_ls(pattern: str) -> List[str]:
+    out = gsutil_run(["ls", pattern], capture=True, text=True).stdout.strip()
+    if not out:
+        return []
+    return sorted([line for line in out.splitlines() if line.strip()])
+
+def gsutil_cat_stream(gs_uri: str):
+    project_id = _require_project()
+    cmd = ["gsutil", "-u", project_id, "cat", gs_uri]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, errors="replace")
+    try:
+        for line in proc.stdout:
+            yield line
+    finally:
+        ret = proc.wait()
+        if ret != 0:
+            raise RuntimeError(f"gsutil cat failed for {gs_uri} with code {ret}")
+
+def gsutil_cat_range(gs_uri: str, start: int, end: int) -> bytes:
+    project_id = _require_project()
+    cmd = ["gsutil", "-u", project_id, "cat", "-r", f"{start}-{end}", gs_uri]
+    return subprocess.check_output(cmd)
+
+def gsutil_size(gs_uri: str) -> int:
+    out = gsutil_run(["stat", gs_uri], capture=True, text=True).stdout
+    m = re.search(r"Content-Length:\s*(\d+)", out)
+    if not m:
+        raise RuntimeError(f"Unable to read size for {gs_uri}")
+    return int(m.group(1))
+
+# ----------------------- Requester-Pays aware fetcher ------------------------
+
+class RangeFetcher:
+    """
+    Fetch byte ranges from GCS using the Python client with Requester Pays,
+    falling back to gsutil if the client is unavailable or unauthed.
+    """
+    def __init__(self):
+        self.mode = "gsutil"
+        self.client = None
+        self.project = _require_project()
+        try:
+            from google.cloud import storage  # lazy import
+            self.client = storage.Client(project=self.project)
+            # Quick smoke test: ensure we can build a blob with user_project
+            self.mode = "gcs"
+        except Exception as e:
+            tqdm.write(f"Note: google-cloud-storage unavailable or not authed ({e}); using gsutil fallback.")
+            self.client = None
+            self.mode = "gsutil"
+
+    def _blob_with_user_project(self, gs_uri: str):
+        from google.cloud import storage  # type: ignore
+        # Parse "gs://bucket/path"
+        if not gs_uri.startswith("gs://"):
+            raise ValueError(f"Not a gs:// URI: {gs_uri}")
+        _, _, rest = gs_uri.partition("gs://")
+        bucket_name, _, blob_name = rest.partition("/")
+        if not bucket_name or not blob_name:
+            raise ValueError(f"Malformed GCS URI: {gs_uri}")
+        # IMPORTANT: user_project passed here enables Requester Pays billing
+        bucket = self.client.bucket(bucket_name, user_project=self.project)
+        return bucket.blob(blob_name)
+
+    def fetch(self, gs_uri: str, start: int, end: int) -> bytes:
+        if self.mode == "gcs":
+            try:
+                blob = self._blob_with_user_project(gs_uri)
+                return blob.download_as_bytes(start=start, end=end)  # inclusive
+            except Exception as e:
+                # Fall back to gsutil transparently on any client error
+                tqdm.write(f"Note: GCS client range fetch failed ({e}); falling back to gsutil for {gs_uri}.")
+                return gsutil_cat_range(gs_uri, start, end)
+        else:
+            return gsutil_cat_range(gs_uri, start, end)
+
+# ----------------------- Core logic ------------------------------------------
+
+def fetch_target_snps(url: str) -> set:
     print("--- STEP 1: Fetching Target SNPs ---")
     try:
-        response = requests.get(url)
-        response.raise_for_status()
-        # Create a set for O(1) average time complexity lookups.
-        snp_set = {line.strip() for line in response.text.splitlines() if line.strip()}
-        print(f"Successfully loaded {len(snp_set):,} unique target SNPs into memory.\n")
-        return snp_set
-    except requests.exceptions.RequestException as e:
+        r = requests.get(url)
+        r.raise_for_status()
+        snps = {line.strip() for line in r.text.splitlines() if line.strip()}
+        print(f"Loaded {len(snps):,} target SNPs.\n")
+        return snps
+    except requests.RequestException as e:
         print(f"FATAL: Could not fetch SNP list from {url}. Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-def process_fam_file(gcs_dir_path, output_filename):
+def identify_matches_and_geometry(gcs_dir_path: str, target_snps_set: set) -> Tuple[List[dict], int]:
     """
-    Copies a single .fam file (they are all identical) and counts the number of samples.
-    This count is CRITICAL for calculating byte offsets in the .bed file.
+    Stream .bim shards, write subset .bim, and collect per-shard metadata:
+      {
+        "order": shard_order_index,
+        "bim": <gcs_uri>,
+        "bed": <gcs_uri>,
+        "match_indices": [i, j, ...],  # ascending within this shard
+        "variant_count": V_shard,
+        "bytes_per_snp": bpf_remote
+      }
+    Enforces SNP-major and identical bytes_per_snp across shards containing matches.
     """
-    print(f"--- STEP 2: Processing Sample Information (.fam file) ---")
-    project_id = os.getenv("GOOGLE_PROJECT")
-    if not project_id:
-        print("FATAL: GOOGLE_PROJECT environment variable is not set.", file=sys.stderr)
+    print("--- STEP 2: Scanning .bim files and validating shard geometry ---")
+    bim_files = gsutil_ls(os.path.join(gcs_dir_path, "*.bim"))
+    if not bim_files:
+        print(f"FATAL: No .bim files found under {gcs_dir_path}", file=sys.stderr)
         sys.exit(1)
+
+    matched_shards: List[dict] = []
+    total_matches = 0
+    common_bpf = None
+
+    with open(OUTPUT_BIM_FILENAME, "w") as fout:
+        for order, bim_path in enumerate(tqdm(bim_files, desc="Scanning .bim shards")):
+            bed_path = bim_path.replace(".bim", ".bed")
+            idx = 0
+            V_shard = 0
+            match_indices: List[int] = []
+
+            for line in gsutil_cat_stream(bim_path):
+                parts = line.strip().split()  # whitespace-safe
+                if len(parts) >= 4:
+                    key = f"{parts[0]}:{parts[3]}"  # chr:bp
+                    if key in target_snps_set:
+                        fout.write(line)  # keep line as-is
+                        match_indices.append(idx)
+                idx += 1
+            V_shard = idx
+
+            if V_shard == 0:
+                tqdm.write(f"WARNING: {bim_path} appears empty; skipping.")
+                continue
+            if not match_indices:
+                continue
+
+            # Validate SNP-major header and compute bytes/SNP from actual BED size
+            hdr = gsutil_cat_range(bed_path, 0, 2)
+            if hdr != b"\x6c\x1b\x01":
+                raise RuntimeError(f"{bed_path} is not SNP-major .bed (header={hdr.hex()})")
+
+            B = gsutil_size(bed_path)
+            if B < 3:
+                raise RuntimeError(f"{bed_path} too small (size={B})")
+
+            rem = (B - 3) % V_shard
+            if rem != 0:
+                raise RuntimeError(f"{bed_path} has non-integer bytes/SNP: (B-3)={B-3}, V={V_shard}")
+            bpf = (B - 3) // V_shard
+
+            if common_bpf is None:
+                common_bpf = bpf
+            elif bpf != common_bpf:
+                raise RuntimeError(
+                    f"Inconsistent bytes/SNP across shards: {bed_path} has {bpf}, expected {common_bpf}"
+                )
+
+            matched_shards.append({
+                "order": order,
+                "bim": bim_path,
+                "bed": bed_path,
+                "match_indices": match_indices,
+                "variant_count": V_shard,
+                "bytes_per_snp": bpf
+            })
+            total_matches += len(match_indices)
+
+    print(f"Found {total_matches:,} matching SNPs across {len(matched_shards)} shards.")
+    print(f"Wrote local BIM: ./{OUTPUT_BIM_FILENAME}\n")
+    return matched_shards, (common_bpf or 0)
+
+def select_and_copy_fam(gcs_dir_path: str, required_bpf: int) -> int:
+    """
+    Copy a .fam whose ceil(N/4) equals required_bpf. Return N (sample count).
+    """
+    print("--- STEP 3: Selecting compatible .fam and copying locally ---")
+    fam_files = gsutil_ls(os.path.join(gcs_dir_path, "*.fam"))
+    if not fam_files:
+        print(f"FATAL: No .fam files found under {gcs_dir_path}", file=sys.stderr)
+        sys.exit(1)
+
+    compatible: List[Tuple[str, int]] = []
+    for fam in fam_files:
+        n = 0
+        for _ in gsutil_cat_stream(fam):
+            n += 1
+        if math.ceil(n / 4) == required_bpf:
+            compatible.append((fam, n))
+
+    if not compatible:
+        raise RuntimeError(
+            f"No .fam in directory has ceil(N/4) equal to shards' bytes-per-SNP ({required_bpf})."
+        )
+
+    fam_src, N = compatible[0]
+    tqdm.write(f"Selected {os.path.basename(fam_src)} (N={N:,}, ceil(N/4)={required_bpf}).")
+    gsutil_run(["cp", fam_src, OUTPUT_FAM_FILENAME], capture=True, text=True)
+    print(f"Copied local FAM: ./{OUTPUT_FAM_FILENAME}\n")
+    return N
+
+def coalesce_indices(indices: List[int], max_gap: int) -> List[List[int]]:
+    """Group sorted indices into runs where consecutive elements differ by <= max_gap."""
+    if not indices:
+        return []
+    runs: List[List[int]] = []
+    current = [indices[0]]
+    for i in indices[1:]:
+        if i - current[-1] <= max_gap:
+            current.append(i)
+        else:
+            runs.append(current)
+            current = [i]
+    runs.append(current)
+    return runs
+
+def process_shard_to_temp(shard: dict, fetcher: RangeFetcher, tmpdir: str, pbar: tqdm) -> Tuple[int, str, int]:
+    """
+    For one shard:
+      - Build runs over match_indices.
+      - For each run, fetch a contiguous byte range and carve out only required blocks.
+      - Append to a shard temp file (headerless bed-part).
+    Returns (order, temp_path, n_variants_written).
+    """
+    bed = shard["bed"]
+    bpf = shard["bytes_per_snp"]
+    indices = shard["match_indices"]  # ascending
+    runs = coalesce_indices(indices, MAX_GAP_SNPS)
+
+    temp_path = os.path.join(tmpdir, f"{os.path.basename(bed)}.subset.part")
+    n_written = 0
+
+    with open(temp_path, "wb") as fout:
+        for run in runs:
+            start_idx = run[0]
+            end_idx = run[-1]
+            start_off = 3 + start_idx * bpf
+            end_off = 3 + (end_idx + 1) * bpf - 1  # inclusive
+            blob_bytes = fetcher.fetch(bed, start_off, end_off)
+
+            # Carve only the wanted indices
+            for idx in run:
+                offset_in_blob = (idx - start_idx) * bpf
+                chunk = blob_bytes[offset_in_blob:offset_in_blob + bpf]
+                if len(chunk) != bpf:
+                    raise IOError(f"Short slice in {bed} at idx {idx}: {len(chunk)} vs {bpf}")
+                fout.write(chunk)
+                n_written += 1
+                pbar.update(1)
+
+    return shard["order"], temp_path, n_written
+
+def assemble_bed_parallel(matched_shards: List[dict]) -> int:
+    """
+    Parallel assembly:
+      - Each shard writes a headerless temp .bed part in parallel (coalesced ranged reads).
+      - Then concatenate parts in BIM-order with a single 3-byte header.
+    Returns number of variants written.
+    """
+    print("--- STEP 4: Assembling subset .bed with coalesced, parallel ranged reads ---")
+
+    total_snps = sum(len(s["match_indices"]) for s in matched_shards)
+    if total_snps == 0:
+        print("No matching SNPs to extract; skipping .bed creation.\n")
+        return 0
+
+    fetcher = RangeFetcher()
+    tmpdir = tempfile.mkdtemp(prefix="subset_bed_parts_")
+    parts_in_order: List[Tuple[int, str, int]] = []
+    n_written_total = 0
 
     try:
-        # List all .fam files and grab the first one.
-        ls_command = ["gsutil", "-u", project_id, "ls", os.path.join(gcs_dir_path, "*.fam")]
-        process_ls = subprocess.run(ls_command, capture_output=True, text=True, check=True)
-        all_fam_files = process_ls.stdout.strip().split("\n")
-        if not all_fam_files or not all_fam_files[0]:
-            print(f"FATAL: No .fam files found in {gcs_dir_path}", file=sys.stderr)
-            sys.exit(1)
-        source_fam_path = all_fam_files[0]
-        
-        # Copy the single .fam file to our local directory.
-        print(f"Copying sample file {os.path.basename(source_fam_path)} to ./{output_filename}")
-        cp_command = ["gsutil", "-u", project_id, "cp", source_fam_path, output_filename]
-        subprocess.run(cp_command, check=True, capture_output=True)
+        with tqdm(total=total_snps, desc="Extracting genotype blocks") as pbar:
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+                futures = [
+                    ex.submit(process_shard_to_temp, shard, fetcher, tmpdir, pbar)
+                    for shard in matched_shards
+                ]
+                for fut in as_completed(futures):
+                    order, part_path, n_written = fut.result()
+                    parts_in_order.append((order, part_path, n_written))
+                    n_written_total += n_written
 
-        # Count the number of lines (samples) in the new file.
-        with open(output_filename, 'r') as f:
-            num_samples = sum(1 for _ in f)
+        # Order parts by shard order (same as BIM writing order)
+        parts_in_order.sort(key=lambda x: x[0])
 
-        print(f"Found {num_samples:,} samples in the dataset.")
-        print(f"Created local file: ./{output_filename}\n")
-        return num_samples
+        # Concatenate into final BED (add header once)
+        with open(OUTPUT_BED_FILENAME, "wb") as fout:
+            fout.write(b"\x6c\x1b\x01")
+            for _, part_path, _ in parts_in_order:
+                with open(part_path, "rb") as fpart:
+                    shutil.copyfileobj(fpart, fout)
+    finally:
+        # Cleanup no matter what
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"FATAL: A gsutil command for the .fam file failed. Error: {e.stderr}", file=sys.stderr)
-        sys.exit(1)
+    print(f"Wrote local BED: ./{OUTPUT_BED_FILENAME}\n")
+    return n_written_total
 
-def process_bim_files(gcs_dir_path, target_snps_set):
+def final_integrity_checks(n_variants_written: int, matched_shards: List[dict], fam_N: int):
     """
-    Streams all .bim files, creates a local subset .bim file, and returns a
-    map of the locations (file path and index) of the matched SNPs.
+    Validate what PLINK will compute: BIM count, BED size, bytes/SNP consistency.
     """
-    print(f"--- STEP 3: Identifying and Mapping Target SNPs (.bim files) ---")
-    project_id = os.getenv("GOOGLE_PROJECT")
-    snp_locations = {}
-    
-    # Get a list of all .bim files to process.
-    ls_command = ["gsutil", "-u", project_id, "ls", os.path.join(gcs_dir_path, "*.bim")]
-    process_ls = subprocess.run(ls_command, capture_output=True, text=True, check=True)
-    bim_files = sorted(process_ls.stdout.strip().split("\n"))
+    print("--- STEP 5: Final integrity checks ---")
+    with open(OUTPUT_BIM_FILENAME, "r") as f:
+        bim_lines = sum(1 for _ in f)
+    if bim_lines != n_variants_written:
+        raise AssertionError(
+            f"BIM line count ({bim_lines}) != variants written to BED ({n_variants_written})"
+        )
 
-    print(f"Streaming {len(bim_files)} .bim files to find matches...")
-    with open(OUTPUT_BIM_FILENAME, "w") as f_out:
-        for bim_gcs_path in tqdm(bim_files, desc="Scanning .bim files"):
-            snp_index = 0
-            found_in_file = []
-            
-            cat_command = ["gsutil", "-u", project_id, "cat", bim_gcs_path]
-            process_cat = subprocess.Popen(cat_command, stdout=subprocess.PIPE, text=True, errors="replace")
-            
-            for line in process_cat.stdout:
-                parts = line.strip().split('\t') # .bim is tab-separated
-                if len(parts) >= 4:
-                    # Construct SNP ID from bim format: <chr> <id> <pos> <bp> <a1> <a2>
-                    current_snp_id = f"{parts[0]}:{parts[3]}"
-                    if current_snp_id in target_snps_set:
-                        f_out.write(line)
-                        found_in_file.append(snp_index)
-                snp_index += 1
-            
-            process_cat.wait()
-            if found_in_file:
-                snp_locations[bim_gcs_path] = found_in_file
+    bpf = matched_shards[0]["bytes_per_snp"] if matched_shards else math.ceil(fam_N / 4)
+    actual = os.path.getsize(OUTPUT_BED_FILENAME) if n_variants_written > 0 else 0
+    expected = 3 + n_variants_written * bpf if n_variants_written > 0 else 0
+    if actual != expected:
+        raise AssertionError(
+            f"BED size mismatch: got {actual}, expected {expected} "
+            f"(variants={n_variants_written}, bpf={bpf})"
+        )
 
-    total_snps_found = sum(len(indices) for indices in snp_locations.values())
-    print(f"Found a total of {total_snps_found:,} matching SNP records across all files.")
-    print(f"Created local file: ./{OUTPUT_BIM_FILENAME}\n")
-    return snp_locations
+    fam_bpf = math.ceil(fam_N / 4)
+    if n_variants_written > 0 and fam_bpf != bpf:
+        raise AssertionError(
+            f".fam implies bytes/SNP={fam_bpf} but shards use {bpf}. Wrong .fam?"
+        )
 
-def process_bed_files(snp_locations, num_samples):
-    """
-    Performs targeted byte-range reads on remote .bed files based on the
-    snp_locations map and assembles the local subset.bed file.
-    """
-    print(f"--- STEP 4: Assembling Subset Genotype Data (.bed file) ---")
-    
-    # Initialize the GCS client. It will use Application Default Credentials.
-    storage_client = storage.Client()
-    
-    # In a SNP-major .bed file, each SNP's data is a fixed-size block.
-    # The size is determined by the number of samples.
-    bytes_per_snp = math.ceil(num_samples / 4)
-    print(f"Calculated block size per SNP: {bytes_per_snp} bytes.")
-
-    total_snps_to_write = sum(len(indices) for indices in snp_locations.values())
-
-    with open(OUTPUT_BED_FILENAME, "wb") as f_out:
-        # Write the mandatory 3-byte PLINK .bed header.
-        # Magic numbers: 0x6c (108), 0x1b (27), 0x01 (1 = SNP-major)
-        f_out.write(b'\x6c\x1b\x01')
-
-        with tqdm(total=total_snps_to_write, desc="Extracting genotype data") as pbar:
-            # Iterate through each file that had matches.
-            for bim_gcs_path, indices in snp_locations.items():
-                bed_gcs_path = bim_gcs_path.replace('.bim', '.bed')
-                
-                try:
-                    # Get the blob object for the remote .bed file.
-                    blob = storage.Blob.from_string(bed_gcs_path, client=storage_client)
-                    
-                    # For each matched SNP in this file, download its specific data block.
-                    for snp_index in indices:
-                        # Calculate the exact start position of the data block in the remote file.
-                        # The first 3 bytes are the header.
-                        offset = 3 + (snp_index * bytes_per_snp)
-                        
-                        # Download JUST this specific byte range into memory.
-                        # The 'end' parameter is inclusive.
-                        chunk = blob.download_as_bytes(start=offset, end=offset + bytes_per_snp - 1)
-                        
-                        # Write the downloaded chunk to our local subset.bed file.
-                        f_out.write(chunk)
-                        pbar.update(1)
-                
-                except Exception as e:
-                    pbar.write(f"Warning: Could not process {bed_gcs_path}. Error: {e}", file=sys.stderr)
-
-    print(f"Finished writing genotype data.")
-    print(f"Created local file: ./{OUTPUT_BED_FILENAME}\n")
+    print("Integrity checks passed.\n")
 
 def main():
-    """Main execution function to orchestrate the subsetting process."""
     print("Starting PLINK subset creation process...\n")
-    
-    target_snps = fetch_target_snps(TARGET_SNPS_URL)
-    
-    num_samples = process_fam_file(ACAF_PLINK_GCS_DIR, OUTPUT_FAM_FILENAME)
-    
-    snp_locations_map = process_bim_files(ACAF_PLINK_GCS_DIR, target_snps)
-    
-    if not snp_locations_map:
+
+    targets = fetch_target_snps(TARGET_SNPS_URL)
+    matched_shards, common_bpf = identify_matches_and_geometry(ACAF_PLINK_GCS_DIR, targets)
+
+    if not matched_shards:
         print("--- FINAL RESULT ---")
-        print("No matching SNPs were found in the dataset. No .bed file will be created.")
-        # Clean up empty .bim file
-        if os.path.exists(OUTPUT_BIM_FILENAME):
-             if os.path.getsize(OUTPUT_BIM_FILENAME) == 0:
-                  os.remove(OUTPUT_BIM_FILENAME)
+        print("No matching SNPs were found. No .bed will be created.")
+        if os.path.exists(OUTPUT_BIM_FILENAME) and os.path.getsize(OUTPUT_BIM_FILENAME) == 0:
+            os.remove(OUTPUT_BIM_FILENAME)
         sys.exit(0)
-        
-    process_bed_files(snp_locations_map, num_samples)
-    
+
+    fam_N = select_and_copy_fam(ACAF_PLINK_GCS_DIR, common_bpf)
+
+    n_written = assemble_bed_parallel(matched_shards)
+
+    final_integrity_checks(n_written, matched_shards, fam_N)
+
     print("--- FINAL RESULT ---")
-    print("Successfully created a subsetted PLINK fileset.")
-    print(f" --> {OUTPUT_FAM_FILENAME}")
-    print(f" --> {OUTPUT_BIM_FILENAME}")
-    print(f" --> {OUTPUT_BED_FILENAME}")
+    print("Successfully created a PLINK 1.9-readable subset fileset:")
+    print(f"  --> {OUTPUT_FAM_FILENAME} (N={fam_N:,})")
+    print(f"  --> {OUTPUT_BIM_FILENAME} (variants={n_written:,})")
+    print(f"  --> {OUTPUT_BED_FILENAME}")
     print("\nProcess complete.")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except subprocess.CalledProcessError as e:
+        msg = e.stderr if isinstance(e.stderr, str) and e.stderr else str(e)
+        print(f"FATAL: A gsutil command failed. {msg}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"FATAL: {e}", file=sys.stderr)
+        sys.exit(1)
