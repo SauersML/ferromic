@@ -57,10 +57,6 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
     return np.array(X_synth), np.array(y_synth)
 
 def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dict):
-    """
-    Extracts haplotype data for a given locus, applying a strict SNP whitelist
-    from a pre-loaded dictionary and standardizing the effect allele.
-    """
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     try:
         chrom, start, end = inversion_job['seqnames'], inversion_job['start'], inversion_job['end']
@@ -96,8 +92,6 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
         for var in vcf_subset(region_str):
             if var.POS in processed_pos: continue
 
-            # --- Primary filter based on the whitelist with NORMALIZED chromosome name ---
-            # This removes the 'chr' prefix to match the format from list.txt
             normalized_chrom = var.CHROM.replace('chr', '')
             snp_id_str = f"{normalized_chrom}:{var.POS}"
             if snp_id_str not in allowed_snps_dict:
@@ -106,28 +100,20 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
             if not (var.is_snp and not var.is_indel and len(var.ALT) == 1 and all(-1 not in gt[:2] for gt in var.genotypes)):
                 continue
 
-            # --- Effect allele standardization logic ---
             effect_allele = allowed_snps_dict[snp_id_str]
             ref_allele, alt_allele = var.REF, var.ALT[0]
             genotypes = np.array([gt[:2] for gt in var.genotypes], dtype=int)
 
             if effect_allele == alt_allele:
-                # Standard case: effect allele is the ALT. No change needed.
                 encoded_gts = genotypes
             elif effect_allele == ref_allele:
-                # Inverted case: effect allele is the REF. Flip 0s and 1s.
                 encoded_gts = 1 - genotypes
             else:
-                # Mismatch case: allele in list.txt doesn't match VCF REF or ALT. Skip.
                 logging.warning(f"[{inversion_id}] Skipping SNP {snp_id_str}: Effect allele '{effect_allele}' from list.txt "
                                 f"does not match VCF REF='{ref_allele}' or ALT='{alt_allele}'.")
                 continue
-            # --- END ---
 
-            h1_data.append(encoded_gts[:, 0])
-            h2_data.append(encoded_gts[:, 1])
-            
-            # --- Add effect allele to metadata for traceability ---
+            h1_data.append(encoded_gts[:, 0]); h2_data.append(encoded_gts[:, 1])
             snp_meta.append({'id': snp_id_str, 'pos': var.POS, 'effect_allele': effect_allele})
             processed_pos.add(var.POS)
 
@@ -167,7 +153,7 @@ def get_effective_max_components(X_train, y_train, max_components):
                 if match := re.search(r'iteration (\d+)', str(msg.message)): return min(max_components, int(match.group(1)))
     return max_components
 
-def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int):
+def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_dir: str):
     inversion_id = preloaded_data['id']
     try:
         y_full, confidence_mask = preloaded_data['y_diploid'], preloaded_data['confidence_mask']
@@ -177,7 +163,6 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int):
         
         val_min_class_count = min(Counter(y_val).values()) if y_val.size > 0 else 0
         if val_min_class_count < 2:
-            logging.info(f"[{inversion_id}] Skipping: {val_min_class_count} HC samples in minority class")
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Validation set minority class count ({val_min_class_count}) is < 2.'}
         
         n_outer_splits = min(5, val_min_class_count)
@@ -187,7 +172,6 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int):
         original_hc_indices = np.where(confidence_mask)[0]
 
         for i, (train_val_idx, test_val_idx) in enumerate(outer_cv.split(X_val, y_val)):
-            logging.info(f"[{inversion_id}] Starting CV Fold {i+1}/{n_outer_splits} (using {n_jobs_inner} inner cores)...")
             X_test, y_test = X_val[test_val_idx], y_val[test_val_idx]
             X_train_val_fold, y_train_val_fold = X_val[train_val_idx], y_val[train_val_idx]
             X_real_train_fold = np.vstack([p for p in [X_train_val_fold, X_lowconf] if p.shape[0] > 0])
@@ -215,13 +199,10 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int):
             y_true_pooled.extend(y_test); y_pred_pls_pooled.extend(grid_search.best_estimator_.predict(X_test).flatten()); y_pred_dummy_pooled.extend(dummy_model_fold.predict(X_test))
         
         if not y_true_pooled: return {'status': 'FAILED', 'id': inversion_id, 'reason': "Nested CV failed on all folds."}
-        logging.info(f"[{inversion_id}] Finalizing and fitting full model (using {n_jobs_inner} inner cores)...")
+        
         y_true_arr, y_pred_arr = np.array(y_true_pooled), np.array(y_pred_pls_pooled)
-
-        if y_true_arr.size < 2 or np.std(y_true_arr) == 0 or np.std(y_pred_arr) == 0:
-            corr = 0.0
-        else:
-            corr, _ = pearsonr(y_true_arr, y_pred_arr)
+        if y_true_arr.size < 2 or np.std(y_true_arr) == 0 or np.std(y_pred_arr) == 0: corr = 0.0
+        else: corr, _ = pearsonr(y_true_arr, y_pred_arr)
         
         pearson_r2 = (corr if not np.isnan(corr) else 0.0)**2
         _, p_value = wilcoxon(np.abs(y_true_arr - y_pred_arr), np.abs(y_true_arr - np.array(y_pred_dummy_pooled)), alternative='less', zero_method='zsplit')
@@ -242,7 +223,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int):
         final_grid_search = GridSearchCV(estimator=final_pipeline, param_grid={'pls__n_components': range(1, final_effective_max + 1)}, scoring='neg_mean_squared_error', cv=final_cv, n_jobs=n_jobs_inner, refit=True)
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", "y residual is constant", UserWarning); final_grid_search.fit(X_final_train, y_final_train)
-        output_dir = "final_imputation_models"
+        
         os.makedirs(output_dir, exist_ok=True)
         model_filename = os.path.join(output_dir, f"{inversion_id}.model.joblib")
         dump(final_grid_search.best_estimator_, model_filename)
@@ -250,116 +231,127 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int):
         logging.info(f"[{inversion_id}] Success. Model saved to {model_filename}")
         return {'status': 'SUCCESS', 'id': inversion_id, 'unbiased_pearson_r2': pearson_r2, 'unbiased_rmse': np.sqrt(mean_squared_error(y_true_pooled, y_pred_pls_pooled)), 'model_p_value': p_value, 'best_n_components': final_grid_search.best_params_['pls__n_components'], 'num_snps_in_model': X_full.shape[1], 'model_path': model_filename}
     except Exception as e:
-        import traceback
-        logging.error(f"[{inversion_id}] Analysis failed unexpectedly.")
-        return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}\n{traceback.format_exc()}"}
+        return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}"}
 
-def process_locus_end_to_end(job: dict, n_jobs_inner: int, allowed_snps_dict: dict):
+def process_locus_end_to_end(job: dict, n_jobs_inner: int, allowed_snps_dict: dict, output_dir: str):
     inversion_id = job.get('orig_ID', 'Unknown_ID')
-    logging.info(f"[{inversion_id}] Starting processing: Extracting data...")
-    # Pass the pre-loaded SNP dictionary to the extraction function
+    
+    expected_model_path = os.path.join(output_dir, f"{inversion_id}.model.joblib")
+    if os.path.exists(expected_model_path):
+        # Do not log here to avoid cluttering the log on retries. The final report is sufficient.
+        return {'status': 'CACHED', 'id': inversion_id}
+
     preloaded_data = extract_haplotype_data_for_locus(job, allowed_snps_dict)
     
     if not isinstance(preloaded_data, dict) or preloaded_data.get('status') != 'PREPROCESSED':
-        reason = preloaded_data.get('reason', 'Unknown failure during data extraction')
-        logging.warning(f"[{inversion_id}] Pre-processing step returned status: {preloaded_data.get('status', 'FAILED')}. Reason: {reason}")
         return preloaded_data
 
-    logging.info(f"[{inversion_id}] Data extracted. Starting model analysis...")
-    return analyze_and_model_locus_pls(preloaded_data, n_jobs_inner)
+    return analyze_and_model_locus_pls(preloaded_data, n_jobs_inner, output_dir)
 
 def load_and_normalize_snp_list(filepath: str):
-    """
-    Loads the SNP whitelist and normalizes chromosome names by removing 'chr' prefix
-    for consistent matching.
-    """
     if not os.path.exists(filepath):
-        logging.critical(f"FATAL: SNP whitelist file not found: '{filepath}'")
-        sys.exit(1)
-
+        logging.critical(f"FATAL: SNP whitelist file not found: '{filepath}'"); sys.exit(1)
     allowed_snps_dict = {}
     with open(filepath, 'r') as f:
         for i, line in enumerate(f):
             parts = line.strip().split()
             if len(parts) == 2:
                 snp_id, effect_allele = parts
-                # Normalize the chromosome part of the ID
                 chrom, pos = snp_id.split(':', 1)
                 normalized_chrom = chrom.replace('chr', '')
                 normalized_id = f"{normalized_chrom}:{pos}"
                 allowed_snps_dict[normalized_id] = effect_allele.upper()
-            elif line.strip(): # Avoid warning on blank lines
-                logging.warning(f"Malformed line #{i+1} in '{filepath}': '{line.strip()}' - Skipping.")
-    
     if not allowed_snps_dict:
-        logging.critical(f"FATAL: SNP whitelist file '{filepath}' was empty or contained no valid entries.")
-        sys.exit(1)
-        
+        logging.critical(f"FATAL: SNP whitelist file '{filepath}' was empty."); sys.exit(1)
     logging.info(f"Successfully loaded and normalized {len(allowed_snps_dict)} SNPs from '{filepath}'.")
     return allowed_snps_dict
 
 if __name__ == '__main__':
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s] [%(levelname)s] %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        handlers=[logging.FileHandler("log.txt", mode='w'), logging.StreamHandler(sys.stdout)]
-    )
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s',
+                        datefmt='%Y-%m-%d %H:%M:%S', handlers=[logging.FileHandler("log.txt", mode='w'), logging.StreamHandler(sys.stdout)])
 
     script_start_time = time.time()
-    logging.info("--- Starting PLS-Based Inversion Imputation Model Pipeline ---")
+    logging.info("--- Starting Hybrid Parallel-Serial Imputation Pipeline ---")
     
     output_dir = "final_imputation_models"
     ground_truth_file = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
-    snp_whitelist_file = "list.txt" # Define the whitelist file here
+    snp_whitelist_file = "list.txt"
     
     os.makedirs(output_dir, exist_ok=True)
     if not os.path.exists(ground_truth_file):
-        logging.critical(f"FATAL: Ground-truth file not found: '{ground_truth_file}'")
-        sys.exit(1)
+        logging.critical(f"FATAL: Ground-truth file not found: '{ground_truth_file}'"); sys.exit(1)
     
-    # --- EFFICIENT & CORRECT: Load and process the SNP whitelist ONCE ---
     allowed_snps = load_and_normalize_snp_list(snp_whitelist_file)
     
     config_df = pd.read_csv(ground_truth_file, sep='\t', on_bad_lines='warn', dtype={'seqnames': str})
     config_df = config_df[(config_df['verdict'] == 'pass') & (~config_df['seqnames'].isin(['chrY', 'chrM']))].copy()
     all_jobs = config_df.to_dict('records')
     if not all_jobs:
-        logging.warning("No valid inversions to process. Exiting.")
-        sys.exit(0)
+        logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
 
+    # --- PHASE 1: MASSIVELY PARALLEL EXECUTION ---
     total_cores = cpu_count()
-    N_INNER_JOBS = 8 
-    if total_cores < N_INNER_JOBS:
-        N_INNER_JOBS = total_cores
-    N_OUTER_JOBS = max(1, total_cores // N_INNER_JOBS)
+    # Use aggressive parallelism for the first pass
+    N_INNER_JOBS_P1 = 8 if total_cores > 8 else total_cores
+    N_OUTER_JOBS_P1 = max(1, total_cores // N_INNER_JOBS_P1)
 
-    logging.info(f"Loaded {len(all_jobs)} inversions. Using {total_cores} total cores.")
-    logging.info(f"Configuration: {N_OUTER_JOBS} parallel 'outer' jobs, each using up to {N_INNER_JOBS} 'inner' cores for GridSearchCV.")
-    
-    # --- PARALLEL CALL ---
-    # The pre-loaded 'allowed_snps' dictionary is passed to each parallel job.
-    job_generator = (delayed(process_locus_end_to_end)(job, N_INNER_JOBS, allowed_snps) for job in all_jobs)
-    
-    all_results = Parallel(n_jobs=N_OUTER_JOBS, backend='loky')(
-        tqdm(job_generator, total=len(all_jobs), desc="Processing Loci", unit="locus")
+    logging.info(f"--- PHASE 1: Starting Massively Parallel Processing ({N_OUTER_JOBS_P1} outer jobs) ---")
+    job_generator_p1 = (delayed(process_locus_end_to_end)(job, N_INNER_JOBS_P1, allowed_snps, output_dir) for job in all_jobs)
+    phase_1_results = Parallel(n_jobs=N_OUTER_JOBS_P1, backend='loky')(
+        tqdm(job_generator_p1, total=len(all_jobs), desc="Phase 1 (Parallel)", unit="locus")
     )
+    logging.info("--- PHASE 1: Parallel Processing Complete ---")
 
+    # --- IDENTIFY FAILED/CRASHED JOBS FOR RETRY ---
+    results_map = {r['id']: r for r in phase_1_results if r and 'id' in r}
+    all_job_ids = {job['orig_ID'] for job in all_jobs}
+    
+    # Identify jobs that need a retry: those that are not SUCCESS or CACHED or SKIPPED
+    retry_ids = set()
+    for job_id in all_job_ids:
+        if job_id not in results_map:
+            retry_ids.add(job_id) # Crashed jobs
+        elif results_map[job_id].get('status') not in ['SUCCESS', 'CACHED', 'SKIPPED']:
+            retry_ids.add(job_id) # Failed jobs
+
+    # --- PHASE 2: SERIAL RETRY LOOP ---
+    if not retry_ids:
+        logging.info("--- No failed or crashed jobs to retry. Proceeding to final report. ---")
+    else:
+        logging.info(f"--- PHASE 2: Starting Serial Retry for {len(retry_ids)} Failed/Crashed Jobs ---")
+        retry_jobs = [job for job in all_jobs if job['orig_ID'] in retry_ids]
+        
+        # In serial mode, each job gets all inner cores available, but only one job runs at a time.
+        N_INNER_JOBS_P2 = total_cores
+        phase_2_results = []
+        for job in tqdm(retry_jobs, desc="Phase 2 (Serial Retry)", unit="locus"):
+            # The 'process_locus_end_to_end' function will handle caching, so no work is repeated if a miracle occurred.
+            result = process_locus_end_to_end(job, N_INNER_JOBS_P2, allowed_snps, output_dir)
+            phase_2_results.append(result)
+
+        logging.info("--- PHASE 2: Serial Retry Complete ---")
+        # Update the results map with the outcomes of the retry attempts
+        for result in phase_2_results:
+            if result and 'id' in result:
+                results_map[result['id']] = result
+
+    # --- FINAL REPORT GENERATION ---
     logging.info(f"--- All Processing Complete in {time.time() - script_start_time:.2f} seconds ---")
+    all_results = list(results_map.values())
     successful_runs = [r for r in all_results if r and r.get('status') == 'SUCCESS']
     
-    # --- FINAL REPORT ---
-    logging.info("\n\n" + "="*100 + "\n---      FINAL PLS IMPUTATION MODEL REPORT      ---\n" + "="*100)
-    reason_counts = Counter(f"({r.get('status', 'N/A')}) {r.get('reason', 'N/A').splitlines()[0]}" for r in all_results if r.get('status') != 'SUCCESS')
+    logging.info("\n\n" + "="*100 + "\n---      FINAL PIPELINE REPORT      ---\n" + "="*100)
+    
+    other_runs = [r for r in all_results if r and r.get('status') != 'SUCCESS']
+    reason_counts = Counter(f"({r.get('status', 'CRASHED')}) {r.get('reason', 'Worker process terminated (likely RAM issue) or unknown error.').splitlines()[0]}" for r in other_runs)
     if reason_counts:
-        logging.info("\n--- FAILED OR SKIPPED LOCI SUMMARY ---")
+        logging.info("\n--- SUMMARY OF NON-SUCCESSFUL LOCI (FINAL STATUS) ---")
         for reason, count in sorted(reason_counts.items(), key=lambda item: item[1], reverse=True): 
             logging.info(f"  - ({count: >3} loci): {reason}")
 
     if successful_runs:
         results_df = pd.DataFrame(successful_runs).set_index('id').sort_values('unbiased_pearson_r2', ascending=False)
-        logging.info(f"\n--- Aggregate Performance ({len(successful_runs)} Successful Models) ---")
+        logging.info(f"\n--- Aggregate Performance ({len(successful_runs)} Total Successful Models) ---")
         logging.info(f"  Mean Unbiased Pearson r²: {results_df['unbiased_pearson_r2'].mean():.4f}")
         logging.info(f"  Models with Est. r² > 0.5: {(results_df['unbiased_pearson_r2'] > 0.5).sum()}")
         logging.info(f"  Models with p < 0.05 (vs. baseline): {(results_df['model_p_value'] < 0.05).sum()}")
@@ -372,7 +364,6 @@ if __name__ == '__main__':
             logging.info("\n--- High-Performance Models (Est. Unbiased r² > 0.5 & p < 0.05) ---")
             with pd.option_context('display.max_rows', None, 'display.width', 120):
                 logging.info("\n" + high_perf_df[summary_cols].to_string())
-
             logging.info(f"\n[SUCCESS] Saved summary for {len(high_perf_df)} models to '{summary_filename}'")
         else:
             logging.info("\n--- No high-performance models found meeting the r² > 0.5 criteria ---")
