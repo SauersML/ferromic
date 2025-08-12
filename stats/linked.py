@@ -56,49 +56,108 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
     if not X_synth: return None, None
     return np.array(X_synth), np.array(y_synth)
 
-def extract_haplotype_data_for_locus(inversion_job: dict):
+def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dict):
+    """
+    Extracts haplotype data for a given locus, applying a strict SNP whitelist
+    from a pre-loaded dictionary and standardizing the effect allele.
+    """
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     try:
         chrom, start, end = inversion_job['seqnames'], inversion_job['start'], inversion_job['end']
         vcf_path = f"../vcfs/{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
         if not os.path.exists(vcf_path):
             return {'status': 'FAILED', 'id': inversion_id, 'reason': f"VCF file not found: {vcf_path}"}
+        
         vcf_reader = VCF(vcf_path, lazy=True)
         vcf_samples = vcf_reader.samples
         tsv_samples = [col for col in inversion_job.keys() if col.startswith(('HG', 'NA'))]
         sample_map = {ts: p[0] for ts in tsv_samples if len(p := [vs for vs in vcf_samples if ts in vs]) == 1}
         if not sample_map:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': "No TSV samples could be mapped to VCF samples."}
+
         def parse_gt_for_synth(gt_str: any):
             high_conf_map = {"0|0": 0, "1|0": 1, "0|1": 1, "1|1": 2}
             low_conf_map = {"0|0_lowconf": 0, "1|0_lowconf": 1, "0|1_lowconf": 1, "1|1_lowconf": 2}
             if gt_str in high_conf_map: return (high_conf_map[gt_str], True, gt_str)
             if gt_str in low_conf_map: return (low_conf_map[gt_str], False, gt_str.replace("_lowconf", ""))
             return (None, None, None)
+
         gt_data = {vcf_s: {'dosage': d, 'is_high_conf': hc, 'raw_gt': rgt} for tsv_s, vcf_s in sample_map.items() for d, hc, rgt in [parse_gt_for_synth(inversion_job.get(tsv_s))] if d is not None}
         if not gt_data:
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No samples with a valid inversion dosage.'}
+        
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
         flank_size = 50000
         region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
         vcf_subset = VCF(vcf_path, samples=list(gt_df.index))
+        
         h1_data, h2_data, snp_meta, processed_pos = [], [], [], set()
+
         for var in vcf_subset(region_str):
             if var.POS in processed_pos: continue
-            if var.is_snp and not var.is_indel and len(var.ALT) == 1 and all(-1 not in gt[:2] for gt in var.genotypes):
-                h1_data.append([gt[0] for gt in var.genotypes]); h2_data.append([gt[1] for gt in var.genotypes])
-                snp_meta.append({'id': var.ID or f"{var.CHROM}:{var.POS}", 'pos': var.POS}); processed_pos.add(var.POS)
+
+            # --- Primary filter based on the whitelist with NORMALIZED chromosome name ---
+            # This removes the 'chr' prefix to match the format from list.txt
+            normalized_chrom = var.CHROM.replace('chr', '')
+            snp_id_str = f"{normalized_chrom}:{var.POS}"
+            if snp_id_str not in allowed_snps_dict:
+                continue
+
+            if not (var.is_snp and not var.is_indel and len(var.ALT) == 1 and all(-1 not in gt[:2] for gt in var.genotypes)):
+                continue
+
+            # --- Effect allele standardization logic ---
+            effect_allele = allowed_snps_dict[snp_id_str]
+            ref_allele, alt_allele = var.REF, var.ALT[0]
+            genotypes = np.array([gt[:2] for gt in var.genotypes], dtype=int)
+
+            if effect_allele == alt_allele:
+                # Standard case: effect allele is the ALT. No change needed.
+                encoded_gts = genotypes
+            elif effect_allele == ref_allele:
+                # Inverted case: effect allele is the REF. Flip 0s and 1s.
+                encoded_gts = 1 - genotypes
+            else:
+                # Mismatch case: allele in list.txt doesn't match VCF REF or ALT. Skip.
+                logging.warning(f"[{inversion_id}] Skipping SNP {snp_id_str}: Effect allele '{effect_allele}' from list.txt "
+                                f"does not match VCF REF='{ref_allele}' or ALT='{alt_allele}'.")
+                continue
+            # --- END ---
+
+            h1_data.append(encoded_gts[:, 0])
+            h2_data.append(encoded_gts[:, 1])
+            
+            # --- Add effect allele to metadata for traceability ---
+            snp_meta.append({'id': snp_id_str, 'pos': var.POS, 'effect_allele': effect_allele})
+            processed_pos.add(var.POS)
+
         if not snp_meta:
-            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No suitable SNPs (with 100% call rate) found.'}
-        df_H1 = pd.DataFrame(np.array(h1_data).T, index=vcf_subset.samples); df_H2 = pd.DataFrame(np.array(h2_data).T, index=vcf_subset.samples)
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No suitable SNPs from the whitelist were found in the region.'}
+
+        df_H1 = pd.DataFrame(np.array(h1_data).T, index=vcf_subset.samples)
+        df_H2 = pd.DataFrame(np.array(h2_data).T, index=vcf_subset.samples)
+        
         common_samples = df_H1.index.intersection(gt_df.index)
         if len(common_samples) < 20: return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient overlapping samples ({len(common_samples)}) for modeling.'}
         if gt_df.loc[common_samples, 'is_high_conf'].sum() < 3: return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient high-confidence samples for pooling.'}
-        return {'status': 'PREPROCESSED', 'id': inversion_id, 'X_hap1': df_H1.loc[common_samples].values, 'X_hap2': df_H2.loc[common_samples].values, 'y_diploid': gt_df.loc[common_samples, 'dosage'].values.astype(int), 'confidence_mask': gt_df.loc[common_samples, 'is_high_conf'].values.astype(bool), 'raw_gts': gt_df.loc[common_samples, 'raw_gt'], 'snp_metadata': snp_meta}
+        
+        return {
+            'status': 'PREPROCESSED', 'id': inversion_id, 
+            'X_hap1': df_H1.loc[common_samples].values, 
+            'X_hap2': df_H2.loc[common_samples].values, 
+            'y_diploid': gt_df.loc[common_samples, 'dosage'].values.astype(int), 
+            'confidence_mask': gt_df.loc[common_samples, 'is_high_conf'].values.astype(bool), 
+            'raw_gts': gt_df.loc[common_samples, 'raw_gt'], 
+            'snp_metadata': snp_meta
+        }
     except Exception as e:
-        return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Data Extraction Error: {type(e).__name__}: {e}"}
+        import traceback
+        logging.error(f"[{inversion_id}] Data Extraction failed unexpectedly.")
+        return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Data Extraction Error: {type(e).__name__}: {e}\n{traceback.format_exc()}"}
 
 def get_effective_max_components(X_train, y_train, max_components):
+    if X_train.shape[1] == 0: return 0
+    max_components = min(max_components, X_train.shape[1])
     if max_components <= 1: return max_components
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
@@ -145,7 +204,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int):
             X_train, y_train = X_train_full[resampled_indices], y_train_full[resampled_indices]
             train_min_class_count = min(Counter(y_train).values()) if len(y_train) > 0 else 0
             if train_min_class_count < 2: continue
-            max_components = min(100, X_train.shape[1], X_train.shape[0] - 1)
+            max_components = min(100, X_train.shape[0] - 1)
             effective_max_components = get_effective_max_components(X_train, y_train, max_components)
             if effective_max_components < 1: continue
             inner_cv = StratifiedKFold(n_splits=min(3, train_min_class_count), shuffle=True, random_state=123)
@@ -175,7 +234,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int):
         X_final_train, y_final_train = X_final_train_full[final_resampled_indices], y_final_train_full[final_resampled_indices]
         final_min_class_count = min(Counter(y_final_train).values()) if y_final_train.size > 0 else 0
         if final_min_class_count < 2: return {'status': 'FAILED', 'id': inversion_id, 'reason': "Final balanced training set lacks class diversity."}
-        final_max_components = min(100, X_final_train.shape[1], X_final_train.shape[0] - 1)
+        final_max_components = min(100, X_final_train.shape[0] - 1)
         final_effective_max = get_effective_max_components(X_final_train, y_final_train, final_max_components)
         if final_effective_max < 1: return {'status': 'FAILED', 'id': inversion_id, 'reason': "Final model training range is invalid."}
         final_cv = StratifiedKFold(n_splits=min(3, final_min_class_count), shuffle=True, random_state=42)
@@ -195,10 +254,11 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int):
         logging.error(f"[{inversion_id}] Analysis failed unexpectedly.")
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}\n{traceback.format_exc()}"}
 
-def process_locus_end_to_end(job: dict, n_jobs_inner: int):
+def process_locus_end_to_end(job: dict, n_jobs_inner: int, allowed_snps_dict: dict):
     inversion_id = job.get('orig_ID', 'Unknown_ID')
     logging.info(f"[{inversion_id}] Starting processing: Extracting data...")
-    preloaded_data = extract_haplotype_data_for_locus(job)
+    # Pass the pre-loaded SNP dictionary to the extraction function
+    preloaded_data = extract_haplotype_data_for_locus(job, allowed_snps_dict)
     
     if not isinstance(preloaded_data, dict) or preloaded_data.get('status') != 'PREPROCESSED':
         reason = preloaded_data.get('reason', 'Unknown failure during data extraction')
@@ -208,27 +268,59 @@ def process_locus_end_to_end(job: dict, n_jobs_inner: int):
     logging.info(f"[{inversion_id}] Data extracted. Starting model analysis...")
     return analyze_and_model_locus_pls(preloaded_data, n_jobs_inner)
 
+def load_and_normalize_snp_list(filepath: str):
+    """
+    Loads the SNP whitelist and normalizes chromosome names by removing 'chr' prefix
+    for consistent matching.
+    """
+    if not os.path.exists(filepath):
+        logging.critical(f"FATAL: SNP whitelist file not found: '{filepath}'")
+        sys.exit(1)
+
+    allowed_snps_dict = {}
+    with open(filepath, 'r') as f:
+        for i, line in enumerate(f):
+            parts = line.strip().split()
+            if len(parts) == 2:
+                snp_id, effect_allele = parts
+                # Normalize the chromosome part of the ID
+                chrom, pos = snp_id.split(':', 1)
+                normalized_chrom = chrom.replace('chr', '')
+                normalized_id = f"{normalized_chrom}:{pos}"
+                allowed_snps_dict[normalized_id] = effect_allele.upper()
+            elif line.strip(): # Avoid warning on blank lines
+                logging.warning(f"Malformed line #{i+1} in '{filepath}': '{line.strip()}' - Skipping.")
+    
+    if not allowed_snps_dict:
+        logging.critical(f"FATAL: SNP whitelist file '{filepath}' was empty or contained no valid entries.")
+        sys.exit(1)
+        
+    logging.info(f"Successfully loaded and normalized {len(allowed_snps_dict)} SNPs from '{filepath}'.")
+    return allowed_snps_dict
+
 if __name__ == '__main__':
-    # Configure logging to write to both a file and the console.
-    # The console handler allows tqdm to work without cluttering the log file.
+    # Configure logging
     logging.basicConfig(
         level=logging.INFO,
         format='[%(asctime)s] [%(levelname)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
-        handlers=[
-            logging.FileHandler("log.txt", mode='w'),
-            logging.StreamHandler(sys.stdout)
-        ]
+        handlers=[logging.FileHandler("log.txt", mode='w'), logging.StreamHandler(sys.stdout)]
     )
 
     script_start_time = time.time()
     logging.info("--- Starting PLS-Based Inversion Imputation Model Pipeline ---")
     
-    output_dir, ground_truth_file = "final_imputation_models", "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
+    output_dir = "final_imputation_models"
+    ground_truth_file = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
+    snp_whitelist_file = "list.txt" # Define the whitelist file here
+    
     os.makedirs(output_dir, exist_ok=True)
     if not os.path.exists(ground_truth_file):
         logging.critical(f"FATAL: Ground-truth file not found: '{ground_truth_file}'")
         sys.exit(1)
+    
+    # --- EFFICIENT & CORRECT: Load and process the SNP whitelist ONCE ---
+    allowed_snps = load_and_normalize_snp_list(snp_whitelist_file)
     
     config_df = pd.read_csv(ground_truth_file, sep='\t', on_bad_lines='warn', dtype={'seqnames': str})
     config_df = config_df[(config_df['verdict'] == 'pass') & (~config_df['seqnames'].isin(['chrY', 'chrM']))].copy()
@@ -246,9 +338,9 @@ if __name__ == '__main__':
     logging.info(f"Loaded {len(all_jobs)} inversions. Using {total_cores} total cores.")
     logging.info(f"Configuration: {N_OUTER_JOBS} parallel 'outer' jobs, each using up to {N_INNER_JOBS} 'inner' cores for GridSearchCV.")
     
-    # This is the simplified, robust way to get a real-time progress bar.
-    # joblib.Parallel is wrapped by tqdm, which automatically updates as jobs complete.
-    job_generator = (delayed(process_locus_end_to_end)(job, N_INNER_JOBS) for job in all_jobs)
+    # --- PARALLEL CALL ---
+    # The pre-loaded 'allowed_snps' dictionary is passed to each parallel job.
+    job_generator = (delayed(process_locus_end_to_end)(job, N_INNER_JOBS, allowed_snps) for job in all_jobs)
     
     all_results = Parallel(n_jobs=N_OUTER_JOBS, backend='loky')(
         tqdm(job_generator, total=len(all_jobs), desc="Processing Loci", unit="locus")
@@ -258,7 +350,6 @@ if __name__ == '__main__':
     successful_runs = [r for r in all_results if r and r.get('status') == 'SUCCESS']
     
     # --- FINAL REPORT ---
-    # Logging the report ensures it is saved cleanly to log.txt
     logging.info("\n\n" + "="*100 + "\n---      FINAL PLS IMPUTATION MODEL REPORT      ---\n" + "="*100)
     reason_counts = Counter(f"({r.get('status', 'N/A')}) {r.get('reason', 'N/A').splitlines()[0]}" for r in all_results if r.get('status') != 'SUCCESS')
     if reason_counts:
@@ -278,7 +369,6 @@ if __name__ == '__main__':
             summary_filename = os.path.join(output_dir, "high_performance_pls_models_summary.tsv")
             high_perf_df[summary_cols].to_csv(summary_filename, sep='\t', float_format='%.4g')
             
-            # Log the DataFrame by converting it to a string
             logging.info("\n--- High-Performance Models (Est. Unbiased r² > 0.5 & p < 0.05) ---")
             with pd.option_context('display.max_rows', None, 'display.width', 120):
                 logging.info("\n" + high_perf_df[summary_cols].to_string())
