@@ -1,78 +1,48 @@
 import os
-import sys
 import json
-import time
+from collections import defaultdict, namedtuple
+from typing import Dict, List, Tuple, Optional, Iterable
+
 import numpy as np
 import pandas as pd
-
-import dask
-import dask.array as da
-from dask.diagnostics import ProgressBar
-from pandas_plink import read_plink1_bin
 from tqdm import tqdm
+from numpy.lib.format import open_memmap
 
+# Fast PLINK reader (Rust backend)
+from bed_reader import open_bed
 
-# ============================================================
+# ------------------------------------------------------------
 # CONFIG
-# ============================================================
-PLINK_PREFIX = "subset"
-MODEL_DIR = "impute"
-OUTPUT_DIR = "genotype_matrices"
+# ------------------------------------------------------------
+PLINK_PREFIX = os.getenv("PLINK_PREFIX", "subset")
+MODEL_DIR    = os.getenv("MODEL_DIR", "impute")
+OUTPUT_DIR   = os.getenv("OUTPUT_DIR", "genotype_matrices")
 
-# Tuning knobs (override with env vars if needed)
-VARIANT_CHUNK = int(os.getenv("VARIANT_CHUNK", "100000"))           # columns per dask chunk
-ARRAY_CHUNK_SIZE_HINT = os.getenv("DASK_ARRAY_CHUNK_SIZE", "256 MiB")
-PERSIST_BED = bool(int(os.getenv("PERSIST_BED", "0")))              # 1 to persist bed in RAM
-PRINT_BIM_HEAD = int(os.getenv("PRINT_BIM_HEAD", "3"))              # show first N BIM rows
+BLOCK_SNPS   = int(os.getenv("BLOCK_SNPS", "512"))   # SNP columns to read per block
+NUM_THREADS  = os.getenv("NUM_THREADS", "auto")      # "auto" or integer string
+# ------------------------------------------------------------
 
+# Write int8 missing in PLINK .bed
+MISSING_INT8 = np.int8(-127)
 
-# ============================================================
-# DEBUG HELPERS
-# ============================================================
-def dbg(msg):
-    print(f"[DEBUG {time.strftime('%H:%M:%S')}] {msg}", flush=True)
+# A small record for the models we keep
+ModelSpec = namedtuple("ModelSpec", ["name", "ncols", "col_ids", "col_effects"])
 
-
-def show_chunks(da_arr, name="array"):
+def parse_num_threads(val: str) -> Optional[int]:
+    if val is None or val == "" or val.lower() == "auto":
+        return None
     try:
-        ch = da_arr.chunks
-        dbg(f"{name}: ndim={da_arr.ndim}, shape={da_arr.shape}, dtype={da_arr.dtype}")
-        if ch is not None and isinstance(ch, tuple):
-            for ax, c in enumerate(ch):
-                sizes = list(c[:5])
-                more = " ..." if len(c) > 5 else ""
-                dbg(f"{name}: axis {ax} chunk_sizes (first 5): {sizes}{more}")
-        else:
-            dbg(f"{name}: chunks=<unknown or scalar>")
-    except Exception as e:
-        dbg(f"show_chunks({name}) failed: {e}")
+        n = int(val)
+        return n if n > 0 else None
+    except Exception:
+        return None
 
-
-def meminfo():
-    try:
-        with open("/proc/meminfo", "r") as f:
-            lines = f.readlines()
-        head = "".join(lines[:5]).strip()
-        dbg("Meminfo (first lines):\n" + head)
-    except Exception as e:
-        dbg(f"meminfo failed: {e}")
-
-
-# ============================================================
-# CHROMOSOME NORMALIZATION
-# ============================================================
-def chrom_aliases(ch: str):
-    """
-    Return a set of equivalent chromosome name aliases for robust matching.
-    Handles:
-      - with/without 'chr' prefix (chr1 <-> 1)
-      - X <-> 23, Y <-> 24, XY <-> 25, MT/M <-> 26
-    """
+def chrom_aliases(ch: str) -> Iterable[str]:
+    """Return chromosome aliases: with/without 'chr', numeric/sex synonyms."""
     s = str(ch).strip()
     if s == "":
-        return {s}
+        return [s]
 
-    # strip 'chr' prefix if present
     if s.lower().startswith("chr"):
         base = s[3:]
         prefixed = s
@@ -81,293 +51,260 @@ def chrom_aliases(ch: str):
         prefixed = "chr" + s
 
     base_up = base.upper()
+    out = {base, prefixed}
 
-    # start with both prefixed/non-prefixed forms we observed
-    aliases = {base, prefixed}
-
-    # Map sex/mito numeric codes used by some tools
     if base_up in {"X", "23"}:
-        aliases.update({"X", "23", "chrX", "chr23"})
+        out.update({"X", "23", "chrX", "chr23"})
     elif base_up in {"Y", "24"}:
-        aliases.update({"Y", "24", "chrY", "chr24"})
+        out.update({"Y", "24", "chrY", "chr24"})
     elif base_up in {"XY", "25"}:
-        aliases.update({"XY", "25", "chrXY", "chr25"})
+        out.update({"XY", "25", "chrXY", "chr25"})
     elif base_up in {"MT", "M", "26"}:
-        aliases.update({"MT", "M", "26", "chrMT", "chrM", "chr26"})
+        out.update({"MT", "M", "26", "chrMT", "chrM", "chr26"})
     else:
-        # autosomes: normalize possible zero-padded numbers (e.g., '01')
         try:
             n = int(base_up)
-            aliases.update({str(n), "chr" + str(n)})
+            out.update({str(n), "chr" + str(n)})
         except ValueError:
-            # non-numeric weirdness: just ensure both prefixed and base forms
-            aliases.update({base_up, "chr" + base_up})
+            out.update({base_up, "chr" + base_up})
+    return out
 
-    return aliases
+def load_bed_meta(prefix: str):
+    bed_path = prefix + ".bed"
+    # Open once and keep open for all reads
+    bed = open_bed(bed_path)
 
+    n_samples, n_snps = bed.shape
+    chrom = np.asarray(bed.chromosome, dtype=str)
+    pos   = np.asarray(bed.bp_position, dtype=np.int64)
+    a1    = np.asarray(bed.allele_1, dtype=str)  # dosage counts A1 (default)
+    a2    = np.asarray(bed.allele_2, dtype=str)
 
-# ============================================================
-# CORE BUILDERS
-# ============================================================
-def build_bim_and_mappings(G):
+    # Uppercase alleles for robust matching
+    a1 = np.char.upper(a1)
+    a2 = np.char.upper(a2)
+
+    print(f"BED: samples={n_samples:,}, variants={n_snps:,}")
+    print(f"BLOCK_SNPS={BLOCK_SNPS}, NUM_THREADS={NUM_THREADS}")
+
+    # Build ID -> list of indices (fixes multi-allelic duplicates)
+    id_to_idxs: Dict[str, List[int]] = defaultdict(list)
+    for v in range(n_snps):
+        c = chrom[v]
+        p = pos[v]
+        for c_alias in chrom_aliases(c):
+            key = f"{c_alias}:{p}"
+            id_to_idxs[key].append(v)
+
+    return bed, n_samples, n_snps, chrom, pos, a1, a2, id_to_idxs
+
+def load_models_and_build_router(model_dir: str,
+                                 id_to_idxs: Dict[str, List[int]],
+                                 a1: np.ndarray,
+                                 a2: np.ndarray) -> Tuple[List[ModelSpec], Dict[int, List[Tuple[int,int,bool]]], int, int]:
     """
-    Build:
-      - bim DataFrame with: chrom,pos,a0,a1,i,id (id is the PLINK-provided form)
-      - key_to_i: mapping "id|allele" for MANY aliases (chr/nochr and sex/mito synonyms)
-      - a0_arr, a1_arr: numpy arrays aligned by variant index
+    Returns:
+      - models: list of ModelSpec
+      - routes_for_variant: dict v -> list of (model_index, dest_col, flip)
+      - skipped_models: count with schema/JSON problems
+      - total_requested_cols: sum of cols across usable models
     """
-    dbg("Building BIM and lookup mappings...")
+    files = sorted([f for f in os.listdir(model_dir) if f.endswith(".snps.json")])
+    print(f"Found {len(files)} model files.")
 
-    chrom = np.asarray(G.chrom.values).astype(str)
-    pos = np.asarray(G.pos.values)
+    models: List[ModelSpec] = []
+    skipped = 0
+    total_cols = 0
 
-    if not np.issubdtype(pos.dtype, np.integer):
-        dbg(f"Converting pos dtype {pos.dtype} -> int64")
-        pos = pos.astype(np.int64)
+    # Temporary per-model selected mapping: col_j -> (v_idx, flip) or (None, False) if missing
+    selected_per_model: List[List[Tuple[Optional[int], bool]]] = []
 
-    a0 = np.asarray(G.a0.values).astype(str)
-    a1 = np.asarray(G.a1.values).astype(str)
+    for f in tqdm(files, desc="Indexing models", unit="model", leave=False):
+        name = f[:-10]
+        path = os.path.join(model_dir, f)
 
-    n_variants = int(G.shape[1])
-    idx = np.arange(n_variants, dtype=np.int64)
-
-    bim = pd.DataFrame({
-        "chrom": chrom,
-        "pos": pos,
-        "a0": a0,
-        "a1": a1,
-        "i": idx
-    })
-    bim["id"] = bim["chrom"] + ":" + bim["pos"].astype(str)
-
-    if PRINT_BIM_HEAD > 0:
-        dbg("BIM head:\n" + bim.head(PRINT_BIM_HEAD).to_string(index=False))
-
-    # Build a Python dict for speed and to control first-wins deduping
-    key_to_i_dict = {}
-
-    # Create keys for BOTH a0 and a1 for ALL reasonable ID aliases
-    t0 = time.perf_counter()
-    for row in bim.itertuples(index=False):
-        ch = row.chrom
-        p = row.pos
-        i = int(row.i)
-        a0v = row.a0
-        a1v = row.a1
-
-        for ch_alias in chrom_aliases(ch):
-            base_id = f"{ch_alias}:{p}"
-            k0 = f"{base_id}|{a0v}"
-            k1 = f"{base_id}|{a1v}"
-
-            if k0 not in key_to_i_dict:
-                key_to_i_dict[k0] = i
-            if k1 not in key_to_i_dict:
-                key_to_i_dict[k1] = i
-    t1 = time.perf_counter()
-
-    key_to_i = pd.Series(key_to_i_dict)
-    dbg(f"BIM rows: {len(bim)}")
-    dbg(f"key_to_i unique keys: {len(key_to_i)}  (built in {t1 - t0:.2f}s)")
-
-    a0_arr = bim["a0"].to_numpy()
-    a1_arr = bim["a1"].to_numpy()
-    return bim, key_to_i, a0_arr, a1_arr
-
-
-def normalize_model_df(model_df, model_name):
-    """Ensure required columns exist and normalize strings."""
-    if "id" not in model_df.columns:
-        raise ValueError(f"Model '{model_name}' missing 'id'.")
-    if "effect_allele" not in model_df.columns:
-        raise ValueError(f"Model '{model_name}' missing 'effect_allele'.")
-
-    model_df = model_df.set_index("id", drop=True)
-    model_df.index = model_df.index.astype(str).str.strip()
-    model_df["effect_allele"] = model_df["effect_allele"].astype(str).str.strip()
-    return model_df
-
-
-def indices_for_model(model_df: pd.DataFrame, key_to_i: pd.Series, model_name: str) -> np.ndarray:
-    """
-    Resolve variant column indices using composite key 'id|effect_allele',
-    trying multiple chromosome aliases where needed.
-    """
-    # Fast path: try direct map first
-    keys_direct = pd.Series(
-        model_df.index.astype(str) + "|" + model_df["effect_allele"].astype(str).to_numpy(),
-        index=model_df.index
-    )
-    idx_direct = keys_direct.map(key_to_i)
-
-    if not idx_direct.isna().any():
-        idx_np = idx_direct.to_numpy(dtype=np.int64)
-        dbg(f"[{model_name}] resolved via direct id match: {len(idx_np)} indices")
-        return idx_np
-
-    # Slow path: for missing entries, try aliasing the chromosome name
-    dbg(f"[{model_name}] some IDs did not match directly; trying chromosome aliases...")
-    resolved = []
-    misses = []
-
-    # Pre-split model ids into chrom and pos (assume 'chrom:pos')
-    # Be robust to weird inputs by skipping malformed ids
-    for id_str, eff_allele in zip(model_df.index.tolist(), model_df["effect_allele"].tolist()):
         try:
-            chrom_str, pos_str = id_str.split(":")
-        except ValueError:
-            misses.append(f"{id_str}|{eff_allele}")
+            with open(path, "r") as fh:
+                rows = json.load(fh)
+            df = pd.DataFrame(rows)
+        except Exception as e:
+            print(f"[WARN] skip {name}: cannot parse JSON ({e})")
+            skipped += 1
             continue
 
-        found = False
-        for ch_alias in chrom_aliases(chrom_str):
-            key = f"{ch_alias}:{pos_str}|{eff_allele}"
-            if key in key_to_i.index:
-                resolved.append(key_to_i.loc[key])
-                found = True
-                break
-        if not found:
-            misses.append(f"{id_str}|{eff_allele}")
+        # Validate schema
+        if not {"id", "effect_allele"}.issubset(df.columns):
+            print(f"[WARN] skip {name}: requires columns ['id','effect_allele']")
+            skipped += 1
+            continue
 
-    if misses:
-        dbg(f"[{model_name}] missing after aliasing: {len(misses)} / {len(model_df)}. "
-            f"Examples: {misses[:10]}")
-        raise ValueError(
-            f"Model '{model_name}': {len(misses)} SNPs not found even after aliasing. "
-            f"Examples: {misses[:10]}"
-        )
+        # Normalize
+        df["id"] = df["id"].astype(str).str.strip()
+        df["effect_allele"] = df["effect_allele"].astype(str).str.strip().str.upper()
+        col_ids = df["id"].tolist()
+        col_eff = df["effect_allele"].tolist()
 
-    idx_np = np.asarray(resolved, dtype=np.int64)
-    dbg(f"[{model_name}] resolved via aliasing: {len(idx_np)} indices")
-    return idx_np
+        ncols = len(col_ids)
+        total_cols += ncols
 
+        # Resolve each column to a BIM index with duplicate-aware matching
+        chosen: List[Tuple[Optional[int], bool]] = []
+        for idx_in_model, (id_str, eff) in enumerate(zip(col_ids, col_eff)):
+            # Collect candidate BIM indices for this position using chrom aliases
+            cand_idxs: List[int] = []
+            try:
+                chrom_str, pos_str = id_str.split(":")
+            except ValueError:
+                # malformed id
+                print(f"[WARN] {name}: malformed id '{id_str}'")
+                chosen.append((None, False))
+                continue
 
-def compute_model_matrix(
-    bed_da: da.core.Array,
-    idx: np.ndarray,
-    model_effect_alleles: np.ndarray,
-    a0_arr: np.ndarray,
-    a1_arr: np.ndarray,
-    model_name: str
-) -> da.core.Array:
-    """
-    Build a lazy dask array for the model with allele flips applied (bed counts a1).
-    """
-    dbg(f"[{model_name}] selecting columns: min={idx.min()} max={idx.max()} n={len(idx)}")
-    sel = bed_da[:, idx].astype(np.int8)
-    show_chunks(sel, name=f"sel_preflip[{model_name}]")
+            for alias in chrom_aliases(chrom_str):
+                key = f"{alias}:{pos_str}"
+                lst = id_to_idxs.get(key)
+                if lst:
+                    cand_idxs.extend(lst)
 
-    a0_sel = a0_arr[idx]
-    a1_sel = a1_arr[idx]
-    eff = model_effect_alleles.astype(str)
+            if not cand_idxs:
+                # Not present in BIM at all
+                chosen.append((None, False))
+                continue
 
-    flip_mask = (eff == a0_sel)
-    valid_mask = flip_mask | (eff == a1_sel)
-    n_invalid = int((~valid_mask).sum())
-    if n_invalid:
-        bad_pos = np.where(~valid_mask)[0][:5]
-        dbg(f"[{model_name}] INVALID effect alleles at positions {bad_pos.tolist()}")
-        raise ValueError(f"Model '{model_name}': {n_invalid} SNPs have effect_allele not in (a0, a1).")
+            # Prefer A1 match (no flip), else A2 match (flip)
+            a1_matches = [v for v in cand_idxs if a1[v] == eff]
+            a2_matches = [v for v in cand_idxs if a2[v] == eff]
 
-    mask_da = da.from_array(flip_mask, chunks=(sel.chunks[1]))
-    sel = da.where(mask_da[None, :], 2 - sel, sel).astype(np.int8)
-    show_chunks(sel, name=f"sel_postflip[{model_name}]")
-    return sel
+            if a1_matches:
+                v_idx = a1_matches[0]
+                if len(a1_matches) > 1:
+                    # Ambiguous: multiple BIM rows at same position with same A1=eff
+                    print(f"[WARN ambiguous] {name}: multiple A1 matches for '{id_str}'='{eff}', picked index {v_idx}")
+                chosen.append((v_idx, False))
+            elif a2_matches:
+                v_idx = a2_matches[0]
+                if len(a2_matches) > 1:
+                    print(f"[WARN ambiguous] {name}: multiple A2 matches for '{id_str}'='{eff}', picked index {v_idx}")
+                chosen.append((v_idx, True))
+            else:
+                # Present but alleles don't match
+                # Log a single concise warning (no A1/A2 match)
+                # We'll leave this column as missing (-127)
+                chosen.append((None, False))
 
+                # Emit one informative line (short)
+                v0 = cand_idxs[0]
+                print(f"[WARN] {name}: effect '{eff}' not in {{A1='{a1[v0]}', A2='{a2[v0]}'}} at '{id_str}'")
 
-# ============================================================
-# MAIN
-# ============================================================
+        # Keep the model
+        models.append(ModelSpec(name=name, ncols=ncols, col_ids=col_ids, col_effects=col_eff))
+        selected_per_model.append(chosen)
+
+    usable_models = len(models)
+    if skipped:
+        print(f"[INFO] skipped {skipped} model files (schema/JSON problems)")
+    print(f"Usable models: {usable_models}")
+    print(f"Total requested columns (across usable models): {total_cols:,}")
+
+    # Build global router: v -> list of (model_idx, dest_col, flip)
+    routes_for_variant: Dict[int, List[Tuple[int, int, bool]]] = defaultdict(list)
+    for m_idx, chosen in enumerate(selected_per_model):
+        for j, (v_idx, flip) in enumerate(chosen):
+            if v_idx is not None:
+                routes_for_variant[v_idx].append((m_idx, j, flip))
+
+    return models, routes_for_variant, skipped, total_cols
+
+def safe_flip_int8(col: np.ndarray) -> np.ndarray:
+    """Flip counts (2 - x) where x>=0; keep missing (-127) as-is."""
+    out = col.copy()
+    mask = out >= 0
+    out[mask] = np.int8(2 - out[mask].astype(np.int16))  # widen then back to avoid overflow
+    return out
+
 def main():
-    print("--- Genotype Matrix Preparation ---", flush=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    dask.config.set({"array.chunk-size": ARRAY_CHUNK_SIZE_HINT})
-    dbg(f"Dask array chunk-size hint: {ARRAY_CHUNK_SIZE_HINT}")
-    dbg(f"VARIANT_CHUNK: {VARIANT_CHUNK}")
-    dbg(f"Python: {sys.version.split()[0]}  PID: {os.getpid()}")
-    dbg(f"CPU count: {os.cpu_count()}")
-    meminfo()
+    # ---- BED metadata & ID index (duplicate-aware) ----
+    bed, n_samples, n_snps, chrom, pos, a1, a2, id_to_idxs = load_bed_meta(PLINK_PREFIX)
 
-    # Load PLINK xarray/dask
-    print(f"Loading PLINK fileset: '{PLINK_PREFIX}.*'", flush=True)
-    G = read_plink1_bin(f"{PLINK_PREFIX}.bed", verbose=True)
+    # ---- Models & router ----
+    models, routes_for_variant, skipped, total_cols = load_models_and_build_router(MODEL_DIR, id_to_idxs, a1, a2)
+    if not models:
+        print("No usable models. Exiting.")
+        return
 
-    # Lazy dask array (do NOT use .values)
-    bed = G.data
+    # Unique SNP indices we actually need to read
+    needed_variants = sorted(routes_for_variant.keys())
+    print(f"Unique SNPs to read (drives I/O): {len(needed_variants):,}")
 
-    # Rechunk variants axis for fast column slicing
-    dbg("Rechunking genotype array along variant axis...")
-    bed = bed.rechunk({1: VARIANT_CHUNK})
-    show_chunks(bed, name="bed")
+    # ---- Prepare outputs (memmaps prefilled with missing) ----
+    model_memmaps: List[np.memmap] = []
+    for ms in models:
+        out_path = os.path.join(OUTPUT_DIR, f"{ms.name}.genotypes.npy")
+        mm = open_memmap(out_path, mode="w+", dtype=np.int8, shape=(n_samples, ms.ncols), fortran_order=True)
+        mm[:] = MISSING_INT8  # prefill as missing
+        model_memmaps.append(mm)
 
-    if PERSIST_BED:
-        dbg("Persisting bed array in RAM (optional).")
-        with ProgressBar():
-            bed = bed.persist()
-        show_chunks(bed, name="bed_persisted")
+    # Map from variant index to router list already holds (model_idx, col_idx, flip)
 
-    n_samples, n_variants = G.shape
-    print(f"Loaded metadata for {n_samples:,} samples and {n_variants:,} variants.", flush=True)
+    # ---- Stream the BED once in SNP blocks ----
+    num_threads = parse_num_threads(NUM_THREADS)
+    needed_set = set(needed_variants)
+    processed_needed = 0
 
-    # BIM + mappings (with aliases)
-    bim, key_to_i, a0_arr, a1_arr = build_bim_and_mappings(G)
+    # Progress counts only the SNPs we actually needed (not every SNP in the bed)
+    pbar = tqdm(total=len(needed_variants), desc="Scanning BED", unit="snp", dynamic_ncols=True)
 
-    # Discover models
-    model_json_files = sorted([f for f in os.listdir(MODEL_DIR) if f.endswith(".snps.json")])
-    if not model_json_files:
-        raise FileNotFoundError(f"No '.snps.json' model files found in '{MODEL_DIR}'.")
-    print(f"Found {len(model_json_files)} models.", flush=True)
+    # Iterate by contiguous SNP ranges for good locality
+    for start in range(0, n_snps, BLOCK_SNPS):
+        end = min(start + BLOCK_SNPS, n_snps)
+        block_width = end - start
 
-    # Sequential to avoid I/O thrash on one disk
-    for json_filename in tqdm(model_json_files, desc="Models", unit="model"):
-        model_name = json_filename[:-10]  # strip .snps.json
-        json_path = os.path.join(MODEL_DIR, json_filename)
-        output_path = os.path.join(OUTPUT_DIR, f"{model_name}.genotypes.npy")
+        # Read block: rows=samples, cols=SNPs in [start:end)
+        block = bed.read(index=np.s_[:, start:end], dtype="int8", order="F", num_threads=num_threads)
 
-        dbg(f"[{model_name}] reading model file: {json_path}")
-        with open(json_path, "r") as f:
-            model_snps_list = json.load(f)
+        # For each column in this block that is needed, route it
+        # Pre-compute which local columns are needed
+        needed_local: List[int] = [j for j in range(block_width) if (start + j) in needed_set]
+        if not needed_local:
+            continue
 
-        model_df = pd.DataFrame(model_snps_list)
-        dbg(f"[{model_name}] raw rows: {len(model_df)}")
-        model_df = normalize_model_df(model_df, model_name)
-        dbg(f"[{model_name}] normalized rows: {len(model_df)}")
-        dbg(f"[{model_name}] head:\n{model_df.head(5).to_string()}")
+        # Precompute flip variants we will need in this block to avoid repeated flips
+        # For each local j, check if any assignment in router needs flip
+        flip_need = {}
+        for j in needed_local:
+            v_idx = start + j
+            flip_needed = any(flip for (_m, _c, flip) in routes_for_variant[v_idx])
+            flip_need[j] = flip_needed
 
-        # Resolve indices (try direct, then aliasing)
-        idx = indices_for_model(model_df, key_to_i, model_name)
+        # Now route
+        for j in needed_local:
+            v_idx = start + j
+            assignments = routes_for_variant[v_idx]
 
-        # Build lazy computation (with flip)
-        dbg(f"[{model_name}] building dask graph for compute")
-        sel_da = compute_model_matrix(
-            bed_da=bed,
-            idx=idx,
-            model_effect_alleles=model_df["effect_allele"].to_numpy(),
-            a0_arr=a0_arr,
-            a1_arr=a1_arr,
-            model_name=model_name
-        )
+            col = block[:, j]  # int8 column
+            col_flip = None
+            if flip_need[j]:
+                col_flip = safe_flip_int8(col)
 
-        # Compute with visible progress bar
-        start = time.perf_counter()
-        dbg(f"[{model_name}] compute() start; target shape: [samples x {len(idx)}]")
-        with ProgressBar():
-            arr = sel_da.compute()
-        elapsed = time.perf_counter() - start
-        dbg(f"[{model_name}] compute() done in {elapsed:.2f}s; result shape={arr.shape}, dtype={arr.dtype}")
+            # Fan-out to all destinations
+            for (m_idx, dest_col, flip) in assignments:
+                if flip:
+                    model_memmaps[m_idx][:, dest_col] = col_flip
+                else:
+                    model_memmaps[m_idx][:, dest_col] = col
 
-        # Save
-        np.save(output_path, arr)
-        dbg(f"[{model_name}] saved -> {output_path}")
+            processed_needed += 1
+            pbar.update(1)
 
-    print("--- Process Complete ---", flush=True)
-    print(f"Saved genotype matrices in './{OUTPUT_DIR}/'.", flush=True)
+    pbar.close()
 
+    # ---- Finalize ----
+    for mm in model_memmaps:
+        mm.flush()
+
+    print("Done.")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        dbg(f"FATAL: {type(e).__name__}: {e}")
-        raise
+    main()
