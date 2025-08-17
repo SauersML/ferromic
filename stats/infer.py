@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import gc
 
 import joblib
 import numpy as np
@@ -10,16 +11,60 @@ from tqdm import tqdm
 # --- CONFIGURATION ---
 MODEL_DIR = "impute"
 GENOTYPE_DIR = "genotype_matrices"
-PLINK_PREFIX = "subset"  # Used to get sample IDs from the .fam file
+PLINK_PREFIX = "subset"
 OUTPUT_FILE = "imputed_inversion_dosages.tsv"
 MISSING_VALUE_CODE = -127
+
+# Only models in this set will be processed. All others will be skipped.
+TARGET_INVERSIONS = {
+    "chr2-138246733-INV-5010",
+    "chr7-54220528-INV-101153",
+    "chr6-76111919-INV-44661",
+    "chr12-46897663-INV-16289",
+    "chr1-197787661-INV-1197",
+    "chr6-167181003-INV-209976",
+    "chr10-55007454-INV-5370",
+    "chr7-40839738-INV-1134",
+    "chr4-87925789-INV-11799",
+    "chr3-195680867-INV-272256",
+    "chr3-162827167-INV-3077",
+    "chr3-195749464-INV-230745",
+    "chr9-30951702-INV-5595",
+    "chr16-28471894-INV-165758",
+    "chr10-79542902-INV-674513",
+    "chr11-55662740-INV-3952",
+    "chr7-70955928-INV-18020",
+    "chr14-60604531-INV-8718",
+    "chr10-37102555-INV-11157",
+    "chr12-71546144-INV-1652",
+    "chr6-141867315-INV-29159",
+    "chr4-187948402-INV-8158",
+    "chr11-66251212-INV-1252",
+    "chr3-131969892-INV-7927",
+    "chr11-310146-INV-10302",
+    "chr4-33098029-INV-7075",
+    "chr5-64470929-INV-4190",
+    "chr11-24263185-INV-392",
+    "chr6-130527042-INV-4267",
+    "chr9-123976301-INV-18001",
+    "chr15-30618104-INV-1535102",
+    "chr8-7301025-INV-5297356",
+    "chr4-40233409-INV-2010",
+    "chr15-84373376-INV-43322",
+    "chr13-48199211-INV-7451",
+    "chr11-50136371-INV-206505",
+    "chr5-64466170-INV-15635",
+    "chr10-46135869-INV-77646",
+    "chr7-65219158-INV-312667",
+    "chr2-95800192-INV-224213",
+}
 
 
 def main():
     """
     Main function to run the inference pipeline.
     """
-    print("--- Starting Imputation Inference Pipeline ---")
+    print("--- Starting Memory-Efficient Imputation Inference Pipeline ---")
     start_time = time.time()
 
     # --- 1. Pre-flight Checks ---
@@ -45,38 +90,54 @@ def main():
         print(f"[FATAL] Could not read sample IDs from .fam file. Error: {e}")
         sys.exit(1)
 
-    # --- 3. Identify Models to Process ---
-    # We use the generated .npy files as the source of truth for which models are usable.
+    # --- 3. Identify and Filter Models to Process ---
     try:
-        model_names = sorted([
+        all_available_models = sorted([
             f.replace(".genotypes.npy", "")
             for f in os.listdir(GENOTYPE_DIR)
             if f.endswith(".genotypes.npy")
         ])
     except FileNotFoundError:
-        model_names = []
-        
-    if not model_names:
+        all_available_models = []
+    
+    if not all_available_models:
         print("[FATAL] No '.genotypes.npy' files found in the genotype directory. Nothing to process.")
         sys.exit(1)
 
-    print(f"Found {len(model_names)} staged genotype matrices to process.")
+    print(f"Found {len(all_available_models)} total staged genotype matrices.")
 
-    # --- 4. Iterate, Impute, and Predict ---
-    predictions_dict = {}
+    # Apply the hardcoded filter
+    models_to_process = [m for m in all_available_models if m in TARGET_INVERSIONS]
     
-    for model_name in tqdm(model_names, desc="Predicting Inversions", unit="model"):
+    if not models_to_process:
+        print("[FATAL] None of the available models are in the target list. Nothing to process.")
+        sys.exit(1)
+        
+    print(f"After filtering, {len(models_to_process)} models will be processed.")
+    
+    # --- 4. MEMORY: Initialize final output file and write header ---
+    # We will append columns to this file instead of holding results in memory.
+    print(f"Initializing output file: {OUTPUT_FILE}")
+    # Start with a DataFrame containing only the sample IDs
+    results_df = pd.DataFrame(index=sample_ids)
+    results_df.index.name = "SampleID"
+    # Write the initial file with just the index
+    results_df.to_csv(OUTPUT_FILE, sep='\t')
+
+    # --- 5. Iterate, Impute, Predict, and Append ---
+    for model_name in tqdm(models_to_process, desc="Predicting Inversions", unit="model"):
         print(f"\n--- Processing: {model_name} ---")
 
         model_path = os.path.join(MODEL_DIR, f"{model_name}.model.joblib")
         matrix_path = os.path.join(GENOTYPE_DIR, f"{model_name}.genotypes.npy")
+        
+        predicted_dosages = None # Ensure variable is defined
 
         try:
-            # Step A: Load the model and the genotype matrix
+            # Step A: Load model and memory-mapped matrix
             model = joblib.load(model_path)
-            # Use mmap_mode='r' for memory efficiency with large files
             X_inference = np.load(matrix_path, mmap_mode='r')
-
+            
             n_samples, n_snps = X_inference.shape
             print(f"  - Samples: {n_samples}, SNPs in model: {n_snps}")
             
@@ -89,60 +150,53 @@ def main():
                 print(f"  - [WARN] Genotype matrix is empty. Skipping.")
                 continue
             
-            missing_mask = (X_inference == MISSING_VALUE_CODE)
-            missing_count = np.sum(missing_mask)
+            missing_count = np.sum(X_inference == MISSING_VALUE_CODE)
             percent_missing = (missing_count / X_inference.size) * 100
             print(f"  - Missing data: {missing_count} / {X_inference.size} ({percent_missing:.2f}%)")
 
-            # Step C: Handle missing values via mean imputation (CRITICAL STEP)
-            X_imputed = X_inference.copy().astype(np.float32) # Work on a float copy
+            # Step C: Handle missing values with a memory-efficient approach
+            # We create the float copy ONLY for this loop iteration
+            X_imputed = X_inference.astype(np.float32, copy=True)
             
-            # Calculate mean for each column, ignoring missing values
-            # This is a robust way to do it column-by-column
             print("  - Imputing missing values with column means...")
             for j in range(n_snps):
                 column_data = X_imputed[:, j]
-                valid_data = column_data[column_data != MISSING_VALUE_CODE]
+                valid_mask = (column_data != MISSING_VALUE_CODE)
                 
-                if valid_data.size > 0:
-                    col_mean = np.mean(valid_data)
+                if np.any(valid_mask):
+                    col_mean = np.mean(column_data[valid_mask])
                 else:
-                    # Edge case: if an entire SNP column is missing, default to 1.0
-                    col_mean = 1.0 
+                    col_mean = 1.0 # Default if entire column is missing
                 
-                # Replace missing values in this column with its calculated mean
-                column_data[column_data == MISSING_VALUE_CODE] = col_mean
-                X_imputed[:, j] = column_data
-
+                column_data[~valid_mask] = col_mean
+            
             # Step D: Run prediction
             print("  - Running prediction...")
             predicted_dosages = model.predict(X_imputed)
 
-            # Step E: Store results
-            predictions_dict[model_name] = predicted_dosages
-
         except FileNotFoundError:
             print(f"  - [ERROR] Could not find matching model file: {model_path}. Skipping.")
+            continue # Skip to the next model
         except Exception as e:
             print(f"  - [ERROR] An unexpected error occurred while processing {model_name}: {e}")
             import traceback
             traceback.print_exc()
+            continue # Skip to the next model
             
-    # --- 5. Assemble and Save Final Results ---
-    if not predictions_dict:
-        print("\nNo predictions were successfully generated. Exiting.")
-        sys.exit(1)
+        finally:
+            # MEMORY: Explicitly clean up large objects from this iteration
+            del model, X_inference
+            if 'X_imputed' in locals(): del X_imputed
+            gc.collect()
 
-    print(f"\n--- Assembling Final Results for {len(predictions_dict)} Models ---")
-    
-    # Create the final DataFrame
-    results_df = pd.DataFrame(predictions_dict)
-    results_df.index = sample_ids
-    results_df.index.name = "SampleID"
-    
-    # Save to a tab-separated file
-    print(f"Saving final imputed dosages to: {OUTPUT_FILE}")
-    results_df.to_csv(OUTPUT_FILE, sep='\t', float_format='%.4f')
+        # Step E: MEMORY - Append results directly to the file
+        if predicted_dosages is not None:
+            print(f"  - Appending results to {OUTPUT_FILE}...")
+            # Reload the current results, add the new column, and save back
+            current_results = pd.read_csv(OUTPUT_FILE, sep='\t', index_col="SampleID")
+            current_results[model_name] = predicted_dosages
+            current_results.to_csv(OUTPUT_FILE, sep='\t', float_format='%.4f')
+            print("  - Done appending.")
 
     end_time = time.time()
     print("\n--- Pipeline Complete ---")
