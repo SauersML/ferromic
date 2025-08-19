@@ -18,7 +18,7 @@ PLINK_PREFIX = os.getenv("PLINK_PREFIX", "subset")
 MODEL_DIR    = os.getenv("MODEL_DIR", "impute")
 OUTPUT_DIR   = os.getenv("OUTPUT_DIR", "genotype_matrices")
 
-BLOCK_SNPS   = int(os.getenv("BLOCK_SNPS", "512"))   # SNP columns to read per block
+BLOCK_SNPS   = int(os.getenv("BLOCK_SNPS", "4096"))   # SNP columns to read per block
 NUM_THREADS  = os.getenv("NUM_THREADS", "auto")      # "auto" or integer string
 # ------------------------------------------------------------
 
