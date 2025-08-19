@@ -52,6 +52,7 @@ def main():
         sys.exit(1)
 
     # --- 3. Identify and Filter Models to Process ---
+    # ... (this section is correct and unchanged)
     try:
         all_available_models = sorted([
             f.replace(".genotypes.npy", "")
@@ -60,29 +61,20 @@ def main():
         ])
     except FileNotFoundError:
         all_available_models = []
-    
     if not all_available_models:
         print("[FATAL] No '.genotypes.npy' files found in the genotype directory. Nothing to process.")
         sys.exit(1)
-
     print(f"Found {len(all_available_models)} total staged genotype matrices.")
-
-    # Apply the hardcoded filter
     models_to_process = [m for m in all_available_models if m in TARGET_INVERSIONS]
-    
     if not models_to_process:
         print("[FATAL] None of the available models are in the target list. Nothing to process.")
         sys.exit(1)
-        
     print(f"After filtering, {len(models_to_process)} models will be processed.")
-    
-    # --- 4. MEMORY: Initialize final output file and write header ---
-    # We will append columns to this file instead of holding results in memory.
+
+    # --- 4. Initialize final output file ---
     print(f"Initializing output file: {OUTPUT_FILE}")
-    # Start with a DataFrame containing only the sample IDs
     results_df = pd.DataFrame(index=sample_ids)
     results_df.index.name = "SampleID"
-    # Write the initial file with just the index
     results_df.to_csv(OUTPUT_FILE, sep='\t')
 
     # --- 5. Iterate, Impute, Predict, and Append ---
@@ -92,21 +84,17 @@ def main():
         model_path = os.path.join(MODEL_DIR, f"{model_name}.model.joblib")
         matrix_path = os.path.join(GENOTYPE_DIR, f"{model_name}.genotypes.npy")
         
-        predicted_dosages = None # Ensure variable is defined
+        predicted_dosages = None
 
         try:
-            # Step A: Load model and memory-mapped matrix
             model = joblib.load(model_path)
             X_inference = np.load(matrix_path, mmap_mode='r')
-            
             n_samples, n_snps = X_inference.shape
             print(f"  - Samples: {n_samples}, SNPs in model: {n_snps}")
-            
             if n_samples != len(sample_ids):
                 print(f"[ERROR] Sample count mismatch! FAM has {len(sample_ids)} but matrix has {n_samples}. Skipping.")
                 continue
 
-            # Step B: Calculate missingness percentage
             if X_inference.size == 0:
                 print(f"  - [WARN] Genotype matrix is empty. Skipping.")
                 continue
@@ -115,48 +103,51 @@ def main():
             percent_missing = (missing_count / X_inference.size) * 100
             print(f"  - Missing data: {missing_count} / {X_inference.size} ({percent_missing:.2f}%)")
 
-            # Step C: Handle missing values with a memory-efficient approach
-            # We create the float copy ONLY for this loop iteration
+            # Using the original loop for imputation as it's faster for this data shape
             X_imputed = X_inference.astype(np.float32, copy=True)
-            
             print("  - Imputing missing values with column means...")
             for j in range(n_snps):
                 column_data = X_imputed[:, j]
                 valid_mask = (column_data != MISSING_VALUE_CODE)
-                
                 if np.any(valid_mask):
                     col_mean = np.mean(column_data[valid_mask])
                 else:
-                    col_mean = 1.0 # Default if entire column is missing
-                
+                    col_mean = 1.0
                 column_data[~valid_mask] = col_mean
             
-            # Step D: Run prediction
             print("  - Running prediction...")
             predicted_dosages = model.predict(X_imputed)
 
         except FileNotFoundError:
             print(f"  - [ERROR] Could not find matching model file: {model_path}. Skipping.")
-            continue # Skip to the next model
+            continue
         except Exception as e:
             print(f"  - [ERROR] An unexpected error occurred while processing {model_name}: {e}")
             import traceback
             traceback.print_exc()
-            continue # Skip to the next model
+            continue
             
         finally:
-            # MEMORY: Explicitly clean up large objects from this iteration
             if 'model' in locals(): del model
             if 'X_inference' in locals(): del X_inference
             if 'X_imputed' in locals(): del X_imputed
             gc.collect()
 
-        # Step E: MEMORY - Append results directly to the file
+        # Step E: Append results directly to the file
         if predicted_dosages is not None:
             print(f"  - Appending results to {OUTPUT_FILE}...")
-            # Reload the current results, add the new column, and save back
-            current_results = pd.read_csv(OUTPUT_FILE, sep='\t', index_col="SampleID")
-            current_results[model_name] = predicted_dosages
+            
+            # Force the index column to be read as a string.
+            # This ensures the index dtypes match for a robust assignment.
+            current_results = pd.read_csv(
+                OUTPUT_FILE, 
+                sep='\t', 
+                index_col="SampleID",
+                dtype={"SampleID": str} # This prevents pandas from inferring it as numeric
+            )
+            
+            current_results[model_name] = pd.Series(predicted_dosages, index=sample_ids)
+            
             current_results.to_csv(OUTPUT_FILE, sep='\t', float_format='%.4f')
             print("  - Done appending.")
 
