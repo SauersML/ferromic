@@ -267,7 +267,7 @@ if __name__ == '__main__':
     # --- Configuration Section ---
     output_dir = "final_imputation_models"
     ground_truth_file = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
-    snp_whitelist_file = "list.txt"
+    snp_whitelist_file = "passed_snvs.txt"
     
     os.makedirs(output_dir, exist_ok=True)
     if not os.path.exists(ground_truth_file):
