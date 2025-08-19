@@ -22,7 +22,6 @@ from sklearn.utils.class_weight import compute_sample_weight
 from scipy.stats import wilcoxon, pearsonr
 import traceback
 
-# Configuration is done in the main block to control output location
 warnings.filterwarnings("ignore", category=FutureWarning)
 rng = np.random.default_rng(seed=42)
 
@@ -59,18 +58,23 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
 
 def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dict):
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
+    vcf_path = None
     try:
         chrom, start, end = inversion_job['seqnames'], inversion_job['start'], inversion_job['end']
         vcf_path = f"../vcfs/{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
         if not os.path.exists(vcf_path):
-            return {'status': 'FAILED', 'id': inversion_id, 'reason': f"VCF file not found: {vcf_path}"}
-        
+            reason = f"VCF file not found: {vcf_path}"
+            logging.error(f"[{inversion_id}] FAILED: {reason}")
+            return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
+
         vcf_reader = VCF(vcf_path, lazy=True)
         vcf_samples = vcf_reader.samples
         tsv_samples = [col for col in inversion_job.keys() if col.startswith(('HG', 'NA'))]
         sample_map = {ts: p[0] for ts in tsv_samples if len(p := [vs for vs in vcf_samples if ts in vs]) == 1}
         if not sample_map:
-            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': "No TSV samples could be mapped to VCF samples."}
+            reason = "No TSV samples could be mapped to VCF samples."
+            logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
 
         def parse_gt_for_synth(gt_str: any):
             high_conf_map = {"0|0": 0, "1|0": 1, "0|1": 1, "1|1": 2}
@@ -81,13 +85,15 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
 
         gt_data = {vcf_s: {'dosage': d, 'is_high_conf': hc, 'raw_gt': rgt} for tsv_s, vcf_s in sample_map.items() for d, hc, rgt in [parse_gt_for_synth(inversion_job.get(tsv_s))] if d is not None}
         if not gt_data:
-            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No samples with a valid inversion dosage.'}
-        
+            reason = 'No samples with a valid inversion dosage.'
+            logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
+
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
         flank_size = 50000
         region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
         vcf_subset = VCF(vcf_path, samples=list(gt_df.index))
-        
+
         h1_data, h2_data, snp_meta, processed_pos = [], [], [], set()
 
         for var in vcf_subset(region_str):
@@ -107,15 +113,26 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
             processed_pos.add(var.POS)
 
         if not snp_meta:
-            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': 'No suitable SNPs from the whitelist were found in the region.'}
+            reason = 'No suitable SNPs from the whitelist were found in the region.'
+            logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
         df_H1 = pd.DataFrame(np.array(h1_data).T, index=vcf_subset.samples)
         df_H2 = pd.DataFrame(np.array(h2_data).T, index=vcf_subset.samples)
         common_samples = df_H1.index.intersection(gt_df.index)
-        if len(common_samples) < 20: return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient overlapping samples ({len(common_samples)}) for modeling.'}
-        if gt_df.loc[common_samples, 'is_high_conf'].sum() < 3: return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Insufficient high-confidence samples for pooling.'}
-        
+        if len(common_samples) < 20:
+            reason = f'Insufficient overlapping samples ({len(common_samples)}) for modeling.'
+            logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
+        if gt_df.loc[common_samples, 'is_high_conf'].sum() < 3:
+            reason = 'Insufficient high-confidence samples for pooling.'
+            logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
+            
         return {'status': 'PREPROCESSED', 'id': inversion_id, 'X_hap1': df_H1.loc[common_samples].values, 'X_hap2': df_H2.loc[common_samples].values, 'y_diploid': gt_df.loc[common_samples, 'dosage'].values.astype(int), 'confidence_mask': gt_df.loc[common_samples, 'is_high_conf'].values.astype(bool), 'raw_gts': gt_df.loc[common_samples, 'raw_gt'], 'snp_metadata': snp_meta}
-    except Exception as e: return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Data Extraction Error: {type(e).__name__}: {e}"}
+    except Exception as e:
+        reason = f"Data Extraction Error: {type(e).__name__}: {e}. Problem VCF: '{vcf_path}'"
+        logging.error(f"[{inversion_id}] FAILED: {reason}")
+        return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
 
 def get_effective_max_components(X_train, y_train, max_components):
     if X_train.shape[1] == 0: return 0
@@ -136,11 +153,13 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         X_hap1, X_hap2 = preloaded_data['X_hap1'], preloaded_data['X_hap2']
         X_full, y_val = X_hap1 + X_hap2, y_full[confidence_mask]
         X_val, X_lowconf, y_lowconf = X_full[confidence_mask], X_full[~confidence_mask], y_full[~confidence_mask]
-        
+
         val_min_class_count = min(Counter(y_val).values()) if y_val.size > 0 else 0
         if val_min_class_count < 2:
-            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': f'Validation set minority class count ({val_min_class_count}) is < 2.'}
-        
+            reason = f'Validation set minority class count ({val_min_class_count}) is < 2.'
+            logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
+            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
+
         n_outer_splits = min(5, val_min_class_count)
         outer_cv = StratifiedKFold(n_splits=n_outer_splits, shuffle=True, random_state=42)
         pipeline = Pipeline([('pls', PLSRegression())])
@@ -173,12 +192,15 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
                 warnings.filterwarnings("ignore", "y residual is constant", UserWarning); grid_search.fit(X_train, y_train)
             dummy_model_fold = DummyRegressor(strategy='mean').fit(X_train_full, y_train_full)
             y_true_pooled.extend(y_test); y_pred_pls_pooled.extend(grid_search.best_estimator_.predict(X_test).flatten()); y_pred_dummy_pooled.extend(dummy_model_fold.predict(X_test))
-        
-        if not y_true_pooled: return {'status': 'FAILED', 'id': inversion_id, 'reason': "Nested CV failed on all folds."}
+
+        if not y_true_pooled:
+            reason = "Nested CV failed on all folds."
+            logging.error(f"[{inversion_id}] FAILED: {reason}")
+            return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
         y_true_arr, y_pred_arr = np.array(y_true_pooled), np.array(y_pred_pls_pooled)
         if y_true_arr.size < 2 or np.std(y_true_arr) == 0 or np.std(y_pred_arr) == 0: corr = 0.0
         else: corr, _ = pearsonr(y_true_arr, y_pred_arr)
-        
+
         pearson_r2 = (corr if not np.isnan(corr) else 0.0)**2
         _, p_value = wilcoxon(np.abs(y_true_arr - y_pred_arr), np.abs(y_true_arr - np.array(y_pred_dummy_pooled)), alternative='less', zero_method='zsplit')
         X_synth_final, y_synth_final = create_synthetic_data(X_hap1, X_hap2, preloaded_data['raw_gts'], confidence_mask, X_full)
@@ -187,40 +209,48 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         X_final_train_full, y_final_train_full = np.vstack(final_train_X_parts), np.concatenate(final_train_y_parts)
         final_sample_weights = compute_sample_weight("balanced", y=y_final_train_full)
         final_resampled_indices = rng.choice(len(X_final_train_full), size=len(X_final_train_full), replace=True, p=final_sample_weights / np.sum(final_sample_weights))
-        X_final_train, y_final_train = X_final_train_full[final_resampled_indices], y_final_train_full[resampled_indices]
+        X_final_train, y_final_train = X_final_train_full[final_resampled_indices], y_final_train_full[final_resampled_indices]
         final_min_class_count = min(Counter(y_final_train).values()) if y_final_train.size > 0 else 0
-        if final_min_class_count < 2: return {'status': 'FAILED', 'id': inversion_id, 'reason': "Final balanced training set lacks class diversity."}
+        if final_min_class_count < 2:
+            reason = "Final balanced training set lacks class diversity."
+            logging.error(f"[{inversion_id}] FAILED: {reason}")
+            return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
         final_max_components = min(100, X_final_train.shape[0] - 1)
         final_effective_max = get_effective_max_components(X_final_train, y_final_train, final_max_components)
-        if final_effective_max < 1: return {'status': 'FAILED', 'id': inversion_id, 'reason': "Final model training range is invalid."}
+        if final_effective_max < 1:
+            reason = "Final model training range is invalid."
+            logging.error(f"[{inversion_id}] FAILED: {reason}")
+            return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
         final_cv = StratifiedKFold(n_splits=min(3, final_min_class_count), shuffle=True, random_state=42)
         final_pipeline = Pipeline([('pls', PLSRegression())])
         final_grid_search = GridSearchCV(estimator=final_pipeline, param_grid={'pls__n_components': range(1, final_effective_max + 1)}, scoring='neg_mean_squared_error', cv=final_cv, n_jobs=n_jobs_inner, refit=True)
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", "y residual is constant", UserWarning); final_grid_search.fit(X_final_train, y_final_train)
-        
+
         os.makedirs(output_dir, exist_ok=True)
         model_filename = os.path.join(output_dir, f"{inversion_id}.model.joblib")
         dump(final_grid_search.best_estimator_, model_filename)
         pd.DataFrame(preloaded_data['snp_metadata']).to_json(os.path.join(output_dir, f"{inversion_id}.snps.json"), orient='records')
-        
+
         return {'status': 'SUCCESS', 'id': inversion_id, 'unbiased_pearson_r2': pearson_r2, 'unbiased_rmse': np.sqrt(mean_squared_error(y_true_pooled, y_pred_pls_pooled)), 'model_p_value': p_value, 'best_n_components': final_grid_search.best_params_['pls__n_components'], 'num_snps_in_model': X_full.shape[1], 'model_path': model_filename}
     except Exception as e:
-        return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}", 'traceback': traceback.format_exc()}
+        reason = f"Analysis Error: {type(e).__name__}: {e}"
+        logging.error(f"[{inversion_id}] FAILED: {reason}")
+        return {'status': 'FAILED', 'id': inversion_id, 'reason': reason, 'traceback': traceback.format_exc()}
 
 def process_locus_end_to_end(job: dict, n_jobs_inner: int, allowed_snps_dict: dict, output_dir: str):
     inversion_id = job.get('orig_ID', 'Unknown_ID')
-    
+
     success_receipt = os.path.join(output_dir, f"{inversion_id}.model.joblib")
 
     if os.path.exists(success_receipt):
         return {'status': 'CACHED', 'id': inversion_id, 'reason': 'SUCCESS receipt found.'}
 
     result = extract_haplotype_data_for_locus(job, allowed_snps_dict)
-    
+
     if result.get('status') == 'PREPROCESSED':
         result = analyze_and_model_locus_pls(result, n_jobs_inner, output_dir)
-            
+
     return result
 
 def load_and_normalize_snp_list(filepath: str):
@@ -241,36 +271,28 @@ def load_and_normalize_snp_list(filepath: str):
     logging.info(f"Successfully loaded and normalized {len(allowed_snps_dict)} SNPs from '{filepath}'.")
     return allowed_snps_dict
 
-# --- NEW FUNCTION FOR PRE-FLIGHT CHECK ---
 def check_snp_availability_for_locus(job: dict, allowed_snps_dict: dict):
-    """
-    A lightweight, fast checker to see if at least one whitelisted SNP
-    exists in the target region for a given locus. Stops on the first hit.
-    """
     inversion_id = job.get('orig_ID', 'Unknown_ID')
     try:
         chrom, start, end = job['seqnames'], job['start'], job['end']
         vcf_path = f"../vcfs/{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
         if not os.path.exists(vcf_path):
             return {'status': 'VCF_NOT_FOUND', 'id': inversion_id, 'reason': f"VCF file not found: {vcf_path}"}
-        
+
         flank_size = 50000
         region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
-        
+
         vcf_reader = VCF(vcf_path, lazy=True)
-        
+
         for var in vcf_reader(region_str):
             normalized_chrom = var.CHROM.replace('chr', '')
             snp_id_str = f"{normalized_chrom}:{var.POS}"
             if snp_id_str in allowed_snps_dict:
-                # Found one, we can stop immediately.
                 return {'status': 'FOUND', 'id': inversion_id}
-        
-        # If the loop completes without finding any SNPs
+
         return {'status': 'NOT_FOUND', 'id': inversion_id, 'region': region_str}
-        
+
     except Exception as e:
-        # Catch any other errors during the quick check
         return {'status': 'PRECHECK_FAILED', 'id': inversion_id, 'reason': str(e)}
 
 if __name__ == '__main__':
@@ -279,39 +301,37 @@ if __name__ == '__main__':
 
     script_start_time = time.time()
     logging.info("--- Starting Idempotent Imputation Pipeline ---")
-    
-    # --- Configuration Section ---
+
     output_dir = "final_imputation_models"
     ground_truth_file = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv"
     snp_whitelist_file = "passed_snvs.txt"
-    
+
     os.makedirs(output_dir, exist_ok=True)
     if not os.path.exists(ground_truth_file):
         logging.critical(f"FATAL: Ground-truth file not found: '{ground_truth_file}'"); sys.exit(1)
-    
+
     allowed_snps = load_and_normalize_snp_list(snp_whitelist_file)
-    
+
     config_df = pd.read_csv(ground_truth_file, sep='\t', on_bad_lines='warn', dtype={'seqnames': str})
     config_df = config_df[(config_df['verdict'] == 'pass') & (~config_df['seqnames'].isin(['chrY', 'chrM']))].copy()
     all_jobs = config_df.to_dict('records')
     if not all_jobs:
         logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
 
-    # --- Parallelism Configuration ---
     total_cores = cpu_count()
-    N_INNER_JOBS = 8 
+    N_INNER_JOBS = 8
     if total_cores < N_INNER_JOBS: N_INNER_JOBS = total_cores
     N_OUTER_JOBS = max(1, total_cores // N_INNER_JOBS)
-    
+
     logging.info(f"Loaded {len(all_jobs)} inversions to process or verify.")
     logging.info(f"Using {N_OUTER_JOBS} parallel 'outer' jobs, each with up to {N_INNER_JOBS} 'inner' cores for model training.")
-    
+
     logging.info("\n--- Running Pre-flight SNP Availability Check ---")
     precheck_generator = (delayed(check_snp_availability_for_locus)(job, allowed_snps) for job in all_jobs)
     precheck_results = Parallel(n_jobs=N_OUTER_JOBS, backend='loky')(
         tqdm(precheck_generator, total=len(all_jobs), desc="Pre-checking SNP availability", unit="locus")
     )
-    
+
     loci_without_snps = [r for r in precheck_results if r and r.get('status') == 'NOT_FOUND']
     if loci_without_snps:
         logging.warning("\n" + "="*80)
@@ -321,29 +341,29 @@ if __name__ == '__main__':
         logging.warning("="*80 + "\n")
     else:
         logging.info("--- Pre-flight SNP Availability Check Passed: All loci have at least one potential SNP. ---\n")
-    
+
     logging.info("--- Starting Main Processing Pipeline ---")
     job_generator = (delayed(process_locus_end_to_end)(job, N_INNER_JOBS, allowed_snps, output_dir) for job in all_jobs)
-    
+
     all_results = Parallel(n_jobs=N_OUTER_JOBS, backend='loky')(
         tqdm(job_generator, total=len(all_jobs), desc="Processing Loci", unit="locus")
     )
 
     logging.info(f"--- All Processing Complete in {time.time() - script_start_time:.2f} seconds ---")
-    
+
     valid_results = [r for r in all_results if r is not None]
-    
+
     successful_runs = [r for r in valid_results if r.get('status') == 'SUCCESS']
     cached_runs = [r for r in valid_results if r.get('status') == 'CACHED']
-    
+
     completed_ids = {r['id'] for r in valid_results}
     all_initial_ids = {job['orig_ID'] for job in all_jobs}
     crashed_ids = all_initial_ids - completed_ids
 
     other_runs = [r for r in valid_results if r.get('status') not in ['SUCCESS', 'CACHED']]
-    
+
     logging.info("\n\n" + "="*100 + "\n---      FINAL PIPELINE REPORT      ---\n" + "="*100)
-    
+
     summary_counts = Counter()
     for r in other_runs:
         summary_counts[f"({r.get('status')}) {r.get('reason', 'No reason provided.')}"] += 1
@@ -355,7 +375,7 @@ if __name__ == '__main__':
     logging.info(f"  - Found previously completed (Cached): {len(cached_runs)}")
     if summary_counts:
         logging.info("\n--- Details of Incomplete Loci From This Run ---")
-        for reason, count in sorted(summary_counts.items(), key=lambda item: item[1], reverse=True): 
+        for reason, count in sorted(summary_counts.items(), key=lambda item: item[1], reverse=True):
             logging.info(f"  - ({count: >3} loci): {reason}")
 
     final_models = [f for f in os.listdir(output_dir) if f.endswith('.model.joblib')]
@@ -371,5 +391,5 @@ if __name__ == '__main__':
                 logging.info("\n" + high_perf_df[summary_cols].to_string())
         else:
             logging.info("\n--- No new high-performance models were generated in this run. ---")
-    
+
     logging.info("\n" + "="*100)
