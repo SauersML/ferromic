@@ -25,10 +25,21 @@ import traceback
 warnings.filterwarnings("ignore", category=FutureWarning)
 rng = np.random.default_rng(seed=42)
 
-def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Series, sample_indices: np.ndarray, X_existing: np.ndarray, target_counts: dict):
+def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Series, 
+                          sample_indices: np.ndarray, confidence_mask: np.ndarray, 
+                          X_existing: np.ndarray, target_counts: dict = None):
+    """
+    Creates synthetic diploid genomes.
+    - Uses only high-confidence samples (via confidence_mask) to build haplotype pools.
+    - In "Rescue Mode" (target_counts is provided): Generates a specific number of samples for missing classes and tracks parentage.
+    - In "Augmentation Mode" (target_counts is None): Generates all possible novel combinations to enrich a training set.
+    """
     hap_pool_0, hap_pool_1 = [], []
-    for i, gt in enumerate(raw_gts):
+    for i in range(len(raw_gts)):
+        if not confidence_mask[i]:
+            continue
         original_index = sample_indices[i]
+        gt = raw_gts.iloc[i]
         if gt == '0|0':
             hap_pool_0.extend([(X_hap1[i], original_index), (X_hap2[i], original_index)])
         elif gt == '1|1':
@@ -42,41 +53,52 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
     
     if not hap_pool_0 and not hap_pool_1: return None, None, None
 
+    unique_hap_pool_0 = list(dict.fromkeys(hap_pool_0))
+    unique_hap_pool_1 = list(dict.fromkeys(hap_pool_1))
+    
     existing_genomes_set = {tuple(genome) for genome in X_existing}
     X_synth, y_synth, parent_map = [], [], []
 
-    for class_label, num_needed in target_counts.items():
-        if num_needed <= 0: continue
-        for _ in range(num_needed):
-            new_diploid, parents = None, None
-            if class_label == 2: # Homozygous Inverted (1|1)
-                if len(hap_pool_1) < 2: return None, None, None
-                h1_idx, h2_idx = rng.choice(len(hap_pool_1), 2, replace=True)
-                h1, p1 = hap_pool_1[h1_idx]
-                h2, p2 = hap_pool_1[h2_idx]
-                new_diploid = h1 + h2
-                parents = [p1, p2]
-            elif class_label == 0: # Homozygous Standard (0|0)
-                if len(hap_pool_0) < 2: return None, None, None
-                h1_idx, h2_idx = rng.choice(len(hap_pool_0), 2, replace=True)
-                h1, p1 = hap_pool_0[h1_idx]
-                h2, p2 = hap_pool_0[h2_idx]
-                new_diploid = h1 + h2
-                parents = [p1, p2]
-            elif class_label == 1: # Heterozygous (0|1)
-                if len(hap_pool_0) < 1 or len(hap_pool_1) < 1: return None, None, None
-                h0_idx = rng.choice(len(hap_pool_0))
-                h1_idx = rng.choice(len(hap_pool_1))
-                h0, p0 = hap_pool_0[h0_idx]
-                h1, p1 = hap_pool_1[h1_idx]
-                new_diploid = h0 + h1
-                parents = [p0, p1]
+    if target_counts: # Rescue Mode
+        for class_label, num_needed in target_counts.items():
+            if num_needed <= 0: continue
+            for _ in range(num_needed):
+                new_diploid, parents = None, None
+                if class_label == 2: # Homozygous Inverted (1|1)
+                    if len(unique_hap_pool_1) < 2: return None, None, None
+                    h1_idx, h2_idx = rng.choice(len(unique_hap_pool_1), 2, replace=True)
+                    h1, p1 = unique_hap_pool_1[h1_idx]; h2, p2 = unique_hap_pool_1[h2_idx]
+                    new_diploid, parents = h1 + h2, [p1, p2]
+                elif class_label == 0: # Homozygous Standard (0|0)
+                    if len(unique_hap_pool_0) < 2: return None, None, None
+                    h1_idx, h2_idx = rng.choice(len(unique_hap_pool_0), 2, replace=True)
+                    h1, p1 = unique_hap_pool_0[h1_idx]; h2, p2 = unique_hap_pool_0[h2_idx]
+                    new_diploid, parents = h1 + h2, [p1, p2]
+                elif class_label == 1: # Heterozygous (0|1)
+                    if not unique_hap_pool_0 or not unique_hap_pool_1: return None, None, None
+                    h0_idx, h1_idx = rng.choice(len(unique_hap_pool_0)), rng.choice(len(unique_hap_pool_1))
+                    h0, p0 = unique_hap_pool_0[h0_idx]; h1, p1 = unique_hap_pool_1[h1_idx]
+                    new_diploid, parents = h0 + h1, [p0, p1]
 
-            if new_diploid is not None and tuple(new_diploid) not in existing_genomes_set:
-                X_synth.append(new_diploid)
-                y_synth.append(class_label)
-                parent_map.append(parents)
-                existing_genomes_set.add(tuple(new_diploid))
+                if new_diploid is not None:
+                    X_synth.append(new_diploid); y_synth.append(class_label); parent_map.append(parents)
+    else: # Augmentation Mode
+        n_unique_0, n_unique_1 = len(unique_hap_pool_0), len(unique_hap_pool_1)
+        if n_unique_1 >= 2:
+            for i, j in itertools.combinations_with_replacement(range(n_unique_1), 2):
+                h1, _ = unique_hap_pool_1[i]; h2, _ = unique_hap_pool_1[j]
+                new_diploid = h1 + h2
+                if tuple(new_diploid) not in existing_genomes_set: X_synth.append(new_diploid); y_synth.append(2)
+        if n_unique_0 >= 2:
+            for i, j in itertools.combinations_with_replacement(range(n_unique_0), 2):
+                h1, _ = unique_hap_pool_0[i]; h2, _ = unique_hap_pool_0[j]
+                new_diploid = h1 + h2
+                if tuple(new_diploid) not in existing_genomes_set: X_synth.append(new_diploid); y_synth.append(0)
+        if n_unique_0 >= 1 and n_unique_1 >= 1:
+            for i, j in itertools.product(range(n_unique_0), range(n_unique_1)):
+                h0, _ = unique_hap_pool_0[i]; h1, _ = unique_hap_pool_1[j]
+                new_diploid = h0 + h1
+                if tuple(new_diploid) not in existing_genomes_set: X_synth.append(new_diploid); y_synth.append(1)
 
     if not X_synth: return None, None, None
     return np.array(X_synth), np.array(y_synth), parent_map
@@ -149,7 +171,7 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
             logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
             
-        return {'status': 'PREPROCESSED', 'id': inversion_id, 'X_hap1': df_H1.loc[common_samples].values, 'X_hap2': df_H2.loc[common_samples].values, 'y_diploid': gt_df.loc[common_samples, 'dosage'].values.astype(int), 'raw_gts': gt_df.loc[common_samples, 'raw_gt'], 'snp_metadata': snp_meta}
+        return {'status': 'PREPROCESSED', 'id': inversion_id, 'X_hap1': df_H1.loc[common_samples].values, 'X_hap2': df_H2.loc[common_samples].values, 'y_diploid': gt_df.loc[common_samples, 'dosage'].values.astype(int), 'confidence_mask': gt_df.loc[common_samples, 'is_high_conf'].values.astype(bool), 'raw_gts': gt_df.loc[common_samples, 'raw_gt'], 'snp_metadata': snp_meta}
     except Exception as e:
         reason = f"Data Extraction Error: {type(e).__name__}: {e}. Problem VCF: '{vcf_path}'"
         logging.error(f"[{inversion_id}] FAILED: {reason}")
@@ -172,6 +194,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
     try:
         y_full = preloaded_data['y_diploid']
         X_hap1, X_hap2 = preloaded_data['X_hap1'], preloaded_data['X_hap2']
+        confidence_mask = preloaded_data['confidence_mask']
         X_full = X_hap1 + X_hap2
         
         # --- Start of New Rescue and Data Assembly Logic ---
@@ -181,17 +204,18 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         
         use_group_kfold = False
         X_combined, y_combined, groups = X_full, y_full, None
+        num_real_samples = len(y_full)
 
         if any(v > 0 for v in needed_counts.values()):
             logging.info(f"[{inversion_id}] Minority class count < 2. Attempting rescue. Needed: {needed_counts}")
-            all_sample_indices = np.arange(len(y_full))
             X_synth, y_synth, parent_map = create_synthetic_data(
                 X_hap1, X_hap2, preloaded_data['raw_gts'], 
-                all_sample_indices, X_full, needed_counts
+                np.arange(num_real_samples), confidence_mask, 
+                X_full, needed_counts
             )
             
             if X_synth is None or sum(needed_counts.values()) > len(y_synth):
-                reason = "Minority class count < 2 and could not be rescued with synthetic data (insufficient haplotypes)."
+                reason = "Minority class count < 2 and could not be rescued with synthetic data (insufficient high-confidence haplotypes)."
                 logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
                 return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
             
@@ -200,19 +224,22 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             
             X_combined = np.vstack([X_full, X_synth])
             y_combined = np.concatenate([y_full, y_synth])
+            num_synth_samples = len(y_synth)
             
-            # Create group IDs for StratifiedGroupKFold
-            group_id_map = {i: i for i in range(len(y_full))}
-            synth_group_ids = []
-            for child_parents in parent_map:
-                parent_group_id = group_id_map[child_parents[0]]
-                for parent_idx in child_parents:
-                    group_id_map[parent_idx] = parent_group_id
-                synth_group_ids.append(parent_group_id)
-            groups = np.array([group_id_map[i] for i in range(len(y_full))] + synth_group_ids)
-
-        # --- End of New Rescue and Data Assembly Logic ---
-
+            # Robust, transitive group creation
+            groups = np.arange(num_real_samples + num_synth_samples)
+            while True:
+                changed = False
+                for i, parent_indices in enumerate(parent_map):
+                    child_index = num_real_samples + i
+                    family = parent_indices + [child_index]
+                    min_group_id = min(groups[idx] for idx in family)
+                    for idx in family:
+                        if groups[idx] != min_group_id:
+                            groups[idx] = min_group_id
+                            changed = True
+                if not changed: break
+        
         val_min_class_count = min(Counter(y_combined).values())
         n_outer_splits = min(5, val_min_class_count)
         
@@ -229,6 +256,20 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             X_train, y_train = X_combined[train_idx], y_combined[train_idx]
             X_test, y_test = X_combined[test_idx], y_combined[test_idx]
             
+            # Restore per-fold training augmentation
+            original_indices_in_train = train_idx[train_idx < num_real_samples]
+            train_fold_confidence_mask = np.isin(np.arange(num_real_samples), original_indices_in_train) & confidence_mask
+            
+            X_aug, y_aug, _ = create_synthetic_data(
+                X_hap1, X_hap2, preloaded_data['raw_gts'], 
+                np.arange(num_real_samples), train_fold_confidence_mask, 
+                X_combined, target_counts=None
+            )
+
+            if X_aug is not None:
+                X_train = np.vstack([X_train, X_aug])
+                y_train = np.concatenate([y_train, y_aug])
+
             if len(X_train) == 0 or len(np.unique(y_train)) < 2: continue
             sample_weights = compute_sample_weight("balanced", y=y_train)
             resampled_indices = rng.choice(len(X_train), size=len(X_train), replace=True, p=sample_weights / np.sum(sample_weights))
@@ -261,9 +302,22 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         pearson_r2 = (corr if not np.isnan(corr) else 0.0)**2
         _, p_value = wilcoxon(np.abs(y_true_arr - y_pred_arr), np.abs(y_true_arr - np.array(y_pred_dummy_pooled)), alternative='less', zero_method='zsplit')
         
-        final_sample_weights = compute_sample_weight("balanced", y=y_combined)
-        final_resampled_indices = rng.choice(len(y_combined), size=len(y_combined), replace=True, p=final_sample_weights / np.sum(final_sample_weights))
-        X_final_train, y_final_train = X_combined[final_resampled_indices], y_combined[final_resampled_indices]
+        # Augment the final training set as well for a more robust model
+        final_aug_confidence_mask = confidence_mask
+        X_final_aug, y_final_aug, _ = create_synthetic_data(
+            X_hap1, X_hap2, preloaded_data['raw_gts'], 
+            np.arange(num_real_samples), final_aug_confidence_mask,
+            X_combined, target_counts=None
+        )
+        X_final_train_full = X_combined
+        y_final_train_full = y_combined
+        if X_final_aug is not None:
+            X_final_train_full = np.vstack([X_combined, X_final_aug])
+            y_final_train_full = np.concatenate([y_combined, y_final_aug])
+
+        final_sample_weights = compute_sample_weight("balanced", y=y_final_train_full)
+        final_resampled_indices = rng.choice(len(y_final_train_full), size=len(y_final_train_full), replace=True, p=final_sample_weights / np.sum(final_sample_weights))
+        X_final_train, y_final_train = X_final_train_full[final_resampled_indices], y_final_train_full[final_resampled_indices]
         
         final_min_class_count = min(Counter(y_final_train).values())
         if final_min_class_count < 2:
