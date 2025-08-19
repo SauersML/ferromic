@@ -12,16 +12,20 @@ from tqdm import tqdm
 GCS_DIR = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/acaf_threshold/plink_bed/"
 ALLOW_LIST_URL = "https://raw.githubusercontent.com/SauersML/ferromic/refs/heads/main/data/vcf_list.txt"
 
-OUT_BIM = "subset.bim"
-OUT_BED = "subset.bed"
-OUT_FAM = "subset.fam"
+OUT_BIM    = "subset.bim"
+OUT_BED    = "subset.bed"
+OUT_FAM    = "subset.fam"
 OUT_PASSED = "passed_snvs.txt"
 
 # ------------------------- PERFORMANCE TUNING --------------------------------
 
-# Coalescing by BYTES (not just SNP count). Tune based on your bandwidth/latency.
-MAX_RUN_BYTES = 64 * 1024 * 1024     # ≈64 MiB max per ranged request
-MAX_BYTE_GAP  =  2 * 1024 * 1024     # merge neighbors if byte gap ≤ 2 MiB
+# Coalescing by BYTES for ranged reads during metrics and assembly:
+MAX_RUN_BYTES = 64 * 1024 * 1024     # ~64 MiB per ranged request (metrics phase)
+MAX_BYTE_GAP  =  2 * 1024 * 1024     # merge neighbors if byte gap ≤ 2 MiB (metrics phase)
+
+# For final BED assembly we prioritize stability & resumability (sequential, low RAM):
+ASSEMBLY_MAX_RUN_BYTES = 16 * 1024 * 1024  # smaller chunks to keep memory low
+ASSEMBLY_MAX_BYTE_GAP  = 256 * 1024
 
 # I/O concurrency (network-bound). Increase if your network can handle it.
 IO_THREADS = max(64, (os.cpu_count() or 8) * 8)
@@ -50,6 +54,18 @@ def gsutil_stat_size(gs_uri: str) -> int:
         print(f"FATAL: Unable to parse size for {gs_uri}", file=sys.stderr)
         sys.exit(1)
     return int(m.group(1))
+
+def gsutil_cat_lines(gs_uri: str) -> Iterable[str]:
+    """Stream lines from gs:// URI."""
+    proc = subprocess.Popen(["gsutil", "-u", require_project(), "cat", gs_uri],
+                            stdout=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        yield line
+    ret = proc.wait()
+    if ret != 0:
+        print(f"FATAL: gsutil cat failed for {gs_uri} (exit {ret})", file=sys.stderr)
+        sys.exit(1)
 
 def norm_chr(s: str) -> str:
     s = s.strip()
@@ -95,9 +111,8 @@ class RangeFetcher:
 
     def fetch(self, gs_uri: str, start: int, end: int) -> bytes:
         if self.mode == "gcs":
-            # google-cloud-storage treats end as inclusive; matches gsutil -r semantics
             try:
-                return self._blob(gs_uri).download_as_bytes(start=start, end=end)
+                return self._blob(gs_uri).download_as_bytes(start=start, end=end)  # inclusive end
             except Exception as e:
                 tqdm.write(f"[RangeFetcher] Client range failed ({e}); gsutil fallback: {gs_uri} {start}-{end}")
         # fallback
@@ -221,7 +236,7 @@ def load_allow_list(url: str):
             except: bar.update(1); continue
             c = norm_chr(cs)
             allow_map[(c, bp)].add(al)
-            allow_raw[(c, bp)].append(s)  # keep raw line for full reporting if allele-absent
+            allow_raw[(c, bp)].append(s)
             chr_set.add(c)
             bar.update(1)
 
@@ -254,6 +269,47 @@ def list_relevant_shards(chr_set: Set[str]) -> List[Shard]:
     print(f"DONE: Selected {len(selected)} shards.\n")
     return selected
 
+def list_shards_for_bim_chroms() -> List[Shard]:
+    """Resume helper: build shards using chromosomes observed in subset.bim (no allow-list needed)."""
+    print("START: Discovering shards for chromosomes in subset.bim …")
+    # Gather chroms from local subset.bim
+    chroms: List[str] = []
+    seen: Set[str] = set()
+    with open(OUT_BIM, "r") as f:
+        for ln in f:
+            p = ln.split()
+            if len(p) < 1: continue
+            c = norm_chr(p[0])
+            if c not in seen:
+                seen.add(c); chroms.append(c)
+    if not chroms:
+        print("FATAL: subset.bim exists but appears empty.", file=sys.stderr); sys.exit(1)
+
+    bim_paths = gsutil_ls(os.path.join(GCS_DIR, "*.bim"))
+    if not bim_paths:
+        print("FATAL: No .bim files found.", file=sys.stderr); sys.exit(1)
+
+    # Keep only shards whose name matches a chrom in subset.bim; preserve subset.bim chrom order
+    shards: List[Shard] = []
+    for c in chroms:
+        match = None
+        for p in bim_paths:
+            if looks_like_chr(p, c):
+                match = p; break
+        if not match:
+            print(f"FATAL: Could not locate shard for chromosome {c} referenced by subset.bim.", file=sys.stderr)
+            sys.exit(1)
+        bed = match[:-4] + ".bed"
+        fam = match[:-4] + ".fam"
+        shards.append(Shard(chrom=c,
+                            bim_uri=match,
+                            bed_uri=bed,
+                            fam_uri=fam,
+                            bim_size=gsutil_stat_size(match),
+                            bed_size=gsutil_stat_size(bed)))
+    print(f"DONE: Selected {len(shards)} shards (from subset.bim chroms).\n")
+    return shards
+
 def scan_bims_collect(shards: List[Shard],
                       allow_map: Dict[Tuple[str,int], Set[str]],
                       allow_raw: Dict[Tuple[str,int], List[str]]) -> List[Candidate]:
@@ -268,7 +324,7 @@ def scan_bims_collect(shards: List[Shard],
             idx = 0
             scanned = kept = nonacgt = notallowed = allele_absent = 0
             pending_bytes = 0
-            for line in run_gsutil(["cat", sh.bim_uri], capture=True, text=True).stdout.splitlines(True):
+            for line in gsutil_cat_lines(sh.bim_uri):
                 pending_bytes += len(line.encode("utf-8", "ignore"))
                 parts = line.strip().split()
                 if len(parts) < 6:
@@ -320,47 +376,80 @@ def validate_bed_and_choose_fam(shards: List[Shard]) -> int:
         hdr = subprocess.check_output(["gsutil", "-u", require_project(), "cat", "-r", "0-2", sh.bed_uri])
         if hdr != b"\x6c\x1b\x01":
             print(f"FATAL: Not SNP-major BED: {sh.bed_uri} (header={hdr.hex()})", file=sys.stderr); sys.exit(1)
-        if sh.variant_count == 0:
-            continue
-        rem = (sh.bed_size - 3) % sh.variant_count
-        if rem != 0:
-            print(f"FATAL: BED size not divisible by variant count: {sh.bed_uri}", file=sys.stderr); sys.exit(1)
-        sh.bpf = (sh.bed_size - 3) // sh.variant_count
-        if bpf_ref is None: bpf_ref = sh.bpf
-        elif sh.bpf != bpf_ref:
-            print(f"FATAL: Mixed bytes-per-SNP across shards ({sh.bpf} vs {bpf_ref}).", file=sys.stderr); sys.exit(1)
+        # We don't need variant_count for bpf; use divisibility by any consistent bpf later.
+        # But if we have variant_count (after fresh BIM scan), compute precise bpf:
+        if sh.variant_count > 0:
+            rem = (sh.bed_size - 3) % sh.variant_count
+            if rem != 0:
+                print(f"FATAL: BED size not divisible by variant count: {sh.bed_uri}", file=sys.stderr); sys.exit(1)
+            sh.bpf = (sh.bed_size - 3) // sh.variant_count
+            if bpf_ref is None: bpf_ref = sh.bpf
+            elif sh.bpf != bpf_ref:
+                print(f"FATAL: Mixed bytes-per-SNP across shards ({sh.bpf} vs {bpf_ref}).", file=sys.stderr); sys.exit(1)
+
+    # If variant_count was unknown (resume path), derive a consistent bpf via FAM selection:
     if bpf_ref is None:
-        print("FATAL: No usable shards with variants.", file=sys.stderr); sys.exit(1)
-    bpf = int(bpf_ref)
-    print(f"DONE: bytes-per-SNP (bpf) = {bpf}\n")
+        # Try to infer from existing subset.fam (resume) or select a FAM and write it
+        if os.path.exists(OUT_FAM) and os.path.getsize(OUT_FAM) > 0:
+            N = sum(1 for _ in open(OUT_FAM, "r"))
+            bpf_ref = math.ceil(N/4)
+            print(f"INFO: Inferred bpf={bpf_ref} from existing subset.fam (N={N:,}).")
+        else:
+            # No subset.fam yet — we will select FAM below and set bpf from it then verify
+            pass
 
-    # Choose any FAM with ceil(N/4) == bpf
-    print("START: Selecting compatible FAM (progress = sample lines read) …")
-    fams = gsutil_ls(os.path.join(GCS_DIR, "*.fam"))
-    if not fams:
-        print("FATAL: No .fam files found.", file=sys.stderr); sys.exit(1)
-    chosen = None; N = None
-    for fam in fams:
-        n = 0
-        for _ in run_gsutil(["cat", fam], capture=True, text=True).stdout.splitlines():
-            n += 1
-        if math.ceil(n/4) == bpf:
-            chosen = fam; N = n
-            print(f"DONE: Selected {os.path.basename(fam)} (N={n:,}, ceil(N/4)={bpf})\n")
-            break
-    if chosen is None:
-        print(f"FATAL: No FAM matches bpf={bpf}.", file=sys.stderr); sys.exit(1)
+    # Choose any FAM with ceil(N/4) == bpf (if we still need to write OUT_FAM)
+    if not (os.path.exists(OUT_FAM) and os.path.getsize(OUT_FAM) > 0):
+        print("START: Selecting compatible FAM (progress = sample lines read) …")
+        fams = gsutil_ls(os.path.join(GCS_DIR, "*.fam"))
+        if not fams:
+            print("FATAL: No .fam files found.", file=sys.stderr); sys.exit(1)
 
-    print("START: Writing subset.fam …")
-    with open(OUT_FAM, "w") as fout:
-        for line in tqdm(run_gsutil(["cat", chosen], capture=True, text=True).stdout.splitlines(True),
-                         desc="subset.fam", unit="lines"):
-            fout.write(line)
-    print(f"DONE: Wrote {OUT_FAM} (N={N:,})\n")
-    return int(N)
+        chosen = None; N = None
+        for fam in fams:
+            n = 0
+            for _ in gsutil_cat_lines(fam):
+                n += 1
+            if bpf_ref is None:
+                # If we had no bpf yet, set bpf_ref from the first FAM — but verify against shards by divisibility
+                candidate_bpf = math.ceil(n/4)
+                # Quick header/divisibility check across shards
+                ok = True
+                for sh in shards:
+                    rem = (sh.bed_size - 3) % candidate_bpf
+                    if rem != 0:
+                        ok = False; break
+                if not ok:
+                    continue
+                bpf_ref = candidate_bpf
 
-def coalesce_by_bytes(indices: List[int], bpf: int) -> List[Tuple[int,int]]:
-    """Merge sorted SNP indices into byte-aware runs (gap ≤ MAX_BYTE_GAP, run ≤ MAX_RUN_BYTES)."""
+            if math.ceil(n/4) == bpf_ref:
+                chosen = fam; N = n
+                print(f"DONE: Selected {os.path.basename(fam)} (N={n:,}, ceil(N/4)={bpf_ref})\n")
+                break
+        if chosen is None:
+            print(f"FATAL: No FAM matches bpf={bpf_ref}.", file=sys.stderr); sys.exit(1)
+
+        print("START: Writing subset.fam …")
+        with open(OUT_FAM, "w") as fout:
+            for line in tqdm(gsutil_cat_lines(chosen), desc="subset.fam", unit="lines"):
+                fout.write(line)
+        print(f"DONE: Wrote {OUT_FAM} (N={N:,})\n")
+    else:
+        print("SKIP: Found existing subset.fam — keeping it.\n")
+
+    # Propagate bpf to all shards
+    if bpf_ref is None:
+        # Should not happen
+        print("FATAL: Could not determine bytes-per-SNP (bpf).", file=sys.stderr); sys.exit(1)
+    for sh in shards:
+        sh.bpf = int(bpf_ref)
+
+    print(f"DONE: bytes-per-SNP (bpf) = {int(bpf_ref)}\n")
+    return sum(1 for _ in open(OUT_FAM, "r"))
+
+def coalesce_by_bytes(indices: List[int], bpf: int, *, max_gap: int, max_run: int) -> List[Tuple[int,int]]:
+    """Merge sorted SNP indices into byte-aware runs (gap ≤ max_gap, run ≤ max_run)."""
     if not indices: return []
     idxs = sorted(set(indices))
     runs = []
@@ -368,7 +457,7 @@ def coalesce_by_bytes(indices: List[int], bpf: int) -> List[Tuple[int,int]]:
     run_bytes = bpf
     for x in idxs[1:]:
         byte_gap = (x - prev) * bpf
-        if byte_gap <= MAX_BYTE_GAP and (run_bytes + byte_gap + bpf) <= MAX_RUN_BYTES:
+        if byte_gap <= max_gap and (run_bytes + byte_gap + bpf) <= max_run:
             run_bytes += byte_gap + bpf
             prev = x
         else:
@@ -395,7 +484,7 @@ def evaluate_candidates_fast(shards: List[Shard],
     for sid, idxs in snp_by_shard.items():
         sh = shards[sid]
         bpf = int(sh.bpf)  # type: ignore
-        spans = coalesce_by_bytes(idxs, bpf)
+        spans = coalesce_by_bytes(idxs, bpf, max_gap=MAX_BYTE_GAP, max_run=MAX_RUN_BYTES)
         for i0, i1 in spans:
             runs.append((sid, i0, i1, (i1 - i0 + 1) * bpf))
     # Large runs first to keep the pipe full
@@ -470,8 +559,8 @@ def select_winners(candidates: List[Candidate],
     print(f"DONE: Considered={considered:,}, dropped(call-rate<95%)={dropped_cr:,}, unique kept={len(winners):,}\n")
     return winners
 
-def write_outputs(shards: List[Shard], candidates: List[Candidate], winners: List[int]):
-    """Write subset.bim, passed_snvs.txt, and assemble subset.bed via ranged reads (BIM order)."""
+def write_winners_outputs(shards: List[Shard], candidates: List[Candidate], winners: List[int]):
+    """Write subset.bim and passed_snvs.txt in BIM order across shards."""
     # Winners grouped by shard in BIM order
     by_shard: DefaultDict[int, List[int]] = defaultdict(list)
     for i in winners:
@@ -479,7 +568,6 @@ def write_outputs(shards: List[Shard], candidates: List[Candidate], winners: Lis
     for sid in list(by_shard.keys()):
         by_shard[sid].sort(key=lambda i: candidates[i].snp_index)
 
-    # Write BIM + PASSED
     print(f"START: Writing {OUT_BIM} and {OUT_PASSED} …")
     total_selected = sum(len(v) for v in by_shard.values())
     with open(OUT_BIM, "w") as fbim, open(OUT_PASSED, "w") as ftxt:
@@ -490,75 +578,236 @@ def write_outputs(shards: List[Shard], candidates: List[Candidate], winners: Lis
                 ftxt.write(f"{c.chrom}:{c.bp} {c.allele}\n")
     print(f"DONE: Wrote {OUT_BIM} (variants={total_selected:,}), {OUT_PASSED}\n")
 
-    # Assemble BED via coalesced ranges, persistent fetcher
-    print(f"START: Assembling {OUT_BED} via ranged reads …")
+def load_winners_from_subset_bim() -> Tuple[List[str], List[Tuple[str,str]]]:
+    """
+    Return:
+      - chrom_order: list of chromosomes in the order they appear in subset.bim
+      - winners_records: list of (chrom, snp_id) in BIM order (one per line)
+    """
+    chrom_order: List[str] = []
+    seen: Set[str] = set()
+    winners_records: List[Tuple[str,str]] = []
+    with open(OUT_BIM, "r") as f:
+        for ln in f:
+            p = ln.split()
+            if len(p) < 2: continue
+            chrom = norm_chr(p[0]); snp_id = p[1]
+            winners_records.append((chrom, snp_id))
+            if chrom not in seen:
+                seen.add(chrom); chrom_order.append(chrom)
+    if not winners_records:
+        print("FATAL: subset.bim exists but contains no variants.", file=sys.stderr); sys.exit(1)
+    return chrom_order, winners_records
+
+def map_snpids_to_indices(shards: List[Shard], winners_records: List[Tuple[str,str]]) -> Dict[int, List[int]]:
+    """
+    Build per-shard ordered list of SNP indices for the winners in subset.bim.
+    Streaming scan of each shard's BIM, but only look up needed SNP IDs.
+    """
+    # Build per-chrom required snp_id sets in BIM order (to preserve order later)
+    required_by_chrom: DefaultDict[str, List[str]] = defaultdict(list)
+    needed_sets: DefaultDict[str, Set[str]] = defaultdict(set)
+    for chrom, snp_id in winners_records:
+        if snp_id not in needed_sets[chrom]:
+            needed_sets[chrom].add(snp_id)
+            required_by_chrom[chrom].append(snp_id)
+
+    idx_map_by_chrom: Dict[str, Dict[str, int]] = {sh.chrom: {} for sh in shards}
+
+    print("START: Mapping winner SNP IDs to shard indices …")
+    for sh in shards:
+        needed = needed_sets.get(sh.chrom, set())
+        if not needed:
+            continue
+        found = 0
+        idx_map = idx_map_by_chrom[sh.chrom]
+        idx = 0
+        for line in tqdm(gsutil_cat_lines(sh.bim_uri), desc=f"Index {os.path.basename(sh.bim_uri)}", unit="lines", leave=False):
+            p = line.split()
+            if len(p) < 2:
+                idx += 1; continue
+            snp_id = p[1]
+            if snp_id in needed:
+                idx_map[snp_id] = idx
+                found += 1
+                if found == len(needed):
+                    break
+            idx += 1
+        if found < len(needed):
+            missing = len(needed) - found
+            print(f"WARNING: {missing} SNP IDs from subset.bim not located in {os.path.basename(sh.bim_uri)}; continuing…")
+
+    # Now order per shard according to subset.bim order
+    sel_by_shard: DefaultDict[int, List[int]] = defaultdict(list)
+    chrom_to_sid = {sh.chrom: sid for sid, sh in enumerate(shards)}
+    for chrom, snp_id in winners_records:
+        sid = chrom_to_sid.get(chrom)
+        if sid is None:
+            print(f"FATAL: Chromosome {chrom} from subset.bim has no matching shard.", file=sys.stderr)
+            sys.exit(1)
+        idx = idx_map_by_chrom.get(chrom, {}).get(snp_id)
+        if idx is None:
+            print(f"FATAL: SNP ID {snp_id} from subset.bim not found in shard {chrom}.", file=sys.stderr)
+            sys.exit(1)
+        sel_by_shard[sid].append(idx)
+
+    print("DONE: Mapped winner SNP IDs to shard indices.\n")
+    return sel_by_shard
+
+def compute_written_blocks(bpf: int) -> int:
+    """How many SNP blocks are already present in OUT_BED (resumable)."""
+    if not os.path.exists(OUT_BED):
+        return 0
+    sz = os.path.getsize(OUT_BED)
+    if sz < 3:
+        return 0
+    body = sz - 3
+    if body < 0 or (body % bpf) != 0:
+        print("WARNING: Existing subset.bed has unexpected size; rewriting from scratch.")
+        # Rewrite header so we can append correctly
+        with open(OUT_BED, "wb") as f:
+            f.write(b"\x6c\x1b\x01")
+        return 0
+    return body // bpf
+
+def assemble_bed_resume(shards: List[Shard],
+                        sel_by_shard: Dict[int, List[int]]):
+    """
+    Assemble subset.bed in strict BIM order, RESUMABLE by counting blocks.
+    - Writes header once (3 bytes) if file is new.
+    - Computes already-written blocks and skips them deterministically.
+    - Sequential per-shard, per-run fetching with conservative coalescing to keep RAM low.
+    """
+    # Determine bpf and total winners
+    bpf_any = next(int(sh.bpf) for sh in shards if sh.bpf is not None)
+    total_selected = sum(len(v) for v in sel_by_shard.values())
+    already = compute_written_blocks(bpf_any)
+    if already > total_selected:
+        print("WARNING: subset.bed appears larger than expected; rewriting from scratch.")
+        with open(OUT_BED, "wb") as f:
+            f.write(b"\x6c\x1b\x01")
+        already = 0
+
+    remaining = max(0, total_selected - already)
+    if remaining == 0:
+        print(f"SKIP: subset.bed already complete (variants={total_selected:,}).\n")
+        return
+
+    print(f"START: Assembling {OUT_BED} via ranged reads (resuming) …")
+    print(f"INFO: total winners={total_selected:,}, already written={already:,}, remaining={remaining:,}")
+
+    # Open for append (header must already exist)
+    if not os.path.exists(OUT_BED) or os.path.getsize(OUT_BED) < 3:
+        with open(OUT_BED, "wb") as f:
+            f.write(b"\x6c\x1b\x01")
+
     fetcher = RangeFetcher()
-    total_blocks = total_selected
-    run_specs: List[Tuple[int,int,int,int]] = []  # (sid, i0, i1, bytes)
-    total_bytes = 0
 
+    # Skip across shards according to BIM order (sid ascending)
+    # Build a pointer of where to start in each shard
+    to_write_by_shard: Dict[int, List[int]] = {}
+    skip_left = already
     for sid in range(len(shards)):
-        lst = by_shard.get(sid, [])
-        if not lst: continue
+        lst = sel_by_shard.get(sid, [])
+        if not lst:
+            continue
+        if skip_left >= len(lst):
+            skip_left -= len(lst)
+            continue
+        # keep only the part after skipping
+        to_write_by_shard[sid] = lst[skip_left:]
+        skip_left = 0
+    # Sanity
+    left = sum(len(v) for v in to_write_by_shard.values())
+    if left != remaining:
+        print(f"WARNING: resume accounting mismatch (computed {left}, expected {remaining}); proceeding with {left}.")
+
+    # Plan sequential runs (per shard, increasing index order)
+    total_bytes_planned = 0
+    for sid, idxs in to_write_by_shard.items():
         sh = shards[sid]
-        bpf = int(sh.bpf)  # type: ignore
-        idxs = [candidates[i].snp_index for i in lst]
-        spans = coalesce_by_bytes(idxs, bpf)
-        for i0, i1 in spans:
-            b = (i1 - i0 + 1) * bpf
-            run_specs.append((sid, i0, i1, b))
-            total_bytes += b
-
-    run_specs.sort(key=lambda x: x[3], reverse=True)
-
-    def fetch_run(sid: int, i0: int, i1: int):
-        sh = shards[sid]; bpf = int(sh.bpf)  # type: ignore
-        start = 3 + i0 * bpf; end = 3 + (i1 + 1) * bpf - 1
-        blob = fetcher.fetch(sh.bed_uri, start, end)
-        return sid, i0, i1, bpf, blob
+        spans = coalesce_by_bytes(idxs, int(sh.bpf), max_gap=ASSEMBLY_MAX_BYTE_GAP, max_run=ASSEMBLY_MAX_RUN_BYTES)
+        total_bytes_planned += sum((i1 - i0 + 1) * int(sh.bpf) for i0, i1 in spans)
 
     import bisect
-    with open(OUT_BED, "wb") as fbed, \
-         ThreadPoolExecutor(max_workers=IO_THREADS) as ex, \
-         tqdm(total=total_blocks, desc="BED SNPs", unit="snp") as pbar_snp, \
-         tqdm(total=total_bytes,  desc="BED bytes", unit="B", unit_scale=True, unit_divisor=1024, leave=False) as pbar_bytes:
+    wrote = 0
+    with open(OUT_BED, "ab") as fbed, \
+         tqdm(total=remaining, desc="BED SNPs (resume)", unit="snp") as pbar_snp, \
+         tqdm(total=total_bytes_planned, desc="BED bytes (planned)", unit="B", unit_scale=True, unit_divisor=1024, leave=False) as pbar_bytes:
 
-        fbed.write(b"\x6c\x1b\x01")
+        for sid in range(len(shards)):
+            idxs = to_write_by_shard.get(sid, [])
+            if not idxs:
+                continue
+            sh = shards[sid]
+            bpf = int(sh.bpf)  # type: ignore
+            spans = coalesce_by_bytes(idxs, bpf, max_gap=ASSEMBLY_MAX_BYTE_GAP, max_run=ASSEMBLY_MAX_RUN_BYTES)
+            # Sequentially fetch each span and write only selected indices (in order)
+            for i0, i1 in spans:
+                start = 3 + i0 * bpf
+                end   = 3 + (i1 + 1) * bpf - 1
+                blob = fetcher.fetch(sh.bed_uri, start, end)
+                # carve
+                start_ptr = bisect.bisect_left(idxs, i0)
+                ptr = start_ptr
+                while ptr < len(idxs) and idxs[ptr] <= i1:
+                    snp_idx = idxs[ptr]
+                    off = (snp_idx - i0) * bpf
+                    fbed.write(blob[off:off+bpf])
+                    wrote += 1
+                    pbar_snp.update(1)
+                    ptr += 1
+                pbar_bytes.update(len(blob))
 
-        # Pre-build selected index lists
-        sel_by_shard = {sid: [candidates[i].snp_index for i in by_shard.get(sid, [])]
-                        for sid in range(len(shards)) if by_shard.get(sid)}
-        futs = [ex.submit(fetch_run, sid, i0, i1) for sid, i0, i1, _ in run_specs]
-        for fut in as_completed(futs):
-            sid, i0, i1, bpf, blob = fut.result()
-            sel = sel_by_shard[sid]
-            # write only selected indices in this window, in order
-            start_ptr = bisect.bisect_left(sel, i0)
-            ptr = start_ptr
-            while ptr < len(sel) and sel[ptr] <= i1:
-                snp_idx = sel[ptr]
-                off = (snp_idx - i0) * bpf
-                fbed.write(blob[off:off+bpf])
-                pbar_snp.update(1)
-                ptr += 1
-            pbar_bytes.update(len(blob))
-
-    # Integrity check
-    bpf_any = next(int(sh.bpf) for sh in shards if sh.bpf is not None)
-    n_variants = sum(1 for _ in open(OUT_BIM, "r"))
-    expected_size = 3 + n_variants * bpf_any
+    # Final integrity
+    expected_size = 3 + total_selected * bpf_any
     actual_size = os.path.getsize(OUT_BED)
     if actual_size != expected_size:
         print(f"FATAL: BED size {actual_size} != expected {expected_size}", file=sys.stderr)
         sys.exit(1)
-    print(f"DONE: Wrote {OUT_BED} (variants={n_variants:,})\n")
+    print(f"DONE: Wrote {OUT_BED} (variants={total_selected:,}).\n")
 
 # ------------------------------- DRIVER --------------------------------------
 
 def main():
-    print("=== STREAMED PLINK SUBSETTER (FAST, SNP-only) ===\n")
+    print("=== STREAMED PLINK SUBSETTER (FAST, SNP-only; RESUMABLE) ===\n")
 
-    # 1) Allow-list (keep raw lines for full reporting on allele-absent)
+    # FAST-PATH: If subset.bim + subset.fam already exist, skip heavy stages and only assemble BED (resumable).
+    winners_ready = os.path.exists(OUT_BIM) and os.path.getsize(OUT_BIM) > 0
+    fam_ready     = os.path.exists(OUT_FAM) and os.path.getsize(OUT_FAM) > 0
+
+    if winners_ready and fam_ready:
+        print("RESUME MODE: Found existing subset.bim and subset.fam. Skipping candidate/metrics/selection.\n")
+        # Build shards from subset.bim chroms (preserve order as written previously)
+        shards = list_shards_for_bim_chroms()
+
+        # Determine bpf from subset.fam (and propagate to shards); verify BED divisibility
+        N = sum(1 for _ in open(OUT_FAM, "r"))
+        bpf = math.ceil(N/4)
+        for sh in shards:
+            sh.bpf = bpf
+            # quick divisibility sanity
+            if (sh.bed_size - 3) % bpf != 0:
+                print(f"FATAL: {os.path.basename(sh.bed_uri)} not compatible with derived bpf={bpf}.", file=sys.stderr)
+                sys.exit(1)
+
+        # Map winners (subset.bim) to per-shard SNP indices
+        chrom_order, winners_records = load_winners_from_subset_bim()
+        sel_by_shard = map_snpids_to_indices(shards, winners_records)
+
+        # If subset.bed already complete, exit; else resume assembly
+        total_selected = len(winners_records)
+        expected_size = 3 + total_selected * bpf
+        if os.path.exists(OUT_BED) and os.path.getsize(OUT_BED) == expected_size:
+            print(f"ALL DONE: subset.bed already complete (variants={total_selected:,}).")
+            return
+
+        assemble_bed_resume(shards, sel_by_shard)
+        print("=== COMPLETE (RESUME) ===")
+        return
+
+    # FULL PIPELINE PATH
+    # 1) Allow-list
     allow_map, allow_raw, chr_set = load_allow_list(ALLOW_LIST_URL)
 
     # 2) Shards
@@ -589,8 +838,16 @@ def main():
         open(OUT_PASSED, "w").close()
         return
 
-    # 7) Write outputs
-    write_outputs(shards, candidates, winners)
+    # 7) Write subset.bim + passed_snvs.txt
+    write_winners_outputs(shards, candidates, winners)
+
+    # 8) Assemble subset.bed (fresh run; not resume)
+    # Recreate ordered winners per shard
+    chrom_order, winners_records = load_winners_from_subset_bim()
+    # Reorder shards to match subset.bim chrom order
+    shards = list_shards_for_bim_chroms()
+    sel_by_shard = map_snpids_to_indices(shards, winners_records)
+    assemble_bed_resume(shards, sel_by_shard)
 
     print("=== COMPLETE ===")
 
