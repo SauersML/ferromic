@@ -46,7 +46,7 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
     X_synth, y_synth, parent_map = [], [], []
 
     for class_label, num_needed in target_counts.items():
-        if num_needed == 0: continue
+        if num_needed <= 0: continue
         for _ in range(num_needed):
             new_diploid, parents = None, None
             if class_label == 2: # Homozygous Inverted (1|1)
@@ -148,10 +148,6 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
             reason = f'Insufficient overlapping samples ({len(common_samples)}) for modeling.'
             logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
-        if gt_df.loc[common_samples, 'is_high_conf'].sum() < 3 and gt_df.loc[common_samples, 'raw_gts'].str.contains('1').any():
-            reason = 'Insufficient high-confidence samples for pooling, and no inverted haplotypes available.'
-            logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
-            return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
             
         return {'status': 'PREPROCESSED', 'id': inversion_id, 'X_hap1': df_H1.loc[common_samples].values, 'X_hap2': df_H2.loc[common_samples].values, 'y_diploid': gt_df.loc[common_samples, 'dosage'].values.astype(int), 'raw_gts': gt_df.loc[common_samples, 'raw_gt'], 'snp_metadata': snp_meta}
     except Exception as e:
@@ -178,29 +174,34 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         X_hap1, X_hap2 = preloaded_data['X_hap1'], preloaded_data['X_hap2']
         X_full = X_hap1 + X_hap2
         
+        # --- Start of New Rescue and Data Assembly Logic ---
+        
         total_counts = Counter(y_full)
         needed_counts = {c: max(0, 2 - total_counts.get(c, 0)) for c in [0, 1, 2]}
-        X_synth, y_synth, parent_map = None, None, None
+        
         use_group_kfold = False
+        X_combined, y_combined, groups = X_full, y_full, None
 
         if any(v > 0 for v in needed_counts.values()):
-            logging.info(f"[{inversion_id}] Minority class count < 2. Attempting rescue with synthetic data. Needed: {needed_counts}")
+            logging.info(f"[{inversion_id}] Minority class count < 2. Attempting rescue. Needed: {needed_counts}")
             all_sample_indices = np.arange(len(y_full))
             X_synth, y_synth, parent_map = create_synthetic_data(
                 X_hap1, X_hap2, preloaded_data['raw_gts'], 
                 all_sample_indices, X_full, needed_counts
             )
+            
             if X_synth is None or sum(needed_counts.values()) > len(y_synth):
-                reason = "Minority class count < 2 and could not be rescued with synthetic data."
+                reason = "Minority class count < 2 and could not be rescued with synthetic data (insufficient haplotypes)."
                 logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
                 return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
+            
+            logging.info(f"[{inversion_id}] Rescue successful. Generated {len(y_synth)} synthetic sample(s).")
             use_group_kfold = True
-
-        X_combined, y_combined, groups = X_full, y_full, None
-        if use_group_kfold:
+            
             X_combined = np.vstack([X_full, X_synth])
             y_combined = np.concatenate([y_full, y_synth])
             
+            # Create group IDs for StratifiedGroupKFold
             group_id_map = {i: i for i in range(len(y_full))}
             synth_group_ids = []
             for child_parents in parent_map:
@@ -209,6 +210,8 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
                     group_id_map[parent_idx] = parent_group_id
                 synth_group_ids.append(parent_group_id)
             groups = np.array([group_id_map[i] for i in range(len(y_full))] + synth_group_ids)
+
+        # --- End of New Rescue and Data Assembly Logic ---
 
         val_min_class_count = min(Counter(y_combined).values())
         n_outer_splits = min(5, val_min_class_count)
