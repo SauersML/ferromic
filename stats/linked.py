@@ -27,7 +27,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 rng = np.random.default_rng(seed=42)
 
 def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Series, confidence_mask: np.ndarray, X_real_train_fold: np.ndarray):
-    # This function remains unchanged.
     if not np.any(confidence_mask): return None, None
     X_h1_hc, X_h2_hc, gts_hc = X_hap1[confidence_mask], X_hap2[confidence_mask], raw_gts[confidence_mask]
     hap_pool_0, hap_pool_1 = [], []
@@ -59,7 +58,6 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
     return np.array(X_synth), np.array(y_synth)
 
 def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dict):
-    # This function remains unchanged.
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     try:
         chrom, start, end = inversion_job['seqnames'], inversion_job['start'], inversion_job['end']
@@ -120,7 +118,6 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
     except Exception as e: return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Data Extraction Error: {type(e).__name__}: {e}"}
 
 def get_effective_max_components(X_train, y_train, max_components):
-    # This function remains unchanged.
     if X_train.shape[1] == 0: return 0
     max_components = min(max_components, X_train.shape[1])
     if max_components <= 1: return max_components
@@ -133,7 +130,6 @@ def get_effective_max_components(X_train, y_train, max_components):
     return max_components
 
 def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_dir: str):
-    # This function remains unchanged from the previous correct version.
     inversion_id = preloaded_data['id']
     try:
         y_full, confidence_mask = preloaded_data['y_diploid'], preloaded_data['confidence_mask']
@@ -191,7 +187,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         X_final_train_full, y_final_train_full = np.vstack(final_train_X_parts), np.concatenate(final_train_y_parts)
         final_sample_weights = compute_sample_weight("balanced", y=y_final_train_full)
         final_resampled_indices = rng.choice(len(X_final_train_full), size=len(X_final_train_full), replace=True, p=final_sample_weights / np.sum(final_sample_weights))
-        X_final_train, y_final_train = X_final_train_full[final_resampled_indices], y_final_train_full[final_resampled_indices]
+        X_final_train, y_final_train = X_final_train_full[final_resampled_indices], y_final_train_full[resampled_indices]
         final_min_class_count = min(Counter(y_final_train).values()) if y_final_train.size > 0 else 0
         if final_min_class_count < 2: return {'status': 'FAILED', 'id': inversion_id, 'reason': "Final balanced training set lacks class diversity."}
         final_max_components = min(100, X_final_train.shape[0] - 1)
@@ -213,33 +209,21 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         return {'status': 'FAILED', 'id': inversion_id, 'reason': f"Analysis Error: {type(e).__name__}: {e}", 'traceback': traceback.format_exc()}
 
 def process_locus_end_to_end(job: dict, n_jobs_inner: int, allowed_snps_dict: dict, output_dir: str):
-    """
-    FIXED: The master wrapper function with the correct, simple caching logic.
-    A job is ONLY considered "done" if a .model.joblib file exists.
-    """
     inversion_id = job.get('orig_ID', 'Unknown_ID')
     
-    # The one and only receipt for a completed job is the final model file.
     success_receipt = os.path.join(output_dir, f"{inversion_id}.model.joblib")
 
-    # 1. Check for the SUCCESS receipt.
     if os.path.exists(success_receipt):
         return {'status': 'CACHED', 'id': inversion_id, 'reason': 'SUCCESS receipt found.'}
 
-    # 2. If no receipt exists, run the full analysis.
-    #    Any outcome (SUCCESS, SKIPPED, FAILED) is possible from this point.
     result = extract_haplotype_data_for_locus(job, allowed_snps_dict)
     
     if result.get('status') == 'PREPROCESSED':
         result = analyze_and_model_locus_pls(result, n_jobs_inner, output_dir)
             
-    # 3. Return whatever the outcome was. No other files are written here.
-    #    If the result is SUCCESS, analyze_and_model_locus_pls has already written the receipt.
-    #    If the result is SKIPPED or FAILED, NO receipt is written, ensuring it will be re-attempted next time.
     return result
 
 def load_and_normalize_snp_list(filepath: str):
-    # This function remains unchanged.
     if not os.path.exists(filepath):
         logging.critical(f"FATAL: SNP whitelist file not found: '{filepath}'"); sys.exit(1)
     allowed_snps_dict = {}
@@ -256,6 +240,38 @@ def load_and_normalize_snp_list(filepath: str):
         logging.critical(f"FATAL: SNP whitelist file '{filepath}' was empty."); sys.exit(1)
     logging.info(f"Successfully loaded and normalized {len(allowed_snps_dict)} SNPs from '{filepath}'.")
     return allowed_snps_dict
+
+# --- NEW FUNCTION FOR PRE-FLIGHT CHECK ---
+def check_snp_availability_for_locus(job: dict, allowed_snps_dict: dict):
+    """
+    A lightweight, fast checker to see if at least one whitelisted SNP
+    exists in the target region for a given locus. Stops on the first hit.
+    """
+    inversion_id = job.get('orig_ID', 'Unknown_ID')
+    try:
+        chrom, start, end = job['seqnames'], job['start'], job['end']
+        vcf_path = f"../vcfs/{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
+        if not os.path.exists(vcf_path):
+            return {'status': 'VCF_NOT_FOUND', 'id': inversion_id, 'reason': f"VCF file not found: {vcf_path}"}
+        
+        flank_size = 50000
+        region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
+        
+        vcf_reader = VCF(vcf_path, lazy=True)
+        
+        for var in vcf_reader(region_str):
+            normalized_chrom = var.CHROM.replace('chr', '')
+            snp_id_str = f"{normalized_chrom}:{var.POS}"
+            if snp_id_str in allowed_snps_dict:
+                # Found one, we can stop immediately.
+                return {'status': 'FOUND', 'id': inversion_id}
+        
+        # If the loop completes without finding any SNPs
+        return {'status': 'NOT_FOUND', 'id': inversion_id, 'region': region_str}
+        
+    except Exception as e:
+        # Catch any other errors during the quick check
+        return {'status': 'PRECHECK_FAILED', 'id': inversion_id, 'reason': str(e)}
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] [%(message)s]',
@@ -282,16 +298,31 @@ if __name__ == '__main__':
         logging.warning("No valid inversions to process. Exiting."); sys.exit(0)
 
     # --- Parallelism Configuration ---
-    # This now defines the settings for the CURRENT run.
     total_cores = cpu_count()
     N_INNER_JOBS = 8 
     if total_cores < N_INNER_JOBS: N_INNER_JOBS = total_cores
     N_OUTER_JOBS = max(1, total_cores // N_INNER_JOBS)
-
-    logging.info(f"Loaded {len(all_jobs)} inversions to process or verify.")
-    logging.info(f"Using {N_OUTER_JOBS} parallel 'outer' jobs, each with up to {N_INNER_JOBS} 'inner' cores.")
     
-    # --- Simplified, Correct Single-Pass Execution ---
+    logging.info(f"Loaded {len(all_jobs)} inversions to process or verify.")
+    logging.info(f"Using {N_OUTER_JOBS} parallel 'outer' jobs, each with up to {N_INNER_JOBS} 'inner' cores for model training.")
+    
+    logging.info("\n--- Running Pre-flight SNP Availability Check ---")
+    precheck_generator = (delayed(check_snp_availability_for_locus)(job, allowed_snps) for job in all_jobs)
+    precheck_results = Parallel(n_jobs=N_OUTER_JOBS, backend='loky')(
+        tqdm(precheck_generator, total=len(all_jobs), desc="Pre-checking SNP availability", unit="locus")
+    )
+    
+    loci_without_snps = [r for r in precheck_results if r and r.get('status') == 'NOT_FOUND']
+    if loci_without_snps:
+        logging.warning("\n" + "="*80)
+        logging.warning(f"--- PRE-CHECK WARNING: Found {len(loci_without_snps)} loci that will fail due to no suitable SNPs ---")
+        for failed_locus in sorted(loci_without_snps, key=lambda x: x['id']):
+            logging.warning(f"  - [{failed_locus['id']}] will fail: No SNPs from whitelist found in region [{failed_locus['region']}]")
+        logging.warning("="*80 + "\n")
+    else:
+        logging.info("--- Pre-flight SNP Availability Check Passed: All loci have at least one potential SNP. ---\n")
+    
+    logging.info("--- Starting Main Processing Pipeline ---")
     job_generator = (delayed(process_locus_end_to_end)(job, N_INNER_JOBS, allowed_snps, output_dir) for job in all_jobs)
     
     all_results = Parallel(n_jobs=N_OUTER_JOBS, backend='loky')(
@@ -300,7 +331,6 @@ if __name__ == '__main__':
 
     logging.info(f"--- All Processing Complete in {time.time() - script_start_time:.2f} seconds ---")
     
-    # --- FINAL REPORT GENERATION ---
     valid_results = [r for r in all_results if r is not None]
     
     successful_runs = [r for r in valid_results if r.get('status') == 'SUCCESS']
