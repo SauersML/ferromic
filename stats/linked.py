@@ -53,8 +53,19 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
     
     if not hap_pool_0 and not hap_pool_1: return None, None, None
 
-    unique_hap_pool_0 = list(dict.fromkeys(hap_pool_0))
-    unique_hap_pool_1 = list(dict.fromkeys(hap_pool_1))
+    # Correctly deduplicate haplotypes by converting numpy arrays to hashable tuples
+    seen_haps_0, seen_haps_1 = set(), set()
+    unique_hap_pool_0, unique_hap_pool_1 = [], []
+    for hap, p_idx in hap_pool_0:
+        hap_tuple = tuple(hap)
+        if hap_tuple not in seen_haps_0:
+            seen_haps_0.add(hap_tuple)
+            unique_hap_pool_0.append((hap, p_idx))
+    for hap, p_idx in hap_pool_1:
+        hap_tuple = tuple(hap)
+        if hap_tuple not in seen_haps_1:
+            seen_haps_1.add(hap_tuple)
+            unique_hap_pool_1.append((hap, p_idx))
     
     existing_genomes_set = {tuple(genome) for genome in X_existing}
     X_synth, y_synth, parent_map = [], [], []
@@ -65,12 +76,12 @@ def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Se
             for _ in range(num_needed):
                 new_diploid, parents = None, None
                 if class_label == 2: # Homozygous Inverted (1|1)
-                    if len(unique_hap_pool_1) < 2: return None, None, None
+                    if not unique_hap_pool_1: return None, None, None # Refined check
                     h1_idx, h2_idx = rng.choice(len(unique_hap_pool_1), 2, replace=True)
                     h1, p1 = unique_hap_pool_1[h1_idx]; h2, p2 = unique_hap_pool_1[h2_idx]
                     new_diploid, parents = h1 + h2, [p1, p2]
                 elif class_label == 0: # Homozygous Standard (0|0)
-                    if len(unique_hap_pool_0) < 2: return None, None, None
+                    if not unique_hap_pool_0: return None, None, None # Refined check
                     h1_idx, h2_idx = rng.choice(len(unique_hap_pool_0), 2, replace=True)
                     h1, p1 = unique_hap_pool_0[h1_idx]; h2, p2 = unique_hap_pool_0[h2_idx]
                     new_diploid, parents = h1 + h2, [p1, p2]
@@ -256,7 +267,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
             X_train, y_train = X_combined[train_idx], y_combined[train_idx]
             X_test, y_test = X_combined[test_idx], y_combined[test_idx]
             
-            # Restore per-fold training augmentation
+            # Restore per-fold training augmentation, preventing data leakage
             original_indices_in_train = train_idx[train_idx < num_real_samples]
             train_fold_confidence_mask = np.isin(np.arange(num_real_samples), original_indices_in_train) & confidence_mask
             
