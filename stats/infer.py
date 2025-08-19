@@ -146,7 +146,8 @@ def main():
             
         finally:
             # MEMORY: Explicitly clean up large objects from this iteration
-            del model, X_inference
+            if 'model' in locals(): del model
+            if 'X_inference' in locals(): del X_inference
             if 'X_imputed' in locals(): del X_imputed
             gc.collect()
 
