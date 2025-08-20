@@ -101,12 +101,88 @@ def parse_icd_codes(code_string):
     if pd.isna(code_string) or not isinstance(code_string, str): return set()
     return {code.strip().strip('"') for code in code_string.split(';') if code.strip()}
 
-
 def get_cached_or_generate(cache_path, generation_func, *args, **kwargs):
-    """Generic caching wrapper."""
+    """
+    Generic caching wrapper with validation. Compatible with pre-existing caches.
+    If the existing file fails shape/schema/NA checks, regenerate it by calling generation_func.
+    """
+    def _valid_demographics(df):
+        ok = all(c in df.columns for c in ["AGE", "AGE_sq"])
+        ok = ok and is_numeric_dtype(df["AGE"]) and is_numeric_dtype(df["AGE_sq"])
+        if not ok: return False
+        # AGE_sq consistency (allow minor float noise)
+        return np.nanmax(np.abs(df["AGE_sq"].to_numpy() - (df["AGE"].to_numpy() ** 2))) < 1e-6
+
+    def _valid_inversion(df):
+        # exactly one column: the current TARGET_INVERSION; numeric; no NA-only rows
+        cols = list(df.columns)
+        if cols != [TARGET_INVERSION]: 
+            return False
+        return is_numeric_dtype(df[TARGET_INVERSION]) and df[TARGET_INVERSION].notna().any()
+
+    def _valid_pcs(df):
+        expected = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+        if list(df.columns) != expected:
+            return False
+        # all numeric, no all-NA columns
+        return all(is_numeric_dtype(df[c]) and df[c].notna().any() for c in expected)
+
+    def _valid_sex(df):
+        if list(df.columns) != ["sex"]:
+            return False
+        if not is_numeric_dtype(df["sex"]):
+            return False
+        # allow only 0/1 (with possible missing filtered at join time)
+        uniq = set(pd.unique(df["sex"].dropna()))
+        return uniq.issubset({0, 1})
+
+    def _needs_validation(path):
+        bn = os.path.basename(path)
+        return (
+            bn.startswith("demographics_")
+            or bn.startswith("inversion_")
+            or bn.startswith("pcs_")
+            or bn == "genetic_sex.parquet"
+        )
+
+    def _validate(path, df):
+        bn = os.path.basename(path)
+        if bn.startswith("demographics_"):
+            return _valid_demographics(df)
+        if bn.startswith("inversion_"):
+            return _valid_inversion(df)
+        if bn.startswith("pcs_"):
+            return _valid_pcs(df)
+        if bn == "genetic_sex.parquet":
+            return _valid_sex(df)
+        # everything else: accept as-is
+        return True
+
     if os.path.exists(cache_path):
         print(f"  -> Found cache, loading from '{cache_path}'...")
-        return pd.read_parquet(cache_path)
+        try:
+            df = pd.read_parquet(cache_path)
+        except Exception as e:
+            print(f"  -> Cache unreadable ({e}); regenerating...")
+            df = generation_func(*args, **kwargs)
+            df.to_parquet(cache_path)
+            return df
+
+        # Basic index hygiene for joins
+        if df.index.name != "person_id":
+            try:
+                df.index = df.index.astype(str)
+                df.index.name = "person_id"
+            except Exception:
+                pass
+
+        # Only validate known core covariates; regenerate if invalid
+        if _needs_validation(cache_path) and not _validate(cache_path, df):
+            print(f"  -> Cache at '{cache_path}' failed validation; regenerating...")
+            df = generation_func(*args, **kwargs)
+            df.to_parquet(cache_path)
+        return df
+
     print(f"  -> No cache found at '{cache_path}'. Generating data...")
     data = generation_func(*args, **kwargs)
     data.to_parquet(cache_path)
@@ -274,6 +350,21 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, categor
     pheno_queue.put(None)
     print("[Fetcher]  - All phenotypes fetched. Producer thread finished.")
 
+def _should_skip(meta_path, core_df, case_idx_fp, category, target):
+    meta = _read_meta_json(meta_path)
+    if not meta:
+        return False  # no meta = cannot prove equivalence -> recompute
+    same_cols = meta.get("model_columns") == list(core_df.columns)
+    same_params = (
+        meta.get("num_pcs") == NUM_PCS and
+        meta.get("min_cases") == MIN_CASES_FILTER and
+        meta.get("min_ctrls") == MIN_CONTROLS_FILTER and
+        meta.get("target") == target and
+        meta.get("category") == category
+    )
+    same_core = meta.get("core_index_fp") == _index_fingerprint(core_df.index)
+    same_case = meta.get("case_idx_fp") == case_idx_fp
+    return all([same_cols, same_params, same_core, same_case])
 
 def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     """CONSUMER: Runs a single model. Executed in a separate process using integer indices and precomputed masks."""
@@ -282,9 +373,11 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     category = pheno_data["category"]
     case_idx = pheno_data["case_idx"]
     result_path = os.path.join(results_cache_dir, f"{s_name}.json")
-
-    if os.path.exists(result_path):
+    meta_path = result_path + ".meta.json"
+    case_idx_fp = _bytes_fp(case_idx.tobytes())
+    if os.path.exists(result_path) and _should_skip(meta_path, worker_core_df, case_idx_fp, category, target_inversion):
         return
+
 
     try:
         case_mask = np.zeros(N_core, dtype=bool)
@@ -327,6 +420,22 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "P_Value": pval
         }
         pd.Series(result_data).to_json(result_path)
+        
+        # write meta for safe reuse next time
+        _write_meta_json(meta_path, {
+            "kind": "phewas_result",
+            "s_name": s_name,
+            "category": category,
+            "model": "Logit",
+            "model_columns": list(worker_core_df.columns),
+            "num_pcs": NUM_PCS,
+            "min_cases": MIN_CASES_FILTER,
+            "min_ctrls": MIN_CONTROLS_FILTER,
+            "target": target_inversion,
+            "core_index_fp": _index_fingerprint(worker_core_df.index),
+            "case_idx_fp": case_idx_fp,
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        })
 
     except Exception as e:
         print(f"[Worker-{os.getpid()}] - [FAIL] {s_name:<40s} | Error: {str(e)[:100]}", flush=True)
