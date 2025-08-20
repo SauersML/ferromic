@@ -360,8 +360,10 @@ def main():
             if os.path.exists(category_cache_path):
                 category_to_pan_cases = pd.read_pickle(category_cache_path)
             else:
-                base_ids_df = bq_client.query(f"SELECT person_id FROM `{cdr_dataset_id}.person`").to_dataframe()
-                base_ids = set(base_ids_df["person_id"].astype(str))
+                # The base population is defined later from the covariate-eligible cohort to ensure consistent denominators.
+                unused_base_ids_df = None
+                # Placeholder assignment to maintain variable existence; the definitive assignment occurs after covariate assembly.
+                base_ids = set()
                 category_to_pan_cases = {}
                 for category, group in pheno_defs_df.groupby('disease_category'):
                     pan_codes = set.union(*group['all_codes'])
@@ -371,9 +373,10 @@ def main():
                     else:
                         category_to_pan_cases[category] = set()
                 pd.to_pickle(category_to_pan_cases, category_cache_path)
-            print("[Setup]    - Fetching full base population for control definition...")
-            persons_df = bq_client.query(f"SELECT person_id FROM `{cdr_dataset_id}.person`").to_dataframe()
-            base_ids = set(persons_df["person_id"].astype(str))
+            print("[Setup]    - Defining base population as covariate-eligible cohort...")
+            base_ids = set(core_df_with_const.index.astype(str))
+            print(f"[Setup]    - Base population size (covariate-eligible): {len(base_ids):,}")
+
 
         print(f"\n--- Total Setup Time: {t_setup.duration:.2f}s ---")
 
