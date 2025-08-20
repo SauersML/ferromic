@@ -384,9 +384,12 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if case_idx.size > 0:
             case_mask[case_idx] = True
 
-        valid_mask = allowed_mask_by_cat[category] | case_mask
+        # Ensure modeling matrix contains no missing covariates by applying a non-null mask.
+        nonnull_mask = ~worker_core_df.isna().any(axis=1).to_numpy()
+        valid_mask = (allowed_mask_by_cat[category] | case_mask) & nonnull_mask
 
         n_total = int(valid_mask.sum())
+
         if n_total == 0:
             return
 
