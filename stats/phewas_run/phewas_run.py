@@ -108,6 +108,40 @@ def _load_pcs(gcp_project):
     except Exception as e:
         raise RuntimeError(f"Failed to load PCs: {e}")
 
+def _load_demographics_with_stable_age(bq_client, cdr_id):
+    """
+    Loads demographics, calculating a stable and reproducible age for each participant
+    based on their last observation date in the dataset.
+    """
+    print("    -> Generating stable, reproducible age covariate...")
+    
+    # Query 1: Get year of birth
+    yob_q = f"SELECT person_id, year_of_birth FROM `{cdr_id}.person`"
+    yob_df = bq_client.query(yob_q).to_dataframe()
+    yob_df['person_id'] = yob_df['person_id'].astype(str)
+
+    # Query 2: Get the year of the last observation for each person
+    obs_q = f"""
+        SELECT person_id, EXTRACT(YEAR FROM MAX(observation_period_end_date)) AS obs_end_year
+        FROM `{cdr_id}.observation_period`
+        GROUP BY person_id
+    """
+    obs_df = bq_client.query(obs_q).to_dataframe()
+    obs_df['person_id'] = obs_df['person_id'].astype(str)
+
+    # Merge the two data sources
+    demographics = pd.merge(yob_df, obs_df, on='person_id', how='inner')
+    
+    # Calculate age and age-squared, handling potential data errors gracefully
+    demographics['year_of_birth'] = pd.to_numeric(demographics['year_of_birth'], errors='coerce')
+    demographics['AGE'] = demographics['obs_end_year'] - demographics['year_of_birth']
+    demographics['AGE_sq'] = demographics['AGE'] ** 2
+    
+    # Set index and select final columns, dropping anyone with missing age info
+    final_df = demographics[['person_id', 'AGE', 'AGE_sq']].dropna().set_index('person_id')
+    
+    print(f"    -> Successfully calculated stable age for {len(final_df):,} participants.")
+    return final_df
 
 # --- High-Performance Pipeline Functions ---
 
@@ -255,7 +289,14 @@ def main():
             cdr_codename = cdr_dataset_id.split('.')[-1]
             
             print("[Setup]    - Loading shared covariates...")
-            demographics_df = get_cached_or_generate(os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"), lambda: bq_client.query(f"SELECT person_id, year_of_birth FROM `{cdr_dataset_id}.person`").to_dataframe().assign(person_id=lambda d: d.person_id.astype(str)).set_index('person_id').assign(AGE=datetime.now().year - pd.to_numeric(lambda d: d.year_of_birth), AGE_sq=lambda d: d.AGE**2)[['AGE', 'AGE_sq']])
+            demographics_cache_path = os.path.join(CACHE_DIR, f"demographics_{cdr_codename}_stable_age.parquet")
+            demographics_df = get_cached_or_generate(
+                demographics_cache_path,
+                _load_demographics_with_stable_age,
+                bq_client=bq_client,
+                cdr_id=cdr_dataset_id
+            )    
+            
             inversion_df = get_cached_or_generate(os.path.join(CACHE_DIR, f"inversion_{TARGET_INVERSION}.parquet"), _load_inversions)
             pc_df = get_cached_or_generate(os.path.join(CACHE_DIR, "pcs_10.parquet"), _load_pcs, gcp_project=gcp_project)
             
