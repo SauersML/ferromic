@@ -11,6 +11,8 @@ import queue
 from functools import partial
 from multiprocessing import Pool, cpu_count
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
+from pandas.api.types import is_numeric_dtype
 
 import numpy as np
 import pandas as pd
@@ -66,6 +68,23 @@ class Timer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.end_time = time.time()
         self.duration = self.end_time - self.start_time
+
+def _index_fingerprint(index) -> str:
+    """Order-insensitive fingerprint of a person_id index."""
+    s = '\n'.join(sorted(map(str, index)))
+    return hashlib.sha256(s.encode()).hexdigest()[:16] + f":{len(index)}"
+
+def _bytes_fp(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()[:16]
+
+def _read_meta_json(path) -> dict | None:
+    try:
+        return pd.read_json(path, typ="series").to_dict()
+    except Exception:
+        return None
+
+def _write_meta_json(path, meta: dict):
+    pd.Series(meta).to_json(path)
 
 def rss_gb():
     """Returns the resident set size of the current process in gigabytes for lightweight memory instrumentation."""
