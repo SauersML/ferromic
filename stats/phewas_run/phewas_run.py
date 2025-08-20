@@ -378,7 +378,6 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     if os.path.exists(result_path) and _should_skip(meta_path, worker_core_df, case_idx_fp, category, target_inversion):
         return
 
-
     try:
         case_mask = np.zeros(N_core, dtype=bool)
         if case_idx.size > 0:
@@ -389,27 +388,121 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         valid_mask = (allowed_mask_by_cat[category] | case_mask) & nonnull_mask
 
         n_total = int(valid_mask.sum())
-
         if n_total == 0:
             return
 
+        # Construct response aligned to valid rows.
         y = np.zeros(n_total, dtype=np.int8)
         case_positions = np.nonzero(case_mask[valid_mask])[0]
         if case_positions.size > 0:
             y[case_positions] = 1
 
-        X_clean = worker_core_df[valid_mask]
+        X_clean = worker_core_df[valid_mask].copy()
         y_clean = pd.Series(y, index=X_clean.index, name='is_case')
 
         n_cases = int(y_clean.sum())
         n_ctrls = int(n_total - n_cases)
-
         if n_cases < MIN_CASES_FILTER or n_ctrls < MIN_CONTROLS_FILTER:
             return
 
-        fit = sm.Logit(y_clean, X_clean).fit(disp=0, maxiter=200)
+        # Drop any zero-variance covariates within the valid set, but never drop the intercept or target.
+        drop_candidates = [c for c in X_clean.columns if c not in ('const', target_inversion)]
+        zero_var_cols = [c for c in drop_candidates if X_clean[c].nunique(dropna=False) <= 1]
+        if zero_var_cols:
+            X_clean = X_clean.drop(columns=zero_var_cols)
+
+        # If the target inversion dosage is constant in the valid set, persist a NA result and return.
+        if X_clean[target_inversion].nunique(dropna=False) <= 1:
+            result_data = {
+                "Phenotype": s_name,
+                "N_Total": n_total,
+                "N_Cases": n_cases,
+                "N_Controls": n_ctrls,
+                "Beta": float('nan'),
+                "OR": float('nan'),
+                "P_Value": float('nan')
+            }
+            pd.Series(result_data).to_json(result_path)
+            _write_meta_json(meta_path, {
+                "kind": "phewas_result",
+                "s_name": s_name,
+                "category": category,
+                "model": "Logit",
+                "model_columns": list(worker_core_df.columns),
+                "num_pcs": NUM_PCS,
+                "min_cases": MIN_CASES_FILTER,
+                "min_ctrls": MIN_CONTROLS_FILTER,
+                "target": target_inversion,
+                "core_index_fp": _index_fingerprint(worker_core_df.index),
+                "case_idx_fp": case_idx_fp,
+                "created_at": datetime.utcnow().isoformat() + "Z",
+            })
+            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan", flush=True)
+            return
+
+        # Helper to check convergence across statsmodels fit result variants.
+        def _converged(fit_obj):
+            try:
+                if hasattr(fit_obj, "mle_retvals") and isinstance(fit_obj.mle_retvals, dict):
+                    return bool(fit_obj.mle_retvals.get("converged", False))
+                if hasattr(fit_obj, "converged"):
+                    return bool(fit_obj.converged)
+                return False
+            except Exception:
+                return False
+
+        fit = None
+        ridge_used = False
+
+        # First attempt: LBFGS with a higher iteration cap.
+        try:
+            fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, maxiter=400, method='lbfgs')
+            fit = fit_try if _converged(fit_try) else None
+        except Exception:
+            fit = None
+
+        # Second attempt: BFGS with an even higher iteration cap.
+        if fit is None:
+            try:
+                fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, maxiter=800, method='bfgs')
+                fit = fit_try if _converged(fit_try) else None
+            except Exception:
+                fit = None
+
+        # If all fitting attempts failed, persist NA result and return.
+        if fit is None or target_inversion not in fit.params:
+            result_data = {
+                "Phenotype": s_name,
+                "N_Total": n_total,
+                "N_Cases": n_cases,
+                "N_Controls": n_ctrls,
+                "Beta": float('nan'),
+                "OR": float('nan'),
+                "P_Value": float('nan')
+            }
+            pd.Series(result_data).to_json(result_path)
+            _write_meta_json(meta_path, {
+                "kind": "phewas_result",
+                "s_name": s_name,
+                "category": category,
+                "model": "Logit",
+                "model_columns": list(worker_core_df.columns),
+                "num_pcs": NUM_PCS,
+                "min_cases": MIN_CASES_FILTER,
+                "min_ctrls": MIN_CONTROLS_FILTER,
+                "target": target_inversion,
+                "core_index_fp": _index_fingerprint(worker_core_df.index),
+                "case_idx_fp": case_idx_fp,
+                "created_at": datetime.utcnow().isoformat() + "Z",
+            })
+            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan", flush=True)
+            return
+
         beta = float(fit.params[target_inversion])
-        pval = float(fit.pvalues[target_inversion])
+        try:
+            pval = float(fit.pvalues[target_inversion]) if not ridge_used else float('nan')
+        except Exception:
+            pval = float('nan')
 
         print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta={beta:+.3f} | OR={np.exp(beta):.3f} | P={pval:.2e}", flush=True)
 
@@ -423,8 +516,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "P_Value": pval
         }
         pd.Series(result_data).to_json(result_path)
-        
-        # write meta for safe reuse next time
+
         _write_meta_json(meta_path, {
             "kind": "phewas_result",
             "s_name": s_name,
@@ -650,17 +742,60 @@ def main():
                 return pd.Series(y, index=X.index, name='is_case'), X
 
             def _safe_fit_logit(X, y):
-                try:
-                    return sm.Logit(y, X).fit(disp=0, maxiter=200)
-                except Exception:
+                # Drop zero-variance covariates within the current design, but never drop the intercept or target.
+                cols_to_check = [c for c in X.columns if c not in ['const', TARGET_INVERSION]]
+                zvar = [c for c in cols_to_check if X[c].nunique(dropna=False) <= 1]
+                if len(zvar) > 0:
+                    X = X.drop(columns=zvar)
+                # If the target inversion dosage is constant within this subset, the effect is not estimable.
+                if X[TARGET_INVERSION].nunique(dropna=False) <= 1:
                     return None
+
+                def _conv(f):
+                    try:
+                        if hasattr(f, "mle_retvals") and isinstance(f.mle_retvals, dict):
+                            return bool(f.mle_retvals.get("converged", False))
+                        if hasattr(f, "converged"):
+                            return bool(f.converged)
+                        return False
+                    except Exception:
+                        return False
+
+                fit_loc = None
+                try:
+                    fit_try = sm.Logit(y, X).fit(disp=0, maxiter=400, method='lbfgs')
+                    fit_loc = fit_try if _conv(fit_try) else None
+                except Exception:
+                    fit_loc = None
+
+                if fit_loc is None:
+                    try:
+                        fit_try = sm.Logit(y, X).fit(disp=0, maxiter=800, method='bfgs')
+                        fit_loc = fit_try if _conv(fit_try) else None
+                    except Exception:
+                        fit_loc = None
+
+                if fit_loc is None:
+                    try:
+                        fit_loc = sm.Logit(y, X).fit_regularized(method='l-bfgs', maxiter=2000, alpha=1.0, L1_wt=0.0)
+                    except Exception:
+                        fit_loc = None
+
+                return fit_loc
 
             def _or_ci_pair(fit, coef_name):
                 beta = float(fit.params[coef_name])
-                se = float(fit.bse[coef_name])
+                se_val = None
+                if hasattr(fit, "bse"):
+                    try:
+                        se_val = float(fit.bse[coef_name])
+                    except Exception:
+                        se_val = None
                 or_val = float(np.exp(beta))
-                lo = float(np.exp(beta - 1.96 * se))
-                hi = float(np.exp(beta + 1.96 * se))
+                if se_val is None or not np.isfinite(se_val) or se_val == 0.0:
+                    return or_val, float('nan'), float('nan')
+                lo = float(np.exp(beta - 1.96 * se_val))
+                hi = float(np.exp(beta + 1.96 * se_val))
                 return or_val, lo, hi
 
             def _design_matrix_rank(X):
