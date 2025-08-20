@@ -17,6 +17,7 @@ from pandas.api.types import is_numeric_dtype
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from google.cloud import bigquery
 from statsmodels.stats.multitest import multipletests
 
@@ -975,13 +976,21 @@ def main():
             df.to_csv(output_filename, index=False)
 
             out_df = df.copy()
+
+            # Format integer-like counts safely; print blanks when values are missing.
             for col in ["N_Total", "N_Cases", "N_Controls"]:
-                out_df[col] = out_df[col].astype(int).map("{:,.0f}".format)
-            out_df["Beta"] = out_df["Beta"].map("{:+.4f}".format)
-            out_df["OR"] = out_df["OR"].map("{:.3f}".format)
-            out_df["P_Value"] = out_df["P_Value"].map("{:.3e}".format)
-            out_df["P_FDR"] = out_df["P_FDR"].map("{:.3f}".format)
-            out_df["Sig_FDR"] = out_df["Sig_FDR"].map(lambda x: "✓" if x else "")
+                out_df[col] = pd.to_numeric(out_df[col], errors="coerce")
+                out_df[col] = out_df[col].apply(lambda v: "" if pd.isna(v) else f"{int(v):,}")
+
+            # Format floats safely; print blanks when values are missing.
+            out_df["Beta"] = out_df["Beta"].apply(lambda v: "" if pd.isna(v) else f"{float(v):+0.4f}")
+            out_df["OR"] = out_df["OR"].apply(lambda v: "" if pd.isna(v) else f"{float(v):0.3f}")
+            out_df["P_Value"] = out_df["P_Value"].apply(lambda v: "" if pd.isna(v) else f"{float(v):.3e}")
+            out_df["P_FDR"] = out_df["P_FDR"].apply(lambda v: "" if pd.isna(v) else f"{float(v):.3f}")
+
+            # Ensure missing Sig_FDR stays unmarked.
+            out_df["Sig_FDR"] = out_df["Sig_FDR"].fillna(False).map(lambda x: "✓" if bool(x) else "")
+
             print(out_df.to_string(index=False))
 
     except Exception as e:
