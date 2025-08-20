@@ -25,6 +25,8 @@ PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads
 QUEUE_MAX_SIZE = cpu_count() * 4
 LOADER_THREADS = 32
 
+LOADER_CHUNK_SIZE = 128
+
 # --- Data sources and caching ---
 CACHE_DIR = "./phewas_cache"
 RESULTS_CACHE_DIR = os.path.join(CACHE_DIR, "results_atomic")
@@ -46,12 +48,14 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 worker_core_df = None
 
 def init_worker(df_to_share):
+    """Sends the large core_df to each worker process ONCE to save memory and time."""
     global worker_core_df
     worker_core_df = df_to_share
     print(f"[Worker-{os.getpid()}] Initialized and received shared core dataframe.", flush=True)
 
 
 class Timer:
+    """Context manager for timing code blocks."""
     def __enter__(self):
         self.start_time = time.time()
         return self
@@ -61,16 +65,19 @@ class Timer:
 
 
 def sanitize_name(name):
+    """Cleans a disease name to be a valid identifier."""
     name = re.sub(r'[\*\(\)\[\]\/\']', '', name)
     name = re.sub(r'[\s,-]+', '_', name.strip())
     return name
 
 def parse_icd_codes(code_string):
+    """Parses a semi-colon delimited string of ICD codes into a clean set."""
     if pd.isna(code_string) or not isinstance(code_string, str): return set()
     return {code.strip().strip('"') for code in code_string.split(';') if code.strip()}
 
 
 def get_cached_or_generate(cache_path, generation_func, *args, **kwargs):
+    """Generic caching wrapper."""
     if os.path.exists(cache_path):
         print(f"  -> Found cache, loading from '{cache_path}'...")
         return pd.read_parquet(cache_path)
@@ -80,6 +87,7 @@ def get_cached_or_generate(cache_path, generation_func, *args, **kwargs):
     return data
 
 def _load_inversions():
+    """Loads the target inversion dosage."""
     try:
         df = pd.read_csv(INVERSION_DOSAGES_FILE, sep="\t", usecols=["SampleID", TARGET_INVERSION])
         df['SampleID'] = df['SampleID'].astype(str)
@@ -88,6 +96,7 @@ def _load_inversions():
         raise RuntimeError(f"Failed to load inversion data: {e}")
 
 def _load_pcs(gcp_project):
+    """Loads genetic PCs."""
     try:
         raw_pcs = pd.read_csv(PCS_URI, sep="\t", storage_options={"project": gcp_project, "requester_pays": True})
         pc_mat = pd.DataFrame(
@@ -103,6 +112,7 @@ def _load_pcs(gcp_project):
 # --- High-Performance Pipeline Functions ---
 
 def _load_single_pheno_cache(pheno_info, base_ids, category_to_pan_cases, cdr_codename):
+    """THREAD WORKER: Loads one cached phenotype file from disk."""
     s_name, category = pheno_info['sanitized_name'], pheno_info['disease_category']
     pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
     try:
@@ -115,19 +125,29 @@ def _load_single_pheno_cache(pheno_info, base_ids, category_to_pan_cases, cdr_co
         return None
 
 def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, base_ids, category_to_pan_cases, cdr_codename):
+    """PRODUCER: High-performance, memory-stable data loader that works in chunks."""
     print("[Fetcher]  - Categorizing phenotypes into cached vs. uncached...")
     phenos_to_load_from_cache = [row.to_dict() for _, row in pheno_defs.iterrows() if os.path.exists(os.path.join(CACHE_DIR, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))]
     phenos_to_query_from_bq = [row.to_dict() for _, row in pheno_defs.iterrows() if not os.path.exists(os.path.join(CACHE_DIR, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))]
     print(f"[Fetcher]  - Found {len(phenos_to_load_from_cache)} cached phenotypes to fast-load.")
     print(f"[Fetcher]  - Found {len(phenos_to_query_from_bq)} uncached phenotypes to queue.")
 
-    with ThreadPoolExecutor(max_workers=LOADER_THREADS) as executor:
-        future_to_pheno = {executor.submit(_load_single_pheno_cache, p_info, base_ids, category_to_pan_cases, cdr_codename): p_info for p_info in phenos_to_load_from_cache}
-        for future in as_completed(future_to_pheno):
-            result = future.result()
-            if result:
-                pheno_queue.put(result)
-    print("[Fetcher]  - Finished parallel cache loading phase.")
+    # ---  STAGE 1 - PACED PARALLEL CACHE LOADING IN CHUNKS ---
+    num_chunks = (len(phenos_to_load_from_cache) + LOADER_CHUNK_SIZE - 1) // LOADER_CHUNK_SIZE
+    for i in range(0, len(phenos_to_load_from_cache), LOADER_CHUNK_SIZE):
+        chunk = phenos_to_load_from_cache[i:i + LOADER_CHUNK_SIZE]
+        chunk_num = (i // LOADER_CHUNK_SIZE) + 1
+        print(f"[Fetcher]  - Processing chunk {chunk_num} of {num_chunks} ({len(chunk)} phenotypes)...", flush=True)
+        
+        # A new, temporary thread pool is created for each chunk.
+        # This ensures memory from completed futures is garbage collected between chunks.
+        with ThreadPoolExecutor(max_workers=LOADER_THREADS) as executor:
+            future_to_pheno = {executor.submit(_load_single_pheno_cache, p_info, base_ids, category_to_pan_cases, cdr_codename): p_info for p_info in chunk}
+            for future in as_completed(future_to_pheno):
+                result = future.result()
+                if result:
+                    pheno_queue.put(result) # Will block if main queue is full
+    print("[Fetcher]  - Finished all parallel cache loading chunks.")
 
     # STAGE 2: SLOW SEQUENTIAL BIGQUERY QUERIES
     for pheno_info in phenos_to_query_from_bq:
@@ -153,7 +173,10 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, base_id
         # Cache the newly fetched data (even if it's empty) so we don't query again next time.
         print(f"[Fetcher]  - Caching {len(cases):,} new cases for '{s_name}'", flush=True)
         pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
-        pd.DataFrame(index=list(cases), data={'is_case': 1}, dtype=np.int8).to_parquet(pheno_cache_path)
+        # Create a DataFrame to cache the case IDs
+        df_to_cache = pd.DataFrame(index=list(cases), data={'is_case': 1}, dtype=np.int8)
+        df_to_cache.index.name = 'person_id'
+        df_to_cache.to_parquet(pheno_cache_path)
         
         # Define controls for this phenotype's category
         controls = base_ids - category_to_pan_cases[category]
@@ -161,11 +184,12 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, base_id
         # Put the complete data onto the queue for the consumer processes
         pheno_queue.put({"name": s_name, "cases": cases, "controls": controls})
 
-    pheno_queue.put(None)
+    pheno_queue.put(None) # Sentinel value to signal completion
     print("[Fetcher]  - All phenotypes fetched. Producer thread finished.")
 
 
 def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
+    """CONSUMER: Runs a single model. Executed in a separate process."""
     global worker_core_df
     s_name = pheno_data["name"]
     result_path = os.path.join(results_cache_dir, f"{s_name}.json")
@@ -189,7 +213,6 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         fit = model.fit(disp=0, maxiter=200)
         beta, pval = fit.params[target_inversion], fit.pvalues[target_inversion]
         
-        # --- REAL-TIME DETAILED LOGGING ---
         print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={len(y_clean):,} | Cases={n_cases:,} | Beta={beta:+.3f} | OR={np.exp(beta):.3f} | P={pval:.2e}", flush=True)
 
         result_data = {
@@ -211,7 +234,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 def main():
     script_start_time = time.time()
     print("=" * 70)
-    print(" Starting Robust, Memory-Constrained, High-Performance PheWAS Pipeline")
+    print(" Starting Robust, Memory-Stable PheWAS Pipeline (Chunked Producer)")
     print("=" * 70)
     
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -267,7 +290,9 @@ def main():
                     else:
                         category_to_pan_cases[category] = set()
                 pd.to_pickle(category_to_pan_cases, category_cache_path)
-            base_ids = set.union(*category_to_pan_cases.values()) if category_to_pan_cases else set()
+            print("[Setup]    - Fetching full base population for control definition...")
+            persons_df = bq_client.query(f"SELECT person_id FROM `{cdr_dataset_id}.person`").to_dataframe()
+            base_ids = set(persons_df["person_id"].astype(str))
 
         print(f"\n--- Total Setup Time: {t_setup.duration:.2f}s ---")
 
@@ -279,14 +304,12 @@ def main():
         worker_func = partial(run_single_model_worker, target_inversion=TARGET_INVERSION, results_cache_dir=RESULTS_CACHE_DIR)
         
         print(f"\n--- Starting parallel model fitting with {cpu_count()} worker processes ---")
-        # --- FIRE-AND-FORGET DISPATCH LOOP ---
         with Pool(processes=cpu_count(), initializer=init_worker, initargs=(core_df_with_const,)) as pool:
             while True:
                 pheno_data = pheno_queue.get()
                 if pheno_data is None:
                     break
                 pool.apply_async(worker_func, (pheno_data,))
-            
             pool.close()
             pool.join()
         
