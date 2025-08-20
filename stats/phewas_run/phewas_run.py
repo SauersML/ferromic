@@ -636,12 +636,7 @@ def main():
 
             # Align ancestry labels to the core covariate index used in modeling.
             anc_series = ancestry_labels_df.reindex(core_df_with_const.index)["ANCESTRY"]
-            anc_levels_list = anc_series.dropna().unique().tolist()
-            if 'eur' in anc_levels_list:
-                anc_levels = ['eur'] + [a for a in anc_levels_list if a != 'eur']
-            else:
-                anc_levels = anc_levels_list
-
+            
             # Helper: build y and X matrices given masks, always using PC1–PC10.
             pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
             base_cols = ['const', TARGET_INVERSION, 'sex'] + pc_cols + ['AGE', 'AGE_sq']
@@ -667,6 +662,30 @@ def main():
                 lo = float(np.exp(beta - 1.96 * se))
                 hi = float(np.exp(beta + 1.96 * se))
                 return or_val, lo, hi
+
+            def _design_matrix_rank(X):
+                """
+                Computes the numerical rank of a design matrix for robust LRT df calculation.
+                Uses numpy.linalg.matrix_rank on the concrete array backing the DataFrame.
+                """
+                try:
+                    return int(np.linalg.matrix_rank(X.values))
+                except Exception:
+                    return int(np.linalg.matrix_rank(np.asarray(X)))
+
+            def _convergence_flag(fit):
+                """
+                Returns True when the statsmodels Logit fit converged. Falls back to the
+                'converged' attribute if mle_retvals is unavailable.
+                """
+                try:
+                    if hasattr(fit, "mle_retvals") and isinstance(fit.mle_retvals, dict):
+                        return bool(fit.mle_retvals.get("converged", False))
+                    if hasattr(fit, "converged"):
+                        return bool(fit.converged)
+                    return False
+                except Exception:
+                    return False
 
             # Prepare phenotype-to-category mapping for masks.
             name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
@@ -702,7 +721,10 @@ def main():
                     # Interaction LRT: reduced model with ancestry main effects, full adds dosage×ancestry.
                     y_all, X_base = _build_y_X(valid_mask_all, case_mask)
                     anc_vec = anc_series.loc[X_base.index]
-                    anc_cat = pd.Categorical(anc_vec, categories=anc_levels, ordered=False)
+                    anc_levels_local = anc_vec.dropna().unique().tolist()
+                    if 'eur' in anc_levels_local:
+                        anc_levels_local = ['eur'] + [a for a in anc_levels_local if a != 'eur']
+                    anc_cat = pd.Categorical(anc_vec, categories=anc_levels_local, ordered=False)
                     A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True)
 
                     X_red = pd.concat([X_base, A], axis=1)
@@ -712,19 +734,58 @@ def main():
 
                     fit_red = _safe_fit_logit(X_red, y_all)
                     fit_full = _safe_fit_logit(X_full, y_all)
-                    p_lrt = np.nan
-                    if (fit_red is not None) and (fit_full is not None) and (fit_full.llf >= fit_red.llf):
-                        llr = 2 * (fit_full.llf - fit_red.llf)
-                        df_lrt = X_full.shape[1] - X_red.shape[1]
-                        p_lrt = float(stats.chi2.sf(llr, df_lrt))
 
-                    # Per-ancestry OR and CI.
-                    out = {'Phenotype': s_name, 'P_LRT_AncestryxDosage': p_lrt}
-                    for anc in anc_levels:
+                    lrt_converged_red = False
+                    lrt_converged_full = False
+                    p_lrt = np.nan
+                    lrt_df = np.nan
+                    ancestry_dummy_cols = list(A.columns)
+                    interaction_cols = [f"{TARGET_INVERSION}:{col}" for col in ancestry_dummy_cols]
+                    varying_interactions = [c for c in interaction_cols if X_full[c].var() > 0]
+
+                    if fit_red is not None:
+                        lrt_converged_red = _convergence_flag(fit_red)
+                        if not lrt_converged_red:
+                            print(f"[FollowUp] LRT reduced model did not converge for phenotype '{s_name}'.")
+
+                    if fit_full is not None:
+                        lrt_converged_full = _convergence_flag(fit_full)
+                        if not lrt_converged_full:
+                            print(f"[FollowUp] LRT full model did not converge for phenotype '{s_name}'.")
+
+                    if (fit_red is not None) and (fit_full is not None) and (fit_full.llf >= fit_red.llf):
+                        rank_red = _design_matrix_rank(X_red)
+                        rank_full = _design_matrix_rank(X_full)
+                        lrt_df = int(max(0, rank_full - rank_red))
+                        if lrt_df > 0:
+                            llr = 2.0 * (fit_full.llf - fit_red.llf)
+                            p_lrt = float(stats.chi2.sf(llr, lrt_df))
+                        else:
+                            print(f"[FollowUp] LRT degrees of freedom computed as zero for phenotype '{s_name}'. Skipping p-value.")
+
+                    # Per-ancestry OR and CI plus EUR p-value and counts.
+                    out = {
+                        'Phenotype': s_name,
+                        'P_LRT_AncestryxDosage': p_lrt,
+                        'LRT_df': lrt_df,
+                        'LRT_Converged_Reduced': lrt_converged_red,
+                        'LRT_Converged_Full': lrt_converged_full,
+                        'LRT_Ancestry_Levels': ",".join(anc_levels_local),
+                        'LRT_Ancestry_Dummies': ",".join(ancestry_dummy_cols),
+                        'LRT_Interaction_Cols': ",".join(varying_interactions)
+                    }
+
+                    for anc in anc_levels_local:
                         group_mask = valid_mask_all & anc_series.eq(anc).reindex(core_df_with_const.index).fillna(False).to_numpy()
                         if not group_mask.any():
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
+                            if anc == 'eur':
+                                out["EUR_P"] = np.nan
+                                out["EUR_P_Source"] = "EUR-only"
+                                out["EUR_N"] = 0
+                                out["EUR_N_Cases"] = 0
+                                out["EUR_N_Controls"] = 0
                             continue
                         y_g, X_g = _build_y_X(group_mask, case_mask)
                         n_cases = int(y_g.sum())
@@ -733,15 +794,40 @@ def main():
                         if (n_cases < MIN_CASES_FILTER) or (n_ctrl < MIN_CONTROLS_FILTER):
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
+                            if anc == 'eur':
+                                out["EUR_P"] = np.nan
+                                out["EUR_P_Source"] = "EUR-only"
+                                out["EUR_N"] = n_tot
+                                out["EUR_N_Cases"] = n_cases
+                                out["EUR_N_Controls"] = n_ctrl
                             continue
                         fit_g = _safe_fit_logit(X_g, y_g)
                         if fit_g is None or TARGET_INVERSION not in fit_g.params:
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
+                            if anc == 'eur':
+                                out["EUR_P"] = np.nan
+                                out["EUR_P_Source"] = "EUR-only"
+                                out["EUR_N"] = n_tot
+                                out["EUR_N_Cases"] = n_cases
+                                out["EUR_N_Controls"] = n_ctrl
                             continue
+                        conv_g = _convergence_flag(fit_g)
+                        if not conv_g:
+                            print(f"[FollowUp] Per-ancestry model did not converge for phenotype '{s_name}' in ancestry '{anc}'.")
                         or_val, lo, hi = _or_ci_pair(fit_g, TARGET_INVERSION)
                         out[f"{anc.upper()}_OR"] = or_val
                         out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
+                        if anc == 'eur':
+                            try:
+                                eur_p = float(fit_g.pvalues[TARGET_INVERSION])
+                            except Exception:
+                                eur_p = np.nan
+                            out["EUR_P"] = eur_p
+                            out["EUR_P_Source"] = "EUR-only"
+                            out["EUR_N"] = n_tot
+                            out["EUR_N_Cases"] = n_cases
+                            out["EUR_N_Controls"] = n_ctrl
                     follow_rows.append(out)
 
             # Merge follow-up columns into main df so the final CSV includes them for hits.
