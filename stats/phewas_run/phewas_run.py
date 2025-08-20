@@ -260,6 +260,10 @@ def main():
             _, p_adj, _, _ = multipletests(df['P_Value'].dropna(), alpha=FDR_ALPHA, method="fdr_bh")
             df.loc[df['P_Value'].notna(), "P_FDR"] = p_adj
             df["Sig_FDR"] = df["P_FDR"] < FDR_ALPHA
+
+            output_filename = f"phewas_results_{TARGET_INVERSION}.csv"
+            print(f"\n--- Saving results to '{output_filename}' ---")
+            df.to_csv(output_filename, index=False)
             
             out_df = df.copy()
             for col in ['N_Total', 'N_Cases', 'N_Controls']: out_df[col] = out_df[col].map('{:,.0f}'.format)
