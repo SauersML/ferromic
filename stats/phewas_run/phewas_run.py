@@ -315,7 +315,6 @@ def main():
             cdr_codename = cdr_dataset_id.split('.')[-1]
             
             print("[Setup]    - Loading shared covariates (Demographics, Inversions, PCs, Sex)...")
-            demographics_df = get_cached_or_generate(os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"), lambda: bq_client.query(f"SELECT person_id, year_of_birth FROM `{cdr_dataset_id}.person`").to_dataframe().assign(person_id=lambda d: d.person_id.astype(str)).set_index('person_id').assign(AGE=datetime.now().year - pd.to_numeric(lambda d: d.year_of_birth), AGE_sq=lambda d: d.AGE**2)[['AGE', 'AGE_sq']])
             demographics_df = get_cached_or_generate(
                 os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"),
                 _load_demographics_with_stable_age, bq_client=bq_client, cdr_id=cdr_dataset_id
