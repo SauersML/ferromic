@@ -32,6 +32,8 @@ CACHE_DIR = "./phewas_cache"
 RESULTS_CACHE_DIR = os.path.join(CACHE_DIR, "results_atomic")
 INVERSION_DOSAGES_FILE = "imputed_inversion_dosages.tsv"
 PCS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
+SEX_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
+RELATEDNESS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
 
 # --- Model parameters ---
 NUM_PCS = 10
@@ -107,6 +109,30 @@ def _load_pcs(gcp_project):
         return pc_df[[f'PC{i}' for i in range(1, NUM_PCS + 1)]]
     except Exception as e:
         raise RuntimeError(f"Failed to load PCs: {e}")
+
+def _load_genetic_sex(gcp_project):
+    """Loads genetically-inferred sex and encodes it as a numeric variable."""
+    print("    -> Loading genetically-inferred sex (ploidy)...")
+    sex_df = pd.read_csv(SEX_URI, sep="\t", storage_options={"project": gcp_project, "requester_pays": True},
+                         usecols=['research_id', 'dragen_sex_ploidy'])
+    
+    sex_df['sex'] = np.nan
+    sex_df.loc[sex_df['dragen_sex_ploidy'] == 'XX', 'sex'] = 0
+    sex_df.loc[sex_df['dragen_sex_ploidy'] == 'XY', 'sex'] = 1
+    
+    sex_df = sex_df.rename(columns={'research_id': 'person_id'})
+    sex_df['person_id'] = sex_df['person_id'].astype(str)
+    
+    return sex_df[['person_id', 'sex']].dropna().set_index('person_id')
+
+def _load_related_to_remove(gcp_project):
+    """Loads the pre-computed list of related individuals to prune."""
+    print("    -> Loading list of related individuals to exclude...")
+    related_df = pd.read_csv(RELATEDNESS_URI, sep="\t", header=None, names=['person_id'],
+                             storage_options={"project": gcp_project, "requester_pays": True})
+    
+    # Return a set for extremely fast filtering
+    return set(related_df['person_id'].astype(str))
 
 def _load_demographics_with_stable_age(bq_client, cdr_id):
     """
@@ -288,26 +314,37 @@ def main():
             bq_client = bigquery.Client(project=gcp_project)
             cdr_codename = cdr_dataset_id.split('.')[-1]
             
-            print("[Setup]    - Loading shared covariates...")
-            demographics_cache_path = os.path.join(CACHE_DIR, f"demographics_{cdr_codename}_stable_age.parquet")
-            demographics_df = get_cached_or_generate(
-                demographics_cache_path,
-                _load_demographics_with_stable_age,
-                bq_client=bq_client,
-                cdr_id=cdr_dataset_id
-            )    
-            
+            print("[Setup]    - Loading shared covariates (Demographics, Inversions, PCs, Sex)...")
+            demographics_df = get_cached_or_generate(os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"), lambda: bq_client.query(f"SELECT person_id, year_of_birth FROM `{cdr_dataset_id}.person`").to_dataframe().assign(person_id=lambda d: d.person_id.astype(str)).set_index('person_id').assign(AGE=datetime.now().year - pd.to_numeric(lambda d: d.year_of_birth), AGE_sq=lambda d: d.AGE**2)[['AGE', 'AGE_sq']])
             inversion_df = get_cached_or_generate(os.path.join(CACHE_DIR, f"inversion_{TARGET_INVERSION}.parquet"), _load_inversions)
             pc_df = get_cached_or_generate(os.path.join(CACHE_DIR, "pcs_10.parquet"), _load_pcs, gcp_project=gcp_project)
+            sex_df = get_cached_or_generate(os.path.join(CACHE_DIR, "genetic_sex.parquet"), _load_genetic_sex, gcp_project=gcp_project)
+            
+            # Load related individuals to remove. No caching needed as it's a small file and a fast operation.
+            related_ids_to_remove = _load_related_to_remove(gcp_project=gcp_project)
             
             print("[Setup]    - Standardizing covariate indexes for robust joining...")
             demographics_df.index = demographics_df.index.astype(str)
             inversion_df.index = inversion_df.index.astype(str)
             pc_df.index = pc_df.index.astype(str)
+            sex_df.index = sex_df.index.astype(str)
             
             pc_cols = [f'PC{i}' for i in range(1, NUM_PCS + 1)]
-            covariate_cols = [TARGET_INVERSION] + pc_cols + ['AGE', 'AGE_sq']
-            core_df = demographics_df.join(inversion_df, how='inner').join(pc_df, how='inner')[covariate_cols]
+            # Add 'sex' to the list of model covariates
+            covariate_cols = [TARGET_INVERSION] + ['sex'] + pc_cols + ['AGE', 'AGE_sq']
+            
+            # Add sex_df to the join chain
+            core_df = demographics_df.join(inversion_df, how='inner') \
+                                     .join(pc_df, how='inner') \
+                                     .join(sex_df, how='inner')
+            
+            print(f"[Setup]    - Pre-filter cohort size: {len(core_df):,}")
+            # Apply the relatedness filter
+            core_df = core_df[~core_df.index.isin(related_ids_to_remove)]
+            print(f"[Setup]    - Post-filter unrelated cohort size: {len(core_df):,}")
+    
+            # Now select the final columns
+            core_df = core_df[covariate_cols]
             
             core_df_with_const = sm.add_constant(core_df, prepend=True)
             del core_df, demographics_df, inversion_df, pc_df; gc.collect()
