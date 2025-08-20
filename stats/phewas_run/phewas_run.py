@@ -130,6 +130,16 @@ def _load_genetic_sex(gcp_project):
     
     return sex_df[['person_id', 'sex']].dropna().set_index('person_id')
 
+def _load_ancestry_labels(gcp_project):
+    """Loads predicted ancestry labels for each person."""
+    print("    -> Loading genetic ancestry labels...")
+    raw = pd.read_csv(PCS_URI, sep="\t", storage_options={"project": gcp_project, "requester_pays": True},
+                      usecols=['research_id', 'ancestry_pred'])
+    df = raw.rename(columns={'research_id': 'person_id', 'ancestry_pred': 'ANCESTRY'})
+    df['person_id'] = df['person_id'].astype(str)
+    df = df.dropna(subset=['ANCESTRY'])
+    return df.set_index('person_id')[['ANCESTRY']]
+
 def _load_related_to_remove(gcp_project):
     """Loads the pre-computed list of related individuals to prune."""
     print("    -> Loading list of related individuals to exclude...")
@@ -354,6 +364,9 @@ def main():
             sex_df = get_cached_or_generate(
                 os.path.join(CACHE_DIR, "genetic_sex.parquet"), _load_genetic_sex, gcp_project=gcp_project
             )
+            ancestry_labels_df = get_cached_or_generate(
+                os.path.join(CACHE_DIR, "ancestry_labels.parquet"), _load_ancestry_labels, gcp_project=gcp_project
+            )
 
             # Load related individuals to remove.
             related_ids_to_remove = _load_related_to_remove(gcp_project=gcp_project)
@@ -363,6 +376,7 @@ def main():
             inversion_df.index = inversion_df.index.astype(str)
             pc_df.index = pc_df.index.astype(str)
             sex_df.index = sex_df.index.astype(str)
+            ancestry_labels_df.index = ancestry_labels_df.index.astype(str)
 
             pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
             covariate_cols = [TARGET_INVERSION] + ["sex"] + pc_cols + ["AGE", "AGE_sq"]
@@ -485,6 +499,124 @@ def main():
             _, p_adj, _, _ = multipletests(df["P_Value"].dropna(), alpha=FDR_ALPHA, method="fdr_bh")
             df.loc[df["P_Value"].notna(), "P_FDR"] = p_adj
             df["Sig_FDR"] = df["P_FDR"] < FDR_ALPHA
+
+            # === Ancestry follow-up on FDR-significant phenotypes ===
+            from scipy import stats
+
+            # Align ancestry labels to the core covariate index used in modeling.
+            anc_series = ancestry_labels_df.reindex(core_df_with_const.index)["ANCESTRY"]
+            anc_levels_list = anc_series.dropna().unique().tolist()
+            if 'eur' in anc_levels_list:
+                anc_levels = ['eur'] + [a for a in anc_levels_list if a != 'eur']
+            else:
+                anc_levels = anc_levels_list
+
+            # Helper: build y and X matrices given masks, always using PC1–PC10.
+            pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+            base_cols = ['const', TARGET_INVERSION, 'sex'] + pc_cols + ['AGE', 'AGE_sq']
+
+            def _build_y_X(valid_mask, case_mask):
+                X = core_df_with_const.loc[valid_mask, base_cols].copy()
+                y = np.zeros(X.shape[0], dtype=np.int8)
+                case_positions = np.nonzero(case_mask[valid_mask])[0]
+                if case_positions.size > 0:
+                    y[case_positions] = 1
+                return pd.Series(y, index=X.index, name='is_case'), X
+
+            def _safe_fit_logit(X, y):
+                try:
+                    return sm.Logit(y, X).fit(disp=0, maxiter=200)
+                except Exception:
+                    return None
+
+            def _or_ci_pair(fit, coef_name):
+                beta = float(fit.params[coef_name])
+                se = float(fit.bse[coef_name])
+                or_val = float(np.exp(beta))
+                lo = float(np.exp(beta - 1.96 * se))
+                hi = float(np.exp(beta + 1.96 * se))
+                return or_val, lo, hi
+
+            # Prepare phenotype-to-category mapping for masks.
+            name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
+
+            # Collect follow-up results keyed by phenotype.
+            follow_rows = []
+
+            hit_names = df.loc[df["Sig_FDR"] == True, "Phenotype"].tolist()
+            if len(hit_names) > 0:
+                for s_name in hit_names:
+                    category = name_to_cat.get(s_name, None)
+                    if category is None or category not in allowed_mask_by_cat:
+                        continue
+
+                    # Read case indices from the per-phenotype cache file created earlier.
+                    pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
+                    if not os.path.exists(pheno_cache_path):
+                        continue
+                    ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
+                    case_ids = ph.index[ph['is_case'] == 1].astype(str)
+                    case_idx = core_index.get_indexer(case_ids)
+                    case_idx = case_idx[case_idx >= 0].astype(np.int32)
+
+                    case_mask = np.zeros(len(core_index), dtype=bool)
+                    if case_idx.size > 0:
+                        case_mask[case_idx] = True
+
+                    # Valid modeling mask mirrors the worker logic for this phenotype.
+                    valid_mask_all = (allowed_mask_by_cat[category] | case_mask) & global_notnull_mask
+                    if int(valid_mask_all.sum()) == 0:
+                        continue
+
+                    # Interaction LRT: reduced model with ancestry main effects, full adds dosage×ancestry.
+                    y_all, X_base = _build_y_X(valid_mask_all, case_mask)
+                    anc_vec = anc_series.loc[X_base.index]
+                    anc_cat = pd.Categorical(anc_vec, categories=anc_levels, ordered=False)
+                    A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True)
+
+                    X_red = pd.concat([X_base, A], axis=1)
+                    X_full = X_red.copy()
+                    for col in A.columns:
+                        X_full[f"{TARGET_INVERSION}:{col}"] = X_full[TARGET_INVERSION] * X_full[col]
+
+                    fit_red = _safe_fit_logit(X_red, y_all)
+                    fit_full = _safe_fit_logit(X_full, y_all)
+                    p_lrt = np.nan
+                    if (fit_red is not None) and (fit_full is not None) and (fit_full.llf >= fit_red.llf):
+                        llr = 2 * (fit_full.llf - fit_red.llf)
+                        df_lrt = X_full.shape[1] - X_red.shape[1]
+                        p_lrt = float(stats.chi2.sf(llr, df_lrt))
+
+                    # Per-ancestry OR and CI.
+                    out = {'Phenotype': s_name, 'P_LRT_AncestryxDosage': p_lrt}
+                    for anc in anc_levels:
+                        group_mask = valid_mask_all & anc_series.eq(anc).reindex(core_df_with_const.index).fillna(False).to_numpy()
+                        if not group_mask.any():
+                            out[f"{anc.upper()}_OR"] = np.nan
+                            out[f"{anc.upper()}_CI95"] = np.nan
+                            continue
+                        y_g, X_g = _build_y_X(group_mask, case_mask)
+                        n_cases = int(y_g.sum())
+                        n_tot = int(len(y_g))
+                        n_ctrl = n_tot - n_cases
+                        if (n_cases < MIN_CASES_FILTER) or (n_ctrl < MIN_CONTROLS_FILTER):
+                            out[f"{anc.upper()}_OR"] = np.nan
+                            out[f"{anc.upper()}_CI95"] = np.nan
+                            continue
+                        fit_g = _safe_fit_logit(X_g, y_g)
+                        if fit_g is None or TARGET_INVERSION not in fit_g.params:
+                            out[f"{anc.upper()}_OR"] = np.nan
+                            out[f"{anc.upper()}_CI95"] = np.nan
+                            continue
+                        or_val, lo, hi = _or_ci_pair(fit_g, TARGET_INVERSION)
+                        out[f"{anc.upper()}_OR"] = or_val
+                        out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
+                    follow_rows.append(out)
+
+            # Merge follow-up columns into main df so the final CSV includes them for hits.
+            if len(follow_rows) > 0:
+                follow_df = pd.DataFrame(follow_rows)
+                df = df.merge(follow_df, on="Phenotype", how="left")
 
             output_filename = f"phewas_results_{TARGET_INVERSION}.csv"
             print(f"\n--- Saving final results to '{output_filename}' ---")
