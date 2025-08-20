@@ -718,7 +718,6 @@ def main():
             results_df = pd.DataFrame(all_results_from_disk)
             print(f"Successfully consolidated {len(results_df)} results.")
 
-            print("\n--- FINAL RESULTS (sorted by P-value) ---")
             df = results_df.sort_values("P_Value").reset_index(drop=True)
             _, p_adj, _, _ = multipletests(df["P_Value"].dropna(), alpha=FDR_ALPHA, method="fdr_bh")
             df.loc[df["P_Value"].notna(), "P_FDR"] = p_adj
