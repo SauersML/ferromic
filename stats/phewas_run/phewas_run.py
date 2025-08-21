@@ -775,6 +775,19 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             pval = float('nan')
             pval_reason = f"pvalue_unavailable({type(e).__name__})"
         
+        # Compute a 95% CI for the overall cohort using the model-based standard error when available.
+        se = None
+        if hasattr(fit, "bse"):
+            try:
+                se = float(fit.bse[target_inversion])
+            except Exception:
+                se = None
+        or_ci95_str = None
+        if se is not None and np.isfinite(se) and se > 0.0:
+            lo = float(np.exp(beta - 1.96 * se))
+            hi = float(np.exp(beta + 1.96 * se))
+            or_ci95_str = f"{lo:.3f},{hi:.3f}"
+        
         suffix = f" | P_CAUSE={pval_reason}" if (not np.isfinite(pval) and pval_reason) else ""
         print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta={beta:+.3f} | OR={np.exp(beta):.3f} | P={pval:.2e}{suffix}", flush=True)
 
@@ -785,7 +798,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "N_Controls": n_ctrls,
             "Beta": beta,
             "OR": float(np.exp(beta)),
-            "P_Value": pval
+            "P_Value": pval,
+            "OR_CI95": or_ci95_str
         }
         pd.Series(result_data).to_json(result_path)
 
@@ -1049,6 +1063,37 @@ def main():
 
             # === Ancestry follow-up on FDR-significant phenotypes ===
             from scipy import stats
+
+            # Compute overall-cohort 95% CI for OR in the consolidated results using cached Beta and P_Value when needed.
+            if "OR_CI95" not in df.columns:
+                df["OR_CI95"] = np.nan
+
+            def _compute_overall_or_ci(beta_val, p_val):
+                """
+                Returns a formatted 'lo,hi' string for the overall OR 95% CI using a Wald approximation
+                derived from the cached Beta and two-sided P_Value. Falls back to NaN when unavailable.
+                """
+                if pd.isna(beta_val) or pd.isna(p_val):
+                    return np.nan
+                try:
+                    b = float(beta_val)
+                    p = float(p_val)
+                    if not np.isfinite(b) or not np.isfinite(p):
+                        return np.nan
+                    if not (0.0 < p < 1.0):
+                        return np.nan
+                    z = float(stats.norm.ppf(1.0 - p / 2.0))
+                    if not np.isfinite(z) or z == 0.0:
+                        return np.nan
+                    se = abs(b) / z
+                    lo = float(np.exp(b - 1.96 * se))
+                    hi = float(np.exp(b + 1.96 * se))
+                    return f"{lo:.3f},{hi:.3f}"
+                except Exception:
+                    return np.nan
+
+            missing_ci_mask = df["OR_CI95"].isna() | (df["OR_CI95"].astype(str) == "") | (df["OR_CI95"].astype(str).str.lower() == "nan")
+            df.loc[missing_ci_mask, "OR_CI95"] = df.loc[missing_ci_mask, ["Beta", "P_Value"]].apply(lambda r: _compute_overall_or_ci(r["Beta"], r["P_Value"]), axis=1)
 
             # Align ancestry labels to the core covariate index used in modeling.
             anc_series = ancestry_labels_df.reindex(core_df_with_const.index)["ANCESTRY"].str.lower()
