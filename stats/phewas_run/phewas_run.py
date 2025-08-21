@@ -944,17 +944,8 @@ def main():
                         n_cases = int(y_g.sum())
                         n_tot = int(len(y_g))
                         n_ctrl = n_tot - n_cases
-                        if (n_cases < MIN_CASES_FILTER) or (n_ctrl < MIN_CONTROLS_FILTER):
-                            out[f"{anc.upper()}_OR"] = np.nan
-                            out[f"{anc.upper()}_CI95"] = np.nan
-                            if anc == 'eur':
-                                out["EUR_P"] = np.nan
-                                out["EUR_P_Source"] = "EUR-only"
-                                out["EUR_N"] = n_tot
-                                out["EUR_N_Cases"] = n_cases
-                                out["EUR_N_Controls"] = n_ctrl
-                            continue
                         fit_g = _safe_fit_logit(X_g, y_g)
+
                         if fit_g is None or TARGET_INVERSION not in fit_g.params:
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
