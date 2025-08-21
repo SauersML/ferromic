@@ -1121,7 +1121,7 @@ def main():
                     y[case_positions] = 1
                 return pd.Series(y, index=X.index, name='is_case'), X
 
-            def _safe_fit_logit(X, y):
+            def _safe_fit_logit(X, y, allow_sex_handling=True):
                 """
                 Fits a logistic regression with robust numeric hygiene and automatic stabilization:
                 1) Enforces numeric, finite design; drops zero-variance columns except intercept and target.
@@ -1219,7 +1219,7 @@ def main():
 
                 # Detect and handle sex-by-case separation without prior knowledge.
                 model_notes = []
-                if 'sex' in X.columns:
+                if allow_sex_handling and 'sex' in X.columns:
                     try:
                         tab = pd.crosstab(X['sex'], y_series).reindex(index=[0.0, 1.0], columns=[0.0, 1.0], fill_value=0)
                         valid_sexes = []
@@ -1421,6 +1421,14 @@ def main():
                 if len(zvar_cols) > 0:
                     X_base = X_base.drop(columns=zvar_cols)
 
+                # Enforce the same minimum case/control thresholds used by worker models to keep Stage-1 coherent.
+                n_cases_stage1 = int(y_all.sum())
+                n_ctrls_stage1 = int(len(y_all) - n_cases_stage1)
+                if n_cases_stage1 < MIN_CASES_FILTER or n_ctrls_stage1 < MIN_CONTROLS_FILTER:
+                    entry["LRT_Overall_Reason"] = "insufficient_counts"
+                    overall_rows.append(entry)
+                    continue
+
                 if TARGET_INVERSION not in X_base.columns or pd.Series(X_base[TARGET_INVERSION]).nunique(dropna=False) <= 1:
                     entry["LRT_Overall_Reason"] = "target_constant"
                     overall_rows.append(entry)
@@ -1429,8 +1437,9 @@ def main():
                 X_full = X_base.copy()
                 X_red = X_base.drop(columns=[TARGET_INVERSION])
 
-                fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all)
-                fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all)
+                fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all, allow_sex_handling=False)
+                fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all, allow_sex_handling=False)
+
 
                 ridge_only_flag = False
                 if (fit_red is not None) and hasattr(fit_red, "_model_note") and isinstance(fit_red._model_note, str):
@@ -1452,7 +1461,8 @@ def main():
                         entry["LRT_Overall_Reason"] = ""
                     else:
                         entry["LRT_df_Overall"] = 0
-                        entry["LRT_Overall_Reason"] = "no_interaction_df"
+                        entry["LRT_Overall_Reason"] = "no_df"
+
                 else:
                     reason_bits = []
                     if fit_red is None:
@@ -1758,6 +1768,11 @@ def main():
                         pass
                         
             # Merge follow-up columns into main df so the final CSV includes them for hits.
+            # Compute quantities for Benjamini–Bogomolov adjustment independent of whether follow-up rows exist.
+            m_total = int(pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna().sum())
+            R_selected = int(pd.to_numeric(df["Sig_FDR"], errors="coerce").fillna(False).astype(bool).sum())
+            alpha_within = (FDR_ALPHA * (R_selected / m_total)) if m_total > 0 else 0.0
+
             if len(follow_rows) > 0:
                 follow_df = pd.DataFrame(follow_rows)
                 df = df.merge(follow_df, on="Phenotype", how="left")
@@ -1765,10 +1780,6 @@ def main():
                 # Benjamini–Bogomolov adjustment for ancestry-specific tests:
                 # Within-phenotype BH at alpha_within = FDR_ALPHA * (R_selected / m_total),
                 # where m_total counts non-NaN overall LRT p-values and R_selected counts Stage-1 discoveries.
-                m_total = int(pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna().sum())
-                R_selected = int(pd.to_numeric(df["Sig_FDR"], errors="coerce").fillna(False).astype(bool).sum())
-                alpha_within = (FDR_ALPHA * (R_selected / m_total)) if m_total > 0 else 0.0
-
                 if R_selected > 0 and alpha_within > 0.0:
                     selected_idx = df.index[df["Sig_FDR"] == True].tolist()
                     for idx in selected_idx:
@@ -1798,6 +1809,7 @@ def main():
                         for anc_key, adj_val in zip(keys, p_adj_vals):
                             outcol = f"{anc_key}_P_FDR"
                             df.at[idx, outcol] = float(adj_val)
+
 
             # Drop legacy column if present.
             if "EUR_P_Source" in df.columns:
