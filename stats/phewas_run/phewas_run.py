@@ -1013,8 +1013,13 @@ def main():
                         interaction_cols = []
                         varying_interactions = []
                     else:
+                        # Encode ancestry as numeric dummy variables with a plain NumPy dtype.
                         A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True, dtype=np.float64)
 
+                        # Ensure base covariates are plain float64 to avoid mixed dtypes after concatenation.
+                        X_base = X_base.astype(np.float64, copy=False)
+
+                        # Build reduced and full design matrices as pure float64 arrays.
                         X_red = pd.concat([X_base, A], axis=1).astype(np.float64, copy=False)
                         X_full = X_red.copy()
                         for col in A.columns:
@@ -1031,9 +1036,9 @@ def main():
 
                         varying_interactions = [c for c in interaction_cols if c in X_full.columns]
 
+                        # Fit with hardened numeric design matrices to prevent object-dtype casting errors.
                         fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all)
                         fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all)
-
 
                         p_lrt = np.nan
                         lrt_df = np.nan
