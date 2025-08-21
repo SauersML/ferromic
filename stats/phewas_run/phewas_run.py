@@ -447,6 +447,77 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         # Harden design matrix for numeric stability and emit immediate diagnostics if any non-finite values slip through.
         X_clean = worker_core_df[valid_mask].copy().astype(np.float64, copy=False)
+        try:
+            _X = X_clean.copy()
+            _num_cols = [c for c in _X.columns if pd.api.types.is_numeric_dtype(_X[c])]
+            _X = _X[_num_cols].astype(np.float64, copy=False)
+            _t = TARGET_INVERSION
+            _tvec = _X[_t].to_numpy()
+        
+            # Basic stats for target
+            _u = pd.Series(_tvec).nunique(dropna=False)
+            _mn = float(np.nanmin(_tvec)) if _u > 0 else float('nan')
+            _mx = float(np.nanmax(_tvec)) if _u > 0 else float('nan')
+            _sd = float(np.nanstd(_tvec))
+        
+            # How many unique AGE values? (quadratic degeneracy check)
+            _age_unique = _X['AGE'].nunique(dropna=True) if 'AGE' in _X.columns else np.nan
+            _age_flag = (_age_unique <= 2) if pd.notna(_age_unique) else False
+        
+            # Columns equal/affine to target (exact within float tol)
+            _eq_cols = []
+            for c in _X.columns:
+                if c == _t: 
+                    continue
+                v = _X[c].to_numpy()
+                if np.allclose(v, _tvec, equal_nan=True):
+                    _eq_cols.append(c)
+                else:
+                    A = np.vstack([v, np.ones_like(v)]).T
+                    try:
+                        coef, *_ = np.linalg.lstsq(A, _tvec, rcond=None)
+                        resid = _tvec - (coef[0]*v + coef[1])
+                        if np.nanmax(np.abs(resid)) < 1e-10:
+                            _eq_cols.append(c + "[affine]")
+                    except Exception:
+                        pass
+        
+            # R^2 of target explained by other covariates
+            _others = [c for c in _X.columns if c not in ['const', _t]]
+            _r2 = np.nan
+            if len(_others) > 0:
+                _A = _X[_others].to_numpy()
+                try:
+                    coef, *_ = np.linalg.lstsq(_A, _tvec, rcond=None)
+                    pred = _A.dot(coef)
+                    ss_res = float(np.nansum(( _tvec - pred )**2))
+                    ss_tot = float(np.nansum(( _tvec - np.nanmean(_tvec))**2))
+                    _r2 = 1.0 - (ss_res/ss_tot) if ss_tot > 0 else np.nan
+                except Exception:
+                    pass
+        
+            # Matrix rank & condition number
+            try:
+                _arr = _X.to_numpy()
+                _rank = int(np.linalg.matrix_rank(_arr))
+                _s = np.linalg.svd(_arr, compute_uv=False)
+                _cond = float((_s[0] / _s[-1]) if (_s[-1] != 0) else np.inf)
+            except Exception:
+                _rank = -1
+                _cond = np.nan
+        
+            # Zero-variance columns (after valid_mask)
+            _zv = [c for c in _X.columns if c not in ['const', _t] and pd.Series(_X[c]).nunique(dropna=False) <= 1]
+        
+            # Print concise one-line summary
+            _age_note = " AGE_DEGENERATE(const,AGE,AGE_sq collinear!)" if _age_flag else ""
+            print(f"[DEBUG_COLLINEARITY] {s_name} N={len(_X)} rank={_rank} cond={_cond:.2e} "
+                  f"target_unique={_u} min={_mn:.4g} max={_mx:.4g} sd={_sd:.4g} "
+                  f"R2(target~others)={_r2:.6f} zero_var={_zv} eq_cols={_eq_cols}{_age_note}",
+                  flush=True)
+        except Exception as _e:
+            print(f"[DEBUG_COLLINEARITY] {s_name} failed: {type(_e).__name__}: {_e}", flush=True)
+        
         if not np.isfinite(X_clean.to_numpy()).all():
             bad_cols = [c for c in X_clean.columns if not np.isfinite(X_clean[c].to_numpy()).all()]
             bad_rows_mask = ~np.isfinite(X_clean.to_numpy()).all(axis=1)
