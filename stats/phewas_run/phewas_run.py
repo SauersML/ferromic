@@ -973,7 +973,40 @@ def main():
                             out["EUR_N_Cases"] = n_cases
                             out["EUR_N_Controls"] = n_ctrl
                     follow_rows.append(out)
-
+                    try:
+                        # Structured immediate summary for ancestry follow-up on this phenotype.
+                        lrt_val = out.get('P_LRT_AncestryxDosage')
+                        lrt_str = f"P_LRT={lrt_val:.3e}" if pd.notna(lrt_val) else "P_LRT=nan"
+                        df_val = out.get('LRT_df')
+                        df_str = f"df={int(df_val)}" if pd.notna(df_val) else "df=nan"
+                        levels_str = out.get('LRT_Ancestry_Levels', '')
+                        # Compose per-ancestry snippets in a stable order.
+                        anc_snippets = []
+                        for anc in anc_levels_local:
+                            k_or = f"{anc.upper()}_OR"
+                            k_ci = f"{anc.upper()}_CI95"
+                            or_val = out.get(k_or, np.nan)
+                            ci_val = out.get(k_ci, np.nan)
+                            if pd.isna(or_val):
+                                anc_snippets.append(f"{anc.upper()}: OR=nan")
+                            else:
+                                if isinstance(ci_val, str):
+                                    anc_snippets.append(f"{anc.upper()}: OR={float(or_val):.3f} CI95=({ci_val})")
+                                else:
+                                    anc_snippets.append(f"{anc.upper()}: OR={float(or_val):.3f}")
+                        eur_detail = ""
+                        if 'EUR_P' in out:
+                            eur_p = out['EUR_P']
+                            eur_n = out['EUR_N']
+                            eur_nc = out['EUR_N_Cases']
+                            eur_nctrl = out['EUR_N_Controls']
+                            eur_p_str = f"P={float(eur_p):.3e}" if pd.notna(eur_p) else "P=nan"
+                            eur_detail = f" | EUR N={eur_n} Cases={eur_nc} Controls={eur_nctrl} {eur_p_str}"
+                        print(f"[Ancestry] {s_name} | {lrt_str} {df_str} | Levels={levels_str} | " + " ; ".join(anc_snippets) + eur_detail, flush=True)
+                    except Exception:
+                        # Never allow reporting to break analysis.
+                        pass
+                        
             # Merge follow-up columns into main df so the final CSV includes them for hits.
             if len(follow_rows) > 0:
                 follow_df = pd.DataFrame(follow_rows)
