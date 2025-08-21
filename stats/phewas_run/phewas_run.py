@@ -647,7 +647,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         # First attempt: LBFGS with a higher iteration cap.
         try:
-            fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, maxiter=400, method='lbfgs')
+            fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
             fit = fit_try if _converged(fit_try) else None
         except Exception as e:
             import traceback
@@ -658,7 +658,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         # Second attempt: BFGS with an even higher iteration cap.
         if fit is None:
             try:
-                fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, maxiter=800, method='bfgs')
+                fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
                 fit = fit_try if _converged(fit_try) else None
             except Exception as e:
                 import traceback
@@ -1116,7 +1116,7 @@ def main():
             
                 last_reason = ""
                 try:
-                    fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=400, method='lbfgs')
+                    fit_try = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
                     if _conv(fit_try):
                         return fit_try, ""
                     last_reason = "lbfgs_not_converged"
@@ -1127,7 +1127,7 @@ def main():
                     last_reason = f"lbfgs_exception:{type(e).__name__}:{e}"
             
                 try:
-                    fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=800, method='bfgs')
+                    fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
                     if _conv(fit_try):
                         return fit_try, ""
                     last_reason = "bfgs_not_converged"
@@ -1138,11 +1138,16 @@ def main():
                     last_reason = f"bfgs_exception:{type(e).__name__}:{e}"
             
                 try:
-                    fit_try = sm.Logit(y_arr, X).fit_regularized(method='lbfgs', maxiter=2000, alpha=1.0, L1_wt=0.0)
-                    return fit_try, "regularized_fallback"
+                    fit_try = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=400, tol=1e-8, warn_convergence=True)
+                    if _conv(fit_try):
+                        return fit_try, ""
+                    last_reason = "newton_not_converged"
                 except Exception as e:
-                    return None, (last_reason or f"regularized_exception:{type(e).__name__}")
-
+                    import traceback
+                    print("[TRACEBACK] _safe_fit_logit newton failed:", flush=True)
+                    traceback.print_exc()
+                    last_reason = f"newton_exception:{type(e).__name__}:{e}"
+                return None, last_reason
 
             def _or_ci_pair(fit, coef_name):
                 beta = float(fit.params[coef_name])
