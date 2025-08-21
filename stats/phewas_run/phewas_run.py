@@ -1621,6 +1621,25 @@ def main():
                 follow_df = pd.DataFrame(follow_rows)
                 df = df.merge(follow_df, on="Phenotype", how="left")
 
+                # Compute Benjamini–Hochberg FDR-corrected ancestry-specific p-values using the total number of overall tests.
+                # The adjustment uses m equal to the count of non-NaN overall P_Value entries and applies BH-FDR to each ancestry-specific column.
+                # Padding with 1.0 ensures that the number of hypotheses considered by BH equals the total number of overall tests.
+                m_total = int(pd.to_numeric(df["P_Value"], errors="coerce").notna().sum())
+                ancestry_p_cols = [c for c in df.columns if c.endswith("_P") and c.split("_")[0].isupper()]
+                for pcol in ancestry_p_cols:
+                    p_series = pd.to_numeric(df[pcol], errors="coerce")
+                    observed_mask = p_series.notna()
+                    k = int(observed_mask.sum())
+                    outcol = pcol.replace("_P", "_P_FDR")
+                    if k == 0:
+                        df[outcol] = np.nan
+                        continue
+                    pad_n = max(0, m_total - k)
+                    padded = np.concatenate([p_series.loc[observed_mask].to_numpy(dtype=float), np.ones(pad_n, dtype=float)])
+                    _, p_adj_all, _, _ = multipletests(padded, alpha=FDR_ALPHA, method="fdr_bh")
+                    df[outcol] = np.nan
+                    df.loc[observed_mask, outcol] = p_adj_all[:k]
+
             # Drop legacy column if present.
             if "EUR_P_Source" in df.columns:
                 df = df.drop(columns=["EUR_P_Source"], errors="ignore")
