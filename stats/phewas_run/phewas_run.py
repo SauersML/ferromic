@@ -21,6 +21,19 @@ from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from google.cloud import bigquery
 from statsmodels.stats.multitest import multipletests
 
+warnings.filterwarnings(
+    "ignore",
+    message=r"^overflow encountered in exp",
+    category=RuntimeWarning,
+    module=r"^statsmodels\.discrete\.discrete_model$",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"^divide by zero encountered in log",
+    category=RuntimeWarning,
+    module=r"^statsmodels\.discrete\.discrete_model$",
+)
+
 # --- Configuration ---
 TARGET_INVERSION = 'chr17-45585160-INV-706887'
 PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads/main/data/significant_heritability_diseases.tsv"
@@ -54,6 +67,19 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 worker_core_df = None
 
 def init_worker(df_to_share, masks):
+    import warnings
+    warnings.filterwarnings(
+        "ignore",
+        message=r"^overflow encountered in exp",
+        category=RuntimeWarning,
+        module=r"^statsmodels\.discrete\.discrete_model$",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r"^divide by zero encountered in log",
+        category=RuntimeWarning,
+        module=r"^statsmodels\.discrete\.discrete_model$",
+    )
     """Sends the large core_df and precomputed masks to each worker process once in a read-only fashion."""
     global worker_core_df, allowed_mask_by_cat, N_core
     worker_core_df = df_to_share
