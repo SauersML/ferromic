@@ -705,12 +705,14 @@ def main():
         print("\n--- Consolidating results from atomic files ---")
         all_results_from_disk = []
         for filename in os.listdir(RESULTS_CACHE_DIR):
-            if filename.endswith(".json"):
+            # Only load atomic result files; exclude metadata sidecars.
+            if filename.endswith(".json") and not filename.endswith(".meta.json"):
                 try:
                     result = pd.read_json(os.path.join(RESULTS_CACHE_DIR, filename), typ="series")
                     all_results_from_disk.append(result.to_dict())
                 except Exception as e:
                     print(f"Warning: Could not read corrupted result file: {filename}, Error: {e}")
+
 
         if not all_results_from_disk:
             print("No results found to process.")
@@ -777,7 +779,7 @@ def main():
 
                 if fit_loc is None:
                     try:
-                        fit_loc = sm.Logit(y, X).fit_regularized(method='l-bfgs', maxiter=2000, alpha=1.0, L1_wt=0.0)
+                        fit_loc = sm.Logit(y, X).fit_regularized(method='lbfgs', maxiter=2000, alpha=1.0, L1_wt=0.0)
                     except Exception:
                         fit_loc = None
 
@@ -860,23 +862,44 @@ def main():
                     if 'eur' in anc_levels_local:
                         anc_levels_local = ['eur'] + [a for a in anc_levels_local if a != 'eur']
                     anc_cat = pd.Categorical(anc_vec, categories=anc_levels_local, ordered=False)
-                    A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True)
+                    # Build ancestry design for the LRT. Require at least two ancestry levels to ensure nonzero df.
+                    if len(anc_levels_local) < 2:
+                        A = pd.DataFrame(index=X_base.index)
+                        X_red = X_base.copy()
+                        X_full = X_base.copy()
+                        fit_red = None
+                        fit_full = None
+                        p_lrt = np.nan
+                        lrt_df = np.nan
+                        ancestry_dummy_cols = []
+                        interaction_cols = []
+                        varying_interactions = []
+                    else:
+                        A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True)
 
-                    X_red = pd.concat([X_base, A], axis=1)
-                    X_full = X_red.copy()
-                    for col in A.columns:
-                        X_full[f"{TARGET_INVERSION}:{col}"] = X_full[TARGET_INVERSION] * X_full[col]
+                        X_red = pd.concat([X_base, A], axis=1)
+                        X_full = X_red.copy()
+                        for col in A.columns:
+                            X_full[f"{TARGET_INVERSION}:{col}"] = X_full[TARGET_INVERSION] * X_full[col]
 
-                    fit_red = _safe_fit_logit(X_red, y_all)
-                    fit_full = _safe_fit_logit(X_full, y_all)
+                        ancestry_dummy_cols = list(A.columns)
+                        interaction_cols = [f"{TARGET_INVERSION}:{col}" for col in ancestry_dummy_cols]
+
+                        # Drop zero-variance interaction columns from the full model before fitting.
+                        zero_var_inters = [c for c in interaction_cols if X_full[c].var() == 0]
+                        if len(zero_var_inters) > 0:
+                            X_full = X_full.drop(columns=zero_var_inters)
+
+                        varying_interactions = [c for c in interaction_cols if c in X_full.columns]
+
+                        fit_red = _safe_fit_logit(X_red, y_all)
+                        fit_full = _safe_fit_logit(X_full, y_all)
+
+                        p_lrt = np.nan
+                        lrt_df = np.nan
 
                     lrt_converged_red = False
                     lrt_converged_full = False
-                    p_lrt = np.nan
-                    lrt_df = np.nan
-                    ancestry_dummy_cols = list(A.columns)
-                    interaction_cols = [f"{TARGET_INVERSION}:{col}" for col in ancestry_dummy_cols]
-                    varying_interactions = [c for c in interaction_cols if X_full[c].var() > 0]
 
                     if fit_red is not None:
                         lrt_converged_red = _convergence_flag(fit_red)
@@ -898,16 +921,11 @@ def main():
                         else:
                             print(f"[FollowUp] LRT degrees of freedom computed as zero for phenotype '{s_name}'. Skipping p-value.")
 
-                    # Per-ancestry OR and CI plus EUR p-value and counts.
                     out = {
                         'Phenotype': s_name,
                         'P_LRT_AncestryxDosage': p_lrt,
                         'LRT_df': lrt_df,
-                        'LRT_Converged_Reduced': lrt_converged_red,
-                        'LRT_Converged_Full': lrt_converged_full,
-                        'LRT_Ancestry_Levels': ",".join(anc_levels_local),
-                        'LRT_Ancestry_Dummies': ",".join(ancestry_dummy_cols),
-                        'LRT_Interaction_Cols': ",".join(varying_interactions)
+                        'LRT_Ancestry_Levels': ",".join(anc_levels_local)
                     }
 
                     for anc in anc_levels_local:
