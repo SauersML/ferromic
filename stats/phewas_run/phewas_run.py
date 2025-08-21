@@ -518,7 +518,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         try:
             fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, maxiter=400, method='lbfgs')
             fit = fit_try if _converged(fit_try) else None
-        except Exception:
+        except Exception as e:
+            import traceback
+            print("[TRACEBACK] run_single_model_worker lbfgs failed:", flush=True)
+            traceback.print_exc()
             fit = None
 
         # Second attempt: BFGS with an even higher iteration cap.
@@ -526,7 +529,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             try:
                 fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, maxiter=800, method='bfgs')
                 fit = fit_try if _converged(fit_try) else None
-            except Exception:
+            except Exception as e:
+                import traceback
+                print("[TRACEBACK] run_single_model_worker bfgs failed:", flush=True)
+                traceback.print_exc()
                 fit = None
 
         # If all fitting attempts failed, persist NA result and return.
@@ -693,7 +699,10 @@ def main():
                 )
 
             core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
-            global_notnull_mask = ~core_df_with_const.isna().any(axis=1).to_numpy()
+
+            # Use a non-finite-aware mask to guarantee rows are fully numeric and finite across all covariates.
+            global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
+
             print(f"[Mem] RSS after core covariates assembly: {rss_gb():.2f} GB")
 
             print("[Setup]    - Pre-calculating pan-category case sets...")
@@ -1203,7 +1212,10 @@ def main():
             print(out_df.to_string(index=False))
 
     except Exception as e:
-        print(f"\nSCRIPT HALTED DUE TO A CRITICAL ERROR:\n{e}")
+        import traceback
+        print("\nSCRIPT HALTED DUE TO A CRITICAL ERROR:", flush=True)
+        traceback.print_exc()
+
 
     finally:
         script_duration = time.time() - script_start_time
