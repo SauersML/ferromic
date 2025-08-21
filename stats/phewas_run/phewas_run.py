@@ -529,6 +529,23 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             sys.stderr.flush()
         y_clean = pd.Series(y, index=X_clean.index, name='is_case')
 
+        # The following block prints detailed statistics for the predictor and outcome variables
+        # immediately before model fitting. This is crucial for debugging systematic model failures,
+        # such as observing a standard deviation of zero in the predictor, which would correctly
+        # result in a beta coefficient of zero.
+        try:
+            print(
+                f"\n--- [DEBUG] Pre-fit diagnostics for phenotype '{s_name}' in Worker-{os.getpid()} ---"
+                f"\n[DEBUG] Total rows in design matrix: {len(X_clean):,}"
+                f"\n[DEBUG] Predictor '{target_inversion}' statistics:\n{X_clean[target_inversion].describe().to_string()}"
+                f"\n[DEBUG] Predictor '{target_inversion}' value counts:\n{X_clean[target_inversion].value_counts(dropna=False).to_string()}"
+                f"\n[DEBUG] Outcome 'is_case' value counts:\n{y_clean.value_counts().to_string()}"
+                "\n--- [DEBUG] End of diagnostics ---\n",
+                flush=True
+            )
+        except Exception as diag_e:
+            print(f"[DEBUG] Diagnostic printing failed for '{s_name}': {diag_e}", flush=True)
+
         n_cases = int(y_clean.sum())
         n_ctrls = int(n_total - n_cases)
         if n_cases < MIN_CASES_FILTER or n_ctrls < MIN_CONTROLS_FILTER:
