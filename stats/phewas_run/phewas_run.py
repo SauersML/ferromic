@@ -1542,24 +1542,7 @@ def main():
                         except Exception:
                             out[f"{anc.upper()}_P"] = np.nan
                         out[f"{anc.upper()}_REASON"] = ""
-                            continue
 
-                        conv_g = _convergence_flag(fit_g)
-                        if not conv_g:
-                            print(f"[FollowUp] Per-ancestry model did not converge for phenotype '{s_name}' in ancestry '{anc}'.")
-                        or_val, lo, hi = _or_ci_pair(fit_g, TARGET_INVERSION)
-                        out[f"{anc.upper()}_OR"] = or_val
-                        out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
-                        if anc == 'eur':
-                            try:
-                                eur_p = float(fit_g.pvalues[TARGET_INVERSION])
-                            except Exception:
-                                eur_p = np.nan
-                            out["EUR_P"] = eur_p
-                            out["EUR_P_Source"] = "EUR-only"
-                            out["EUR_N"] = n_tot
-                            out["EUR_N_Cases"] = n_cases
-                            out["EUR_N_Controls"] = n_ctrl
                     follow_rows.append(out)
                     try:
                         # Structured immediate summary for ancestry follow-up on this phenotype.
