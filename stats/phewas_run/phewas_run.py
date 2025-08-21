@@ -810,6 +810,8 @@ def main():
 
             def _build_y_X(valid_mask, case_mask):
                 X = core_df_with_const.loc[valid_mask, base_cols].copy()
+                # Force all covariates to plain float64 for stable numeric behavior across pandas and statsmodels.
+                X = X.astype(np.float64, copy=False)
                 y = np.zeros(X.shape[0], dtype=np.int8)
                 case_positions = np.nonzero(case_mask[valid_mask])[0]
                 if case_positions.size > 0:
@@ -817,13 +819,43 @@ def main():
                 return pd.Series(y, index=X.index, name='is_case'), X
 
             def _safe_fit_logit(X, y):
+                """
+                Fits a logistic regression with robust numeric hygiene.
+                All design matrices are coerced to float64 and validated for finiteness to prevent object-dtype arrays.
+                Returns a tuple of (fit_result or None, reason string).
+                """
+                # Coerce X to DataFrame and ensure numeric dtypes only.
+                if not isinstance(X, pd.DataFrame):
+                    X = pd.DataFrame(X)
+                # Convert any non-numeric columns to numeric, coercing invalid values to NaN for explicit detection.
+                non_numeric_cols = [c for c in X.columns if not pd.api.types.is_numeric_dtype(X[c])]
+                if len(non_numeric_cols) > 0:
+                    X = X.copy()
+                    for c in non_numeric_cols:
+                        X[c] = pd.to_numeric(X[c], errors="coerce")
+                # Upcast to float64 to avoid pandas extension dtypes and mixed dtypes.
+                X = X.astype(np.float64, copy=False)
+            
+                # Validate response vector and coerce to float64 1-D array.
+                y_arr = np.asarray(y, dtype=np.float64).reshape(-1)
+                if y_arr.ndim != 1:
+                    return None, "response_not_1d"
+            
+                # Fail fast on NaN or Inf in design or response.
+                if not np.isfinite(X.to_numpy()).all():
+                    bad_cols = [c for c in X.columns if not np.isfinite(X[c].to_numpy()).all()]
+                    return None, f"non_finite_in_design:{','.join(bad_cols)}"
+                if not np.isfinite(y_arr).all():
+                    return None, "non_finite_in_response"
+            
                 # Drop zero-variance covariates within the current design, but never drop the intercept or target.
                 cols_to_check = [c for c in X.columns if c not in ['const', TARGET_INVERSION]]
-                zvar = [c for c in cols_to_check if X[c].nunique(dropna=False) <= 1]
+                zvar = [c for c in cols_to_check if pd.Series(X[c]).nunique(dropna=False) <= 1]
                 if len(zvar) > 0:
                     X = X.drop(columns=zvar)
+            
                 # If the target inversion dosage is constant within this subset, the effect is not estimable.
-                if X[TARGET_INVERSION].nunique(dropna=False) <= 1:
+                if TARGET_INVERSION not in X.columns or pd.Series(X[TARGET_INVERSION]).nunique(dropna=False) <= 1:
                     return None, "target_constant"
             
                 def _conv(f):
@@ -838,7 +870,7 @@ def main():
             
                 last_reason = ""
                 try:
-                    fit_try = sm.Logit(y, X).fit(disp=0, maxiter=400, method='lbfgs')
+                    fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=400, method='lbfgs')
                     if _conv(fit_try):
                         return fit_try, ""
                     last_reason = "lbfgs_not_converged"
@@ -847,9 +879,9 @@ def main():
                     print("[TRACEBACK] _safe_fit_logit lbfgs failed:", flush=True)
                     traceback.print_exc()
                     last_reason = f"lbfgs_exception:{type(e).__name__}:{e}"
-
+            
                 try:
-                    fit_try = sm.Logit(y, X).fit(disp=0, maxiter=800, method='bfgs')
+                    fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=800, method='bfgs')
                     if _conv(fit_try):
                         return fit_try, ""
                     last_reason = "bfgs_not_converged"
@@ -858,12 +890,13 @@ def main():
                     print("[TRACEBACK] _safe_fit_logit bfgs failed:", flush=True)
                     traceback.print_exc()
                     last_reason = f"bfgs_exception:{type(e).__name__}:{e}"
-
+            
                 try:
-                    fit_try = sm.Logit(y, X).fit_regularized(method='lbfgs', maxiter=2000, alpha=1.0, L1_wt=0.0)
+                    fit_try = sm.Logit(y_arr, X).fit_regularized(method='lbfgs', maxiter=2000, alpha=1.0, L1_wt=0.0)
                     return fit_try, "regularized_fallback"
                 except Exception as e:
                     return None, (last_reason or f"regularized_exception:{type(e).__name__}")
+
 
             def _or_ci_pair(fit, coef_name):
                 beta = float(fit.params[coef_name])
@@ -955,12 +988,13 @@ def main():
                         interaction_cols = []
                         varying_interactions = []
                     else:
-                        A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True)
+                        A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True, dtype=np.float64)
 
-                        X_red = pd.concat([X_base, A], axis=1)
+                        X_red = pd.concat([X_base, A], axis=1).astype(np.float64, copy=False)
                         X_full = X_red.copy()
                         for col in A.columns:
                             X_full[f"{TARGET_INVERSION}:{col}"] = X_full[TARGET_INVERSION] * X_full[col]
+                        X_full = X_full.astype(np.float64, copy=False)
 
                         ancestry_dummy_cols = list(A.columns)
                         interaction_cols = [f"{TARGET_INVERSION}:{col}" for col in ancestry_dummy_cols]
@@ -974,6 +1008,7 @@ def main():
 
                         fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all)
                         fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all)
+
 
                         p_lrt = np.nan
                         lrt_df = np.nan
