@@ -1248,15 +1248,23 @@ def main():
                         if dropped_unknown_anc > 0:
                             print(f"[DEBUG] LRT ancestry_missing_rows phenotype={s_name} dropped={dropped_unknown_anc} base_n_before={len(X_base)}", flush=True)
                         X_base = X_base.loc[keep].astype(np.float64, copy=False)
+                        # make response match the filtered design (critical for shape/index alignment)
+                        y_all = y_all.loc[keep]
+
                         anc_vec_keep = anc_vec.loc[keep]
                         anc_vec_keep = pd.Series(
                             pd.Categorical(anc_vec_keep, categories=anc_levels_local, ordered=False),
-                            index=anc_vec_keep.index
+                            index=anc_vec_keep.index,
+                            name='ANCESTRY'
                         )
                         A = pd.get_dummies(anc_vec_keep, prefix='ANC', drop_first=True, dtype=np.float64)
+                        if not X_base.index.equals(A.index):
+                            print(f"[DEBUG] Forcing ancestry-dummy reindex (base_n={len(X_base)} anc_n={len(A)})", flush=True)
+                            A = A.reindex(X_base.index)
 
                         # Detailed index-alignment diagnostics before concatenation.
                         base_dup = int(X_base.index.duplicated(keep=False).sum())
+
                         anc_dup = int(A.index.duplicated(keep=False).sum())
                         print(f"[DEBUG] LRT index_alignment phenotype={s_name} base_n={len(X_base)} anc_n={len(A)} base_dup={base_dup} anc_dup={anc_dup} base_index_dtype={X_base.index.dtype} anc_index_dtype={A.index.dtype} indices_equal={X_base.index.equals(A.index)}", flush=True)
                         if (not X_base.index.equals(A.index)) or base_dup > 0 or anc_dup > 0:
