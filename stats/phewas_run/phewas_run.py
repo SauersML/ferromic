@@ -869,6 +869,14 @@ def main():
 
             # Align ancestry labels to the core covariate index used in modeling.
             anc_series = ancestry_labels_df.reindex(core_df_with_const.index)["ANCESTRY"].str.lower()
+            # Global ancestry alignment diagnostics to surface upstream issues before per-phenotype tests.
+            total_core = int(len(core_df_with_const.index))
+            known_anc = int(anc_series.notna().sum())
+            missing_anc = total_core - known_anc
+            core_dup = int(core_df_with_const.index.duplicated(keep=False).sum())
+            core_idx_dtype = str(core_df_with_const.index.dtype)
+            anc_levels_global = ",".join(sorted(pd.Series(anc_series.dropna().unique()).astype(str)))
+            print(f"[DEBUG] ancestry_align total_core={total_core} known={known_anc} missing={missing_anc} core_index_dtype={core_idx_dtype} core_index_dup_count={core_dup} levels={anc_levels_global}", flush=True)
             
             # Helper: build y and X matrices given masks, always using PC1–PC10.
             pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
@@ -909,23 +917,57 @@ def main():
             
                 # Fail fast on NaN or Inf in design or response with detailed diagnostics and a full stack trace.
                 if not np.isfinite(X.to_numpy()).all():
-                    bad_cols = [c for c in X.columns if not np.isfinite(X[c].to_numpy()).all()]
-                    bad_rows_mask = ~np.isfinite(X.to_numpy()).all(axis=1)
-                    bad_rows_idx = X.index[bad_rows_mask][:10].tolist()
                     import traceback, sys
+                    arr = X.to_numpy()
+                    bad_rows_mask = ~np.isfinite(arr).all(axis=1)
+                    bad_row_count = int(bad_rows_mask.sum())
+
+                    # Column-level diagnostics: NaN, +Inf, -Inf counts.
+                    nan_counts = {c: int(pd.isna(X[c]).sum()) for c in X.columns}
+                    posinf_counts = {c: int(np.isposinf(X[c].to_numpy()).sum()) for c in X.columns}
+                    neginf_counts = {c: int(np.isneginf(X[c].to_numpy()).sum()) for c in X.columns}
+
+                    # Partition diagnostics to pinpoint source when ancestry dummies are present.
+                    anc_cols = [c for c in X.columns if c.startswith('ANC_')]
+                    inter_cols = [c for c in X.columns if f"{TARGET_INVERSION}:" in c]
+                    base_cols = [c for c in X.columns if c not in anc_cols + inter_cols]
+
+                    def _allfinite_block(cols):
+                        if len(cols) == 0:
+                            return np.ones(len(X), dtype=bool)
+                        return np.isfinite(X[cols].to_numpy()).all(axis=1)
+
+                    only_anc = bad_rows_mask & _allfinite_block(base_cols) & (~_allfinite_block(anc_cols))
+                    only_base = bad_rows_mask & (~_allfinite_block(base_cols)) & _allfinite_block(anc_cols)
+                    both_blocks = bad_rows_mask & (~_allfinite_block(base_cols)) & (~_allfinite_block(anc_cols))
+
+                    # Index diagnostics.
+                    dup_count = int(X.index.duplicated(keep=False).sum())
+                    idx_dtype = str(X.index.dtype)
+                    sample_bad = list(map(str, X.index[bad_rows_mask][:5].tolist()))
+
                     print("[TRACEBACK] _safe_fit_logit detected non-finite values in design matrix", flush=True)
-                    print(f"[DEBUG] non_finite_columns={','.join(bad_cols)} bad_row_count={int(bad_rows_mask.sum())} sample_rows={bad_rows_idx}", flush=True)
+                    print(f"[DEBUG] design_shape={X.shape} index_dtype={idx_dtype} index_dup_count={dup_count}", flush=True)
+                    print(f"[DEBUG] bad_row_count={bad_row_count} bad_rows_only_anc={int(only_anc.sum())} bad_rows_only_base={int(only_base.sum())} bad_rows_both_blocks={int(both_blocks.sum())}", flush=True)
+                    print(f"[DEBUG] non_finite_columns={','.join([c for c in X.columns if nan_counts[c]>0 or posinf_counts[c]>0 or neginf_counts[c]>0])}", flush=True)
+                    print(f"[DEBUG] nan_counts={{{', '.join([f'{k}:{v}' for k,v in nan_counts.items() if v>0])}}}", flush=True)
+                    print(f"[DEBUG] posinf_counts={{{', '.join([f'{k}:{v}' for k,v in posinf_counts.items() if v>0])}}}", flush=True)
+                    print(f"[DEBUG] neginf_counts={{{', '.join([f'{k}:{v}' for k,v in neginf_counts.items() if v>0])}}}", flush=True)
+                    if bad_row_count > 0:
+                        print(f"[DEBUG] bad_row_index_sample={','.join(sample_bad)}", flush=True)
                     traceback.print_stack()
                     sys.stderr.flush()
-                    return None, f"non_finite_in_design:{','.join(bad_cols)}"
-
+                    return None, "non_finite_in_design"
                 if not np.isfinite(y_arr).all():
                     import traceback, sys
+                    y_nan = int(np.isnan(y_arr).sum())
+                    y_posinf = int(np.isposinf(y_arr).sum())
+                    y_neginf = int(np.isneginf(y_arr).sum())
                     print("[TRACEBACK] _safe_fit_logit detected non-finite values in response vector", flush=True)
+                    print(f"[DEBUG] y_nan={y_nan} y_posinf={y_posinf} y_neginf={y_neginf} y_len={len(y_arr)}", flush=True)
                     traceback.print_stack()
                     sys.stderr.flush()
                     return None, "non_finite_in_response"
-
             
                 # Drop zero-variance covariates within the current design, but never drop the intercept or target.
                 cols_to_check = [c for c in X.columns if c not in ['const', TARGET_INVERSION]]
@@ -1068,13 +1110,35 @@ def main():
                         varying_interactions = []
                     else:
                         # Encode ancestry as numeric dummy variables with a plain NumPy dtype.
-                        A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True, dtype=np.float64)
+                        # Restrict to rows with known ancestry and enforce exact index alignment to avoid NaNs from outer alignment.
+                        keep = anc_vec.notna()
+                        dropped_unknown_anc = int((~keep).sum())
+                        if dropped_unknown_anc > 0:
+                            print(f"[DEBUG] LRT ancestry_missing_rows phenotype={s_name} dropped={dropped_unknown_anc} base_n_before={len(X_base)}", flush=True)
+                        X_base = X_base.loc[keep].astype(np.float64, copy=False)
+                        anc_vec_keep = anc_vec.loc[keep]
+                        A = pd.get_dummies(pd.Categorical(anc_vec_keep, categories=anc_levels_local, ordered=False),
+                                           prefix='ANC', drop_first=True, dtype=np.float64)
+                        # Detailed index-alignment diagnostics before concatenation.
+                        base_dup = int(X_base.index.duplicated(keep=False).sum())
+                        anc_dup = int(A.index.duplicated(keep=False).sum())
+                        print(f"[DEBUG] LRT index_alignment phenotype={s_name} base_n={len(X_base)} anc_n={len(A)} base_dup={base_dup} anc_dup={anc_dup} base_index_dtype={X_base.index.dtype} anc_index_dtype={A.index.dtype} indices_equal={X_base.index.equals(A.index)}", flush=True)
+                        if (not X_base.index.equals(A.index)) or base_dup > 0 or anc_dup > 0:
+                            import traceback, sys
+                            print("[TRACEBACK] LRT index mismatch or duplicates detected during ancestry design assembly", flush=True)
+                            traceback.print_stack()
+                            sys.stderr.flush()
 
-                        # Ensure base covariates are plain float64 to avoid mixed dtypes after concatenation.
-                        X_base = X_base.astype(np.float64, copy=False)
+                        # Build reduced and full design matrices with inner alignment to prevent NaNs from misalignment.
+                        X_red = pd.concat([X_base, A], axis=1, join='inner').astype(np.float64, copy=False)
+                        lost_rows = len(X_base) - len(X_red)
+                        if lost_rows != 0:
+                            import traceback, sys
+                            print(f"[DEBUG] LRT concat_inner_rows_lost phenotype={s_name} lost={lost_rows}", flush=True)
+                            print("[TRACEBACK] LRT inner-join dropped rows while aligning ancestry dummies with base covariates", flush=True)
+                            traceback.print_stack()
+                            sys.stderr.flush()
 
-                        # Build reduced and full design matrices as pure float64 arrays.
-                        X_red = pd.concat([X_base, A], axis=1).astype(np.float64, copy=False)
                         X_full = X_red.copy()
                         for col in A.columns:
                             X_full[f"{TARGET_INVERSION}:{col}"] = X_full[TARGET_INVERSION] * X_full[col]
