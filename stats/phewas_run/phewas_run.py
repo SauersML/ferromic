@@ -1121,7 +1121,7 @@ def main():
                     y[case_positions] = 1
                 return pd.Series(y, index=X.index, name='is_case'), X
 
-            def _safe_fit_logit(X, y, allow_sex_handling=True):
+            def _safe_fit_logit(X, y, allow_sex_handling=True, require_target=True):
                 """
                 Fits a logistic regression with robust numeric hygiene and automatic stabilization:
                 1) Enforces numeric, finite design; drops zero-variance columns except intercept and target.
@@ -1132,7 +1132,15 @@ def main():
                 Returns a tuple of (fit_result or None, reason string). When a fit object is returned, it may include:
                     fit._model_note  -> textual note describing the stabilization path taken
                     fit._used_ridge  -> boolean flag indicating whether a ridge step was required
+            
+                Parameters
+                ----------
+                allow_sex_handling : bool
+                    When True, performs sex-by-case separation diagnostics and restricts or drops the sex column to avoid perfect separation.
+                require_target : bool
+                    When True, enforces that the design matrix contains a non-constant TARGET_INVERSION column. When False, skips this check to allow reduced models that intentionally omit the target.
                 """
+
                 # Coerce X to DataFrame and ensure numeric dtypes only.
                 if not isinstance(X, pd.DataFrame):
                     X = pd.DataFrame(X)
@@ -1213,9 +1221,10 @@ def main():
                 if len(zvar) > 0:
                     X = X.drop(columns=zvar)
 
-                # If the target inversion dosage is constant within this subset, the effect is not estimable.
-                if TARGET_INVERSION not in X.columns or pd.Series(X[TARGET_INVERSION]).nunique(dropna=False) <= 1:
-                    return None, "target_constant"
+                # If require_target is True, enforce presence and variability of the target inversion dosage; otherwise skip this check to allow reduced models that purposefully omit the target.
+                if require_target:
+                    if TARGET_INVERSION not in X.columns or pd.Series(X[TARGET_INVERSION]).nunique(dropna=False) <= 1:
+                        return None, "target_constant"
 
                 # Detect and handle sex-by-case separation without prior knowledge.
                 model_notes = []
@@ -1437,9 +1446,8 @@ def main():
                 X_full = X_base.copy()
                 X_red = X_base.drop(columns=[TARGET_INVERSION])
 
-                fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all, allow_sex_handling=False)
-                fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all, allow_sex_handling=False)
-
+                fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all, allow_sex_handling=False, require_target=False)
+                fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all, allow_sex_handling=False, require_target=True)
 
                 ridge_only_flag = False
                 if (fit_red is not None) and hasattr(fit_red, "_model_note") and isinstance(fit_red._model_note, str):
