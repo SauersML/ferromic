@@ -418,7 +418,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     case_idx = pheno_data["case_idx"]
     result_path = os.path.join(results_cache_dir, f"{s_name}.json")
     meta_path = result_path + ".meta.json"
-    case_idx_fp = _bytes_fp(case_idx.tobytes())
+    # Order-insensitive fingerprint of the case set based on person_id values to ensure stable caching across runs.
+    case_ids_for_fp = worker_core_df.index[case_idx] if case_idx.size > 0 else pd.Index([], name=worker_core_df.index.name)
+    case_idx_fp = _index_fingerprint(case_ids_for_fp)
     if os.path.exists(result_path) and _should_skip(meta_path, worker_core_df, case_idx_fp, category, target_inversion):
         return
 
