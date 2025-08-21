@@ -479,7 +479,6 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 return False
 
         fit = None
-        ridge_used = False
 
         # First attempt: LBFGS with a higher iteration cap.
         try:
@@ -527,7 +526,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         beta = float(fit.params[target_inversion])
         try:
-            pval = float(fit.pvalues[target_inversion]) if not ridge_used else float('nan')
+            pval = float(fit.pvalues[target_inversion])
         except Exception:
             pval = float('nan')
 
@@ -730,15 +729,21 @@ def main():
         # --- PART 3: CONSOLIDATE & ANALYZE RESULTS ---
         print("\n--- Consolidating results from atomic files ---")
         all_results_from_disk = []
-        for filename in os.listdir(RESULTS_CACHE_DIR):
-            # Only load atomic result files; exclude metadata sidecars.
-            if filename.endswith(".json") and not filename.endswith(".meta.json"):
-                try:
-                    result = pd.read_json(os.path.join(RESULTS_CACHE_DIR, filename), typ="series")
-                    all_results_from_disk.append(result.to_dict())
-                except Exception as e:
-                    print(f"Warning: Could not read corrupted result file: {filename}, Error: {e}")
-
+        result_files = [f for f in os.listdir(RESULTS_CACHE_DIR) if f.endswith(".json") and not f.endswith(".meta.json")]
+        total_files = len(result_files)
+        bar_len = 30
+        for i, filename in enumerate(result_files, start=1):
+            try:
+                result = pd.read_json(os.path.join(RESULTS_CACHE_DIR, filename), typ="series")
+                all_results_from_disk.append(result.to_dict())
+            except Exception as e:
+                print(f"Warning: Could not read corrupted result file: {filename}, Error: {e}")
+            filled = int(bar_len * i / total_files) if total_files > 0 else bar_len
+            bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+            pct = int(i * 100 / total_files) if total_files > 0 else 100
+            print(f"\r[Consolidate] {bar} {i}/{total_files} ({pct}%)", end="", flush=True)
+        if total_files > 0:
+            print("")
 
         if not all_results_from_disk:
             print("No results found to process.")
@@ -755,7 +760,7 @@ def main():
             from scipy import stats
 
             # Align ancestry labels to the core covariate index used in modeling.
-            anc_series = ancestry_labels_df.reindex(core_df_with_const.index)["ANCESTRY"]
+            anc_series = ancestry_labels_df.reindex(core_df_with_const.index)["ANCESTRY"].str.lower()
             
             # Helper: build y and X matrices given masks, always using PC1–PC10.
             pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
