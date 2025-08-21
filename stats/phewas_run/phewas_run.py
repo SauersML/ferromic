@@ -394,9 +394,11 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, categor
 
         print(f"[Fetcher]  - Caching {len(case_idx):,} new cases for '{s_name}'", flush=True)
         pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
-        df_to_cache = pd.DataFrame(index=core_index[case_idx], data={'is_case': 1}, dtype=np.int8)
-        df_to_cache.index.name = 'person_id'
+        # Cache the full set of case person_ids from BQ (not just the current core intersection)
+        pids_for_cache = pd.Index(pids if 'pids' in locals() else [], dtype=str, name='person_id')
+        df_to_cache = pd.DataFrame({'is_case': 1}, index=pids_for_cache, dtype=np.int8)
         df_to_cache.to_parquet(pheno_cache_path)
+
 
         pheno_queue.put({"name": s_name, "category": category, "case_idx": case_idx})
 
@@ -460,9 +462,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             _X = X_clean.copy()
             _num_cols = [c for c in _X.columns if pd.api.types.is_numeric_dtype(_X[c])]
             _X = _X[_num_cols].astype(np.float64, copy=False)
-            _t = TARGET_INVERSION
+            _t = target_inversion
             _tvec = _X[_t].to_numpy()
-        
+
             # Basic stats for target
             _u = pd.Series(_tvec).nunique(dropna=False)
             _mn = float(np.nanmin(_tvec)) if _u > 0 else float('nan')
@@ -892,27 +894,14 @@ def main():
             core_df = core_df[covariate_cols]
             core_df_with_const = sm.add_constant(core_df, prepend=True)
 
-            # This block calculates and prints the condition number of the design matrix both with and
-            # without the 'AGE_sq' term. A high condition number (e.g., > 1,000) indicates severe
-            # multicollinearity, which can lead to numerically unstable model fits. A dramatic increase
-            # in this number upon adding 'AGE_sq' would confirm it as the source of the instability.
             print("\n--- [DIAGNOSTIC] Testing matrix condition number ---")
             try:
-                # Define columns for a model that excludes the squared term. This model is expected to be numerically stable.
-                stable_cols = ['const', 'sex', 'AGE', TARGET_INVERSION] + [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-                # Drop any rows with NA values before computing the condition number to avoid errors.
-                stable_matrix = core_df_with_const[stable_cols].dropna().to_numpy()
-                stable_cond = np.linalg.cond(stable_matrix)
-                print(f"[DIAGNOSTIC] Condition number WITHOUT AGE_sq: {stable_cond:,.2f}")
-
-                # Define columns for the full model as used in the workers. This model is hypothesized to be unstable.
-                unstable_cols = ['const', 'sex', 'AGE', 'AGE_sq', TARGET_INVERSION] + [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-                # Drop any rows with NA values before computing the condition number.
-                unstable_matrix = core_df_with_const[unstable_cols].dropna().to_numpy()
-                unstable_cond = np.linalg.cond(unstable_matrix)
-                print(f"[DIAGNOSTIC] Condition number WITH AGE_sq:    {unstable_cond:,.2e}")
+                cols = ['const', 'sex', 'AGE', TARGET_INVERSION] + [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+                mat = core_df_with_const[cols].dropna().to_numpy()
+                cond = np.linalg.cond(mat)
+                print(f"[DIAGNOSTIC] Condition number (current model cols): {cond:,.2f}")
             except Exception as e:
-                print(f"[DIAGNOSTIC] Could not compute condition numbers. Error: {e}")
+                print(f"[DIAGNOSTIC] Could not compute condition number. Error: {e}")
             print("--- [DIAGNOSTIC] End of test ---\n")
 
             del core_df, demographics_df, inversion_df, pc_df
