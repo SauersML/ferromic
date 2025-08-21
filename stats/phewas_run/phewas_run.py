@@ -20,6 +20,20 @@ import statsmodels.api as sm
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from google.cloud import bigquery
 from statsmodels.stats.multitest import multipletests
+import faulthandler
+faulthandler.enable()
+
+def _global_excepthook(exc_type, exc, tb):
+    """
+    Uncaught exception hook that prints a full stack trace immediately across threads and subprocesses.
+    """
+    import traceback, sys
+    print("[TRACEBACK] Uncaught exception:", flush=True)
+    traceback.print_exception(exc_type, exc, tb)
+    sys.stderr.flush()
+
+import sys
+sys.excepthook = _global_excepthook
 
 warnings.filterwarnings(
     "ignore",
@@ -410,9 +424,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if case_idx.size > 0:
             case_mask[case_idx] = True
 
-        # Ensure modeling matrix contains no missing covariates by applying a non-null mask.
-        nonnull_mask = ~worker_core_df.isna().any(axis=1).to_numpy()
-        valid_mask = (allowed_mask_by_cat[category] | case_mask) & nonnull_mask
+        # Ensure modeling matrix contains only finite values across all covariates to prevent silent NaN/Inf propagation.
+        finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
+        valid_mask = (allowed_mask_by_cat[category] | case_mask) & finite_mask_worker
+
 
         n_total = int(valid_mask.sum())
         if n_total == 0:
@@ -875,12 +890,24 @@ def main():
                 if y_arr.ndim != 1:
                     return None, "response_not_1d"
             
-                # Fail fast on NaN or Inf in design or response.
+                # Fail fast on NaN or Inf in design or response with detailed diagnostics and a full stack trace.
                 if not np.isfinite(X.to_numpy()).all():
                     bad_cols = [c for c in X.columns if not np.isfinite(X[c].to_numpy()).all()]
+                    bad_rows_mask = ~np.isfinite(X.to_numpy()).all(axis=1)
+                    bad_row_count = int(bad_rows_mask.sum())
+                    import traceback, sys
+                    print("[TRACEBACK] _safe_fit_logit detected non-finite values in design matrix", flush=True)
+                    print(f"[DEBUG] non_finite_columns={','.join(bad_cols)} bad_row_count={bad_row_count}", flush=True)
+                    traceback.print_stack()
+                    sys.stderr.flush()
                     return None, f"non_finite_in_design:{','.join(bad_cols)}"
                 if not np.isfinite(y_arr).all():
+                    import traceback, sys
+                    print("[TRACEBACK] _safe_fit_logit detected non-finite values in response vector", flush=True)
+                    traceback.print_stack()
+                    sys.stderr.flush()
                     return None, "non_finite_in_response"
+
             
                 # Drop zero-variance covariates within the current design, but never drop the intercept or target.
                 cols_to_check = [c for c in X.columns if c not in ['const', TARGET_INVERSION]]
