@@ -824,8 +824,8 @@ def main():
                     X = X.drop(columns=zvar)
                 # If the target inversion dosage is constant within this subset, the effect is not estimable.
                 if X[TARGET_INVERSION].nunique(dropna=False) <= 1:
-                    return None
-
+                    return None, "target_constant"
+            
                 def _conv(f):
                     try:
                         if hasattr(f, "mle_retvals") and isinstance(f.mle_retvals, dict):
@@ -835,28 +835,29 @@ def main():
                         return False
                     except Exception:
                         return False
-
-                fit_loc = None
+            
+                last_reason = ""
                 try:
                     fit_try = sm.Logit(y, X).fit(disp=0, maxiter=400, method='lbfgs')
-                    fit_loc = fit_try if _conv(fit_try) else None
-                except Exception:
-                    fit_loc = None
-
-                if fit_loc is None:
-                    try:
-                        fit_try = sm.Logit(y, X).fit(disp=0, maxiter=800, method='bfgs')
-                        fit_loc = fit_try if _conv(fit_try) else None
-                    except Exception:
-                        fit_loc = None
-
-                if fit_loc is None:
-                    try:
-                        fit_loc = sm.Logit(y, X).fit_regularized(method='lbfgs', maxiter=2000, alpha=1.0, L1_wt=0.0)
-                    except Exception:
-                        fit_loc = None
-
-                return fit_loc
+                    if _conv(fit_try):
+                        return fit_try, ""
+                    last_reason = "lbfgs_not_converged"
+                except Exception as e:
+                    last_reason = f"lbfgs_exception:{type(e).__name__}"
+            
+                try:
+                    fit_try = sm.Logit(y, X).fit(disp=0, maxiter=800, method='bfgs')
+                    if _conv(fit_try):
+                        return fit_try, ""
+                    last_reason = "bfgs_not_converged"
+                except Exception as e:
+                    last_reason = f"bfgs_exception:{type(e).__name__}"
+            
+                try:
+                    fit_try = sm.Logit(y, X).fit_regularized(method='lbfgs', maxiter=2000, alpha=1.0, L1_wt=0.0)
+                    return fit_try, "regularized_fallback"
+                except Exception as e:
+                    return None, (last_reason or f"regularized_exception:{type(e).__name__}")
 
             def _or_ci_pair(fit, coef_name):
                 beta = float(fit.params[coef_name])
@@ -965,8 +966,8 @@ def main():
 
                         varying_interactions = [c for c in interaction_cols if c in X_full.columns]
 
-                        fit_red = _safe_fit_logit(X_red, y_all)
-                        fit_full = _safe_fit_logit(X_full, y_all)
+                        fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all)
+                        fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all)
 
                         p_lrt = np.nan
                         lrt_df = np.nan
@@ -999,9 +1000,9 @@ def main():
                     if len(anc_levels_local) < 2:
                         lrt_reason.append("only_one_ancestry_level")
                     elif fit_red is None:
-                        lrt_reason.append("reduced_model_failed")
+                        lrt_reason.append(f"reduced_model_failed:{fit_red_reason}")
                     elif fit_full is None:
-                        lrt_reason.append("full_model_failed")
+                        lrt_reason.append(f"full_model_failed:{fit_full_reason}")
                     elif not pd.notna(lrt_df) or int(lrt_df) == 0:
                         lrt_reason.append("no_interaction_df")
                     elif (fit_red is not None) and (fit_full is not None) and (fit_full.llf < fit_red.llf):
@@ -1033,12 +1034,13 @@ def main():
                         n_cases = int(y_g.sum())
                         n_tot = int(len(y_g))
                         n_ctrl = n_tot - n_cases
-                        fit_g = _safe_fit_logit(X_g, y_g)
-
+                        fit_g, fit_g_reason = _safe_fit_logit(X_g, y_g)
+                        
                         if fit_g is None or TARGET_INVERSION not in fit_g.params:
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
-                            out[f"{anc.upper()}_REASON"] = "subset_fit_failed" if fit_g is None else "coef_missing"
+                            out[f"{anc.upper()}_REASON"] = ("subset_fit_failed" + (f":{fit_g_reason}" if fit_g_reason else "")) if fit_g is None else "coef_missing"
+
                             if anc == 'eur':
                                 out["EUR_P"] = np.nan
                                 out["EUR_P_Source"] = "EUR-only"
