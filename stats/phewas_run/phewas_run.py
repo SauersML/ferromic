@@ -651,7 +651,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             fit = fit_try if _converged(fit_try) else None
         except Exception as e:
             import traceback
-            print("[TRACEBACK] run_single_model_worker lbfgs failed:", flush=True)
+            print("[TRACEBACK] run_single_model_worker newton failed:", flush=True)
             traceback.print_exc()
             fit = None
 
@@ -1124,7 +1124,7 @@ def main():
                     last_reason = "lbfgs_not_converged"
                 except Exception as e:
                     import traceback
-                    print("[TRACEBACK] _safe_fit_logit lbfgs failed:", flush=True)
+                    print("[TRACEBACK] _safe_fit_logit newton failed:", flush=True)
                     traceback.print_exc()
                     last_reason = f"lbfgs_exception:{type(e).__name__}:{e}"
             
@@ -1249,8 +1249,12 @@ def main():
                             print(f"[DEBUG] LRT ancestry_missing_rows phenotype={s_name} dropped={dropped_unknown_anc} base_n_before={len(X_base)}", flush=True)
                         X_base = X_base.loc[keep].astype(np.float64, copy=False)
                         anc_vec_keep = anc_vec.loc[keep]
-                        A = pd.get_dummies(pd.Categorical(anc_vec_keep, categories=anc_levels_local, ordered=False),
-                                           prefix='ANC', drop_first=True, dtype=np.float64)
+                        anc_vec_keep = pd.Series(
+                            pd.Categorical(anc_vec_keep, categories=anc_levels_local, ordered=False),
+                            index=anc_vec_keep.index
+                        )
+                        A = pd.get_dummies(anc_vec_keep, prefix='ANC', drop_first=True, dtype=np.float64)
+
                         # Detailed index-alignment diagnostics before concatenation.
                         base_dup = int(X_base.index.duplicated(keep=False).sum())
                         anc_dup = int(A.index.duplicated(keep=False).sum())
