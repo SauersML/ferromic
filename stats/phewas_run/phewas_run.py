@@ -645,7 +645,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         fit = None
 
-        # First attempt: LBFGS with a higher iteration cap.
+        # First attempt: Newton-Raphson with a higher iteration cap.
         try:
             fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
             fit = fit_try if _converged(fit_try) else None
@@ -1006,7 +1006,8 @@ def main():
             
             # Helper: build y and X matrices given masks, always using PC1–PC10.
             pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-            base_cols = ['const', TARGET_INVERSION, 'sex'] + pc_cols + ['AGE', 'AGE_sq']
+            # base_cols = ['const', TARGET_INVERSION, 'sex'] + pc_cols + ['AGE', 'AGE_sq']
+            base_cols = ['const', TARGET_INVERSION, 'sex'] + pc_cols + ['AGE']
 
             def _build_y_X(valid_mask, case_mask):
                 X = core_df_with_const.loc[valid_mask, base_cols].copy()
