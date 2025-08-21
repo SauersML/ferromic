@@ -416,6 +416,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         n_total = int(valid_mask.sum())
         if n_total == 0:
+            print(f"[Worker-{os.getpid()}] - [SKIP] {s_name:<40s} | Reason=no_valid_rows_after_mask", flush=True)
             return
 
         # Construct response aligned to valid rows.
@@ -430,7 +431,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         n_cases = int(y_clean.sum())
         n_ctrls = int(n_total - n_cases)
         if n_cases < MIN_CASES_FILTER or n_ctrls < MIN_CONTROLS_FILTER:
+            print(f"[Worker-{os.getpid()}] - [SKIP] {s_name:<40s} | N={n_total:,} Cases={n_cases:,} Ctrls={n_ctrls:,} | Reason=insufficient_cases_or_controls", flush=True)
             return
+
 
         # Drop any zero-variance covariates within the valid set, but never drop the intercept or target.
         drop_candidates = [c for c in X_clean.columns if c not in ('const', target_inversion)]
@@ -464,7 +467,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "case_idx_fp": case_idx_fp,
                 "created_at": datetime.utcnow().isoformat() + "Z",
             })
-            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan", flush=True)
+            uvals = X_clean[target_inversion].dropna().unique().tolist()
+            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan | CONSTANT_DOSAGE unique_values={uvals}", flush=True)
             return
 
         # Helper to check convergence across statsmodels fit result variants.
@@ -521,14 +525,22 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "case_idx_fp": case_idx_fp,
                 "created_at": datetime.utcnow().isoformat() + "Z",
             })
-            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan", flush=True)
+            what = "MODEL_DID_NOT_CONVERGE" if fit is None else "COEFFICIENT_MISSING_IN_FIT_PARAMS"
+            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan | {what} (attempts=lbfgs,bfgs)", flush=True)
             return
+
 
         beta = float(fit.params[target_inversion])
         try:
             pval = float(fit.pvalues[target_inversion])
-        except Exception:
+            pval_reason = ""
+        except Exception as e:
             pval = float('nan')
+            pval_reason = f"pvalue_unavailable({type(e).__name__})"
+        
+        suffix = f" | P_CAUSE={pval_reason}" if (not np.isfinite(pval) and pval_reason) else ""
+        print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta={beta:+.3f} | OR={np.exp(beta):.3f} | P={pval:.2e}{suffix}", flush=True)
+
 
         print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta={beta:+.3f} | OR={np.exp(beta):.3f} | P={pval:.2e}", flush=True)
 
@@ -952,18 +964,33 @@ def main():
                         else:
                             print(f"[FollowUp] LRT degrees of freedom computed as zero for phenotype '{s_name}'. Skipping p-value.")
 
+                    # --- Reason for NaN LRT ---
+                    lrt_reason = []
+                    if len(anc_levels_local) < 2:
+                        lrt_reason.append("only_one_ancestry_level")
+                    elif fit_red is None:
+                        lrt_reason.append("reduced_model_failed")
+                    elif fit_full is None:
+                        lrt_reason.append("full_model_failed")
+                    elif not pd.notna(lrt_df) or int(lrt_df) == 0:
+                        lrt_reason.append("no_interaction_df")
+                    elif (fit_red is not None) and (fit_full is not None) and (fit_full.llf < fit_red.llf):
+                        lrt_reason.append("full_llf_below_reduced_llf")
+                    lrt_reason_str = ";".join(lrt_reason) if lrt_reason else ""
+                    
                     out = {
                         'Phenotype': s_name,
                         'P_LRT_AncestryxDosage': p_lrt,
                         'LRT_df': lrt_df,
-                        'LRT_Ancestry_Levels': ",".join(anc_levels_local)
+                        'LRT_Ancestry_Levels': ",".join(anc_levels_local),
+                        'LRT_Reason': lrt_reason_str
                     }
-
                     for anc in anc_levels_local:
                         group_mask = valid_mask_all & anc_series.eq(anc).reindex(core_df_with_const.index).fillna(False).to_numpy()
                         if not group_mask.any():
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
+                            out[f"{anc.upper()}_REASON"] = "no_rows_in_group"
                             if anc == 'eur':
                                 out["EUR_P"] = np.nan
                                 out["EUR_P_Source"] = "EUR-only"
@@ -971,6 +998,7 @@ def main():
                                 out["EUR_N_Cases"] = 0
                                 out["EUR_N_Controls"] = 0
                             continue
+
                         y_g, X_g = _build_y_X(group_mask, case_mask)
                         n_cases = int(y_g.sum())
                         n_tot = int(len(y_g))
@@ -980,6 +1008,7 @@ def main():
                         if fit_g is None or TARGET_INVERSION not in fit_g.params:
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
+                            out[f"{anc.upper()}_REASON"] = "subset_fit_failed" if fit_g is None else "coef_missing"
                             if anc == 'eur':
                                 out["EUR_P"] = np.nan
                                 out["EUR_P_Source"] = "EUR-only"
@@ -987,6 +1016,7 @@ def main():
                                 out["EUR_N_Cases"] = n_cases
                                 out["EUR_N_Controls"] = n_ctrl
                             continue
+
                         conv_g = _convergence_flag(fit_g)
                         if not conv_g:
                             print(f"[FollowUp] Per-ancestry model did not converge for phenotype '{s_name}' in ancestry '{anc}'.")
@@ -1019,12 +1049,15 @@ def main():
                             or_val = out.get(k_or, np.nan)
                             ci_val = out.get(k_ci, np.nan)
                             if pd.isna(or_val):
-                                anc_snippets.append(f"{anc.upper()}: OR=nan")
+                                reason = out.get(f"{anc.upper()}_REASON", "")
+                                rs = f" REASON={reason}" if reason else ""
+                                anc_snippets.append(f"{anc.upper()}: OR=nan{rs}")
                             else:
                                 if isinstance(ci_val, str):
                                     anc_snippets.append(f"{anc.upper()}: OR={float(or_val):.3f} CI95=({ci_val})")
                                 else:
                                     anc_snippets.append(f"{anc.upper()}: OR={float(or_val):.3f}")
+
                         eur_detail = ""
                         if 'EUR_P' in out:
                             eur_p = out['EUR_P']
@@ -1033,7 +1066,8 @@ def main():
                             eur_nctrl = out['EUR_N_Controls']
                             eur_p_str = f"P={float(eur_p):.3e}" if pd.notna(eur_p) else "P=nan"
                             eur_detail = f" | EUR N={eur_n} Cases={eur_nc} Controls={eur_nctrl} {eur_p_str}"
-                        print(f"[Ancestry] {s_name} | {lrt_str} {df_str} | Levels={levels_str} | " + " ; ".join(anc_snippets) + eur_detail, flush=True)
+                        reason_suffix = f" | LRT_REASON={out.get('LRT_Reason','')}" if (not pd.notna(lrt_val) or not pd.notna(df_val)) else ""
+                        print(f"[Ancestry] {s_name} | {lrt_str} {df_str}{reason_suffix} | Levels={levels_str} | " + " ; ".join(anc_snippets) + eur_detail, flush=True)
                     except Exception:
                         # Never allow reporting to break analysis.
                         pass
