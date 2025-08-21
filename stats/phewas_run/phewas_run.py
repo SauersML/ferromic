@@ -1304,7 +1304,8 @@ def main():
             print(f"\n--- Saving final results to '{output_filename}' ---")
             df.to_csv(output_filename, index=False)
 
-            out_df = df.copy()
+            # Filter for FDR-significant results before printing
+            out_df = df[df['Sig_FDR'] == True].copy()
 
             # Format integer-like counts safely; print blanks when values are missing.
             for col in ["N_Total", "N_Cases", "N_Controls"]:
