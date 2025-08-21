@@ -75,6 +75,15 @@ MIN_CASES_FILTER = 1000
 MIN_CONTROLS_FILTER = 500
 FDR_ALPHA = 0.05
 
+# --- Per-ancestry thresholds and multiple-testing for ancestry splits ---
+PER_ANC_MIN_CASES = 50
+PER_ANC_MIN_CONTROLS = 50
+ANCESTRY_ALPHA = 0.05
+ANCESTRY_P_ADJ_METHOD = "holm"
+
+# --- Regularization strength for ridge fallback in unstable fits ---
+RIDGE_L2_BASE = 1.0
+
 # --- Suppress pandas warnings ---
 pd.options.mode.chained_assignment = None
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -643,30 +652,90 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             except Exception:
                 return False
 
-        fit = None
+        # Apply automatic stabilization locally in the worker: handle sex separation, attempt standard MLE, then ridge fallback.
+        X_work = X_clean
+        y_work = y_clean
 
-        # First attempt: Newton-Raphson with a higher iteration cap.
+        # Detect sex-by-case separation and restrict or drop sex when needed.
+        model_notes_worker = []
+        if 'sex' in X_work.columns:
+            try:
+                tab = pd.crosstab(X_work['sex'], y_work).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
+                valid_sexes = []
+                for s in [0.0, 1.0]:
+                    if s in tab.index:
+                        has_ctrl = bool(tab.loc[s, 0] > 0)
+                        has_case = bool(tab.loc[s, 1] > 0)
+                        if has_ctrl and has_case:
+                            valid_sexes.append(s)
+                if len(valid_sexes) == 1:
+                    mask = X_work['sex'].isin(valid_sexes)
+                    X_work = X_work.loc[mask]
+                    y_work = y_work.loc[X_work.index]
+                    model_notes_worker.append("sex_restricted")
+                elif len(valid_sexes) == 0:
+                    X_work = X_work.drop(columns=['sex'])
+                    model_notes_worker.append("sex_dropped_for_separation")
+            except Exception:
+                pass
+
+        fit = None
+        fit_reason = ""
+
         try:
-            fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
-            fit = fit_try if _converged(fit_try) else None
+            fit_try = sm.Logit(y_work, X_work).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
+            if _converged(fit_try):
+                setattr(fit_try, "_model_note", ";".join(model_notes_worker) if model_notes_worker else "")
+                setattr(fit_try, "_used_ridge", False)
+                fit = fit_try
         except Exception as e:
             import traceback
             print("[TRACEBACK] run_single_model_worker newton failed:", flush=True)
             traceback.print_exc()
-            fit = None
+            fit_reason = f"newton_exception:{type(e).__name__}:{e}"
 
-        # Second attempt: BFGS with an even higher iteration cap.
         if fit is None:
             try:
-                fit_try = sm.Logit(y_clean, X_clean).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
-                fit = fit_try if _converged(fit_try) else None
+                fit_try = sm.Logit(y_work, X_work).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
+                if _converged(fit_try):
+                    setattr(fit_try, "_model_note", ";".join(model_notes_worker) if model_notes_worker else "")
+                    setattr(fit_try, "_used_ridge", False)
+                    fit = fit_try
+                else:
+                    fit_reason = "bfgs_not_converged"
             except Exception as e:
                 import traceback
                 print("[TRACEBACK] run_single_model_worker bfgs failed:", flush=True)
                 traceback.print_exc()
-                fit = None
+                fit_reason = f"bfgs_exception:{type(e).__name__}:{e}"
 
-        # If all fitting attempts failed, persist NA result and return.
+        if fit is None:
+            try:
+                p = X_work.shape[1] - (1 if 'const' in X_work.columns else 0)
+                n = max(1, X_work.shape[0])
+                alpha = max(RIDGE_L2_BASE * (float(p) / float(n)), 1e-6)
+                ridge_fit = sm.Logit(y_work, X_work).fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=800)
+                try:
+                    refit = sm.Logit(y_work, X_work).fit(disp=0, method='newton', maxiter=400, tol=1e-8, start_params=ridge_fit.params, warn_convergence=True)
+                    if _converged(refit):
+                        model_notes_worker.append("ridge_seeded_refit")
+                        setattr(refit, "_model_note", ";".join(model_notes_worker))
+                        setattr(refit, "_used_ridge", True)
+                        fit = refit
+                    else:
+                        model_notes_worker.append("ridge_only")
+                        setattr(ridge_fit, "_model_note", ";".join(model_notes_worker))
+                        setattr(ridge_fit, "_used_ridge", True)
+                        fit = ridge_fit
+                except Exception:
+                    model_notes_worker.append("ridge_only")
+                    setattr(ridge_fit, "_model_note", ";".join(model_notes_worker))
+                    setattr(ridge_fit, "_used_ridge", True)
+                    fit = ridge_fit
+            except Exception as e:
+                fit = None
+                fit_reason = f"ridge_exception:{type(e).__name__}:{e}"
+
         if fit is None or target_inversion not in fit.params:
             result_data = {
                 "Phenotype": s_name,
@@ -692,10 +761,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "case_idx_fp": case_idx_fp,
                 "created_at": datetime.utcnow().isoformat() + "Z",
             })
-            what = "MODEL_DID_NOT_CONVERGE" if fit is None else "COEFFICIENT_MISSING_IN_FIT_PARAMS"
-            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan | {what} (attempts=lbfgs,bfgs)", flush=True)
+            what = f"AUTO_FIT_FAILED:{fit_reason}" if fit is None else "COEFFICIENT_MISSING_IN_FIT_PARAMS"
+            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan | {what}", flush=True)
             return
-
 
         beta = float(fit.params[target_inversion])
         try:
@@ -1021,40 +1089,50 @@ def main():
 
             def _safe_fit_logit(X, y):
                 """
-                Fits a logistic regression with robust numeric hygiene.
-                All design matrices are coerced to float64 and validated for finiteness to prevent object-dtype arrays.
-                Returns a tuple of (fit_result or None, reason string).
+                Fits a logistic regression with robust numeric hygiene and automatic stabilization:
+                1) Enforces numeric, finite design; drops zero-variance columns except intercept and target.
+                2) Detects sex-by-case separation and restricts or drops the sex column when necessary.
+                3) Attempts standard MLE (Newton, then BFGS, then Newton with higher iters).
+                4) If MLE fails or is unstable, fits ridge-penalized logistic regression and uses its params to seed
+                   a final unpenalized refit to recover standard errors and p-values when possible.
+                Returns a tuple of (fit_result or None, reason string). When a fit object is returned, it may include:
+                    fit._model_note  -> textual note describing the stabilization path taken
+                    fit._used_ridge  -> boolean flag indicating whether a ridge step was required
                 """
                 # Coerce X to DataFrame and ensure numeric dtypes only.
                 if not isinstance(X, pd.DataFrame):
                     X = pd.DataFrame(X)
-                # Convert any non-numeric columns to numeric, coercing invalid values to NaN for explicit detection.
                 non_numeric_cols = [c for c in X.columns if not pd.api.types.is_numeric_dtype(X[c])]
                 if len(non_numeric_cols) > 0:
                     X = X.copy()
                     for c in non_numeric_cols:
                         X[c] = pd.to_numeric(X[c], errors="coerce")
-                # Upcast to float64 to avoid pandas extension dtypes and mixed dtypes.
                 X = X.astype(np.float64, copy=False)
-            
-                # Validate response vector and coerce to float64 1-D array.
-                y_arr = np.asarray(y, dtype=np.float64).reshape(-1)
-                if y_arr.ndim != 1:
+
+                # y as Series aligned to X for separation diagnostics; also store ndarray for statsmodels.
+                if isinstance(y, pd.Series):
+                    y_series = y.copy()
+                    if not y_series.index.equals(X.index):
+                        try:
+                            y_series = y_series.reindex(X.index)
+                        except Exception:
+                            y_series = pd.Series(np.asarray(y, dtype=np.float64).reshape(-1), index=X.index, name="is_case")
+                else:
+                    y_series = pd.Series(np.asarray(y, dtype=np.float64).reshape(-1), index=X.index, name="is_case")
+                y_arr = np.asarray(y_series, dtype=np.float64).reshape(-1)
+                if y_arr.ndim != 1 or len(y_arr) != len(X):
                     return None, "response_not_1d"
-            
+
                 # Fail fast on NaN or Inf in design or response with detailed diagnostics and a full stack trace.
                 if not np.isfinite(X.to_numpy()).all():
                     import traceback, sys
                     arr = X.to_numpy()
                     bad_rows_mask = ~np.isfinite(arr).all(axis=1)
                     bad_row_count = int(bad_rows_mask.sum())
-
-                    # Column-level diagnostics: NaN, +Inf, -Inf counts.
                     nan_counts = {c: int(pd.isna(X[c]).sum()) for c in X.columns}
                     posinf_counts = {c: int(np.isposinf(X[c].to_numpy()).sum()) for c in X.columns}
                     neginf_counts = {c: int(np.isneginf(X[c].to_numpy()).sum()) for c in X.columns}
 
-                    # Partition diagnostics to pinpoint source when ancestry dummies are present.
                     anc_cols = [c for c in X.columns if c.startswith('ANC_')]
                     inter_cols = [c for c in X.columns if f"{TARGET_INVERSION}:" in c]
                     base_cols = [c for c in X.columns if c not in anc_cols + inter_cols]
@@ -1068,7 +1146,6 @@ def main():
                     only_base = bad_rows_mask & (~_allfinite_block(base_cols)) & _allfinite_block(anc_cols)
                     both_blocks = bad_rows_mask & (~_allfinite_block(base_cols)) & (~_allfinite_block(anc_cols))
 
-                    # Index diagnostics.
                     dup_count = int(X.index.duplicated(keep=False).sum())
                     idx_dtype = str(X.index.dtype)
                     sample_bad = list(map(str, X.index[bad_rows_mask][:5].tolist()))
@@ -1095,17 +1172,41 @@ def main():
                     traceback.print_stack()
                     sys.stderr.flush()
                     return None, "non_finite_in_response"
-            
+
                 # Drop zero-variance covariates within the current design, but never drop the intercept or target.
                 cols_to_check = [c for c in X.columns if c not in ['const', TARGET_INVERSION]]
                 zvar = [c for c in cols_to_check if pd.Series(X[c]).nunique(dropna=False) <= 1]
                 if len(zvar) > 0:
                     X = X.drop(columns=zvar)
-            
+
                 # If the target inversion dosage is constant within this subset, the effect is not estimable.
                 if TARGET_INVERSION not in X.columns or pd.Series(X[TARGET_INVERSION]).nunique(dropna=False) <= 1:
                     return None, "target_constant"
-            
+
+                # Detect and handle sex-by-case separation without prior knowledge.
+                model_notes = []
+                if 'sex' in X.columns:
+                    try:
+                        tab = pd.crosstab(X['sex'], y_series).reindex(index=[0.0, 1.0], columns=[0.0, 1.0], fill_value=0)
+                        valid_sexes = []
+                        for s in [0.0, 1.0]:
+                            if s in tab.index:
+                                has_ctrl = bool(tab.loc[s, 0.0] > 0)
+                                has_case = bool(tab.loc[s, 1.0] > 0)
+                                if has_ctrl and has_case:
+                                    valid_sexes.append(s)
+                        if len(valid_sexes) == 1:
+                            mask = X['sex'].isin(valid_sexes)
+                            X = X.loc[mask]
+                            y_series = y_series.loc[X.index]
+                            y_arr = np.asarray(y_series, dtype=np.float64).reshape(-1)
+                            model_notes.append("sex_restricted")
+                        elif len(valid_sexes) == 0:
+                            X = X.drop(columns=['sex'])
+                            model_notes.append("sex_dropped_for_separation")
+                    except Exception:
+                        pass
+
                 def _conv(f):
                     try:
                         if hasattr(f, "mle_retvals") and isinstance(f.mle_retvals, dict):
@@ -1115,33 +1216,13 @@ def main():
                         return False
                     except Exception:
                         return False
-            
-                last_reason = ""
+
+                # First: standard MLE attempts.
                 try:
                     fit_try = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
                     if _conv(fit_try):
-                        return fit_try, ""
-                    last_reason = "lbfgs_not_converged"
-                except Exception as e:
-                    import traceback
-                    print("[TRACEBACK] _safe_fit_logit newton failed:", flush=True)
-                    traceback.print_exc()
-                    last_reason = f"lbfgs_exception:{type(e).__name__}:{e}"
-            
-                try:
-                    fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
-                    if _conv(fit_try):
-                        return fit_try, ""
-                    last_reason = "bfgs_not_converged"
-                except Exception as e:
-                    import traceback
-                    print("[TRACEBACK] _safe_fit_logit bfgs failed:", flush=True)
-                    traceback.print_exc()
-                    last_reason = f"bfgs_exception:{type(e).__name__}:{e}"
-            
-                try:
-                    fit_try = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=400, tol=1e-8, warn_convergence=True)
-                    if _conv(fit_try):
+                        setattr(fit_try, "_model_note", ";".join(model_notes) if model_notes else "")
+                        setattr(fit_try, "_used_ridge", False)
                         return fit_try, ""
                     last_reason = "newton_not_converged"
                 except Exception as e:
@@ -1149,6 +1230,60 @@ def main():
                     print("[TRACEBACK] _safe_fit_logit newton failed:", flush=True)
                     traceback.print_exc()
                     last_reason = f"newton_exception:{type(e).__name__}:{e}"
+
+                try:
+                    fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
+                    if _conv(fit_try):
+                        setattr(fit_try, "_model_note", ";".join(model_notes) if model_notes else "")
+                        setattr(fit_try, "_used_ridge", False)
+                        return fit_try, ""
+                    last_reason = "bfgs_not_converged"
+                except Exception as e:
+                    import traceback
+                    print("[TRACEBACK] _safe_fit_logit bfgs failed:", flush=True)
+                    traceback.print_exc()
+                    last_reason = f"bfgs_exception:{type(e).__name__}:{e}"
+
+                try:
+                    fit_try = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=400, tol=1e-8, warn_convergence=True)
+                    if _conv(fit_try):
+                        setattr(fit_try, "_model_note", ";".join(model_notes) if model_notes else "")
+                        setattr(fit_try, "_used_ridge", False)
+                        return fit_try, ""
+                    last_reason = "newton_not_converged_2"
+                except Exception as e:
+                    import traceback
+                    print("[TRACEBACK] _safe_fit_logit newton failed:", flush=True)
+                    traceback.print_exc()
+                    last_reason = f"newton_exception_2:{type(e).__name__}:{e}"
+
+                # Ridge-penalized fallback.
+                try:
+                    p = X.shape[1] - (1 if 'const' in X.columns else 0)
+                    n = max(1, X.shape[0])
+                    alpha = max(RIDGE_L2_BASE * (float(p) / float(n)), 1e-6)
+                    ridge_fit = sm.Logit(y_arr, X).fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=800)
+                    # Seed final unpenalized refit to recover p-values when possible.
+                    try:
+                        refit = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=400, tol=1e-8, start_params=ridge_fit.params, warn_convergence=True)
+                        if _conv(refit):
+                            model_notes.append("ridge_seeded_refit")
+                            setattr(refit, "_model_note", ";".join(model_notes))
+                            setattr(refit, "_used_ridge", True)
+                            return refit, ""
+                        else:
+                            model_notes.append("ridge_only")
+                            setattr(ridge_fit, "_model_note", ";".join(model_notes))
+                            setattr(ridge_fit, "_used_ridge", True)
+                            return ridge_fit, ""
+                    except Exception:
+                        model_notes.append("ridge_only")
+                        setattr(ridge_fit, "_model_note", ";".join(model_notes))
+                        setattr(ridge_fit, "_used_ridge", True)
+                        return ridge_fit, ""
+                except Exception as e:
+                    last_reason = f"ridge_exception:{type(e).__name__}:{e}"
+
                 return None, last_reason
 
             def _or_ci_pair(fit, coef_name):
@@ -1318,7 +1453,15 @@ def main():
                         if not lrt_converged_full:
                             print(f"[FollowUp] LRT full model did not converge for phenotype '{s_name}'.")
 
-                    if (fit_red is not None) and (fit_full is not None) and (fit_full.llf >= fit_red.llf):
+                    ridge_only_flag = False
+                    if (fit_red is not None) and hasattr(fit_red, "_model_note") and isinstance(fit_red._model_note, str):
+                        if "ridge_only" in fit_red._model_note:
+                            ridge_only_flag = True
+                    if (fit_full is not None) and hasattr(fit_full, "_model_note") and isinstance(fit_full._model_note, str):
+                        if "ridge_only" in fit_full._model_note:
+                            ridge_only_flag = True
+
+                    if (fit_red is not None) and (fit_full is not None) and (not ridge_only_flag) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
                         rank_red = _design_matrix_rank(X_red)
                         rank_full = _design_matrix_rank(X_full)
                         lrt_df = int(max(0, rank_full - rank_red))
@@ -1327,6 +1470,8 @@ def main():
                             p_lrt = float(stats.chi2.sf(llr, lrt_df))
                         else:
                             print(f"[FollowUp] LRT degrees of freedom computed as zero for phenotype '{s_name}'. Skipping p-value.")
+                    elif ridge_only_flag:
+                        pass
 
                     # --- Reason for NaN LRT ---
                     lrt_reason = []
@@ -1354,32 +1499,49 @@ def main():
                         if not group_mask.any():
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
+                            out[f"{anc.upper()}_P"] = np.nan
+                            out[f"{anc.upper()}_N"] = 0
+                            out[f"{anc.upper()}_N_Cases"] = 0
+                            out[f"{anc.upper()}_N_Controls"] = 0
                             out[f"{anc.upper()}_REASON"] = "no_rows_in_group"
-                            if anc == 'eur':
-                                out["EUR_P"] = np.nan
-                                out["EUR_P_Source"] = "EUR-only"
-                                out["EUR_N"] = 0
-                                out["EUR_N_Cases"] = 0
-                                out["EUR_N_Controls"] = 0
                             continue
 
                         y_g, X_g = _build_y_X(group_mask, case_mask)
                         n_cases = int(y_g.sum())
                         n_tot = int(len(y_g))
                         n_ctrl = n_tot - n_cases
+
+                        out[f"{anc.upper()}_N"] = n_tot
+                        out[f"{anc.upper()}_N_Cases"] = n_cases
+                        out[f"{anc.upper()}_N_Controls"] = n_ctrl
+
+                        if (n_cases < PER_ANC_MIN_CASES) or (n_ctrl < PER_ANC_MIN_CONTROLS):
+                            out[f"{anc.upper()}_OR"] = np.nan
+                            out[f"{anc.upper()}_CI95"] = np.nan
+                            out[f"{anc.upper()}_P"] = np.nan
+                            out[f"{anc.upper()}_REASON"] = "insufficient_stratum_counts"
+                            continue
+
                         fit_g, fit_g_reason = _safe_fit_logit(X_g, y_g)
-                        
+
                         if fit_g is None or TARGET_INVERSION not in fit_g.params:
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
+                            out[f"{anc.upper()}_P"] = np.nan
                             out[f"{anc.upper()}_REASON"] = ("subset_fit_failed" + (f":{fit_g_reason}" if fit_g_reason else "")) if fit_g is None else "coef_missing"
+                            continue
 
-                            if anc == 'eur':
-                                out["EUR_P"] = np.nan
-                                out["EUR_P_Source"] = "EUR-only"
-                                out["EUR_N"] = n_tot
-                                out["EUR_N_Cases"] = n_cases
-                                out["EUR_N_Controls"] = n_ctrl
+                        conv_g = _convergence_flag(fit_g)
+                        if not conv_g:
+                            print(f"[FollowUp] Per-ancestry model did not converge for phenotype '{s_name}' in ancestry '{anc}'.")
+                        or_val, lo, hi = _or_ci_pair(fit_g, TARGET_INVERSION)
+                        out[f"{anc.upper()}_OR"] = or_val
+                        out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
+                        try:
+                            out[f"{anc.upper()}_P"] = float(fit_g.pvalues[TARGET_INVERSION])
+                        except Exception:
+                            out[f"{anc.upper()}_P"] = np.nan
+                        out[f"{anc.upper()}_REASON"] = ""
                             continue
 
                         conv_g = _convergence_flag(fit_g)
@@ -1442,9 +1604,62 @@ def main():
                 follow_df = pd.DataFrame(follow_rows)
                 df = df.merge(follow_df, on="Phenotype", how="left")
 
+            # Drop legacy column if present.
+            if "EUR_P_Source" in df.columns:
+                df = df.drop(columns=["EUR_P_Source"], errors="ignore")
+
+            # Compute per-phenotype Holm-adjusted ancestry p-values and FINAL_INTERPRETATION.
+            if "Sig_FDR" in df.columns:
+                df["FINAL_INTERPRETATION"] = ""
+                for idx in df.index.tolist():
+                    try:
+                        if not bool(df.at[idx, "Sig_FDR"]):
+                            df.at[idx, "FINAL_INTERPRETATION"] = ""
+                            continue
+                    except Exception:
+                        df.at[idx, "FINAL_INTERPRETATION"] = ""
+                        continue
+
+                    p_lrt = df.at[idx, "P_LRT_AncestryxDosage"] if "P_LRT_AncestryxDosage" in df.columns else np.nan
+                    if not pd.notna(p_lrt) or p_lrt > 0.05:
+                        df.at[idx, "FINAL_INTERPRETATION"] = "overall"
+                        continue
+
+                    levels_str = df.at[idx, "LRT_Ancestry_Levels"] if "LRT_Ancestry_Levels" in df.columns else ""
+                    anc_levels = [s for s in str(levels_str).split(",") if s]
+                    anc_upper = [s.upper() for s in anc_levels]
+
+                    pvals = []
+                    anc_keys = []
+                    for anc in anc_upper:
+                        pcol = f"{anc}_P"
+                        rcol = f"{anc}_REASON"
+                        if pcol in df.columns:
+                            pval = df.at[idx, pcol]
+                            reason_val = df.at[idx, rcol] if rcol in df.columns else ""
+                            if pd.notna(pval) and reason_val != "insufficient_stratum_counts":
+                                pvals.append(float(pval))
+                                anc_keys.append(anc)
+
+                    if len(pvals) == 0:
+                        df.at[idx, "FINAL_INTERPRETATION"] = "unable to determine"
+                        continue
+
+                    rej, p_adj, _, _ = multipletests(pvals, alpha=ANCESTRY_ALPHA, method=ANCESTRY_P_ADJ_METHOD)
+                    for anc, adj in zip(anc_keys, p_adj):
+                        adj_col = f"{anc}_P_adj"
+                        df.at[idx, adj_col] = float(adj)
+
+                    sig_groups = [anc for anc, r in zip(anc_keys, rej) if bool(r)]
+                    if len(sig_groups) == 0:
+                        df.at[idx, "FINAL_INTERPRETATION"] = "unable to determine"
+                    else:
+                        df.at[idx, "FINAL_INTERPRETATION"] = ",".join(sig_groups)
+
             output_filename = f"phewas_results_{TARGET_INVERSION}.csv"
             print(f"\n--- Saving final results to '{output_filename}' ---")
             df.to_csv(output_filename, index=False)
+
 
             # Filter for FDR-significant results before printing
             out_df = df[df['Sig_FDR'] == True].copy()
