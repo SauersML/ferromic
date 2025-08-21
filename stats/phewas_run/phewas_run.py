@@ -843,16 +843,22 @@ def main():
                         return fit_try, ""
                     last_reason = "lbfgs_not_converged"
                 except Exception as e:
-                    last_reason = f"lbfgs_exception:{type(e).__name__}"
-            
+                    import traceback
+                    print("[TRACEBACK] _safe_fit_logit lbfgs failed:", flush=True)
+                    traceback.print_exc()
+                    last_reason = f"lbfgs_exception:{type(e).__name__}:{e}"
+
                 try:
                     fit_try = sm.Logit(y, X).fit(disp=0, maxiter=800, method='bfgs')
                     if _conv(fit_try):
                         return fit_try, ""
                     last_reason = "bfgs_not_converged"
                 except Exception as e:
-                    last_reason = f"bfgs_exception:{type(e).__name__}"
-            
+                    import traceback
+                    print("[TRACEBACK] _safe_fit_logit bfgs failed:", flush=True)
+                    traceback.print_exc()
+                    last_reason = f"bfgs_exception:{type(e).__name__}:{e}"
+
                 try:
                     fit_try = sm.Logit(y, X).fit_regularized(method='lbfgs', maxiter=2000, alpha=1.0, L1_wt=0.0)
                     return fit_try, "regularized_fallback"
