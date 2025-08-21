@@ -34,6 +34,9 @@ def _global_excepthook(exc_type, exc, tb):
 
 import sys
 sys.excepthook = _global_excepthook
+def _thread_excepthook(args):
+    _global_excepthook(args.exc_type, args.exc_value, args.exc_traceback)
+threading.excepthook = _thread_excepthook
 
 warnings.filterwarnings(
     "ignore",
@@ -440,7 +443,17 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if case_positions.size > 0:
             y[case_positions] = 1
 
-        X_clean = worker_core_df[valid_mask].copy()
+        # Harden design matrix for numeric stability and emit immediate diagnostics if any non-finite values slip through.
+        X_clean = worker_core_df[valid_mask].copy().astype(np.float64, copy=False)
+        if not np.isfinite(X_clean.to_numpy()).all():
+            bad_cols = [c for c in X_clean.columns if not np.isfinite(X_clean[c].to_numpy()).all()]
+            bad_rows_mask = ~np.isfinite(X_clean.to_numpy()).all(axis=1)
+            bad_idx_sample = X_clean.index[bad_rows_mask][:10].tolist()
+            import traceback, sys
+            print(f"[TRACEBACK] Non-finite in worker design for phenotype '{s_name}'", flush=True)
+            print(f"[DEBUG] columns={','.join(bad_cols)} sample_rows={bad_idx_sample}", flush=True)
+            traceback.print_stack()
+            sys.stderr.flush()
         y_clean = pd.Series(y, index=X_clean.index, name='is_case')
 
         n_cases = int(y_clean.sum())
@@ -622,7 +635,11 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         })
 
     except Exception as e:
-        print(f"[Worker-{os.getpid()}] - [FAIL] {s_name:<40s} | Error: {str(e)[:100]}", flush=True)
+        import traceback, sys
+        print(f"[Worker-{os.getpid()}] - [FAIL] {s_name:<40s} | Error occurred. Full traceback follows:", flush=True)
+        traceback.print_exc()
+        sys.stderr.flush()
+
     finally:
         if 'pheno_data' in locals():
             del pheno_data
@@ -894,13 +911,14 @@ def main():
                 if not np.isfinite(X.to_numpy()).all():
                     bad_cols = [c for c in X.columns if not np.isfinite(X[c].to_numpy()).all()]
                     bad_rows_mask = ~np.isfinite(X.to_numpy()).all(axis=1)
-                    bad_row_count = int(bad_rows_mask.sum())
+                    bad_rows_idx = X.index[bad_rows_mask][:10].tolist()
                     import traceback, sys
                     print("[TRACEBACK] _safe_fit_logit detected non-finite values in design matrix", flush=True)
-                    print(f"[DEBUG] non_finite_columns={','.join(bad_cols)} bad_row_count={bad_row_count}", flush=True)
+                    print(f"[DEBUG] non_finite_columns={','.join(bad_cols)} bad_row_count={int(bad_rows_mask.sum())} sample_rows={bad_rows_idx}", flush=True)
                     traceback.print_stack()
                     sys.stderr.flush()
                     return None, f"non_finite_in_design:{','.join(bad_cols)}"
+
                 if not np.isfinite(y_arr).all():
                     import traceback, sys
                     print("[TRACEBACK] _safe_fit_logit detected non-finite values in response vector", flush=True)
