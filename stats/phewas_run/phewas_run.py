@@ -757,13 +757,38 @@ def main():
             initializer=init_worker,
             initargs=(core_df_with_const, allowed_mask_by_cat),
         ) as pool:
+            bar_len = 40
+            queued = 0
+            done = 0
+            lock = threading.Lock()
+        
+            def _print_bar(q, d):
+                q = int(q); d = int(d)
+                pct = int((d * 100) / q) if q else 0
+                filled = int(bar_len * (d / q)) if q else 0
+                bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+                print(f"\r[Fit] {bar} {d}/{q} ({pct}%)", end="", flush=True)
+        
+            def _cb(_):
+                nonlocal done, queued
+                with lock:
+                    done += 1
+                    _print_bar(queued, done)
+        
+            # Drain queue → submit jobs with a completion callback
             while True:
                 pheno_data = pheno_queue.get()
                 if pheno_data is None:
                     break
-                pool.apply_async(worker_func, (pheno_data,))
+                queued += 1
+                pool.apply_async(worker_func, (pheno_data,), callback=_cb)
+                _print_bar(queued, done)  # show progress while queuing too
+        
             pool.close()
-            pool.join()
+            pool.join()  # callbacks keep updating the bar while we wait
+            _print_bar(queued, done)  # ensure 100% line
+            print("")  # newline after the bar
+
 
         fetcher_thread.join()
         print("\n--- All models finished. ---")
