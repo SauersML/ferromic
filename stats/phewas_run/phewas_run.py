@@ -79,7 +79,9 @@ FDR_ALPHA = 0.05
 PER_ANC_MIN_CASES = 50
 PER_ANC_MIN_CONTROLS = 50
 ANCESTRY_ALPHA = 0.05
-ANCESTRY_P_ADJ_METHOD = "holm"
+ANCESTRY_P_ADJ_METHOD = "fdr_bh"
+LRT_SELECT_ALPHA = 0.05
+
 
 # --- Regularization strength for ridge fallback in unstable fits ---
 RIDGE_L2_BASE = 1.0
@@ -1056,10 +1058,8 @@ def main():
             results_df = pd.DataFrame(all_results_from_disk)
             print(f"Successfully consolidated {len(results_df)} results.")
 
-            df = results_df.sort_values("P_Value").reset_index(drop=True)
-            _, p_adj, _, _ = multipletests(df["P_Value"].dropna(), alpha=FDR_ALPHA, method="fdr_bh")
-            df.loc[df["P_Value"].notna(), "P_FDR"] = p_adj
-            df["Sig_FDR"] = df["P_FDR"] < FDR_ALPHA
+            # Stage-1 FDR is computed later using the overall LRT; initialize the working results frame.
+            df = results_df.copy()
 
             # === Ancestry follow-up on FDR-significant phenotypes ===
             from scipy import stats
@@ -1362,6 +1362,121 @@ def main():
             # Prepare phenotype-to-category mapping for masks.
             name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
 
+            # Stage-1: Overall LRT for the inversion dosage effect across all phenotypes.
+            # This computes P_LRT_Overall by comparing reduced (no dosage) vs full (with dosage) models on the same row set.
+            overall_rows = []
+            for s_name in df["Phenotype"].astype(str).tolist():
+                category = name_to_cat.get(s_name, None)
+                entry = {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_df_Overall": np.nan, "LRT_Overall_Reason": ""}
+                if (category is None) or (category not in allowed_mask_by_cat):
+                    entry["LRT_Overall_Reason"] = "unknown_category"
+                    overall_rows.append(entry)
+                    continue
+
+                pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
+                if not os.path.exists(pheno_cache_path):
+                    entry["LRT_Overall_Reason"] = "missing_case_cache"
+                    overall_rows.append(entry)
+                    continue
+
+                ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
+                case_ids = ph.index[ph['is_case'] == 1].astype(str)
+                case_idx = core_index.get_indexer(case_ids)
+                case_idx = case_idx[case_idx >= 0].astype(np.int32)
+
+                case_mask = np.zeros(len(core_index), dtype=bool)
+                if case_idx.size > 0:
+                    case_mask[case_idx] = True
+
+                valid_mask_all = (allowed_mask_by_cat[category] | case_mask) & global_notnull_mask
+                if int(valid_mask_all.sum()) == 0:
+                    entry["LRT_Overall_Reason"] = "no_valid_rows_after_mask"
+                    overall_rows.append(entry)
+                    continue
+
+                y_all, X_base = _build_y_X(valid_mask_all, case_mask)
+
+                # Harmonize sex handling once (restrict or drop) so reduced and full are nested on the exact same rows.
+                if 'sex' in X_base.columns:
+                    try:
+                        tab = pd.crosstab(X_base['sex'], y_all).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
+                        valid_sexes = []
+                        for s in [0.0, 1.0]:
+                            if s in tab.index:
+                                has_ctrl = bool(tab.loc[s, 0] > 0)
+                                has_case = bool(tab.loc[s, 1] > 0)
+                                if has_ctrl and has_case:
+                                    valid_sexes.append(s)
+                        if len(valid_sexes) == 1:
+                            mask = X_base['sex'].isin(valid_sexes)
+                            X_base = X_base.loc[mask]
+                            y_all = y_all.loc[X_base.index]
+                        elif len(valid_sexes) == 0:
+                            X_base = X_base.drop(columns=['sex'])
+                    except Exception:
+                        pass
+
+                # Drop zero-variance columns consistently across both models, excluding intercept and the target.
+                zvar_cols = [c for c in X_base.columns if c not in ['const', TARGET_INVERSION] and pd.Series(X_base[c]).nunique(dropna=False) <= 1]
+                if len(zvar_cols) > 0:
+                    X_base = X_base.drop(columns=zvar_cols)
+
+                if TARGET_INVERSION not in X_base.columns or pd.Series(X_base[TARGET_INVERSION]).nunique(dropna=False) <= 1:
+                    entry["LRT_Overall_Reason"] = "target_constant"
+                    overall_rows.append(entry)
+                    continue
+
+                X_full = X_base.copy()
+                X_red = X_base.drop(columns=[TARGET_INVERSION])
+
+                fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all)
+                fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all)
+
+                ridge_only_flag = False
+                if (fit_red is not None) and hasattr(fit_red, "_model_note") and isinstance(fit_red._model_note, str):
+                    if "ridge_only" in fit_red._model_note:
+                        ridge_only_flag = True
+                if (fit_full is not None) and hasattr(fit_full, "_model_note") and isinstance(fit_full._model_note, str):
+                    if "ridge_only" in fit_full._model_note:
+                        ridge_only_flag = True
+
+                if (fit_red is not None) and (fit_full is not None) and (not ridge_only_flag) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
+                    rank_red = _design_matrix_rank(X_red)
+                    rank_full = _design_matrix_rank(X_full)
+                    lrt_df_overall = int(max(0, rank_full - rank_red))
+                    if lrt_df_overall > 0:
+                        llr = 2.0 * (fit_full.llf - fit_red.llf)
+                        p_lrt_overall = float(stats.chi2.sf(llr, lrt_df_overall))
+                        entry["P_LRT_Overall"] = p_lrt_overall
+                        entry["LRT_df_Overall"] = lrt_df_overall
+                        entry["LRT_Overall_Reason"] = ""
+                    else:
+                        entry["LRT_df_Overall"] = 0
+                        entry["LRT_Overall_Reason"] = "no_interaction_df"
+                else:
+                    reason_bits = []
+                    if fit_red is None:
+                        reason_bits.append(f"reduced_model_failed:{fit_red_reason}")
+                    if fit_full is None:
+                        reason_bits.append(f"full_model_failed:{fit_full_reason}")
+                    if ridge_only_flag:
+                        reason_bits.append("ridge_only")
+                    if (fit_red is not None) and (fit_full is not None) and (fit_full.llf < fit_red.llf):
+                        reason_bits.append("full_llf_below_reduced_llf")
+                    entry["LRT_Overall_Reason"] = ";".join(reason_bits)
+
+                overall_rows.append(entry)
+
+            # Merge overall LRT results and compute BH-FDR on P_LRT_Overall with strict thresholding.
+            if len(overall_rows) > 0:
+                overall_df = pd.DataFrame(overall_rows)
+                df = df.merge(overall_df, on="Phenotype", how="left")
+                mask_overall = pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna()
+                if int(mask_overall.sum()) > 0:
+                    _, p_adj_overall, _, _ = multipletests(df.loc[mask_overall, "P_LRT_Overall"], alpha=FDR_ALPHA, method="fdr_bh")
+                    df.loc[mask_overall, "P_FDR"] = p_adj_overall
+                df["Sig_FDR"] = df["P_FDR"] < FDR_ALPHA
+
             # Collect follow-up results keyed by phenotype.
             follow_rows = []
 
@@ -1528,54 +1643,80 @@ def main():
                         'LRT_Ancestry_Levels': ",".join(anc_levels_local),
                         'LRT_Reason': lrt_reason_str
                     }
-                    for anc in anc_levels_local:
-                        group_mask = valid_mask_all & anc_series.eq(anc).reindex(core_df_with_const.index).fillna(False).to_numpy()
-                        if not group_mask.any():
+                    if pd.notna(p_lrt) and (p_lrt < LRT_SELECT_ALPHA):
+                        for anc in anc_levels_local:
+                            group_mask = valid_mask_all & anc_series.eq(anc).reindex(core_df_with_const.index).fillna(False).to_numpy()
+                            if not group_mask.any():
+                                out[f"{anc.upper()}_OR"] = np.nan
+                                out[f"{anc.upper()}_CI95"] = np.nan
+                                out[f"{anc.upper()}_P"] = np.nan
+                                out[f"{anc.upper()}_N"] = 0
+                                out[f"{anc.upper()}_N_Cases"] = 0
+                                out[f"{anc.upper()}_N_Controls"] = 0
+                                out[f"{anc.upper()}_REASON"] = "no_rows_in_group"
+                                continue
+
+                            y_g, X_g = _build_y_X(group_mask, case_mask)
+                            n_cases = int(y_g.sum())
+                            n_tot = int(len(y_g))
+                            n_ctrl = n_tot - n_cases
+
+                            out[f"{anc.upper()}_N"] = n_tot
+                            out[f"{anc.upper()}_N_Cases"] = n_cases
+                            out[f"{anc.upper()}_N_Controls"] = n_ctrl
+
+                            if (n_cases < PER_ANC_MIN_CASES) or (n_ctrl < PER_ANC_MIN_CONTROLS):
+                                out[f"{anc.upper()}_OR"] = np.nan
+                                out[f"{anc.upper()}_CI95"] = np.nan
+                                out[f"{anc.upper()}_P"] = np.nan
+                                out[f"{anc.upper()}_REASON"] = "insufficient_stratum_counts"
+                                continue
+
+                            fit_g, fit_g_reason = _safe_fit_logit(X_g, y_g)
+
+                            if fit_g is None or TARGET_INVERSION not in fit_g.params:
+                                out[f"{anc.upper()}_OR"] = np.nan
+                                out[f"{anc.upper()}_CI95"] = np.nan
+                                out[f"{anc.upper()}_P"] = np.nan
+                                out[f"{anc.upper()}_REASON"] = ("subset_fit_failed" + (f":{fit_g_reason}" if fit_g_reason else "")) if fit_g is None else "coef_missing"
+                                continue
+
+                            conv_g = _convergence_flag(fit_g)
+                            if not conv_g:
+                                print(f"[FollowUp] Per-ancestry model did not converge for phenotype '{s_name}' in ancestry '{anc}'.")
+                            or_val, lo, hi = _or_ci_pair(fit_g, TARGET_INVERSION)
+                            out[f"{anc.upper()}_OR"] = or_val
+                            out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
+                            try:
+                                out[f"{anc.upper()}_P"] = float(fit_g.pvalues[TARGET_INVERSION])
+                            except Exception:
+                                out[f"{anc.upper()}_P"] = np.nan
+                            out[f"{anc.upper()}_REASON"] = ""
+                    else:
+                        for anc in anc_levels_local:
+                            group_mask = valid_mask_all & anc_series.eq(anc).reindex(core_df_with_const.index).fillna(False).to_numpy()
+                            if not group_mask.any():
+                                out[f"{anc.upper()}_OR"] = np.nan
+                                out[f"{anc.upper()}_CI95"] = np.nan
+                                out[f"{anc.upper()}_P"] = np.nan
+                                out[f"{anc.upper()}_N"] = 0
+                                out[f"{anc.upper()}_N_Cases"] = 0
+                                out[f"{anc.upper()}_N_Controls"] = 0
+                                out[f"{anc.upper()}_REASON"] = "no_rows_in_group"
+                                continue
+
+                            y_g, X_g = _build_y_X(group_mask, case_mask)
+                            n_cases = int(y_g.sum())
+                            n_tot = int(len(y_g))
+                            n_ctrl = n_tot - n_cases
+
+                            out[f"{anc.upper()}_N"] = n_tot
+                            out[f"{anc.upper()}_N_Cases"] = n_cases
+                            out[f"{anc.upper()}_N_Controls"] = n_ctrl
                             out[f"{anc.upper()}_OR"] = np.nan
                             out[f"{anc.upper()}_CI95"] = np.nan
                             out[f"{anc.upper()}_P"] = np.nan
-                            out[f"{anc.upper()}_N"] = 0
-                            out[f"{anc.upper()}_N_Cases"] = 0
-                            out[f"{anc.upper()}_N_Controls"] = 0
-                            out[f"{anc.upper()}_REASON"] = "no_rows_in_group"
-                            continue
-
-                        y_g, X_g = _build_y_X(group_mask, case_mask)
-                        n_cases = int(y_g.sum())
-                        n_tot = int(len(y_g))
-                        n_ctrl = n_tot - n_cases
-
-                        out[f"{anc.upper()}_N"] = n_tot
-                        out[f"{anc.upper()}_N_Cases"] = n_cases
-                        out[f"{anc.upper()}_N_Controls"] = n_ctrl
-
-                        if (n_cases < PER_ANC_MIN_CASES) or (n_ctrl < PER_ANC_MIN_CONTROLS):
-                            out[f"{anc.upper()}_OR"] = np.nan
-                            out[f"{anc.upper()}_CI95"] = np.nan
-                            out[f"{anc.upper()}_P"] = np.nan
-                            out[f"{anc.upper()}_REASON"] = "insufficient_stratum_counts"
-                            continue
-
-                        fit_g, fit_g_reason = _safe_fit_logit(X_g, y_g)
-
-                        if fit_g is None or TARGET_INVERSION not in fit_g.params:
-                            out[f"{anc.upper()}_OR"] = np.nan
-                            out[f"{anc.upper()}_CI95"] = np.nan
-                            out[f"{anc.upper()}_P"] = np.nan
-                            out[f"{anc.upper()}_REASON"] = ("subset_fit_failed" + (f":{fit_g_reason}" if fit_g_reason else "")) if fit_g is None else "coef_missing"
-                            continue
-
-                        conv_g = _convergence_flag(fit_g)
-                        if not conv_g:
-                            print(f"[FollowUp] Per-ancestry model did not converge for phenotype '{s_name}' in ancestry '{anc}'.")
-                        or_val, lo, hi = _or_ci_pair(fit_g, TARGET_INVERSION)
-                        out[f"{anc.upper()}_OR"] = or_val
-                        out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
-                        try:
-                            out[f"{anc.upper()}_P"] = float(fit_g.pvalues[TARGET_INVERSION])
-                        except Exception:
-                            out[f"{anc.upper()}_P"] = np.nan
-                        out[f"{anc.upper()}_REASON"] = ""
+                            out[f"{anc.upper()}_REASON"] = "not_selected_by_LRT"
 
                     follow_rows.append(out)
                     try:
@@ -1621,30 +1762,48 @@ def main():
                 follow_df = pd.DataFrame(follow_rows)
                 df = df.merge(follow_df, on="Phenotype", how="left")
 
-                # Compute Benjamini–Hochberg FDR-corrected ancestry-specific p-values using the total number of overall tests.
-                # The adjustment uses m equal to the count of non-NaN overall P_Value entries and applies BH-FDR to each ancestry-specific column.
-                # Padding with 1.0 ensures that the number of hypotheses considered by BH equals the total number of overall tests.
-                m_total = int(pd.to_numeric(df["P_Value"], errors="coerce").notna().sum())
-                ancestry_p_cols = [c for c in df.columns if c.endswith("_P") and c.split("_")[0].isupper()]
-                for pcol in ancestry_p_cols:
-                    p_series = pd.to_numeric(df[pcol], errors="coerce")
-                    observed_mask = p_series.notna()
-                    k = int(observed_mask.sum())
-                    outcol = pcol.replace("_P", "_P_FDR")
-                    if k == 0:
-                        df[outcol] = np.nan
-                        continue
-                    pad_n = max(0, m_total - k)
-                    padded = np.concatenate([p_series.loc[observed_mask].to_numpy(dtype=float), np.ones(pad_n, dtype=float)])
-                    _, p_adj_all, _, _ = multipletests(padded, alpha=FDR_ALPHA, method="fdr_bh")
-                    df[outcol] = np.nan
-                    df.loc[observed_mask, outcol] = p_adj_all[:k]
+                # Benjamini–Bogomolov adjustment for ancestry-specific tests:
+                # Within-phenotype BH at alpha_within = FDR_ALPHA * (R_selected / m_total),
+                # where m_total counts non-NaN overall LRT p-values and R_selected counts Stage-1 discoveries.
+                m_total = int(pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna().sum())
+                R_selected = int(pd.to_numeric(df["Sig_FDR"], errors="coerce").fillna(False).astype(bool).sum())
+                alpha_within = (FDR_ALPHA * (R_selected / m_total)) if m_total > 0 else 0.0
+
+                if R_selected > 0 and alpha_within > 0.0:
+                    selected_idx = df.index[df["Sig_FDR"] == True].tolist()
+                    for idx in selected_idx:
+                        p_lrt = df.at[idx, "P_LRT_AncestryxDosage"] if "P_LRT_AncestryxDosage" in df.columns else np.nan
+                        if (not pd.notna(p_lrt)) or (p_lrt >= LRT_SELECT_ALPHA):
+                            continue
+                        levels_str = df.at[idx, "LRT_Ancestry_Levels"] if "LRT_Ancestry_Levels" in df.columns else ""
+                        anc_levels = [s for s in str(levels_str).split(",") if s]
+                        anc_upper = [s.upper() for s in anc_levels]
+
+                        pvals = []
+                        keys = []
+                        for anc in anc_upper:
+                            pcol = f"{anc}_P"
+                            rcol = f"{anc}_REASON"
+                            if (pcol in df.columns) and (rcol in df.columns):
+                                pval = df.at[idx, pcol]
+                                reason_val = df.at[idx, rcol]
+                                if pd.notna(pval) and reason_val != "insufficient_stratum_counts" and reason_val != "not_selected_by_LRT":
+                                    pvals.append(float(pval))
+                                    keys.append(anc)
+
+                        if len(pvals) == 0:
+                            continue
+
+                        rej, p_adj_vals, _, _ = multipletests(pvals, alpha=alpha_within, method="fdr_bh")
+                        for anc_key, adj_val in zip(keys, p_adj_vals):
+                            outcol = f"{anc_key}_P_FDR"
+                            df.at[idx, outcol] = float(adj_val)
 
             # Drop legacy column if present.
             if "EUR_P_Source" in df.columns:
                 df = df.drop(columns=["EUR_P_Source"], errors="ignore")
 
-            # Compute per-phenotype Holm-adjusted ancestry p-values and FINAL_INTERPRETATION.
+            # Compute FINAL_INTERPRETATION using BB-adjusted ancestry p-values written to <ANC>_P_FDR.
             if "Sig_FDR" in df.columns:
                 df["FINAL_INTERPRETATION"] = ""
                 for idx in df.index.tolist():
@@ -1657,7 +1816,7 @@ def main():
                         continue
 
                     p_lrt = df.at[idx, "P_LRT_AncestryxDosage"] if "P_LRT_AncestryxDosage" in df.columns else np.nan
-                    if not pd.notna(p_lrt) or p_lrt > 0.05:
+                    if (not pd.notna(p_lrt)) or (p_lrt >= LRT_SELECT_ALPHA):
                         df.at[idx, "FINAL_INTERPRETATION"] = "overall"
                         continue
 
@@ -1665,32 +1824,21 @@ def main():
                     anc_levels = [s for s in str(levels_str).split(",") if s]
                     anc_upper = [s.upper() for s in anc_levels]
 
-                    pvals = []
-                    anc_keys = []
+                    sig_groups = []
                     for anc in anc_upper:
-                        pcol = f"{anc}_P"
+                        adj_col = f"{anc}_P_FDR"
                         rcol = f"{anc}_REASON"
-                        if pcol in df.columns:
-                            pval = df.at[idx, pcol]
+                        if adj_col in df.columns:
+                            p_adj_val = df.at[idx, adj_col]
                             reason_val = df.at[idx, rcol] if rcol in df.columns else ""
-                            if pd.notna(pval) and reason_val != "insufficient_stratum_counts":
-                                pvals.append(float(pval))
-                                anc_keys.append(anc)
+                            if pd.notna(p_adj_val) and (p_adj_val < alpha_within) and reason_val != "insufficient_stratum_counts" and reason_val != "not_selected_by_LRT":
+                                sig_groups.append(anc)
 
-                    if len(pvals) == 0:
-                        df.at[idx, "FINAL_INTERPRETATION"] = "unable to determine"
-                        continue
-
-                    rej, p_adj, _, _ = multipletests(pvals, alpha=ANCESTRY_ALPHA, method=ANCESTRY_P_ADJ_METHOD)
-                    for anc, adj in zip(anc_keys, p_adj):
-                        adj_col = f"{anc}_P_adj"
-                        df.at[idx, adj_col] = float(adj)
-
-                    sig_groups = [anc for anc, r in zip(anc_keys, rej) if bool(r)]
                     if len(sig_groups) == 0:
                         df.at[idx, "FINAL_INTERPRETATION"] = "unable to determine"
                     else:
                         df.at[idx, "FINAL_INTERPRETATION"] = ",".join(sig_groups)
+
 
             output_filename = f"phewas_results_{TARGET_INVERSION}.csv"
             print(f"\n--- Saving final results to '{output_filename}' ---")
