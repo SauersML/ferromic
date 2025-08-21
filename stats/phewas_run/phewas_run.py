@@ -822,9 +822,34 @@ def main():
 
             core_df = core_df[covariate_cols]
             core_df_with_const = sm.add_constant(core_df, prepend=True)
+
+            # This block calculates and prints the condition number of the design matrix both with and
+            # without the 'AGE_sq' term. A high condition number (e.g., > 1,000) indicates severe
+            # multicollinearity, which can lead to numerically unstable model fits. A dramatic increase
+            # in this number upon adding 'AGE_sq' would confirm it as the source of the instability.
+            print("\n--- [DIAGNOSTIC] Testing matrix condition number ---")
+            try:
+                # Define columns for a model that excludes the squared term. This model is expected to be numerically stable.
+                stable_cols = ['const', 'sex', 'AGE', TARGET_INVERSION] + [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+                # Drop any rows with NA values before computing the condition number to avoid errors.
+                stable_matrix = core_df_with_const[stable_cols].dropna().to_numpy()
+                stable_cond = np.linalg.cond(stable_matrix)
+                print(f"[DIAGNOSTIC] Condition number WITHOUT AGE_sq: {stable_cond:,.2f}")
+
+                # Define columns for the full model as used in the workers. This model is hypothesized to be unstable.
+                unstable_cols = ['const', 'sex', 'AGE', 'AGE_sq', TARGET_INVERSION] + [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+                # Drop any rows with NA values before computing the condition number.
+                unstable_matrix = core_df_with_const[unstable_cols].dropna().to_numpy()
+                unstable_cond = np.linalg.cond(unstable_matrix)
+                print(f"[DIAGNOSTIC] Condition number WITH AGE_sq:    {unstable_cond:,.2e}")
+            except Exception as e:
+                print(f"[DIAGNOSTIC] Could not compute condition numbers. Error: {e}")
+            print("--- [DIAGNOSTIC] End of test ---\n")
+
             del core_df, demographics_df, inversion_df, pc_df
             gc.collect()
             print(f"[Setup]    - Core covariate DataFrame ready. Shape: {core_df_with_const.shape}")
+            
             if core_df_with_const.shape[0] == 0:
                 raise RuntimeError(
                     "FATAL: Core covariate DataFrame has 0 rows after join. Check input data alignment."
