@@ -534,11 +534,24 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         # such as observing a standard deviation of zero in the predictor, which would correctly
         # result in a beta coefficient of zero.
         try:
+            # Prepare the value counts string for the predictor to avoid printing thousands of lines.
+            predictor_counts = X_clean[target_inversion].value_counts(dropna=False)
+            if len(predictor_counts) > 10:
+                # If there are many unique values, show only the first and last 5 for brevity.
+                counts_str = (
+                    f"{predictor_counts.head(5).to_string()}\n"
+                    f"...\n"
+                    f"{predictor_counts.tail(5).to_string()}"
+                )
+            else:
+                # If there are few unique values, show them all.
+                counts_str = predictor_counts.to_string()
+
             print(
                 f"\n--- [DEBUG] Pre-fit diagnostics for phenotype '{s_name}' in Worker-{os.getpid()} ---"
                 f"\n[DEBUG] Total rows in design matrix: {len(X_clean):,}"
                 f"\n[DEBUG] Predictor '{target_inversion}' statistics:\n{X_clean[target_inversion].describe().to_string()}"
-                f"\n[DEBUG] Predictor '{target_inversion}' value counts:\n{X_clean[target_inversion].value_counts(dropna=False).to_string()}"
+                f"\n[DEBUG] Predictor '{target_inversion}' value counts (truncated):\n{counts_str}"
                 f"\n[DEBUG] Outcome 'is_case' value counts:\n{y_clean.value_counts().to_string()}"
                 "\n--- [DEBUG] End of diagnostics ---\n",
                 flush=True
