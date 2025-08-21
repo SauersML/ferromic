@@ -431,9 +431,39 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         n_cases = int(y_clean.sum())
         n_ctrls = int(n_total - n_cases)
         if n_cases < MIN_CASES_FILTER or n_ctrls < MIN_CONTROLS_FILTER:
-            print(f"[Worker-{os.getpid()}] - [SKIP] {s_name:<40s} | N={n_total:,} Cases={n_cases:,} Ctrls={n_ctrls:,} | Reason=insufficient_cases_or_controls", flush=True)
+            # write result+meta so _should_skip() will skip this phenotype next run
+            result_data = {
+                "Phenotype": s_name,
+                "N_Total": n_total,
+                "N_Cases": n_cases,
+                "N_Controls": n_ctrls,
+                "Beta": float('nan'),
+                "OR": float('nan'),
+                "P_Value": float('nan'),
+                "Skip_Reason": "insufficient_cases_or_controls"
+            }
+            pd.Series(result_data).to_json(result_path)
+            _write_meta_json(meta_path, {
+                "kind": "phewas_result",
+                "s_name": s_name,
+                "category": category,
+                "model": "Logit",
+                "model_columns": list(worker_core_df.columns),
+                "num_pcs": NUM_PCS,
+                "min_cases": MIN_CASES_FILTER,
+                "min_ctrls": MIN_CONTROLS_FILTER,
+                "target": target_inversion,
+                "core_index_fp": _index_fingerprint(worker_core_df.index),
+                "case_idx_fp": case_idx_fp,
+                "created_at": datetime.utcnow().isoformat() + "Z",
+                "skip_reason": "insufficient_cases_or_controls"
+            })
+            print(
+                f"[Worker-{os.getpid()}] - [SKIP] {s_name:<40s} | N={n_total:,} Cases={n_cases:,} Ctrls={n_ctrls:,} "
+                f"| Reason=insufficient_cases_or_controls thresholds(cases>={MIN_CASES_FILTER}, ctrls>={MIN_CONTROLS_FILTER})",
+                flush=True
+            )
             return
-
 
         # Drop any zero-variance covariates within the valid set, but never drop the intercept or target.
         drop_candidates = [c for c in X_clean.columns if c not in ('const', target_inversion)]
