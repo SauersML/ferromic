@@ -808,7 +808,8 @@ def main():
             ancestry_labels_df.index = ancestry_labels_df.index.astype(str)
 
             pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-            covariate_cols = [TARGET_INVERSION] + ["sex"] + pc_cols + ["AGE", "AGE_sq"]
+            # covariate_cols = [TARGET_INVERSION] + ["sex"] + pc_cols + ["AGE", "AGE_sq"]
+            covariate_cols = [TARGET_INVERSION] + ["sex"] + pc_cols + ["AGE"]
 
             core_df = (
                 demographics_df.join(inversion_df, how="inner")
