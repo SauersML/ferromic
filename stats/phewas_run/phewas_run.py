@@ -9,7 +9,7 @@ from datetime import datetime
 import threading
 import queue
 from functools import partial
-from multiprocessing import Pool, cpu_count
+from multiprocessing import get_context, cpu_count
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 from pandas.api.types import is_numeric_dtype
@@ -1601,7 +1601,7 @@ def main():
         )
 
         print(f"\n--- Starting parallel model fitting with {cpu_count()} worker processes ---")
-        with Pool(
+        with get_context('spawn').Pool(
             processes=max(1, min(cpu_count(), 8)),
             initializer=init_worker,
             initargs=(core_df_with_const, allowed_mask_by_cat),
@@ -1738,7 +1738,7 @@ def main():
                 bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
                 print(f"\r[{label}] {bar} {d}/{q} ({pct}%)", end="", flush=True)
 
-            with Pool(
+            with get_context('spawn').Pool(
                 processes=max(1, min(cpu_count(), 8)),
                 initializer=init_worker,
                 initargs=(core_df_with_const, allowed_mask_by_cat),
@@ -1804,7 +1804,7 @@ def main():
                 queued = 0
                 done = 0
                 lock = threading.Lock()
-                with Pool(
+                with get_context('spawn').Pool(
                     processes=max(1, min(cpu_count(), 8)),
                     initializer=init_lrt_worker,
                     initargs=(core_df_with_const, allowed_mask_by_cat, anc_series),
