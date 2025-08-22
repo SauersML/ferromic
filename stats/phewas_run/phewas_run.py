@@ -1374,17 +1374,24 @@ def main():
             # Stage-1: Overall LRT for the inversion dosage effect across all phenotypes.
             # This computes P_LRT_Overall by comparing reduced (no dosage) vs full (with dosage) models on the same row set.
             overall_rows = []
-            for s_name in df["Phenotype"].astype(str).tolist():
+            phenos_list = df["Phenotype"].astype(str).tolist()
+            total_ph = len(phenos_list)
+            print(f"[LRT-Stage1] Starting overall LRT for {total_ph} phenotypes.", flush=True)
+            t0 = time.time()
+            for i, s_name in enumerate(phenos_list, start=1):
                 category = name_to_cat.get(s_name, None)
                 entry = {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_df_Overall": np.nan, "LRT_Overall_Reason": ""}
+                print(f"[LRT-Stage1] {i}/{total_ph} Preparing phenotype='{s_name}'", flush=True)
                 if (category is None) or (category not in allowed_mask_by_cat):
                     entry["LRT_Overall_Reason"] = "unknown_category"
+                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=unknown_category", flush=True)
                     overall_rows.append(entry)
                     continue
 
                 pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
                 if not os.path.exists(pheno_cache_path):
                     entry["LRT_Overall_Reason"] = "missing_case_cache"
+                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=missing_case_cache", flush=True)
                     overall_rows.append(entry)
                     continue
 
@@ -1400,6 +1407,7 @@ def main():
                 valid_mask_all = (allowed_mask_by_cat[category] | case_mask) & global_notnull_mask
                 if int(valid_mask_all.sum()) == 0:
                     entry["LRT_Overall_Reason"] = "no_valid_rows_after_mask"
+                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=no_valid_rows_after_mask", flush=True)
                     overall_rows.append(entry)
                     continue
 
@@ -1420,8 +1428,10 @@ def main():
                             mask = X_base['sex'].isin(valid_sexes)
                             X_base = X_base.loc[mask]
                             y_all = y_all.loc[X_base.index]
+                            print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' sex_restricted rows={len(X_base)}", flush=True)
                         elif len(valid_sexes) == 0:
                             X_base = X_base.drop(columns=['sex'])
+                            print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' sex_dropped rows={len(X_base)}", flush=True)
                     except Exception:
                         pass
 
@@ -1429,23 +1439,27 @@ def main():
                 zvar_cols = [c for c in X_base.columns if c not in ['const', TARGET_INVERSION] and pd.Series(X_base[c]).nunique(dropna=False) <= 1]
                 if len(zvar_cols) > 0:
                     X_base = X_base.drop(columns=zvar_cols)
+                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' dropped_zero_variance={','.join(zvar_cols)}", flush=True)
 
                 # Enforce the same minimum case/control thresholds used by worker models to keep Stage-1 coherent.
                 n_cases_stage1 = int(y_all.sum())
                 n_ctrls_stage1 = int(len(y_all) - n_cases_stage1)
+                print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' N={len(y_all)} cases={n_cases_stage1} ctrls={n_ctrls_stage1}", flush=True)
                 if n_cases_stage1 < MIN_CASES_FILTER or n_ctrls_stage1 < MIN_CONTROLS_FILTER:
                     entry["LRT_Overall_Reason"] = "insufficient_counts"
+                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=insufficient_counts", flush=True)
                     overall_rows.append(entry)
                     continue
 
                 if TARGET_INVERSION not in X_base.columns or pd.Series(X_base[TARGET_INVERSION]).nunique(dropna=False) <= 1:
                     entry["LRT_Overall_Reason"] = "target_constant"
+                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=target_constant", flush=True)
                     overall_rows.append(entry)
                     continue
 
                 X_full = X_base.copy()
                 X_red = X_base.drop(columns=[TARGET_INVERSION])
-
+                print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' fitting reduced_full shapes red={X_red.shape} full={X_full.shape}", flush=True)
                 fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all, allow_sex_handling=False, require_target=False)
                 fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all, allow_sex_handling=False, require_target=True)
 
@@ -1467,9 +1481,11 @@ def main():
                         entry["P_LRT_Overall"] = p_lrt_overall
                         entry["LRT_df_Overall"] = lrt_df_overall
                         entry["LRT_Overall_Reason"] = ""
+                        print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' df={lrt_df_overall} llf_full={fit_full.llf:.6f} llf_red={fit_red.llf:.6f} p={p_lrt_overall:.3e}", flush=True)
                     else:
                         entry["LRT_df_Overall"] = 0
                         entry["LRT_Overall_Reason"] = "no_df"
+                        print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=no_df", flush=True)
 
                 else:
                     reason_bits = []
@@ -1482,25 +1498,35 @@ def main():
                     if (fit_red is not None) and (fit_full is not None) and (fit_full.llf < fit_red.llf):
                         reason_bits.append("full_llf_below_reduced_llf")
                     entry["LRT_Overall_Reason"] = ";".join(reason_bits)
+                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason={entry['LRT_Overall_Reason']}", flush=True)
 
                 overall_rows.append(entry)
 
             # Merge overall LRT results and compute BH-FDR on P_LRT_Overall with strict thresholding.
             if len(overall_rows) > 0:
                 overall_df = pd.DataFrame(overall_rows)
+                print(f"[LRT-Stage1] Completed overall LRT. Consolidating {len(overall_df)} rows.", flush=True)
                 df = df.merge(overall_df, on="Phenotype", how="left")
                 mask_overall = pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna()
-                if int(mask_overall.sum()) > 0:
+                m_total = int(mask_overall.sum())
+                print(f"[LRT-Stage1] m_total_non_nan={m_total}", flush=True)
+                if m_total > 0:
                     _, p_adj_overall, _, _ = multipletests(df.loc[mask_overall, "P_LRT_Overall"], alpha=FDR_ALPHA, method="fdr_bh")
                     df.loc[mask_overall, "P_FDR"] = p_adj_overall
                 df["Sig_FDR"] = df["P_FDR"] < FDR_ALPHA
+                R_selected = int(pd.to_numeric(df["Sig_FDR"], errors="coerce").fillna(False).astype(bool).sum())
+                print(f"[LRT-Stage1] Stage-1 BH complete. R_selected={R_selected}", flush=True)
+
 
             # Collect follow-up results keyed by phenotype.
             follow_rows = []
 
             hit_names = df.loc[df["Sig_FDR"] == True, "Phenotype"].tolist()
+            print(f"[Ancestry] Starting follow-up for {len(hit_names)} FDR-significant phenotypes.", flush=True)
             if len(hit_names) > 0:
                 for s_name in hit_names:
+                    print(f"[Ancestry] Begin phenotype='{s_name}'", flush=True)
+
                     category = name_to_cat.get(s_name, None)
                     if category is None or category not in allowed_mask_by_cat:
                         continue
