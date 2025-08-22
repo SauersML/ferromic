@@ -38,6 +38,13 @@ def _thread_excepthook(args):
     _global_excepthook(args.exc_type, args.exc_value, args.exc_traceback)
 threading.excepthook = _thread_excepthook
 
+# Ensure line-buffered, real-time stdout/stderr for consistent progress bars and diagnostics across threads and subprocesses.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 warnings.filterwarnings(
     "ignore",
     message=r"^overflow encountered in exp",
@@ -64,6 +71,9 @@ LOADER_CHUNK_SIZE = 128
 # --- Data sources and caching ---
 CACHE_DIR = "./phewas_cache"
 RESULTS_CACHE_DIR = os.path.join(CACHE_DIR, "results_atomic")
+# Per-phenotype Likelihood Ratio Test caches for resume-safe execution
+LRT_OVERALL_CACHE_DIR = os.path.join(CACHE_DIR, "lrt_overall")
+LRT_FOLLOWUP_CACHE_DIR = os.path.join(CACHE_DIR, "lrt_followup")
 INVERSION_DOSAGES_FILE = "imputed_inversion_dosages.tsv"
 PCS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
 SEX_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
@@ -586,8 +596,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "P_Value": float('nan'),
                 "Skip_Reason": "insufficient_cases_or_controls"
             }
-            pd.Series(result_data).to_json(result_path)
-            _write_meta_json(meta_path, {
+            _atomic_write_json(result_path, result_data)
+            _atomic_write_json(meta_path, {
                 "kind": "phewas_result",
                 "s_name": s_name,
                 "category": category,
@@ -602,6 +612,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "created_at": datetime.utcnow().isoformat() + "Z",
                 "skip_reason": "insufficient_cases_or_controls"
             })
+
             print(
                 f"[Worker-{os.getpid()}] - [SKIP] {s_name:<40s} | N={n_total:,} Cases={n_cases:,} Ctrls={n_ctrls:,} "
                 f"| Reason=insufficient_cases_or_controls thresholds(cases>={MIN_CASES_FILTER}, ctrls>={MIN_CONTROLS_FILTER})",
@@ -626,8 +637,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "OR": float('nan'),
                 "P_Value": float('nan')
             }
-            pd.Series(result_data).to_json(result_path)
-            _write_meta_json(meta_path, {
+            _atomic_write_json(result_path, result_data)
+            _atomic_write_json(meta_path, {
                 "kind": "phewas_result",
                 "s_name": s_name,
                 "category": category,
@@ -750,8 +761,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "OR": float('nan'),
                 "P_Value": float('nan')
             }
-            pd.Series(result_data).to_json(result_path)
-            _write_meta_json(meta_path, {
+            _atomic_write_json(result_path, result_data)
+            _atomic_write_json(meta_path, {
                 "kind": "phewas_result",
                 "s_name": s_name,
                 "category": category,
@@ -803,9 +814,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "P_Value": pval,
             "OR_CI95": or_ci95_str
         }
-        pd.Series(result_data).to_json(result_path)
+        _atomic_write_json(result_path, result_data)
 
-        _write_meta_json(meta_path, {
+        _atomic_write_json(meta_path, {
             "kind": "phewas_result",
             "s_name": s_name,
             "category": category,
@@ -836,6 +847,604 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if 'y_clean' in locals():
             del y_clean
         gc.collect()
+
+# Atomic JSON writer used by workers to guarantee on-disk completeness even under interruption.
+def _atomic_write_json(path, data_obj):
+    """
+    Writes JSON atomically by first writing to a unique temp path and then moving it into place.
+    Accepts either a dict-like object or a pandas Series.
+    """
+    tmp_path = f"{path}.tmp.{os.getpid()}.{int(time.time() * 1000)}"
+    try:
+        if isinstance(data_obj, pd.Series):
+            data_obj.to_json(tmp_path)
+        else:
+            pd.Series(data_obj).to_json(tmp_path)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+# Lightweight LRT meta equivalence check. This keeps invariants small and stable.
+def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target):
+    meta = _read_meta_json(meta_path)
+    if not meta:
+        return False
+    same = (
+        meta.get("model_columns") == list(core_df_cols) and
+        meta.get("num_pcs") == NUM_PCS and
+        meta.get("min_cases") == MIN_CASES_FILTER and
+        meta.get("min_ctrls") == MIN_CONTROLS_FILTER and
+        meta.get("target") == target and
+        meta.get("category") == category and
+        meta.get("core_index_fp") == core_index_fp and
+        meta.get("case_idx_fp") == case_idx_fp
+    )
+    return bool(same)
+
+# Dedicated initializer for LRT pools that also provides ancestry labels to workers for Stage-2.
+worker_anc_series = None
+def init_lrt_worker(df_to_share, masks, anc_series):
+    import warnings
+    warnings.filterwarnings(
+        "ignore",
+        message=r"^overflow encountered in exp",
+        category=RuntimeWarning,
+        module=r"^statsmodels\.discrete\.discrete_model$",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r"^divide by zero encountered in log",
+        category=RuntimeWarning,
+        module=r"^statsmodels\.discrete\.discrete_model$",
+    )
+    global worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series
+    worker_core_df = df_to_share
+    allowed_mask_by_cat = masks
+    N_core = len(df_to_share)
+    # Align and normalize ancestry once per worker to avoid repeated per-task work.
+    worker_anc_series = anc_series.reindex(df_to_share.index).str.lower()
+    print(f"[Worker-{os.getpid()}] Initialized and received shared core dataframe, masks, and ancestry.", flush=True)
+
+def lrt_overall_worker(task):
+    """
+    Worker for Stage-1 overall LRT. Reads case set from per-phenotype cache, builds reduced and full models
+    on the same rows, computes df via rank difference, and writes result + meta atomically.
+    """
+    try:
+        s_name = task["name"]
+        category = task["category"]
+        cdr_codename = task["cdr_codename"]
+        target_inversion = task["target"]
+        result_path = os.path.join(LRT_OVERALL_CACHE_DIR, f"{s_name}.json")
+        meta_path = result_path + ".meta.json"
+
+        # Case fingerprint based on person_id values for resume-safe equivalence.
+        pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
+        if not os.path.exists(pheno_cache_path):
+            _atomic_write_json(result_path, {
+                "Phenotype": s_name,
+                "P_LRT_Overall": float('nan'),
+                "LRT_df_Overall": float('nan'),
+                "LRT_Overall_Reason": "missing_case_cache"
+            })
+            _atomic_write_json(meta_path, {
+                "kind": "lrt_overall",
+                "s_name": s_name,
+                "category": category,
+                "model_columns": list(worker_core_df.columns),
+                "num_pcs": NUM_PCS,
+                "min_cases": MIN_CASES_FILTER,
+                "min_ctrls": MIN_CONTROLS_FILTER,
+                "target": target_inversion,
+                "core_index_fp": _index_fingerprint(worker_core_df.index),
+                "case_idx_fp": "",
+                "created_at": datetime.utcnow().isoformat() + "Z"
+            })
+            print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason=missing_case_cache", flush=True)
+            return
+
+        ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
+        case_ids = ph.index[ph['is_case'] == 1].astype(str)
+        core_index = worker_core_df.index
+        case_idx = core_index.get_indexer(case_ids)
+        case_idx = case_idx[case_idx >= 0].astype(np.int32)
+        case_ids_for_fp = core_index[case_idx] if case_idx.size > 0 else pd.Index([], name=core_index.name)
+        case_fp = _index_fingerprint(case_ids_for_fp)
+
+        if os.path.exists(result_path) and _lrt_meta_should_skip(
+            meta_path,
+            worker_core_df.columns,
+            _index_fingerprint(core_index),
+            case_fp,
+            category,
+            target_inversion
+        ):
+            print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} CACHE_HIT", flush=True)
+            return
+
+        # Build masks and design
+        finite_mask = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
+        allowed_mask = allowed_mask_by_cat.get(category, np.ones(len(core_index), dtype=bool))
+        case_mask = np.zeros(len(core_index), dtype=bool)
+        if case_idx.size > 0:
+            case_mask[case_idx] = True
+        valid_mask = (allowed_mask | case_mask) & finite_mask
+        n_valid = int(valid_mask.sum())
+        y = np.zeros(n_valid, dtype=np.int8)
+        case_positions = np.nonzero(case_mask[valid_mask])[0]
+        if case_positions.size > 0:
+            y[case_positions] = 1
+
+        # Assemble base X and enforce float64
+        pc_cols_local = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+        base_cols = ['const', target_inversion, 'sex'] + pc_cols_local + ['AGE']
+        X_base = worker_core_df.loc[valid_mask, base_cols].astype(np.float64, copy=False)
+        y_series = pd.Series(y, index=X_base.index, name='is_case')
+
+        # Sex handling mirrored across reduced and full
+        if 'sex' in X_base.columns:
+            try:
+                tab = pd.crosstab(X_base['sex'], y_series).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
+                valid_sexes = []
+                for s in [0.0, 1.0]:
+                    if s in tab.index:
+                        if bool(tab.loc[s, 0] > 0) and bool(tab.loc[s, 1] > 0):
+                            valid_sexes.append(s)
+                if len(valid_sexes) == 1:
+                    keep = X_base['sex'].isin(valid_sexes)
+                    X_base = X_base.loc[keep]
+                    y_series = y_series.loc[X_base.index]
+                elif len(valid_sexes) == 0:
+                    X_base = X_base.drop(columns=['sex'])
+            except Exception:
+                pass
+
+        # Drop zero-variance columns except const and target
+        zvars = [c for c in X_base.columns if c not in ['const', target_inversion] and pd.Series(X_base[c]).nunique(dropna=False) <= 1]
+        if len(zvars) > 0:
+            X_base = X_base.drop(columns=zvars)
+
+        n_cases = int(y_series.sum())
+        n_ctrls = int(len(y_series) - n_cases)
+        if n_cases < MIN_CASES_FILTER or n_ctrls < MIN_CONTROLS_FILTER:
+            _atomic_write_json(result_path, {
+                "Phenotype": s_name,
+                "P_LRT_Overall": float('nan'),
+                "LRT_df_Overall": float('nan'),
+                "LRT_Overall_Reason": "insufficient_counts"
+            })
+            _atomic_write_json(meta_path, {
+                "kind": "lrt_overall",
+                "s_name": s_name,
+                "category": category,
+                "model_columns": list(worker_core_df.columns),
+                "num_pcs": NUM_PCS,
+                "min_cases": MIN_CASES_FILTER,
+                "min_ctrls": MIN_CONTROLS_FILTER,
+                "target": target_inversion,
+                "core_index_fp": _index_fingerprint(core_index),
+                "case_idx_fp": case_fp,
+                "created_at": datetime.utcnow().isoformat() + "Z"
+            })
+            print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason=insufficient_counts", flush=True)
+            return
+
+        # Require variability in target
+        if target_inversion not in X_base.columns or pd.Series(X_base[target_inversion]).nunique(dropna=False) <= 1:
+            _atomic_write_json(result_path, {
+                "Phenotype": s_name,
+                "P_LRT_Overall": float('nan'),
+                "LRT_df_Overall": float('nan'),
+                "LRT_Overall_Reason": "target_constant"
+            })
+            _atomic_write_json(meta_path, {
+                "kind": "lrt_overall",
+                "s_name": s_name,
+                "category": category,
+                "model_columns": list(worker_core_df.columns),
+                "num_pcs": NUM_PCS,
+                "min_cases": MIN_CASES_FILTER,
+                "min_ctrls": MIN_CONTROLS_FILTER,
+                "target": target_inversion,
+                "core_index_fp": _index_fingerprint(core_index),
+                "case_idx_fp": case_fp,
+                "created_at": datetime.utcnow().isoformat() + "Z"
+            })
+            print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason=target_constant", flush=True)
+            return
+
+        # Fit reduced and full using a hardened local helper to keep parity with main.
+        def _design_rank(X):
+            try:
+                return int(np.linalg.matrix_rank(X.values))
+            except Exception:
+                return int(np.linalg.matrix_rank(np.asarray(X)))
+
+        def _fit_logit_hardened(X, y_in, require_target):
+            if not isinstance(X, pd.DataFrame):
+                X = pd.DataFrame(X)
+            X = X.astype(np.float64, copy=False)
+            y_arr = np.asarray(y_in, dtype=np.float64).reshape(-1)
+            if require_target:
+                if target_inversion not in X.columns or pd.Series(X[target_inversion]).nunique(dropna=False) <= 1:
+                    return None, "target_constant"
+            try:
+                fit_try = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
+                return fit_try, ""
+            except Exception:
+                pass
+            try:
+                fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
+                return fit_try, ""
+            except Exception:
+                pass
+            try:
+                p = X.shape[1] - (1 if 'const' in X.columns else 0)
+                n = max(1, X.shape[0])
+                alpha = max(RIDGE_L2_BASE * (float(p) / float(n)), 1e-6)
+                ridge_fit = sm.Logit(y_arr, X).fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=800)
+                return ridge_fit, ""
+            except Exception as e:
+                return None, f"fit_exception:{type(e).__name__}"
+
+        X_full = X_base.copy()
+        X_red = X_base.drop(columns=[target_inversion])
+
+        fit_red, r_reason = _fit_logit_hardened(X_red, y_series, require_target=False)
+        fit_full, f_reason = _fit_logit_hardened(X_full, y_series, require_target=True)
+
+        out = {
+            "Phenotype": s_name,
+            "P_LRT_Overall": float('nan'),
+            "LRT_df_Overall": float('nan'),
+            "LRT_Overall_Reason": ""
+        }
+
+        if (fit_red is not None) and (fit_full is not None) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
+            rank_red = _design_rank(X_red)
+            rank_full = _design_rank(X_full)
+            df_lrt = int(max(0, rank_full - rank_red))
+            if df_lrt > 0:
+                from scipy import stats as _stats
+                llr = 2.0 * (fit_full.llf - fit_red.llf)
+                out["P_LRT_Overall"] = float(_stats.chi2.sf(llr, df_lrt))
+                out["LRT_df_Overall"] = df_lrt
+                out["LRT_Overall_Reason"] = ""
+                print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} df={df_lrt} p={out['P_LRT_Overall']:.3e}", flush=True)
+            else:
+                out["LRT_df_Overall"] = 0
+                out["LRT_Overall_Reason"] = "no_df"
+                print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason=no_df", flush=True)
+        else:
+            reasons = []
+            if fit_red is None:
+                reasons.append(f"reduced_model_failed:{r_reason}")
+            if fit_full is None:
+                reasons.append(f"full_model_failed:{f_reason}")
+            if (fit_red is not None) and (fit_full is not None) and (fit_full.llf < fit_red.llf):
+                reasons.append("full_llf_below_reduced_llf")
+            out["LRT_Overall_Reason"] = ";".join(reasons) if reasons else "fit_failed"
+            print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason={out['LRT_Overall_Reason']}", flush=True)
+
+        _atomic_write_json(result_path, out)
+        _atomic_write_json(meta_path, {
+            "kind": "lrt_overall",
+            "s_name": s_name,
+            "category": category,
+            "model_columns": list(worker_core_df.columns),
+            "num_pcs": NUM_PCS,
+            "min_cases": MIN_CASES_FILTER,
+            "min_ctrls": MIN_CONTROLS_FILTER,
+            "target": target_inversion,
+            "core_index_fp": _index_fingerprint(core_index),
+            "case_idx_fp": case_fp,
+            "created_at": datetime.utcnow().isoformat() + "Z"
+        })
+    except Exception:
+        import traceback, sys
+        print(f"[LRT-Stage1-Worker-{os.getpid()}] {task.get('name','?')} FAILED with exception, writing error stub", flush=True)
+        traceback.print_exc()
+        sys.stderr.flush()
+        s_name = task.get("name", "unknown")
+        _atomic_write_json(os.path.join(LRT_OVERALL_CACHE_DIR, f"{s_name}.json"), {
+            "Phenotype": s_name,
+            "P_LRT_Overall": float('nan'),
+            "LRT_df_Overall": float('nan'),
+            "LRT_Overall_Reason": "exception"
+        })
+
+def lrt_followup_worker(task):
+    """
+    Worker for Stage-2 ancestry×dosage LRT and per-ancestry splits for selected phenotypes.
+    Caches one JSON per phenotype in the follow-up cache directory.
+    """
+    try:
+        s_name = task["name"]
+        category = task["category"]
+        cdr_codename = task["cdr_codename"]
+        target_inversion = task["target"]
+        result_path = os.path.join(LRT_FOLLOWUP_CACHE_DIR, f"{s_name}.json")
+        meta_path = result_path + ".meta.json"
+
+        # Case indices
+        pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
+        if not os.path.exists(pheno_cache_path):
+            _atomic_write_json(result_path, {
+                'Phenotype': s_name,
+                'P_LRT_AncestryxDosage': float('nan'),
+                'LRT_df': float('nan'),
+                'LRT_Ancestry_Levels': "",
+                'LRT_Reason': "missing_case_cache"
+            })
+            _atomic_write_json(meta_path, {
+                "kind": "lrt_followup",
+                "s_name": s_name,
+                "category": category,
+                "model_columns": list(worker_core_df.columns),
+                "num_pcs": NUM_PCS,
+                "min_cases": MIN_CASES_FILTER,
+                "min_ctrls": MIN_CONTROLS_FILTER,
+                "target": target_inversion,
+                "core_index_fp": _index_fingerprint(worker_core_df.index),
+                "case_idx_fp": "",
+                "created_at": datetime.utcnow().isoformat() + "Z"
+            })
+            print(f"[Ancestry-Worker-{os.getpid()}] {s_name} SKIP reason=missing_case_cache", flush=True)
+            return
+
+        ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
+        case_ids = ph.index[ph['is_case'] == 1].astype(str)
+        core_index = worker_core_df.index
+        case_idx = core_index.get_indexer(case_ids)
+        case_idx = case_idx[case_idx >= 0].astype(np.int32)
+        case_ids_for_fp = core_index[case_idx] if case_idx.size > 0 else pd.Index([], name=core_index.name)
+        case_fp = _index_fingerprint(case_ids_for_fp)
+
+        if os.path.exists(result_path) and _lrt_meta_should_skip(
+            meta_path,
+            worker_core_df.columns,
+            _index_fingerprint(core_index),
+            case_fp,
+            category,
+            target_inversion
+        ):
+            print(f"[Ancestry-Worker-{os.getpid()}] {s_name} CACHE_HIT", flush=True)
+            return
+
+        # Masks and base X/Y
+        finite_mask = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
+        allowed_mask = allowed_mask_by_cat.get(category, np.ones(len(core_index), dtype=bool))
+        case_mask = np.zeros(len(core_index), dtype=bool)
+        if case_idx.size > 0:
+            case_mask[case_idx] = True
+        valid_mask = (allowed_mask | case_mask) & finite_mask
+        if int(valid_mask.sum()) == 0:
+            _atomic_write_json(result_path, {
+                'Phenotype': s_name,
+                'P_LRT_AncestryxDosage': float('nan'),
+                'LRT_df': float('nan'),
+                'LRT_Ancestry_Levels': "",
+                'LRT_Reason': "no_valid_rows_after_mask"
+            })
+            _atomic_write_json(meta_path, {
+                "kind": "lrt_followup",
+                "s_name": s_name,
+                "category": category,
+                "model_columns": list(worker_core_df.columns),
+                "num_pcs": NUM_PCS,
+                "min_cases": MIN_CASES_FILTER,
+                "min_ctrls": MIN_CONTROLS_FILTER,
+                "target": target_inversion,
+                "core_index_fp": _index_fingerprint(core_index),
+                "case_idx_fp": case_fp,
+                "created_at": datetime.utcnow().isoformat() + "Z"
+            })
+            print(f"[Ancestry-Worker-{os.getpid()}] {s_name} SKIP reason=no_valid_rows_after_mask", flush=True)
+            return
+
+        pc_cols_local = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+        base_cols = ['const', target_inversion, 'sex'] + pc_cols_local + ['AGE']
+        X_base = worker_core_df.loc[valid_mask, base_cols].astype(np.float64, copy=False)
+        y = np.zeros(X_base.shape[0], dtype=np.int8)
+        case_positions = np.nonzero(case_mask[valid_mask])[0]
+        if case_positions.size > 0:
+            y[case_positions] = 1
+        y_series = pd.Series(y, index=X_base.index, name='is_case')
+
+        anc_vec = worker_anc_series.loc[X_base.index]
+        anc_levels_local = anc_vec.dropna().unique().tolist()
+        if 'eur' in anc_levels_local:
+            anc_levels_local = ['eur'] + [a for a in anc_levels_local if a != 'eur']
+
+        out = {
+            'Phenotype': s_name,
+            'P_LRT_AncestryxDosage': float('nan'),
+            'LRT_df': float('nan'),
+            'LRT_Ancestry_Levels': ",".join(anc_levels_local),
+            'LRT_Reason': ""
+        }
+
+        if len(anc_levels_local) < 2:
+            out['LRT_Reason'] = "only_one_ancestry_level"
+            _atomic_write_json(result_path, out)
+            _atomic_write_json(meta_path, {
+                "kind": "lrt_followup",
+                "s_name": s_name,
+                "category": category,
+                "model_columns": list(worker_core_df.columns),
+                "num_pcs": NUM_PCS,
+                "min_cases": MIN_CASES_FILTER,
+                "min_ctrls": MIN_CONTROLS_FILTER,
+                "target": target_inversion,
+                "core_index_fp": _index_fingerprint(core_index),
+                "case_idx_fp": case_fp,
+                "created_at": datetime.utcnow().isoformat() + "Z"
+            })
+            print(f"[Ancestry-Worker-{os.getpid()}] {s_name} SKIP reason=only_one_ancestry_level", flush=True)
+            return
+
+        keep = anc_vec.notna()
+        X_base = X_base.loc[keep]
+        y_series = y_series.loc[keep]
+        anc_keep = anc_vec.loc[keep]
+        anc_keep = pd.Series(pd.Categorical(anc_keep, categories=anc_levels_local, ordered=False), index=anc_keep.index, name='ANCESTRY')
+        A = pd.get_dummies(anc_keep, prefix='ANC', drop_first=True, dtype=np.float64)
+        X_red = pd.concat([X_base, A], axis=1, join='inner').astype(np.float64, copy=False)
+        X_full = X_red.copy()
+        for c in A.columns:
+            X_full[f"{target_inversion}:{c}"] = X_full[target_inversion] * X_full[c]
+
+        # Fit both designs (hardened)
+        def _fit_logit(X, y_in, require_target):
+            if not isinstance(X, pd.DataFrame):
+                X = pd.DataFrame(X)
+            X = X.astype(np.float64, copy=False)
+            y_arr = np.asarray(y_in, dtype=np.float64).reshape(-1)
+            if require_target:
+                if target_inversion not in X.columns or pd.Series(X[target_inversion]).nunique(dropna=False) <= 1:
+                    return None, "target_constant"
+            try:
+                fit_try = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
+                return fit_try, ""
+            except Exception:
+                pass
+            try:
+                fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
+                return fit_try, ""
+            except Exception:
+                pass
+            try:
+                p = X.shape[1] - (1 if 'const' in X.columns else 0)
+                n = max(1, X.shape[0])
+                alpha = max(RIDGE_L2_BASE * (float(p) / float(n)), 1e-6)
+                ridge_fit = sm.Logit(y_arr, X).fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=800)
+                return ridge_fit, ""
+            except Exception as e:
+                return None, f"fit_exception:{type(e).__name__}"
+
+        fit_red, rr = _fit_logit(X_red, y_series, require_target=False)
+        fit_full, fr = _fit_logit(X_full, y_series, require_target=True)
+
+        def _rank(X):
+            try:
+                return int(np.linalg.matrix_rank(X.values))
+            except Exception:
+                return int(np.linalg.matrix_rank(np.asarray(X)))
+
+        if (fit_red is not None) and (fit_full is not None) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
+            from scipy import stats as _stats
+            df_lrt = int(max(0, _rank(X_full) - _rank(X_red)))
+            if df_lrt > 0:
+                llr = 2.0 * (fit_full.llf - fit_red.llf)
+                out['P_LRT_AncestryxDosage'] = float(_stats.chi2.sf(llr, df_lrt))
+                out['LRT_df'] = df_lrt
+                out['LRT_Reason'] = ""
+                print(f"[Ancestry-Worker-{os.getpid()}] {s_name} df={df_lrt} p={out['P_LRT_AncestryxDosage']:.3e}", flush=True)
+            else:
+                out['LRT_Reason'] = "no_interaction_df"
+        else:
+            reasons = []
+            if fit_red is None:
+                reasons.append(f"reduced_model_failed:{rr}")
+            if fit_full is None:
+                reasons.append(f"full_model_failed:{fr}")
+            if (fit_red is not None) and (fit_full is not None) and (fit_full.llf < fit_red.llf):
+                reasons.append("full_llf_below_reduced_llf")
+            out['LRT_Reason'] = ";".join(reasons) if reasons else "fit_failed"
+
+        # Per-ancestry simple splits (counts always included; OR/P only when stratum large enough)
+        for anc in anc_levels_local:
+            group_mask = valid_mask & worker_anc_series.eq(anc).to_numpy()
+            if not group_mask.any():
+                out[f"{anc.upper()}_N"] = 0
+                out[f"{anc.upper()}_N_Cases"] = 0
+                out[f"{anc.upper()}_N_Controls"] = 0
+                out[f"{anc.upper()}_OR"] = float('nan')
+                out[f"{anc.upper()}_CI95"] = float('nan')
+                out[f"{anc.upper()}_P"] = float('nan')
+                out[f"{anc.upper()}_REASON"] = "no_rows_in_group"
+                continue
+            X_g = worker_core_df.loc[group_mask, ['const', target_inversion, 'sex'] + pc_cols_local + ['AGE']].astype(np.float64, copy=False)
+            y_g = np.zeros(X_g.shape[0], dtype=np.int8)
+            case_positions_g = np.nonzero(case_mask[group_mask])[0]
+            if case_positions_g.size > 0:
+                y_g[case_positions_g] = 1
+            n_cases_g = int(y_g.sum())
+            n_tot_g = int(len(y_g))
+            n_ctrl_g = n_tot_g - n_cases_g
+            out[f"{anc.upper()}_N"] = n_tot_g
+            out[f"{anc.upper()}_N_Cases"] = n_cases_g
+            out[f"{anc.upper()}_N_Controls"] = n_ctrl_g
+            if (n_cases_g < PER_ANC_MIN_CASES) or (n_ctrl_g < PER_ANC_MIN_CONTROLS):
+                out[f"{anc.upper()}_OR"] = float('nan')
+                out[f"{anc.upper()}_CI95"] = float('nan')
+                out[f"{anc.upper()}_P"] = float('nan')
+                out[f"{anc.upper()}_REASON"] = "insufficient_stratum_counts"
+                continue
+            # Fit per-ancestry effect
+            try:
+                fit_g = sm.Logit(y_g, X_g).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
+            except Exception:
+                try:
+                    fit_g = sm.Logit(y_g, X_g).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
+                except Exception:
+                    fit_g = None
+            if (fit_g is None) or (target_inversion not in getattr(fit_g, "params", {})):
+                out[f"{anc.upper()}_OR"] = float('nan')
+                out[f"{anc.upper()}_CI95"] = float('nan')
+                out[f"{anc.upper()}_P"] = float('nan')
+                out[f"{anc.upper()}_REASON"] = "subset_fit_failed"
+                continue
+            beta = float(fit_g.params[target_inversion])
+            or_val = float(np.exp(beta))
+            if hasattr(fit_g, "bse"):
+                try:
+                    se = float(fit_g.bse[target_inversion])
+                    lo = float(np.exp(beta - 1.96 * se))
+                    hi = float(np.exp(beta + 1.96 * se))
+                    out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
+                except Exception:
+                    out[f"{anc.upper()}_CI95"] = float('nan')
+            else:
+                out[f"{anc.upper()}_CI95"] = float('nan')
+            out[f"{anc.upper()}_OR"] = or_val
+            try:
+                out[f"{anc.upper()}_P"] = float(fit_g.pvalues[target_inversion])
+            except Exception:
+                out[f"{anc.upper()}_P"] = float('nan')
+            out[f"{anc.upper()}_REASON"] = ""
+
+        _atomic_write_json(result_path, out)
+        _atomic_write_json(meta_path, {
+            "kind": "lrt_followup",
+            "s_name": s_name,
+            "category": category,
+            "model_columns": list(worker_core_df.columns),
+            "num_pcs": NUM_PCS,
+            "min_cases": MIN_CASES_FILTER,
+            "min_ctrls": MIN_CONTROLS_FILTER,
+            "target": target_inversion,
+            "core_index_fp": _index_fingerprint(core_index),
+            "case_idx_fp": case_fp,
+            "created_at": datetime.utcnow().isoformat() + "Z"
+        })
+    except Exception:
+        import traceback, sys
+        print(f"[Ancestry-Worker-{os.getpid()}] {task.get('name','?')} FAILED with exception, writing error stub", flush=True)
+        traceback.print_exc()
+        sys.stderr.flush()
+        s_name = task.get("name", "unknown")
+        _atomic_write_json(os.path.join(LRT_FOLLOWUP_CACHE_DIR, f"{s_name}.json"), {
+            'Phenotype': s_name,
+            'P_LRT_AncestryxDosage': float('nan'),
+            'LRT_df': float('nan'),
+            'LRT_Ancestry_Levels': "",
+            'LRT_Reason': "exception"
+        })
 
 def main():
     script_start_time = time.time()
@@ -993,9 +1602,10 @@ def main():
 
         print(f"\n--- Starting parallel model fitting with {cpu_count()} worker processes ---")
         with Pool(
-            processes=cpu_count(),
+            processes=max(1, min(cpu_count(), 8)),
             initializer=init_worker,
             initargs=(core_df_with_const, allowed_mask_by_cat),
+            maxtasksperchild=50,
         ) as pool:
             bar_len = 40
             queued = 0
@@ -1055,6 +1665,10 @@ def main():
         if not all_results_from_disk:
             print("No results found to process.")
         else:
+            # Ensure LRT cache directories exist
+            os.makedirs(LRT_OVERALL_CACHE_DIR, exist_ok=True)
+            os.makedirs(LRT_FOLLOWUP_CACHE_DIR, exist_ok=True)
+
             results_df = pd.DataFrame(all_results_from_disk)
             print(f"Successfully consolidated {len(results_df)} results.")
 
@@ -1105,407 +1719,67 @@ def main():
             core_idx_dtype = str(core_df_with_const.index.dtype)
             anc_levels_global = ",".join(sorted(pd.Series(anc_series.dropna().unique()).astype(str)))
             print(f"[DEBUG] ancestry_align total_core={total_core} known={known_anc} missing={missing_anc} core_index_dtype={core_idx_dtype} core_index_dup_count={core_dup} levels={anc_levels_global}", flush=True)
-            
-            # Helper: build y and X matrices given masks, always using PC1–PC10.
-            pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-            # base_cols = ['const', TARGET_INVERSION, 'sex'] + pc_cols + ['AGE', 'AGE_sq']
-            base_cols = ['const', TARGET_INVERSION, 'sex'] + pc_cols + ['AGE']
 
-            def _build_y_X(valid_mask, case_mask):
-                X = core_df_with_const.loc[valid_mask, base_cols].copy()
-                # Force all covariates to plain float64 for stable numeric behavior across pandas and statsmodels.
-                X = X.astype(np.float64, copy=False)
-                y = np.zeros(X.shape[0], dtype=np.int8)
-                case_positions = np.nonzero(case_mask[valid_mask])[0]
-                if case_positions.size > 0:
-                    y[case_positions] = 1
-                return pd.Series(y, index=X.index, name='is_case'), X
-
-            def _safe_fit_logit(X, y, allow_sex_handling=True, require_target=True):
-                """
-                Fits a logistic regression with robust numeric hygiene and automatic stabilization:
-                1) Enforces numeric, finite design; drops zero-variance columns except intercept and target.
-                2) Detects sex-by-case separation and restricts or drops the sex column when necessary.
-                3) Attempts standard MLE (Newton, then BFGS, then Newton with higher iters).
-                4) If MLE fails or is unstable, fits ridge-penalized logistic regression and uses its params to seed
-                   a final unpenalized refit to recover standard errors and p-values when possible.
-                Returns a tuple of (fit_result or None, reason string). When a fit object is returned, it may include:
-                    fit._model_note  -> textual note describing the stabilization path taken
-                    fit._used_ridge  -> boolean flag indicating whether a ridge step was required
-            
-                Parameters
-                ----------
-                allow_sex_handling : bool
-                    When True, performs sex-by-case separation diagnostics and restricts or drops the sex column to avoid perfect separation.
-                require_target : bool
-                    When True, enforces that the design matrix contains a non-constant TARGET_INVERSION column. When False, skips this check to allow reduced models that intentionally omit the target.
-                """
-
-                # Coerce X to DataFrame and ensure numeric dtypes only.
-                if not isinstance(X, pd.DataFrame):
-                    X = pd.DataFrame(X)
-                non_numeric_cols = [c for c in X.columns if not pd.api.types.is_numeric_dtype(X[c])]
-                if len(non_numeric_cols) > 0:
-                    X = X.copy()
-                    for c in non_numeric_cols:
-                        X[c] = pd.to_numeric(X[c], errors="coerce")
-                X = X.astype(np.float64, copy=False)
-
-                # y as Series aligned to X for separation diagnostics; also store ndarray for statsmodels.
-                if isinstance(y, pd.Series):
-                    y_series = y.copy()
-                    if not y_series.index.equals(X.index):
-                        try:
-                            y_series = y_series.reindex(X.index)
-                        except Exception:
-                            y_series = pd.Series(np.asarray(y, dtype=np.float64).reshape(-1), index=X.index, name="is_case")
-                else:
-                    y_series = pd.Series(np.asarray(y, dtype=np.float64).reshape(-1), index=X.index, name="is_case")
-                y_arr = np.asarray(y_series, dtype=np.float64).reshape(-1)
-                if y_arr.ndim != 1 or len(y_arr) != len(X):
-                    return None, "response_not_1d"
-
-                # Fail fast on NaN or Inf in design or response with detailed diagnostics and a full stack trace.
-                if not np.isfinite(X.to_numpy()).all():
-                    import traceback, sys
-                    arr = X.to_numpy()
-                    bad_rows_mask = ~np.isfinite(arr).all(axis=1)
-                    bad_row_count = int(bad_rows_mask.sum())
-                    nan_counts = {c: int(pd.isna(X[c]).sum()) for c in X.columns}
-                    posinf_counts = {c: int(np.isposinf(X[c].to_numpy()).sum()) for c in X.columns}
-                    neginf_counts = {c: int(np.isneginf(X[c].to_numpy()).sum()) for c in X.columns}
-
-                    anc_cols = [c for c in X.columns if c.startswith('ANC_')]
-                    inter_cols = [c for c in X.columns if f"{TARGET_INVERSION}:" in c]
-                    base_cols = [c for c in X.columns if c not in anc_cols + inter_cols]
-
-                    def _allfinite_block(cols):
-                        if len(cols) == 0:
-                            return np.ones(len(X), dtype=bool)
-                        return np.isfinite(X[cols].to_numpy()).all(axis=1)
-
-                    only_anc = bad_rows_mask & _allfinite_block(base_cols) & (~_allfinite_block(anc_cols))
-                    only_base = bad_rows_mask & (~_allfinite_block(base_cols)) & _allfinite_block(anc_cols)
-                    both_blocks = bad_rows_mask & (~_allfinite_block(base_cols)) & (~_allfinite_block(anc_cols))
-
-                    dup_count = int(X.index.duplicated(keep=False).sum())
-                    idx_dtype = str(X.index.dtype)
-                    sample_bad = list(map(str, X.index[bad_rows_mask][:5].tolist()))
-
-                    print("[TRACEBACK] _safe_fit_logit detected non-finite values in design matrix", flush=True)
-                    print(f"[DEBUG] design_shape={X.shape} index_dtype={idx_dtype} index_dup_count={dup_count}", flush=True)
-                    print(f"[DEBUG] bad_row_count={bad_row_count} bad_rows_only_anc={int(only_anc.sum())} bad_rows_only_base={int(only_base.sum())} bad_rows_both_blocks={int(both_blocks.sum())}", flush=True)
-                    print(f"[DEBUG] non_finite_columns={','.join([c for c in X.columns if nan_counts[c]>0 or posinf_counts[c]>0 or neginf_counts[c]>0])}", flush=True)
-                    print(f"[DEBUG] nan_counts={{{', '.join([f'{k}:{v}' for k,v in nan_counts.items() if v>0])}}}", flush=True)
-                    print(f"[DEBUG] posinf_counts={{{', '.join([f'{k}:{v}' for k,v in posinf_counts.items() if v>0])}}}", flush=True)
-                    print(f"[DEBUG] neginf_counts={{{', '.join([f'{k}:{v}' for k,v in neginf_counts.items() if v>0])}}}", flush=True)
-                    if bad_row_count > 0:
-                        print(f"[DEBUG] bad_row_index_sample={','.join(sample_bad)}", flush=True)
-                    traceback.print_stack()
-                    sys.stderr.flush()
-                    return None, "non_finite_in_design"
-                if not np.isfinite(y_arr).all():
-                    import traceback, sys
-                    y_nan = int(np.isnan(y_arr).sum())
-                    y_posinf = int(np.isposinf(y_arr).sum())
-                    y_neginf = int(np.isneginf(y_arr).sum())
-                    print("[TRACEBACK] _safe_fit_logit detected non-finite values in response vector", flush=True)
-                    print(f"[DEBUG] y_nan={y_nan} y_posinf={y_posinf} y_neginf={y_neginf} y_len={len(y_arr)}", flush=True)
-                    traceback.print_stack()
-                    sys.stderr.flush()
-                    return None, "non_finite_in_response"
-
-                # Drop zero-variance covariates within the current design, but never drop the intercept or target.
-                cols_to_check = [c for c in X.columns if c not in ['const', TARGET_INVERSION]]
-                zvar = [c for c in cols_to_check if pd.Series(X[c]).nunique(dropna=False) <= 1]
-                if len(zvar) > 0:
-                    X = X.drop(columns=zvar)
-
-                # If require_target is True, enforce presence and variability of the target inversion dosage; otherwise skip this check to allow reduced models that purposefully omit the target.
-                if require_target:
-                    if TARGET_INVERSION not in X.columns or pd.Series(X[TARGET_INVERSION]).nunique(dropna=False) <= 1:
-                        return None, "target_constant"
-
-                # Detect and handle sex-by-case separation without prior knowledge.
-                model_notes = []
-                if allow_sex_handling and 'sex' in X.columns:
-                    try:
-                        tab = pd.crosstab(X['sex'], y_series).reindex(index=[0.0, 1.0], columns=[0.0, 1.0], fill_value=0)
-                        valid_sexes = []
-                        for s in [0.0, 1.0]:
-                            if s in tab.index:
-                                has_ctrl = bool(tab.loc[s, 0.0] > 0)
-                                has_case = bool(tab.loc[s, 1.0] > 0)
-                                if has_ctrl and has_case:
-                                    valid_sexes.append(s)
-                        if len(valid_sexes) == 1:
-                            mask = X['sex'].isin(valid_sexes)
-                            X = X.loc[mask]
-                            y_series = y_series.loc[X.index]
-                            y_arr = np.asarray(y_series, dtype=np.float64).reshape(-1)
-                            model_notes.append("sex_restricted")
-                        elif len(valid_sexes) == 0:
-                            X = X.drop(columns=['sex'])
-                            model_notes.append("sex_dropped_for_separation")
-                    except Exception:
-                        pass
-
-                def _conv(f):
-                    try:
-                        if hasattr(f, "mle_retvals") and isinstance(f.mle_retvals, dict):
-                            return bool(f.mle_retvals.get("converged", False))
-                        if hasattr(f, "converged"):
-                            return bool(f.converged)
-                        return False
-                    except Exception:
-                        return False
-
-                # First: standard MLE attempts.
-                try:
-                    fit_try = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
-                    if _conv(fit_try):
-                        setattr(fit_try, "_model_note", ";".join(model_notes) if model_notes else "")
-                        setattr(fit_try, "_used_ridge", False)
-                        return fit_try, ""
-                    last_reason = "newton_not_converged"
-                except Exception as e:
-                    import traceback
-                    print("[TRACEBACK] _safe_fit_logit newton failed:", flush=True)
-                    traceback.print_exc()
-                    last_reason = f"newton_exception:{type(e).__name__}:{e}"
-
-                try:
-                    fit_try = sm.Logit(y_arr, X).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
-                    if _conv(fit_try):
-                        setattr(fit_try, "_model_note", ";".join(model_notes) if model_notes else "")
-                        setattr(fit_try, "_used_ridge", False)
-                        return fit_try, ""
-                    last_reason = "bfgs_not_converged"
-                except Exception as e:
-                    import traceback
-                    print("[TRACEBACK] _safe_fit_logit bfgs failed:", flush=True)
-                    traceback.print_exc()
-                    last_reason = f"bfgs_exception:{type(e).__name__}:{e}"
-
-                try:
-                    fit_try = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=400, tol=1e-8, warn_convergence=True)
-                    if _conv(fit_try):
-                        setattr(fit_try, "_model_note", ";".join(model_notes) if model_notes else "")
-                        setattr(fit_try, "_used_ridge", False)
-                        return fit_try, ""
-                    last_reason = "newton_not_converged_2"
-                except Exception as e:
-                    import traceback
-                    print("[TRACEBACK] _safe_fit_logit newton failed:", flush=True)
-                    traceback.print_exc()
-                    last_reason = f"newton_exception_2:{type(e).__name__}:{e}"
-
-                # Ridge-penalized fallback.
-                try:
-                    p = X.shape[1] - (1 if 'const' in X.columns else 0)
-                    n = max(1, X.shape[0])
-                    alpha = max(RIDGE_L2_BASE * (float(p) / float(n)), 1e-6)
-                    ridge_fit = sm.Logit(y_arr, X).fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=800)
-                    # Seed final unpenalized refit to recover p-values when possible.
-                    try:
-                        refit = sm.Logit(y_arr, X).fit(disp=0, method='newton', maxiter=400, tol=1e-8, start_params=ridge_fit.params, warn_convergence=True)
-                        if _conv(refit):
-                            model_notes.append("ridge_seeded_refit")
-                            setattr(refit, "_model_note", ";".join(model_notes))
-                            setattr(refit, "_used_ridge", True)
-                            return refit, ""
-                        else:
-                            model_notes.append("ridge_only")
-                            setattr(ridge_fit, "_model_note", ";".join(model_notes))
-                            setattr(ridge_fit, "_used_ridge", True)
-                            return ridge_fit, ""
-                    except Exception:
-                        model_notes.append("ridge_only")
-                        setattr(ridge_fit, "_model_note", ";".join(model_notes))
-                        setattr(ridge_fit, "_used_ridge", True)
-                        return ridge_fit, ""
-                except Exception as e:
-                    last_reason = f"ridge_exception:{type(e).__name__}:{e}"
-
-                return None, last_reason
-
-            def _or_ci_pair(fit, coef_name):
-                beta = float(fit.params[coef_name])
-                se_val = None
-                if hasattr(fit, "bse"):
-                    try:
-                        se_val = float(fit.bse[coef_name])
-                    except Exception:
-                        se_val = None
-                or_val = float(np.exp(beta))
-                if se_val is None or not np.isfinite(se_val) or se_val == 0.0:
-                    return or_val, float('nan'), float('nan')
-                lo = float(np.exp(beta - 1.96 * se_val))
-                hi = float(np.exp(beta + 1.96 * se_val))
-                return or_val, lo, hi
-
-            def _design_matrix_rank(X):
-                """
-                Computes the numerical rank of a design matrix for robust LRT df calculation.
-                Uses numpy.linalg.matrix_rank on the concrete array backing the DataFrame.
-                """
-                try:
-                    return int(np.linalg.matrix_rank(X.values))
-                except Exception:
-                    return int(np.linalg.matrix_rank(np.asarray(X)))
-
-            def _convergence_flag(fit):
-                """
-                Returns True when the statsmodels Logit fit converged. Falls back to the
-                'converged' attribute if mle_retvals is unavailable.
-                """
-                try:
-                    if hasattr(fit, "mle_retvals") and isinstance(fit.mle_retvals, dict):
-                        return bool(fit.mle_retvals.get("converged", False))
-                    if hasattr(fit, "converged"):
-                        return bool(fit.converged)
-                    return False
-                except Exception:
-                    return False
-
-            # Prepare phenotype-to-category mapping for masks.
+            # ---- PARALLEL STAGE-1 OVERALL LRT WITH PER-PHENOTYPE ATOMIC CACHING ----
             name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
-
-            # Stage-1: Overall LRT for the inversion dosage effect across all phenotypes.
-            # This computes P_LRT_Overall by comparing reduced (no dosage) vs full (with dosage) models on the same row set.
-            overall_rows = []
             phenos_list = df["Phenotype"].astype(str).tolist()
-            total_ph = len(phenos_list)
-            print(f"[LRT-Stage1] Starting overall LRT for {total_ph} phenotypes.", flush=True)
-            t0 = time.time()
-            for i, s_name in enumerate(phenos_list, start=1):
-                category = name_to_cat.get(s_name, None)
-                entry = {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_df_Overall": np.nan, "LRT_Overall_Reason": ""}
-                print(f"[LRT-Stage1] {i}/{total_ph} Preparing phenotype='{s_name}'", flush=True)
-                if (category is None) or (category not in allowed_mask_by_cat):
-                    entry["LRT_Overall_Reason"] = "unknown_category"
-                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=unknown_category", flush=True)
-                    overall_rows.append(entry)
-                    continue
+            tasks = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": TARGET_INVERSION} for s in phenos_list]
 
-                pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
-                if not os.path.exists(pheno_cache_path):
-                    entry["LRT_Overall_Reason"] = "missing_case_cache"
-                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=missing_case_cache", flush=True)
-                    overall_rows.append(entry)
-                    continue
+            print(f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching.", flush=True)
+            bar_len = 40
+            queued = 0
+            done = 0
+            lock = threading.Lock()
 
-                ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
-                case_ids = ph.index[ph['is_case'] == 1].astype(str)
-                case_idx = core_index.get_indexer(case_ids)
-                case_idx = case_idx[case_idx >= 0].astype(np.int32)
+            def _print_bar(q, d, label):
+                q = int(q); d = int(d)
+                pct = int((d * 100) / q) if q else 0
+                filled = int(bar_len * (d / q)) if q else 0
+                bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+                print(f"\r[{label}] {bar} {d}/{q} ({pct}%)", end="", flush=True)
 
-                case_mask = np.zeros(len(core_index), dtype=bool)
-                if case_idx.size > 0:
-                    case_mask[case_idx] = True
+            with Pool(
+                processes=max(1, min(cpu_count(), 8)),
+                initializer=init_worker,
+                initargs=(core_df_with_const, allowed_mask_by_cat),
+                maxtasksperchild=50,
+            ) as pool:
 
-                valid_mask_all = (allowed_mask_by_cat[category] | case_mask) & global_notnull_mask
-                if int(valid_mask_all.sum()) == 0:
-                    entry["LRT_Overall_Reason"] = "no_valid_rows_after_mask"
-                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=no_valid_rows_after_mask", flush=True)
-                    overall_rows.append(entry)
-                    continue
+                def _cb(_):
+                    nonlocal done, queued
+                    with lock:
+                        done += 1
+                        _print_bar(queued, done, "LRT-Stage1")
 
-                y_all, X_base = _build_y_X(valid_mask_all, case_mask)
+                for task in tasks:
+                    queued += 1
+                    pool.apply_async(lrt_overall_worker, (task,), callback=_cb)
+                    _print_bar(queued, done, "LRT-Stage1")
+                pool.close()
+                pool.join()
+                _print_bar(queued, done, "LRT-Stage1")
+                print("")
 
-                # Harmonize sex handling once (restrict or drop) so reduced and full are nested on the exact same rows.
-                if 'sex' in X_base.columns:
-                    try:
-                        tab = pd.crosstab(X_base['sex'], y_all).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
-                        valid_sexes = []
-                        for s in [0.0, 1.0]:
-                            if s in tab.index:
-                                has_ctrl = bool(tab.loc[s, 0] > 0)
-                                has_case = bool(tab.loc[s, 1] > 0)
-                                if has_ctrl and has_case:
-                                    valid_sexes.append(s)
-                        if len(valid_sexes) == 1:
-                            mask = X_base['sex'].isin(valid_sexes)
-                            X_base = X_base.loc[mask]
-                            y_all = y_all.loc[X_base.index]
-                            print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' sex_restricted rows={len(X_base)}", flush=True)
-                        elif len(valid_sexes) == 0:
-                            X_base = X_base.drop(columns=['sex'])
-                            print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' sex_dropped rows={len(X_base)}", flush=True)
-                    except Exception:
-                        pass
+            # Read cached overall LRT results
+            overall_records = []
+            files_overall = [f for f in os.listdir(LRT_OVERALL_CACHE_DIR) if f.endswith(".json") and not f.endswith(".meta.json")]
+            total_ov = len(files_overall)
+            bar_len = 30
+            for i, filename in enumerate(files_overall, start=1):
+                try:
+                    rec = pd.read_json(os.path.join(LRT_OVERALL_CACHE_DIR, filename), typ="series")
+                    overall_records.append(rec.to_dict())
+                except Exception as e:
+                    print(f"Warning: Could not read LRT overall file: {filename}, Error: {e}")
+                filled = int(bar_len * i / total_ov) if total_ov > 0 else bar_len
+                bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+                pct = int(i * 100 / total_ov) if total_ov > 0 else 100
+                print(f"\r[LRT-Stage1-Collect] {bar} {i}/{total_ov} ({pct}%)", end="", flush=True)
+            if total_ov > 0:
+                print("")
 
-                # Drop zero-variance columns consistently across both models, excluding intercept and the target.
-                zvar_cols = [c for c in X_base.columns if c not in ['const', TARGET_INVERSION] and pd.Series(X_base[c]).nunique(dropna=False) <= 1]
-                if len(zvar_cols) > 0:
-                    X_base = X_base.drop(columns=zvar_cols)
-                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' dropped_zero_variance={','.join(zvar_cols)}", flush=True)
-
-                # Enforce the same minimum case/control thresholds used by worker models to keep Stage-1 coherent.
-                n_cases_stage1 = int(y_all.sum())
-                n_ctrls_stage1 = int(len(y_all) - n_cases_stage1)
-                print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' N={len(y_all)} cases={n_cases_stage1} ctrls={n_ctrls_stage1}", flush=True)
-                if n_cases_stage1 < MIN_CASES_FILTER or n_ctrls_stage1 < MIN_CONTROLS_FILTER:
-                    entry["LRT_Overall_Reason"] = "insufficient_counts"
-                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=insufficient_counts", flush=True)
-                    overall_rows.append(entry)
-                    continue
-
-                if TARGET_INVERSION not in X_base.columns or pd.Series(X_base[TARGET_INVERSION]).nunique(dropna=False) <= 1:
-                    entry["LRT_Overall_Reason"] = "target_constant"
-                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=target_constant", flush=True)
-                    overall_rows.append(entry)
-                    continue
-
-                X_full = X_base.copy()
-                X_red = X_base.drop(columns=[TARGET_INVERSION])
-                print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' fitting reduced_full shapes red={X_red.shape} full={X_full.shape}", flush=True)
-                fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all, allow_sex_handling=False, require_target=False)
-                fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all, allow_sex_handling=False, require_target=True)
-
-                ridge_only_flag = False
-                if (fit_red is not None) and hasattr(fit_red, "_model_note") and isinstance(fit_red._model_note, str):
-                    if "ridge_only" in fit_red._model_note:
-                        ridge_only_flag = True
-                if (fit_full is not None) and hasattr(fit_full, "_model_note") and isinstance(fit_full._model_note, str):
-                    if "ridge_only" in fit_full._model_note:
-                        ridge_only_flag = True
-
-                if (fit_red is not None) and (fit_full is not None) and (not ridge_only_flag) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
-                    rank_red = _design_matrix_rank(X_red)
-                    rank_full = _design_matrix_rank(X_full)
-                    lrt_df_overall = int(max(0, rank_full - rank_red))
-                    if lrt_df_overall > 0:
-                        llr = 2.0 * (fit_full.llf - fit_red.llf)
-                        p_lrt_overall = float(stats.chi2.sf(llr, lrt_df_overall))
-                        entry["P_LRT_Overall"] = p_lrt_overall
-                        entry["LRT_df_Overall"] = lrt_df_overall
-                        entry["LRT_Overall_Reason"] = ""
-                        print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' df={lrt_df_overall} llf_full={fit_full.llf:.6f} llf_red={fit_red.llf:.6f} p={p_lrt_overall:.3e}", flush=True)
-                    else:
-                        entry["LRT_df_Overall"] = 0
-                        entry["LRT_Overall_Reason"] = "no_df"
-                        print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason=no_df", flush=True)
-
-                else:
-                    reason_bits = []
-                    if fit_red is None:
-                        reason_bits.append(f"reduced_model_failed:{fit_red_reason}")
-                    if fit_full is None:
-                        reason_bits.append(f"full_model_failed:{fit_full_reason}")
-                    if ridge_only_flag:
-                        reason_bits.append("ridge_only")
-                    if (fit_red is not None) and (fit_full is not None) and (fit_full.llf < fit_red.llf):
-                        reason_bits.append("full_llf_below_reduced_llf")
-                    entry["LRT_Overall_Reason"] = ";".join(reason_bits)
-                    print(f"[LRT-Stage1] {i}/{total_ph} phenotype='{s_name}' SKIP reason={entry['LRT_Overall_Reason']}", flush=True)
-
-                overall_rows.append(entry)
-
-            # Merge overall LRT results and compute BH-FDR on P_LRT_Overall with strict thresholding.
-            if len(overall_rows) > 0:
-                overall_df = pd.DataFrame(overall_rows)
-                print(f"[LRT-Stage1] Completed overall LRT. Consolidating {len(overall_df)} rows.", flush=True)
+            if len(overall_records) > 0:
+                overall_df = pd.DataFrame(overall_records)
                 df = df.merge(overall_df, on="Phenotype", how="left")
                 mask_overall = pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna()
                 m_total = int(mask_overall.sum())
@@ -1516,340 +1790,103 @@ def main():
                 df["Sig_FDR"] = df["P_FDR"] < FDR_ALPHA
                 R_selected = int(pd.to_numeric(df["Sig_FDR"], errors="coerce").fillna(False).astype(bool).sum())
                 print(f"[LRT-Stage1] Stage-1 BH complete. R_selected={R_selected}", flush=True)
+            else:
+                print("[LRT-Stage1] No overall LRT records found on disk.", flush=True)
+                R_selected = 0
+                m_total = 0
 
-
-            # Collect follow-up results keyed by phenotype.
-            follow_rows = []
-
-            hit_names = df.loc[df["Sig_FDR"] == True, "Phenotype"].tolist()
-            print(f"[Ancestry] Starting follow-up for {len(hit_names)} FDR-significant phenotypes.", flush=True)
+            # ---- PARALLEL STAGE-2 FOLLOW-UP WITH ATOMIC CACHING ----
+            hit_names = df.loc[df["Sig_FDR"] == True, "Phenotype"].astype(str).tolist()
+            print(f"[Ancestry] Scheduling follow-up for {len(hit_names)} FDR-significant phenotypes.", flush=True)
             if len(hit_names) > 0:
-                for s_name in hit_names:
-                    print(f"[Ancestry] Begin phenotype='{s_name}'", flush=True)
+                tasks_follow = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": TARGET_INVERSION} for s in hit_names]
+                bar_len = 40
+                queued = 0
+                done = 0
+                lock = threading.Lock()
+                with Pool(
+                    processes=max(1, min(cpu_count(), 8)),
+                    initializer=init_lrt_worker,
+                    initargs=(core_df_with_const, allowed_mask_by_cat, anc_series),
+                    maxtasksperchild=50,
+                ) as pool:
+                    def _cb2(_):
+                        nonlocal done, queued
+                        with lock:
+                            done += 1
+                            _print_bar(queued, done, "Ancestry")
 
-                    category = name_to_cat.get(s_name, None)
-                    if category is None or category not in allowed_mask_by_cat:
-                        continue
+                    for task in tasks_follow:
+                        queued += 1
+                        pool.apply_async(lrt_followup_worker, (task,), callback=_cb2)
+                        _print_bar(queued, done, "Ancestry")
+                    pool.close()
+                    pool.join()
+                    _print_bar(queued, done, "Ancestry")
+                    print("")
 
-                    # Read case indices from the per-phenotype cache file created earlier.
-                    pheno_cache_path = os.path.join(CACHE_DIR, f"pheno_{s_name}_{cdr_codename}.parquet")
-                    if not os.path.exists(pheno_cache_path):
-                        continue
-                    ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
-                    case_ids = ph.index[ph['is_case'] == 1].astype(str)
-                    case_idx = core_index.get_indexer(case_ids)
-                    case_idx = case_idx[case_idx >= 0].astype(np.int32)
+            # Read follow-up cache and merge
+            follow_records = []
+            files_follow = [f for f in os.listdir(LRT_FOLLOWUP_CACHE_DIR) if f.endswith(".json") and not f.endswith(".meta.json")]
+            total_fw = len(files_follow)
+            bar_len = 30
+            for i, filename in enumerate(files_follow, start=1):
+                try:
+                    rec = pd.read_json(os.path.join(LRT_FOLLOWUP_CACHE_DIR, filename), typ="series")
+                    follow_records.append(rec.to_dict())
+                except Exception as e:
+                    print(f"Warning: Could not read LRT follow-up file: {filename}, Error: {e}")
+                filled = int(bar_len * i / total_fw) if total_fw > 0 else bar_len
+                bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+                pct = int(i * 100 / total_fw) if total_fw > 0 else 100
+                print(f"\r[FollowUp-Collect] {bar} {i}/{total_fw} ({pct}%)", end="", flush=True)
+            if total_fw > 0:
+                print("")
 
-                    case_mask = np.zeros(len(core_index), dtype=bool)
-                    if case_idx.size > 0:
-                        case_mask[case_idx] = True
+            if len(follow_records) > 0:
+                follow_df = pd.DataFrame(follow_records)
+                df = df.merge(follow_df, on="Phenotype", how="left")
 
-                    # Valid modeling mask mirrors the worker logic for this phenotype.
-                    valid_mask_all = (allowed_mask_by_cat[category] | case_mask) & global_notnull_mask
-                    if int(valid_mask_all.sum()) == 0:
-                        continue
-
-                    # Interaction LRT: reduced model with ancestry main effects, full adds dosage×ancestry.
-                    y_all, X_base = _build_y_X(valid_mask_all, case_mask)
-                    anc_vec = anc_series.loc[X_base.index]
-                    anc_levels_local = anc_vec.dropna().unique().tolist()
-                    if 'eur' in anc_levels_local:
-                        anc_levels_local = ['eur'] + [a for a in anc_levels_local if a != 'eur']
-                    anc_cat = pd.Categorical(anc_vec, categories=anc_levels_local, ordered=False)
-                    # Build ancestry design for the LRT. Require at least two ancestry levels to ensure nonzero df.
-                    if len(anc_levels_local) < 2:
-                        A = pd.DataFrame(index=X_base.index)
-                        X_red = X_base.copy()
-                        X_full = X_base.copy()
-                        fit_red = None
-                        fit_full = None
-                        p_lrt = np.nan
-                        lrt_df = np.nan
-                        ancestry_dummy_cols = []
-                        interaction_cols = []
-                        varying_interactions = []
-                    else:
-                        # Encode ancestry as numeric dummy variables with a plain NumPy dtype.
-                        # Restrict to rows with known ancestry and enforce exact index alignment to avoid NaNs from outer alignment.
-                        keep = anc_vec.notna()
-                        dropped_unknown_anc = int((~keep).sum())
-                        if dropped_unknown_anc > 0:
-                            print(f"[DEBUG] LRT ancestry_missing_rows phenotype={s_name} dropped={dropped_unknown_anc} base_n_before={len(X_base)}", flush=True)
-                        X_base = X_base.loc[keep].astype(np.float64, copy=False)
-                        # make response match the filtered design (critical for shape/index alignment)
-                        y_all = y_all.loc[keep]
-
-                        anc_vec_keep = anc_vec.loc[keep]
-                        anc_vec_keep = pd.Series(
-                            pd.Categorical(anc_vec_keep, categories=anc_levels_local, ordered=False),
-                            index=anc_vec_keep.index,
-                            name='ANCESTRY'
-                        )
-                        A = pd.get_dummies(anc_vec_keep, prefix='ANC', drop_first=True, dtype=np.float64)
-                        if not X_base.index.equals(A.index):
-                            print(f"[DEBUG] Forcing ancestry-dummy reindex (base_n={len(X_base)} anc_n={len(A)})", flush=True)
-                            A = A.reindex(X_base.index)
-
-                        # Detailed index-alignment diagnostics before concatenation.
-                        base_dup = int(X_base.index.duplicated(keep=False).sum())
-
-                        anc_dup = int(A.index.duplicated(keep=False).sum())
-                        print(f"[DEBUG] LRT index_alignment phenotype={s_name} base_n={len(X_base)} anc_n={len(A)} base_dup={base_dup} anc_dup={anc_dup} base_index_dtype={X_base.index.dtype} anc_index_dtype={A.index.dtype} indices_equal={X_base.index.equals(A.index)}", flush=True)
-                        if (not X_base.index.equals(A.index)) or base_dup > 0 or anc_dup > 0:
-                            import traceback, sys
-                            print("[TRACEBACK] LRT index mismatch or duplicates detected during ancestry design assembly", flush=True)
-                            traceback.print_stack()
-                            sys.stderr.flush()
-
-                        # Build reduced and full design matrices with inner alignment to prevent NaNs from misalignment.
-                        X_red = pd.concat([X_base, A], axis=1, join='inner').astype(np.float64, copy=False)
-                        lost_rows = len(X_base) - len(X_red)
-                        if lost_rows != 0:
-                            import traceback, sys
-                            print(f"[DEBUG] LRT concat_inner_rows_lost phenotype={s_name} lost={lost_rows}", flush=True)
-                            print("[TRACEBACK] LRT inner-join dropped rows while aligning ancestry dummies with base covariates", flush=True)
-                            traceback.print_stack()
-                            sys.stderr.flush()
-
-                        X_full = X_red.copy()
-                        for col in A.columns:
-                            X_full[f"{TARGET_INVERSION}:{col}"] = X_full[TARGET_INVERSION] * X_full[col]
-                        X_full = X_full.astype(np.float64, copy=False)
-
-                        ancestry_dummy_cols = list(A.columns)
-                        interaction_cols = [f"{TARGET_INVERSION}:{col}" for col in ancestry_dummy_cols]
-
-                        # Drop zero-variance interaction columns from the full model before fitting.
-                        zero_var_inters = [c for c in interaction_cols if X_full[c].var() == 0]
-                        if len(zero_var_inters) > 0:
-                            X_full = X_full.drop(columns=zero_var_inters)
-
-                        varying_interactions = [c for c in interaction_cols if c in X_full.columns]
-
-                        # Fit with hardened numeric design matrices to prevent object-dtype casting errors.
-                        fit_red, fit_red_reason = _safe_fit_logit(X_red, y_all)
-                        fit_full, fit_full_reason = _safe_fit_logit(X_full, y_all)
-
-                        p_lrt = np.nan
-                        lrt_df = np.nan
-
-                    lrt_converged_red = False
-                    lrt_converged_full = False
-
-                    if fit_red is not None:
-                        lrt_converged_red = _convergence_flag(fit_red)
-                        if not lrt_converged_red:
-                            print(f"[FollowUp] LRT reduced model did not converge for phenotype '{s_name}'.")
-
-                    if fit_full is not None:
-                        lrt_converged_full = _convergence_flag(fit_full)
-                        if not lrt_converged_full:
-                            print(f"[FollowUp] LRT full model did not converge for phenotype '{s_name}'.")
-
-                    ridge_only_flag = False
-                    if (fit_red is not None) and hasattr(fit_red, "_model_note") and isinstance(fit_red._model_note, str):
-                        if "ridge_only" in fit_red._model_note:
-                            ridge_only_flag = True
-                    if (fit_full is not None) and hasattr(fit_full, "_model_note") and isinstance(fit_full._model_note, str):
-                        if "ridge_only" in fit_full._model_note:
-                            ridge_only_flag = True
-
-                    if (fit_red is not None) and (fit_full is not None) and (not ridge_only_flag) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
-                        rank_red = _design_matrix_rank(X_red)
-                        rank_full = _design_matrix_rank(X_full)
-                        lrt_df = int(max(0, rank_full - rank_red))
-                        if lrt_df > 0:
-                            llr = 2.0 * (fit_full.llf - fit_red.llf)
-                            p_lrt = float(stats.chi2.sf(llr, lrt_df))
-                        else:
-                            print(f"[FollowUp] LRT degrees of freedom computed as zero for phenotype '{s_name}'. Skipping p-value.")
-                    elif ridge_only_flag:
-                        pass
-
-                    # --- Reason for NaN LRT ---
-                    lrt_reason = []
-                    if len(anc_levels_local) < 2:
-                        lrt_reason.append("only_one_ancestry_level")
-                    elif fit_red is None:
-                        lrt_reason.append(f"reduced_model_failed:{fit_red_reason}")
-                    elif fit_full is None:
-                        lrt_reason.append(f"full_model_failed:{fit_full_reason}")
-                    elif not pd.notna(lrt_df) or int(lrt_df) == 0:
-                        lrt_reason.append("no_interaction_df")
-                    elif (fit_red is not None) and (fit_full is not None) and (fit_full.llf < fit_red.llf):
-                        lrt_reason.append("full_llf_below_reduced_llf")
-                    lrt_reason_str = ";".join(lrt_reason) if lrt_reason else ""
-                    
-                    out = {
-                        'Phenotype': s_name,
-                        'P_LRT_AncestryxDosage': p_lrt,
-                        'LRT_df': lrt_df,
-                        'LRT_Ancestry_Levels': ",".join(anc_levels_local),
-                        'LRT_Reason': lrt_reason_str
-                    }
-                    if pd.notna(p_lrt) and (p_lrt < LRT_SELECT_ALPHA):
-                        for anc in anc_levels_local:
-                            group_mask = valid_mask_all & anc_series.eq(anc).reindex(core_df_with_const.index).fillna(False).to_numpy()
-                            if not group_mask.any():
-                                out[f"{anc.upper()}_OR"] = np.nan
-                                out[f"{anc.upper()}_CI95"] = np.nan
-                                out[f"{anc.upper()}_P"] = np.nan
-                                out[f"{anc.upper()}_N"] = 0
-                                out[f"{anc.upper()}_N_Cases"] = 0
-                                out[f"{anc.upper()}_N_Controls"] = 0
-                                out[f"{anc.upper()}_REASON"] = "no_rows_in_group"
-                                continue
-
-                            y_g, X_g = _build_y_X(group_mask, case_mask)
-                            n_cases = int(y_g.sum())
-                            n_tot = int(len(y_g))
-                            n_ctrl = n_tot - n_cases
-
-                            out[f"{anc.upper()}_N"] = n_tot
-                            out[f"{anc.upper()}_N_Cases"] = n_cases
-                            out[f"{anc.upper()}_N_Controls"] = n_ctrl
-
-                            if (n_cases < PER_ANC_MIN_CASES) or (n_ctrl < PER_ANC_MIN_CONTROLS):
-                                out[f"{anc.upper()}_OR"] = np.nan
-                                out[f"{anc.upper()}_CI95"] = np.nan
-                                out[f"{anc.upper()}_P"] = np.nan
-                                out[f"{anc.upper()}_REASON"] = "insufficient_stratum_counts"
-                                continue
-
-                            fit_g, fit_g_reason = _safe_fit_logit(X_g, y_g)
-
-                            if fit_g is None or TARGET_INVERSION not in fit_g.params:
-                                out[f"{anc.upper()}_OR"] = np.nan
-                                out[f"{anc.upper()}_CI95"] = np.nan
-                                out[f"{anc.upper()}_P"] = np.nan
-                                out[f"{anc.upper()}_REASON"] = ("subset_fit_failed" + (f":{fit_g_reason}" if fit_g_reason else "")) if fit_g is None else "coef_missing"
-                                continue
-
-                            conv_g = _convergence_flag(fit_g)
-                            if not conv_g:
-                                print(f"[FollowUp] Per-ancestry model did not converge for phenotype '{s_name}' in ancestry '{anc}'.")
-                            or_val, lo, hi = _or_ci_pair(fit_g, TARGET_INVERSION)
-                            out[f"{anc.upper()}_OR"] = or_val
-                            out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
-                            try:
-                                out[f"{anc.upper()}_P"] = float(fit_g.pvalues[TARGET_INVERSION])
-                            except Exception:
-                                out[f"{anc.upper()}_P"] = np.nan
-                            out[f"{anc.upper()}_REASON"] = ""
-                    else:
-                        for anc in anc_levels_local:
-                            group_mask = valid_mask_all & anc_series.eq(anc).reindex(core_df_with_const.index).fillna(False).to_numpy()
-                            if not group_mask.any():
-                                out[f"{anc.upper()}_OR"] = np.nan
-                                out[f"{anc.upper()}_CI95"] = np.nan
-                                out[f"{anc.upper()}_P"] = np.nan
-                                out[f"{anc.upper()}_N"] = 0
-                                out[f"{anc.upper()}_N_Cases"] = 0
-                                out[f"{anc.upper()}_N_Controls"] = 0
-                                out[f"{anc.upper()}_REASON"] = "no_rows_in_group"
-                                continue
-
-                            y_g, X_g = _build_y_X(group_mask, case_mask)
-                            n_cases = int(y_g.sum())
-                            n_tot = int(len(y_g))
-                            n_ctrl = n_tot - n_cases
-
-                            out[f"{anc.upper()}_N"] = n_tot
-                            out[f"{anc.upper()}_N_Cases"] = n_cases
-                            out[f"{anc.upper()}_N_Controls"] = n_ctrl
-                            out[f"{anc.upper()}_OR"] = np.nan
-                            out[f"{anc.upper()}_CI95"] = np.nan
-                            out[f"{anc.upper()}_P"] = np.nan
-                            out[f"{anc.upper()}_REASON"] = "not_selected_by_LRT"
-
-                    follow_rows.append(out)
-                    try:
-                        # Structured immediate summary for ancestry follow-up on this phenotype.
-                        lrt_val = out.get('P_LRT_AncestryxDosage')
-                        lrt_str = f"P_LRT={lrt_val:.3e}" if pd.notna(lrt_val) else "P_LRT=nan"
-                        df_val = out.get('LRT_df')
-                        df_str = f"df={int(df_val)}" if pd.notna(df_val) else "df=nan"
-                        levels_str = out.get('LRT_Ancestry_Levels', '')
-                        # Compose per-ancestry snippets in a stable order.
-                        anc_snippets = []
-                        for anc in anc_levels_local:
-                            k_or = f"{anc.upper()}_OR"
-                            k_ci = f"{anc.upper()}_CI95"
-                            or_val = out.get(k_or, np.nan)
-                            ci_val = out.get(k_ci, np.nan)
-                            if pd.isna(or_val):
-                                reason = out.get(f"{anc.upper()}_REASON", "")
-                                rs = f" REASON={reason}" if reason else ""
-                                anc_snippets.append(f"{anc.upper()}: OR=nan{rs}")
-                            else:
-                                if isinstance(ci_val, str):
-                                    anc_snippets.append(f"{anc.upper()}: OR={float(or_val):.3f} CI95=({ci_val})")
-                                else:
-                                    anc_snippets.append(f"{anc.upper()}: OR={float(or_val):.3f}")
-
-                        eur_detail = ""
-                        if 'EUR_P' in out:
-                            eur_p = out['EUR_P']
-                            eur_n = out['EUR_N']
-                            eur_nc = out['EUR_N_Cases']
-                            eur_nctrl = out['EUR_N_Controls']
-                            eur_p_str = f"P={float(eur_p):.3e}" if pd.notna(eur_p) else "P=nan"
-                            eur_detail = f" | EUR N={eur_n} Cases={eur_nc} Controls={eur_nctrl} {eur_p_str}"
-                        reason_suffix = f" | LRT_REASON={out.get('LRT_Reason','')}" if (not pd.notna(lrt_val) or not pd.notna(df_val)) else ""
-                        print(f"[Ancestry] {s_name} | {lrt_str} {df_str}{reason_suffix} | Levels={levels_str} | " + " ; ".join(anc_snippets) + eur_detail, flush=True)
-                    except Exception:
-                        # Never allow reporting to break analysis.
-                        pass
-                        
-            # Merge follow-up columns into main df so the final CSV includes them for hits.
-            # Compute quantities for Benjamini–Bogomolov adjustment independent of whether follow-up rows exist.
+            # Benjamini–Bogomolov adjustment for ancestry-specific tests
             m_total = int(pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna().sum())
             R_selected = int(pd.to_numeric(df["Sig_FDR"], errors="coerce").fillna(False).astype(bool).sum())
             alpha_within = (FDR_ALPHA * (R_selected / m_total)) if m_total > 0 else 0.0
 
-            if len(follow_rows) > 0:
-                follow_df = pd.DataFrame(follow_rows)
-                df = df.merge(follow_df, on="Phenotype", how="left")
+            if R_selected > 0 and alpha_within > 0.0:
+                selected_idx = df.index[df["Sig_FDR"] == True].tolist()
+                for idx in selected_idx:
+                    p_lrt = df.at[idx, "P_LRT_AncestryxDosage"] if "P_LRT_AncestryxDosage" in df.columns else np.nan
+                    if (not pd.notna(p_lrt)) or (p_lrt >= LRT_SELECT_ALPHA):
+                        continue
+                    levels_str = df.at[idx, "LRT_Ancestry_Levels"] if "LRT_Ancestry_Levels" in df.columns else ""
+                    anc_levels = [s for s in str(levels_str).split(",") if s]
+                    anc_upper = [s.upper() for s in anc_levels]
 
-                # Benjamini–Bogomolov adjustment for ancestry-specific tests:
-                # Within-phenotype BH at alpha_within = FDR_ALPHA * (R_selected / m_total),
-                # where m_total counts non-NaN overall LRT p-values and R_selected counts Stage-1 discoveries.
-                if R_selected > 0 and alpha_within > 0.0:
-                    selected_idx = df.index[df["Sig_FDR"] == True].tolist()
-                    for idx in selected_idx:
-                        p_lrt = df.at[idx, "P_LRT_AncestryxDosage"] if "P_LRT_AncestryxDosage" in df.columns else np.nan
-                        if (not pd.notna(p_lrt)) or (p_lrt >= LRT_SELECT_ALPHA):
-                            continue
-                        levels_str = df.at[idx, "LRT_Ancestry_Levels"] if "LRT_Ancestry_Levels" in df.columns else ""
-                        anc_levels = [s for s in str(levels_str).split(",") if s]
-                        anc_upper = [s.upper() for s in anc_levels]
+                    pvals = []
+                    keys = []
+                    for anc in anc_upper:
+                        pcol = f"{anc}_P"
+                        rcol = f"{anc}_REASON"
+                        if (pcol in df.columns) and (rcol in df.columns):
+                            pval = df.at[idx, pcol]
+                            reason_val = df.at[idx, rcol]
+                            if pd.notna(pval) and reason_val != "insufficient_stratum_counts" and reason_val != "not_selected_by_LRT":
+                                pvals.append(float(pval))
+                                keys.append(anc)
 
-                        pvals = []
-                        keys = []
-                        for anc in anc_upper:
-                            pcol = f"{anc}_P"
-                            rcol = f"{anc}_REASON"
-                            if (pcol in df.columns) and (rcol in df.columns):
-                                pval = df.at[idx, pcol]
-                                reason_val = df.at[idx, rcol]
-                                if pd.notna(pval) and reason_val != "insufficient_stratum_counts" and reason_val != "not_selected_by_LRT":
-                                    pvals.append(float(pval))
-                                    keys.append(anc)
+                    if len(pvals) == 0:
+                        continue
 
-                        if len(pvals) == 0:
-                            continue
-
-                        rej, p_adj_vals, _, _ = multipletests(pvals, alpha=alpha_within, method="fdr_bh")
-                        for anc_key, adj_val in zip(keys, p_adj_vals):
-                            outcol = f"{anc_key}_P_FDR"
-                            df.at[idx, outcol] = float(adj_val)
-
+                    rej, p_adj_vals, _, _ = multipletests(pvals, alpha=alpha_within, method="fdr_bh")
+                    for anc_key, adj_val in zip(keys, p_adj_vals):
+                        outcol = f"{anc_key}_P_FDR"
+                        df.at[idx, outcol] = float(adj_val)
 
             # Drop legacy column if present.
             if "EUR_P_Source" in df.columns:
                 df = df.drop(columns=["EUR_P_Source"], errors="ignore")
 
-            # Compute FINAL_INTERPRETATION using BB-adjusted ancestry p-values written to <ANC>_P_FDR.
+            # FINAL_INTERPRETATION from BB-adjusted ancestry p-values
             if "Sig_FDR" in df.columns:
                 df["FINAL_INTERPRETATION"] = ""
                 for idx in df.index.tolist():
@@ -1885,11 +1922,9 @@ def main():
                     else:
                         df.at[idx, "FINAL_INTERPRETATION"] = ",".join(sig_groups)
 
-
             output_filename = f"phewas_results_{TARGET_INVERSION}.csv"
             print(f"\n--- Saving final results to '{output_filename}' ---")
             df.to_csv(output_filename, index=False)
-
 
             # Filter for FDR-significant results before printing
             out_df = df[df['Sig_FDR'] == True].copy()
