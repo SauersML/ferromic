@@ -329,6 +329,56 @@ plt.ylabel('Pi Value')
 
 plt.tight_layout()
 plt.savefig('inversion_pi_violins.png', dpi=300)
+
+# Ensure each inversion maps to a single recurrence label
+uniq_recur_counts = data.groupby('orig_index')['0_single_1_recur'].nunique()
+valid_indices = uniq_recur_counts[uniq_recur_counts == 1].index
+inter_df = data[data['orig_index'].isin(valid_indices)].copy()
+
+# Prepare numeric pi values and remove non-finite entries
+inter_df['pi_direct'] = pd.to_numeric(inter_df['0_pi_filtered'], errors='coerce')
+inter_df['pi_inverted'] = pd.to_numeric(inter_df['1_pi_filtered'], errors='coerce')
+inter_df = inter_df.replace([np.inf, -np.inf], np.nan)
+inter_df = inter_df.dropna(subset=['pi_direct', 'pi_inverted', '0_single_1_recur'])
+
+# Long format: each inversion contributes two rows (direct, inverted)
+long = inter_df[['orig_index', '0_single_1_recur', 'pi_direct', 'pi_inverted']].rename(columns={'0_single_1_recur': 'recur'})
+long = long.melt(id_vars=['orig_index', 'recur'], value_vars=['pi_direct', 'pi_inverted'], var_name='status', value_name='pi')
+
+# Status indicator: 1 = inverted, 0 = direct
+long['status_inv'] = (long['status'] == 'pi_inverted').astype(int)
+
+# Response transform to stabilize variance and reduce skew
+long['log_pi'] = np.log1p(long['pi'])
+long = long.dropna(subset=['log_pi', 'status_inv', 'recur'])
+
+# Fit mixed model with interaction
+import statsmodels.formula.api as smf
+md = smf.mixedlm("log_pi ~ status_inv * C(recur)", data=long, groups=long["orig_index"])
+mdf = md.fit()
+
+print("\nMixed-effects model: log(1 + pi) ~ status_inv * C(recur) with random intercept per inversion")
+print(f"Number of inversions (groups) used: {long['orig_index'].nunique()}")
+print(f"Number of observations: {len(long)}")
+
+# Extract and print coefficients and p-values
+params = mdf.params
+pvals = mdf.pvalues
+
+coef_status = params.get('status_inv', np.nan)
+p_status = pvals.get('status_inv', np.nan)
+
+coef_recur = params.get('C(recur)[T.1]', np.nan)
+p_recur = pvals.get('C(recur)[T.1]', np.nan)
+
+interaction_name = 'status_inv:C(recur)[T.1]'
+coef_inter = params.get(interaction_name, np.nan)
+p_inter = pvals.get(interaction_name, np.nan)
+
+print(f"Main effect (status_inv): coef={coef_status:.6f}, p={p_status:.6g}")
+print(f"Main effect (C(recur)[T.1]): coef={coef_recur:.6f}, p={p_recur:.6g}")
+print(f"Interaction (status_inv:C(recur)[T.1]): coef={coef_inter:.6f}, p={p_inter:.6g}")
+
 plt.close()
 print("\nViolin plots saved to 'inversion_pi_violins.png'")
 
