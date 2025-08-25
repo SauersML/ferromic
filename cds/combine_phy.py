@@ -221,6 +221,21 @@ def find_and_combine_phy_files():
                 break
             collected.extend(seqs)
 
+        # Attempt to include a region outgroup when present using the required naming convention:
+        # outgroup_inversion_{chrom_label}_start{start}_end{end}.phy
+        if is_valid:
+            m_id = re.match(r"^inversion_([A-Za-z0-9]+)_start(\d+)_end(\d+)$", identifier)
+            if m_id:
+                chrom_label, start, end = m_id.groups()
+                outgroup_filename = f"outgroup_inversion_{chrom_label}_start{start}_end{end}.phy"
+                if os.path.exists(outgroup_filename):
+                    print(f"  - Parsing '{outgroup_filename}' with 'outgroup' rules...")
+                    out_seqs = parse_specific_phy_file(outgroup_filename, 'outgroup')
+                    if out_seqs is None:
+                        is_valid = False
+                    else:
+                        collected.extend(out_seqs)
+
         if not is_valid:
             print(f"   Skipping region pair for '{identifier}' due to parsing failure.")
             continue
