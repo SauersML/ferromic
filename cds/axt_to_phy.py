@@ -575,7 +575,7 @@ def _workers_cap():
     except Exception:
         cpu = multiprocessing.cpu_count()
     # Default cap to prevent spawn stalls on big nodes
-    default = min(cpu, 16)
+    default = min(cpu, 32)
     env = os.environ.get("AXT_WORKERS")
     if env:
         try:
