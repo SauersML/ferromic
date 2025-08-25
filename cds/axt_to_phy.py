@@ -1,13 +1,18 @@
 import os
 import re
+import sys
+import io
 import gzip
 import glob
 import time
+import math
 import shutil
-import gzip
+import resource
+import traceback
 import requests
 import multiprocessing
 from collections import defaultdict
+from contextlib import contextmanager
 
 # =========================
 # --- Configuration -----
@@ -28,7 +33,73 @@ DEBUG_TRANSCRIPT = None   # e.g., 'ENST00000367770.8'
 DEBUG_REGION = None       # e.g., 'inv_7_60911891_61578023'
 
 # Bin size (bp) for interval indexing over the genome (faster than per-base maps)
-BIN_SIZE = 1000
+BIN_SIZE = int(os.environ.get("BIN_SIZE", "1000"))
+
+# Verbosity knobs
+DEBUG_VERBOSE = os.environ.get("DEBUG_VERBOSE", "0") == "1"
+DEBUG_CHUNK_SAMPLE = int(os.environ.get("DEBUG_CHUNK_SAMPLE", "0"))  # e.g., 1000
+
+# =========================
+# --- Simple Debug Utils ---
+# =========================
+
+def ts():
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+def print_dbg(msg):
+    if DEBUG_VERBOSE:
+        print(f"[{ts()}] [DEBUG] {msg}", flush=True)
+
+def print_always(msg):
+    print(f"[{ts()}] {msg}", flush=True)
+
+def get_rss_kb():
+    """Return RSS in kB (Linux), else None."""
+    try:
+        with open("/proc/self/status", "r") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except Exception:
+        return None
+    return None
+
+def get_fd_count():
+    try:
+        return len(os.listdir("/proc/self/fd"))
+    except Exception:
+        return None
+
+def human_bytes(n):
+    if n is None:
+        return "unknown"
+    units = ["B","KB","MB","GB","TB"]
+    s = 0
+    v = float(n)
+    while v >= 1024 and s < len(units)-1:
+        v /= 1024.0
+        s += 1
+    return f"{v:.1f} {units[s]}"
+
+def progress_bar(label, done, total, width=40):
+    if total <= 0:
+        bar = "-" * width
+        pct = 0
+    else:
+        filled = int(width * done // total)
+        bar = "█" * filled + "-" * (width - filled)
+        pct = int(done * 100 // total)
+    print(f"\r{label} |{bar}| {done}/{total} ({pct}%)", end='', flush=True)
+
+@contextmanager
+def time_block(name):
+    t0 = time.time()
+    print_always(f"BEGIN: {name}")
+    try:
+        yield
+    finally:
+        dt = time.time() - t0
+        print_always(f"END  : {name} [{dt:.2f}s]")
 
 # =========================
 # --- Logger --------------
@@ -64,39 +135,69 @@ logger = Logger()
 
 def download_axt_file():
     if os.path.exists(AXT_FILENAME) or os.path.exists(AXT_GZ_FILENAME):
+        print_always("AXT file already present; skipping download.")
         return
-    print(f"Downloading '{AXT_GZ_FILENAME}' from UCSC...")
+    print_always(f"Downloading '{AXT_GZ_FILENAME}' from UCSC...")
     try:
-        with requests.get(AXT_URL, stream=True) as r:
+        with requests.get(AXT_URL, stream=True, timeout=60) as r:
             r.raise_for_status()
+            total = int(r.headers.get('Content-Length', '0'))
+            got = 0
+            chunk = 8192 * 8
             with open(AXT_GZ_FILENAME, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192 * 4):
-                    f.write(chunk)
+                last_print = time.time()
+                for block in r.iter_content(chunk_size=chunk):
+                    if not block:
+                        continue
+                    f.write(block)
+                    got += len(block)
+                    if time.time() - last_print > 0.25:
+                        if total:
+                            progress_bar("[Download AXT]", got, total)
+                        else:
+                            print(f"\r[Download AXT] {human_bytes(got)}", end='', flush=True)
+                        last_print = time.time()
+            if total:
+                progress_bar("[Download AXT]", total, total)
+                print()
+            else:
+                print()
     except requests.exceptions.RequestException as e:
-        print(f"FATAL: Error downloading file: {e}")
-        exit(1)
+        print(f"\nFATAL: Error downloading file: {e}", flush=True)
+        sys.exit(1)
 
 def ungzip_file():
     if not os.path.exists(AXT_GZ_FILENAME):
         if not os.path.exists(AXT_FILENAME):
-            print(f"FATAL: AXT file not found.")
-            exit(1)
+            print_always("FATAL: AXT file not found (neither .gz nor plain).")
+            sys.exit(1)
+        print_always("AXT .gz not found but plain exists; skipping decompression.")
         return
     if os.path.exists(AXT_FILENAME):
+        print_always("AXT plain file exists; skipping decompression.")
         return
-    print(f"Decompressing '{AXT_GZ_FILENAME}'...")
+
+    print_always(f"Decompressing '{AXT_GZ_FILENAME}' -> '{AXT_FILENAME}' ...")
     try:
-        with gzip.open(AXT_GZ_FILENAME, 'rb') as f_in, open(AXT_FILENAME, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out, length=16 * 1024 * 1024)
+        size_in = os.path.getsize(AXT_GZ_FILENAME)
+        done = 0
+        chunk = 16 * 1024 * 1024
+        with gzip.open(AXT_GZ_FILENAME, 'rb') as f_in, open(AXT_FILENAME, 'wb', buffering=chunk) as f_out:
+            while True:
+                buf = f_in.read(chunk)
+                if not buf:
+                    break
+                f_out.write(buf)
+                done += len(buf)
+                progress_bar("[Ungzip AXT]", done, size_in if size_in else 1)
+        progress_bar("[Ungzip AXT]", 1, 1)
+        print()
     except Exception as e:
-        print(f"FATAL: Error decompressing file: {e}")
-        exit(1)
+        print(f"\nFATAL: Error decompressing file: {e}", flush=True)
+        sys.exit(1)
 
 def read_phy_sequences(filename):
-    """
-    Reads all sequences from a simple PHYLIP file.
-    Returns list of uppercase strings (ACGTN-), ignoring names.
-    """
+    """Reads all sequences from a simple PHYLIP file. Returns list[str]."""
     sequences = []
     try:
         with open(filename, 'r') as f:
@@ -121,22 +222,29 @@ def read_phy_sequences(filename):
 def parse_transcript_metadata():
     """
     Parses METADATA_FILE and validates group0/group1 .phy lengths for each transcript.
-    Returns:
-      - t_entries: list of dicts with keys:
-           info: {gene_name, transcript_id, chromosome, expected_len, start, end, g0_fname, g1_fname}
-           segments: [(start,end), ...] (1-based inclusive hg38 genomic coords)
+    Returns list of dicts:
+        {'info': {...}, 'segments': [(start,end), ...]}
     """
     if not os.path.exists(METADATA_FILE):
-        print(f"FATAL: Metadata file '{METADATA_FILE}' not found.")
-        exit(1)
+        print_always(f"FATAL: Metadata file '{METADATA_FILE}' not found.")
+        sys.exit(1)
 
-    print("Validating transcript inputs against metadata...")
+    print_always("Validating transcript inputs against metadata...")
+    # First count lines for progress bar
+    with open(METADATA_FILE, 'r') as f:
+        total_lines = sum(1 for _ in f) - 1
+    total_lines = max(total_lines, 0)
+
     validated = []
     seen = set()
+    processed = 0
 
     with open(METADATA_FILE, 'r') as f:
         next(f, None)  # skip header
         for line_num, line in enumerate(f, 2):
+            processed += 1
+            if processed % 50 == 0 or processed == total_lines:
+                progress_bar("[Metadata]", processed, total_lines if total_lines else 1)
             parts = [p.strip() for p in line.strip().split('\t')]
             if len(parts) < 9:
                 continue
@@ -165,7 +273,6 @@ def parse_transcript_metadata():
                 g1_fname = phy_fname
                 g0_fname = phy_fname.replace("group1_", "group0_")
             else:
-                # Can't infer sibling; try both patterns
                 base = os.path.basename(phy_fname)
                 logger.add("Missing Input File", f"L{line_num}: Cannot infer group0/group1 for {t_id} from '{base}'.")
                 continue
@@ -199,6 +306,9 @@ def parse_transcript_metadata():
             }
             validated.append({'info': cds_info, 'segments': segments})
 
+    progress_bar("[Metadata]", total_lines if total_lines else 1, total_lines if total_lines else 1)
+    print()
+    print_dbg(f"Parsed metadata entries: {len(validated)}")
     return validated
 
 # =========================
@@ -211,14 +321,10 @@ REGION_REGEX = re.compile(
 
 def find_region_sets():
     """
-    Finds available inversion region PHYLIPs by scanning current directory.
-    Groups group0/group1 by (chrom, start, end).
-    Performs header-only length validation for speed and prints a live progress bar.
-    Returns list of dicts:
-      info: {region_id, chromosome, expected_len, start, end, g0_fname?, g1_fname?}
-      segments: [(start,end)]
+    Scans inversion region PHYLIPs and does header-only length check.
+    Returns list of dicts similar to transcripts.
     """
-    print("Scanning for inversion region PHYLIP files...")
+    print_always("Scanning for inversion region PHYLIP files...")
     files = glob.glob('inversion_group[01]_*_start*_end*.phy')
     groups = defaultdict(dict)  # key: (chrom, start, end) -> {'group0': path, 'group1': path}
 
@@ -239,6 +345,7 @@ def find_region_sets():
     processed = 0
     bar_width = 40
 
+    print_dbg(f"Region candidate groups: {total}")
     for (chrom, start, end), d in groups.items():
         expected_len = end - start + 1
         region_id = f"inv_{chrom}_{start}_{end}"
@@ -272,16 +379,12 @@ def find_region_sets():
         validated.append({'info': info, 'segments': [(start, end)]})
 
         processed += 1
-        if total > 0:
-            filled = int(bar_width * processed // total)
-            bar = "█" * filled + "-" * (bar_width - filled)
-            pct = int((processed * 100) // total)
-            print(f"\r[Region QC] |{bar}| {processed}/{total} ({pct}%)", end='', flush=True)
+        progress_bar("[Region QC]", processed, total if total else 1)
 
     if total > 0:
-        print()
-
-    print(f"Found {len(validated)} candidate regions.")
+        progress_bar("[Region QC]", total, total)
+    print()
+    print_always(f"Found {len(validated)} candidate regions.")
     return validated
 
 # =========================
@@ -290,7 +393,6 @@ def find_region_sets():
 
 def _bin_range(start, end, bin_size):
     """Yield bin ids covered by [start, end] inclusive (1-based coords)."""
-    # Convert to 0-based half-open for binning
     a = max(0, start - 1)
     b = end
     first = a // bin_size
@@ -300,33 +402,39 @@ def _bin_range(start, end, bin_size):
 
 def build_bin_index(transcripts, regions):
     """
-    Builds a per-chromosome bin index mapping BIN -> list of segments.
-    Each record: (kind, id, seg_start, seg_end, offset)
-      kind: 'TX' or 'RG'
-      id: transcript_id or region_id
-      offset: where this segment starts in the scaffold (0-based)
-    Returns dict: index[chrom][bin_id] -> list of records
-    Also returns: info_maps for lookups
+    Builds per-chromosome bin index: index[chrom][bin_id] -> list(records)
+    record = ('TX'|'RG', id, seg_start, seg_end, offset)
     """
-    index = {}  # chrom -> bin -> [records]; plain dicts ensure picklability with multiprocessing
+    print_always("Building bin index (overlap-aware) for transcripts and regions...")
+    t0 = time.time()
+    index = {}  # chrom -> bin -> [records]
     tx_info_map = {}
     rg_info_map = {}
 
     # Transcripts
+    total_tx = sum(len(t['segments']) for t in transcripts)
+    done_tx = 0
     for t in transcripts:
         info = t['info']
         chrom = info['chromosome']
         t_id = info['transcript_id']
         tx_info_map[t_id] = info
-        # precompute offsets across exon segments
         offset = 0
         for s, e in t['segments']:
             chrom_bins = index.setdefault(chrom, {})
             for b in _bin_range(s, e, BIN_SIZE):
                 chrom_bins.setdefault(b, []).append(('TX', t_id, s, e, offset))
             offset += (e - s + 1)
+            done_tx += 1
+            if done_tx % 50 == 0 or done_tx == total_tx:
+                progress_bar("[BinIndex TX]", done_tx, total_tx if total_tx else 1)
+    if total_tx:
+        progress_bar("[BinIndex TX]", total_tx, total_tx)
+        print()
 
     # Regions
+    total_rg = len(regions)
+    done_rg = 0
     for r in regions:
         info = r['info']
         chrom = info['chromosome']
@@ -336,9 +444,20 @@ def build_bin_index(transcripts, regions):
         chrom_bins = index.setdefault(chrom, {})
         for b in _bin_range(s, e, BIN_SIZE):
             chrom_bins.setdefault(b, []).append(('RG', r_id, s, e, 0))
+        done_rg += 1
+        if done_rg % 20 == 0 or done_rg == total_rg:
+            progress_bar("[BinIndex RG]", done_rg, total_rg if total_rg else 1)
+    if total_rg:
+        progress_bar("[BinIndex RG]", total_rg, total_rg)
+        print()
 
+    dt = time.time() - t0
+    # Quick size stats
+    chrom_stats = {c: len(bins) for c, bins in index.items()}
+    print_dbg(f"Bin index built in {dt:.2f}s; chrom bins: {chrom_stats}")
+    rss = get_rss_kb()
+    print_always(f"Bin index memory snapshot: RSS ~ {rss} KB" if rss else "Bin index memory snapshot: RSS unknown")
     return index, tx_info_map, rg_info_map
-
 
 # =========================
 # --- AXT Processing -------
@@ -350,62 +469,140 @@ def process_axt_chunk(chunk_start, chunk_end, bin_index):
     Returns dict: id -> {target_idx: base}
     """
     results = defaultdict(dict)  # id -> {pos_idx: base}
-    with open(AXT_FILENAME, 'r') as f:
-        f.seek(chunk_start)
-        if chunk_start != 0:
-            f.readline()  # align to line boundary
+    parsed_headers = 0
+    try:
+        with open(AXT_FILENAME, 'r', buffering=1024*1024) as f:
+            f.seek(chunk_start)
+            if chunk_start != 0:
+                f.readline()  # align to line boundary
 
-        while f.tell() < chunk_end:
-            header = f.readline()
-            if not header:
-                break
-            header = header.strip()
-            if not header:
-                continue
+            while f.tell() < chunk_end:
+                header = f.readline()
+                if not header:
+                    break
+                header = header.strip()
+                if not header:
+                    continue
 
-            parts = header.split()
-            if len(parts) != 9:
-                # Skip non-AXT lines (shouldn't occur in .net.axt)
-                continue
+                parts = header.split()
+                if len(parts) != 9:
+                    # Skip non-AXT lines (shouldn't occur in .net.axt)
+                    # Also skip two seq lines to stay aligned if this was a header-ish line.
+                    _ = f.readline()
+                    _ = f.readline()
+                    continue
 
-            axt_chr = parts[1]                  # e.g., 'chr7'
-            try:
-                human_pos = int(parts[2])       # tStart
-            except ValueError:
-                # Malformed; skip 2 sequence lines to stay aligned
-                f.readline(); f.readline()
-                continue
+                axt_chr = parts[1]  # e.g., 'chr7'
+                try:
+                    human_pos = int(parts[2])  # tStart
+                except ValueError:
+                    # Malformed; skip 2 sequence lines to stay aligned
+                    f.readline(); f.readline()
+                    continue
 
-            human_seq = f.readline()
-            chimp_seq = f.readline()
-            if not human_seq or not chimp_seq:
-                break
+                human_seq = f.readline()
+                chimp_seq = f.readline()
+                if not human_seq or not chimp_seq:
+                    break
 
-            human_seq = human_seq.strip().upper()
-            chimp_seq = chimp_seq.strip().upper()
+                human_seq = human_seq.strip().upper()
+                chimp_seq = chimp_seq.strip().upper()
 
-            # If chromosome not indexed at all, skip fast
-            chrom_bins = bin_index.get(axt_chr)
-            if not chrom_bins:
-                continue
+                parsed_headers += 1
+                if DEBUG_CHUNK_SAMPLE and (parsed_headers % DEBUG_CHUNK_SAMPLE == 0):
+                    # Light periodic debug from worker
+                    print_dbg(f"Worker chunk[{chunk_start}:{chunk_end}] parsed {parsed_headers} blocks (tell={f.tell()})")
 
-            # Iterate alignment columns
-            for h_char, c_char in zip(human_seq, chimp_seq):
-                if h_char != '-':
-                    # Query bin
-                    bin_id = (human_pos - 1) // BIN_SIZE
-                    records = chrom_bins.get(bin_id)
-                    if records:
-                        for kind, ident, seg_start, seg_end, offset in records:
-                            if seg_start <= human_pos <= seg_end:
-                                # 0-based position within this scaffold segment
-                                target_idx = offset + (human_pos - seg_start)
-                                # first-write wins
-                                if target_idx not in results[ident]:
-                                    results[ident][target_idx] = c_char
-                    human_pos += 1
+                # If chromosome not indexed at all, skip fast
+                chrom_bins = bin_index.get(axt_chr)
+                if not chrom_bins:
+                    continue
+
+                # Iterate alignment columns
+                for h_char, c_char in zip(human_seq, chimp_seq):
+                    if h_char != '-':
+                        # Query bin
+                        bin_id = (human_pos - 1) // BIN_SIZE
+                        records = chrom_bins.get(bin_id)
+                        if records:
+                            for kind, ident, seg_start, seg_end, offset in records:
+                                if seg_start <= human_pos <= seg_end:
+                                    target_idx = offset + (human_pos - seg_start)
+                                    if target_idx not in results[ident]:
+                                        results[ident][target_idx] = c_char
+                        human_pos += 1
+
+    except Exception as e:
+        # Return an error sentinel
+        return {"__error__": f"{e.__class__.__name__}: {e}", "__trace__": traceback.format_exc(),
+                "__chunk__": (chunk_start, chunk_end), "__parsed__": parsed_headers}
 
     return dict(results)
+
+def _safe_pool_create(desired):
+    """Create a ThreadPool with fallback reductions if creation is slow/fails."""
+    from multiprocessing.dummy import Pool as ThreadPool
+    attempts = []
+    plan = [desired]
+    if desired > 32:
+        plan.append(32)
+    if desired > 16:
+        plan.append(16)
+    if desired > 8:
+        plan.append(8)
+    if desired > 4:
+        plan.append(4)
+    plan = list(dict.fromkeys(plan))  # uniq, preserve order
+
+    last_exc = None
+    for n in plan:
+        print_always(f"Creating thread pool with {n} workers ...")
+        t0 = time.time()
+        try:
+            pool = ThreadPool(processes=n)
+            dt = time.time() - t0
+            print_always(f"Thread pool ready ({n} workers) in {dt:.2f}s.")
+            return pool, n
+        except Exception as e:
+            last_exc = e
+            attempts.append((n, f"{e}"))
+            print_always(f"Pool creation failed for {n}: {e}. Trying fewer ...")
+    raise RuntimeError(f"Unable to create pool. Attempts: {attempts}") from last_exc
+
+def _workers_cap():
+    try:
+        cpu = len(os.sched_getaffinity(0))
+    except Exception:
+        cpu = multiprocessing.cpu_count()
+    # Default cap to prevent spawn stalls on big nodes
+    default = min(cpu, 16)
+    env = os.environ.get("AXT_WORKERS")
+    if env:
+        try:
+            want = max(1, int(env))
+            return min(want, cpu)
+        except ValueError:
+            pass
+    return default
+
+def _print_system_limits():
+    pid = os.getpid()
+    rss = get_rss_kb()
+    fds = get_fd_count()
+    nproc = resource.getrlimit(resource.RLIMIT_NPROC)
+    nofile = resource.getrlimit(resource.RLIMIT_NOFILE)
+    print_always(f"Process PID={pid} | RSS={rss} KB | FDs={fds} | RLIMIT_NPROC={nproc} | RLIMIT_NOFILE={nofile}")
+
+def _chunk_plan(file_size, n_workers):
+    # guard tiny chunks
+    base = max(1, file_size // n_workers)
+    offsets = []
+    start = 0
+    for i in range(n_workers):
+        end = file_size if i == n_workers - 1 else min(file_size, start + base)
+        offsets.append((start, end))
+        start = end
+    return offsets
 
 def build_outgroups_and_filter(transcripts, regions):
     """
@@ -413,184 +610,265 @@ def build_outgroups_and_filter(transcripts, regions):
     Apply divergence QC and write .phy outgroups for both sets.
     """
     if not transcripts and not regions:
-        print("No transcript or region entries to process.")
+        print_always("No transcript or region entries to process.")
         return
 
-    print("Building bin index (overlap-aware) for transcripts and regions...")
+    # Build bin index
     bin_index, tx_info_map, rg_info_map = build_bin_index(transcripts, regions)
 
     # Create empty scaffolds
     tx_scaffolds = {t['info']['transcript_id']: ['-'] * t['info']['expected_len'] for t in transcripts}
     rg_scaffolds = {r['info']['region_id']: ['-'] * r['info']['expected_len'] for r in regions}
 
-    print(f"Processing '{AXT_FILENAME}' in parallel...")
+    print_always(f"Processing '{AXT_FILENAME}' in parallel (threaded)...")
+    if not os.path.exists(AXT_FILENAME):
+        print_always("FATAL: AXT plain file missing.")
+        sys.exit(1)
+
     file_size = os.path.getsize(AXT_FILENAME)
+    if file_size == 0:
+        print_always("FATAL: AXT file is empty.")
+        sys.exit(1)
+
+    # Worker count + system info
+    workers = _workers_cap()
     try:
-        num_procs = len(os.sched_getaffinity(0))
-    except AttributeError:
-        num_procs = multiprocessing.cpu_count()
-    num_procs = max(1, num_procs)
-    print(f"Using {num_procs} available CPU cores.")
+        cpu_all = len(os.sched_getaffinity(0))
+    except Exception:
+        cpu_all = multiprocessing.cpu_count()
+    print_always(f"CPU detected: {cpu_all} | Planned workers: {workers} (override with AXT_WORKERS)")
+    _print_system_limits()
 
-    chunk_size = file_size // num_procs
-    chunks = [(i * chunk_size, (i + 1) * chunk_size, bin_index) for i in range(num_procs)]
-    chunks[-1] = (chunks[-1][0], file_size, bin_index)
+    # Chunking plan
+    chunk_ranges = _chunk_plan(file_size, workers)
+    print_dbg(f"AXT file size: {human_bytes(file_size)}; chunk ranges (first 5): {chunk_ranges[:5]}")
 
+    # Create pool (with fallbacks)
+    t_pool_create0 = time.time()
+    pool, actual_workers = _safe_pool_create(workers)
+    t_pool_create1 = time.time()
+    print_dbg(f"Pool creation took {t_pool_create1 - t_pool_create0:.2f}s; actual workers={actual_workers}")
+
+    # Kick off work
     t0 = time.time()
-    from multiprocessing.dummy import Pool as ThreadPool  # threading-based pool avoids pickling overhead for task arguments
-    with ThreadPool(processes=num_procs) as pool:
-        total = len(chunks)
-        completed = 0
-        bar_width = 40
-        print(f"[AXT parse] |{'-' * bar_width}| 0/{total} (0%)", end='', flush=True)
-        parts = []
-        for res in pool.imap_unordered(lambda args: process_axt_chunk(*args), chunks):
-            parts.append(res)
-            completed += 1
-            filled = int(bar_width * completed // total)
-            bar = "█" * filled + "-" * (bar_width - filled)
-            pct = int(completed * 100 // total)
-            print(f"\r[AXT parse] |{bar}| {completed}/{total} ({pct}%)", end='', flush=True)
-        print()
-    print(f"Finished parallel AXT processing in {time.time() - t0:.2f} seconds.")
+    print_always(f"[AXT parse] START — scheduling {len(chunk_ranges)} chunks")
+    progress_bar("[AXT parse]", 0, len(chunk_ranges))
+    parts = []
 
-    print("Merging results and writing outgroups (with divergence QC)...")
-    # Merge into scaffolds
-    for res in parts:
-        for ident, posmap in res.items():
-            if ident in tx_scaffolds:
-                sc = tx_scaffolds[ident]
+    # Use a wrapper to include bin_index by reference without copying
+    def _runner(args):
+        cs, ce = args
+        return process_axt_chunk(cs, ce, bin_index)
+
+    # imap_unordered returns results as ready; keep UI responsive
+    try:
+        completed = 0
+        for res in pool.imap_unordered(_runner, chunk_ranges):
+            completed += 1
+            progress_bar("[AXT parse]", completed, len(chunk_ranges))
+            # Handle worker error sentinel
+            if isinstance(res, dict) and "__error__" in res:
+                print("\n[AXT parse][WORKER ERROR]")
+                print(res["__error__"])
+                print(res.get("__trace__", ""))
+                print(f"Chunk: {res.get('__chunk__')}, parsed headers before error: {res.get('__parsed__')}")
+                # Continue rather than die; we keep partial results
+                continue
+            parts.append(res)
+    finally:
+        try:
+            pool.close()
+            pool.join()
+        except Exception:
+            pass
+    progress_bar("[AXT parse]", len(chunk_ranges), len(chunk_ranges))
+    print()
+    print_always(f"Finished parallel AXT processing in {time.time() - t0:.2f} seconds.")
+    print_always(f"Collected {len(parts)} partial result maps.")
+
+    # Merge results
+    print_always("Merging results into scaffolds (with divergence QC later)...")
+    with time_block("Merge results"):
+        total_parts = len(parts)
+        merged = 0
+        last_print = time.time()
+        for res in parts:
+            for ident, posmap in res.items():
+                if ident in tx_scaffolds:
+                    sc = tx_scaffolds[ident]
+                elif ident in rg_scaffolds:
+                    sc = rg_scaffolds[ident]
+                else:
+                    continue
                 for pos_idx, base in posmap.items():
                     if 0 <= pos_idx < len(sc) and sc[pos_idx] == '-':
                         sc[pos_idx] = base
-            elif ident in rg_scaffolds:
-                sc = rg_scaffolds[ident]
-                for pos_idx, base in posmap.items():
-                    if 0 <= pos_idx < len(sc) and sc[pos_idx] == '-':
-                        sc[pos_idx] = base
+            merged += 1
+            if time.time() - last_print > 0.1 or merged == total_parts:
+                progress_bar("[Merge]", merged, total_parts)
+                last_print = time.time()
+        if total_parts:
+            progress_bar("[Merge]", total_parts, total_parts)
+            print()
 
     # --- Write transcripts ---
-    tx_written = 0
-    for t in transcripts:
-        info = t['info']
-        t_id = info['transcript_id']
-        gene = info['gene_name']
-        chrom = info['chromosome']
-        start = info['start']
-        end = info['end']
-        g0_fname = info['g0_fname']
+    print_always("Writing transcript outgroups (after divergence QC)...")
+    with time_block("Write transcript outgroups"):
+        tx_written = 0
+        total_tx = len(transcripts)
+        for i, t in enumerate(transcripts, 1):
+            info = t['info']
+            t_id = info['transcript_id']
+            gene = info['gene_name']
+            chrom = info['chromosome']
+            start = info['start']
+            end = info['end']
+            g0_fname = info['g0_fname']
 
-        seq_list = tx_scaffolds.get(t_id)
-        if not seq_list:
-            logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
-            continue
-        final_seq = "".join(seq_list)
+            seq_list = tx_scaffolds.get(t_id)
+            if not seq_list:
+                logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
+                progress_bar("[TX write]", i, total_tx)
+                continue
+            final_seq = "".join(seq_list)
 
-        if final_seq.count('-') == len(final_seq):
-            logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
-            continue
+            if final_seq.count('-') == len(final_seq):
+                logger.add("No Alignment Found", f"No chimp alignment found for {t_id}.")
+                progress_bar("[TX write]", i, total_tx)
+                continue
 
-        # Divergence QC vs group0 reference (first sequence)
-        human_seqs = read_phy_sequences(g0_fname)
-        if not human_seqs:
-            logger.add("Human File Missing for QC", f"Could not read human seqs from {g0_fname} for divergence check on {t_id}.")
-            continue
-        human_ref = human_seqs[0]
-
-        diff = 0
-        comp = 0
-        for h, c in zip(human_ref, final_seq):
-            if h != '-' and c != '-':
-                comp += 1
-                if h != c:
-                    diff += 1
-        divergence = (diff / comp) * 100 if comp else 0.0
-
-        outname = f"outgroup_{gene}_{t_id}_{chrom}_start{start}_end{end}.phy"
-        if divergence > DIVERGENCE_THRESHOLD:
-            logger.add("QC Filter: High Divergence", f"'{gene} ({t_id})' removed. Divergence vs chimp: {divergence:.2f}% (> {DIVERGENCE_THRESHOLD}%).")
-            if os.path.exists(outname):
-                os.remove(outname)
-            continue
-
-        if DEBUG_TRANSCRIPT == t_id:
-            print(f"\n--- DEBUG TX {t_id} --- len={len(final_seq)}\n{final_seq[:120]}...\n")
-
-        with open(outname, 'w') as f_out:
-            f_out.write(f" 1 {len(final_seq)}\n")
-            f_out.write(f"{'panTro5':<10}{final_seq}\n")
-        tx_written += 1
-
-    # --- Write regions ---
-    rg_written = 0
-    for r in regions:
-        info = r['info']
-        r_id = info['region_id']              # inv_<chrom>_<start>_<end>
-        chrom_label = info['chromosome'][3:]  # strip 'chr'
-        start = info['start']
-        end = info['end']
-        g0_fname = info['g0_fname'] or info['g1_fname']
-
-        seq_list = rg_scaffolds.get(r_id)
-        if not seq_list:
-            logger.add("No Alignment Found (Region)", f"No chimp alignment found for {r_id}.")
-            continue
-        final_seq = "".join(seq_list)
-
-        if final_seq.count('-') == len(final_seq):
-            logger.add("No Alignment Found (Region)", f"No chimp alignment found for {r_id}.")
-            continue
-
-        # Divergence QC vs human reference (group0 preferred)
-        if not g0_fname:
-            logger.add("Region File Missing for QC", f"{r_id}: no group file for divergence check; skipping QC.")
-            divergence = 0.0
-        else:
+            # Divergence QC vs group0 reference (first sequence)
             human_seqs = read_phy_sequences(g0_fname)
             if not human_seqs:
-                logger.add("Region File Missing for QC", f"{r_id}: cannot read {os.path.basename(g0_fname)}; skipping QC.")
+                logger.add("Human File Missing for QC", f"Could not read human seqs from {g0_fname} for divergence check on {t_id}.")
+                progress_bar("[TX write]", i, total_tx)
+                continue
+            human_ref = human_seqs[0]
+
+            diff = 0
+            comp = 0
+            for h, c in zip(human_ref, final_seq):
+                if h != '-' and c != '-':
+                    comp += 1
+                    if h != c:
+                        diff += 1
+            divergence = (diff / comp) * 100 if comp else 0.0
+
+            outname = f"outgroup_{gene}_{t_id}_{chrom}_start{start}_end{end}.phy"
+            if divergence > DIVERGENCE_THRESHOLD:
+                logger.add("QC Filter: High Divergence", f"'{gene} ({t_id})' removed. Divergence vs chimp: {divergence:.2f}% (> {DIVERGENCE_THRESHOLD}%).")
+                if os.path.exists(outname):
+                    try:
+                        os.remove(outname)
+                    except Exception:
+                        pass
+                progress_bar("[TX write]", i, total_tx)
+                continue
+
+            if DEBUG_TRANSCRIPT == t_id:
+                print_always(f"\n--- DEBUG TX {t_id} --- len={len(final_seq)}\n{final_seq[:120]}...\n")
+
+            with open(outname, 'w') as f_out:
+                f_out.write(f" 1 {len(final_seq)}\n")
+                f_out.write(f"{'panTro5':<10}{final_seq}\n")
+            tx_written += 1
+            progress_bar("[TX write]", i, total_tx)
+        if total_tx:
+            progress_bar("[TX write]", total_tx, total_tx)
+            print()
+        print_always(f"Wrote {tx_written} transcript outgroup PHYLIPs (passed QC).")
+
+    # --- Write regions ---
+    print_always("Writing region outgroups (after divergence QC)...")
+    with time_block("Write region outgroups"):
+        rg_written = 0
+        total_rg = len(regions)
+        for i, r in enumerate(regions, 1):
+            info = r['info']
+            r_id = info['region_id']              # inv_<chrom>_<start>_<end>
+            chrom_label = info['chromosome'][3:]  # strip 'chr'
+            start = info['start']
+            end = info['end']
+            g0_fname = info['g0_fname'] or info['g1_fname']
+
+            seq_list = rg_scaffolds.get(r_id)
+            if not seq_list:
+                logger.add("No Alignment Found (Region)", f"No chimp alignment found for {r_id}.")
+                progress_bar("[RG write]", i, total_rg)
+                continue
+            final_seq = "".join(seq_list)
+
+            if final_seq.count('-') == len(final_seq):
+                logger.add("No Alignment Found (Region)", f"No chimp alignment found for {r_id}.")
+                progress_bar("[RG write]", i, total_rg)
+                continue
+
+            # Divergence QC vs human reference (group0 preferred)
+            if not g0_fname:
+                logger.add("Region File Missing for QC", f"{r_id}: no group file for divergence check; skipping QC.")
                 divergence = 0.0
             else:
-                human_ref = human_seqs[0]
-                diff = 0
-                comp = 0
-                for h, c in zip(human_ref, final_seq):
-                    if h != '-' and c != '-':
-                        comp += 1
-                        if h != c:
-                            diff += 1
-                divergence = (diff / comp) * 100 if comp else 0.0
+                human_seqs = read_phy_sequences(g0_fname)
+                if not human_seqs:
+                    logger.add("Region File Missing for QC", f"{r_id}: cannot read {os.path.basename(g0_fname)}; skipping QC.")
+                    divergence = 0.0
+                else:
+                    human_ref = human_seqs[0]
+                    diff = 0
+                    comp = 0
+                    for h, c in zip(human_ref, final_seq):
+                        if h != '-' and c != '-':
+                            comp += 1
+                            if h != c:
+                                diff += 1
+                    divergence = (diff / comp) * 100 if comp else 0.0
 
-        outname = f"outgroup_inversion_{chrom_label}_start{start}_end{end}.phy"
-        if divergence > DIVERGENCE_THRESHOLD:
-            logger.add("QC Filter: High Divergence (Region)", f"{r_id} removed. Divergence vs chimp: {divergence:.2f}% (> {DIVERGENCE_THRESHOLD}%).")
-            if os.path.exists(outname):
-                os.remove(outname)
-            continue
+            outname = f"outgroup_inversion_{chrom_label}_start{start}_end{end}.phy"
+            if divergence > DIVERGENCE_THRESHOLD:
+                logger.add("QC Filter: High Divergence (Region)", f"{r_id} removed. Divergence vs chimp: {divergence:.2f}% (> {DIVERGENCE_THRESHOLD}%).")
+                if os.path.exists(outname):
+                    try:
+                        os.remove(outname)
+                    except Exception:
+                        pass
+                progress_bar("[RG write]", i, total_rg)
+                continue
 
-        if DEBUG_REGION == r_id:
-            print(f"\n--- DEBUG RG {r_id} --- len={len(final_seq)}\n{final_seq[:120]}...\n")
+            if DEBUG_REGION == r_id:
+                print_always(f"\n--- DEBUG RG {r_id} --- len={len(final_seq)}\n{final_seq[:120]}...\n")
 
-        with open(outname, 'w') as f_out:
-            f_out.write(f" 1 {len(final_seq)}\n")
-            f_out.write(f"{'panTro5':<10}{final_seq}\n")
-        rg_written += 1
-
-    print(f"Wrote {tx_written} transcript outgroup PHYLIPs and {rg_written} region outgroup PHYLIPs (passed QC).")
+            with open(outname, 'w') as f_out:
+                f_out.write(f" 1 {len(final_seq)}\n")
+                f_out.write(f"{'panTro5':<10}{final_seq}\n")
+            rg_written += 1
+            progress_bar("[RG write]", i, total_rg)
+        if total_rg:
+            progress_bar("[RG write]", total_rg, total_rg)
+            print()
+        print_always(f"Wrote {rg_written} region outgroup PHYLIPs (passed QC).")
 
 # =========================
 # --- Fixed-diff stats ----
 # =========================
 
 def calculate_and_print_differences_transcripts():
-    print("\n--- Final Difference Calculation & Statistics (Transcripts) ---")
+    print_always("--- Final Difference Calculation & Statistics (Transcripts) ---")
     key_regex = re.compile(r"(ENST[0-9]+\.[0-9]+)_(chr[^_]+)_start([0-9]+)_end([0-9]+)")
     cds_groups = defaultdict(dict)
-    for f in glob.glob('*.phy'):
-        base = os.path.basename(f)
+    all_phys = glob.glob('*.phy')
+
+    # Scan files with progress
+    total_files = len(all_phys)
+    for i, fpath in enumerate(all_phys, 1):
+        base = os.path.basename(fpath)
         m = key_regex.search(base)
         if m:
-            cds_groups[m.groups()][base.split('_')[0]] = f  # leading token: group0/group1/outgroup
+            cds_groups[m.groups()][base.split('_')[0]] = fpath
+        if i % 25 == 0 or i == total_files:
+            progress_bar("[TX stats: scan]", i, total_files if total_files else 1)
+    if total_files:
+        progress_bar("[TX stats: scan]", total_files, total_files)
+        print()
 
     total_fixed_diffs = 0
     g0_matches = 0
@@ -599,13 +877,18 @@ def calculate_and_print_differences_transcripts():
     per_tx_g1 = {}
     comparable_sets = 0
 
-    print("Analyzing each comparable transcript set (passed QC)...")
-    for identifier, files in cds_groups.items():
+    keys = list(cds_groups.items())
+    total_keys = len(keys)
+    print_dbg(f"Comparable TX groups detected (pre-filter): {total_keys}")
+
+    print_always("Analyzing each comparable transcript set (passed QC)...")
+    for idx, (identifier, files) in enumerate(keys, 1):
         if {'group0', 'group1', 'outgroup'}.issubset(files.keys()):
             g0_seqs = read_phy_sequences(files['group0'])
             g1_seqs = read_phy_sequences(files['group1'])
             out_seq_list = read_phy_sequences(files['outgroup'])
             if not out_seq_list:
+                progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
                 continue
             out_seq = out_seq_list[0]
 
@@ -613,12 +896,14 @@ def calculate_and_print_differences_transcripts():
             g1_len = set(len(s) for s in g1_seqs)
             if not (len(g0_len) == 1 and len(g1_len) == 1):
                 logger.add("Intra-file Length Mismatch", f"Not all sequences in a .phy have same length for {identifier[0]}.")
+                progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
                 continue
 
             L0 = g0_len.pop()
             L1 = g1_len.pop()
             if L0 != L1 or L0 != len(out_seq):
                 logger.add("Final Comparison Error", f"Length mismatch between groups for {identifier[0]}.")
+                progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
                 continue
 
             comparable_sets += 1
@@ -652,11 +937,17 @@ def calculate_and_print_differences_transcripts():
                 per_tx_g0[key] = (local_g0 / local_fd) * 100.0
                 per_tx_g1[key] = (local_g1 / local_fd) * 100.0
 
+        progress_bar("[TX stats]", idx, total_keys if total_keys else 1)
+
+    if total_keys:
+        progress_bar("[TX stats]", total_keys, total_keys)
+        print()
+
     if comparable_sets == 0:
-        print("CRITICAL: No complete transcript sets found to compare after filtering.")
+        print_always("CRITICAL: No complete transcript sets found to compare after filtering.")
         return
 
-    print(f"Successfully analyzed {comparable_sets} complete transcript CDS sets.")
+    print_always(f"Successfully analyzed {comparable_sets} complete transcript CDS sets.")
     print("\n" + "="*50)
     print(f" TRANSCRIPTS REPORT (QC < {DIVERGENCE_THRESHOLD:.1f}%)")
     print("="*50)
@@ -682,26 +973,33 @@ def calculate_and_print_differences_transcripts():
     print("="*50 + "\n")
 
 def calculate_and_print_differences_regions():
-    print("\n--- Final Difference Calculation & Statistics (Regions) ---")
+    print_always("--- Final Difference Calculation & Statistics (Regions) ---")
     # Match inversion group files
     inv_regex = re.compile(r"^inversion_group(?P<grp>[01])_(?P<chrom>[^_]+)_start(?P<start>\d+)_end(?P<end>\d+)\.phy$")
     # Outgroup for region files
     out_regex = re.compile(r"^outgroup_inversion_(?P<chrom>[^_]+)_start(?P<start>\d+)_end(?P<end>\d+)\.phy$")
 
     groups = defaultdict(dict)  # key: (chrom,start,end) -> dict of role->file
+    all_phys = glob.glob('*.phy')
 
-    for f in glob.glob('*.phy'):
-        base = os.path.basename(f)
+    # Scan files with progress
+    total_files = len(all_phys)
+    for i, fpath in enumerate(all_phys, 1):
+        base = os.path.basename(fpath)
         m = inv_regex.match(base)
         if m:
             key = (m.group('chrom'), m.group('start'), m.group('end'))
             role = f"group{m.group('grp')}"
-            groups[key][role] = f
-            continue
+            groups[key][role] = fpath
         m2 = out_regex.match(base)
         if m2:
-            key = (m2.group('chrom'), m2.group('start'), m2.group('end'))
-            groups[key]['outgroup'] = f
+            key2 = (m2.group('chrom'), m2.group('start'), m2.group('end'))
+            groups[key2]['outgroup'] = fpath
+        if i % 25 == 0 or i == total_files:
+            progress_bar("[RG stats: scan]", i, total_files if total_files else 1)
+    if total_files:
+        progress_bar("[RG stats: scan]", total_files, total_files)
+        print()
 
     total_fixed_diffs = 0
     g0_matches = 0
@@ -710,13 +1008,18 @@ def calculate_and_print_differences_regions():
     per_region_g1 = {}
     comparable_sets = 0
 
-    print("Analyzing each comparable REGION set (passed QC)...")
-    for key, files in groups.items():
+    keys = list(groups.items())
+    total_keys = len(keys)
+    print_dbg(f"Comparable REGION groups detected (pre-filter): {total_keys}")
+
+    print_always("Analyzing each comparable REGION set (passed QC)...")
+    for idx, (key, files) in enumerate(keys, 1):
         if {'group0', 'group1', 'outgroup'}.issubset(files.keys()):
             g0_seqs = read_phy_sequences(files['group0'])
             g1_seqs = read_phy_sequences(files['group1'])
             out_seq_list = read_phy_sequences(files['outgroup'])
             if not out_seq_list:
+                progress_bar("[RG stats]", idx, total_keys if total_keys else 1)
                 continue
             out_seq = out_seq_list[0]
 
@@ -724,12 +1027,14 @@ def calculate_and_print_differences_regions():
             g1_len = set(len(s) for s in g1_seqs)
             if not (len(g0_len) == 1 and len(g1_len) == 1):
                 logger.add("Intra-file Length Mismatch (Region)", f"Not all sequences same length for region {key}.")
+                progress_bar("[RG stats]", idx, total_keys if total_keys else 1)
                 continue
 
             L0 = g0_len.pop()
             L1 = g1_len.pop()
             if L0 != L1 or L0 != len(out_seq):
                 logger.add("Final Comparison Error (Region)", f"Length mismatch between groups for region {key}.")
+                progress_bar("[RG stats]", idx, total_keys if total_keys else 1)
                 continue
 
             comparable_sets += 1
@@ -760,11 +1065,17 @@ def calculate_and_print_differences_regions():
                 per_region_g0[region_label] = (local_g0 / local_fd) * 100.0
                 per_region_g1[region_label] = (local_g1 / local_fd) * 100.0
 
+        progress_bar("[RG stats]", idx, total_keys if total_keys else 1)
+
+    if total_keys:
+        progress_bar("[RG stats]", total_keys, total_keys)
+        print()
+
     if comparable_sets == 0:
-        print("CRITICAL: No complete REGION sets found to compare after filtering.")
+        print_always("CRITICAL: No complete REGION sets found to compare after filtering.")
         return
 
-    print(f"Successfully analyzed {comparable_sets} complete REGION sets.")
+    print_always(f"Successfully analyzed {comparable_sets} complete REGION sets.")
     print("\n" + "="*50)
     print(f" REGIONS REPORT (QC < {DIVERGENCE_THRESHOLD:.1f}%)")
     print("="*50)
@@ -794,24 +1105,37 @@ def calculate_and_print_differences_regions():
 # =========================
 
 def main():
-    print("--- Starting Chimp Outgroup Generation for Transcripts + Regions ---")
-    download_axt_file()
-    ungzip_file()
+    print_always("--- Starting Chimp Outgroup Generation for Transcripts + Regions ---")
+    print_dbg(f"Using BIN_SIZE={BIN_SIZE}, DEBUG_VERBOSE={DEBUG_VERBOSE}, DEBUG_CHUNK_SAMPLE={DEBUG_CHUNK_SAMPLE}")
+
+    with time_block("Download + prepare AXT"):
+        download_axt_file()
+        ungzip_file()
 
     # Parse inputs
-    transcripts = parse_transcript_metadata()
-    regions = find_region_sets()
+    with time_block("Parse transcript metadata"):
+        transcripts = parse_transcript_metadata()
+
+    with time_block("Scan region PHYLIPs"):
+        regions = find_region_sets()
 
     if not transcripts and not regions:
-        print("No valid transcripts or regions found after initial validation.")
+        print_always("No valid transcripts or regions found after initial validation.")
     else:
-        build_outgroups_and_filter(transcripts, regions)
+        with time_block("Build outgroups + filter + write"):
+            build_outgroups_and_filter(transcripts, regions)
         # Stats for each domain
-        calculate_and_print_differences_transcripts()
-        calculate_and_print_differences_regions()
+        with time_block("Compute TX stats"):
+            calculate_and_print_differences_transcripts()
+        with time_block("Compute REG stats"):
+            calculate_and_print_differences_regions()
 
     logger.report()
-    print("--- Script finished. ---")
+    print_always("--- Script finished. ---")
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.", flush=True)
+        sys.exit(130)
