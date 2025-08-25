@@ -1,25 +1,24 @@
 use crate::stats::{
-    calculate_adjusted_sequence_length, calculate_inversion_allele_frequency, calculate_per_site_diversity,
-    calculate_pi, calculate_watterson_theta, calculate_fst_wc_haplotype_groups, calculate_fst_wc_csv_populations, SiteDiversity, FstWcResults,
-    HudsonFSTOutcome, PopulationContext, PopulationId, calculate_hudson_fst_for_pair
+    calculate_adjusted_sequence_length, calculate_fst_wc_csv_populations,
+    calculate_fst_wc_haplotype_groups, calculate_hudson_fst_for_pair,
+    calculate_inversion_allele_frequency, calculate_per_site_diversity, calculate_pi,
+    calculate_watterson_theta, FstWcResults, HudsonFSTOutcome, PopulationContext, PopulationId,
+    SiteDiversity,
 };
 
 use crate::parse::{
-    find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header
+    find_vcf_file, open_vcf_reader, parse_gtf_file, read_reference_sequence, validate_vcf_header,
 };
 
 use crate::progress::{
-    log, LogLevel, ProcessingStage, set_stage,
-    init_entry_progress, update_entry_progress, finish_entry_progress,
-    init_step_progress, update_step_progress, finish_step_progress,
-    init_variant_progress, update_variant_progress, finish_variant_progress,
-    create_spinner, display_status_box, StatusBox
+    create_spinner, display_status_box, finish_entry_progress, finish_step_progress,
+    finish_variant_progress, init_entry_progress, init_step_progress, init_variant_progress, log,
+    set_stage, update_entry_progress, update_step_progress, update_variant_progress, LogLevel,
+    ProcessingStage, StatusBox,
 };
 
 use crate::transcripts::{
-    TranscriptAnnotationCDS,
-    make_sequences,
-    filter_and_log_transcripts,
+    filter_and_log_transcripts, make_sequences, write_phylip_file, TranscriptAnnotationCDS,
 };
 
 use clap::Parser;
@@ -27,9 +26,11 @@ use colored::*;
 use crossbeam_channel::bounded;
 use csv::WriterBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
+use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use prettytable::{row, Table};
 use rayon::prelude::*;
+use std::collections::HashMap as Map2;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, BufRead};
@@ -39,13 +40,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use std::collections::HashMap as Map2;
 use tempfile::TempDir;
-use once_cell::sync::Lazy;
 
-pub static TEMP_DIR: Lazy<Mutex<Option<TempDir>>> = Lazy::new(|| {
-    Mutex::new(None)
-});
+pub static TEMP_DIR: Lazy<Mutex<Option<TempDir>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn create_temp_dir() -> Result<TempDir, VcfError> {
     let ramdisk_path = std::env::var("RAMDISK_PATH").unwrap_or_else(|_| "/dev/shm".to_string());
@@ -103,13 +100,21 @@ pub struct Args {
     /// Enable PCA analysis on all haplotypes
     #[arg(long = "pca", help = "Perform PCA analysis on all haplotypes")]
     pub enable_pca: bool,
-    
+
     /// Number of principal components to compute
-    #[arg(long = "pca_components", default_value = "10", help = "Number of principal components to compute")]
+    #[arg(
+        long = "pca_components",
+        default_value = "10",
+        help = "Number of principal components to compute"
+    )]
     pub pca_components: usize,
-    
+
     /// Output file for PCA results
-    #[arg(long = "pca_output", default_value = "pca_results.tsv", help = "Output file for PCA results")]
+    #[arg(
+        long = "pca_output",
+        default_value = "pca_results.tsv",
+        help = "Output file for PCA results"
+    )]
     pub pca_output: String,
 
     /// Enable FST calculation
@@ -117,7 +122,10 @@ pub struct Args {
     pub enable_fst: bool,
 
     /// Path to CSV file defining population groups for FST calculation
-    #[arg(long = "fst_populations", help = "Path to CSV file defining population groups for FST calculation")]
+    #[arg(
+        long = "fst_populations",
+        help = "Path to CSV file defining population groups for FST calculation"
+    )]
     pub fst_populations: Option<String>,
 }
 
@@ -138,7 +146,6 @@ pub struct ZeroBasedHalfOpen {
     pub start: usize,
     pub end: usize,
 }
-
 
 impl ZeroBasedHalfOpen {
     /// Creates a new half-open interval from 1-based inclusive coordinates.
@@ -215,7 +222,7 @@ impl ZeroBasedHalfOpen {
 
     /// Returns the 0-based inclusive end coordinate of this 0-based half-open interval [self.start, self.end).
     /// For a non-empty interval [S_0, E_0), this returns E_0 - 1.
-    /// For an empty interval where self.end <= self.start (e.g., [0,0) or [5,2) ), 
+    /// For an empty interval where self.end <= self.start (e.g., [0,0) or [5,2) ),
     /// this will result in an end coordinate that is less than self.start,
     /// correctly defining an empty or invalid 0-based inclusive interval [self.start, result].
     pub fn get_0based_inclusive_end_coord(&self) -> i64 {
@@ -226,7 +233,7 @@ impl ZeroBasedHalfOpen {
         (self.end as i64) - 1
     }
 
-    /// Returns the coordinate value that serves as the 1-based inclusive end 
+    /// Returns the coordinate value that serves as the 1-based inclusive end
     /// of this 0-based half-open interval [self.start, self.end).
     /// For an interval like [S_0, E_0) (0-based half-open), the corresponding
     /// 1-based inclusive interval is [S_0 + 1, E_0]. This function returns E_0.
@@ -234,11 +241,14 @@ impl ZeroBasedHalfOpen {
         self.end as i64
     }
 
-    /// Returns a tuple (1-based inclusive start, 1-based inclusive end) 
+    /// Returns a tuple (1-based inclusive start, 1-based inclusive end)
     /// representing this 0-based half-open interval.
     /// For an interval like [S_0, E_0) (0-based half-open), this returns (S_0 + 1, E_0).
     pub fn to_1based_inclusive_tuple(&self) -> (i64, i64) {
-        (self.start_1based_inclusive(), self.get_1based_inclusive_end_coord())
+        (
+            self.start_1based_inclusive(),
+            self.get_1based_inclusive_end_coord(),
+        )
     }
 
     /// Returns 1-based position of `pos` if inside [start..end), else None.
@@ -266,7 +276,6 @@ impl ZeroBasedHalfOpen {
         }
     }
 
-
     // Query region
     pub fn to_zero_based_inclusive(&self) -> ZeroBasedInclusive {
         ZeroBasedInclusive {
@@ -276,7 +285,7 @@ impl ZeroBasedHalfOpen {
     }
 
     // Make the names e.g. zero vs. 0 consistent later
-    
+
     /// Creates a new half-open interval from 0-based half-open coordinates.
     /// Takes a start (inclusive) and end (exclusive) as-is, assuming they are already 0-based.
     pub fn from_0based_half_open(start: i64, end: i64) -> Self {
@@ -407,8 +416,9 @@ impl QueryRegion {
         // To calculate length using ZeroBasedHalfOpen, convert to 0-based half-open [start, end+1).
         // The length of [S0, E0) is E0 - S0.
         // So, for [self.start, self.end+1), the length is (self.end + 1) - self.start.
-        if self.start > self.end { // Catches invalid ranges where start is after end.
-            0 
+        if self.start > self.end {
+            // Catches invalid ranges where start is after end.
+            0
         } else {
             ZeroBasedHalfOpen::from_0based_inclusive(self.start, self.end).len() as i64
         }
@@ -568,39 +578,11 @@ pub fn display_seqinfo_entries(seqinfo: &[SeqInfo], limit: usize) {
 
 // Function to check if a position is within any of the regions
 fn position_in_regions(pos: i64, regions: &[(i64, i64)]) -> bool {
-    // pos is zero-based
-    // regions are sorted by start position
-    
-    // Create a ZeroBasedHalfOpen for the position (as a point)
-    let position_interval = ZeroBasedHalfOpen::from_0based_point(pos);
-    
-    // Binary search through regions
-    let mut left = 0;
-    let mut right = regions.len();
-
-    while left < right {
-        let mid = (left + right) / 2;
-        let (start, end) = regions[mid];
-        
-        // Convert region to ZeroBasedHalfOpen
-        let region_interval = ZeroBasedHalfOpen {
-            start: start as usize,
-            end: end as usize,
-        };
-        
-        // Use intersect to check for overlap
-        if position_interval.start >= region_interval.end {
-            // Position is beyond this region, look to the right
-            left = mid + 1;
-        } else if position_interval.end <= region_interval.start {
-            // Position is before this region, look to the left
-            right = mid;
-        } else {
-            // Overlap exists, position is in region
-            return true;
-        }
-    }
-    false
+    // `pos` is zero-based and regions are half-open [start, end)
+    // Use a linear scan to avoid assumptions about sorting or overlap
+    regions
+        .iter()
+        .any(|&(start, end)| pos >= start && pos < end)
 }
 
 /*
@@ -649,14 +631,27 @@ fn process_variants(
     cds_regions: &[TranscriptAnnotationCDS],
 ) -> Result<Option<(usize, f64, f64, usize, Vec<SiteDiversity>)>, VcfError> {
     set_stage(ProcessingStage::VariantAnalysis);
-    
-    let group_type = if is_filtered_set { "filtered" } else { "unfiltered" };
-    log(LogLevel::Info, &format!("Processing {} variants for group {} in {}:{}-{}",
-        variants.len(), haplotype_group, chromosome, inversion_interval.start, inversion_interval.end));
-        
+
+    let group_type = if is_filtered_set {
+        "filtered"
+    } else {
+        "unfiltered"
+    };
+    log(
+        LogLevel::Info,
+        &format!(
+            "Processing {} variants for group {} in {}:{}-{}",
+            variants.len(),
+            haplotype_group,
+            chromosome,
+            inversion_interval.start,
+            inversion_interval.end
+        ),
+    );
+
     // Map sample names to indices
     init_step_progress(&format!("Mapping samples for group {}", haplotype_group), 3);
-    
+
     let mut index_map = HashMap::new();
     for (sample_index, name) in sample_names.iter().enumerate() {
         let trimmed_id = name.rsplit('_').next().unwrap_or(name);
@@ -678,60 +673,91 @@ fn process_variants(
             }
             None => {
                 missing_samples.push(config_sample_name.clone());
-                log(LogLevel::Warning, &format!(
-                    "Sample '{}' from config not found in VCF - skipping",
-                    config_sample_name
-                ));
+                log(
+                    LogLevel::Warning,
+                    &format!(
+                        "Sample '{}' from config not found in VCF - skipping",
+                        config_sample_name
+                    ),
+                );
             }
         }
     }
-    
+
     if !missing_samples.is_empty() {
-        log(LogLevel::Warning, &format!(
-            "Missing {} samples for chromosome {}: {}",
-            missing_samples.len(),
-            chromosome,
-            missing_samples.join(", ")
-        ));
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Missing {} samples for chromosome {}: {}",
+                missing_samples.len(),
+                chromosome,
+                missing_samples.join(", ")
+            ),
+        );
     }
-    
+
     if group_haps.is_empty() {
-        log(LogLevel::Warning, &format!("No haplotypes found for group {}", haplotype_group));
+        log(
+            LogLevel::Warning,
+            &format!("No haplotypes found for group {}", haplotype_group),
+        );
         finish_step_progress("No haplotypes found");
         return Ok(None);
     }
-    
-    update_step_progress(1, &format!("Found {} haplotypes for group {}", group_haps.len(), haplotype_group));
+
+    update_step_progress(
+        1,
+        &format!(
+            "Found {} haplotypes for group {}",
+            group_haps.len(),
+            haplotype_group
+        ),
+    );
 
     // Count segregating sites
     let mut region_segsites = 0;
     let region_hap_count = group_haps.len();
-    
+
     if variants.is_empty() {
-        log(LogLevel::Info, &format!("No variants found for {}:{}-{} in group {}",
-            chromosome, inversion_interval.start, inversion_interval.end, haplotype_group));
+        log(
+            LogLevel::Info,
+            &format!(
+                "No variants found for {}:{}-{} in group {}",
+                chromosome, inversion_interval.start, inversion_interval.end, haplotype_group
+            ),
+        );
         finish_step_progress("No variants to analyze");
         return Ok(Some((0, 0.0, 0.0, region_hap_count, Vec::new())));
     }
-    
-    let variants_in_region: Vec<Variant> = variants.iter()
+
+    let variants_in_region: Vec<Variant> = variants
+        .iter()
         .filter(|v| inversion_interval.contains(ZeroBasedPosition(v.position)))
         .cloned()
         .collect();
-    
-    init_variant_progress(&format!("Analyzing {} variants in region", variants_in_region.len()), 
-        variants_in_region.len() as u64);
-    
+
+    init_variant_progress(
+        &format!("Analyzing {} variants in region", variants_in_region.len()),
+        variants_in_region.len() as u64,
+    );
+
     for (i, current_variant) in variants_in_region.iter().enumerate() {
         if i % 100 == 0 {
-            update_variant_progress(i as u64, 
-                &format!("Processing variant {} of {}", i+1, variants_in_region.len()));
+            update_variant_progress(
+                i as u64,
+                &format!(
+                    "Processing variant {} of {}",
+                    i + 1,
+                    variants_in_region.len()
+                ),
+            );
         }
-        
+
         let mut allele_values = Vec::new();
 
         // Iterate over haplotype group indices, borrowing each tuple
-        for (mapped_index, _) in &group_haps { // We don't need side in this outer loop
+        for (mapped_index, _) in &group_haps {
+            // We don't need side in this outer loop
             // Access genotypes using the dereferenced index
             if let Some(some_genotypes) = current_variant.genotypes.get(*mapped_index) {
                 for (side, genotype_vec) in some_genotypes.iter().enumerate() {
@@ -747,24 +773,27 @@ fn process_variants(
             region_segsites += 1;
         }
     }
-    
+
     finish_variant_progress(&format!("Found {} segregating sites", region_segsites));
 
     // Calculate diversity statistics
     update_step_progress(2, "Calculating diversity statistics");
-    
+
     // Define the precise QueryRegion for per-site diversity calculation,
     // matching the original entry.interval.
-    let query_region_for_diversity = QueryRegion::from(inversion_interval.to_zero_based_inclusive());
+    let query_region_for_diversity =
+        QueryRegion::from(inversion_interval.to_zero_based_inclusive());
 
     // The 'final_length' for overall theta/pi should also be based on the precise entry.interval
     // 'adjusted_sequence_length' is already calculated based on entry.interval and passed in.
     // If 'adjusted_sequence_length' is None, it means we use the raw length of entry.interval.
-    let length_for_overall_stats = adjusted_sequence_length.unwrap_or(inversion_interval.len() as i64);
+    let length_for_overall_stats =
+        adjusted_sequence_length.unwrap_or(inversion_interval.len() as i64);
 
-    let final_theta = calculate_watterson_theta(region_segsites, region_hap_count, length_for_overall_stats);
+    let final_theta =
+        calculate_watterson_theta(region_segsites, region_hap_count, length_for_overall_stats);
     let final_pi = calculate_pi(&variants_in_region, &group_haps, length_for_overall_stats);
-    
+
     log(LogLevel::Info, &format!(
         "Group {} ({}): θ={:.6}, π={:.6}, with {} segregating sites ({} haplotypes, length {}bp)",
         haplotype_group, group_type, final_theta, final_pi, region_segsites, region_hap_count, length_for_overall_stats
@@ -774,7 +803,7 @@ fn process_variants(
     if !cds_regions.is_empty() {
         update_step_progress(3, &format!("Processing {} CDS regions", cds_regions.len()));
     }
-    
+
     for transcript in cds_regions {
         // Map of haplotype labels to their assembled CDS sequences
         let mut assembled: HashMap<String, Vec<u8>> = HashMap::new();
@@ -797,10 +826,13 @@ fn process_variants(
 
             if seg_start < 0 {
                 // Log to file instead of printing to terminal
-                log(LogLevel::Warning, &format!(
-                    "Skipping negative start {} for transcript {} on {}",
-                    seg_start, transcript.transcript_id, chromosome
-                ));
+                log(
+                    LogLevel::Warning,
+                    &format!(
+                        "Skipping negative start {} for transcript {} on {}",
+                        seg_start, transcript.transcript_id, chromosome
+                    ),
+                );
                 continue;
             }
             let base_idx = {
@@ -834,8 +866,8 @@ fn process_variants(
 
             for (mapped_index, side) in &group_haps {
                 let label = match *side {
-                        HaplotypeSide::Left => format!("{}_L", sample_names[*mapped_index]),
-                        HaplotypeSide::Right => format!("{}_R", sample_names[*mapped_index]),
+                    HaplotypeSide::Left => format!("{}_L", sample_names[*mapped_index]),
+                    HaplotypeSide::Right => format!("{}_R", sample_names[*mapped_index]),
                 };
                 let mutable_vec = assembled
                     .get_mut(&label)
@@ -863,11 +895,20 @@ fn process_variants(
     // Check SeqInfo for validation
     let locked_seqinfo = seqinfo_storage.lock();
     if locked_seqinfo.is_empty() {
-        log(LogLevel::Warning, &format!("No SeqInfo in stats pass for group {}", haplotype_group));
+        log(
+            LogLevel::Warning,
+            &format!("No SeqInfo in stats pass for group {}", haplotype_group),
+        );
     } else {
         if region_hap_count > 20 {
             // Only display the table for smaller sample sets to avoid cluttering
-            log(LogLevel::Info, &format!("Processed {} haplotypes for group {}", region_hap_count, haplotype_group));
+            log(
+                LogLevel::Info,
+                &format!(
+                    "Processed {} haplotypes for group {}",
+                    region_hap_count, haplotype_group
+                ),
+            );
         } else {
             display_seqinfo_entries(&locked_seqinfo, 12);
         }
@@ -877,22 +918,30 @@ fn process_variants(
 
     // Generate sequence files if this is the filtered set
     if is_filtered_set {
-        log(LogLevel::Info, &format!(
-            "Generating sequence files for {} CDS regions, group {}",
-            cds_regions.len(), haplotype_group
-        ));
-        
+        log(
+            LogLevel::Info,
+            &format!(
+                "Generating sequence files for {} CDS regions, group {}",
+                cds_regions.len(),
+                haplotype_group
+            ),
+        );
+
         if chromosome.contains("X") || chromosome.contains("x") {
-            log(LogLevel::Info, &format!(
+            log(
+                LogLevel::Info,
+                &format!(
                 "DEBUG X: Processing sequence files for chrX:{}-{}, group {}, with {} CDS regions",
                 inversion_interval.start, inversion_interval.end, haplotype_group, cds_regions.len()
-            ));
+            ),
+            );
         }
-        
+
         let spinner = create_spinner(&format!(
-            "Creating sequences for group {} haplotypes", haplotype_group
+            "Creating sequences for group {} haplotypes",
+            haplotype_group
         ));
-        
+
         if let Err(e) = make_sequences(
             variants,
             sample_names,
@@ -905,39 +954,47 @@ fn process_variants(
             &chromosome,
             inversion_interval,
         ) {
-            log(LogLevel::Warning, &format!(
-                "ERROR generating sequences for group {} on {}: {}", 
-                haplotype_group, chromosome, e
-            ));
+            log(
+                LogLevel::Warning,
+                &format!(
+                    "ERROR generating sequences for group {} on {}: {}",
+                    haplotype_group, chromosome, e
+                ),
+            );
             // Continue processing - don't let sequence generation errors affect main analysis
         }
-        
+
         spinner.finish_and_clear();
-        log(LogLevel::Info, &format!(
-            "Created sequence files for group {} haplotypes",
-            haplotype_group
-        ));
+        log(
+            LogLevel::Info,
+            &format!(
+                "Created sequence files for group {} haplotypes",
+                haplotype_group
+            ),
+        );
     }
 
     // Calculate per-site diversity
     let spinner = create_spinner("Calculating per-site diversity");
     // query_region_for_diversity was defined earlier based on entry.interval.start and entry.interval.end
     // to correctly represent the 0-based inclusive range [entry.interval.start, entry.interval.end - 1].
-    let site_diversities = calculate_per_site_diversity(variants, &group_haps, query_region_for_diversity);
+    let site_diversities =
+        calculate_per_site_diversity(variants, &group_haps, query_region_for_diversity);
     spinner.finish_and_clear();
-    log(LogLevel::Info, &format!(
-        "Calculated diversity for {} sites",
-        site_diversities.len()
-    ));
-    
-    log(LogLevel::Info, &format!(
-        "Completed analysis for {} group {}: {} segregating sites, θ={:.6}, π={:.6}",
-        group_type, haplotype_group, region_segsites, final_theta, final_pi
-    ));
-    
-    finish_step_progress(&format!(
-        "Completed group {} analysis", haplotype_group
-    ));
+    log(
+        LogLevel::Info,
+        &format!("Calculated diversity for {} sites", site_diversities.len()),
+    );
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Completed analysis for {} group {}: {} segregating sites, θ={:.6}, π={:.6}",
+            group_type, haplotype_group, region_segsites, final_theta, final_pi
+        ),
+    );
+
+    finish_step_progress(&format!("Completed group {} analysis", haplotype_group));
 
     Ok(Some((
         region_segsites,
@@ -948,7 +1005,9 @@ fn process_variants(
     )))
 }
 
-pub fn map_sample_names_to_indices(sample_names: &[String]) -> Result<HashMap<String, usize>, VcfError> {
+pub fn map_sample_names_to_indices(
+    sample_names: &[String],
+) -> Result<HashMap<String, usize>, VcfError> {
     let mut vcf_sample_id_to_index = HashMap::new();
     for (i, name) in sample_names.iter().enumerate() {
         // Convert to String to so the HashMap owns its keys.
@@ -975,7 +1034,7 @@ pub fn get_haplotype_indices_for_group(
 ) -> Result<Vec<(usize, HaplotypeSide)>, VcfError> {
     let mut haplotype_indices = Vec::new();
     let mut missing_samples = Vec::new();
-    
+
     for (sample_name, &(left_tsv, right_tsv)) in sample_filter {
         match vcf_sample_id_to_index.get(sample_name.as_str()) {
             Some(&idx) => {
@@ -989,22 +1048,28 @@ pub fn get_haplotype_indices_for_group(
             None => {
                 missing_samples.push(sample_name.clone());
                 // Log warning instead of returning error
-                log(LogLevel::Warning, &format!(
-                    "Sample '{}' from config not found in VCF - skipping (haplotype indices)",
-                    sample_name
-                ));
+                log(
+                    LogLevel::Warning,
+                    &format!(
+                        "Sample '{}' from config not found in VCF - skipping (haplotype indices)",
+                        sample_name
+                    ),
+                );
             }
         }
     }
-    
+
     if !missing_samples.is_empty() {
-        log(LogLevel::Warning, &format!(
-            "Missing {} samples when getting haplotype indices: {}",
-            missing_samples.len(),
-            missing_samples.join(", ")
-        ));
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Missing {} samples when getting haplotype indices: {}",
+                missing_samples.len(),
+                missing_samples.join(", ")
+            ),
+        );
     }
-    
+
     Ok(haplotype_indices)
 }
 
@@ -1021,15 +1086,15 @@ pub fn process_config_entries(
     let temp_dir_path = {
         let temp_dir = create_temp_dir()?;
         let temp_path = temp_dir.path().to_path_buf();
-        
+
         let mut locked_opt = TEMP_DIR.lock();
         *locked_opt = Some(temp_dir);
-        
+
         temp_path
     };
-    
+
     // For PCA, collect filtered variants across chromosomes
-    let global_filtered_variants: Arc<Mutex<HashMap<String, Vec<Variant>>>> = 
+    let global_filtered_variants: Arc<Mutex<HashMap<String, Vec<Variant>>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let global_sample_names: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -1040,18 +1105,25 @@ pub fn process_config_entries(
 
     // Group config entries by chromosome for efficiency
     let grouped = group_config_entries_by_chr(config_entries);
-    
+
     // Log the count of entries per chromosome
     log(LogLevel::Info, "STATISTICS: Input regions by chromosome:");
     for (chr, entries) in &grouped {
-        log(LogLevel::Info, &format!("  - {}: {} regions", chr, entries.len()));
-        
+        log(
+            LogLevel::Info,
+            &format!("  - {}: {} regions", chr, entries.len()),
+        );
+
         if chr.contains("X") || chr.contains("x") {
             for (i, entry) in entries.iter().enumerate() {
                 log(LogLevel::Info, &format!(
                     "DEBUG X: chrX input region {}: {}:{}-{} ({} filtered samples, {} unfiltered samples)",
-                    i+1, entry.seqname, entry.interval.start, entry.interval.end, 
-                    entry.samples_filtered.len(), entry.samples_unfiltered.len()
+                    i + 1,
+                    entry.seqname,
+                    entry.interval.start,
+                    entry.interval.end,
+                    entry.samples_filtered.len(),
+                    entry.samples_unfiltered.len()
                 ));
             }
         }
@@ -1060,32 +1132,48 @@ pub fn process_config_entries(
     // We will process each chromosome in parallel (for speed),
     // then flatten the per-chromosome results.
     // `process_chromosome_entries` now returns a tuple: (Vec_for_main_csv, Vec_for_hudson_csv)
-    let mut all_main_csv_data_tuples: Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)> = Vec::new();
+    let mut all_main_csv_data_tuples: Vec<(
+        CsvRowData,
+        Vec<(i64, f64, f64, u8, bool)>,
+        Vec<(i64, f64, f64)>,
+    )> = Vec::new();
     let mut all_regional_hudson_outcomes: Vec<RegionalHudsonFSTOutcome> = Vec::new();
 
     // Parse population CSV once if --fst and --fst_populations are provided.
     // This parsed data will be passed to each chromosome's processing.
-    let parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>> =
-        if args.enable_fst {
-            if let Some(csv_path_str) = &args.fst_populations {
-                log(LogLevel::Info, &format!("Parsing population definition file for FST: {}", csv_path_str));
-                match crate::stats::parse_population_csv(Path::new(csv_path_str)) {
-                    Ok(parsed_map) => Some(Arc::new(parsed_map)),
-                    Err(e) => {
-                        log(LogLevel::Error, &format!("Failed to parse population CSV '{}': {}. FST calculations for CSV-defined populations will be skipped.", csv_path_str, e));
-                        None
-                    }
+    let parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>> = if args.enable_fst {
+        if let Some(csv_path_str) = &args.fst_populations {
+            log(
+                LogLevel::Info,
+                &format!(
+                    "Parsing population definition file for FST: {}",
+                    csv_path_str
+                ),
+            );
+            match crate::stats::parse_population_csv(Path::new(csv_path_str)) {
+                Ok(parsed_map) => Some(Arc::new(parsed_map)),
+                Err(e) => {
+                    log(LogLevel::Error, &format!("Failed to parse population CSV '{}': {}. FST calculations for CSV-defined populations will be skipped.", csv_path_str, e));
+                    None
                 }
-            } else {
-                None
             }
         } else {
             None
-        };
+        }
+    } else {
+        None
+    };
 
     // The map operation collects results per chromosome.
     // Each result is a tuple: (main_csv_data_for_this_chr, hudson_data_for_this_chr)
-    let per_chromosome_collected_results: Vec<(Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, Vec<RegionalHudsonFSTOutcome>)> = grouped
+    let per_chromosome_collected_results: Vec<(
+        Vec<(
+            CsvRowData,
+            Vec<(i64, f64, f64, u8, bool)>,
+            Vec<(i64, f64, f64)>,
+        )>,
+        Vec<RegionalHudsonFSTOutcome>,
+    )> = grouped
         .par_iter()
         .map(|(chr, chr_entries)| {
             match process_chromosome_entries(
@@ -1097,7 +1185,10 @@ pub fn process_config_entries(
                 &allow,
                 args,
                 if args.enable_pca {
-                    Some((global_filtered_variants.clone(), global_sample_names.clone()))
+                    Some((
+                        global_filtered_variants.clone(),
+                        global_sample_names.clone(),
+                    ))
                 } else {
                     None
                 },
@@ -1129,23 +1220,32 @@ pub fn process_config_entries(
     for row in &all_results {
         *chr_counts.entry(row.seqname.clone()).or_insert(0) += 1;
     }
-    
+
     // Log the count by chromosome
-    log(LogLevel::Info, "STATISTICS: Regions in final output by chromosome:");
+    log(
+        LogLevel::Info,
+        "STATISTICS: Regions in final output by chromosome:",
+    );
     for (chr, count) in &chr_counts {
         log(LogLevel::Info, &format!("  - {}: {} regions", chr, count));
     }
-    
+
     // Write all rows to the CSV file
-    log(LogLevel::Info, &format!("Writing {} total rows to CSV", all_results.len()));
+    log(
+        LogLevel::Info,
+        &format!("Writing {} total rows to CSV", all_results.len()),
+    );
     for row_data in all_results {
         write_csv_row(&mut writer, &row_data)?;
-        
+
         if row_data.seqname.contains("X") || row_data.seqname.contains("x") {
-            log(LogLevel::Info, &format!(
-                "DEBUG X: Wrote chrX region {}:{}-{} to output CSV",
-                row_data.seqname, row_data.region_start, row_data.region_end
-            ));
+            log(
+                LogLevel::Info,
+                &format!(
+                    "DEBUG X: Wrote chrX region {}:{}-{} to output CSV",
+                    row_data.seqname, row_data.region_start, row_data.region_end
+                ),
+            );
         }
     }
 
@@ -1184,12 +1284,14 @@ pub fn process_config_entries(
         // If is_filtered=true, we fill "filtered_pi_" and "filtered_theta_" columns.
         // The relative position is (pos - region_start + 1).
 
-        for &(pos_1based_in_vec, pi_val, theta_val, group_id, is_filtered) in per_site_diversity_vec {
+        for &(pos_1based_in_vec, pi_val, theta_val, group_id, is_filtered) in per_site_diversity_vec
+        {
             // csv_row.region_start and csv_row.region_end now store 1-based inclusive coordinates.
             // Convert these to a 0-based half-open interval for the bounds check.
             // This represents the original entry.interval for comparison.
-            let check_region_zbh = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
-            
+            let check_region_zbh =
+                ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+
             // pos_1based_in_vec is the 1-based position from SiteDiversity calculations.
             // Convert it to a 0-based value for comparison with the 0-based half-open check_region_zbh.
             // We use OneBasedPosition and its zero_based() method to encapsulate the conversion.
@@ -1208,7 +1310,9 @@ pub fn process_config_entries(
             // check_region_zbh.end is 0-based exclusive.
             // The 'region' variable here is equivalent to 'check_region_zbh', representing the current CSV processing region
             // as a ZeroBasedHalfOpen interval.
-            if pos_0based_for_check < check_region_zbh.start as i64 || pos_0based_for_check >= check_region_zbh.end as i64 {
+            if pos_0based_for_check < check_region_zbh.start as i64
+                || pos_0based_for_check >= check_region_zbh.end as i64
+            {
                 eprintln!(
                     "Warning: Position {} (1-based) is outside region {}-{} (1-based inclusive) for FALSTA all_columns map. This site was at 0-based pos {} against 0-based half-open interval [{}, {}).",
                     pos_1based_in_vec,      // Print the original 1-based position from the diversity vector
@@ -1224,8 +1328,10 @@ pub fn process_config_entries(
             // Calculate the 1-based relative position of pos_1based_in_vec within the current region (check_region_zbh).
             // check_region_zbh (or equivalently 'region' from the outer scope) is ZeroBasedHalfOpen.
             match check_region_zbh.relative_position_1based_inclusive(pos_1based_in_vec) {
-                Some(rel_pos_usize) => { // rel_pos_usize is the 1-based relative position
-                    if rel_pos_usize > max_position { // Ensure max_position is usize
+                Some(rel_pos_usize) => {
+                    // rel_pos_usize is the 1-based relative position
+                    if rel_pos_usize > max_position {
+                        // Ensure max_position is usize
                         max_position = rel_pos_usize;
                     }
 
@@ -1285,7 +1391,9 @@ pub fn process_config_entries(
         if let Some(dir) = locked_opt.as_ref() {
             dir.path().join("per_site_diversity_output.falsta")
         } else {
-            return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
+            return Err(VcfError::Parse(
+                "Failed to access temporary directory".to_string(),
+            ));
         }
     };
     let fasta_file = File::create(&temp_fasta_path)?;
@@ -1320,7 +1428,8 @@ pub fn process_config_entries(
 
     // Data for per-site diversity comes from the second element of the tuple in all_main_csv_data_tuples
     for (csv_row, per_site_diversity_vec, _fst_data_wc) in &all_main_csv_data_tuples {
-        let region = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+        let region =
+            ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
         let region_len = region.len();
 
         // We store 4 possible keys: "unfiltered_pi", "unfiltered_theta", "filtered_pi", "filtered_theta".
@@ -1333,10 +1442,19 @@ pub fn process_config_entries(
         }
         let mut records_map: Map2<String, Vec<Option<f64>>> = Map2::new();
         for &grp in group_ids.iter() {
-            records_map.insert(format!("unfiltered_pi_group_{}", grp), vec![None; region_len]);
-            records_map.insert(format!("unfiltered_theta_group_{}", grp), vec![None; region_len]);
+            records_map.insert(
+                format!("unfiltered_pi_group_{}", grp),
+                vec![None; region_len],
+            );
+            records_map.insert(
+                format!("unfiltered_theta_group_{}", grp),
+                vec![None; region_len],
+            );
             records_map.insert(format!("filtered_pi_group_{}", grp), vec![None; region_len]);
-            records_map.insert(format!("filtered_theta_group_{}", grp), vec![None; region_len]);
+            records_map.insert(
+                format!("filtered_theta_group_{}", grp),
+                vec![None; region_len],
+            );
         }
 
         // Fill in data from per_site_diversity_vec
@@ -1347,7 +1465,11 @@ pub fn process_config_entries(
                 let idx_0based = OneBasedPosition::new(rel_pos_usize as i64)
                     .expect("Relative position from relative_position_1based_inclusive should be valid and >= 1")
                     .zero_based() as usize;
-                let key_prefix = if is_filtered { "filtered_" } else { "unfiltered_" };
+                let key_prefix = if is_filtered {
+                    "filtered_"
+                } else {
+                    "unfiltered_"
+                };
                 {
                     let combo_key = format!("{}pi_group_{}", key_prefix, group_id);
                     if let Some(vec_ref) = records_map.get_mut(&combo_key) {
@@ -1410,7 +1532,7 @@ pub fn process_config_entries(
                     writeln!(fasta_writer, "{}", header)?;
 
                     // Now build the single line of comma-separated numeric data.
-                    // We'll store 0 as "0". 
+                    // We'll store 0 as "0".
                     // If Some(0.0), that's "0". Otherwise format with six decimals.
 
                     let mut line_values = Vec::with_capacity(region_len);
@@ -1444,43 +1566,65 @@ pub fn process_config_entries(
         if let Some(dir) = locked_opt.as_ref() {
             dir.path().join("per_site_fst_output.falsta")
         } else {
-            return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
+            return Err(VcfError::Parse(
+                "Failed to access temporary directory".to_string(),
+            ));
         }
     };
     let fst_fasta_file = File::create(&temp_fst_fasta_path)?;
     let mut fst_fasta_writer = BufWriter::new(fst_fasta_file);
-    
+
     // Process FST data for each region
     for (csv_row, _, fst_data) in &all_main_csv_data_tuples {
         // Process FST data between groups 0 and 1
-        if !fst_data.is_empty() {            
-             // Define the region length for FALSTA output.
+        if !fst_data.is_empty() {
+            // Define the region length for FALSTA output.
             // csv_row.region_start and csv_row.region_end are 1-based inclusive as outputted in the main CSV.
-            let falsta_region_zbh = ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+            let falsta_region_zbh =
+                ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
             let region_length_for_falsta = falsta_region_zbh.len();
 
             // Write header and data for Overall Haplotype FST
-            if !fst_data.is_empty() { // Only write if there's haplotype FST data
+            if !fst_data.is_empty() {
+                // Only write if there's haplotype FST data
                 // Headers use 1-based inclusive coordinates matching the CSV output.
                 let header_overall_hap_fst = format!(
                     ">haplotype_overall_fst_summary_chr_{}_start_{}_end_{}",
                     csv_row.seqname, csv_row.region_start, csv_row.region_end
                 );
                 writeln!(fst_fasta_writer, "{}", header_overall_hap_fst)?;
-                
+
                 let mut overall_values_str = vec!["NA".to_string(); region_length_for_falsta];
                 // fst_data contains (1-based_pos, OverallHaplotypeFstEstimate_f64, Pairwise0v1HaplotypeFstEstimate_f64)
-                let region_start_1based = OneBasedPosition::new(csv_row.region_start).map_err(|e| VcfError::Parse(format!("Invalid 1-based region_start for FST FALSTA: {}, error: {}", csv_row.region_start, e)))?;
+                let region_start_1based =
+                    OneBasedPosition::new(csv_row.region_start).map_err(|e| {
+                        VcfError::Parse(format!(
+                            "Invalid 1-based region_start for FST FALSTA: {}, error: {}",
+                            csv_row.region_start, e
+                        ))
+                    })?;
 
                 for &(pos_1based, overall_hap_fst_val, _) in fst_data {
                     // Convert absolute 1-based position from fst_data to 0-based index relative to region start
-                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| VcfError::Parse(format!("Invalid 1-based site position for FST FALSTA: {}, error: {}", pos_1based, e)))?;
-                    
-                    let rel_pos_0based_i64 = site_pos_1based.zero_based() - region_start_1based.zero_based();
+                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| {
+                        VcfError::Parse(format!(
+                            "Invalid 1-based site position for FST FALSTA: {}, error: {}",
+                            pos_1based, e
+                        ))
+                    })?;
 
-                    if rel_pos_0based_i64 >= 0 && (rel_pos_0based_i64 as usize) < region_length_for_falsta {
+                    let rel_pos_0based_i64 =
+                        site_pos_1based.zero_based() - region_start_1based.zero_based();
+
+                    if rel_pos_0based_i64 >= 0
+                        && (rel_pos_0based_i64 as usize) < region_length_for_falsta
+                    {
                         let rel_pos_0based = rel_pos_0based_i64 as usize;
-                        overall_values_str[rel_pos_0based] = if overall_hap_fst_val.is_nan() { "NA".to_string() } else { format!("{:.6}", overall_hap_fst_val) };
+                        overall_values_str[rel_pos_0based] = if overall_hap_fst_val.is_nan() {
+                            "NA".to_string()
+                        } else {
+                            format!("{:.6}", overall_hap_fst_val)
+                        };
                     } else if rel_pos_0based_i64 < 0 {
                         // This case implies the site is before the region
                         log(LogLevel::Warning, &format!("Site at 1-based position {} is before current FALSTA FST region start {} (1-based). Skipping.", pos_1based, csv_row.region_start));
@@ -1500,21 +1644,34 @@ pub fn process_config_entries(
 
                 let mut pairwise_0v1_values_str = vec!["NA".to_string(); region_length_for_falsta];
                 for &(pos_1based, _, pairwise_0v1_hap_fst_val) in fst_data {
-                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| VcfError::Parse(format!("Invalid 1-based site position for FST FALSTA pairwise: {}, error: {}", pos_1based, e)))?;
-                    let rel_pos_0based_i64 = site_pos_1based.zero_based() - region_start_1based.zero_based();
+                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| {
+                        VcfError::Parse(format!(
+                            "Invalid 1-based site position for FST FALSTA pairwise: {}, error: {}",
+                            pos_1based, e
+                        ))
+                    })?;
+                    let rel_pos_0based_i64 =
+                        site_pos_1based.zero_based() - region_start_1based.zero_based();
 
-                    if rel_pos_0based_i64 >= 0 && (rel_pos_0based_i64 as usize) < region_length_for_falsta {
+                    if rel_pos_0based_i64 >= 0
+                        && (rel_pos_0based_i64 as usize) < region_length_for_falsta
+                    {
                         let rel_pos_0based = rel_pos_0based_i64 as usize;
-                        pairwise_0v1_values_str[rel_pos_0based] = if pairwise_0v1_hap_fst_val.is_nan() { "NA".to_string() } else { format!("{:.6}", pairwise_0v1_hap_fst_val) };
+                        pairwise_0v1_values_str[rel_pos_0based] =
+                            if pairwise_0v1_hap_fst_val.is_nan() {
+                                "NA".to_string()
+                            } else {
+                                format!("{:.6}", pairwise_0v1_hap_fst_val)
+                            };
                     } else if rel_pos_0based_i64 < 0 {
-                         log(LogLevel::Warning, &format!("Pairwise FST Site at 1-based position {} is before current FALSTA FST region start {} (1-based). Skipping.", pos_1based, csv_row.region_start));
+                        log(LogLevel::Warning, &format!("Pairwise FST Site at 1-based position {} is before current FALSTA FST region start {} (1-based). Skipping.", pos_1based, csv_row.region_start));
                     } else {
-                         log(LogLevel::Warning, &format!("Pairwise FST Site at 1-based position {} is outside current FALSTA FST region ({}:{}-{}, length {}). Rel 0-based idx {} out of bounds. Skipping.", pos_1based, csv_row.seqname, csv_row.region_start, csv_row.region_end, region_length_for_falsta, rel_pos_0based_i64));
+                        log(LogLevel::Warning, &format!("Pairwise FST Site at 1-based position {} is outside current FALSTA FST region ({}:{}-{}, length {}). Rel 0-based idx {} out of bounds. Skipping.", pos_1based, csv_row.seqname, csv_row.region_start, csv_row.region_end, region_length_for_falsta, rel_pos_0based_i64));
                     }
                 }
                 writeln!(fst_fasta_writer, "{}", pairwise_0v1_values_str.join(","))?;
             }
-            
+
             // Process and write population pairwise FST data if available
             if let Some(ref pop_results) = csv_row.population_fst_wc_results {
                 // Create a map of all pairwise comparisons across all sites
@@ -1524,53 +1681,69 @@ pub fn process_config_entries(
                         all_pairs.insert(pair_name.clone());
                     }
                 }
-                
+
                 // For each population pair, create a separate record
                 for pair_name in all_pairs {
                     // Write header for this population pair
-                    let header = format!(">fst_pop_{}_{}_start_{}_end_{}", 
-                            pair_name, csv_row.seqname, csv_row.region_start, csv_row.region_end);
-                        writeln!(fst_fasta_writer, "{}", header)?;
+                    let header = format!(
+                        ">fst_pop_{}_{}_start_{}_end_{}",
+                        pair_name, csv_row.seqname, csv_row.region_start, csv_row.region_end
+                    );
+                    writeln!(fst_fasta_writer, "{}", header)?;
 
-                        // Format values for this pair
-                        let mut pair_values = vec!["NA".to_string(); region_length_for_falsta];
-                        // csv_row.region_start is 1-based inclusive. Convert to 0-based for comparison with site.position.
-                        let region_start_0based = OneBasedPosition::new(csv_row.region_start).map_err(|e| VcfError::Parse(format!("Invalid 1-based region_start for PopFST FALSTA: {}, error: {}", csv_row.region_start, e)))?.zero_based();
-                        // csv_row.region_end is 1-based inclusive. Convert to 0-based for comparison.
-                        let region_end_0based_inclusive = OneBasedPosition::new(csv_row.region_end).map_err(|e| VcfError::Parse(format!("Invalid 1-based region_end for PopFST FALSTA: {}, error: {}", csv_row.region_end, e)))?.zero_based();
+                    // Format values for this pair
+                    let mut pair_values = vec!["NA".to_string(); region_length_for_falsta];
+                    // csv_row.region_start is 1-based inclusive. Convert to 0-based for comparison with site.position.
+                    let region_start_0based = OneBasedPosition::new(csv_row.region_start)
+                        .map_err(|e| {
+                            VcfError::Parse(format!(
+                                "Invalid 1-based region_start for PopFST FALSTA: {}, error: {}",
+                                csv_row.region_start, e
+                            ))
+                        })?
+                        .zero_based();
+                    // csv_row.region_end is 1-based inclusive. Convert to 0-based for comparison.
+                    let region_end_0based_inclusive = OneBasedPosition::new(csv_row.region_end)
+                        .map_err(|e| {
+                            VcfError::Parse(format!(
+                                "Invalid 1-based region_end for PopFST FALSTA: {}, error: {}",
+                                csv_row.region_end, e
+                            ))
+                        })?
+                        .zero_based();
 
+                    for site in &pop_results.site_fst {
+                        // site.position is 0-based from SiteFstWc.
+                        if site.position >= region_start_0based
+                            && site.position <= region_end_0based_inclusive
+                        {
+                            let rel_pos_i64 = site.position - region_start_0based;
+                            // This check should be redundant if the above condition is met and region_start_0based <= region_end_0based_inclusive
+                            if rel_pos_i64 < 0 {
+                                log(LogLevel::Warning, &format!("Population FST site position {} (0-based) resulted in negative relative offset from region start {} (0-based). Skipping.", site.position, region_start_0based));
+                                continue;
+                            }
+                            let rel_pos = rel_pos_i64 as usize;
 
-                        for site in &pop_results.site_fst {
-                            // site.position is 0-based from SiteFstWc.
-                            if site.position >= region_start_0based && site.position <= region_end_0based_inclusive {
-                                let rel_pos_i64 = site.position - region_start_0based;
-                                // This check should be redundant if the above condition is met and region_start_0based <= region_end_0based_inclusive
-                                if rel_pos_i64 < 0 {
-                                     log(LogLevel::Warning, &format!("Population FST site position {} (0-based) resulted in negative relative offset from region start {} (0-based). Skipping.", site.position, region_start_0based));
-                                     continue;
+                            if rel_pos < region_length_for_falsta {
+                                // Get this pair's FST value if it exists
+                                if let Some(&fst_estimate_val) = site.pairwise_fst.get(&pair_name) {
+                                    // Use the Display trait of FstEstimate for formatting
+                                    pair_values[rel_pos] = fst_estimate_val.to_string();
                                 }
-                                let rel_pos = rel_pos_i64 as usize;
-
-                                if rel_pos < region_length_for_falsta {
-                                    // Get this pair's FST value if it exists
-                                    if let Some(&fst_estimate_val) = site.pairwise_fst.get(&pair_name) {
-                                        // Use the Display trait of FstEstimate for formatting
-                                        pair_values[rel_pos] = fst_estimate_val.to_string();
-                                    }
-                                } else {
-                                     log(LogLevel::Warning, &format!("Population FST site position {} (0-based), relative index {} is out of bounds for length {}. Region {}:{}-{}. Skipping.", site.position, rel_pos, region_length_for_falsta, csv_row.seqname, csv_row.region_start, csv_row.region_end));
-                                }
+                            } else {
+                                log(LogLevel::Warning, &format!("Population FST site position {} (0-based), relative index {} is out of bounds for length {}. Region {}:{}-{}. Skipping.", site.position, rel_pos, region_length_for_falsta, csv_row.seqname, csv_row.region_start, csv_row.region_end));
                             }
                         }
-                    
+                    }
+
                     // Write the pairwise FST values to the FASTA file
                     writeln!(fst_fasta_writer, "{}", pair_values.join(","))?;
                 }
             }
         }
     }
-    
-    
+
     fst_fasta_writer.flush()?;
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
@@ -1580,17 +1753,19 @@ pub fn process_config_entries(
         "Processing complete. Check the output file: {:?}",
         output_file
     );
-    
+
     // Copy files from temporary directory to final destinations
     let temp_dir_path = {
         let locked_opt = TEMP_DIR.lock();
         if let Some(dir) = locked_opt.as_ref() {
             dir.path().to_path_buf()
         } else {
-            return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
+            return Err(VcfError::Parse(
+                "Failed to access temporary directory".to_string(),
+            ));
         }
     };
-    
+
     // Copy CSV file
     let temp_csv = temp_dir_path.join(output_file.file_name().unwrap());
     if let Some(parent) = output_file.parent() {
@@ -1601,14 +1776,20 @@ pub fn process_config_entries(
     // Copy FASTA files
     let temp_fasta = temp_dir_path.join("per_site_diversity_output.falsta");
     if temp_fasta.exists() {
-        std::fs::copy(&temp_fasta, std::path::Path::new("per_site_diversity_output.falsta"))?;
+        std::fs::copy(
+            &temp_fasta,
+            std::path::Path::new("per_site_diversity_output.falsta"),
+        )?;
     }
-    
+
     let temp_fst_fasta = temp_dir_path.join("per_site_fst_output.falsta");
     if temp_fst_fasta.exists() {
-        std::fs::copy(&temp_fst_fasta, std::path::Path::new("per_site_fst_output.falsta"))?;
+        std::fs::copy(
+            &temp_fst_fasta,
+            std::path::Path::new("per_site_fst_output.falsta"),
+        )?;
     }
-    
+
     // Copy PHYLIP files
     for entry in std::fs::read_dir(&temp_dir_path)? {
         let entry = entry?;
@@ -1618,7 +1799,7 @@ pub fn process_config_entries(
             std::fs::copy(&path, std::path::Path::new(".").join(file_name))?;
         }
     }
-    
+
     // Copy log files
     for log_file in ["cds_validation.log", "transcript_overlap.log"] {
         let temp_log = temp_dir_path.join(log_file);
@@ -1630,7 +1811,7 @@ pub fn process_config_entries(
     // Write Hudson FST results if FST calculations were enabled
     if args.enable_fst {
         let hudson_output_filename = "hudson_fst_results.tsv".to_string();
-        
+
         // Place the Hudson FST output file in the same directory as the main output file.
         let hudson_output_path = if let Some(main_output_parent) = output_file.parent() {
             main_output_parent.join(&hudson_output_filename)
@@ -1638,17 +1819,33 @@ pub fn process_config_entries(
             Path::new(&hudson_output_filename).to_path_buf()
         };
 
-        log(LogLevel::Info, &format!("Writing Hudson FST results to: {}", hudson_output_path.display()));
-        
+        log(
+            LogLevel::Info,
+            &format!(
+                "Writing Hudson FST results to: {}",
+                hudson_output_path.display()
+            ),
+        );
+
         let hudson_file = File::create(&hudson_output_path).map_err(|e| VcfError::Io(e.into()))?;
-        let mut hudson_writer = WriterBuilder::new().delimiter(b'\t').from_writer(BufWriter::new(hudson_file));
+        let mut hudson_writer = WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_writer(BufWriter::new(hudson_file));
 
         // Write Hudson FST header
         hudson_writer.write_record(&[
-            "chr", "region_start_0based", "region_end_0based",
-            "pop1_id_type", "pop1_id_name",
-            "pop2_id_type", "pop2_id_name",
-            "Dxy", "pi_pop1", "pi_pop2", "pi_xy_avg", "FST"
+            "chr",
+            "region_start_0based",
+            "region_end_0based",
+            "pop1_id_type",
+            "pop1_id_name",
+            "pop2_id_type",
+            "pop2_id_name",
+            "Dxy",
+            "pi_pop1",
+            "pi_pop2",
+            "pi_xy_avg",
+            "FST",
         ])?;
 
         // Write Hudson FST data rows
@@ -1671,7 +1868,14 @@ pub fn process_config_entries(
             ])?;
         }
         hudson_writer.flush()?;
-        log(LogLevel::Info, &format!("Successfully wrote {} Hudson FST records to {}", all_regional_hudson_outcomes.len(), hudson_output_path.display()));
+        log(
+            LogLevel::Info,
+            &format!(
+                "Successfully wrote {} Hudson FST records to {}",
+                all_regional_hudson_outcomes.len(),
+                hudson_output_path.display()
+            ),
+        );
     }
 
     Ok(())
@@ -1739,8 +1943,8 @@ fn write_csv_row<W: Write>(writer: &mut csv::Writer<W>, row: &CsvRowData) -> Res
     writer
         .write_record(&[
             &row.seqname,
-            &row.region_start.to_string(), // 0-based inclusive
-            &row.region_end.to_string(),   // 0-based inclusive
+            &row.region_start.to_string(), // 1-based inclusive
+            &row.region_end.to_string(),   // 1-based inclusive
             &row.seq_len_0.to_string(),
             &row.seq_len_1.to_string(),
             &row.seq_len_adj_0.to_string(),
@@ -1804,22 +2008,38 @@ fn process_chromosome_entries(
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     args: &Args,
-    pca_storage: Option<(Arc<Mutex<HashMap<String, Vec<Variant>>>>, Arc<Mutex<Vec<String>>>)>,
+    pca_storage: Option<(
+        Arc<Mutex<HashMap<String, Vec<Variant>>>>,
+        Arc<Mutex<Vec<String>>>,
+    )>,
     // Arc containing the parsed population definitions from the CSV file, if provided.
     // Key: Population Name (String), Value: List of Sample IDs (String) in that population.
     parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>>,
-) -> Result<(Vec<(CsvRowData, Vec<(i64, f64, f64, u8, bool)>, Vec<(i64, f64, f64)>)>, Vec<RegionalHudsonFSTOutcome>), VcfError> {
+) -> Result<
+    (
+        Vec<(
+            CsvRowData,
+            Vec<(i64, f64, f64, u8, bool)>,
+            Vec<(i64, f64, f64)>,
+        )>,
+        Vec<RegionalHudsonFSTOutcome>,
+    ),
+    VcfError,
+> {
     set_stage(ProcessingStage::ConfigEntry);
     log(LogLevel::Info, &format!("Processing chromosome: {}", chr));
-    
+
     init_step_progress(&format!("Loading resources for chr{}", chr), 3);
-    
+
     // Load entire chromosome length from reference index
     update_step_progress(0, &format!("Reading reference index for chr{}", chr));
     let chr_length = {
         let fasta_reader =
             bio::io::fasta::IndexedReader::from_file(&args.reference_path).map_err(|e| {
-                log(LogLevel::Error, &format!("Failed to open reference file: {}", e));
+                log(
+                    LogLevel::Error,
+                    &format!("Failed to open reference file: {}", e),
+                );
                 VcfError::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     e.to_string(),
@@ -1830,7 +2050,10 @@ fn process_chromosome_entries(
             .iter()
             .find(|seq| seq.name == chr || seq.name == format!("chr{}", chr))
             .ok_or_else(|| {
-                log(LogLevel::Error, &format!("Chromosome {} not found in reference", chr));
+                log(
+                    LogLevel::Error,
+                    &format!("Chromosome {} not found in reference", chr),
+                );
                 VcfError::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!("Chromosome {} not found in reference", chr),
@@ -1848,50 +2071,73 @@ fn process_chromosome_entries(
         };
         read_reference_sequence(Path::new(&args.reference_path), chr, entire_chrom)?
     };
-    log(LogLevel::Info, &format!("Loaded {}bp reference sequence for chr{}", ref_sequence.len(), chr));
+    log(
+        LogLevel::Info,
+        &format!(
+            "Loaded {}bp reference sequence for chr{}",
+            ref_sequence.len(),
+            chr
+        ),
+    );
 
     // Parse all transcripts for that chromosome from the GTF
     update_step_progress(2, &format!("Loading transcript annotations for chr{}", chr));
     let all_transcripts = parse_gtf_file(Path::new(&args.gtf_path), chr)?;
     // We'll keep them in `cds_regions` for subsequent filtering
     let cds_regions = all_transcripts;
-    log(LogLevel::Info, &format!("Loaded {} transcript annotations for chr{}", cds_regions.len(), chr));
+    log(
+        LogLevel::Info,
+        &format!(
+            "Loaded {} transcript annotations for chr{}",
+            cds_regions.len(),
+            chr
+        ),
+    );
 
     // Locate the VCF file for this chromosome
     let vcf_file = match find_vcf_file(vcf_folder, chr) {
         Ok(file) => {
-            log(LogLevel::Info, &format!("Found VCF file for chr{}: {}", chr, file.display()));
+            log(
+                LogLevel::Info,
+                &format!("Found VCF file for chr{}: {}", chr, file.display()),
+            );
             file
-        },
+        }
         Err(e) => {
-            log(LogLevel::Error, &format!("Error finding VCF file for chr{}: {:?}", chr, e));
+            log(
+                LogLevel::Error,
+                &format!("Error finding VCF file for chr{}: {:?}", chr, e),
+            );
             finish_step_progress(&format!("Failed to find VCF for chr{}", chr));
             return Ok((Vec::new(), Vec::new())); // Return empty tuple for both main CSV data and Hudson FST results
         }
     };
-    
+
     finish_step_progress(&format!("Loaded resources for chr{}", chr));
 
     // Stores tuples for the main CSV output (W&C FST, diversity stats)
     let mut main_csv_tuples = Vec::with_capacity(entries.len());
     // Stores RegionalHudsonFSTOutcome for the dedicated Hudson FST output file for this chromosome
     let mut chromosome_hudson_fst_results: Vec<RegionalHudsonFSTOutcome> = Vec::new();
-    
+
     // Store filtered variants for PCA if enabled
     if let Some((_, sample_names_storage)) = &pca_storage {
         let vcf_file = match find_vcf_file(vcf_folder, chr) {
             Ok(file) => file,
             Err(e) => {
-                log(LogLevel::Error, &format!("Error finding VCF file for chr{} for PCA: {:?}", chr, e));
+                log(
+                    LogLevel::Error,
+                    &format!("Error finding VCF file for chr{} for PCA: {:?}", chr, e),
+                );
                 return Ok((Vec::new(), Vec::new())); // Return empty tuple for both main CSV data and Hudson FST results
             }
         };
-        
+
         // Open VCF reader to get sample names
         let mut reader = open_vcf_reader(&vcf_file)?;
         let mut buffer = String::new();
         let mut sample_names = Vec::new();
-        
+
         // Extract sample names from VCF header
         while reader.read_line(&mut buffer)? > 0 {
             if buffer.starts_with("##") {
@@ -1907,7 +2153,7 @@ fn process_chromosome_entries(
             }
             buffer.clear();
         }
-        
+
         // Store sample names (once)
         {
             let mut names_storage = sample_names_storage.lock();
@@ -1918,7 +2164,10 @@ fn process_chromosome_entries(
     }
 
     // Initialize progress for config entries
-    init_entry_progress(&format!("Processing {} regions on chr{}", entries.len(), chr), entries.len() as u64);
+    init_entry_progress(
+        &format!("Processing {} regions on chr{}", entries.len(), chr),
+        entries.len() as u64,
+    );
 
     // For each config entry in this chromosome, do the work
     //    (We could also parallelize here...)
@@ -1926,7 +2175,7 @@ fn process_chromosome_entries(
     for (idx, entry) in entries.iter().enumerate() {
         let region_desc = format!("{}:{}-{}", chr, entry.interval.start, entry.interval.end);
         update_entry_progress(idx as u64, &format!("Processing region {}", region_desc));
-        
+
         let result = process_single_config_entry(
             entry.clone(),
             &vcf_file,
@@ -1940,66 +2189,111 @@ fn process_chromosome_entries(
             pca_storage.as_ref(),
             parsed_csv_populations_arc.clone(), // Pass down the Arc<HashMap<String, Vec<String>>>
         );
-        
+
         match result {
             // A 4-element tuple from process_single_config_entry
-            Ok(Some((main_csv_tuple_content, per_site_diversity_data, per_site_wc_fst_data, mut hudson_outcomes_for_entry))) => {
+            Ok(Some((
+                main_csv_tuple_content,
+                per_site_diversity_data,
+                per_site_wc_fst_data,
+                mut hudson_outcomes_for_entry,
+            ))) => {
                 // The main_csv_tuple_content is CsvRowData
                 // The per_site_diversity_data is Vec<(i64, f64, f64, u8, bool)>
                 // The per_site_wc_fst_data is Vec<(i64, f64, f64)>
                 // These two Vecs are for the .falsta output files and are aggregated in process_config_entries
-                main_csv_tuples.push((main_csv_tuple_content, per_site_diversity_data, per_site_wc_fst_data));
+                main_csv_tuples.push((
+                    main_csv_tuple_content,
+                    per_site_diversity_data,
+                    per_site_wc_fst_data,
+                ));
                 chromosome_hudson_fst_results.append(&mut hudson_outcomes_for_entry);
-                log(LogLevel::Info, &format!("Successfully processed region {}", region_desc));
-                
+                log(
+                    LogLevel::Info,
+                    &format!("Successfully processed region {}", region_desc),
+                );
+
                 if entry.seqname.contains("X") || entry.seqname.contains("x") {
-                    log(LogLevel::Info, &format!(
-                        "ADDED chrX region {} to output rows (now {} main CSV tuples)",
-                        region_desc, main_csv_tuples.len()
-                    ));
+                    log(
+                        LogLevel::Info,
+                        &format!(
+                            "ADDED chrX region {} to output rows (now {} main CSV tuples)",
+                            region_desc,
+                            main_csv_tuples.len()
+                        ),
+                    );
                 }
             }
             Ok(None) => {
-                log(LogLevel::Warning, &format!(
-                    "DROPPED: Region {} was skipped (no matching haplotypes)", region_desc
-                ));
-                
-                if entry.seqname.contains("X") || entry.seqname.contains("x") {
-                    log(LogLevel::Warning, &format!(
-                        "DEBUG X: DROPPED chrX region {} from output (returned Ok(None))",
+                log(
+                    LogLevel::Warning,
+                    &format!(
+                        "DROPPED: Region {} was skipped (no matching haplotypes)",
                         region_desc
-                    ));
+                    ),
+                );
+
+                if entry.seqname.contains("X") || entry.seqname.contains("x") {
+                    log(
+                        LogLevel::Warning,
+                        &format!(
+                            "DEBUG X: DROPPED chrX region {} from output (returned Ok(None))",
+                            region_desc
+                        ),
+                    );
                 }
             }
             Err(e) => {
-                log(LogLevel::Error, &format!("DROPPED: Error processing region {}: {}", region_desc, e));
-                
+                log(
+                    LogLevel::Error,
+                    &format!("DROPPED: Error processing region {}: {}", region_desc, e),
+                );
+
                 if entry.seqname.contains("X") || entry.seqname.contains("x") {
-                    log(LogLevel::Error, &format!(
-                        "DEBUG X: DROPPED chrX region {} due to error: {}",
-                        region_desc, e
-                    ));
+                    log(
+                        LogLevel::Error,
+                        &format!(
+                            "DEBUG X: DROPPED chrX region {} due to error: {}",
+                            region_desc, e
+                        ),
+                    );
                 }
             }
         }
-    
-        update_entry_progress((idx + 1) as u64, &format!("Global progress for region {}", region_desc));
+
+        update_entry_progress(
+            (idx + 1) as u64,
+            &format!("Global progress for region {}", region_desc),
+        );
     }
 
-    finish_entry_progress(&format!("Processed {} regions on chr{}", entries.len(), chr));
+    finish_entry_progress(&format!(
+        "Processed {} regions on chr{}",
+        entries.len(),
+        chr
+    ));
 
     display_status_box(StatusBox {
         title: format!("Chromosome {} Statistics", chr),
         stats: vec![
             ("Total regions".to_string(), entries.len().to_string()),
-            ("Successful regions".to_string(), main_csv_tuples.len().to_string()),
-            ("Skipped/failed".to_string(), (entries.len() - main_csv_tuples.len()).to_string()),
+            (
+                "Successful regions".to_string(),
+                main_csv_tuples.len().to_string(),
+            ),
+            (
+                "Skipped/failed".to_string(),
+                (entries.len() - main_csv_tuples.len()).to_string(),
+            ),
         ],
     });
 
     if args.enable_pca {
         if let Some((filtered_variants_map, sample_names_storage)) = &pca_storage {
-            let spinner_pca = create_spinner(&format!("Performing single PCA after all regions for chromosome {}", chr));
+            let spinner_pca = create_spinner(&format!(
+                "Performing single PCA after all regions for chromosome {}",
+                chr
+            ));
             let sample_names_for_pca = {
                 let stored = sample_names_storage.lock();
                 stored.clone()
@@ -2008,10 +2302,14 @@ fn process_chromosome_entries(
                 let stored = filtered_variants_map.lock();
                 stored.get(chr).cloned().unwrap_or_else(Vec::new)
             };
-            log(LogLevel::Info, &format!(
-                "DEBUG: entire chromosome {} has {} total filtered variants",
-                chr, filtered_variants_for_chr.len()
-            ));
+            log(
+                LogLevel::Info,
+                &format!(
+                    "DEBUG: entire chromosome {} has {} total filtered variants",
+                    chr,
+                    filtered_variants_for_chr.len()
+                ),
+            );
             if !filtered_variants_for_chr.is_empty() {
                 match crate::pca::compute_chromosome_pca(
                     &filtered_variants_for_chr,
@@ -2026,14 +2324,20 @@ fn process_chromosome_entries(
                         crate::pca::write_chromosome_pca_to_file(&pca_result, chr, out_dir)?;
                     }
                     Err(err) => {
-                        log(LogLevel::Warning, &format!("Chromosome {} PCA error: {}", chr, err));
+                        log(
+                            LogLevel::Warning,
+                            &format!("Chromosome {} PCA error: {}", chr, err),
+                        );
                     }
                 }
             } else {
-                log(LogLevel::Warning, &format!(
-                    "No filtered variants remain for chromosome {}. Skipping PCA.",
-                    chr
-                ));
+                log(
+                    LogLevel::Warning,
+                    &format!(
+                        "No filtered variants remain for chromosome {}. Skipping PCA.",
+                        chr
+                    ),
+                );
             }
             spinner_pca.finish_and_clear();
         } else {
@@ -2045,6 +2349,119 @@ fn process_chromosome_entries(
     // 1. Data for the main CSV output file.
     // 2. Data for the dedicated Hudson FST output file, specific to this chromosome.
     Ok((main_csv_tuples, chromosome_hudson_fst_results))
+}
+
+fn generate_full_region_alignment(
+    entry: &ConfigEntry,
+    haplotype_group: u8,
+    all_filtered_variants: &[Variant],
+    sample_names: &[String],
+    full_ref_sequence: &[u8],
+    position_allele_map: &Arc<Mutex<HashMap<i64, (char, char)>>>,
+    mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
+    vcf_sample_id_to_index: &HashMap<String, usize>,
+) -> Result<(), VcfError> {
+    let group_haps = get_haplotype_indices_for_group(
+        haplotype_group,
+        &entry.samples_filtered,
+        vcf_sample_id_to_index,
+    )?;
+
+    if group_haps.is_empty() {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "No haplotypes for group {} to write alignment",
+                haplotype_group
+            ),
+        );
+        return Ok(());
+    }
+
+    let region_start = entry.interval.start as usize;
+    let region_end = entry.interval.end as usize;
+    let reference_slice = &full_ref_sequence[region_start..region_end];
+
+    // Restrict variants to this region using binary search
+    let start_idx = all_filtered_variants
+        .binary_search_by_key(&(entry.interval.start as i64), |v| v.position)
+        .unwrap_or_else(|idx| idx);
+    let end_idx = all_filtered_variants
+        .binary_search_by_key(&(entry.interval.end as i64), |v| v.position)
+        .unwrap_or_else(|idx| idx);
+    let region_variants = &all_filtered_variants[start_idx..end_idx];
+
+    let pos_map = position_allele_map.lock();
+    let mask_map = mask.as_ref().map(|m| m.as_ref());
+    let allow_map = allow.as_ref().map(|a| a.as_ref());
+
+    let mut seq_map: HashMap<String, Vec<char>> = HashMap::new();
+
+    for (sample_idx, side) in group_haps {
+        let mut seq = reference_slice.to_vec();
+        for variant in region_variants {
+            if let Some(genotype_opt) = variant.genotypes.get(sample_idx) {
+                if let Some(genotype_vec) = genotype_opt {
+                    let allele_opt = match side {
+                        HaplotypeSide::Left => genotype_vec.get(0),
+                        HaplotypeSide::Right => genotype_vec.get(1),
+                    };
+                    if let Some(&1) = allele_opt {
+                        if let Some((_, alt)) = pos_map.get(&variant.position) {
+                            let rel = (variant.position - entry.interval.start as i64) as usize;
+                            if rel < seq.len() {
+                                seq[rel] = *alt as u8;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply mask and allow regions
+        for (i, base) in seq.iter_mut().enumerate() {
+            let abs_pos = entry.interval.start as i64 + i as i64;
+            if let Some(mmap) = mask_map.and_then(|m| m.get(&entry.seqname)) {
+                if position_in_regions(abs_pos, mmap) {
+                    *base = b'N';
+                    continue;
+                }
+            }
+            if let Some(amap) = allow_map.and_then(|a| a.get(&entry.seqname)) {
+                if !position_in_regions(abs_pos, amap) {
+                    *base = b'N';
+                }
+            } else if allow_map.is_some() {
+                *base = b'N';
+            }
+        }
+
+        let sample_name = match side {
+            HaplotypeSide::Left => format!("{}_L", sample_names[sample_idx]),
+            HaplotypeSide::Right => format!("{}_R", sample_names[sample_idx]),
+        };
+        let seq_chars = seq.iter().map(|&b| b as char).collect::<Vec<char>>();
+        seq_map.insert(sample_name, seq_chars);
+    }
+
+    if seq_map.is_empty() {
+        log(
+            LogLevel::Warning,
+            &format!("No sequences generated for group {}", haplotype_group),
+        );
+        return Ok(());
+    }
+
+    let start_1based = entry.interval.start_1based_inclusive();
+    let end_1based = entry.interval.get_1based_inclusive_end_coord();
+    let filename = format!(
+        "inversion_group{}_{}_start{}_end{}.phy",
+        haplotype_group, entry.seqname, start_1based, end_1based
+    );
+
+    write_phylip_file(&filename, &seq_map, &filename)?;
+    Ok(())
 }
 
 /// Processes a single config entry's region and sample sets for a given chromosome.
@@ -2062,52 +2479,72 @@ fn process_single_config_entry(
     cds_regions: &[TranscriptAnnotationCDS],
     chr: &str,
     args: &Args,
-    pca_storage: Option<&(Arc<Mutex<HashMap<String, Vec<Variant>>>>, Arc<Mutex<Vec<String>>>)>,
+    pca_storage: Option<&(
+        Arc<Mutex<HashMap<String, Vec<Variant>>>>,
+        Arc<Mutex<Vec<String>>>,
+    )>,
     // Arc containing the parsed population definitions from the CSV file, if provided.
     // Key: Population Name (String), Value: List of Sample IDs (String) in that population.
     parsed_csv_populations_arc: Option<Arc<HashMap<String, Vec<String>>>>,
-) -> Result<Option<(
-    CsvRowData, // Data for the main CSV output (W&C FST, diversity stats, etc.)
-    Vec<(i64, f64, f64, u8, bool)>, // Per-site diversity data (pos, pi, theta, group_id, is_filtered) for falsta output
-    Vec<(i64, f64, f64)>, // Per-site W&C FST data (pos, overall_wc_fst, pairwise_wc_fst_0vs1) for falsta output
-    Vec<RegionalHudsonFSTOutcome> // Hudson FST results specific to this config entry
-)>, VcfError> {
+) -> Result<
+    Option<(
+        CsvRowData, // Data for the main CSV output (W&C FST, diversity stats, etc.)
+        Vec<(i64, f64, f64, u8, bool)>, // Per-site diversity data (pos, pi, theta, group_id, is_filtered) for falsta output
+        Vec<(i64, f64, f64)>, // Per-site W&C FST data (pos, overall_wc_fst, pairwise_wc_fst_0vs1) for falsta output
+        Vec<RegionalHudsonFSTOutcome>, // Hudson FST results specific to this config entry
+    )>,
+    VcfError,
+> {
     set_stage(ProcessingStage::ConfigEntry);
-    let region_desc = format!("{}:{}-{}", 
-        entry.seqname, entry.interval.start, entry.interval.end);
-    
-    log(LogLevel::Info, &format!("Processing region: {}", region_desc));
-    
+    let region_desc = format!(
+        "{}:{}-{}",
+        entry.seqname, entry.interval.start, entry.interval.end
+    );
+
+    log(
+        LogLevel::Info,
+        &format!("Processing region: {}", region_desc),
+    );
+
     init_step_progress(&format!("Filtering transcripts for {}", region_desc), 2);
-    
+
     let local_cds = filter_and_log_transcripts(
         cds_regions.to_vec(),
         entry.interval.to_zero_based_inclusive().into(),
     );
-    
-    log(LogLevel::Info, &format!(
-        "Found {} transcripts overlapping region {}",
-        local_cds.len(), region_desc
-    ));
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Found {} transcripts overlapping region {}",
+            local_cds.len(),
+            region_desc
+        ),
+    );
 
     update_step_progress(1, "Preparing extended region");
 
     if entry.seqname.contains("X") || entry.seqname.contains("x") {
-        log(LogLevel::Info, &format!(
-            "DEBUG X: Processing chrX region: {}:{}-{}", 
-            entry.seqname, entry.interval.start, entry.interval.end
-        ));
+        log(
+            LogLevel::Info,
+            &format!(
+                "DEBUG X: Processing chrX region: {}:{}-{}",
+                entry.seqname, entry.interval.start, entry.interval.end
+            ),
+        );
     }
-    
+
     let chr_length = ref_sequence.len() as i64;
     let extended_region = ZeroBasedHalfOpen::from_1based_inclusive(
         (entry.interval.start as i64 - 3_000_000).max(0),
         ((entry.interval.end as i64) + 3_000_000).min(chr_length),
     );
-    
+
     finish_step_progress(&format!(
-        "Extended region: {}:{}-{}", 
-        chr, extended_region.start_1based_inclusive(), extended_region.get_1based_inclusive_end_coord()
+        "Extended region: {}:{}-{}",
+        chr,
+        extended_region.start_1based_inclusive(),
+        extended_region.get_1based_inclusive_end_coord()
     ));
 
     let seqinfo_storage_unfiltered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
@@ -2117,12 +2554,18 @@ fn process_single_config_entry(
 
     set_stage(ProcessingStage::VcfProcessing);
     init_step_progress(&format!("Processing VCF for {}", region_desc), 2);
-    
-    log(LogLevel::Info, &format!(
-        "Processing VCF for {}:{}-{} (extended: {}-{})",
-        chr, entry.interval.start, entry.interval.end, 
-        extended_region.start, extended_region.end
-    ));
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Processing VCF for {}:{}-{} (extended: {}-{})",
+            chr,
+            entry.interval.start,
+            entry.interval.end,
+            extended_region.start,
+            extended_region.end
+        ),
+    );
 
     let (
         unfiltered_variants,
@@ -2146,16 +2589,23 @@ fn process_single_config_entry(
     ) {
         Ok(data) => data,
         Err(e) => {
-            log(LogLevel::Error, &format!("Error processing VCF for {}: {}", chr, e));
+            log(
+                LogLevel::Error,
+                &format!("Error processing VCF for {}: {}", chr, e),
+            );
             finish_step_progress("VCF processing failed");
             return Ok(None);
         }
     };
-    
+
+    let vcf_sample_id_to_index = map_sample_names_to_indices(&sample_names)?;
+
     update_step_progress(1, "Analyzing variant statistics");
 
     if !filtered_variants.is_empty() {
-        let is_sorted = filtered_variants.windows(2).all(|w| w[0].position <= w[1].position);
+        let is_sorted = filtered_variants
+            .windows(2)
+            .all(|w| w[0].position <= w[1].position);
         if !is_sorted {
             // This should not happen if process_vcf sorts them.
             // Log an error or panic, as this is a critical pre-condition for efficient and correct sub-slicing.
@@ -2171,13 +2621,18 @@ fn process_single_config_entry(
 
     // Create a sub-slice of filtered_variants that strictly corresponds to this Hudson analysis region.
     // This uses binary search, relying on filtered_variants being sorted by position.
-    let start_idx_for_hudson_slice = filtered_variants.binary_search_by_key(&hudson_analysis_region_start_0based, |v| v.position)
+    let start_idx_for_hudson_slice = filtered_variants
+        .binary_search_by_key(&hudson_analysis_region_start_0based, |v| v.position)
         .unwrap_or_else(|idx| idx); // Returns Ok(idx) if found, or Err(idx) for insertion point. Both are fine.
 
-    let end_idx_for_hudson_slice = filtered_variants.binary_search_by_key(&hudson_analysis_region_end_0based_exclusive, |v| v.position)
+    let end_idx_for_hudson_slice = filtered_variants
+        .binary_search_by_key(&hudson_analysis_region_end_0based_exclusive, |v| v.position)
         .unwrap_or_else(|idx| idx); // Insertion point is the correct exclusive end for the slice.
-    
-    let variants_for_hudson_slice: &[Variant] = if start_idx_for_hudson_slice < end_idx_for_hudson_slice && end_idx_for_hudson_slice <= filtered_variants.len() {
+
+    let variants_for_hudson_slice: &[Variant] = if start_idx_for_hudson_slice
+        < end_idx_for_hudson_slice
+        && end_idx_for_hudson_slice <= filtered_variants.len()
+    {
         &filtered_variants[start_idx_for_hudson_slice..end_idx_for_hudson_slice]
     } else {
         // If the region is empty or indices are problematic, use an empty slice.
@@ -2192,91 +2647,136 @@ fn process_single_config_entry(
     // Calculate FST if enabled
     let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
         let spinner = create_spinner("Calculating FST statistics");
-    
+
         // Define the FST analysis region.
         // entry.interval is ZeroBasedHalfOpen [start, end), meaning 0-based inclusive start and 0-based exclusive end.
         // QueryRegion for FST calculations requires a 0-based inclusive start and 0-based inclusive end.
         // Convert entry.interval to ZeroBasedInclusive, then to QueryRegion.
         let fst_query_region_zbi = entry.interval.to_zero_based_inclusive();
         let fst_query_region: QueryRegion = fst_query_region_zbi.into();
-        
+
         // FST between haplotype groups (0 vs 1)
-        log(LogLevel::Info, "Calculating FST between haplotype groups (0 vs 1)");
+        log(
+            LogLevel::Info,
+            "Calculating FST between haplotype groups (0 vs 1)",
+        );
         let haplotype_fst = calculate_fst_wc_haplotype_groups(
             &filtered_variants,
             &sample_names,
             &entry.samples_filtered,
-            fst_query_region
+            fst_query_region,
         );
-        
+
         // FST between population groups if CSV is provided
         let population_fst = if let Some(pop_csv) = &args.fst_populations {
-            log(LogLevel::Info, &format!("Calculating FST between population groups from {}", pop_csv));
+            log(
+                LogLevel::Info,
+                &format!("Calculating FST between population groups from {}", pop_csv),
+            );
             match calculate_fst_wc_csv_populations(
                 &filtered_variants,
                 &sample_names,
                 Path::new(pop_csv),
-                fst_query_region
+                fst_query_region,
             ) {
                 Ok(results) => {
                     // Log successful population FST calculation
-                    log(LogLevel::Info, &format!(
+                    log(
+                        LogLevel::Info,
+                        &format!(
                         "Successfully calculated population FST with {} populations and {} sites",
                         results.pairwise_fst.len(), results.site_fst.len()
-                    ));
+                    ),
+                    );
                     Some(results)
-                },
+                }
                 Err(e) => {
-                    log(LogLevel::Error, &format!("Error calculating population FST: {}", e));
+                    log(
+                        LogLevel::Error,
+                        &format!("Error calculating population FST: {}", e),
+                    );
                     None
                 }
             }
         } else {
             None
         };
-        
+
         spinner.finish_and_clear();
         log(LogLevel::Info, "FST calculations complete");
-        
+
         (Some(haplotype_fst), population_fst)
     } else {
         (None, None)
     };
-    
+
     // Store filtered variants for PCA if enabled and the pca_storage is provided
     if let Some((variants_storage, sample_names_storage)) = &pca_storage {
         // Store filtered variants for this chromosome
-        variants_storage.lock().insert(chr.to_string(), filtered_variants.clone());
-        
+        variants_storage
+            .lock()
+            .insert(chr.to_string(), filtered_variants.clone());
+
         // Store sample names if not already stored
         let mut names = sample_names_storage.lock();
         if names.is_empty() {
             *names = sample_names.clone();
         }
-        
-        log(LogLevel::Info, &format!(
-            "Stored {} filtered variants from chr{} for PCA analysis", 
-            filtered_variants.len(), chr
-        ));
+
+        log(
+            LogLevel::Info,
+            &format!(
+                "Stored {} filtered variants from chr{} for PCA analysis",
+                filtered_variants.len(),
+                chr
+            ),
+        );
     }
 
     // Display variant filtering statistics
     display_status_box(StatusBox {
         title: format!("Variant Statistics for {}", region_desc),
         stats: vec![
-            ("Total variants".to_string(), filtering_stats.total_variants.to_string()),
-            ("Filtered variants".to_string(), filtering_stats._filtered_variants.to_string()),
-            ("% Filtered".to_string(), format!("{:.1}%", 
-                (filtering_stats._filtered_variants as f64 / 
-                 filtering_stats.total_variants.max(1) as f64) * 100.0)),
-            ("Due to mask".to_string(), filtering_stats.filtered_due_to_mask.to_string()),
-            ("Due to allow".to_string(), filtering_stats.filtered_due_to_allow.to_string()),
-            ("Multi-allelic".to_string(), filtering_stats.multi_allelic_variants.to_string()),
-            ("Low GQ".to_string(), filtering_stats.low_gq_variants.to_string()),
-            ("Missing data".to_string(), filtering_stats.missing_data_variants.to_string()),
+            (
+                "Total variants".to_string(),
+                filtering_stats.total_variants.to_string(),
+            ),
+            (
+                "Filtered variants".to_string(),
+                filtering_stats._filtered_variants.to_string(),
+            ),
+            (
+                "% Filtered".to_string(),
+                format!(
+                    "{:.1}%",
+                    (filtering_stats._filtered_variants as f64
+                        / filtering_stats.total_variants.max(1) as f64)
+                        * 100.0
+                ),
+            ),
+            (
+                "Due to mask".to_string(),
+                filtering_stats.filtered_due_to_mask.to_string(),
+            ),
+            (
+                "Due to allow".to_string(),
+                filtering_stats.filtered_due_to_allow.to_string(),
+            ),
+            (
+                "Multi-allelic".to_string(),
+                filtering_stats.multi_allelic_variants.to_string(),
+            ),
+            (
+                "Low GQ".to_string(),
+                filtering_stats.low_gq_variants.to_string(),
+            ),
+            (
+                "Missing data".to_string(),
+                filtering_stats.missing_data_variants.to_string(),
+            ),
         ],
     });
-    
+
     log(LogLevel::Info, &format!(
         "Variant statistics: {} total, {} filtered (mask={}, allow={}, multi={}, lowGQ={}, missing={})",
         filtering_stats.total_variants,
@@ -2297,18 +2797,21 @@ fn process_single_config_entry(
     //  - The 1-based inclusive end is E_0.
     // We use methods from ZeroBasedHalfOpen to get these 1-based coordinates.
     let adj_seq_len_start_1based_inclusive = entry.interval.start_1based_inclusive();
-    let adj_seq_len_end_1based_inclusive = entry.interval.get_1based_inclusive_end_coord(); 
+    let adj_seq_len_end_1based_inclusive = entry.interval.get_1based_inclusive_end_coord();
     let adjusted_sequence_length = calculate_adjusted_sequence_length(
         adj_seq_len_start_1based_inclusive,
         adj_seq_len_end_1based_inclusive,
         allow.as_ref().and_then(|a| a.get(&chr.to_string())),
         mask.as_ref().and_then(|m| m.get(&chr.to_string())),
     );
-    
-    log(LogLevel::Info, &format!(
-        "Region length: {}bp (adjusted: {}bp after masking)", 
-        sequence_length, adjusted_sequence_length
-    ));
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Region length: {}bp (adjusted: {}bp after masking)",
+            sequence_length, adjusted_sequence_length
+        ),
+    );
 
     // Filter to variants specifically in this region
     let region_variants_unfiltered: Vec<_> = unfiltered_variants
@@ -2316,14 +2819,22 @@ fn process_single_config_entry(
         .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
         .cloned()
         .collect();
-    
-    log(LogLevel::Info, &format!(
-        "Found {} unfiltered variants in precise region {}:{}-{}", 
-        region_variants_unfiltered.len(), chr, entry.interval.start, entry.interval.end
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Found {} unfiltered variants in precise region {}:{}-{}",
+            region_variants_unfiltered.len(),
+            chr,
+            entry.interval.start,
+            entry.interval.end
+        ),
+    );
+
+    finish_step_progress(&format!(
+        "Found {} variants in region",
+        region_variants_unfiltered.len()
     ));
-    
-    finish_step_progress(&format!("Found {} variants in region", 
-        region_variants_unfiltered.len()));
 
     #[derive(Clone)]
     struct VariantInvocation<'a> {
@@ -2339,7 +2850,7 @@ fn process_single_config_entry(
     // Set up the four analysis invocations (filtered/unfiltered × group 0/1)
     set_stage(ProcessingStage::VariantAnalysis);
     init_step_progress("Analyzing haplotype groups", 4);
-    
+
     let invocations = [
         VariantInvocation {
             group_id: 0,
@@ -2383,11 +2894,16 @@ fn process_single_config_entry(
         [None, None, None, None];
 
     for (i, call) in invocations.iter().enumerate() {
-        let filter_type = if call.is_filtered { "filtered" } else { "unfiltered" };
-        update_step_progress(i as u64, &format!(
-            "Analyzing {} group {}", filter_type, call.group_id
-        ));
-        
+        let filter_type = if call.is_filtered {
+            "filtered"
+        } else {
+            "unfiltered"
+        };
+        update_step_progress(
+            i as u64,
+            &format!("Analyzing {} group {}", filter_type, call.group_id),
+        );
+
         let stats_opt = process_variants(
             call.variants,
             &sample_names,
@@ -2414,10 +2930,13 @@ fn process_single_config_entry(
                 (1, false) => "unfiltered group 1",
                 _ => "unknown scenario",
             };
-            log(LogLevel::Warning, &format!(
-                "No haplotypes found for {} in region {}-{}",
-                label, entry.interval.start, entry.interval.end
-            ));
+            log(
+                LogLevel::Warning,
+                &format!(
+                    "No haplotypes found for {} in region {}-{}",
+                    label, entry.interval.start, entry.interval.end
+                ),
+            );
             // finish_step_progress("No matching haplotypes found");
             // return Ok(None);
             // Not returning here in case some of the groups succeed
@@ -2426,11 +2945,14 @@ fn process_single_config_entry(
 
     // After the loop, check if ANY groups had results
     if results.iter().all(|r| r.is_none()) {
-        log(LogLevel::Warning, &format!(
-            "No haplotypes found for any group in region {}-{}",
-            entry.interval.start, entry.interval.end
-        ));
-        
+        log(
+            LogLevel::Warning,
+            &format!(
+                "No haplotypes found for any group in region {}-{}",
+                entry.interval.start, entry.interval.end
+            ),
+        );
+
         // Calculate detailed statistics about why regions failed
         let mut reasons = Vec::new();
         if entry.samples_filtered.is_empty() {
@@ -2439,30 +2961,33 @@ fn process_single_config_entry(
         if entry.samples_unfiltered.is_empty() {
             reasons.push("No unfiltered samples in config");
         }
-        
+
         if entry.seqname.contains("X") || entry.seqname.contains("x") {
-            log(LogLevel::Warning, &format!(
+            log(
+                LogLevel::Warning,
+                &format!(
                 "DEBUG X: DROPPED chrX region {}:{}-{} - ALL groups had no haplotypes. Reasons: {}",
                 entry.seqname, entry.interval.start, entry.interval.end,
                 if reasons.is_empty() { "Unknown".to_string() } else { reasons.join(", ") }
-            ));
+            ),
+            );
         }
-        
+
         finish_step_progress("No matching haplotypes found");
         return Ok(None);
     }
-    
+
     // Extract all results with default values for missing ones
-    let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f, site_divs_0_f) = 
+    let (num_segsites_0_f, w_theta_0_f, pi_0_f, n_hap_0_f, site_divs_0_f) =
         results[0].take().unwrap_or((0, 0.0, 0.0, 0, Vec::new()));
-        
-    let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f, site_divs_1_f) = 
+
+    let (num_segsites_1_f, w_theta_1_f, pi_1_f, n_hap_1_f, site_divs_1_f) =
         results[1].take().unwrap_or((0, 0.0, 0.0, 0, Vec::new()));
-        
-    let (num_segsites_0_u, w_theta_0_u, pi_0_u, n_hap_0_u, site_divs_0_u) = 
+
+    let (num_segsites_0_u, w_theta_0_u, pi_0_u, n_hap_0_u, site_divs_0_u) =
         results[2].take().unwrap_or((0, 0.0, 0.0, 0, Vec::new()));
-        
-    let (num_segsites_1_u, w_theta_1_u, pi_1_u, n_hap_1_u, site_divs_1_u) = 
+
+    let (num_segsites_1_u, w_theta_1_u, pi_1_u, n_hap_1_u, site_divs_1_u) =
         results[3].take().unwrap_or((0, 0.0, 0.0, 0, Vec::new()));
 
     // Calculate inversion frequencies
@@ -2471,11 +2996,15 @@ fn process_single_config_entry(
         calculate_inversion_allele_frequency(&entry.samples_filtered).unwrap_or(-1.0);
     let inversion_freq_no_filter =
         calculate_inversion_allele_frequency(&entry.samples_unfiltered).unwrap_or(-1.0);
-    
-    log(LogLevel::Info, &format!(
-        "Inversion frequency: {:.2}% (unfiltered), {:.2}% (filtered)",
-        inversion_freq_no_filter * 100.0, inversion_freq_filt * 100.0
-    ));
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Inversion frequency: {:.2}% (unfiltered), {:.2}% (filtered)",
+            inversion_freq_no_filter * 100.0,
+            inversion_freq_filt * 100.0
+        ),
+    );
 
     // Initialize Hudson FST components for haplotype groups 0 vs 1 to None
     let mut hudson_fst_hap_group_0v1_val: Option<f64> = None;
@@ -2487,22 +3016,23 @@ fn process_single_config_entry(
     let mut local_regional_hudson_outcomes: Vec<RegionalHudsonFSTOutcome> = Vec::new();
 
     if args.enable_fst {
-        log(LogLevel::Info, &format!("Initiating Hudson FST calculations for region: {}", region_desc));
-
-        // This map is for linking sample IDs from config/CSV to their VCF column index.
-        // It maps the core sample ID (e.g., "NA12878") to its 0-based VCF column index.
-        let mut vcf_sample_id_to_index: HashMap<String, usize> = HashMap::new();
-        for (i, vcf_sample_name) in sample_names.iter().enumerate() {
-            // The key stored should be the identifier used in the config/CSV files.
-            let core_sample_id = vcf_sample_name.rsplit('_').next().unwrap_or(vcf_sample_name).to_string();
-            vcf_sample_id_to_index.insert(core_sample_id, i);
-        }
+        log(
+            LogLevel::Info,
+            &format!(
+                "Initiating Hudson FST calculations for region: {}",
+                region_desc
+            ),
+        );
 
         // A. Hudson FST for Haplotype Groups (0 vs. 1) using filtered samples and variants
-        let haplotypes_group_0_res = get_haplotype_indices_for_group(0, &entry.samples_filtered, &vcf_sample_id_to_index);
-        let haplotypes_group_1_res = get_haplotype_indices_for_group(1, &entry.samples_filtered, &vcf_sample_id_to_index);
+        let haplotypes_group_0_res =
+            get_haplotype_indices_for_group(0, &entry.samples_filtered, &vcf_sample_id_to_index);
+        let haplotypes_group_1_res =
+            get_haplotype_indices_for_group(1, &entry.samples_filtered, &vcf_sample_id_to_index);
 
-        if let (Ok(haplotypes_group_0), Ok(haplotypes_group_1)) = (haplotypes_group_0_res, haplotypes_group_1_res) {
+        if let (Ok(haplotypes_group_0), Ok(haplotypes_group_1)) =
+            (haplotypes_group_0_res, haplotypes_group_1_res)
+        {
             // Check if both groups have at least two haplotypes, required for `calculate_pi`.
             if haplotypes_group_0.len() >= 2 && haplotypes_group_1.len() >= 2 {
                 let pop0_context = PopulationContext {
@@ -2544,7 +3074,7 @@ fn process_single_config_entry(
                 log(LogLevel::Warning, &format!("Skipping Hudson FST for haplotype groups 0 vs 1 in region {}: one or both groups have fewer than 2 haplotypes.", region_desc));
             }
         } else {
-             log(LogLevel::Error, &format!("Failed to get haplotype indices for Hudson FST (haplotype groups) in region {}.", region_desc));
+            log(LogLevel::Error, &format!("Failed to get haplotype indices for Hudson FST (haplotype groups) in region {}.", region_desc));
         }
 
         // B. Hudson FST for CSV-Defined Populations using filtered samples and variants
@@ -2552,15 +3082,24 @@ fn process_single_config_entry(
             let csv_populations_map = csv_populations_map_arc_ref.as_ref(); // Dereference Arc
 
             // Map population names to their actual haplotype lists (VCF index, Side) present in this VCF.
-            let mut population_name_to_haplotypes_map: HashMap<String, Vec<(usize, HaplotypeSide)>> = HashMap::new();
+            let mut population_name_to_haplotypes_map: HashMap<
+                String,
+                Vec<(usize, HaplotypeSide)>,
+            > = HashMap::new();
             for pop_name in csv_populations_map.keys() {
-                let pop_haplotypes = get_haplotype_indices_for_csv_population(pop_name, csv_populations_map, &vcf_sample_id_to_index);
-                if !pop_haplotypes.is_empty() { // Only consider populations with present samples
+                let pop_haplotypes = get_haplotype_indices_for_csv_population(
+                    pop_name,
+                    csv_populations_map,
+                    &vcf_sample_id_to_index,
+                );
+                if !pop_haplotypes.is_empty() {
+                    // Only consider populations with present samples
                     population_name_to_haplotypes_map.insert(pop_name.clone(), pop_haplotypes);
                 }
             }
 
-            let mut valid_pop_names: Vec<String> = population_name_to_haplotypes_map.keys().cloned().collect();
+            let mut valid_pop_names: Vec<String> =
+                population_name_to_haplotypes_map.keys().cloned().collect();
             valid_pop_names.sort(); // consistent order for generating pairs
 
             for i in 0..valid_pop_names.len() {
@@ -2569,8 +3108,10 @@ fn process_single_config_entry(
                     let pop_name_b = &valid_pop_names[j];
 
                     // These unwraps are safe because valid_pop_names comes from the map's keys.
-                    let haplotypes_pop_a = population_name_to_haplotypes_map.get(pop_name_a).unwrap();
-                    let haplotypes_pop_b = population_name_to_haplotypes_map.get(pop_name_b).unwrap();
+                    let haplotypes_pop_a =
+                        population_name_to_haplotypes_map.get(pop_name_a).unwrap();
+                    let haplotypes_pop_b =
+                        population_name_to_haplotypes_map.get(pop_name_b).unwrap();
 
                     if haplotypes_pop_a.len() >= 2 && haplotypes_pop_b.len() >= 2 {
                         let pop_a_context_csv = PopulationContext {
@@ -2600,26 +3141,45 @@ fn process_single_config_entry(
                             Err(e) => log(LogLevel::Error, &format!("Error calculating Hudson FST for CSV populations '{}' vs '{}' in region {}: {}", pop_name_a, pop_name_b, region_desc, e)),
                         }
                     } else {
-                         log(LogLevel::Warning, &format!("Skipping Hudson FST for CSV populations '{}' vs '{}' in region {}: one or both groups have fewer than 2 haplotypes.", pop_name_a, pop_name_b, region_desc));
+                        log(LogLevel::Warning, &format!("Skipping Hudson FST for CSV populations '{}' vs '{}' in region {}: one or both groups have fewer than 2 haplotypes.", pop_name_a, pop_name_b, region_desc));
                     }
                 }
             }
         }
     }
 
-// This is the FstEstimate enum for overall haplotype W&C FST
+    // Generate full inversion region alignments for each haplotype group
+    log(
+        LogLevel::Info,
+        "Generating full inversion region alignments...",
+    );
+    for haplotype_group in [0u8, 1u8] {
+        generate_full_region_alignment(
+            &entry,
+            haplotype_group,
+            &filtered_variants,
+            &sample_names,
+            ref_sequence,
+            &position_allele_map_filtered,
+            mask,
+            allow,
+            &vcf_sample_id_to_index,
+        )?;
+    }
+
+    // This is the FstEstimate enum for overall haplotype W&C FST
     let haplotype_overall_fst_estimate_enum = fst_results_filtered.as_ref().map_or(
-        crate::stats::FstEstimate::InsufficientDataForEstimation { sum_a: 0.0, sum_b: 0.0, sites_attempted: 0 },
-        |res| res.overall_fst
+        crate::stats::FstEstimate::InsufficientDataForEstimation {
+            sum_a: 0.0,
+            sum_b: 0.0,
+            sites_attempted: 0,
+        },
+        |res| res.overall_fst,
     );
 
     // Extract components for CSV output
-    let (
-        hap_fst_val,
-        hap_sum_a,
-        hap_sum_b,
-        hap_num_sites
-    ) = crate::stats::extract_wc_fst_components(&haplotype_overall_fst_estimate_enum);
+    let (hap_fst_val, hap_sum_a, hap_sum_b, hap_num_sites) =
+        crate::stats::extract_wc_fst_components(&haplotype_overall_fst_estimate_enum);
 
     let row_data = CsvRowData {
         seqname: entry.seqname.clone(),
@@ -2661,137 +3221,38 @@ fn process_single_config_entry(
         population_fst_wc_results: fst_results_pop_filtered.clone(),
     };
 
-    if args.enable_fst {
-        log(LogLevel::Info, &format!("Initiating Hudson FST calculations for region: {}", region_desc));
-
-        // This map is for linking sample IDs from config/CSV to their VCF column index.
-        // It maps the core sample ID (e.g., "NA12878") to its 0-based VCF column index.
-        let mut vcf_sample_id_to_index: HashMap<String, usize> = HashMap::new();
-        for (i, vcf_sample_name) in sample_names.iter().enumerate() {
-            // The key stored should be the identifier used in the config/CSV files.
-            let core_sample_id = vcf_sample_name.rsplit('_').next().unwrap_or(vcf_sample_name).to_string();
-            vcf_sample_id_to_index.insert(core_sample_id, i);
-        }
-
-        // A. Hudson FST for Haplotype Groups (0 vs. 1) using filtered samples and variants
-        let haplotypes_group_0_res = get_haplotype_indices_for_group(0, &entry.samples_filtered, &vcf_sample_id_to_index);
-        let haplotypes_group_1_res = get_haplotype_indices_for_group(1, &entry.samples_filtered, &vcf_sample_id_to_index);
-
-        if let (Ok(haplotypes_group_0), Ok(haplotypes_group_1)) = (haplotypes_group_0_res, haplotypes_group_1_res) {
-            // Check if both groups have at least two haplotypes, required for `calculate_pi`.
-            if haplotypes_group_0.len() >= 2 && haplotypes_group_1.len() >= 2 {
-                let pop0_context = PopulationContext {
-                    id: PopulationId::HaplotypeGroup(0),
-                    haplotypes: haplotypes_group_0,
-                    variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
-                    sample_names: &sample_names,
-                    sequence_length: adjusted_sequence_length,
-                };
-                let pop1_context = PopulationContext {
-                    id: PopulationId::HaplotypeGroup(1),
-                    haplotypes: haplotypes_group_1,
-                    variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
-                    sample_names: &sample_names,
-                    sequence_length: adjusted_sequence_length,
-                };
-
-                match calculate_hudson_fst_for_pair(&pop0_context, &pop1_context) {
-                    Ok(outcome) => {
-                        local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
-                            chr: entry.seqname.clone(),
-                            region_start: entry.interval.start as i64, // 0-based inclusive
-                            region_end: entry.interval.end as i64,     // 0-based inclusive
-                            outcome,
-                        });
-                    }
-                    Err(e) => log(LogLevel::Error, &format!("Error calculating Hudson FST for haplotype groups 0 vs 1 in region {}: {}", region_desc, e)),
-                }
-            } else {
-                log(LogLevel::Warning, &format!("Skipping Hudson FST for haplotype groups 0 vs 1 in region {}: one or both groups have fewer than 2 haplotypes.", region_desc));
-            }
-        } else {
-             log(LogLevel::Error, &format!("Failed to get haplotype indices for Hudson FST (haplotype groups) in region {}.", region_desc));
-        }
-
-        // B. Hudson FST for CSV-Defined Populations using filtered samples and variants
-        if let Some(csv_populations_map_arc_ref) = &parsed_csv_populations_arc {
-            let csv_populations_map = csv_populations_map_arc_ref.as_ref(); // Dereference Arc
-
-            // Map population names to their actual haplotype lists (VCF index, Side) present in this VCF.
-            let mut population_name_to_haplotypes_map: HashMap<String, Vec<(usize, HaplotypeSide)>> = HashMap::new();
-            for pop_name in csv_populations_map.keys() {
-                let pop_haplotypes = get_haplotype_indices_for_csv_population(pop_name, csv_populations_map, &vcf_sample_id_to_index);
-                if !pop_haplotypes.is_empty() { // Only consider populations with present samples
-                    population_name_to_haplotypes_map.insert(pop_name.clone(), pop_haplotypes);
-                }
-            }
-
-            let mut valid_pop_names: Vec<String> = population_name_to_haplotypes_map.keys().cloned().collect();
-            valid_pop_names.sort(); // Ensures consistent order for generating pairs
-
-            for i in 0..valid_pop_names.len() {
-                for j in (i + 1)..valid_pop_names.len() {
-                    let pop_name_a = &valid_pop_names[i];
-                    let pop_name_b = &valid_pop_names[j];
-
-                    // These unwraps are safe because valid_pop_names comes from the map's keys.
-                    let haplotypes_pop_a = population_name_to_haplotypes_map.get(pop_name_a).unwrap();
-                    let haplotypes_pop_b = population_name_to_haplotypes_map.get(pop_name_b).unwrap();
-
-                    if haplotypes_pop_a.len() >= 2 && haplotypes_pop_b.len() >= 2 {
-                        let pop_a_context_csv = PopulationContext {
-                            id: PopulationId::Named(pop_name_a.clone()),
-                            haplotypes: haplotypes_pop_a.clone(), // Clone Vec for ownership
-                            variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
-                            sample_names: &sample_names,
-                            sequence_length: adjusted_sequence_length,
-                        };
-                        let pop_b_context_csv = PopulationContext {
-                            id: PopulationId::Named(pop_name_b.clone()),
-                            haplotypes: haplotypes_pop_b.clone(), // Clone Vec for ownership
-                            variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
-                            sample_names: &sample_names,
-                            sequence_length: adjusted_sequence_length,
-                        };
-
-                        match calculate_hudson_fst_for_pair(&pop_a_context_csv, &pop_b_context_csv) {
-                            Ok(outcome) => {
-                                local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
-                                    chr: entry.seqname.clone(),
-                                    region_start: entry.interval.start as i64,
-                                    region_end: entry.interval.end as i64,
-                                    outcome,
-                                });
-                            }
-                            Err(e) => log(LogLevel::Error, &format!("Error calculating Hudson FST for CSV populations '{}' vs '{}' in region {}: {}", pop_name_a, pop_name_b, region_desc, e)),
-                        }
-                    } else {
-                         log(LogLevel::Warning, &format!("Skipping Hudson FST for CSV populations '{}' vs '{}' in region {}: one or both groups have fewer than 2 haplotypes.", pop_name_a, pop_name_b, region_desc));
-                    }
-                }
-            }
-        }
-    }
-        
     // Display summary of results
     display_status_box(StatusBox {
         title: format!("Results for {}", region_desc),
         stats: vec![
-            ("Unfiltered θ Group 0".to_string(), format!("{:.6}", w_theta_0_u)),
-            ("Unfiltered θ Group 1".to_string(), format!("{:.6}", w_theta_1_u)),
+            (
+                "Unfiltered θ Group 0".to_string(),
+                format!("{:.6}", w_theta_0_u),
+            ),
+            (
+                "Unfiltered θ Group 1".to_string(),
+                format!("{:.6}", w_theta_1_u),
+            ),
             ("Unfiltered π Group 0".to_string(), format!("{:.6}", pi_0_u)),
             ("Unfiltered π Group 1".to_string(), format!("{:.6}", pi_1_u)),
-            ("Filtered θ Group 0".to_string(), format!("{:.6}", w_theta_0_f)),
-            ("Filtered θ Group 1".to_string(), format!("{:.6}", w_theta_1_f)),
+            (
+                "Filtered θ Group 0".to_string(),
+                format!("{:.6}", w_theta_0_f),
+            ),
+            (
+                "Filtered θ Group 1".to_string(),
+                format!("{:.6}", w_theta_1_f),
+            ),
             ("Filtered π Group 0".to_string(), format!("{:.6}", pi_0_f)),
             ("Filtered π Group 1".to_string(), format!("{:.6}", pi_1_f)),
-            ("Inversion Frequency".to_string(), format!("{:.2}%", inversion_freq_filt * 100.0)),
+            (
+                "Inversion Frequency".to_string(),
+                format!("{:.2}%", inversion_freq_filt * 100.0),
+            ),
         ],
     });
-    
-    finish_step_progress(&format!(
-        "Completed analysis for {}", region_desc
-    ));
+
+    finish_step_progress(&format!("Completed analysis for {}", region_desc));
 
     // Collect per-site diversity records
     log(LogLevel::Info, "Collecting per-site diversity statistics");
@@ -2814,12 +3275,17 @@ fn process_single_config_entry(
     // Stores (1-based position, Overall_Haplotype_FstEstimate_as_f64, Pairwise_0v1_Haplotype_FstEstimate_as_f64).
     let mut per_site_fst_records: Vec<(i64, f64, f64)> = Vec::new();
 
-    if let Some(fst_results_hap_groups) = &fst_results_filtered { // fst_results_hap_groups is &FstWcResults
-        log(LogLevel::Info, &format!(
-            "Collecting per-site FST data for haplotype groups (0 vs 1) for region {}",
-            region_desc
-        ));
-        for site_fst_wc in &fst_results_hap_groups.site_fst { // site_fst_wc is &SiteFstWc
+    if let Some(fst_results_hap_groups) = &fst_results_filtered {
+        // fst_results_hap_groups is &FstWcResults
+        log(
+            LogLevel::Info,
+            &format!(
+                "Collecting per-site FST data for haplotype groups (0 vs 1) for region {}",
+                region_desc
+            ),
+        );
+        for site_fst_wc in &fst_results_hap_groups.site_fst {
+            // site_fst_wc is &SiteFstWc
             let overall_site_hap_fst_val = match site_fst_wc.overall_fst {
                 crate::stats::FstEstimate::Calculable { value, .. } => value, // Extract the value field
                 _ => f64::NAN, // Use NaN for other FstEstimate variants.
@@ -2828,7 +3294,11 @@ fn process_single_config_entry(
                 Some(&crate::stats::FstEstimate::Calculable { value, .. }) => value, // Extract the value field
                 _ => f64::NAN, // Use NaN if the pair is not found or its FstEstimate is not Calculable.
             };
-            per_site_fst_records.push((site_fst_wc.position, overall_site_hap_fst_val, pairwise_0_vs_1_hap_fst_val));
+            per_site_fst_records.push((
+                site_fst_wc.position,
+                overall_site_hap_fst_val,
+                pairwise_0_vs_1_hap_fst_val,
+            ));
         }
     }
 
@@ -2837,7 +3307,7 @@ fn process_single_config_entry(
     // That data is fully contained within `row_data.population_fst_wc_results`
     // and is used directly in `process_config_entries` for detailed per-population-pair FALSTA output.
     // The overall FST for CSV populations is in `row_data.population_overall_fst_wc`.
-    
+
     log(LogLevel::Info, &format!(
         "Collected {} per-site diversity records and {} per-site haplotype FST summary records for {}",
         per_site_diversity_records.len(), per_site_fst_records.len(), region_desc
@@ -2847,7 +3317,7 @@ fn process_single_config_entry(
         row_data,
         per_site_diversity_records,
         per_site_fst_records, // Vec<(i64, FstEstimate, FstEstimate)> containing only haplotype group FSTs
-        local_regional_hudson_outcomes
+        local_regional_hudson_outcomes,
     )))
 }
 
@@ -2960,15 +3430,21 @@ pub fn process_vcf(
     VcfError,
 > {
     set_stage(ProcessingStage::VcfProcessing);
-    log(LogLevel::Info, &format!(
-        "Processing VCF file {} for chr{}:{}-{}", 
-        file.display(), chr, region.start, region.end
-    ));
-    
+    log(
+        LogLevel::Info,
+        &format!(
+            "Processing VCF file {} for chr{}:{}-{}",
+            file.display(),
+            chr,
+            region.start,
+            region.end
+        ),
+    );
+
     // Initialize the VCF reader
     let mut reader = open_vcf_reader(file)?;
     let mut sample_names = Vec::new();
-    
+
     // Get chromosome length from reference
     let chr_length = {
         let fasta_reader = bio::io::fasta::IndexedReader::from_file(&reference_path)
@@ -2981,7 +3457,10 @@ pub fn process_vcf(
         seq_info.len as i64
     };
     // Log without terminal message to reduce spam
-    log(LogLevel::Info, &format!("Chromosome {} length: {}bp", chr, chr_length));
+    log(
+        LogLevel::Info,
+        &format!("Chromosome {} length: {}bp", chr, chr_length),
+    );
 
     // Small vectors to hold variants in batches, limiting memory usage
     let unfiltered_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
@@ -2999,7 +3478,7 @@ pub fn process_vcf(
         let file_size = fs::metadata(file)?.len();
         ProgressBar::new(file_size)
     });
-    
+
     let style = if is_gzipped {
         ProgressStyle::default_spinner()
             .template("{spinner:.bold.green} Reading VCF {elapsed_precise} {msg}")
@@ -3011,12 +3490,15 @@ pub fn process_vcf(
             .expect("Progress bar template error")
             .progress_chars("█▓▒░")
     };
-    
+
     progress_bar.set_style(style);
     // Set to use stdout directly to avoid duplication in multi-threaded environment
     progress_bar.set_draw_target(indicatif::ProgressDrawTarget::stdout());
-    progress_bar.set_message(format!("Reading VCF for chr{}:{}-{}", chr, region.start, region.end));
-        
+    progress_bar.set_message(format!(
+        "Reading VCF for chr{}:{}-{}",
+        chr, region.start, region.end
+    ));
+
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = Arc::clone(&processing_complete);
     let progress_bar_clone = Arc::clone(&progress_bar); // Clone Arc for progress thread
@@ -3253,24 +3735,40 @@ pub fn process_vcf(
         .into_inner();
     let final_names = Arc::try_unwrap(arc_sample_names)
         .map_err(|_| VcfError::Parse("Sample names have multiple owners".to_string()))?;
-        
-    log(LogLevel::Info, &format!(
-        "VCF processing complete for chr{}:{}-{}: {} variants loaded, {} filtered",
-        chr, region.start, region.end, final_unfiltered.len(), final_filtered.len()
-    ));
-    
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "VCF processing complete for chr{}:{}-{}: {} variants loaded, {} filtered",
+            chr,
+            region.start,
+            region.end,
+            final_unfiltered.len(),
+            final_filtered.len()
+        ),
+    );
+
     if chr.contains("X") || chr.contains("x") {
-        log(LogLevel::Info, &format!(
-            "DEBUG X: chrX VCF processing complete with {} unfiltered and {} filtered variants",
-            final_unfiltered.len(), final_filtered.len()
-        ));
+        log(
+            LogLevel::Info,
+            &format!(
+                "DEBUG X: chrX VCF processing complete with {} unfiltered and {} filtered variants",
+                final_unfiltered.len(),
+                final_filtered.len()
+            ),
+        );
     }
-    
-    log(LogLevel::Info, &format!(
-        "VCF statistics: missing data points: {}/{} ({:.2}%)",
-        final_miss.missing_data_points, final_miss.total_data_points,
-        (final_miss.missing_data_points as f64 / final_miss.total_data_points.max(1) as f64) * 100.0
-    ));
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "VCF statistics: missing data points: {}/{} ({:.2}%)",
+            final_miss.missing_data_points,
+            final_miss.total_data_points,
+            (final_miss.missing_data_points as f64 / final_miss.total_data_points.max(1) as f64)
+                * 100.0
+        ),
+    );
 
     Ok((
         final_unfiltered,
@@ -3364,7 +3862,7 @@ fn process_variant(
             start: zero_based_position as usize,
             end: (zero_based_position + 1) as usize,
         };
-        
+
         // Check if position is masked using the ZeroBasedHalfOpen type
         let is_masked = mask_regions_chr.iter().any(|&(start, end)| {
             let mask_interval = ZeroBasedHalfOpen {
@@ -3373,7 +3871,7 @@ fn process_variant(
             };
             position_interval.intersect(&mask_interval).is_some()
         });
-        
+
         if is_masked {
             _filtering_stats._filtered_variants += 1;
             _filtering_stats.filtered_due_to_mask += 1;
