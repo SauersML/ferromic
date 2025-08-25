@@ -439,7 +439,19 @@ def build_outgroups_and_filter(transcripts, regions):
     t0 = time.time()
     from multiprocessing.dummy import Pool as ThreadPool  # threading-based pool avoids pickling overhead for task arguments
     with ThreadPool(processes=num_procs) as pool:
-        parts = pool.starmap(process_axt_chunk, chunks)
+        total = len(chunks)
+        completed = 0
+        bar_width = 40
+        print(f"[AXT parse] |{'-' * bar_width}| 0/{total} (0%)", end='', flush=True)
+        parts = []
+        for res in pool.imap_unordered(lambda args: process_axt_chunk(*args), chunks):
+            parts.append(res)
+            completed += 1
+            filled = int(bar_width * completed // total)
+            bar = "█" * filled + "-" * (bar_width - filled)
+            pct = int(completed * 100 // total)
+            print(f"\r[AXT parse] |{bar}| {completed}/{total} ({pct}%)", end='', flush=True)
+        print()
     print(f"Finished parallel AXT processing in {time.time() - t0:.2f} seconds.")
 
     print("Merging results and writing outgroups (with divergence QC)...")
