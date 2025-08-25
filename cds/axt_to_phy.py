@@ -213,10 +213,10 @@ def find_region_sets():
     """
     Finds available inversion region PHYLIPs by scanning current directory.
     Groups group0/group1 by (chrom, start, end).
-    Validates lengths where possible.
+    Performs header-only length validation for speed and prints a live progress bar.
     Returns list of dicts:
       info: {region_id, chromosome, expected_len, start, end, g0_fname?, g1_fname?}
-      segments: [(start,end)]    # single span
+      segments: [(start,end)]
     """
     print("Scanning for inversion region PHYLIP files...")
     files = glob.glob('inversion_group[01]_*_start*_end*.phy')
@@ -227,14 +227,18 @@ def find_region_sets():
         m = REGION_REGEX.match(name)
         if not m:
             continue
-        chrom = m.group('chrom')  # e.g., '7', 'X'
+        chrom = m.group('chrom')
         start = int(m.group('start'))
         end = int(m.group('end'))
-        grp = m.group('grp')      # '0' or '1'
+        grp = m.group('grp')
         key = (chrom, start, end)
         groups[key][f'group{grp}'] = path
 
     validated = []
+    total = len(groups)
+    processed = 0
+    bar_width = 40
+
     for (chrom, start, end), d in groups.items():
         expected_len = end - start + 1
         region_id = f"inv_{chrom}_{start}_{end}"
@@ -248,21 +252,34 @@ def find_region_sets():
             'g1_fname': d.get('group1'),
         }
 
-        # We prefer to QC against group0 if present
         qc_fname = info['g0_fname'] or info['g1_fname']
         if not qc_fname:
             logger.add("Region Missing File", f"{region_id}: neither group0 nor group1 file present; skipping QC.")
         else:
-            seqs = read_phy_sequences(qc_fname)
-            if not seqs:
-                logger.add("Region Missing File", f"{region_id}: {os.path.basename(qc_fname)} empty or unreadable.")
-            else:
-                lens = set(len(s) for s in seqs)
-                if lens != {expected_len}:
-                    logger.add("Region Input Length Mismatch",
-                               f"{region_id}: lengths {lens} != expected ({expected_len}).")
+            try:
+                with open(qc_fname, 'r') as f:
+                    first = f.readline().strip()
+                mlen = re.match(r'\s*\d+\s+(\d+)\s*$', first)
+                if not mlen:
+                    logger.add("Region QC Warning", f"{region_id}: could not parse header length in {os.path.basename(qc_fname)}.")
+                else:
+                    header_len = int(mlen.group(1))
+                    if header_len != expected_len:
+                        logger.add("Region Input Length Mismatch", f"{region_id}: header length {header_len} != expected ({expected_len}).")
+            except Exception:
+                logger.add("Region QC Warning", f"{region_id}: failed to read header from {os.path.basename(qc_fname)}.")
 
         validated.append({'info': info, 'segments': [(start, end)]})
+
+        processed += 1
+        if total > 0:
+            filled = int(bar_width * processed // total)
+            bar = "█" * filled + "-" * (bar_width - filled)
+            pct = int((processed * 100) // total)
+            print(f"\r[Region QC] |{bar}| {processed}/{total} ({pct}%)", end='', flush=True)
+
+    if total > 0:
+        print()
 
     print(f"Found {len(validated)} candidate regions.")
     return validated
@@ -291,7 +308,7 @@ def build_bin_index(transcripts, regions):
     Returns dict: index[chrom][bin_id] -> list of records
     Also returns: info_maps for lookups
     """
-    index = defaultdict(lambda: defaultdict(list))  # chrom -> bin -> [records]
+    index = {}  # chrom -> bin -> [records]; plain dicts ensure picklability with multiprocessing
     tx_info_map = {}
     rg_info_map = {}
 
@@ -304,8 +321,9 @@ def build_bin_index(transcripts, regions):
         # precompute offsets across exon segments
         offset = 0
         for s, e in t['segments']:
+            chrom_bins = index.setdefault(chrom, {})
             for b in _bin_range(s, e, BIN_SIZE):
-                index[chrom][b].append(('TX', t_id, s, e, offset))
+                chrom_bins.setdefault(b, []).append(('TX', t_id, s, e, offset))
             offset += (e - s + 1)
 
     # Regions
@@ -315,10 +333,12 @@ def build_bin_index(transcripts, regions):
         r_id = info['region_id']
         rg_info_map[r_id] = info
         (s, e) = r['segments'][0]
+        chrom_bins = index.setdefault(chrom, {})
         for b in _bin_range(s, e, BIN_SIZE):
-            index[chrom][b].append(('RG', r_id, s, e, 0))
+            chrom_bins.setdefault(b, []).append(('RG', r_id, s, e, 0))
 
     return index, tx_info_map, rg_info_map
+
 
 # =========================
 # --- AXT Processing -------
