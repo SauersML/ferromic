@@ -437,7 +437,8 @@ def build_outgroups_and_filter(transcripts, regions):
     chunks[-1] = (chunks[-1][0], file_size, bin_index)
 
     t0 = time.time()
-    with multiprocessing.Pool(processes=num_procs) as pool:
+    from multiprocessing.dummy import Pool as ThreadPool  # threading-based pool avoids pickling overhead for task arguments
+    with ThreadPool(processes=num_procs) as pool:
         parts = pool.starmap(process_axt_chunk, chunks)
     print(f"Finished parallel AXT processing in {time.time() - t0:.2f} seconds.")
 
