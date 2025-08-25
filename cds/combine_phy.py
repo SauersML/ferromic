@@ -13,7 +13,7 @@ def parse_specific_phy_file(filename, group_type):
                           which determines the parsing rules.
 
     Returns:
-        list: A list of (taxon_name, sequence) tuples, or None if a fatal error occurs.
+        list: A list of (taxon_name, sequence, group_type) tuples, or None if a fatal error occurs.
     """
     sequences = []
     try:
@@ -36,7 +36,7 @@ def parse_specific_phy_file(filename, group_type):
             int(first_line_parts[1])
             start_index = 1  # It's a header, so we start processing from the next line.
         except ValueError:
-            pass # Not a header, process from the first line.
+            pass  # Not a header, process from the first line.
 
     # Apply parsing rules based on the file's group type
     for i, line in enumerate(lines[start_index:], start=start_index + 1):
@@ -55,7 +55,7 @@ def parse_specific_phy_file(filename, group_type):
                 seq = line[split_pos + 2:]
             else:
                 print(f"  [!] FAILURE: In '{filename}' (line {i}), could not find '_L' or '_R' delimiter. Line: '{line[:80]}...'", file=sys.stderr)
-                return None # This is a fatal error for the file.
+                return None  # This is a fatal error for the file.
 
         elif group_type == 'outgroup':
             # Rule: Split on the first whitespace.
@@ -64,8 +64,8 @@ def parse_specific_phy_file(filename, group_type):
                 taxon_name, seq = parts
             else:
                 print(f"  [!] FAILURE: In '{filename}' (line {i}), could not split line into taxon and sequence. Line: '{line[:80]}...'", file=sys.stderr)
-                return None # This is a fatal error for the file.
-        
+                return None  # This is a fatal error for the file.
+
         if taxon_name and seq:
             # Clean any whitespace from within the sequence string itself
             cleaned_seq = ''.join(seq.split())
@@ -78,120 +78,165 @@ def parse_specific_phy_file(filename, group_type):
 
     return sequences
 
+def _validate_and_get_length(sequences, require_divisible_by_three=True, context=""):
+    """
+    Validate that all sequences are the same length and, optionally, divisible by 3.
+    Returns the common length if valid, else None.
+    """
+    if not sequences:
+        print(f"  [!] FAILURE: No sequences found for {context}.", file=sys.stderr)
+        return None
+
+    expected_length = None
+    for taxon, seq, _ in sequences:
+        if expected_length is None:
+            if require_divisible_by_three and (len(seq) % 3 != 0):
+                print(f"  [!] FAILURE: Taxon '{taxon}' has length {len(seq)}, which is not divisible by 3. Skipping.", file=sys.stderr)
+                return None
+            expected_length = len(seq)
+        else:
+            if len(seq) != expected_length:
+                print(f"  [!] FAILURE: Taxon '{taxon}' has length {len(seq)}, but expected {expected_length}. Skipping.", file=sys.stderr)
+                return None
+    return expected_length
+
+def _write_combined_output(output_filename, sequences, alignment_length):
+    try:
+        with open(output_filename, 'w') as f_out:
+            # Write the header with the number of sequences and the CORRECT sequence length.
+            f_out.write(f"{len(sequences)} {alignment_length}\n")
+
+            # Iterate through all sequences, now including the group_type
+            for taxon, seq, group_type in sequences:
+                final_taxon_name = taxon
+
+                # Prepend 0 for direct (group0) and 1 for inverted (group1)
+                if group_type == 'group0':
+                    final_taxon_name = f"0{taxon}"
+                elif group_type == 'group1':
+                    final_taxon_name = f"1{taxon}"
+
+                # Write with the modified taxon name and two spaces for separation
+                f_out.write(f"{final_taxon_name}  {seq}\n")
+
+        print(f"  -> SUCCESS: Created '{output_filename}'")
+        return True
+    except IOError as e:
+        print(f"  [!] FATAL: Could not write to output file '{output_filename}': {e}", file=sys.stderr)
+        return False
+
 def find_and_combine_phy_files():
     """
-    Finds and processes trios of .phy files, providing detailed logs.
-    It identifies file trios (group0, group1, outgroup) by a common identifier,
-    parses them, validates sequence length consistency, and combines them into a
-    single new .phy file with a correct header.
+    Finds and processes .phy files for:
+      1) Gene trios: (group0, group1, outgroup) -> combined_<gene>_<ENST>_<coords>.phy
+      2) Overall region pairs: (inversion_group0, inversion_group1) -> combined_inversion_<chr>_start<start>_end<end>.phy
+
+    For gene trios, the sequences must all have identical lengths and be divisible by 3.
+    For region pairs, the sequences must all have identical lengths (no multiple-of-3 requirement).
     """
-    # Regex to extract key parts from filenames, handling the optional ENSG ID.
-    file_pattern = re.compile(
+    # Regex to extract key parts from filenames, handling the optional ENSG ID. (Gene files)
+    pattern_gene = re.compile(
         r"^(group0|group1|outgroup)_([A-Z0-9\._-]+?)_(?:ENSG[0-9\.]+_)?(ENST[0-9\.]+)_(chr.+)\.phy$"
     )
+    # Regex for overall region (inversion) files: inversion_group{0|1}_{CHR}_start{S}_end{E}.phy
+    pattern_region = re.compile(
+        r"^inversion_(group0|group1)_([A-Za-z0-9]+)_start(\d+)_end(\d+)\.phy$"
+    )
 
-    file_groups = defaultdict(dict)
-    
-    # Group files by a common identifier derived from the filename
+    gene_groups = defaultdict(dict)     # identifier -> {'group0': file, 'group1': file, 'outgroup': file}
+    region_groups = defaultdict(dict)   # identifier -> {'group0': file, 'group1': file}
+
+    # Discover files and group by identifier
     for filename in os.listdir('.'):
-        match = file_pattern.match(filename)
-        if match:
-            group_type, gene_name, enst_id, coords = match.groups()
+        m_gene = pattern_gene.match(filename)
+        if m_gene:
+            group_type, gene_name, enst_id, coords = m_gene.groups()
             identifier = f"{gene_name}_{enst_id}_{coords}"
-            file_groups[identifier][group_type] = filename
-            
-    if not file_groups:
-        print("No files matching the required naming pattern (e.g., group0_...) were found.", file=sys.stderr)
+            gene_groups[identifier][group_type] = filename
+            continue
+
+        m_region = pattern_region.match(filename)
+        if m_region:
+            group_type, chrom, start, end = m_region.groups()
+            identifier = f"inversion_{chrom}_start{start}_end{end}"
+            region_groups[identifier][group_type] = filename
+            continue
+
+    if not gene_groups and not region_groups:
+        print("No files matching gene (group0_|group1_|outgroup_) or region (inversion_group0_|inversion_group1_) patterns were found.", file=sys.stderr)
         return
 
-    print(f"Found {len(file_groups)} unique identifiers. Now checking for complete trios...")
-    
+    print(f"Found {len(gene_groups)} gene identifiers and {len(region_groups)} region identifiers.")
+    print("Now checking for complete sets (trios for genes, pairs for regions)...")
+
     trios_processed_count = 0
-    # Sort for deterministic order
-    for identifier, files_dict in sorted(file_groups.items()):
-        # A complete trio must have all three group types.
+    pairs_processed_count = 0
+
+    # ---- Process GENE TRIOS ----
+    for identifier, files_dict in sorted(gene_groups.items()):
         if not ('group0' in files_dict and 'group1' in files_dict and 'outgroup' in files_dict):
             continue
 
-        print(f"\n--- Checking Trio: {identifier} ---")
-        is_valid_trio = True
-        all_sequences_for_trio = []
-        expected_dna_length = None
+        print(f"\n--- Checking Gene Trio: {identifier} ---")
+        is_valid = True
+        collected = []
 
-        # Step 1: Parse all three files and collect sequences.
         for group_type in ['group0', 'group1', 'outgroup']:
             filename = files_dict[group_type]
             print(f"  - Parsing '{filename}' with '{group_type}' rules...")
-            sequences_from_file = parse_specific_phy_file(filename, group_type)
-            
-            if sequences_from_file is None:
-                is_valid_trio = False
-                break # A fatal error occurred during parsing.
-            
-            all_sequences_for_trio.extend(sequences_from_file)
-        
-        if not is_valid_trio:
+            seqs = parse_specific_phy_file(filename, group_type)
+            if seqs is None:
+                is_valid = False
+                break
+            collected.extend(seqs)
+
+        if not is_valid:
             print(f"   Skipping trio for '{identifier}' due to parsing failure.")
             continue
 
-        # Step 2: Validate the collected sequences for length and consistency.
-        print("  - All files parsed. Validating sequence consistency...")
-        if not all_sequences_for_trio:
-            print(f"  [!] FAILURE: No sequences found for trio '{identifier}'. Skipping.", file=sys.stderr)
-            continue
-            
-        for taxon, seq, _ in all_sequences_for_trio:
-            # The first valid sequence sets the standard length.
-            if expected_dna_length is None:
-                if len(seq) % 3 != 0:
-                    print(f"  [!] FAILURE: Taxon '{taxon}' has length {len(seq)}, which is not divisible by 3. Skipping trio.", file=sys.stderr)
-                    is_valid_trio = False
-                    break
-                expected_dna_length = len(seq)
-            # All subsequent sequences must match the standard length.
-            elif len(seq) != expected_dna_length:
-                print(f"  [!] FAILURE: Taxon '{taxon}' has length {len(seq)}, but expected {expected_dna_length}. Skipping trio.", file=sys.stderr)
-                is_valid_trio = False
-                break
-        
-        if not is_valid_trio:
+        print("  - All files parsed. Validating sequence consistency (and /3 for coding)...")
+        alignment_length = _validate_and_get_length(collected, require_divisible_by_three=True, context=f"trio '{identifier}'")
+        if alignment_length is None:
             continue
 
-        # Step 3: If all checks pass, write the combined file with the CORRECT header.
-        print("  - Validation successful.")
-        num_sequences = len(all_sequences_for_trio)
-        
-        # The alignment length in the header must match the actual length of the 
-        # sequences being written. Since we are writing the full DNA sequences,
-        # we must use `expected_dna_length`.
-        alignment_length = expected_dna_length
         output_filename = f"combined_{identifier}.phy"
-        
-        try:
-            with open(output_filename, 'w') as f_out:
-                # Write the header with the number of sequences and the CORRECT sequence length.
-                f_out.write(f"{num_sequences} {alignment_length}\n")
-                
-                # Iterate through all sequences, now including the group_type
-                for taxon, seq, group_type in all_sequences_for_trio:
-                    final_taxon_name = taxon
-                    
-                    # Prepend 0 for direct (group0) and 1 for inverted (group1)
-                    if group_type == 'group0':
-                        final_taxon_name = f"0{taxon}"
-                    elif group_type == 'group1':
-                        final_taxon_name = f"1{taxon}"
-                    
-                    # Write with the modified taxon name and two spaces for separation
-                    f_out.write(f"{final_taxon_name}  {seq}\n")
-                    
-            print(f"  -> SUCCESS: Created '{output_filename}'")
+        if _write_combined_output(output_filename, collected, alignment_length):
             trios_processed_count += 1
-        except IOError as e:
-            print(f"  [!] FATAL: Could not write to output file '{output_filename}': {e}", file=sys.stderr)
-    
+
+    # ---- Process REGION PAIRS ----
+    for identifier, files_dict in sorted(region_groups.items()):
+        if not ('group0' in files_dict and 'group1' in files_dict):
+            continue
+
+        print(f"\n--- Checking Region Pair: {identifier} ---")
+        is_valid = True
+        collected = []
+
+        for group_type in ['group0', 'group1']:
+            filename = files_dict[group_type]
+            print(f"  - Parsing '{filename}' with '{group_type}' rules...")
+            seqs = parse_specific_phy_file(filename, group_type)
+            if seqs is None:
+                is_valid = False
+                break
+            collected.extend(seqs)
+
+        if not is_valid:
+            print(f"   Skipping region pair for '{identifier}' due to parsing failure.")
+            continue
+
+        print("  - All files parsed. Validating sequence consistency...")
+        alignment_length = _validate_and_get_length(collected, require_divisible_by_three=False, context=f"region pair '{identifier}'")
+        if alignment_length is None:
+            continue
+
+        output_filename = f"combined_{identifier}.phy"
+        if _write_combined_output(output_filename, collected, alignment_length):
+            pairs_processed_count += 1
+
+    total = trios_processed_count + pairs_processed_count
     print("-" * 20)
-    print(f"Operation complete. Successfully created {trios_processed_count} combined .phy files.")
+    print(f"Operation complete. Successfully created {trios_processed_count} combined gene .phy files and {pairs_processed_count} combined region .phy files (total {total}).")
 
 if __name__ == "__main__":
     find_and_combine_phy_files()
