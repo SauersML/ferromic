@@ -167,6 +167,21 @@ def find_and_combine_phy_files():
         return
 
     print(f"Found {len(gene_groups)} gene identifiers and {len(region_groups)} region identifiers.")
+
+    # ---------- PRE-RUN SUMMARY (exact-match only) ----------
+    gene_pair_ids = [i for i,d in gene_groups.items() if ('group0' in d and 'group1' in d)]
+    gene_trio_ids = [i for i in gene_pair_ids if 'outgroup' in gene_groups[i]]
+
+    gene_cached = sum(os.path.exists(f"combined_{i}.phy") for i in gene_trio_ids)
+    gene_to_make = len(gene_trio_ids) - gene_cached
+
+    region_pair_ids = [i for i,d in region_groups.items() if ('group0' in d and 'group1' in d)]
+    region_cached = sum(os.path.exists(f"combined_{i}.phy") for i in region_pair_ids)
+    region_to_make = len(region_pair_ids) - region_cached
+
+    print("=== PRE-RUN SUMMARY ===")
+    print(f"Genes: pairs={len(gene_pair_ids)}, trios_with_outgroup={len(gene_trio_ids)}, cached_skip={gene_cached}, will_make_now={gene_to_make}")
+    print(f"Regions: pairs={len(region_pair_ids)}, cached_skip={region_cached}, will_make_now={region_to_make}")
     print("Now checking for complete sets (trios for genes, pairs for regions)...")
 
     trios_processed_count = 0
@@ -175,6 +190,11 @@ def find_and_combine_phy_files():
     # ---- Process GENE TRIOS ----
     for identifier, files_dict in sorted(gene_groups.items()):
         if not ('group0' in files_dict and 'group1' in files_dict and 'outgroup' in files_dict):
+            continue
+
+        output_filename = f"combined_{identifier}.phy"
+        if os.path.exists(output_filename):
+            print(f"  - SKIP (cached): {output_filename}")
             continue
 
         print(f"\n--- Checking Gene Trio: {identifier} ---")
@@ -199,13 +219,17 @@ def find_and_combine_phy_files():
         if alignment_length is None:
             continue
 
-        output_filename = f"combined_{identifier}.phy"
         if _write_combined_output(output_filename, collected, alignment_length):
             trios_processed_count += 1
 
     # ---- Process REGION PAIRS ----
     for identifier, files_dict in sorted(region_groups.items()):
         if not ('group0' in files_dict and 'group1' in files_dict):
+            continue
+
+        output_filename = f"combined_{identifier}.phy"
+        if os.path.exists(output_filename):
+            print(f"  - SKIP (cached): {output_filename}")
             continue
 
         print(f"\n--- Checking Region Pair: {identifier} ---")
@@ -245,7 +269,6 @@ def find_and_combine_phy_files():
         if alignment_length is None:
             continue
 
-        output_filename = f"combined_{identifier}.phy"
         if _write_combined_output(output_filename, collected, alignment_length):
             pairs_processed_count += 1
 
