@@ -46,7 +46,7 @@ logging.basicConfig(
 
 # --- Paths to Executables ---
 # Assumes executables are in specific locations relative to the script's runtime directory.
-IQTREE_PATH = os.path.abspath('./iqtree-3.0.1-Linux/bin/iqtree3')
+IQTREE_PATH = os.path.abspath('../iqtree-3.0.1-Linux/bin/iqtree3')
 PAML_PATH = os.path.abspath('../paml/bin/codeml')
 
 # --- Analysis Parameters ---
