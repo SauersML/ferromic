@@ -15,7 +15,7 @@ import re
 from tqdm.auto import tqdm
 from sklearn.model_selection import StratifiedKFold, GridSearchCV, StratifiedGroupKFold
 from sklearn.metrics import mean_squared_error
-from patch_pls.py import PLSRegression
+from patch_pls import PLSRegression
 from sklearn.pipeline import Pipeline
 from sklearn.dummy import DummyRegressor
 from sklearn.utils.class_weight import compute_sample_weight
