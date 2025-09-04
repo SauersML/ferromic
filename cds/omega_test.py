@@ -633,6 +633,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 
     try:
         qc_passed, qc_message = perform_qc(gene_info['path'])
+        logging.info(f"[{gene_name}|{region_label}] QC: {qc_message}")
         if not qc_passed:
             result.update({'status': 'qc_fail', 'reason': qc_message})
             return result
@@ -642,17 +643,21 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         region_taxa = Tree(region_tree_file, format=1).get_leaf_names()
         gene_taxa = read_taxa_from_phy(gene_info['path'])
         pruned_tree = os.path.join(temp_dir, f"{gene_name}_pruned.tree")
+        logging.info(f"[{gene_name}|{region_label}] Pruning region tree")
         prune_region_tree(region_tree_file, gene_taxa, pruned_tree)
-        kept_taxa = read_taxa_from_phy(pruned_tree)
-        dropped = set(region_taxa) - set(kept_taxa)
-        logging.info(f"[{gene_name}|{region_label}] Pruned tree to {len(kept_taxa)} taxa; dropped {','.join(sorted(dropped)) if dropped else 'none'}")
-
         t = Tree(pruned_tree, format=1)
+        kept_taxa = t.get_leaf_names()
+        dropped = set(region_taxa) - set(kept_taxa)
+        logging.info(
+            f"[{gene_name}|{region_label}] Pruned tree to {len(kept_taxa)} taxa; dropped {','.join(sorted(dropped)) if dropped else 'none'}"
+        )
+
         chimp_name = next((n for n in t.get_leaf_names() if 'pantro' in n.lower() or 'pan_troglodytes' in n.lower()), None)
         if len(t.get_leaf_names()) < 4:
             result.update({'status': 'uninformative_topology', 'reason': 'Fewer than four taxa after pruning'})
             return result
 
+        logging.info(f"[{gene_name}|{region_label}] Preparing PAML tree files")
         h1_tree, h0_tree, informative, status_tree = create_paml_tree_files(pruned_tree, temp_dir, gene_name)
         if not informative:
             result.update({'status': 'uninformative_topology', 'reason': 'No pure internal branches found for both direct and inverted groups.'})
@@ -662,6 +667,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 
         h1_ctl = os.path.join(temp_dir, f"{gene_name}_H1.ctl")
         h1_out = os.path.join(temp_dir, f"{gene_name}_H1.out")
+        logging.info(f"[{gene_name}|{region_label}] Running codeml H1 model")
         generate_paml_ctl(h1_ctl, phy_abs, h1_tree, h1_out, model_num=2)
         run_command([PAML_PATH, h1_ctl], temp_dir)
         lnl_h1 = parse_paml_lnl(h1_out)
@@ -674,6 +680,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 
         h0_ctl = os.path.join(temp_dir, f"{gene_name}_H0.ctl")
         h0_out = os.path.join(temp_dir, f"{gene_name}_H0.out")
+        logging.info(f"[{gene_name}|{region_label}] Running codeml H0 model")
         generate_paml_ctl(h0_ctl, phy_abs, h0_tree, h0_out, model_num=2)
         run_command([PAML_PATH, h0_ctl], temp_dir)
         lnl_h0 = parse_paml_lnl(h0_out)
@@ -685,6 +692,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 
         lrt_stat = 2 * (lnl_h1 - lnl_h0)
         p_value = chi2.sf(lrt_stat, df=1)
+        logging.info(f"[{gene_name}|{region_label}] LRT={lrt_stat:.3f} p={p_value:.3g}")
 
         result.update({
             'status': 'success', 'p_value': p_value, 'lrt_stat': lrt_stat,
@@ -724,18 +732,24 @@ def main():
         logging.critical(f"FATAL: PAML codeml not found or not executable at '{PAML_PATH}'")
         sys.exit(1)
 
+    logging.info("Checking external tool versions...")
     iqtree_ver = subprocess.run([IQTREE_PATH, '--version'], capture_output=True, text=True, check=True).stdout.strip().split('\n')[0]
-    paml_ver = subprocess.run([PAML_PATH], capture_output=True, text=True, check=False).stdout.strip().split('\n')[0]
     logging.info(f"IQ-TREE version: {iqtree_ver}")
-    logging.info(f"PAML version: {paml_ver}")
+    logging.info(f"PAML executable: {PAML_PATH}")
     logging.info(f"CPUs: {CPU_COUNT} | REGION_WORKERS={REGION_WORKERS} | PAML_WORKERS={PAML_WORKERS}")
+    if PAML_WORKERS > CPU_COUNT:
+        logging.warning(
+            f"PAML_WORKERS ({PAML_WORKERS}) exceeds available CPUs ({CPU_COUNT}); performance may suffer"
+        )
 
     os.makedirs(FIGURE_DIR, exist_ok=True)
     os.makedirs(ANNOTATED_FIGURE_DIR, exist_ok=True)
     os.makedirs(REGION_TREE_DIR, exist_ok=True)
 
+    logging.info("Searching for alignment files...")
     region_files = glob.glob('combined_inversion_*.phy')
     gene_files = [f for f in glob.glob('combined_*.phy') if 'inversion' not in os.path.basename(f)]
+    logging.info(f"Found {len(region_files)} region alignments and {len(gene_files)} gene alignments")
 
     if not region_files:
         logging.critical("FATAL: No region alignment files found.")
@@ -744,10 +758,17 @@ def main():
         logging.critical("FATAL: No gene alignment files found.")
         sys.exit(1)
 
+    logging.info("Loading gene metadata...")
     metadata = load_gene_metadata()
+    logging.info(f"Loaded metadata for {len(metadata)} genes")
+
+    logging.info("Parsing region and gene filenames...")
     region_infos = [parse_region_filename(f) for f in region_files]
     gene_infos = [parse_gene_filename(f, metadata) for f in gene_files]
+    logging.info("Mapping genes to overlapping regions...")
     region_gene_map = build_region_gene_map(region_infos, gene_infos)
+    for label, genes in region_gene_map.items():
+        logging.info(f"Region {label} overlaps {len(genes)} genes")
 
     # Build region trees in parallel
     logging.info(f"Running IQ-TREE on {len(region_infos)} regions with {REGION_WORKERS} workers")
@@ -756,7 +777,13 @@ def main():
         for res in tqdm(pool.imap_unordered(region_worker, region_infos), total=len(region_infos)):
             region_results.append(res)
 
-    region_tree_map = {label: tree for label, tree, reason in region_results if tree}
+    region_tree_map = {}
+    for label, tree, reason in region_results:
+        if tree:
+            region_tree_map[label] = tree
+        else:
+            logging.warning(f"Region {label} skipped: {reason}")
+    logging.info(f"Built trees for {len(region_tree_map)}/{len(region_infos)} regions")
 
     all_results = []
     tasks = []
@@ -770,11 +797,13 @@ def main():
             return codeml_worker(*args)
         status_counts = {}
         with multiprocessing.Pool(processes=PAML_WORKERS, maxtasksperchild=1) as pool:
-            for res in tqdm(pool.imap_unordered(_worker, tasks), total=len(tasks)):
+            for res in tqdm(pool.imap_unordered(_worker, tasks, chunksize=5), total=len(tasks)):
                 all_results.append(res)
                 status_counts[res['status']] = status_counts.get(res['status'], 0) + 1
                 done = sum(status_counts.values())
                 logging.info(f"Completed {done}/{len(tasks)}: {res['gene']} in {res['region']} -> {res['status']}")
+    else:
+        logging.warning("No gene×region tasks to run; exiting early")
 
     results_df = pd.DataFrame(all_results)
 
