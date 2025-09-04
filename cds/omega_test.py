@@ -348,9 +348,12 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
     h1_newick = t_h1.write(format=1, features=["paml_mark"])
     # The regex cleans up the ete3 output to be PAML-compatible.
     h1_paml_str = re.sub(r"\[&&NHX:paml_mark=(#\d+)\]", r" \1", h1_newick)
+    if (" #1" not in h1_paml_str) and (" #2" not in h1_paml_str):
+        logging.warning(f"[{gene_name}] H1 tree has no labeled branches; treating as uninformative.")
+        return None, None, False, t
     h1_tree_path = os.path.join(work_dir, f"{gene_name}_H1.tree")
     with open(h1_tree_path, 'w') as f:
-        f.write(f"{len(t_h1)} 1\n{h1_paml_str}")
+        f.write("1\n" + h1_paml_str + "\n")
 
 
     # Step 4: Create H0 (Null Model) Tree.
@@ -365,7 +368,7 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
     h0_paml_str = re.sub(r"\[&&NHX:paml_mark=(#1)\]", r" \1", h0_newick)
     h0_tree_path = os.path.join(work_dir, f"{gene_name}_H0.tree")
     with open(h0_tree_path, 'w') as f:
-        f.write(f"{len(t_h0)} 1\n{h0_paml_str}")
+        f.write("1\n" + h0_paml_str + "\n")
 
     # Return the tree object 't' which now has the 'group_status' features attached.
     return h1_tree_path, h0_tree_path, analysis_is_informative, t
@@ -474,11 +477,13 @@ def parse_region_filename(path):
 
 
 def load_gene_metadata(tsv_path='phy_metadata.tsv'):
-    """Load gene coordinate metadata from a TSV file."""
+    """Load gene coordinate metadata from a TSV file robustly."""
     if not os.path.exists(tsv_path):
         raise FileNotFoundError(
             "Metadata file 'phy_metadata.tsv' not found; cannot map genes to regions.")
-    df = pd.read_csv(tsv_path, sep='\t')
+
+    # Read as strings so we can normalise and coerce ourselves
+    df = pd.read_csv(tsv_path, sep='\t', dtype=str)
 
     # Map possible column aliases to canonical names
     aliases = {
@@ -496,18 +501,67 @@ def load_gene_metadata(tsv_path='phy_metadata.tsv'):
                 break
     missing = [c for c in aliases if c not in col_map]
     if missing:
-        raise KeyError(f"Metadata file missing columns {missing}. Available: {list(df.columns)}")
+        raise KeyError(
+            f"Metadata file missing columns {missing}. Available: {list(df.columns)}")
+
+    # Normalise chromosome strings
+    def _norm_chr(x):
+        if x is None or pd.isna(x):
+            return None
+        s = str(x).strip()
+        s = s.replace('Chr', 'chr').replace('CHR', 'chr')
+        if s in {'M', 'MT', 'Mt', 'chrMT', 'chrMt', 'MT_chr'}:
+            return 'chrM'
+        if not s.startswith('chr'):
+            s = 'chr' + s.lstrip('chr')
+        return s
+
+    df['_gene'] = df[col_map['gene']].astype(str)
+    df['_enst'] = df[col_map['enst']].astype(str)
+    df['_chr'] = df[col_map['chr']].apply(_norm_chr)
+    df['_start'] = pd.to_numeric(df[col_map['start']], errors='coerce')
+    df['_end'] = pd.to_numeric(df[col_map['end']], errors='coerce')
+
+    # Drop rows with missing critical values
+    before = len(df)
+    df = df.dropna(subset=['_gene', '_enst', '_chr', '_start', '_end'])
+    dropped_missing = before - len(df)
+    if dropped_missing:
+        logging.warning(
+            f"Metadata: dropped {dropped_missing} rows with missing gene/enst/chr/start/end.")
+
+    # Swap start/end if reversed
+    flipped = (df['_start'] > df['_end']).sum()
+    if flipped:
+        logging.warning(
+            f"Metadata: found {flipped} rows with start > end; swapping.")
+        s = df['_start'].copy()
+        df.loc[df['_start'] > df['_end'], '_start'] = df.loc[df['_start'] > df['_end'], '_end']
+        df.loc[df['_start'] > df['_end'], '_end'] = s[df['_start'] > df['_end']]
+
+    # Collapse duplicates keeping widest span
+    df['_width'] = (df['_end'] - df['_start']).abs()
+    df = df.sort_values(['_gene', '_enst', '_width'], ascending=[True, True, False])
+    dupes = df.duplicated(subset=['_gene', '_enst']).sum()
+    if dupes:
+        logging.info(
+            f"Metadata: collapsing {dupes} duplicate (gene,enst) rows; keeping widest span.")
+    df = df.drop_duplicates(subset=['_gene', '_enst'], keep='first')
+
+    # Final cast to ints
+    df['_start'] = df['_start'].round().astype(int)
+    df['_end'] = df['_end'].round().astype(int)
 
     meta = {}
     for _, row in df.iterrows():
-        gene = row[col_map['gene']]
-        enst = row[col_map['enst']]
-        chrom = str(row[col_map['chr']])
-        if not chrom.startswith('chr'):
-            chrom = 'chr' + chrom.lstrip('chr')
-        start = int(row[col_map['start']])
-        end = int(row[col_map['end']])
-        meta[(gene, enst)] = {'chrom': chrom, 'start': start, 'end': end}
+        meta[(row['_gene'], row['_enst'])] = {
+            'chrom': row['_chr'],
+            'start': int(row['_start']),
+            'end': int(row['_end']),
+        }
+
+    logging.info(
+        f"Loaded metadata for {len(meta)} (gene,enst) pairs after cleaning.")
     return meta
 
 
@@ -642,9 +696,14 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 
         region_taxa = Tree(region_tree_file, format=1).get_leaf_names()
         gene_taxa = read_taxa_from_phy(gene_info['path'])
+        keep = [taxon for taxon in gene_taxa if taxon in set(region_taxa)]
+        if len(keep) < 4:
+            result.update({'status': 'uninformative_topology',
+                           'reason': f'Fewer than four shared taxa (n={len(keep)})'})
+            return result
         pruned_tree = os.path.join(temp_dir, f"{gene_name}_pruned.tree")
         logging.info(f"[{gene_name}|{region_label}] Pruning region tree")
-        prune_region_tree(region_tree_file, gene_taxa, pruned_tree)
+        prune_region_tree(region_tree_file, keep, pruned_tree)
         t = Tree(pruned_tree, format=1)
         kept_taxa = t.get_leaf_names()
         dropped = set(region_taxa) - set(kept_taxa)
@@ -763,8 +822,27 @@ def main():
     logging.info(f"Loaded metadata for {len(metadata)} genes")
 
     logging.info("Parsing region and gene filenames...")
-    region_infos = [parse_region_filename(f) for f in region_files]
-    gene_infos = [parse_gene_filename(f, metadata) for f in gene_files]
+    region_infos, bad_regions = [], []
+    for f in region_files:
+        try:
+            region_infos.append(parse_region_filename(f))
+        except Exception as e:
+            bad_regions.append((f, str(e)))
+    if bad_regions:
+        logging.warning(
+            f"Skipping {len(bad_regions)} region files with bad names: " +
+            "; ".join(os.path.basename(b) for b, _ in bad_regions))
+
+    gene_infos, bad_genes = [], []
+    for f in gene_files:
+        try:
+            gene_infos.append(parse_gene_filename(f, metadata))
+        except Exception as e:
+            bad_genes.append((f, str(e)))
+    if bad_genes:
+        logging.warning(
+            f"Skipping {len(bad_genes)} gene files with missing/ambiguous coords or bad names. "
+            f"Example: {os.path.basename(bad_genes[0][0])} -> {bad_genes[0][1]}")
     logging.info("Mapping genes to overlapping regions...")
     region_gene_map = build_region_gene_map(region_infos, gene_infos)
     for label, genes in region_gene_map.items():
