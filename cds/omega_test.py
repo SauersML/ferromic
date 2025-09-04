@@ -63,6 +63,12 @@ POP_COLORS = {
 FIGURE_DIR = "tree_figures"
 ANNOTATED_FIGURE_DIR = "annotated_tree_figures"
 RESULTS_TSV = f"full_paml_results_{datetime.now().strftime('%Y-%m-%d')}.tsv"
+REGION_TREE_DIR = "region_trees"
+
+# Worker caps (override via env vars)
+CPU_COUNT = os.cpu_count() or 1
+REGION_WORKERS = int(os.environ.get("REGION_WORKERS", max(1, min(CPU_COUNT // 2, 8))))
+PAML_WORKERS = int(os.environ.get("PAML_WORKERS", min(CPU_COUNT, 32)))
 
 # ==============================================================================
 # === GENERIC HELPER FUNCTIONS (UNCHANGED CORE LOGIC) ==========================
@@ -165,7 +171,7 @@ def _tree_layout(node):
         nstyle = NodeStyle(shape="circle", size=3, fgcolor="#CCCCCC")
         node.set_style(nstyle)
 
-def generate_tree_figure(tree_file, gene_name):
+def generate_tree_figure(tree_file, label):
     """Creates a publication-quality phylogenetic tree figure using ete3."""
     t = Tree(tree_file, format=1)
     ts = TreeStyle()
@@ -173,7 +179,7 @@ def generate_tree_figure(tree_file, gene_name):
     ts.show_leaf_name = False
     ts.show_scale = False
     ts.branch_vertical_margin = 8
-    ts.title.add_face(TextFace(f"Phylogeny of {gene_name}", fsize=16, ftype="Arial"), column=0)
+    ts.title.add_face(TextFace(f"Phylogeny of Region {label}", fsize=16, ftype="Arial"), column=0)
     
     # Legend
     ts.legend.add_face(TextFace("Haplotype Status", fsize=10, ftype="Arial", fstyle="Bold"), column=0)
@@ -186,16 +192,17 @@ def generate_tree_figure(tree_file, gene_name):
         ts.legend.add_face(CircleFace(10, color), column=3); ts.legend.add_face(TextFace(f" {pop}", fsize=9), column=4)
     ts.legend_position = 1
     
-    figure_path = os.path.join(FIGURE_DIR, f"{gene_name}.png")
+    figure_path = os.path.join(FIGURE_DIR, f"{label}.png")
     t.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
 
-def generate_omega_result_figure(gene_name, status_annotated_tree, paml_params):
+def generate_omega_result_figure(gene_name, region_label, status_annotated_tree, paml_params):
     """
     Creates a tree figure with branches colored by their estimated omega (dN/dS) value.
     This function visualizes the final results from the PAML model=2 analysis.
 
     Args:
         gene_name (str): The name of the gene, used for the figure title.
+        region_label (str): Identifier for the region providing the topology.
         status_annotated_tree (ete3.Tree): The tree object with 'group_status' on each node.
         paml_params (dict): A dictionary of parsed omega values from the PAML H1 run.
     """
@@ -250,7 +257,7 @@ def generate_omega_result_figure(gene_name, status_annotated_tree, paml_params):
     ts.show_leaf_name = False
     ts.show_scale = False
     ts.branch_vertical_margin = 8
-    ts.title.add_face(TextFace(f"dN/dS Results for {gene_name}", fsize=16, ftype="Arial"), column=0)
+    ts.title.add_face(TextFace(f"dN/dS for {gene_name} under {region_label}", fsize=16, ftype="Arial"), column=0)
     
     # --- Create a dynamic legend based on the actual PAML results ---
     ts.legend.add_face(TextFace("Selection Regime (ω = dN/dS)", fsize=10, ftype="Arial", fstyle="Bold"), column=0)
@@ -272,7 +279,7 @@ def generate_omega_result_figure(gene_name, status_annotated_tree, paml_params):
 
     ts.legend_position = 4 # Position the legend in the top-right
 
-    figure_path = os.path.join(ANNOTATED_FIGURE_DIR, f"{gene_name}_omega_results.png")
+    figure_path = os.path.join(ANNOTATED_FIGURE_DIR, f"{gene_name}__{region_label}_omega_results.png")
     status_annotated_tree.render(figure_path, w=200, units="mm", dpi=300, tree_style=ts)
 
 # ==============================================================================
@@ -333,14 +340,14 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
     for node in t_h1.traverse():
         status = getattr(node, "group_status", "both")
         if status == "direct":
-            node.add_feature("paml_mark", "#0")
-        elif status == "inverted":
             node.add_feature("paml_mark", "#1")
+        elif status == "inverted":
+            node.add_feature("paml_mark", "#2")
         # Any node with 'both' or 'outgroup' status remains unlabeled, defaulting to background.
 
     h1_newick = t_h1.write(format=1, features=["paml_mark"])
     # The regex cleans up the ete3 output to be PAML-compatible.
-    h1_paml_str = re.sub(r"\[&&NHX:paml_mark=(#[01])\]", r" \1", h1_newick)
+    h1_paml_str = re.sub(r"\[&&NHX:paml_mark=(#\d+)\]", r" \1", h1_newick)
     h1_tree_path = os.path.join(work_dir, f"{gene_name}_H1.tree")
     with open(h1_tree_path, 'w') as f:
         f.write(f"{len(t_h1)} 1\n{h1_paml_str}")
@@ -427,9 +434,12 @@ def parse_h1_paml_output(outfile_path):
     for line in omega_lines:
         if "w for branch type 0" in line:
             match = re.search(r'type 0:\s*([\d\.]+)', line)
-            if match: params['omega_direct'] = float(match.group(1))
+            if match: params['omega_background'] = float(match.group(1))
         elif "w for branch type 1" in line:
             match = re.search(r'type 1:\s*([\d\.]+)', line)
+            if match: params['omega_direct'] = float(match.group(1))
+        elif "w for branch type 2" in line:
+            match = re.search(r'type 2:\s*([\d\.]+)', line)
             if match: params['omega_inverted'] = float(match.group(1))
         else:
             # This regex handles both "w (dN/dS) = ..." and "w for branches: ..."
@@ -441,89 +451,236 @@ def parse_h1_paml_output(outfile_path):
                 
     return params
 
-# ==============================================================================
-# === MAIN WORKER FUNCTION =====================================================
-# ==============================================================================
+# ============================================================================
+# === REGION/GENE HELPER FUNCTIONS ===========================================
+# ============================================================================
 
-def worker_function(phy_filepath, status_summary):
-    """
-    Worker process for a single gene.
-    This function is now designed to be called via functools.partial to include
-    a shared status_summary dictionary from a multiprocessing.Manager.
-    """
-    gene_name = os.path.basename(phy_filepath).replace('combined_', '').replace('.phy', '')
-    result = {'gene': gene_name, 'status': 'runtime_error', 'reason': 'Unknown failure'}
+def parse_region_filename(path):
+    """Extract chromosome and coordinates from a region filename."""
+    name = os.path.basename(path)
+    m = re.match(r"combined_inversion_(chr[^_]+)_start(\d+)_end(\d+)\.phy", name)
+    if not m:
+        m = re.match(r"combined_inversion_(chr[^_]+)_(\d+)_(\d+)\.phy", name)
+    if not m:
+        raise ValueError(f"Unrecognized region filename format: {name}")
+    chrom, start, end = m.groups()
+    return {
+        'path': path,
+        'chrom': chrom,
+        'start': int(start),
+        'end': int(end),
+        'label': f"{chrom}_{start}_{end}"
+    }
+
+
+def load_gene_metadata(tsv_path='phy_metadata.tsv'):
+    """Load gene coordinate metadata from a TSV file."""
+    if not os.path.exists(tsv_path):
+        raise FileNotFoundError(
+            "Metadata file 'phy_metadata.tsv' not found; cannot map genes to regions.")
+    df = pd.read_csv(tsv_path, sep='\t')
+
+    # Map possible column aliases to canonical names
+    aliases = {
+        'gene': ['gene', 'gene_name', 'GENE'],
+        'enst': ['enst', 't_id', 'transcript', 'transcript_id'],
+        'chr': ['chr', 'chrom', 'chromosome'],
+        'start': ['start', 'tx_start', 'cds_start', 'overall_cds_start_1based'],
+        'end': ['end', 'tx_end', 'cds_end', 'overall_cds_end_1based'],
+    }
+    col_map = {}
+    for canon, names in aliases.items():
+        for name in names:
+            if name in df.columns:
+                col_map[canon] = name
+                break
+    missing = [c for c in aliases if c not in col_map]
+    if missing:
+        raise KeyError(f"Metadata file missing columns {missing}. Available: {list(df.columns)}")
+
+    meta = {}
+    for _, row in df.iterrows():
+        gene = row[col_map['gene']]
+        enst = row[col_map['enst']]
+        chrom = str(row[col_map['chr']])
+        if not chrom.startswith('chr'):
+            chrom = 'chr' + chrom.lstrip('chr')
+        start = int(row[col_map['start']])
+        end = int(row[col_map['end']])
+        meta[(gene, enst)] = {'chrom': chrom, 'start': start, 'end': end}
+    return meta
+
+
+def parse_gene_filename(path, metadata):
+    """Extract gene and transcript from a gene filename and augment with metadata."""
+    name = os.path.basename(path)
+    m = re.match(r"combined_([\w\.\-]+)_(ENST[^_]+)\.phy", name)
+    if not m:
+        m = re.match(r"combined_([\w\.\-]+)_(ENST[^_]+)_(chr[^_]+)_start(\d+)_end(\d+)\.phy", name)
+    if not m:
+        m = re.match(r"combined_([\w\.\-]+)_(ENST[^_]+)_(chr[^_]+)_(\d+)_(\d+)\.phy", name)
+    if not m:
+        raise ValueError(f"Unrecognized gene filename format: {name}")
+
+    gene, enst = m.group(1), m.group(2)
+    key = (gene, enst)
+    if len(m.groups()) > 2:
+        # Coordinates were encoded in the filename
+        chrom = m.group(3)
+        start = int(m.group(4))
+        end = int(m.group(5))
+    elif key in metadata:
+        info = metadata[key]
+        chrom, start, end = info['chrom'], info['start'], info['end']
+    else:
+        raise ValueError(f"Coordinates for {gene} {enst} not found in metadata or filename")
+
+    return {
+        'path': path,
+        'gene': gene,
+        'enst': enst,
+        'chrom': chrom,
+        'start': start,
+        'end': end,
+        'label': f"{gene}_{enst}"
+    }
+
+
+def build_region_gene_map(region_infos, gene_infos):
+    """Map each region to the list of genes overlapping it."""
+    region_map = {r['label']: [] for r in region_infos}
+    for g in gene_infos:
+        for r in region_infos:
+            if g['chrom'] == r['chrom'] and not (g['end'] < r['start'] or g['start'] > r['end']):
+                region_map[r['label']].append(g)
+    return region_map
+
+
+def read_taxa_from_phy(phy_path):
+    """Return a list of taxa names from a PHYLIP alignment."""
+    taxa = []
+    with open(phy_path) as f:
+        next(f)
+        for line in f:
+            parts = line.strip().split()
+            if parts:
+                taxa.append(parts[0])
+    return taxa
+
+
+def prune_region_tree(region_tree_path, taxa_to_keep, out_path):
+    """Prune the region tree to the intersection of taxa."""
+    tree = Tree(region_tree_path, format=1)
+    leaf_names = set(tree.get_leaf_names())
+    keep = [taxon for taxon in taxa_to_keep if taxon in leaf_names]
+    tree.prune(keep, preserve_branch_length=True)
+    tree.write(outfile=out_path, format=1)
+    return out_path
+
+
+def region_worker(region):
+    """Run IQ-TREE for a region after basic QC and cache its tree."""
+    label = region['label']
+    path = region['path']
+    start_time = datetime.now()
+    logging.info(f"[{label}] START IQ-TREE")
+    try:
+        taxa = read_taxa_from_phy(path)
+        chimp = next((t for t in taxa if 'pantro' in t.lower() or 'pan_troglodytes' in t.lower()), None)
+        if not chimp or len(taxa) < 6 or not any(t.startswith('0') for t in taxa) or not any(t.startswith('1') for t in taxa):
+            reason = 'missing chimp or insufficient taxa/diversity'
+            logging.warning(f"[{label}] Skipping region: {reason}")
+            return (label, None, reason)
+
+        os.makedirs(REGION_TREE_DIR, exist_ok=True)
+        cached_tree = os.path.join(REGION_TREE_DIR, f"{label}.treefile")
+        if os.path.exists(cached_tree):
+            logging.info(f"[{label}] Using cached tree")
+            return (label, cached_tree, None)
+
+        temp_dir = tempfile.mkdtemp(prefix=f"{label}_")
+        prefix = os.path.join(temp_dir, label)
+        cmd = [IQTREE_PATH, '-s', os.path.abspath(path), '-m', 'MFP', '-T', '1', '--prefix', prefix, '-quiet', '-o', chimp]
+        run_command(cmd, temp_dir)
+        tree_src = f"{prefix}.treefile"
+        if not os.path.exists(tree_src):
+            raise FileNotFoundError('treefile missing')
+        shutil.copy(tree_src, cached_tree)
+        try:
+            generate_tree_figure(cached_tree, label)
+        except Exception as e:
+            logging.error(f"[{label}] Failed to generate region tree figure: {e}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logging.info(f"[{label}] END IQ-TREE ({elapsed:.1f}s)")
+        return (label, cached_tree, None)
+    except Exception as e:
+        logging.error(f"[{label}] IQ-TREE failed: {e}")
+        return (label, None, str(e))
+
+
+# ============================================================================
+# === GENE WORKER USING REGION TOPOLOGY ======================================
+# ============================================================================
+
+def codeml_worker(gene_info, region_tree_file, region_label):
+    """Run codeml for a gene using the provided region tree."""
+    gene_name = gene_info['label']
+    result = {'gene': gene_name, 'region': region_label, 'status': 'runtime_error', 'reason': 'Unknown failure'}
     temp_dir = None
-    # This flag ensures we only decrement the 'running_paml' counter if it was first incremented.
-    paml_was_started = False
+    start_time = datetime.now()
+    logging.info(f"[{gene_name}|{region_label}] START codeml")
 
     try:
-        qc_passed, qc_message = perform_qc(phy_filepath)
+        qc_passed, qc_message = perform_qc(gene_info['path'])
         if not qc_passed:
             result.update({'status': 'qc_fail', 'reason': qc_message})
             return result
 
         temp_dir = tempfile.mkdtemp(prefix=f"{gene_name}_")
-        phy_file_abs_path = os.path.abspath(phy_filepath)
 
-        # --- 1. Build Phylogeny with IQ-TREE ---
-        logging.info(f"[{gene_name}] Starting IQ-TREE...")
-        iqtree_out_prefix = os.path.join(temp_dir, gene_name)
-        chimp_name = next((line.split()[0] for line in open(phy_filepath) if 'pantro' in line.lower() or 'pan_troglodytes' in line.lower()), None)
-        if chimp_name is None: raise ValueError("Chimp outgroup name not found.")
-        run_command([IQTREE_PATH, '-s', phy_file_abs_path, '-o', chimp_name, '-m', 'MFP', '-T', '1', '--prefix', iqtree_out_prefix, '-quiet'], temp_dir)
-        tree_file = f"{iqtree_out_prefix}.treefile"
-        if not os.path.exists(tree_file): raise FileNotFoundError("IQ-TREE did not produce a treefile.")
+        region_taxa = Tree(region_tree_file, format=1).get_leaf_names()
+        gene_taxa = read_taxa_from_phy(gene_info['path'])
+        pruned_tree = os.path.join(temp_dir, f"{gene_name}_pruned.tree")
+        prune_region_tree(region_tree_file, gene_taxa, pruned_tree)
+        kept_taxa = read_taxa_from_phy(pruned_tree)
+        dropped = set(region_taxa) - set(kept_taxa)
+        logging.info(f"[{gene_name}|{region_label}] Pruned tree to {len(kept_taxa)} taxa; dropped {','.join(sorted(dropped)) if dropped else 'none'}")
 
-        logging.info(f"[{gene_name}] Generating figure...")
-        generate_tree_figure(tree_file, gene_name)
-
-        # --- 2. Prepare Trees for PAML and check if informative ---
-        h1_tree, h0_tree, is_informative, status_annotated_tree = create_paml_tree_files(tree_file, temp_dir, gene_name)
-
-        if not is_informative:
-            reason = "No pure internal branches found for both direct and inverted groups."
-            result.update({'status': 'uninformative_topology', 'reason': reason})
-            logging.info(f"Intermediate files for uninformative gene '{gene_name}' are in: {temp_dir}")
+        t = Tree(pruned_tree, format=1)
+        chimp_name = next((n for n in t.get_leaf_names() if 'pantro' in n.lower() or 'pan_troglodytes' in n.lower()), None)
+        if len(t.get_leaf_names()) < 4:
+            result.update({'status': 'uninformative_topology', 'reason': 'Fewer than four taxa after pruning'})
             return result
 
-        # --- This gene PASSED the filter. Update the live counter and proceed. ---
-        logging.info(f"[{gene_name}] Topology is INFORMATIVE. Proceeding to PAML analysis.")
-        # Safely increment the shared 'running_paml' counter.
-        status_summary['running_paml'] = status_summary.get('running_paml', 0) + 1
-        paml_was_started = True
+        h1_tree, h0_tree, informative, status_tree = create_paml_tree_files(pruned_tree, temp_dir, gene_name)
+        if not informative:
+            result.update({'status': 'uninformative_topology', 'reason': 'No pure internal branches found for both direct and inverted groups.'})
+            return result
 
-        # --- 3. Run H1 (Alternative Model) ---
-        logging.info(f"[{gene_name}] Running PAML H1 (Alternative)...")
+        phy_abs = os.path.abspath(gene_info['path'])
+
         h1_ctl = os.path.join(temp_dir, f"{gene_name}_H1.ctl")
         h1_out = os.path.join(temp_dir, f"{gene_name}_H1.out")
-        generate_paml_ctl(h1_ctl, phy_file_abs_path, h1_tree, h1_out, model_num=2)
+        generate_paml_ctl(h1_ctl, phy_abs, h1_tree, h1_out, model_num=2)
         run_command([PAML_PATH, h1_ctl], temp_dir)
         lnl_h1 = parse_paml_lnl(h1_out)
         paml_params = parse_h1_paml_output(h1_out)
 
-        # --- Generate the figure visualizing the PAML dN/dS results ---
-        # This is done only for genes that are informative and successfully run the H1 model.
         try:
-            logging.info(f"[{gene_name}] Generating PAML results figure...")
-            generate_omega_result_figure(gene_name, status_annotated_tree, paml_params)
+            generate_omega_result_figure(gene_name, region_label, status_tree, paml_params)
         except Exception as fig_exc:
             logging.error(f"[{gene_name}] Failed to generate PAML results figure: {fig_exc}")
 
-        # --- 4. Run H0 (Null Model) ---
-        logging.info(f"[{gene_name}] Running PAML H0 (Null)...")
         h0_ctl = os.path.join(temp_dir, f"{gene_name}_H0.ctl")
         h0_out = os.path.join(temp_dir, f"{gene_name}_H0.out")
-        generate_paml_ctl(h0_ctl, phy_file_abs_path, h0_tree, h0_out, model_num=2)
+        generate_paml_ctl(h0_ctl, phy_abs, h0_tree, h0_out, model_num=2)
         run_command([PAML_PATH, h0_ctl], temp_dir)
         lnl_h0 = parse_paml_lnl(h0_out)
 
-        # --- 5. Perform Likelihood Ratio Test ---
         if lnl_h1 < lnl_h0:
-            reason = f'lnL_H1({lnl_h1}) < lnL_H0({lnl_h0})'
-            logging.warning(f"[{gene_name}] PAML optimization issue: {reason}. Skipping.")
+            reason = f"lnL_H1({lnl_h1}) < lnL_H0({lnl_h0})"
             result.update({'status': 'paml_optim_fail', 'reason': reason})
-            logging.info(f"Intermediate files for failed gene '{gene_name}' are in: {temp_dir}")
             return result
 
         lrt_stat = 2 * (lnl_h1 - lnl_h0)
@@ -531,33 +688,34 @@ def worker_function(phy_filepath, status_summary):
 
         result.update({
             'status': 'success', 'p_value': p_value, 'lrt_stat': lrt_stat,
-            'lnl_h1': lnl_h1, 'lnl_h0': lnl_h0, 'reason': 'OK', **paml_params
+            'lnl_h1': lnl_h1, 'lnl_h0': lnl_h0, **paml_params,
+            'n_leaves_region': len(region_taxa),
+            'n_leaves_gene': len(gene_taxa),
+            'n_leaves_pruned': len(t.get_leaf_names()),
+            'chimp_in_region': any('pantro' in n.lower() or 'pan_troglodytes' in n.lower() for n in region_taxa),
+            'chimp_in_pruned': chimp_name is not None,
+            'taxa_used': ';'.join(t.get_leaf_names())
         })
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logging.info(f"[{gene_name}|{region_label}] END codeml ({elapsed:.1f}s) status={result['status']}")
         return result
 
     except Exception as e:
-        logging.error(f"FATAL ERROR in worker for gene '{gene_name}'.\n{traceback.format_exc()}")
+        logging.error(f"FATAL ERROR for gene '{gene_name}' under region '{region_label}'.\n{traceback.format_exc()}")
         result.update({'status': 'runtime_error', 'reason': str(e)})
-        if temp_dir:
-            logging.info(f"Intermediate files for failed gene '{gene_name}' are in: {temp_dir}")
         return result
-    
     finally:
-        # This 'finally' block ensures that the running counter is always decremented
-        # when a worker finishes, regardless of whether it succeeded or failed.
-        if paml_was_started:
-            status_summary['running_paml'] = status_summary.get('running_paml', 1) - 1
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 # ==============================================================================
 # === MAIN EXECUTION AND REPORTING =============================================
 # ==============================================================================
 
 def main():
-    """Main function to discover files, run the pipeline in parallel, and report results."""
-    # This import is needed here for the partial function wrapper.
-    from functools import partial
+    """Run region-first pipeline: IQ-TREE on regions, codeml on genes."""
 
-    logging.info("--- Starting Differential Selection Pipeline (Branch Model) ---")
+    logging.info("--- Starting Region→Gene Differential Selection Pipeline ---")
 
     if not (os.path.exists(IQTREE_PATH) and os.access(IQTREE_PATH, os.X_OK)):
         logging.critical(f"FATAL: IQ-TREE not found or not executable at '{IQTREE_PATH}'")
@@ -566,152 +724,98 @@ def main():
         logging.critical(f"FATAL: PAML codeml not found or not executable at '{PAML_PATH}'")
         sys.exit(1)
 
+    iqtree_ver = subprocess.run([IQTREE_PATH, '--version'], capture_output=True, text=True, check=True).stdout.strip().split('\n')[0]
+    paml_ver = subprocess.run([PAML_PATH], capture_output=True, text=True, check=False).stdout.strip().split('\n')[0]
+    logging.info(f"IQ-TREE version: {iqtree_ver}")
+    logging.info(f"PAML version: {paml_ver}")
+    logging.info(f"CPUs: {CPU_COUNT} | REGION_WORKERS={REGION_WORKERS} | PAML_WORKERS={PAML_WORKERS}")
+
     os.makedirs(FIGURE_DIR, exist_ok=True)
     os.makedirs(ANNOTATED_FIGURE_DIR, exist_ok=True)
-    phy_files = glob.glob('combined_*.phy')
-    if not phy_files:
-        logging.critical("FATAL: No 'combined_*.phy' files found in the current directory.")
+    os.makedirs(REGION_TREE_DIR, exist_ok=True)
+
+    region_files = glob.glob('combined_inversion_*.phy')
+    gene_files = [f for f in glob.glob('combined_*.phy') if 'inversion' not in os.path.basename(f)]
+
+    if not region_files:
+        logging.critical("FATAL: No region alignment files found.")
+        sys.exit(1)
+    if not gene_files:
+        logging.critical("FATAL: No gene alignment files found.")
         sys.exit(1)
 
-    mapt_file_path = None
-    for f in phy_files:
-        if 'MAPT' in os.path.basename(f):
-            mapt_file_path = f
-            break
-    if mapt_file_path:
-        logging.info(f"Prioritizing gene MAPT found at: {mapt_file_path}")
-        phy_files.remove(mapt_file_path)
-        phy_files.insert(0, mapt_file_path)
-    else:
-        logging.warning("Could not find a specific file for gene MAPT to prioritize.")
+    metadata = load_gene_metadata()
+    region_infos = [parse_region_filename(f) for f in region_files]
+    gene_infos = [parse_gene_filename(f, metadata) for f in gene_files]
+    region_gene_map = build_region_gene_map(region_infos, gene_infos)
 
-    logging.info(f"Found {len(phy_files)} CDS files to process.")
-    cpu_cores = max(1, os.cpu_count() - 1 if os.cpu_count() else 1)
-    logging.info(f"Using {cpu_cores} CPU cores for parallel processing.")
+    # Build region trees in parallel
+    logging.info(f"Running IQ-TREE on {len(region_infos)} regions with {REGION_WORKERS} workers")
+    region_results = []
+    with multiprocessing.Pool(processes=REGION_WORKERS) as pool:
+        for res in tqdm(pool.imap_unordered(region_worker, region_infos), total=len(region_infos)):
+            region_results.append(res)
+
+    region_tree_map = {label: tree for label, tree, reason in region_results if tree}
 
     all_results = []
-    
-    # Use a Manager to create a shared dictionary for live status tracking.
-    with multiprocessing.Manager() as manager:
-        status_summary = manager.dict({
-            'running_paml': 0,
-            'success': 0,
-            'qc_fail': 0,
-            'uninformative_topology': 0,
-            'paml_optim_fail': 0,
-            'runtime_error': 0,
-        })
+    tasks = []
+    for label, tree in region_tree_map.items():
+        for gene_info in region_gene_map.get(label, []):
+            tasks.append((gene_info, tree, label))
 
-        # Use functools.partial to create a new function-like object that has the
-        # status_summary dictionary "baked in". This is the clean way to pass
-        # extra, constant arguments to a worker function in a map call.
-        worker_with_summary = partial(worker_function, status_summary=status_summary)
+    if tasks:
+        logging.info(f"Dispatching {len(tasks)} codeml jobs with {PAML_WORKERS} workers")
+        def _worker(args):
+            return codeml_worker(*args)
+        status_counts = {}
+        with multiprocessing.Pool(processes=PAML_WORKERS, maxtasksperchild=1) as pool:
+            for res in tqdm(pool.imap_unordered(_worker, tasks), total=len(tasks)):
+                all_results.append(res)
+                status_counts[res['status']] = status_counts.get(res['status'], 0) + 1
+                done = sum(status_counts.values())
+                logging.info(f"Completed {done}/{len(tasks)}: {res['gene']} in {res['region']} -> {res['status']}")
 
-        with multiprocessing.Pool(processes=cpu_cores) as pool:
-            with tqdm(total=len(phy_files), desc="Processing CDSs", file=sys.stdout) as pbar:
-                for result in pool.imap_unordered(worker_with_summary, phy_files):
-                    all_results.append(result)
-                    pbar.update(1)
-
-                    status = result.get('status', 'runtime_error')
-                    status_summary[status] = status_summary.get(status, 0) + 1
-
-                    # --- Format and Log the Live Aggregate Summary ---
-                    summary_str = (
-                        f"Running PAML: {status_summary['running_paml']} | "
-                        f"Success: {status_summary['success']} | "
-                        f"Filtered (Uninformative): {status_summary['uninformative_topology']} | "
-                        f"Failed (QC/PAML/Error): {status_summary['qc_fail']}/{status_summary['paml_optim_fail']}/{status_summary['runtime_error']}"
-                    )
-                    logging.info(f"[PIPELINE STATUS] {summary_str}")
-
-                    # --- Log the Detailed Report for the INDIVIDUAL Job That Just Finished ---
-                    gene = result.get('gene', 'unknown_gene')
-                    report_header = f"\n{'='*10} Job Finished {'='*10}\nGene: {gene}\nStatus: {status.upper()}"
-                    report_body = ""
-                    if status == 'success':
-                        pval = result.get('p_value')
-                        w_inv = result.get('omega_inverted', 'N/A')
-                        w_dir = result.get('omega_direct', 'N/A')
-                        report_body = (
-                            f"p-value: {pval:.4g}\n"
-                            f"Omega Inverted: {w_inv:.4f}\n"
-                            f"Omega Direct:   {w_dir:.4f}"
-                        )
-                    else:
-                        reason = result.get('reason', 'No reason provided.')
-                        if len(reason) > 150:
-                            reason = reason[:150] + "..."
-                        report_body = f"Reason: {reason}"
-                    
-                    full_report = f"{report_header}\n{report_body}\n{'='*35}"
-                    logging.info(full_report)
-
-        # --- Final Report Section (after all jobs are complete) ---
-        # Convert the managed dict back to a regular dict for the final report.
-        final_status_counts = dict(status_summary)
-        # We don't need the 'running_paml' in the final summary table.
-        del final_status_counts['running_paml']
-
-
-    # --- Create a comprehensive DataFrame and perform FDR Correction ---
     results_df = pd.DataFrame(all_results)
-    
-    successful_runs = results_df[results_df['status'] == 'success'].copy()
-    if not successful_runs.empty:
-        pvals = successful_runs['p_value'].dropna()
+
+    successful = results_df[results_df['status'] == 'success'].copy()
+    if not successful.empty:
+        pvals = successful['p_value'].dropna()
         if not pvals.empty:
             rejected, qvals = fdrcorrection(pvals, alpha=FDR_ALPHA, method='indep')
-            qval_map = {pvals.index[i]: q for i, q in enumerate(qvals)}
-            results_df['q_value'] = results_df.index.map(qval_map)
+            qmap = {pvals.index[i]: q for i, q in enumerate(qvals)}
+            results_df['q_value'] = results_df.index.map(qmap)
+            logging.info(f"Applied FDR correction across {len(pvals)} gene×region tests")
 
-    # --- Write Full TSV Report ---
-    ordered_columns = [
-        'gene', 'status', 'p_value', 'q_value', 'lrt_stat', 
-        'omega_inverted', 'omega_direct', 'omega_background', 'kappa', 
-        'lnl_h1', 'lnl_h0', 'reason'
-    ]
+    ordered_columns = ['region', 'gene', 'status', 'p_value', 'q_value', 'lrt_stat',
+                       'omega_inverted', 'omega_direct', 'omega_background', 'kappa',
+                       'lnl_h1', 'lnl_h0', 'n_leaves_region', 'n_leaves_gene',
+                       'n_leaves_pruned', 'chimp_in_region', 'chimp_in_pruned',
+                       'taxa_used', 'reason']
     for col in ordered_columns:
         if col not in results_df.columns:
             results_df[col] = np.nan
-            
     results_df = results_df[ordered_columns]
     results_df.to_csv(RESULTS_TSV, sep='\t', index=False, float_format='%.6g')
-    logging.info(f"All results, including failures, saved to: {RESULTS_TSV}")
+    logging.info(f"All results saved to: {RESULTS_TSV}")
 
-    # --- Generate Final Console Report ---
+    counts = results_df['status'].value_counts().to_dict()
     logging.info("\n\n" + "="*75)
     logging.info("--- FINAL PIPELINE REPORT ---")
-    logging.info(f"Total CDSs Found: {len(phy_files)}")
-    for status, count in final_status_counts.items():
-        logging.info(f"  - {status.replace('_', ' ').title()}: {count}")
+    logging.info(f"Total tests: {len(results_df)}")
+    for status, count in counts.items():
+        logging.info(f"  - {status}: {count}")
     logging.info("="*75 + "\n")
 
-    significant_df = results_df[(results_df['status'] == 'success') & (results_df['q_value'] < FDR_ALPHA)]
-    
-    logging.info(f"--- Genes with Significant Differential Selection (q < {FDR_ALPHA}) ---")
-    if not significant_df.empty:
-        sorted_sig = significant_df.sort_values('q_value')
-        logging.info(f"{'Gene':<25} {'p-value':<10} {'q-value':<10} {'w_inverted':<12} {'w_direct':<12}")
-        logging.info("-" * 75)
-        for _, row in sorted_sig.iterrows():
-            logging.info(f"{row['gene']:<25} {row['p_value']:<10.4g} {row['q_value']:<10.4g} {row['omega_inverted']:<12.4f} {row['omega_direct']:<12.4f}")
+    sig = results_df[(results_df['status'] == 'success') & (results_df['q_value'] < FDR_ALPHA)]
+    if not sig.empty:
+        logging.info(f"Significant gene×region tests (q < {FDR_ALPHA}):")
+        for _, row in sig.sort_values('q_value').iterrows():
+            logging.info(f"{row['region']} - {row['gene']}: q={row['q_value']:.4g}")
     else:
-        logging.info("  None found.")
-    logging.info("")
+        logging.info("No significant tests.")
 
-    for status_type, status_name in [('qc_fail', 'QC Failures'), ('paml_optim_fail', 'PAML Optimization Failures'), ('runtime_error', 'Runtime Errors')]:
-        failures = results_df[results_df['status'] == status_type]
-        if not failures.empty:
-            logging.warning(f"--- List of {status_name} ---")
-            for _, row in failures.sort_values('gene').iterrows():
-                logging.warning(f"  - {row['gene']:<40} Reason: {row.get('reason', 'N/A')}")
-            logging.warning("")
-    
-    logging.info(f"\nPipeline finished successfully.")
-    logging.info(f"Full details saved to log file: '{LOG_FILE}'.")
-    logging.info(f"Tree figures saved to directory: '{FIGURE_DIR}/'.")
-    logging.info(f"A comprehensive TSV of all results is at: '{RESULTS_TSV}'.")
+    logging.info("\nPipeline finished.")
 
 if __name__ == '__main__':
     main()
