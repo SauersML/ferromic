@@ -136,8 +136,9 @@ def find_and_combine_phy_files():
     """
     # Regex to extract key parts from filenames, handling the optional ENSG ID. (Gene files)
     pattern_gene = re.compile(
-        r"^(group0|group1|outgroup)_([A-Z0-9\._-]+?)_(?:ENSG[0-9\.]+_)?(ENST[0-9\.]+)_(chr.+)\.phy$"
+        r"^(group0|group1|outgroup)_([A-Za-z0-9\._-]+?)_(?:ENSG[0-9\.]+_)?(ENST[0-9\.]+)_(chr.+)\.phy$"
     )
+
     # Regex for overall region (inversion) files: inversion_group{0|1}_{CHR}_start{S}_end{E}.phy
     pattern_region = re.compile(
         r"^inversion_(group0|group1)_([A-Za-z0-9]+)_start(\d+)_end(\d+)\.phy$"
@@ -151,7 +152,8 @@ def find_and_combine_phy_files():
         m_gene = pattern_gene.match(filename)
         if m_gene:
             group_type, gene_name, enst_id, coords = m_gene.groups()
-            identifier = f"{gene_name}_{enst_id}_{coords}"
+            gene_name_norm = gene_name.upper()  # normalize case so names match
+            identifier = f"{gene_name_norm}_{enst_id}"  # drop coords from the join key
             gene_groups[identifier][group_type] = filename
             continue
 
