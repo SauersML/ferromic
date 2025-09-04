@@ -63,6 +63,12 @@ POP_COLORS = {
 FIGURE_DIR = "tree_figures"
 ANNOTATED_FIGURE_DIR = "annotated_tree_figures"
 RESULTS_TSV = f"full_paml_results_{datetime.now().strftime('%Y-%m-%d')}.tsv"
+REGION_TREE_DIR = "region_trees"
+
+# Worker caps (override via env vars)
+CPU_COUNT = os.cpu_count() or 1
+REGION_WORKERS = int(os.environ.get("REGION_WORKERS", max(1, min(CPU_COUNT // 2, 8))))
+PAML_WORKERS = int(os.environ.get("PAML_WORKERS", min(CPU_COUNT, 32)))
 
 # ==============================================================================
 # === GENERIC HELPER FUNCTIONS (UNCHANGED CORE LOGIC) ==========================
@@ -341,7 +347,7 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
 
     h1_newick = t_h1.write(format=1, features=["paml_mark"])
     # The regex cleans up the ete3 output to be PAML-compatible.
-    h1_paml_str = re.sub(r"\[&&NHX:paml_mark=(#[01])\]", r" \1", h1_newick)
+    h1_paml_str = re.sub(r"\[&&NHX:paml_mark=(#\d+)\]", r" \1", h1_newick)
     h1_tree_path = os.path.join(work_dir, f"{gene_name}_H1.tree")
     with open(h1_tree_path, 'w') as f:
         f.write(f"{len(t_h1)} 1\n{h1_paml_str}")
@@ -473,14 +479,35 @@ def load_gene_metadata(tsv_path='phy_metadata.tsv'):
         raise FileNotFoundError(
             "Metadata file 'phy_metadata.tsv' not found; cannot map genes to regions.")
     df = pd.read_csv(tsv_path, sep='\t')
+
+    # Map possible column aliases to canonical names
+    aliases = {
+        'gene': ['gene', 'gene_name', 'GENE'],
+        'enst': ['enst', 't_id', 'transcript', 'transcript_id'],
+        'chr': ['chr', 'chrom', 'chromosome'],
+        'start': ['start', 'tx_start', 'cds_start', 'overall_cds_start_1based'],
+        'end': ['end', 'tx_end', 'cds_end', 'overall_cds_end_1based'],
+    }
+    col_map = {}
+    for canon, names in aliases.items():
+        for name in names:
+            if name in df.columns:
+                col_map[canon] = name
+                break
+    missing = [c for c in aliases if c not in col_map]
+    if missing:
+        raise KeyError(f"Metadata file missing columns {missing}. Available: {list(df.columns)}")
+
     meta = {}
     for _, row in df.iterrows():
-        key = (row['gene'], row['enst'])
-        meta[key] = {
-            'chrom': row['chr'],
-            'start': int(row['start']),
-            'end': int(row['end'])
-        }
+        gene = row[col_map['gene']]
+        enst = row[col_map['enst']]
+        chrom = str(row[col_map['chr']])
+        if not chrom.startswith('chr'):
+            chrom = 'chr' + chrom.lstrip('chr')
+        start = int(row[col_map['start']])
+        end = int(row[col_map['end']])
+        meta[(gene, enst)] = {'chrom': chrom, 'start': start, 'end': end}
     return meta
 
 
@@ -551,6 +578,47 @@ def prune_region_tree(region_tree_path, taxa_to_keep, out_path):
     return out_path
 
 
+def region_worker(region):
+    """Run IQ-TREE for a region after basic QC and cache its tree."""
+    label = region['label']
+    path = region['path']
+    start_time = datetime.now()
+    logging.info(f"[{label}] START IQ-TREE")
+    try:
+        taxa = read_taxa_from_phy(path)
+        chimp = next((t for t in taxa if 'pantro' in t.lower() or 'pan_troglodytes' in t.lower()), None)
+        if not chimp or len(taxa) < 6 or not any(t.startswith('0') for t in taxa) or not any(t.startswith('1') for t in taxa):
+            reason = 'missing chimp or insufficient taxa/diversity'
+            logging.warning(f"[{label}] Skipping region: {reason}")
+            return (label, None, reason)
+
+        os.makedirs(REGION_TREE_DIR, exist_ok=True)
+        cached_tree = os.path.join(REGION_TREE_DIR, f"{label}.treefile")
+        if os.path.exists(cached_tree):
+            logging.info(f"[{label}] Using cached tree")
+            return (label, cached_tree, None)
+
+        temp_dir = tempfile.mkdtemp(prefix=f"{label}_")
+        prefix = os.path.join(temp_dir, label)
+        cmd = [IQTREE_PATH, '-s', os.path.abspath(path), '-m', 'MFP', '-T', '1', '--prefix', prefix, '-quiet', '-o', chimp]
+        run_command(cmd, temp_dir)
+        tree_src = f"{prefix}.treefile"
+        if not os.path.exists(tree_src):
+            raise FileNotFoundError('treefile missing')
+        shutil.copy(tree_src, cached_tree)
+        try:
+            generate_tree_figure(cached_tree, label)
+        except Exception as e:
+            logging.error(f"[{label}] Failed to generate region tree figure: {e}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logging.info(f"[{label}] END IQ-TREE ({elapsed:.1f}s)")
+        return (label, cached_tree, None)
+    except Exception as e:
+        logging.error(f"[{label}] IQ-TREE failed: {e}")
+        return (label, None, str(e))
+
+
 # ============================================================================
 # === GENE WORKER USING REGION TOPOLOGY ======================================
 # ============================================================================
@@ -560,6 +628,8 @@ def codeml_worker(gene_info, region_tree_file, region_label):
     gene_name = gene_info['label']
     result = {'gene': gene_name, 'region': region_label, 'status': 'runtime_error', 'reason': 'Unknown failure'}
     temp_dir = None
+    start_time = datetime.now()
+    logging.info(f"[{gene_name}|{region_label}] START codeml")
 
     try:
         qc_passed, qc_message = perform_qc(gene_info['path'])
@@ -573,6 +643,9 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         gene_taxa = read_taxa_from_phy(gene_info['path'])
         pruned_tree = os.path.join(temp_dir, f"{gene_name}_pruned.tree")
         prune_region_tree(region_tree_file, gene_taxa, pruned_tree)
+        kept_taxa = read_taxa_from_phy(pruned_tree)
+        dropped = set(region_taxa) - set(kept_taxa)
+        logging.info(f"[{gene_name}|{region_label}] Pruned tree to {len(kept_taxa)} taxa; dropped {','.join(sorted(dropped)) if dropped else 'none'}")
 
         t = Tree(pruned_tree, format=1)
         chimp_name = next((n for n in t.get_leaf_names() if 'pantro' in n.lower() or 'pan_troglodytes' in n.lower()), None)
@@ -623,12 +696,17 @@ def codeml_worker(gene_info, region_tree_file, region_label):
             'chimp_in_pruned': chimp_name is not None,
             'taxa_used': ';'.join(t.get_leaf_names())
         })
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logging.info(f"[{gene_name}|{region_label}] END codeml ({elapsed:.1f}s) status={result['status']}")
         return result
 
     except Exception as e:
         logging.error(f"FATAL ERROR for gene '{gene_name}' under region '{region_label}'.\n{traceback.format_exc()}")
         result.update({'status': 'runtime_error', 'reason': str(e)})
         return result
+    finally:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 # ==============================================================================
 # === MAIN EXECUTION AND REPORTING =============================================
@@ -646,8 +724,15 @@ def main():
         logging.critical(f"FATAL: PAML codeml not found or not executable at '{PAML_PATH}'")
         sys.exit(1)
 
+    iqtree_ver = subprocess.run([IQTREE_PATH, '--version'], capture_output=True, text=True, check=True).stdout.strip().split('\n')[0]
+    paml_ver = subprocess.run([PAML_PATH], capture_output=True, text=True, check=False).stdout.strip().split('\n')[0]
+    logging.info(f"IQ-TREE version: {iqtree_ver}")
+    logging.info(f"PAML version: {paml_ver}")
+    logging.info(f"CPUs: {CPU_COUNT} | REGION_WORKERS={REGION_WORKERS} | PAML_WORKERS={PAML_WORKERS}")
+
     os.makedirs(FIGURE_DIR, exist_ok=True)
     os.makedirs(ANNOTATED_FIGURE_DIR, exist_ok=True)
+    os.makedirs(REGION_TREE_DIR, exist_ok=True)
 
     region_files = glob.glob('combined_inversion_*.phy')
     gene_files = [f for f in glob.glob('combined_*.phy') if 'inversion' not in os.path.basename(f)]
@@ -664,44 +749,32 @@ def main():
     gene_infos = [parse_gene_filename(f, metadata) for f in gene_files]
     region_gene_map = build_region_gene_map(region_infos, gene_infos)
 
+    # Build region trees in parallel
+    logging.info(f"Running IQ-TREE on {len(region_infos)} regions with {REGION_WORKERS} workers")
+    region_results = []
+    with multiprocessing.Pool(processes=REGION_WORKERS) as pool:
+        for res in tqdm(pool.imap_unordered(region_worker, region_infos), total=len(region_infos)):
+            region_results.append(res)
+
+    region_tree_map = {label: tree for label, tree, reason in region_results if tree}
+
     all_results = []
     tasks = []
-    for region in region_infos:
-        region_label = region['label']
-        region_path = region['path']
-        logging.info(f"Processing region {region_label}")
-
-        region_taxa = read_taxa_from_phy(region_path)
-        chimp_name = next((t for t in region_taxa if 'pantro' in t.lower() or 'pan_troglodytes' in t.lower()), None)
-        if not chimp_name:
-            logging.error(f"Skipping region {region_label} because chimp outgroup is missing")
-            continue
-        if len(region_taxa) < 6 or not any(t.startswith('0') for t in region_taxa) or not any(t.startswith('1') for t in region_taxa):
-            logging.warning(f"Skipping region {region_label} due to insufficient taxa or haplotype diversity")
-            continue
-
-        temp_dir = tempfile.mkdtemp(prefix=f"{region_label}_")
-        prefix = os.path.join(temp_dir, region_label)
-        iqtree_cmd = [IQTREE_PATH, '-s', os.path.abspath(region_path), '-m', 'MFP', '-T', '1', '--prefix', prefix, '-quiet', '-o', chimp_name]
-        run_command(iqtree_cmd, temp_dir)
-        region_tree = f"{prefix}.treefile"
-        if not os.path.exists(region_tree):
-            logging.error(f"Region tree not found for {region_label}")
-            continue
-        try:
-            generate_tree_figure(region_tree, region_label)
-        except Exception as e:
-            logging.error(f"Failed to generate region tree figure for {region_label}: {e}")
-
-        for gene_info in region_gene_map.get(region_label, []):
-            tasks.append((gene_info, region_tree, region_label))
+    for label, tree in region_tree_map.items():
+        for gene_info in region_gene_map.get(label, []):
+            tasks.append((gene_info, tree, label))
 
     if tasks:
+        logging.info(f"Dispatching {len(tasks)} codeml jobs with {PAML_WORKERS} workers")
         def _worker(args):
             return codeml_worker(*args)
-        with multiprocessing.Pool() as pool:
+        status_counts = {}
+        with multiprocessing.Pool(processes=PAML_WORKERS, maxtasksperchild=1) as pool:
             for res in tqdm(pool.imap_unordered(_worker, tasks), total=len(tasks)):
                 all_results.append(res)
+                status_counts[res['status']] = status_counts.get(res['status'], 0) + 1
+                done = sum(status_counts.values())
+                logging.info(f"Completed {done}/{len(tasks)}: {res['gene']} in {res['region']} -> {res['status']}")
 
     results_df = pd.DataFrame(all_results)
 
@@ -712,6 +785,7 @@ def main():
             rejected, qvals = fdrcorrection(pvals, alpha=FDR_ALPHA, method='indep')
             qmap = {pvals.index[i]: q for i, q in enumerate(qvals)}
             results_df['q_value'] = results_df.index.map(qmap)
+            logging.info(f"Applied FDR correction across {len(pvals)} gene×region tests")
 
     ordered_columns = ['region', 'gene', 'status', 'p_value', 'q_value', 'lrt_stat',
                        'omega_inverted', 'omega_direct', 'omega_background', 'kappa',
