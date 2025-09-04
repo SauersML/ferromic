@@ -459,21 +459,33 @@ def parse_h1_paml_output(outfile_path):
 # ============================================================================
 
 def parse_region_filename(path):
-    """Extract chromosome and coordinates from a region filename."""
+    """Extract chromosome and coordinates from a region filename (accepts with/without 'chr')."""
     name = os.path.basename(path)
-    m = re.match(r"combined_inversion_(chr[^_]+)_start(\d+)_end(\d+)\.phy", name)
+    # Accept: combined_inversion_14_start123_end456.phy and combined_inversion_chr14_start123_end456.phy
+    m = re.match(r"^combined_inversion_(?:chr)?([0-9]+|X|Y|M|MT)_start(\d+)_end(\d+)\.phy$", name, re.I)
     if not m:
-        m = re.match(r"combined_inversion_(chr[^_]+)_(\d+)_(\d+)\.phy", name)
+        # Also accept: combined_inversion_14_123_456.phy and combined_inversion_chr14_123_456.phy
+        m = re.match(r"^combined_inversion_(?:chr)?([0-9]+|X|Y|M|MT)_(\d+)_(\d+)\.phy$", name, re.I)
     if not m:
         raise ValueError(f"Unrecognized region filename format: {name}")
-    chrom, start, end = m.groups()
+
+    chrom_token, start_str, end_str = m.groups()
+    chrom_token = chrom_token.upper()
+    chrom = "chrM" if chrom_token in ("M", "MT") else f"chr{chrom_token}"
+    start = int(start_str)
+    end = int(end_str)
+    if start > end:
+        logging.warning(f"Region {name}: start({start}) > end({end}); swapping.")
+        start, end = end, start
+
     return {
         'path': path,
         'chrom': chrom,
-        'start': int(start),
-        'end': int(end),
+        'start': start,
+        'end': end,
         'label': f"{chrom}_{start}_{end}"
     }
+
 
 
 def load_gene_metadata(tsv_path='phy_metadata.tsv'):
@@ -885,6 +897,29 @@ def main():
 
     results_df = pd.DataFrame(all_results)
 
+    ordered_columns = ['region', 'gene', 'status', 'p_value', 'q_value', 'lrt_stat',
+                       'omega_inverted', 'omega_direct', 'omega_background', 'kappa',
+                       'lnl_h1', 'lnl_h0', 'n_leaves_region', 'n_leaves_gene',
+                       'n_leaves_pruned', 'chimp_in_region', 'chimp_in_pruned',
+                       'taxa_used', 'reason']
+    for col in ordered_columns:
+        if col not in results_df.columns:
+            results_df[col] = np.nan
+
+    # Handle the no-task / empty-results case safely
+    if results_df.empty:
+        results_df = results_df[ordered_columns]
+        results_df.to_csv(RESULTS_TSV, sep='\t', index=False, float_format='%.6g')
+        logging.info(f"All results saved to: {RESULTS_TSV}")
+        logging.warning("No results produced (no valid region trees or gene×region tasks).")
+        logging.info("\n\n" + "="*75)
+        logging.info("--- FINAL PIPELINE REPORT ---")
+        logging.info(f"Total tests: {len(results_df)}")
+        logging.info("="*75 + "\n")
+        logging.info("No significant tests.")
+        logging.info("\nPipeline finished.")
+        return
+
     successful = results_df[results_df['status'] == 'success'].copy()
     if not successful.empty:
         pvals = successful['p_value'].dropna()
@@ -894,14 +929,6 @@ def main():
             results_df['q_value'] = results_df.index.map(qmap)
             logging.info(f"Applied FDR correction across {len(pvals)} gene×region tests")
 
-    ordered_columns = ['region', 'gene', 'status', 'p_value', 'q_value', 'lrt_stat',
-                       'omega_inverted', 'omega_direct', 'omega_background', 'kappa',
-                       'lnl_h1', 'lnl_h0', 'n_leaves_region', 'n_leaves_gene',
-                       'n_leaves_pruned', 'chimp_in_region', 'chimp_in_pruned',
-                       'taxa_used', 'reason']
-    for col in ordered_columns:
-        if col not in results_df.columns:
-            results_df[col] = np.nan
     results_df = results_df[ordered_columns]
     results_df.to_csv(RESULTS_TSV, sep='\t', index=False, float_format='%.6g')
     logging.info(f"All results saved to: {RESULTS_TSV}")
