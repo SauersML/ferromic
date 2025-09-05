@@ -2352,15 +2352,15 @@ fn subtract_regions(
 
 // Calculate the frequency of allele 1 (e.g., an inversion allele) across haplotypes
 pub fn calculate_inversion_allele_frequency(
-    sample_filter: &HashMap<String, (u8, u8)>, // Map of sample names to (left, right) haplotype alleles
+    sample_filter: &HashMap<String, (u8, u8)>, // Map of sample names to (haplotype1, haplotype2) alleles - order is arbitrary
 ) -> Option<f64> {
     // Returns Some(frequency) or None if no haplotypes are present
     let mut num_ones = 0; // Counter for haplotypes with allele 1
     let mut total_haplotypes = 0; // Total number of haplotypes (with allele 0 or 1)
     
-    for (_sample, &(left, right)) in sample_filter.iter() {
+    for (_sample, &(hap1, hap2)) in sample_filter.iter() {
         // Count each haplotype exactly once if it's 0 or 1
-        for allele in [left, right] {
+        for allele in [hap1, hap2] {
             if allele == 0 || allele == 1 {
                 total_haplotypes += 1;
                 if allele == 1 {
@@ -2454,6 +2454,7 @@ pub fn calculate_pairwise_differences(
                             &variant.genotypes[sample_idx_j],
                         ) {
                             // Compare all haplotype pairs (truly per-haplotype analysis)
+                            // Each haplotype is treated as completely independent
                             for a in 0..genotype_i.len() {
                                 for b in 0..genotype_j.len() {
                                     comparable_site_count += 1;
