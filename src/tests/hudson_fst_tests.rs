@@ -189,6 +189,53 @@ mod hudson_fst_tests {
         }
     }
 
+    #[test]
+    fn test_hudson_fst_monomorphic_window() {
+        // Test that monomorphic windows (no variants) return FST = 0.0
+        let pop1_haplotypes = vec![
+            (0, HaplotypeSide::Left),
+            (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left),
+            (1, HaplotypeSide::Right),
+        ];
+        let pop2_haplotypes = vec![
+            (2, HaplotypeSide::Left),
+            (2, HaplotypeSide::Right),
+            (3, HaplotypeSide::Left),
+            (3, HaplotypeSide::Right),
+        ];
+
+        // No variants - monomorphic region
+        let variants = vec![];
+        let sample_names = vec!["sample1".to_string(), "sample2".to_string(), "sample3".to_string(), "sample4".to_string()];
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length: 1000,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length: 1000,
+        };
+
+        let result = calculate_hudson_fst_for_pair(&pop1_context, &pop2_context);
+        assert!(result.is_ok(), "Hudson FST calculation should succeed for monomorphic window");
+
+        let outcome = result.unwrap();
+        println!("Monomorphic window FST: {:?}", outcome.fst);
+
+        // Monomorphic windows should return FST = 0.0, not None
+        assert!(outcome.fst.is_some(), "Monomorphic window should have FST = 0.0, not None");
+        assert_eq!(outcome.fst.unwrap(), 0.0, "Monomorphic window FST should be exactly 0.0");
+    }
+
     fn validate_falsta_content(content: &str) {
         let lines: Vec<&str> = content.lines().collect();
         

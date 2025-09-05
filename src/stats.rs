@@ -2075,9 +2075,28 @@ fn calculate_hudson_fst_for_pair_core<'a>(
         ));
     }
 
-    // 1. Calculate Pi for Pop1
-    // `calculate_pi` returns f64::NAN if <2 haplotypes or seq_length <= 0.
-    // We convert NAN to None here for consistent Option<f64> handling.
+    // Calculate per-site Hudson FST values
+    let site_values = if let Some(reg) = region {
+        calculate_hudson_fst_per_site(pop1_context, pop2_context, reg)
+    } else {
+        // For non-regional calculations, create a region covering all variants
+        if pop1_context.variants.is_empty() {
+            Vec::new()
+        } else {
+            let start_pos = pop1_context.variants.first().unwrap().position;
+            let end_pos = pop1_context.variants.last().unwrap().position;
+            let full_region = QueryRegion {
+                start: start_pos,
+                end: end_pos,
+            };
+            calculate_hudson_fst_per_site(pop1_context, pop2_context, full_region)
+        }
+    };
+
+    // Compute regional FST using unbiased ratio-of-sums from per-site components
+    let regional_fst = aggregate_hudson_from_sites(&site_values);
+
+    // Calculate auxiliary π and Dxy values for output (but don't use for FST)
     let pi1_raw = calculate_pi(
         pop1_context.variants,
         &pop1_context.haplotypes,
@@ -2088,17 +2107,7 @@ fn calculate_hudson_fst_for_pair_core<'a>(
     } else {
         None
     };
-    if pi1_opt.is_none() && pop1_context.haplotypes.len() >= 2 && pop1_context.sequence_length > 0 {
-        log(
-            LogLevel::Warning,
-            &format!(
-                "Pi calculation for pop {:?} resulted in non-finite value despite sufficient data.",
-                pop1_context.id
-            ),
-        );
-    }
 
-    // 2. Calculate Pi for Pop2
     let pi2_raw = calculate_pi(
         pop2_context.variants,
         &pop2_context.haplotypes,
@@ -2109,49 +2118,26 @@ fn calculate_hudson_fst_for_pair_core<'a>(
     } else {
         None
     };
-    if pi2_opt.is_none() && pop2_context.haplotypes.len() >= 2 && pop2_context.sequence_length > 0 {
-        log(
-            LogLevel::Warning,
-            &format!(
-                "Pi calculation for pop {:?} resulted in non-finite value despite sufficient data.",
-                pop2_context.id
-            ),
-        );
-    }
 
-    // 3. Calculate Dxy between Pop1 and Pop2
-    // This function returns Result<DxyHudsonResult, VcfError>
     let dxy_result = calculate_d_xy_hudson(pop1_context, pop2_context)?;
 
-    // 4. Compute final Hudson FST outcome
-    let outcome = compute_hudson_fst_outcome(
-        pop1_context.id.clone(),
-        pop2_context.id.clone(),
-        pi1_opt,
-        pi2_opt,
-        &dxy_result,
-    );
-
-    // 5. Calculate per-site Hudson FST values if a region is provided
-    let site_values = if let Some(reg) = region {
-        let sites = calculate_hudson_fst_per_site(pop1_context, pop2_context, reg);
-        if let (Some(window_fst), Some(site_fst)) =
-            (outcome.fst, aggregate_hudson_from_sites(&sites))
-        {
-            if (window_fst - site_fst).abs() > 1e-9 {
-                log(
-                    LogLevel::Warning,
-                    &format!(
-                        "Hudson FST mismatch: window {:.6e} vs per-site aggregate {:.6e}",
-                        window_fst, site_fst
-                    ),
-                );
-            }
-        }
-        sites
-    } else {
-        Vec::new()
+    // Create outcome with unbiased FST from per-site aggregation
+    let mut outcome = HudsonFSTOutcome {
+        pop1_id: Some(pop1_context.id.clone()),
+        pop2_id: Some(pop2_context.id.clone()),
+        pi_pop1: pi1_opt,
+        pi_pop2: pi2_opt,
+        d_xy: dxy_result.d_xy,
+        fst: regional_fst, // Use unbiased per-site aggregation as single source of truth
+        ..Default::default()
     };
+
+    // Calculate pi_xy_avg for auxiliary output
+    if let (Some(p1), Some(p2)) = (outcome.pi_pop1, outcome.pi_pop2) {
+        if p1.is_finite() && p2.is_finite() {
+            outcome.pi_xy_avg = Some(0.5 * (p1 + p2));
+        }
+    }
 
     Ok((outcome, site_values))
 }
