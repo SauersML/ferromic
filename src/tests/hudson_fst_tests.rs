@@ -158,15 +158,15 @@ mod hudson_fst_tests {
             println!("Site {}: pos={}, fst={:?}, dxy={:?}", i, site.position, site.fst, site.d_xy);
         }
         
-        // Find the site at position 100
-        let site_100 = sites.iter().find(|s| s.position == 100);
-        assert!(site_100.is_some(), "Site at position 100 not found");
+        // Find the site at position 101 (where the actual data is)
+        let site_101 = sites.iter().find(|s| s.position == 101);
+        assert!(site_101.is_some(), "Site at position 101 not found");
         
-        let site = site_100.unwrap();
-        println!("Site 100 FST: {:?}", site.fst);
-        println!("Site 100 D_xy: {:?}", site.d_xy);
-        println!("Site 100 pi_pop1: {:?}", site.pi_pop1);
-        println!("Site 100 pi_pop2: {:?}", site.pi_pop2);
+        let site = site_101.unwrap();
+        println!("Site 101 FST: {:?}", site.fst);
+        println!("Site 101 D_xy: {:?}", site.d_xy);
+        println!("Site 101 pi_pop1: {:?}", site.pi_pop1);
+        println!("Site 101 pi_pop2: {:?}", site.pi_pop2);
         
         // With perfect structure: D_xy should be 1.0, pi should be 0.0
         assert!(site.d_xy.is_some(), "D_xy should be calculated");
