@@ -7,9 +7,12 @@ import multiprocessing
 import tempfile
 import getpass
 import logging
+from logging.handlers import QueueHandler, QueueListener
 import traceback
 from datetime import datetime
 import shutil
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from collections import deque
 
 # --- Scientific Computing Imports ---
 import numpy as np
@@ -35,14 +38,27 @@ from ete3.treeview import TreeStyle, NodeStyle, TextFace, CircleFace, RectFace
 # --- Centralized Logging ---
 # A unique log file is created for each pipeline run.
 LOG_FILE = f"pipeline_run_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler(sys.stdout) # Also print logs to the console
-    ]
-)
+
+def start_logging():
+    """Initializes queue-based logging for multiprocessing."""
+    log_q = multiprocessing.Queue(-1)
+    
+    # The listener pulls from the queue and sends to the handlers.
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler = logging.FileHandler(LOG_FILE)
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    
+    listener = QueueListener(log_q, file_handler, stream_handler)
+    listener.start()
+    return log_q, listener
+
+def worker_logging_init(log_q):
+    """Configures logging for a worker process to use the shared queue."""
+    root = logging.getLogger()
+    root.handlers[:] = [QueueHandler(log_q)]
+    root.setLevel(logging.INFO)
 
 # --- Paths to Executables ---
 # Assumes executables are in specific locations relative to the script's runtime directory.
@@ -65,38 +81,67 @@ ANNOTATED_FIGURE_DIR = "annotated_tree_figures"
 RESULTS_TSV = f"full_paml_results_{datetime.now().strftime('%Y-%m-%d')}.tsv"
 REGION_TREE_DIR = "region_trees"
 
-# Worker caps (override via env vars)
-CPU_COUNT = os.cpu_count() or 1
-REGION_WORKERS = int(os.environ.get("REGION_WORKERS", max(1, min(CPU_COUNT // 2, 8))))
-PAML_WORKERS = int(os.environ.get("PAML_WORKERS", min(CPU_COUNT, 32)))
+# --- Checkpointing and Output Retention ---
+CHECKPOINT_FILE = "paml_results.checkpoint.tsv"
+CHECKPOINT_EVERY = int(os.environ.get("CHECKPOINT_EVERY", "100"))
+KEEP_PAML_OUT = bool(int(os.environ.get("KEEP_PAML_OUT", "0")))
+PAML_OUT_DIR  = os.environ.get("PAML_OUT_DIR", "paml_runs")
+
+# --- Concurrency & runtime knobs ---
+def _detect_cpus():
+    # Prefer cgroup/affinity-aware counts if available
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        # Fallback for systems without sched_getaffinity (e.g., Windows)
+        return os.cpu_count() or 1
+
+CPU_COUNT = _detect_cpus()
+REGION_WORKERS = int(os.environ.get("REGION_WORKERS", max(1, min(CPU_COUNT // 3, 4))))
+# By default, give most CPUs to PAML, but let user override.
+default_paml = max(1, CPU_COUNT - REGION_WORKERS)
+if CPU_COUNT >= 4:
+    default_paml = max(2, default_paml)
+PAML_WORKERS = int(os.environ.get("PAML_WORKERS", default_paml))
+
+# Optional: gate figure generation (tree render can be surprisingly expensive)
+MAKE_FIGURES = bool(int(os.environ.get("MAKE_FIGURES", "1")))
+
+# Subprocess timeouts (seconds). Tweak as appropriate for your datasets/cluster.
+IQTREE_TIMEOUT = int(os.environ.get("IQTREE_TIMEOUT", "7200"))   # 2h default
+PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "3600"))     # 1h default
+
+# Prevent hidden multi-threading from MKL/OpenBLAS in child processes
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
+# Optional: speed up H0 runs by fixing branch lengths to the input tree's values
+PAML_FIX_BLENGTH_H0 = bool(int(os.environ.get("PAML_FIX_BLENGTH_H0", "0")))
 
 # ==============================================================================
 # === GENERIC HELPER FUNCTIONS (UNCHANGED CORE LOGIC) ==========================
 # ==============================================================================
 
-def run_command(command_list, work_dir):
-    """
-    Executes a shell command and raises a detailed error on failure.
-    
-    Args:
-        command_list (list): The command and its arguments as a list of strings.
-        work_dir (str): The directory in which to execute the command.
-    """
+def run_command(command_list, work_dir, timeout=None, env=None):
     try:
         subprocess.run(
             command_list, cwd=work_dir, check=True,
-            capture_output=True, text=True, shell=False
+            capture_output=True, text=True, shell=False,
+            timeout=timeout, env=env
         )
+    except subprocess.TimeoutExpired as e:
+        cmd_str = ' '.join(command_list)
+        raise RuntimeError(
+            f"\n--- COMMAND TIMEOUT ---\nCOMMAND: '{cmd_str}'\nTIMEOUT: {timeout}s\nDIR: {work_dir}\n"
+            f"--- PARTIAL STDOUT ---\n{e.stdout}\n--- PARTIAL STDERR ---\n{e.stderr}\n--- END ---"
+        ) from e
     except subprocess.CalledProcessError as e:
         cmd_str = ' '.join(e.cmd)
         error_message = (
             f"\n--- COMMAND FAILED ---\n"
-            f"COMMAND: '{cmd_str}'\n"
-            f"EXIT CODE: {e.returncode}\n"
-            f"WORKING DIR: {work_dir}\n"
-            f"--- STDOUT ---\n{e.stdout}\n"
-            f"--- STDERR ---\n{e.stderr}\n"
-            f"--- END OF ERROR ---"
+            f"COMMAND: '{cmd_str}'\nEXIT CODE: {e.returncode}\nWORKING DIR: {work_dir}\n"
+            f"--- STDOUT ---\n{e.stdout}\n--- STDERR ---\n{e.stderr}\n--- END ---"
         )
         raise RuntimeError(error_message) from e
 
@@ -173,6 +218,8 @@ def _tree_layout(node):
 
 def generate_tree_figure(tree_file, label):
     """Creates a publication-quality phylogenetic tree figure using ete3."""
+    if not MAKE_FIGURES:
+        return
     t = Tree(tree_file, format=1)
     ts = TreeStyle()
     ts.layout_fn = _tree_layout
@@ -206,6 +253,8 @@ def generate_omega_result_figure(gene_name, region_label, status_annotated_tree,
         status_annotated_tree (ete3.Tree): The tree object with 'group_status' on each node.
         paml_params (dict): A dictionary of parsed omega values from the PAML H1 run.
     """
+    if not MAKE_FIGURES:
+        return
     # Define colors for selection regimes based on omega values
     PURIFYING_COLOR = "#0072B2" # Blue
     POSITIVE_COLOR = "#D55E00"  # Vermillion
@@ -285,6 +334,23 @@ def generate_omega_result_figure(gene_name, region_label, status_annotated_tree,
 # ==============================================================================
 # === CORE ANALYSIS FUNCTIONS  ======================================
 # ==============================================================================
+
+def parse_simple_paml_output(outfile_path):
+    """
+    Parse kappa and the background omega from a one-ratio or H0 run.
+    Returns dict with keys: {'kappa': float, 'omega_background': float}
+    """
+    params = {'kappa': np.nan, 'omega_background': np.nan}
+    with open(outfile_path, 'r') as f:
+        for line in f:
+            if line.startswith('kappa'):
+                m = re.search(r'kappa \(ts/tv\) = \s*([\d\.]+)', line)
+                if m: params['kappa'] = float(m.group(1))
+            elif re.search(r'\bw\b.*\(dN/dS\)', line) or re.search(r'\bw\b for branch', line):
+                m = re.search(r'=\s*([\d\.]+)|type 0:\s*([\d\.]+)', line)
+                if m:
+                    params['omega_background'] = float(m.group(1) or m.group(2))
+    return params
 
 def create_paml_tree_files(iqtree_file, work_dir, gene_name):
     logging.info(f"[{gene_name}] Labeling internal branches conservatively...")
@@ -373,17 +439,15 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
     # Return the tree object 't' which now has the 'group_status' features attached.
     return h1_tree_path, h0_tree_path, analysis_is_informative, t
 
-def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, model_num):
+def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, model_num,
+                      init_kappa=None, init_omega=None, fix_blength=0):
     """
-    Generates a codeml.ctl file with a specified evolutionary model.
-
-    Args:
-        ctl_path (str): The full path where the control file will be written.
-        phy_file (str): The absolute path to the input sequence file (phylip format).
-        tree_file (str): The absolute path to the input tree file.
-        out_file (str): The absolute path for the PAML output file.
-        model_num (int): The PAML model number to use (e.g., 0 for one-ratio, 2 for branch).
+    model_num: 0 (one-ratio) or 2 (branch models)
+    fix_blength: 0 = estimate branch lengths, 1/2 = keep as fixed (speed trade-off; keep 0 if unsure)
     """
+    os.makedirs(os.path.dirname(ctl_path), exist_ok=True)
+    kappa = init_kappa if init_kappa is not None else 2.0
+    omega = init_omega if init_omega is not None else 0.5
     ctl_content = f"""
       seqfile = {phy_file}
       treefile = {tree_file}
@@ -401,9 +465,14 @@ def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, model_num):
     cleandata = 0
 
       fix_kappa = 0
-        kappa = 2
+        kappa = {kappa}
       fix_omega = 0
-        omega = 0.5
+        omega = {omega}
+
+      fix_blength = {fix_blength}
+      method = 0
+      getSE = 0
+      RateAncestor = 0
     """
     with open(ctl_path, 'w') as f:
         f.write(ctl_content.strip())
@@ -419,39 +488,32 @@ def parse_paml_lnl(outfile_path):
     raise ValueError(f"Could not parse lnL from {outfile_path}")
 
 def parse_h1_paml_output(outfile_path):
-    """
-    Robustly parses the H1 output file for estimated kappa and omega values.
-    Handles cases where one foreground group might be missing.
-    """
     params = {'kappa': np.nan, 'omega_background': np.nan, 'omega_direct': np.nan, 'omega_inverted': np.nan}
     omega_lines = []
-    
     with open(outfile_path, 'r') as f:
         for line in f:
-            if line.startswith('kappa'):
-                match = re.search(r'kappa \(ts/tv\) = \s*([\d\.]+)', line)
-                if match: params['kappa'] = float(match.group(1))
-            elif re.match(r'\s*w\s*\(dN/dS\)|w for branch type', line):
-                omega_lines.append(line.strip())
+            if line.lstrip().startswith('kappa'):
+                m = re.search(r'kappa \(ts/tv\)\s*=\s*([\d\.]+)', line)
+                if m: params['kappa'] = float(m.group(1))
+            # be permissive about indentation and wording
+            if re.search(r'\bw\s*\(dN/dS\)', line) or re.search(r'w\s*for\s*branch\s*type', line) or re.search(r'w\s*ratios?\s*for\s*branches?', line):
+                omega_lines.append(line)
 
     for line in omega_lines:
-        if "w for branch type 0" in line:
-            match = re.search(r'type 0:\s*([\d\.]+)', line)
-            if match: params['omega_background'] = float(match.group(1))
-        elif "w for branch type 1" in line:
-            match = re.search(r'type 1:\s*([\d\.]+)', line)
-            if match: params['omega_direct'] = float(match.group(1))
-        elif "w for branch type 2" in line:
-            match = re.search(r'type 2:\s*([\d\.]+)', line)
-            if match: params['omega_inverted'] = float(match.group(1))
+        if re.search(r'branch type\s*0', line):
+            m = re.search(r'type\s*0:\s*([\d\.]+)', line)
+            if m: params['omega_background'] = float(m.group(1))
+        elif re.search(r'branch type\s*1', line):
+            m = re.search(r'type\s*1:\s*([\d\.]+)', line)
+            if m: params['omega_direct'] = float(m.group(1))
+        elif re.search(r'branch type\s*2', line):
+            m = re.search(r'type\s*2:\s*([\d\.]+)', line)
+            if m: params['omega_inverted'] = float(m.group(1))
         else:
-            # This regex handles both "w (dN/dS) = ..." and "w for branches: ..."
-            match = re.search(r'=\s*([\d\.]+)|branches:\s*([\d\.]+)', line)
-            if match:
-                value_str = match.group(1) or match.group(2)
-                if value_str:
-                    params['omega_background'] = float(value_str)
-                
+            m = re.search(r'=\s*([\d\.]+)|branches:\s*([\d\.]+)', line)
+            if m:
+                v = m.group(1) or m.group(2)
+                if v: params['omega_background'] = float(v)
     return params
 
 # ============================================================================
@@ -644,6 +706,31 @@ def prune_region_tree(region_tree_path, taxa_to_keep, out_path):
     return out_path
 
 
+def count_variable_codon_sites(phy_path, taxa_subset=None, max_sites_check=50000):
+    # Lightweight, column-wise variability check
+    with open(phy_path) as f:
+        header = f.readline().strip().split()
+        nseq, seqlen = int(header[0]), int(header[1])
+        seqs = []
+        for line in f:
+            parts = line.strip().split()
+            if not parts: continue
+            name, seq = parts[0], parts[1]
+            if taxa_subset is None or name in taxa_subset:
+                seqs.append(seq)
+            if len(seqs) >= (len(taxa_subset) if taxa_subset else nseq): break
+    if not seqs: return 0
+    seqlen = min(seqlen, len(seqs[0]))
+    var_codons = 0
+    # Cap work on huge alignments
+    for i in range(0, min(seqlen, max_sites_check), 3):
+        col = {s[i:i+3] for s in seqs if len(s) >= i+3}
+        col = {c for c in col if '-' not in c and 'N' not in c and 'n' not in c}
+        if len(col) > 1:
+            var_codons += 1
+    return var_codons
+
+
 def region_worker(region):
     """Run IQ-TREE for a region after basic QC and cache its tree."""
     label = region['label']
@@ -667,11 +754,16 @@ def region_worker(region):
         temp_dir = tempfile.mkdtemp(prefix=f"{label}_")
         prefix = os.path.join(temp_dir, label)
         cmd = [IQTREE_PATH, '-s', os.path.abspath(path), '-m', 'MFP', '-T', '1', '--prefix', prefix, '-quiet', '-o', chimp]
-        run_command(cmd, temp_dir)
+        run_command(cmd, temp_dir, timeout=IQTREE_TIMEOUT)
         tree_src = f"{prefix}.treefile"
         if not os.path.exists(tree_src):
             raise FileNotFoundError('treefile missing')
-        shutil.copy(tree_src, cached_tree)
+        
+        # Atomic copy to prevent corrupted cache files
+        tmp_copy = cached_tree + f".tmp.{os.getpid()}"
+        shutil.copy(tree_src, tmp_copy)
+        os.replace(tmp_copy, cached_tree)
+
         try:
             generate_tree_figure(cached_tree, label)
         except Exception as e:
@@ -689,6 +781,27 @@ def region_worker(region):
 # === GENE WORKER USING REGION TOPOLOGY ======================================
 # ============================================================================
 
+def _log_tail(fp, n=35, prefix=""):
+    try:
+        with open(fp, 'r') as f:
+            lines = f.readlines()[-n:]
+        for ln in lines:
+            logging.info("%s%s", f"[{prefix}] " if prefix else "", ln.rstrip())
+    except Exception as e:
+        logging.debug("Could not read tail of %s: %s", fp, e)
+
+def run_codeml_in(run_dir, ctl_path, timeout):
+    """Creates a directory for a single codeml run and executes it there."""
+    os.makedirs(run_dir, exist_ok=True)
+    # Belt-and-suspenders: remove any PAML detritus if present from a failed previous run
+    for pat in ('rst*', 'rub*', '2NG*', '2ML*', 'lnf', 'mlc'):
+        for f in glob.glob(os.path.join(run_dir, pat)):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    run_command([PAML_PATH, ctl_path], run_dir, timeout=timeout)
+
 def codeml_worker(gene_info, region_tree_file, region_label):
     """Run codeml for a gene using the provided region tree."""
     gene_name = gene_info['label']
@@ -704,7 +817,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
             result.update({'status': 'qc_fail', 'reason': qc_message})
             return result
 
-        temp_dir = tempfile.mkdtemp(prefix=f"{gene_name}_")
+        temp_dir = tempfile.mkdtemp(prefix=f"{gene_name}_", dir=os.getenv("PAML_TMPDIR"))
 
         region_taxa = Tree(region_tree_file, format=1).get_leaf_names()
         gene_taxa = read_taxa_from_phy(gene_info['path'])
@@ -723,6 +836,11 @@ def codeml_worker(gene_info, region_tree_file, region_label):
             f"[{gene_name}|{region_label}] Pruned tree to {len(kept_taxa)} taxa; dropped {','.join(sorted(dropped)) if dropped else 'none'}"
         )
 
+        var_codons = count_variable_codon_sites(gene_info['path'], set(keep))
+        if var_codons < 2:
+            result.update({'status': 'uninformative_topology', 'reason': f'Fewer than 2 variable codon sites ({var_codons})'})
+            return result
+
         chimp_name = next((n for n in t.get_leaf_names() if 'pantro' in n.lower() or 'pan_troglodytes' in n.lower()), None)
         if len(t.get_leaf_names()) < 4:
             result.update({'status': 'uninformative_topology', 'reason': 'Fewer than four taxa after pruning'})
@@ -735,36 +853,88 @@ def codeml_worker(gene_info, region_tree_file, region_label):
             return result
 
         phy_abs = os.path.abspath(gene_info['path'])
+        
+        # ONE-RATIO warm start in its own directory
+        one_dir = os.path.join(temp_dir, "one_ratio")
+        os.makedirs(one_dir, exist_ok=True)
+        one_ctl = os.path.join(one_dir, f"{gene_name}_one.ctl")
+        one_out = os.path.join(one_dir, f"{gene_name}_one.out")
+        logging.info(f"[{gene_name}|{region_label}] Running codeml ONE-RATIO warm start in {one_dir}")
+        generate_paml_ctl(one_ctl, phy_abs, h0_tree, one_out, model_num=0)
+        run_codeml_in(one_dir, one_ctl, PAML_TIMEOUT)
+        _log_tail(one_out, 25, prefix=f"{gene_name}|{region_label} ONE out")
+        seed = parse_simple_paml_output(one_out)
 
-        h1_ctl = os.path.join(temp_dir, f"{gene_name}_H1.ctl")
-        h1_out = os.path.join(temp_dir, f"{gene_name}_H1.out")
-        logging.info(f"[{gene_name}|{region_label}] Running codeml H1 model")
-        generate_paml_ctl(h1_ctl, phy_abs, h1_tree, h1_out, model_num=2)
-        run_command([PAML_PATH, h1_ctl], temp_dir)
-        lnl_h1 = parse_paml_lnl(h1_out)
-        paml_params = parse_h1_paml_output(h1_out)
+        # Define a grid of seeds to try for H0/H1, starting with the one-ratio result
+        initial_kappa = seed.get('kappa')
+        initial_omega = seed.get('omega_background')
+        seeds_to_try = [
+            (initial_kappa, initial_omega),
+            (2.0, 0.2),
+            (2.0, 1.0),
+            (5.0, 2.0)
+        ]
 
-        try:
-            generate_omega_result_figure(gene_name, region_label, status_tree, paml_params)
-        except Exception as fig_exc:
-            logging.error(f"[{gene_name}] Failed to generate PAML results figure: {fig_exc}")
+        best_lnl_h1 = -np.inf
+        paml_params, lnl_h0, lnl_h1 = {}, np.nan, np.nan
+        paml_success = False
+        best_run_files = {}
 
-        h0_ctl = os.path.join(temp_dir, f"{gene_name}_H0.ctl")
-        h0_out = os.path.join(temp_dir, f"{gene_name}_H0.out")
-        logging.info(f"[{gene_name}|{region_label}] Running codeml H0 model")
-        generate_paml_ctl(h0_ctl, phy_abs, h0_tree, h0_out, model_num=2)
-        run_command([PAML_PATH, h0_ctl], temp_dir)
-        lnl_h0 = parse_paml_lnl(h0_out)
+        for i, (k_init, w_init) in enumerate(seeds_to_try):
+            attempt_dir = os.path.join(temp_dir, f"attempt_{i}")
+            os.makedirs(attempt_dir, exist_ok=True)
+            logging.info(f"[{gene_name}|{region_label}] PAML H0/H1 attempt {i+1}/{len(seeds_to_try)} in {attempt_dir}")
+            
+            try:
+                # Run H0 and H1 for this attempt in the same subdirectory
+                h0_ctl = os.path.join(attempt_dir, f"{gene_name}_H0.ctl")
+                h0_out = os.path.join(attempt_dir, f"{gene_name}_H0.out")
+                generate_paml_ctl(h0_ctl, phy_abs, h0_tree, h0_out, model_num=2,
+                                  init_kappa=k_init, init_omega=w_init,
+                                  fix_blength=1 if PAML_FIX_BLENGTH_H0 else 0)
+                run_codeml_in(attempt_dir, h0_ctl, PAML_TIMEOUT)
+                _log_tail(h0_out, 20, prefix=f"{gene_name}|{region_label} H0 out (attempt {i+1})")
+                current_lnl_h0 = parse_paml_lnl(h0_out)
 
-        if lnl_h1 < lnl_h0:
-            reason = f"lnL_H1({lnl_h1}) < lnL_H0({lnl_h0})"
+                h1_ctl = os.path.join(attempt_dir, f"{gene_name}_H1.ctl")
+                h1_out = os.path.join(attempt_dir, f"{gene_name}_H1.out")
+                generate_paml_ctl(h1_ctl, phy_abs, h1_tree, h1_out, model_num=2,
+                                  init_kappa=k_init, init_omega=w_init)
+                run_codeml_in(attempt_dir, h1_ctl, PAML_TIMEOUT)
+                _log_tail(h1_out, 20, prefix=f"{gene_name}|{region_label} H1 out (attempt {i+1})")
+                current_lnl_h1 = parse_paml_lnl(h1_out)
+
+                if current_lnl_h1 < current_lnl_h0:
+                    logging.warning(f"[{gene_name}|{region_label}] Optim fail attempt {i+1}: H1 lnL ({current_lnl_h1}) < H0 lnL ({current_lnl_h0}).")
+                    continue
+
+                if current_lnl_h1 > best_lnl_h1:
+                    logging.info(f"[{gene_name}|{region_label}] Found new best lnL: {current_lnl_h1}")
+                    best_lnl_h1 = current_lnl_h1
+                    lnl_h0 = current_lnl_h0
+                    lnl_h1 = current_lnl_h1
+                    paml_params = parse_h1_paml_output(h1_out)
+                    paml_success = True
+                    best_run_files = {
+                        "one_ctl": one_ctl, "one_out": one_out,
+                        "h0_ctl": h0_ctl, "h0_out": h0_out,
+                        "h1_ctl": h1_ctl, "h1_out": h1_out,
+                        "h1_tree": h1_tree, "h0_tree": h0_tree,
+                        "pruned_tree": pruned_tree,
+                        "mlc": os.path.join(attempt_dir, "mlc")
+                    }
+            except Exception as e:
+                logging.error(f"[{gene_name}|{region_label}] PAML attempt {i+1} failed with exception: {e}", exc_info=True)
+                continue
+
+        if not paml_success:
+            reason = "All PAML seed attempts failed optimization (H1 lnL < H0 lnL or other error)."
             result.update({'status': 'paml_optim_fail', 'reason': reason})
             return result
-
+        
         lrt_stat = 2 * (lnl_h1 - lnl_h0)
         p_value = chi2.sf(lrt_stat, df=1)
-        logging.info(f"[{gene_name}|{region_label}] LRT={lrt_stat:.3f} p={p_value:.3g}")
-
+        
         result.update({
             'status': 'success', 'p_value': p_value, 'lrt_stat': lrt_stat,
             'lnl_h1': lnl_h1, 'lnl_h0': lnl_h0, **paml_params,
@@ -775,6 +945,31 @@ def codeml_worker(gene_info, region_tree_file, region_label):
             'chimp_in_pruned': chimp_name is not None,
             'taxa_used': ';'.join(t.get_leaf_names())
         })
+
+        if KEEP_PAML_OUT:
+            try:
+                import json
+                safe_region = re.sub(r'[^A-Za-z0-9_.-]+', '_', region_label)
+                safe_gene   = re.sub(r'[^A-Za-z0-9_.-]+', '_', gene_name)
+                dest_dir = os.path.join(PAML_OUT_DIR, f"{safe_gene}__{safe_region}")
+                os.makedirs(dest_dir, exist_ok=True)
+                
+                for fn_path in best_run_files.values():
+                    if os.path.exists(fn_path):
+                        shutil.copy(fn_path, os.path.join(dest_dir, os.path.basename(fn_path)))
+
+                with open(os.path.join(dest_dir, "summary.json"), "w") as jf:
+                    serializable_result = {k: (float(v) if isinstance(v, (np.floating, np.integer)) else v) for k, v in result.items()}
+                    json.dump(serializable_result, jf, indent=2)
+            except Exception as copy_e:
+                logging.error(f"[{gene_name}|{region_label}] Failed to save PAML outputs: {copy_e}")
+
+        try:
+            generate_omega_result_figure(gene_name, region_label, status_tree, paml_params)
+        except Exception as fig_exc:
+            logging.error(f"[{gene_name}] Failed to generate PAML results figure: {fig_exc}")
+        
+        logging.info(f"[{gene_name}|{region_label}] LRT={lrt_stat:.3f} p={p_value:.3g}")
         elapsed = (datetime.now() - start_time).total_seconds()
         logging.info(f"[{gene_name}|{region_label}] END codeml ({elapsed:.1f}s) status={result['status']}")
         return result
@@ -791,165 +986,231 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 # === MAIN EXECUTION AND REPORTING =============================================
 # ==============================================================================
 
+def submit_with_cap(exec, fn, args, inflight, cap):
+    """Submits a task to the executor and manages the inflight queue to enforce a cap."""
+    fut = exec.submit(fn, *args)
+    inflight.append(fut)
+    
+    # If the queue is full, wait for the next future to complete
+    if len(inflight) >= cap:
+        done = next(as_completed(inflight))
+        inflight.remove(done)
+        return [done]
+    return []
+
+def run_overlapped(region_infos, region_gene_map, log_q):
+    """
+    Runs the full pipeline with overlapped IQ-TREE and PAML execution,
+    using ProcessPoolExecutors and a cap on in-flight PAML jobs for back-pressure.
+    """
+    all_results = []
+    inflight = deque()
+    cap = PAML_WORKERS * 4
+    completed_count = 0
+
+    # Ensure workers use the 'spawn' context and our queue logger
+    mpctx = multiprocessing.get_context("spawn")
+
+    with ProcessPoolExecutor(max_workers=PAML_WORKERS, mp_context=mpctx,
+                             initializer=worker_logging_init, initargs=(log_q,)) as paml_exec, \
+         ProcessPoolExecutor(max_workers=REGION_WORKERS, mp_context=mpctx,
+                             initializer=worker_logging_init, initargs=(log_q,)) as region_exec:
+
+        logging.info(f"Submitting {len(region_infos)} region tasks to pool...")
+        region_futs = {region_exec.submit(region_worker, r) for r in region_infos}
+
+        for rf in tqdm(as_completed(region_futs), total=len(region_futs), desc="Processing regions"):
+            try:
+                label, tree, reason = rf.result()
+            except Exception as e:
+                logging.error(f"A region task failed with an exception: {e}")
+                continue
+
+            if tree is None:
+                logging.warning(f"Region {label} skipped: {reason}")
+                continue
+            
+            genes_for_region = region_gene_map.get(label, [])
+            if not genes_for_region:
+                continue
+
+            logging.info(f"Region {label} complete. Submitting {len(genes_for_region)} PAML jobs.")
+            for gene_info in genes_for_region:
+                flushed = submit_with_cap(
+                    paml_exec, codeml_worker, (gene_info, tree, label), inflight, cap)
+                for f in flushed:
+                    try:
+                        res = f.result()
+                        all_results.append(res)
+                        completed_count += 1
+                        if (completed_count % 25 == 0) or (res.get('status') != 'success'):
+                            logging.info(f"Completed {completed_count}: {res.get('gene')} in {res.get('region')} -> {res.get('status')}")
+                        if completed_count % CHECKPOINT_EVERY == 0:
+                            logging.info(f"--- Checkpointing {len(all_results)} results to {CHECKPOINT_FILE} ---")
+                            pd.DataFrame(all_results).to_csv(CHECKPOINT_FILE, sep="\t", index=False, float_format='%.6g')
+                    except Exception as e:
+                        logging.error(f"A PAML job failed with an exception: {e}")
+
+        # Drain any remaining PAML jobs
+        logging.info(f"All regions processed. Draining {len(inflight)} remaining PAML jobs...")
+        for f in tqdm(as_completed(list(inflight)), total=len(inflight), desc="Finalizing PAML jobs"):
+            try:
+                res = f.result()
+                all_results.append(res)
+                completed_count += 1
+                if (completed_count % 25 == 0) or (res.get('status') != 'success'):
+                    logging.info(f"Completed {completed_count}: {res.get('gene')} in {res.get('region')} -> {res.get('status')}")
+                if completed_count % CHECKPOINT_EVERY == 0:
+                    logging.info(f"--- Checkpointing {len(all_results)} results to {CHECKPOINT_FILE} ---")
+                    pd.DataFrame(all_results).to_csv(CHECKPOINT_FILE, sep="\t", index=False, float_format='%.6g')
+            except Exception as e:
+                logging.error(f"A PAML job failed with an exception during drain: {e}")
+
+    # Final checkpoint save
+    if all_results:
+        logging.info(f"--- Final checkpoint of {len(all_results)} results to {CHECKPOINT_FILE} ---")
+        pd.DataFrame(all_results).to_csv(CHECKPOINT_FILE, sep="\t", index=False, float_format='%.6g')
+        
+    return all_results
+
+
 def main():
     """Run region-first pipeline: IQ-TREE on regions, codeml on genes."""
+    log_q, listener = start_logging()
+    # Configure logging for the main process to also use the queue
+    root = logging.getLogger()
+    root.handlers[:] = [QueueHandler(log_q)]
+    root.setLevel(logging.INFO)
 
-    logging.info("--- Starting Region→Gene Differential Selection Pipeline ---")
+    try:
+        logging.info("--- Starting Region→Gene Differential Selection Pipeline ---")
 
-    if not (os.path.exists(IQTREE_PATH) and os.access(IQTREE_PATH, os.X_OK)):
-        logging.critical(f"FATAL: IQ-TREE not found or not executable at '{IQTREE_PATH}'")
-        sys.exit(1)
-    if not (os.path.exists(PAML_PATH) and os.access(PAML_PATH, os.X_OK)):
-        logging.critical(f"FATAL: PAML codeml not found or not executable at '{PAML_PATH}'")
-        sys.exit(1)
+        if not (os.path.exists(IQTREE_PATH) and os.access(IQTREE_PATH, os.X_OK)):
+            logging.critical(f"FATAL: IQ-TREE not found or not executable at '{IQTREE_PATH}'")
+            sys.exit(1)
+        if not (os.path.exists(PAML_PATH) and os.access(PAML_PATH, os.X_OK)):
+            logging.critical(f"FATAL: PAML codeml not found or not executable at '{PAML_PATH}'")
+            sys.exit(1)
 
-    logging.info("Checking external tool versions...")
-    iqtree_ver = subprocess.run([IQTREE_PATH, '--version'], capture_output=True, text=True, check=True).stdout.strip().split('\n')[0]
-    logging.info(f"IQ-TREE version: {iqtree_ver}")
-    logging.info(f"PAML executable: {PAML_PATH}")
-    logging.info(f"CPUs: {CPU_COUNT} | REGION_WORKERS={REGION_WORKERS} | PAML_WORKERS={PAML_WORKERS}")
-    if PAML_WORKERS > CPU_COUNT:
-        logging.warning(
-            f"PAML_WORKERS ({PAML_WORKERS}) exceeds available CPUs ({CPU_COUNT}); performance may suffer"
-        )
+        logging.info("Checking external tool versions...")
+        iqtree_ver = subprocess.run([IQTREE_PATH, '--version'], capture_output=True, text=True, check=True).stdout.strip().split('\n')[0]
+        logging.info(f"IQ-TREE version: {iqtree_ver}")
+        logging.info(f"PAML executable: {PAML_PATH}")
+        logging.info(f"CPUs: {CPU_COUNT} | REGION_WORKERS={REGION_WORKERS} | PAML_WORKERS={PAML_WORKERS}")
+        if PAML_WORKERS > CPU_COUNT:
+            logging.warning(
+                f"PAML_WORKERS ({PAML_WORKERS}) exceeds available CPUs ({CPU_COUNT}); performance may suffer"
+            )
 
-    os.makedirs(FIGURE_DIR, exist_ok=True)
-    os.makedirs(ANNOTATED_FIGURE_DIR, exist_ok=True)
-    os.makedirs(REGION_TREE_DIR, exist_ok=True)
+        os.makedirs(FIGURE_DIR, exist_ok=True)
+        os.makedirs(ANNOTATED_FIGURE_DIR, exist_ok=True)
+        os.makedirs(REGION_TREE_DIR, exist_ok=True)
 
-    logging.info("Searching for alignment files...")
-    region_files = glob.glob('combined_inversion_*.phy')
-    gene_files = [f for f in glob.glob('combined_*.phy') if 'inversion' not in os.path.basename(f)]
-    logging.info(f"Found {len(region_files)} region alignments and {len(gene_files)} gene alignments")
+        logging.info("Searching for alignment files...")
+        region_files = glob.glob('combined_inversion_*.phy')
+        gene_files = [f for f in glob.glob('combined_*.phy') if 'inversion' not in os.path.basename(f)]
+        logging.info(f"Found {len(region_files)} region alignments and {len(gene_files)} gene alignments")
 
-    if not region_files:
-        logging.critical("FATAL: No region alignment files found.")
-        sys.exit(1)
-    if not gene_files:
-        logging.critical("FATAL: No gene alignment files found.")
-        sys.exit(1)
+        if not region_files:
+            logging.critical("FATAL: No region alignment files found.")
+            sys.exit(1)
+        if not gene_files:
+            logging.critical("FATAL: No gene alignment files found.")
+            sys.exit(1)
 
-    logging.info("Loading gene metadata...")
-    metadata = load_gene_metadata()
-    logging.info(f"Loaded metadata for {len(metadata)} genes")
+        logging.info("Loading gene metadata...")
+        metadata = load_gene_metadata()
+        logging.info(f"Loaded metadata for {len(metadata)} genes")
 
-    logging.info("Parsing region and gene filenames...")
-    region_infos, bad_regions = [], []
-    for f in region_files:
-        try:
-            region_infos.append(parse_region_filename(f))
-        except Exception as e:
-            bad_regions.append((f, str(e)))
-    if bad_regions:
-        logging.warning(
-            f"Skipping {len(bad_regions)} region files with bad names: " +
-            "; ".join(os.path.basename(b) for b, _ in bad_regions))
+        logging.info("Parsing region and gene filenames...")
+        region_infos, bad_regions = [], []
+        for f in region_files:
+            try:
+                region_infos.append(parse_region_filename(f))
+            except Exception as e:
+                bad_regions.append((f, str(e)))
+        if bad_regions:
+            logging.warning(
+                f"Skipping {len(bad_regions)} region files with bad names: " +
+                "; ".join(os.path.basename(b) for b, _ in bad_regions))
 
-    gene_infos, bad_genes = [], []
-    for f in gene_files:
-        try:
-            gene_infos.append(parse_gene_filename(f, metadata))
-        except Exception as e:
-            bad_genes.append((f, str(e)))
-    if bad_genes:
-        logging.warning(
-            f"Skipping {len(bad_genes)} gene files with missing/ambiguous coords or bad names. "
-            f"Example: {os.path.basename(bad_genes[0][0])} -> {bad_genes[0][1]}")
-    logging.info("Mapping genes to overlapping regions...")
-    region_gene_map = build_region_gene_map(region_infos, gene_infos)
-    for label, genes in region_gene_map.items():
-        logging.info(f"Region {label} overlaps {len(genes)} genes")
+        gene_infos, bad_genes = [], []
+        for f in gene_files:
+            try:
+                gene_infos.append(parse_gene_filename(f, metadata))
+            except Exception as e:
+                bad_genes.append((f, str(e)))
+        if bad_genes:
+            logging.warning(
+                f"Skipping {len(bad_genes)} gene files with missing/ambiguous coords or bad names. "
+                f"Example: {os.path.basename(bad_genes[0][0])} -> {bad_genes[0][1]}")
+        logging.info("Mapping genes to overlapping regions...")
+        region_gene_map = build_region_gene_map(region_infos, gene_infos)
+        for label, genes in region_gene_map.items():
+            logging.info(f"Region {label} overlaps {len(genes)} genes")
 
-    # Build region trees in parallel
-    logging.info(f"Running IQ-TREE on {len(region_infos)} regions with {REGION_WORKERS} workers")
-    region_results = []
-    with multiprocessing.Pool(processes=REGION_WORKERS) as pool:
-        for res in tqdm(pool.imap_unordered(region_worker, region_infos), total=len(region_infos)):
-            region_results.append(res)
+        all_results = run_overlapped(region_infos, region_gene_map, log_q)
+        results_df = pd.DataFrame(all_results)
 
-    region_tree_map = {}
-    for label, tree, reason in region_results:
-        if tree:
-            region_tree_map[label] = tree
-        else:
-            logging.warning(f"Region {label} skipped: {reason}")
-    logging.info(f"Built trees for {len(region_tree_map)}/{len(region_infos)} regions")
+        ordered_columns = ['region', 'gene', 'status', 'p_value', 'q_value', 'lrt_stat',
+                           'omega_inverted', 'omega_direct', 'omega_background', 'kappa',
+                           'lnl_h1', 'lnl_h0', 'n_leaves_region', 'n_leaves_gene',
+                           'n_leaves_pruned', 'chimp_in_region', 'chimp_in_pruned',
+                           'taxa_used', 'reason']
+        for col in ordered_columns:
+            if col not in results_df.columns:
+                results_df[col] = np.nan
 
-    all_results = []
-    tasks = []
-    for label, tree in region_tree_map.items():
-        for gene_info in region_gene_map.get(label, []):
-            tasks.append((gene_info, tree, label))
+        # Handle the no-task / empty-results case safely
+        if results_df.empty:
+            results_df = results_df[ordered_columns]
+            results_df.to_csv(RESULTS_TSV, sep='\t', index=False, float_format='%.6g')
+            logging.info(f"All results saved to: {RESULTS_TSV}")
+            logging.warning("No results produced (no valid region trees or gene×region tasks).")
+            logging.info("\n\n" + "="*75)
+            logging.info("--- FINAL PIPELINE REPORT ---")
+            logging.info(f"Total tests: {len(results_df)}")
+            logging.info("="*75 + "\n")
+            logging.info("No significant tests.")
+            logging.info("\nPipeline finished.")
+            return
 
-    if tasks:
-        logging.info(f"Dispatching {len(tasks)} codeml jobs with {PAML_WORKERS} workers")
-        def _worker(args):
-            return codeml_worker(*args)
-        status_counts = {}
-        with multiprocessing.Pool(processes=PAML_WORKERS, maxtasksperchild=1) as pool:
-            for res in tqdm(pool.imap_unordered(_worker, tasks, chunksize=5), total=len(tasks)):
-                all_results.append(res)
-                status_counts[res['status']] = status_counts.get(res['status'], 0) + 1
-                done = sum(status_counts.values())
-                logging.info(f"Completed {done}/{len(tasks)}: {res['gene']} in {res['region']} -> {res['status']}")
-    else:
-        logging.warning("No gene×region tasks to run; exiting early")
+        successful = results_df[results_df['status'] == 'success'].copy()
+        if not successful.empty:
+            pvals = successful['p_value'].dropna()
+            if not pvals.empty:
+                rejected, qvals = fdrcorrection(pvals, alpha=FDR_ALPHA, method='indep')
+                qmap = {pvals.index[i]: q for i, q in enumerate(qvals)}
+                results_df['q_value'] = results_df.index.map(qmap)
+                logging.info(f"Applied FDR correction across {len(pvals)} gene×region tests")
 
-    results_df = pd.DataFrame(all_results)
-
-    ordered_columns = ['region', 'gene', 'status', 'p_value', 'q_value', 'lrt_stat',
-                       'omega_inverted', 'omega_direct', 'omega_background', 'kappa',
-                       'lnl_h1', 'lnl_h0', 'n_leaves_region', 'n_leaves_gene',
-                       'n_leaves_pruned', 'chimp_in_region', 'chimp_in_pruned',
-                       'taxa_used', 'reason']
-    for col in ordered_columns:
-        if col not in results_df.columns:
-            results_df[col] = np.nan
-
-    # Handle the no-task / empty-results case safely
-    if results_df.empty:
         results_df = results_df[ordered_columns]
         results_df.to_csv(RESULTS_TSV, sep='\t', index=False, float_format='%.6g')
         logging.info(f"All results saved to: {RESULTS_TSV}")
-        logging.warning("No results produced (no valid region trees or gene×region tasks).")
+
+        counts = results_df['status'].value_counts().to_dict()
         logging.info("\n\n" + "="*75)
         logging.info("--- FINAL PIPELINE REPORT ---")
         logging.info(f"Total tests: {len(results_df)}")
+        for status, count in counts.items():
+            logging.info(f"  - {status}: {count}")
         logging.info("="*75 + "\n")
-        logging.info("No significant tests.")
+
+        sig = results_df[(results_df['status'] == 'success') & (results_df['q_value'] < FDR_ALPHA)]
+        if not sig.empty:
+            logging.info(f"Significant gene×region tests (q < {FDR_ALPHA}):")
+            for _, row in sig.sort_values('q_value').iterrows():
+                logging.info(f"{row['region']} - {row['gene']}: q={row['q_value']:.4g}")
+        else:
+            logging.info("No significant tests.")
+
         logging.info("\nPipeline finished.")
-        return
-
-    successful = results_df[results_df['status'] == 'success'].copy()
-    if not successful.empty:
-        pvals = successful['p_value'].dropna()
-        if not pvals.empty:
-            rejected, qvals = fdrcorrection(pvals, alpha=FDR_ALPHA, method='indep')
-            qmap = {pvals.index[i]: q for i, q in enumerate(qvals)}
-            results_df['q_value'] = results_df.index.map(qmap)
-            logging.info(f"Applied FDR correction across {len(pvals)} gene×region tests")
-
-    results_df = results_df[ordered_columns]
-    results_df.to_csv(RESULTS_TSV, sep='\t', index=False, float_format='%.6g')
-    logging.info(f"All results saved to: {RESULTS_TSV}")
-
-    counts = results_df['status'].value_counts().to_dict()
-    logging.info("\n\n" + "="*75)
-    logging.info("--- FINAL PIPELINE REPORT ---")
-    logging.info(f"Total tests: {len(results_df)}")
-    for status, count in counts.items():
-        logging.info(f"  - {status}: {count}")
-    logging.info("="*75 + "\n")
-
-    sig = results_df[(results_df['status'] == 'success') & (results_df['q_value'] < FDR_ALPHA)]
-    if not sig.empty:
-        logging.info(f"Significant gene×region tests (q < {FDR_ALPHA}):")
-        for _, row in sig.sort_values('q_value').iterrows():
-            logging.info(f"{row['region']} - {row['gene']}: q={row['q_value']:.4g}")
-    else:
-        logging.info("No significant tests.")
-
-    logging.info("\nPipeline finished.")
+    finally:
+        listener.stop()
 
 if __name__ == '__main__':
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass
     main()
