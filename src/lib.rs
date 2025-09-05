@@ -10,6 +10,13 @@ pub mod transcripts;
 pub mod progress;
 pub mod pca;
 
+#[cfg(test)]
+mod tests {
+    mod filter_tests;
+    mod stats_tests;
+    mod hudson_fst_tests;
+}
+
 /// PyO3 wrapper for count_segregating_sites
 ///
 /// Counts the number of segregating sites (polymorphic positions) in a collection of variants.

@@ -3206,7 +3206,7 @@ fn process_single_config_entry(
 
                         if hudson_region_is_valid {
                             match calculate_hudson_fst_for_pair_with_sites(&pop_a_context_csv, &pop_b_context_csv, hudson_query_region) {
-                                Ok((outcome, site_values)) => {
+                                Ok((outcome, _)) => {
                                     local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
                                         chr: entry.seqname.clone(),
                                         region_start: entry.interval.start as i64, // entry.interval.start is 0-based inclusive start
@@ -3410,7 +3410,6 @@ struct RegionalHudsonFSTOutcome {
     outcome: HudsonFSTOutcome,
 }
 
-#[derive(Debug, Clone)]
 /// Formats an Option<PopulationId> into type and name strings for output.
 fn format_population_id(pop_id_opt: &Option<PopulationId>) -> (String, String) {
     match pop_id_opt {
