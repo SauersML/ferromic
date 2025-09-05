@@ -1754,30 +1754,38 @@ fn dxy_from_counts(
             dot += (k1 as f64 / n1 as f64) * (k2 as f64 / n2 as f64);
         }
     }
-    // Clamp to handle tiny floating-point errors that could make D_xy slightly negative
+    // Clamp to [0,1] to handle floating-point errors in multi-allelic tallies
     let dxy = 1.0 - dot;
-    Some(dxy.max(0.0))
+    Some(dxy.max(0.0).min(1.0))
 }
 
 /// Compute per-site Hudson FST components from a single variant.
 ///
-/// **Mathematical Foundation:**
+/// **Mathematical Foundation (Hudson et al. 1992):**
 /// Hudson's FST at a single site is defined as:
 ///
-///     FST = (H_B - H_S) / H_B
+///     FST_i = (D_xy,i - 0.5*(π_1,i + π_2,i)) / D_xy,i = (H_B - H_S) / H_B
 ///
 /// Where:
-/// - H_B = D_xy = between-population diversity (average pairwise difference between pops)
-/// - H_S = (π_1 + π_2)/2 = average within-population diversity
+/// - H_B = D_xy,i = 1 - Σ_a p_1a * p_2a = between-population diversity
+/// - H_S = 0.5*(π_1,i + π_2,i) = average within-population diversity
+/// - π_k,i = (n_k/(n_k-1)) * (1 - Σ_a p_ka²) = unbiased within-population estimator
+///
+/// **Literature Alignment:**
+/// - **Hudson et al. (1992)**: Original definition using H_B and H_S
+/// - **scikit-allel**: `average_hudson_fst` uses identical formula and ratio-of-sums aggregation
+/// - **ANGSD**: Uses same per-site definition and weighted window estimator
+/// - **Biallelic equivalence**: For 2 alleles, this equals (p₁-p₂)² minus finite-sample corrections
+///   divided by D_xy = p₁(1-p₂) + p₂(1-p₁)
 ///
 /// **Per-site Components:**
-/// - Numerator: D_xy - 0.5*(π_1 + π_2) = Hudson numerator with finite-sample corrections
-/// - Denominator: D_xy = Hudson denominator
-/// - FST: numerator/denominator when denominator > ε
+/// - Numerator: D_xy,i - 0.5*(π_1,i + π_2,i) = Hudson numerator with finite-sample corrections
+/// - Denominator: D_xy,i = Hudson denominator  
+/// - FST: numerator/denominator when denominator > FST_EPSILON
 ///
-/// **Finite Sample Corrections:**
-/// Both π_1 and π_2 use the unbiased estimator n/(n-1) * (1 - Σp_a²), which accounts
-/// for sampling variance in small samples.
+/// **Multi-allelic Support:**
+/// All formulas use Σ_a notation, so they generalize correctly beyond biallelic SNPs.
+/// D_xy = 1 - Σ_a p_1a * p_2a handles any number of alleles.
 ///
 /// **Multi-allelic and Missing Data:**
 /// Handles any number of alleles and computes frequencies from called haplotypes only.
@@ -1826,11 +1834,25 @@ fn hudson_site_from_variant(
 }
 
 /// Calculate Hudson FST components on a per-site basis across a region.
+///
+/// **IMPORTANT**: This function assumes variant compatibility between populations.
+/// For safe usage, prefer `calculate_hudson_fst_for_pair_with_sites` which includes
+/// proper compatibility checks and error handling.
 pub fn calculate_hudson_fst_per_site(
     pop1_context: &PopulationContext,
     pop2_context: &PopulationContext,
     region: QueryRegion,
 ) -> Vec<SiteFstHudson> {
+    // Guard against basic misuse - variant compatibility check
+    if !variants_compatible(pop1_context.variants, pop2_context.variants) {
+        log(
+            LogLevel::Error,
+            "Variant slices differ between populations in calculate_hudson_fst_per_site. Use calculate_hudson_fst_for_pair_with_sites for safe usage.",
+        );
+        // Return empty vector rather than panicking
+        return Vec::new();
+    }
+
     if pop1_context.sequence_length != region.len() as i64 {
         log(
             LogLevel::Warning,
@@ -1879,17 +1901,25 @@ pub fn calculate_hudson_fst_per_site(
 /// **Mathematical Foundation:**
 /// The recommended window-level Hudson FST estimator is the "ratio of sums":
 ///
-///     FST_window = (Σ_sites numerator_i) / (Σ_sites denominator_i)
+///     FST_window = Σ_i [D_xy,i - 0.5*(π_1,i + π_2,i)] / Σ_i D_xy,i
 ///
-/// This is a **weighted average** where sites with higher D_xy contribute more to the
-/// final estimate. This approach is preferred over the "mean of ratios" because:
-/// 1. It's more robust to sites with low diversity
-/// 2. It matches the behavior of ANGSD and scikit-allel
-/// 3. It provides the maximum likelihood estimator under certain models
+/// This is a **weighted average** where sites with higher D_xy contribute more weight.
+///
+/// **Literature Alignment:**
+/// - **scikit-allel**: `windowed_hudson_fst` uses identical ratio-of-sums aggregation
+/// - **ANGSD**: Uses same weighted estimator for window-level FST
+/// - **PopGen consensus**: Preferred over "mean of ratios" in methodological reviews
+/// - **Bhatia et al. (2013)**: Recommends keeping negative values (no truncation at 0)
+///
+/// **Why Ratio-of-Sums (not Mean-of-Ratios):**
+/// 1. **Stability**: More robust to near-monomorphic sites with tiny denominators
+/// 2. **Weighting**: Sites with higher diversity naturally get more influence
+/// 3. **Statistical properties**: Better maximum likelihood properties under certain models
+/// 4. **Tool compatibility**: Matches mainstream population genetics software
 ///
 /// **Missing Data Robustness:**
-/// Sites with missing data contribute (None, None) components and are excluded from
-/// both numerator and denominator sums, ensuring unbiased estimates.
+/// Sites with undefined components (None, None) are excluded from both sums,
+/// ensuring unbiased estimates regardless of missing data patterns.
 ///
 /// **Monomorphic Sites:**
 /// Sites with D_xy = π = 0 contribute (0, 0) to the sums, which is mathematically correct.
@@ -1963,10 +1993,10 @@ pub fn compute_hudson_fst_outcome(
     if let (Some(dxy_val), Some(pi_xy_avg_val)) = (outcome.d_xy, outcome.pi_xy_avg) {
         // dxy_val and pi_xy_avg_val are finite and dxy_val is positive for division
         if dxy_val.is_finite() && pi_xy_avg_val.is_finite() {
-            if dxy_val > 1e-9 {
-                // Use a small epsilon to avoid division by effective zero
+            if dxy_val > FST_EPSILON {
+                // Use FST_EPSILON to avoid division by effective zero
                 outcome.fst = Some((dxy_val - pi_xy_avg_val) / dxy_val);
-            } else if dxy_val >= 0.0 && (dxy_val - pi_xy_avg_val).abs() < 1e-9 {
+            } else if dxy_val >= 0.0 && (dxy_val - pi_xy_avg_val).abs() < FST_EPSILON {
                 // Case: Dxy is ~0 and Pi_xy_avg is also ~0 (or Dxy approx equals Pi_xy_avg)
                 // This implies no differentiation and possibly no variation. FST is 0.
                 outcome.fst = Some(0.0);
