@@ -816,6 +816,31 @@ pub fn parse_population_csv(csv_path: &Path) -> Result<HashMap<String, Vec<Strin
 ///
 /// # Returns
 /// A HashMap mapping `(vcf_sample_index, HaplotypeSide)` tuples to group identifier strings ("0" or "1").
+/// Extract core sample ID by removing _L/_R suffix if present
+fn core_sample_id(name: &str) -> &str {
+    if let Some(s) = name.strip_suffix("_L").or_else(|| name.strip_suffix("_R")) {
+        s
+    } else {
+        name
+    }
+}
+
+#[cfg(test)]
+mod core_sample_id_tests {
+    use super::*;
+
+    #[test]
+    fn test_core_sample_id() {
+        assert_eq!(core_sample_id("NA12878_L"), "NA12878");
+        assert_eq!(core_sample_id("NA12878_R"), "NA12878");
+        assert_eq!(core_sample_id("SAMP_01_L"), "SAMP_01");
+        assert_eq!(core_sample_id("SAMP_01_R"), "SAMP_01");
+        assert_eq!(core_sample_id("NoSuffix"), "NoSuffix");
+        assert_eq!(core_sample_id("Sample_With_Underscores_L"), "Sample_With_Underscores");
+        assert_eq!(core_sample_id("Sample_With_Underscores_R"), "Sample_With_Underscores");
+    }
+}
+
 fn map_samples_to_haplotype_groups(
     sample_names: &[String],
     sample_to_group_map: &HashMap<String, (u8, u8)>,
@@ -824,8 +849,9 @@ fn map_samples_to_haplotype_groups(
 
     let mut sample_id_to_index = HashMap::new();
     for (idx, name) in sample_names.iter().enumerate() {
-        let sample_id = name.rsplit('_').next().unwrap_or(name); // Uses a simplified ID if name has _L/_R suffix
-        sample_id_to_index.insert(sample_id, idx);
+        let core = core_sample_id(name);
+        sample_id_to_index.insert(core.to_string(), idx);     // core id
+        sample_id_to_index.insert(name.clone(), idx);         // exact id (defensive)
     }
 
     for (config_sample_name, &(left_group, right_group)) in sample_to_group_map {
@@ -869,10 +895,7 @@ fn map_samples_to_populations(
         }
 
         // Attempt match by suffix (e.g., VCF "ID_L" or "ID_R" vs CSV "ID")
-        let core_vcf_id = vcf_sample_name
-            .rsplit('_')
-            .next()
-            .unwrap_or(vcf_sample_name);
+        let core_vcf_id = core_sample_id(vcf_sample_name);
         if let Some(pop_name) = csv_sample_id_to_pop_name.get(core_vcf_id) {
             sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Left), pop_name.clone());
             sample_to_pop_map_for_fst.insert((vcf_idx, HaplotypeSide::Right), pop_name.clone());
@@ -950,6 +973,10 @@ fn calculate_fst_wc_at_site_by_population(
 /// It calculates allele frequencies per subpopulation, then computes Weir & Cockerham's
 /// variance components 'a' (among populations) and 'b' (within populations).
 /// From these, it derives overall and pairwise FST estimates for the site.
+///
+/// **LIMITATION**: This implementation is effectively **biallelic only**. Multi-allelic sites
+/// are collapsed by treating all non-reference alleles (allele_code != 0) as "alternate".
+/// This distorts allele frequencies at truly multi-allelic sites.
 ///
 /// # Arguments
 /// * `variant`: The `Variant` data for the site.
@@ -1613,6 +1640,12 @@ pub fn calculate_d_xy_hudson<'a>(
         );
         return Err(VcfError::Parse(
             "Sequence length mismatch in Dxy calculation".to_string(),
+        ));
+    }
+
+    if !variants_compatible(pop1_context.variants, pop2_context.variants) {
+        return Err(VcfError::Parse(
+            "Variant slices differ in positions/length for Dxy calculation".to_string(),
         ));
     }
 
@@ -2420,12 +2453,13 @@ pub fn calculate_pairwise_differences(
                             &variant.genotypes[sample_idx_i],
                             &variant.genotypes[sample_idx_j],
                         ) {
-                            // Compare aligned haplotypes (left vs left, right vs right)
-                            let len = genotype_i.len().min(genotype_j.len());
-                            for haplotype_idx in 0..len {
-                                comparable_site_count += 1; // Count each comparable haplotype
-                                if genotype_i[haplotype_idx] != genotype_j[haplotype_idx] {
-                                    difference_count += 1; // Count per-haplotype differences
+                            // Compare all haplotype pairs (truly per-haplotype analysis)
+                            for a in 0..genotype_i.len() {
+                                for b in 0..genotype_j.len() {
+                                    comparable_site_count += 1;
+                                    if genotype_i[a] != genotype_j[b] {
+                                        difference_count += 1;
+                                    }
                                 }
                             }
                         }
