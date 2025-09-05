@@ -236,6 +236,263 @@ mod hudson_fst_tests {
         assert_eq!(outcome.fst.unwrap(), 0.0, "Monomorphic window FST should be exactly 0.0");
     }
 
+    #[test]
+    fn test_hudson_fst_ratio_of_sums_no_missingness() {
+        // Test 1: Ratio-of-sums with no missingness (two sites, mixed structure)
+        // Expected regional FST = 5/9 ≈ 0.5555555556
+        
+        let sample_names = vec![
+            "sample0".to_string(), "sample1".to_string(), 
+            "sample2".to_string(), "sample3".to_string()
+        ];
+
+        // Site A (pos=100): perfect structure
+        // sample0: [0,0], sample1: [0,0], sample2: [1,1], sample3: [1,1]
+        let variant_a = create_test_variant(100, vec![
+            Some(vec![0, 0]), // sample0
+            Some(vec![0, 0]), // sample1  
+            Some(vec![1, 1]), // sample2
+            Some(vec![1, 1]), // sample3
+        ]);
+
+        // Site B (pos=200): identical pop frequencies (each pop has 2×0 and 2×1)
+        // sample0: [0,1], sample1: [0,1], sample2: [0,1], sample3: [0,1]
+        let variant_b = create_test_variant(200, vec![
+            Some(vec![0, 1]), // sample0
+            Some(vec![0, 1]), // sample1
+            Some(vec![0, 1]), // sample2
+            Some(vec![0, 1]), // sample3
+        ]);
+
+        let variants = vec![variant_a, variant_b];
+
+        // pop1 = samples {0,1}, pop2 = samples {2,3}
+        let pop1_haplotypes = vec![
+            (0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right),
+        ];
+        let pop2_haplotypes = vec![
+            (2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right),
+        ];
+
+        let region = QueryRegion { start: 100, end: 200 };
+        let sequence_length = 2; // Only 2 variant sites
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let result = calculate_hudson_fst_for_pair_with_sites(&pop1_context, &pop2_context, region);
+        assert!(result.is_ok(), "Hudson FST calculation should succeed");
+
+        let (outcome, sites) = result.unwrap();
+        
+        // Filter to only sites with actual data (non-None FST)
+        let variant_sites: Vec<_> = sites.iter().filter(|s| s.fst.is_some()).collect();
+        assert_eq!(variant_sites.len(), 2, "Should have exactly 2 variant sites");
+
+        // Site A (position 101 in 1-based): perfect structure
+        let site_a = variant_sites.iter().find(|s| s.position == 101).expect("Site A not found");
+        assert!((site_a.fst.unwrap() - 1.0).abs() < 1e-12, "Site A FST should be exactly 1.0");
+        assert!((site_a.num_component.unwrap() - 1.0).abs() < 1e-12, "Site A numerator should be 1.0");
+        assert!((site_a.den_component.unwrap() - 1.0).abs() < 1e-12, "Site A denominator should be 1.0");
+
+        // Site B (position 201 in 1-based): FST = -1/3
+        let site_b = variant_sites.iter().find(|s| s.position == 201).expect("Site B not found");
+        assert!((site_b.fst.unwrap() - (-1.0/3.0)).abs() < 1e-12, "Site B FST should be exactly -1/3");
+        assert!((site_b.num_component.unwrap() - (-1.0/6.0)).abs() < 1e-12, "Site B numerator should be -1/6");
+        assert!((site_b.den_component.unwrap() - 0.5).abs() < 1e-12, "Site B denominator should be 0.5");
+
+        // Regional FST from ratio-of-sums: (5/6) / (3/2) = 5/9
+        let expected_regional_fst = 5.0 / 9.0;
+        let aggregated_fst = aggregate_hudson_from_sites(&sites).expect("Aggregated FST should be Some");
+        assert!((aggregated_fst - expected_regional_fst).abs() < 1e-12, 
+            "Aggregated FST should be exactly 5/9, got {}", aggregated_fst);
+
+        // Window FST should match (if using unbiased implementation)
+        assert!(outcome.fst.is_some(), "Window FST should be Some");
+        assert!((outcome.fst.unwrap() - expected_regional_fst).abs() < 1e-12,
+            "Window FST should match ratio-of-sums: expected {}, got {}", 
+            expected_regional_fst, outcome.fst.unwrap());
+
+        println!("Test 1 PASSED: Regional FST = {} (expected 5/9 = {})", 
+            outcome.fst.unwrap(), expected_regional_fst);
+    }
+
+    #[test]
+    fn test_hudson_fst_ratio_of_sums_uneven_missingness() {
+        // Test 2: Ratio-of-sums under uneven missingness
+        // Expected regional FST = 1/3 ≈ 0.3333333333
+        
+        let sample_names = vec![
+            "sample0".to_string(), "sample1".to_string(), 
+            "sample2".to_string(), "sample3".to_string()
+        ];
+
+        // Site A (pos=100): perfect structure (same as Test 1)
+        let variant_a = create_test_variant(100, vec![
+            Some(vec![0, 0]), // sample0
+            Some(vec![0, 0]), // sample1  
+            Some(vec![1, 1]), // sample2
+            Some(vec![1, 1]), // sample3
+        ]);
+
+        // Site B (pos=200): missing data for samples 0 and 2
+        // sample0: None, sample1: [0,1], sample2: None, sample3: [0,1]
+        // This gives each pop n=2 with {0:1, 1:1}
+        let variant_b = create_test_variant(200, vec![
+            None,           // sample0 - missing
+            Some(vec![0, 1]), // sample1
+            None,           // sample2 - missing  
+            Some(vec![0, 1]), // sample3
+        ]);
+
+        let variants = vec![variant_a, variant_b];
+
+        let pop1_haplotypes = vec![
+            (0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right),
+        ];
+        let pop2_haplotypes = vec![
+            (2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right),
+        ];
+
+        let region = QueryRegion { start: 100, end: 200 };
+        let sequence_length = 2; // Only 2 variant sites
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let result = calculate_hudson_fst_for_pair_with_sites(&pop1_context, &pop2_context, region);
+        assert!(result.is_ok(), "Hudson FST calculation should succeed");
+
+        let (outcome, sites) = result.unwrap();
+        
+        // Filter to only sites with actual data (non-None FST)
+        let variant_sites: Vec<_> = sites.iter().filter(|s| s.fst.is_some()).collect();
+        assert_eq!(variant_sites.len(), 2, "Should have exactly 2 variant sites");
+
+        // Site A unchanged (FST=1, num=1, den=1)
+        let site_a = variant_sites.iter().find(|s| s.position == 101).expect("Site A not found");
+        assert!((site_a.fst.unwrap() - 1.0).abs() < 1e-12, "Site A FST should be exactly 1.0");
+        assert!((site_a.num_component.unwrap() - 1.0).abs() < 1e-12, "Site A numerator should be 1.0");
+        assert!((site_a.den_component.unwrap() - 1.0).abs() < 1e-12, "Site A denominator should be 1.0");
+
+        // Site B with missingness: FST = -1, num = -0.5, den = 0.5
+        let site_b = variant_sites.iter().find(|s| s.position == 201).expect("Site B not found");
+        assert!((site_b.fst.unwrap() - (-1.0)).abs() < 1e-12, "Site B FST should be exactly -1.0");
+        assert!((site_b.num_component.unwrap() - (-0.5)).abs() < 1e-12, "Site B numerator should be -0.5");
+        assert!((site_b.den_component.unwrap() - 0.5).abs() < 1e-12, "Site B denominator should be 0.5");
+
+        // Regional FST: (1 + (-0.5)) / (1 + 0.5) = 0.5 / 1.5 = 1/3
+        let expected_regional_fst = 1.0 / 3.0;
+        let aggregated_fst = aggregate_hudson_from_sites(&sites).expect("Aggregated FST should be Some");
+        assert!((aggregated_fst - expected_regional_fst).abs() < 1e-12, 
+            "Aggregated FST should be exactly 1/3, got {}", aggregated_fst);
+
+        // Window FST should match
+        assert!(outcome.fst.is_some(), "Window FST should be Some");
+        assert!((outcome.fst.unwrap() - expected_regional_fst).abs() < 1e-12,
+            "Window FST should match ratio-of-sums: expected {}, got {}", 
+            expected_regional_fst, outcome.fst.unwrap());
+
+        println!("Test 2 PASSED: Regional FST = {} (expected 1/3 = {})", 
+            outcome.fst.unwrap(), expected_regional_fst);
+    }
+
+    #[test]
+    fn test_hudson_fst_monomorphic_window_surgical() {
+        // Test 3: Monomorphic window ⇒ overall Hudson FST = 0
+        
+        let sample_names = vec![
+            "sample0".to_string(), "sample1".to_string(), 
+            "sample2".to_string(), "sample3".to_string()
+        ];
+
+        // No variants at all
+        let variants = vec![];
+
+        let pop1_haplotypes = vec![
+            (0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right),
+        ];
+        let pop2_haplotypes = vec![
+            (2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right),
+        ];
+
+        let region = QueryRegion { start: 100, end: 102 };
+        let sequence_length = (region.end - region.start + 1) as i64; // 3
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let result = calculate_hudson_fst_for_pair_with_sites(&pop1_context, &pop2_context, region);
+        assert!(result.is_ok(), "Hudson FST calculation should succeed");
+
+        let (outcome, sites) = result.unwrap();
+        
+        // Should have 3 sites (positions 100, 101, 102), all with no data
+        assert_eq!(sites.len(), 3, "Should have exactly 3 sites in region");
+
+        // Each site should have None for all components
+        for site in &sites {
+            assert!(site.fst.is_none(), "Site {} FST should be None", site.position);
+            assert!(site.num_component.is_none(), "Site {} num_component should be None", site.position);
+            assert!(site.den_component.is_none(), "Site {} den_component should be None", site.position);
+        }
+
+        // Aggregated FST should be 0.0 (Σnum = 0, Σden = 0)
+        let aggregated_fst = aggregate_hudson_from_sites(&sites).expect("Aggregated FST should be Some(0.0)");
+        assert!((aggregated_fst - 0.0).abs() < 1e-12, "Aggregated FST should be exactly 0.0");
+
+        // Window FST should also be 0.0
+        assert!(outcome.fst.is_some(), "Window FST should be Some(0.0)");
+        assert!((outcome.fst.unwrap() - 0.0).abs() < 1e-12, "Window FST should be exactly 0.0");
+
+        println!("Test 3 PASSED: Monomorphic window FST = {} (expected 0.0)", outcome.fst.unwrap());
+    }
+
     fn validate_falsta_content(content: &str) {
         let lines: Vec<&str> = content.lines().collect();
         
