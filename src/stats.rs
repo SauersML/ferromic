@@ -14,6 +14,16 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
 
+/// Epsilon threshold for numerical stability in FST calculations.
+/// Used consistently across per-site and aggregation functions to handle
+/// near-zero denominators and floating-point precision issues.
+/// 
+/// **Usage Guidelines:**
+/// - FST_EPSILON (1e-12): For Hudson FST denominators and component sums
+/// - 1e-9: For Weir-Cockerham calculations and general float comparisons
+/// - The choice depends on the expected magnitude of values and required precision
+const FST_EPSILON: f64 = 1e-12;
+
 /// Encapsulates the result of an FST (Fixation Index) calculation for a specific genetic site or genomic region.
 /// FST is a measure of population differentiation, reflecting how much of the total genetic variation
 /// is structured among different populations. It is derived from variance components:
@@ -1675,7 +1685,24 @@ pub fn calculate_d_xy_hudson<'a>(
     Ok(DxyHudsonResult { d_xy: d_xy_value })
 }
 
-// Obtain allele counts for a population at a given variant.
+/// Extract allele counts for a population at a specific variant site.
+///
+/// **Missing Data Handling Strategy:**
+/// This function implements the "complete case analysis" approach for missing data:
+/// - Only counts haplotypes with called genotypes at this site
+/// - Missing genotypes (None) are excluded from frequency calculations
+/// - Returns the number of successfully called haplotypes (n_called)
+/// - Allele frequencies are computed as count/n_called using only available data
+///
+/// **Why This Approach:**
+/// 1. **Unbiased estimation**: Using only called haplotypes gives unbiased allele frequencies
+/// 2. **Site-specific sample sizes**: Each site can have different effective sample sizes
+/// 3. **Robust to missing patterns**: Works regardless of missing data patterns
+/// 4. **Conservative**: Sites with insufficient data will have low n_called and may be excluded
+///
+/// **Mathematical Impact:**
+/// The resulting frequencies {p_a} are computed from n_called haplotypes, making
+/// the downstream π and D_xy calculations appropriate for the actual available data.
 fn freq_map_for_pop(
     variant: &Variant,
     haps: &[(usize, HaplotypeSide)],
@@ -1693,7 +1720,23 @@ fn freq_map_for_pop(
     (n_called, counts)
 }
 
-// Compute per-site pi using unbiased correction from allele counts.
+/// Compute per-site nucleotide diversity (π) using the unbiased estimator.
+///
+/// **Mathematical Foundation:**
+/// For a site with n called haplotypes and allele frequencies {p_a}, the unbiased
+/// estimator of within-population diversity is:
+///
+///     π = (n/(n-1)) * (1 - Σ p_a²)
+///
+/// This corrects for finite sample size bias. The term (1 - Σ p_a²) is the
+/// expected heterozygosity, and the n/(n-1) factor provides the unbiased correction
+/// for haploid/haplotype data.
+///
+/// **Multi-allelic Support:**
+/// Works correctly for any number of alleles by summing p_a² over all observed alleles.
+///
+/// **Missing Data Handling:**
+/// Only uses called haplotypes at this site; n and {p_a} are computed from available data.
 fn pi_from_counts(n: usize, counts: &HashMap<i32, usize>) -> Option<f64> {
     if n < 2 {
         return None;
@@ -1708,7 +1751,22 @@ fn pi_from_counts(n: usize, counts: &HashMap<i32, usize>) -> Option<f64> {
     Some((n as f64) / (n as f64 - 1.0) * (1.0 - sum_p2))
 }
 
-// Compute between-population diversity (Dxy) from allele counts.
+/// Compute between-population diversity (D_xy) from allele counts.
+///
+/// **Mathematical Foundation:**
+/// For two populations with allele frequencies {p_1a} and {p_2a}, the between-population
+/// diversity is the average pairwise difference between haplotypes from different populations:
+///
+///     D_xy = 1 - Σ_a (p_1a * p_2a)
+///
+/// This is Hudson's H_B term - the probability that two randomly chosen haplotypes
+/// from different populations differ at this site.
+///
+/// **Multi-allelic Support:**
+/// Correctly handles any number of alleles by computing the dot product of frequency vectors.
+///
+/// **Missing Data Handling:**
+/// Uses only called haplotypes from each population at this site to compute frequencies.
 fn dxy_from_counts(
     n1: usize,
     c1: &HashMap<i32, usize>,
@@ -1724,10 +1782,33 @@ fn dxy_from_counts(
             dot += (k1 as f64 / n1 as f64) * (k2 as f64 / n2 as f64);
         }
     }
-    Some(1.0 - dot)
+    // Clamp to handle tiny floating-point errors that could make D_xy slightly negative
+    let dxy = 1.0 - dot;
+    Some(dxy.max(0.0))
 }
 
-// Compute per-site Hudson FST components from a single variant.
+/// Compute per-site Hudson FST components from a single variant.
+///
+/// **Mathematical Foundation:**
+/// Hudson's FST at a single site is defined as:
+///
+///     FST = (H_B - H_S) / H_B
+///
+/// Where:
+/// - H_B = D_xy = between-population diversity (average pairwise difference between pops)
+/// - H_S = (π_1 + π_2)/2 = average within-population diversity
+///
+/// **Per-site Components:**
+/// - Numerator: D_xy - 0.5*(π_1 + π_2) = Hudson numerator with finite-sample corrections
+/// - Denominator: D_xy = Hudson denominator
+/// - FST: numerator/denominator when denominator > ε
+///
+/// **Finite Sample Corrections:**
+/// Both π_1 and π_2 use the unbiased estimator n/(n-1) * (1 - Σp_a²), which accounts
+/// for sampling variance in small samples.
+///
+/// **Multi-allelic and Missing Data:**
+/// Handles any number of alleles and computes frequencies from called haplotypes only.
 fn hudson_site_from_variant(
     variant: &Variant,
     pop1_haps: &[(usize, HaplotypeSide)],
@@ -1740,17 +1821,18 @@ fn hudson_site_from_variant(
     let pi2 = pi_from_counts(n2, &counts2);
     let dxy = dxy_from_counts(n1, &counts1, n2, &counts2);
 
-    let eps = 1e-12;
     let (fst, num_c, den_c) = match (dxy, pi1, pi2) {
         (Some(d), Some(p1), Some(p2)) => {
-            if d > eps {
+            if d > FST_EPSILON {
                 let num = d - 0.5 * (p1 + p2);
                 (Some(num / d), Some(num), Some(d))
             } else {
                 let pi_avg = 0.5 * (p1 + p2);
-                if pi_avg.abs() <= eps {
+                if pi_avg.abs() <= FST_EPSILON {
+                    // Both D_xy and average π are effectively zero - monomorphic site
                     (Some(0.0), Some(0.0), Some(0.0))
                 } else {
+                    // D_xy ≈ 0 but π > 0 - undefined FST
                     (None, None, None)
                 }
             }
@@ -1820,7 +1902,25 @@ pub fn calculate_hudson_fst_per_site(
     sites
 }
 
-/// Aggregate per-site Hudson components into a window FST using ratio of sums.
+/// Aggregate per-site Hudson components into a window/regional FST using ratio of sums.
+///
+/// **Mathematical Foundation:**
+/// The recommended window-level Hudson FST estimator is the "ratio of sums":
+///
+///     FST_window = (Σ_sites numerator_i) / (Σ_sites denominator_i)
+///
+/// This is a **weighted average** where sites with higher D_xy contribute more to the
+/// final estimate. This approach is preferred over the "mean of ratios" because:
+/// 1. It's more robust to sites with low diversity
+/// 2. It matches the behavior of ANGSD and scikit-allel
+/// 3. It provides the maximum likelihood estimator under certain models
+///
+/// **Missing Data Robustness:**
+/// Sites with missing data contribute (None, None) components and are excluded from
+/// both numerator and denominator sums, ensuring unbiased estimates.
+///
+/// **Monomorphic Sites:**
+/// Sites with D_xy = π = 0 contribute (0, 0) to the sums, which is mathematically correct.
 pub fn aggregate_hudson_from_sites(sites: &[SiteFstHudson]) -> Option<f64> {
     let mut num_sum = 0.0_f64;
     let mut den_sum = 0.0_f64;
@@ -1830,11 +1930,13 @@ pub fn aggregate_hudson_from_sites(sites: &[SiteFstHudson]) -> Option<f64> {
             den_sum += dc;
         }
     }
-    if den_sum > 0.0 {
+    if den_sum > FST_EPSILON {
         Some(num_sum / den_sum)
-    } else if num_sum.abs() < 1e-12 {
+    } else if num_sum.abs() <= FST_EPSILON {
+        // Both numerator and denominator sums are effectively zero
         Some(0.0)
     } else {
+        // Denominator is zero but numerator is not - undefined FST
         None
     }
 }
@@ -1925,8 +2027,38 @@ fn variants_compatible(a: &[Variant], b: &[Variant]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.position == y.position)
 }
 
-/// Core implementation for Hudson's FST. If `region` is provided, per-site values
-/// are returned; otherwise the per-site vector will be empty.
+/// Core implementation for Hudson's FST calculation between two populations.
+///
+/// **Algorithm Overview:**
+/// 1. **Per-site calculation**: For each variant site, compute Hudson FST components
+///    using the unbiased estimators for π and D_xy
+/// 2. **Regional aggregation**: Use "ratio of sums" to combine per-site components
+///    into a single window-level FST estimate
+///
+/// **Mathematical Approach:**
+/// - Per-site: FST_i = (D_xy_i - 0.5*(π_1i + π_2i)) / D_xy_i
+/// - Regional: FST_region = Σ(numerator_i) / Σ(denominator_i)
+///
+/// **Why Ratio of Sums:**
+/// This weighted approach is more robust than averaging per-site FST values because:
+/// - Sites with higher diversity contribute more weight (appropriate for FST)
+/// - Avoids instability from sites with very low diversity
+/// - Matches standard implementations (ANGSD, scikit-allel)
+/// - Provides better statistical properties under missing data
+///
+/// **Missing Data Strategy:**
+/// This implementation uses a robust "complete case per site" approach:
+/// 1. **Per-site analysis**: Each site uses only haplotypes with called genotypes
+/// 2. **Site-specific sample sizes**: n1 and n2 can vary by site based on available data
+/// 3. **Exclusion of undefined sites**: Sites with insufficient data (n < 2 in either pop)
+///    contribute (None, None) components and are excluded from regional sums
+/// 4. **Unbiased aggregation**: Regional FST uses only sites with valid components
+///
+/// **Advantages over alternatives:**
+/// - More robust than listwise deletion (excluding samples with any missing data)
+/// - Avoids bias from imputation methods
+/// - Naturally handles different missing data patterns across sites
+/// - Maintains statistical validity by using appropriate sample sizes per site
 fn calculate_hudson_fst_for_pair_core<'a>(
     pop1_context: &PopulationContext<'a>,
     pop2_context: &PopulationContext<'a>,
@@ -2024,8 +2156,24 @@ fn calculate_hudson_fst_for_pair_core<'a>(
     Ok((outcome, site_values))
 }
 
-/// Calculates Hudson's FST for a pair of populations, returning the outcome and
-/// per-site values for the specified region.
+/// Calculates Hudson's FST for a pair of populations, returning both regional outcome
+/// and per-site values for the specified region.
+///
+/// **Primary Use Case:**
+/// This function is the main entry point for per-site Hudson FST analysis. It returns
+/// both the aggregated regional FST estimate and detailed per-site components that can
+/// be used for:
+/// - Writing per-site FST values to FALSTA output files
+/// - Quality control and validation of regional estimates
+/// - Fine-scale analysis of FST variation across sites
+///
+/// **Mathematical Guarantee:**
+/// The regional FST in the returned HudsonFSTOutcome equals the ratio-of-sums
+/// aggregation of the per-site components: Σ(numerator_i) / Σ(denominator_i)
+///
+/// **Performance Note:**
+/// Computing per-site values has minimal overhead since the regional calculation
+/// already processes each site individually.
 pub fn calculate_hudson_fst_for_pair_with_sites<'a>(
     pop1_context: &PopulationContext<'a>,
     pop2_context: &PopulationContext<'a>,
@@ -2034,8 +2182,15 @@ pub fn calculate_hudson_fst_for_pair_with_sites<'a>(
     calculate_hudson_fst_for_pair_core(pop1_context, pop2_context, Some(region))
 }
 
-/// Backwards-compatible wrapper returning only the HudsonFSTOutcome over the
-/// entire context.
+/// Backwards-compatible wrapper returning only the regional HudsonFSTOutcome.
+///
+/// **Use Case:**
+/// For analyses that only need the regional FST estimate without per-site details.
+/// This is computationally equivalent to the full function but discards per-site data.
+///
+/// **Mathematical Equivalence:**
+/// Returns the same regional FST as calculate_hudson_fst_for_pair_with_sites,
+/// computed using the identical ratio-of-sums approach.
 pub fn calculate_hudson_fst_for_pair<'a>(
     pop1_context: &PopulationContext<'a>,
     pop2_context: &PopulationContext<'a>,
