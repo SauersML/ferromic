@@ -597,6 +597,223 @@ mod hudson_fst_tests {
         println!("π/Dxy consistency test PASSED: per-site aggregation matches reported values");
     }
 
+    #[test]
+    fn test_hudson_fst_multi_allelic_site() {
+        // Test multi-allelic site: 3 alleles with different frequencies between populations
+        // pop1: A/C/G at 0.5/0.25/0.25 vs pop2: A/C/G at 0.2/0.3/0.5
+        
+        let sample_names = vec![
+            "sample0".to_string(), "sample1".to_string(), 
+            "sample2".to_string(), "sample3".to_string()
+        ];
+
+        // Multi-allelic site with alleles 0=A, 1=C, 2=G
+        // pop1: 2×A, 1×C, 1×G → frequencies: A=0.5, C=0.25, G=0.25
+        // pop2: 1×A, 1×C, 2×G → frequencies: A=0.25, C=0.25, G=0.5
+        let variant = create_test_variant(100, vec![
+            Some(vec![0, 0]), // sample0: A/A (pop1)
+            Some(vec![1, 2]), // sample1: C/G (pop1)
+            Some(vec![0, 1]), // sample2: A/C (pop2)
+            Some(vec![2, 2]), // sample3: G/G (pop2)
+        ]);
+
+        let variants = vec![variant];
+
+        let pop1_haplotypes = vec![
+            (0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right),
+        ];
+        let pop2_haplotypes = vec![
+            (2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right),
+        ];
+
+        let region = QueryRegion { start: 100, end: 100 };
+        let sequence_length = 1;
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let result = calculate_hudson_fst_for_pair_with_sites(&pop1_context, &pop2_context, region);
+        assert!(result.is_ok(), "Hudson FST calculation should succeed for multi-allelic site");
+
+        let (outcome, sites) = result.unwrap();
+        
+        let variant_sites: Vec<_> = sites.iter().filter(|s| s.fst.is_some()).collect();
+        assert_eq!(variant_sites.len(), 1, "Should have exactly 1 variant site");
+
+        let site = variant_sites[0];
+        
+        // Manual calculation for verification:
+        // pop1 frequencies: p1A=0.5, p1C=0.25, p1G=0.25
+        // pop2 frequencies: p2A=0.25, p2C=0.25, p2G=0.5
+        // Dxy = 1 - (p1A*p2A + p1C*p2C + p1G*p2G) = 1 - (0.5*0.25 + 0.25*0.25 + 0.25*0.5) = 1 - 0.3125 = 0.6875
+        let expected_dxy = 0.6875;
+        
+        // π1 = (4/3) * (1 - (0.5² + 0.25² + 0.25²)) = (4/3) * (1 - 0.375) = (4/3) * 0.625 = 0.8333...
+        let expected_pi1 = (4.0/3.0) * (1.0 - (0.5*0.5 + 0.25*0.25 + 0.25*0.25));
+        
+        // π2 = (4/3) * (1 - (0.25² + 0.25² + 0.5²)) = (4/3) * (1 - 0.375) = (4/3) * 0.625 = 0.8333...
+        let expected_pi2 = (4.0/3.0) * (1.0 - (0.25*0.25 + 0.25*0.25 + 0.5*0.5));
+        
+        // numerator = Dxy - 0.5*(π1 + π2)
+        let expected_numerator = expected_dxy - 0.5 * (expected_pi1 + expected_pi2);
+        let expected_fst = expected_numerator / expected_dxy;
+
+        assert!((site.d_xy.unwrap() - expected_dxy).abs() < 1e-12, 
+            "Multi-allelic Dxy should be {}, got {}", expected_dxy, site.d_xy.unwrap());
+        
+        assert!((site.pi_pop1.unwrap() - expected_pi1).abs() < 1e-12,
+            "Multi-allelic π1 should be {}, got {}", expected_pi1, site.pi_pop1.unwrap());
+            
+        assert!((site.pi_pop2.unwrap() - expected_pi2).abs() < 1e-12,
+            "Multi-allelic π2 should be {}, got {}", expected_pi2, site.pi_pop2.unwrap());
+
+        assert!((site.fst.unwrap() - expected_fst).abs() < 1e-12,
+            "Multi-allelic FST should be {}, got {}", expected_fst, site.fst.unwrap());
+
+        println!("Multi-allelic test PASSED: Dxy={:.6}, π1={:.6}, π2={:.6}, FST={:.6}", 
+            site.d_xy.unwrap(), site.pi_pop1.unwrap(), site.pi_pop2.unwrap(), site.fst.unwrap());
+    }
+
+    #[test]
+    fn test_hudson_fst_identical_frequencies() {
+        // Test case: identical allele frequencies between populations
+        // This should give FST close to 0 (but may be slightly negative due to sampling)
+        
+        let sample_names = vec![
+            "sample0".to_string(), "sample1".to_string(), 
+            "sample2".to_string(), "sample3".to_string()
+        ];
+
+        // Both populations have identical frequencies: 50% A, 50% T
+        let variant = create_test_variant(100, vec![
+            Some(vec![0, 1]), // sample0: A/T (pop1)
+            Some(vec![1, 0]), // sample1: T/A (pop1) → pop1: 50% A, 50% T
+            Some(vec![0, 1]), // sample2: A/T (pop2)  
+            Some(vec![1, 0]), // sample3: T/A (pop2) → pop2: 50% A, 50% T
+        ]);
+
+        let variants = vec![variant];
+
+        let pop1_haplotypes = vec![
+            (0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right),
+        ];
+        let pop2_haplotypes = vec![
+            (2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right),
+        ];
+
+        let region = QueryRegion { start: 100, end: 100 };
+        let sequence_length = 1;
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let result = calculate_hudson_fst_for_pair_with_sites(&pop1_context, &pop2_context, region);
+        assert!(result.is_ok(), "Hudson FST calculation should succeed");
+
+        let (_outcome, sites) = result.unwrap();
+        
+        assert_eq!(sites.len(), 1, "Should have exactly 1 site");
+        let site = &sites[0];
+        
+        assert!(site.d_xy.is_some(), "Dxy should be calculable");
+        assert!(site.pi_pop1.is_some(), "π1 should be calculable");  
+        assert!(site.pi_pop2.is_some(), "π2 should be calculable");
+        assert!(site.fst.is_some(), "FST should be calculable for identical frequencies");
+        
+        // With identical frequencies, FST can be negative due to finite sample corrections
+        // The key is that it should be calculable (not None) and within reasonable bounds
+        assert!(site.fst.unwrap() >= -1.0 && site.fst.unwrap() <= 1.0, 
+            "FST should be within [-1,1] bounds, got {}", site.fst.unwrap());
+
+        println!("Identical frequencies test PASSED: FST = {} (within bounds)", site.fst.unwrap());
+    }
+
+    #[test]
+    fn test_hudson_fst_variant_compatibility_guard() {
+        // Test that calculate_hudson_fst_per_site guards against variant incompatibility
+        
+        let sample_names = vec![
+            "sample0".to_string(), "sample1".to_string(), 
+            "sample2".to_string(), "sample3".to_string()
+        ];
+
+        // Different variants for each population (incompatible)
+        let variants1 = vec![create_test_variant(100, vec![
+            Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![1, 0])
+        ])];
+        
+        let variants2 = vec![create_test_variant(200, vec![ // Different position!
+            Some(vec![0, 0]), Some(vec![0, 1]), Some(vec![1, 1]), Some(vec![1, 0])
+        ])];
+
+        let pop1_haplotypes = vec![
+            (0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right),
+        ];
+        let pop2_haplotypes = vec![
+            (2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right),
+        ];
+
+        let region = QueryRegion { start: 100, end: 200 };
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haplotypes,
+            variants: &variants1, // Different variants!
+            sample_names: &sample_names,
+            sequence_length: 2,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haplotypes,
+            variants: &variants2, // Different variants!
+            sample_names: &sample_names,
+            sequence_length: 2,
+        };
+
+        // Direct call to per-site function should return empty vector due to guard
+        let sites = calculate_hudson_fst_per_site(&pop1_context, &pop2_context, region);
+        assert!(sites.is_empty(), "Should return empty vector for incompatible variants");
+
+        // Safe wrapper should return error
+        let result = calculate_hudson_fst_for_pair_with_sites(&pop1_context, &pop2_context, region);
+        assert!(result.is_err(), "Safe wrapper should return error for incompatible variants");
+
+        println!("Variant compatibility guard test PASSED");
+    }
+
     fn validate_falsta_content(content: &str) {
         let lines: Vec<&str> = content.lines().collect();
         
