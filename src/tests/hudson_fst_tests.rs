@@ -493,6 +493,110 @@ mod hudson_fst_tests {
         println!("Test 3 PASSED: Monomorphic window FST = {} (expected 0.0)", outcome.fst.unwrap());
     }
 
+    #[test]
+    fn test_pi_dxy_consistency_with_uneven_coverage() {
+        // Test that π/Dxy calculations are consistent with per-site math
+        // when pairs have different numbers of comparable sites
+        
+        let sample_names = vec![
+            "sample0".to_string(), "sample1".to_string(), 
+            "sample2".to_string(), "sample3".to_string()
+        ];
+
+        // Site A (pos=100): all samples have data
+        let variant_a = create_test_variant(100, vec![
+            Some(vec![0, 0]), // sample0
+            Some(vec![0, 1]), // sample1  
+            Some(vec![1, 1]), // sample2
+            Some(vec![1, 0]), // sample3
+        ]);
+
+        // Site B (pos=200): only samples 1 and 3 have data (uneven coverage)
+        let variant_b = create_test_variant(200, vec![
+            None,             // sample0 - missing
+            Some(vec![0, 0]), // sample1
+            None,             // sample2 - missing
+            Some(vec![1, 1]), // sample3
+        ]);
+
+        let variants = vec![variant_a, variant_b];
+
+        let pop1_haplotypes = vec![
+            (0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right),
+        ];
+        let pop2_haplotypes = vec![
+            (2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right),
+        ];
+
+        let region = QueryRegion { start: 100, end: 200 };
+        let sequence_length = 2; // Only 2 variant sites
+
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haplotypes,
+            variants: &variants,
+            sample_names: &sample_names,
+            sequence_length,
+        };
+
+        let result = calculate_hudson_fst_for_pair_with_sites(&pop1_context, &pop2_context, region);
+        assert!(result.is_ok(), "Hudson FST calculation should succeed");
+
+        let (outcome, sites) = result.unwrap();
+        
+        // Filter to only sites with actual data
+        let variant_sites: Vec<_> = sites.iter().filter(|s| s.fst.is_some()).collect();
+        
+        // Should have 2 variant sites but with different coverage patterns
+        assert_eq!(variant_sites.len(), 2, "Should have exactly 2 variant sites");
+
+        // Verify that π and Dxy values are consistent with per-site aggregation
+        let manual_pi1_sum: f64 = variant_sites.iter()
+            .filter_map(|s| s.pi_pop1)
+            .sum();
+        let manual_pi2_sum: f64 = variant_sites.iter()
+            .filter_map(|s| s.pi_pop2)
+            .sum();
+        let manual_dxy_sum: f64 = variant_sites.iter()
+            .filter_map(|s| s.d_xy)
+            .sum();
+
+        let expected_pi1 = manual_pi1_sum / sequence_length as f64;
+        let expected_pi2 = manual_pi2_sum / sequence_length as f64;
+        let expected_dxy = manual_dxy_sum / sequence_length as f64;
+
+        // The reported π/Dxy should match per-site aggregation
+        if let Some(reported_pi1) = outcome.pi_pop1 {
+            assert!((reported_pi1 - expected_pi1).abs() < 1e-12, 
+                "Reported π1 ({}) should match per-site aggregation ({})", 
+                reported_pi1, expected_pi1);
+        }
+
+        if let Some(reported_pi2) = outcome.pi_pop2 {
+            assert!((reported_pi2 - expected_pi2).abs() < 1e-12, 
+                "Reported π2 ({}) should match per-site aggregation ({})", 
+                reported_pi2, expected_pi2);
+        }
+
+        if let Some(reported_dxy) = outcome.d_xy {
+            assert!((reported_dxy - expected_dxy).abs() < 1e-12, 
+                "Reported Dxy ({}) should match per-site aggregation ({})", 
+                reported_dxy, expected_dxy);
+        }
+
+        println!("π/Dxy consistency test PASSED: per-site aggregation matches reported values");
+    }
+
     fn validate_falsta_content(content: &str) {
         let lines: Vec<&str> = content.lines().collect();
         

@@ -1624,60 +1624,32 @@ pub fn calculate_d_xy_hudson<'a>(
         return Ok(DxyHudsonResult { d_xy: None });
     }
 
-    let mut sum_total_differences_between_pops: f64 = 0.0;
-    let num_haplotypes_pop1 = pop1_context.haplotypes.len();
-    let num_haplotypes_pop2 = pop2_context.haplotypes.len();
+    // Use unbiased per-site aggregation approach
+    let mut sum_dxy = 0.0;
+    let mut variant_count = 0;
 
-    // total_inter_population_pairs is N1 * N2
-    let total_inter_population_pairs = (num_haplotypes_pop1 * num_haplotypes_pop2) as f64;
+    for variant in pop1_context.variants {
+        // Get allele counts for both populations at this variant
+        let (n1, counts1) = freq_map_for_pop(variant, &pop1_context.haplotypes);
+        let (n2, counts2) = freq_map_for_pop(variant, &pop2_context.haplotypes);
 
-    if total_inter_population_pairs == 0.0 {
-        // Should be caught by is_empty above
-        return Ok(DxyHudsonResult { d_xy: None });
-    }
-
-    for (sample_idx1, side1) in pop1_context.haplotypes.iter() {
-        for (sample_idx2, side2) in pop2_context.haplotypes.iter() {
-            let mut differences_for_this_specific_pair: u64 = 0;
-
-            // Iterate through all variants provided in the context.
-            // The `popX_context.variants` slice should contain only variants
-            // within the specific region of interest being analyzed.
-            for variant_site in pop1_context.variants.iter() {
-                // pop1.variants is same as pop2.variants
-                let allele1_opt = variant_site
-                    .genotypes
-                    .get(*sample_idx1)
-                    .and_then(|gt_option| gt_option.as_ref())
-                    .and_then(|gt_vec| gt_vec.get(*side1 as usize));
-
-                let allele2_opt = variant_site
-                    .genotypes
-                    .get(*sample_idx2)
-                    .and_then(|gt_option| gt_option.as_ref())
-                    .and_then(|gt_vec| gt_vec.get(*side2 as usize));
-
-                if let (Some(&a1_code), Some(&a2_code)) = (allele1_opt, allele2_opt) {
-                    // Both alleles are present (not missing, e.g. not '.')
-                    // This site is comparable for this pair.
-                    if a1_code != a2_code {
-                        differences_for_this_specific_pair += 1;
-                    }
-                }
-            }
-            sum_total_differences_between_pops += differences_for_this_specific_pair as f64;
+        // Calculate per-site Dxy using existing helper
+        if let Some(dxy_site) = dxy_from_counts(n1, &counts1, n2, &counts2) {
+            sum_dxy += dxy_site;
+            variant_count += 1;
         }
+        // Sites where either population has n=0 are skipped but contribute 0 to the sum
     }
 
+    // Final Dxy = sum of per-site Dxy values divided by sequence length
+    // Monomorphic sites (including those not in variants list) contribute 0
     let effective_sequence_length = pop1_context.sequence_length as f64;
-    let denominator = total_inter_population_pairs * effective_sequence_length;
-
-    let d_xy_value = if denominator > 0.0 {
-        Some(sum_total_differences_between_pops / denominator)
+    let d_xy_value = if effective_sequence_length > 0.0 {
+        Some(sum_dxy / effective_sequence_length)
     } else {
         log(LogLevel::Warning, &format!(
-            "Dxy denominator is zero for pops {:?}/{:?} (pairs: {}, L: {}). Setting Dxy to None.",
-            pop1_context.id, pop2_context.id, total_inter_population_pairs, effective_sequence_length
+            "Invalid sequence length for Dxy calculation: {}",
+            effective_sequence_length
         ));
         None
     };
@@ -2079,17 +2051,18 @@ fn calculate_hudson_fst_for_pair_core<'a>(
     let site_values = if let Some(reg) = region {
         calculate_hudson_fst_per_site(pop1_context, pop2_context, reg)
     } else {
-        // For non-regional calculations, create a region covering all variants
+        // For non-regional calculations, process only variant positions (performance optimization)
         if pop1_context.variants.is_empty() {
             Vec::new()
         } else {
-            let start_pos = pop1_context.variants.first().unwrap().position;
-            let end_pos = pop1_context.variants.last().unwrap().position;
-            let full_region = QueryRegion {
-                start: start_pos,
-                end: end_pos,
-            };
-            calculate_hudson_fst_per_site(pop1_context, pop2_context, full_region)
+            // Process only variant positions instead of creating a full region
+            pop1_context.variants.iter().map(|variant| {
+                hudson_site_from_variant(
+                    variant,
+                    &pop1_context.haplotypes,
+                    &pop2_context.haplotypes,
+                )
+            }).collect()
         }
     };
 
@@ -2535,24 +2508,12 @@ pub fn calculate_pi(
     seq_length: i64,
 ) -> f64 {
     if haplotypes_in_group.len() <= 1 {
-        // Need at least 2 haplotypes to compute diversity; return NaN if not
         log(
             LogLevel::Warning,
             &format!(
                 "Cannot calculate pi: insufficient haplotypes ({})",
                 haplotypes_in_group.len()
             ),
-        );
-        return f64::NAN;
-    }
-
-    // Calculate total possible pairs: n * (n-1) / 2
-    let total_possible_pairs = haplotypes_in_group.len() * (haplotypes_in_group.len() - 1) / 2;
-    if total_possible_pairs == 0 {
-        // If no pairs can be formed (redundant check), return NaN
-        log(
-            LogLevel::Warning,
-            "No valid pairs can be formed for pi calculation",
         );
         return f64::NAN;
     }
@@ -2569,83 +2530,38 @@ pub fn calculate_pi(
     }
 
     let spinner = create_spinner(&format!(
-        "Calculating π for {} haplotypes ({} pairs) over {} bp",
+        "Calculating π for {} haplotypes over {} bp using unbiased per-site aggregation",
         haplotypes_in_group.len(),
-        total_possible_pairs,
         seq_length
     ));
 
-    let mut total_differences = 0; // Total number of differences across all pairs
-    let mut total_compared_pairs = 0; // Count of pairs with at least one comparable site
+    // Use unbiased per-site aggregation approach
+    let mut sum_pi = 0.0;
+    let mut variant_count = 0;
 
-    for i in 0..haplotypes_in_group.len() {
-        for j in (i + 1)..haplotypes_in_group.len() {
-            // Extract sample index and haplotype side (left or right) for both haplotypes
-            let (sample_i, side_i) = haplotypes_in_group[i];
-            let (sample_j, side_j) = haplotypes_in_group[j];
+    for variant in variants {
+        // Get allele counts for this variant using existing helper
+        let (n_called, allele_counts) = freq_map_for_pop(variant, haplotypes_in_group);
 
-            let mut diff_count = 0; // Number of sites where alleles differ
-            let mut comparable_sites = 0; // Number of sites where both have data
-
-            for var in variants {
-                // Check if both samples have genotype data at this variant
-                if let Some(gt_i) = var.genotypes.get(sample_i) {
-                    if let Some(gt_j) = var.genotypes.get(sample_j) {
-                        if let Some(alleles_i) = gt_i {
-                            if let Some(alleles_j) = gt_j {
-                                // Get the specific allele for each haplotype's side
-                                if let (Some(&a_i), Some(&a_j)) = (
-                                    alleles_i.get(side_i as usize),
-                                    alleles_j.get(side_j as usize),
-                                ) {
-                                    comparable_sites += 1; // Both have data; count this site
-                                    if a_i != a_j {
-                                        diff_count += 1; // Alleles differ; increment difference
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if comparable_sites > 0 {
-                // Track the number of differences and the number of pairs with data
-                total_differences += diff_count;
-                total_compared_pairs += 1;
-            }
-            // If no comparable sites, this pair is not counted
+        // Calculate per-site π using existing helper
+        if let Some(pi_site) = pi_from_counts(n_called, &allele_counts) {
+            sum_pi += pi_site;
+            variant_count += 1;
         }
+        // Monomorphic sites contribute 0 implicitly (not added to sum_pi)
     }
 
-    // Compute nucleotide diversity: average number of differences per site
-    // Pi = (total number of differences) / (sequence length * number of pairs)
-    // If total_compared_pairs is 0, it means no valid comparisons could be made from the variant data,
-    // so pi is un-estimable (NaN). seq_length > 0 is ensured by earlier checks.
-    let pi = if total_compared_pairs > 0 {
-        total_differences as f64 / (seq_length as f64 * total_compared_pairs as f64)
-    } else {
-        // This case implies that although there might be >= 2 haplotypes and seq_length > 0,
-        // no two haplotypes had concurrently valid (non-missing) alleles at any variant site.
-        log(LogLevel::Debug, &format!(
-            "Pi calculation: total_compared_pairs is 0 for {} haplotypes over {} bp ({} total possible pairs). Returning NaN.",
-            haplotypes_in_group.len(), seq_length, total_possible_pairs
-        ));
-        f64::NAN
-    };
+    // Final π = sum of per-site π values divided by sequence length
+    // Monomorphic sites (including those not in variants list) contribute 0
+    let pi = sum_pi / seq_length as f64;
 
     spinner.finish_and_clear();
     log(
         LogLevel::Info,
         &format!(
-            "π = {:.6} (from {} differences across {} bp in {} haplotype pairs)",
-            pi, total_differences, seq_length, total_compared_pairs
+            "π = {:.6} (from {} variant sites over {} bp total length)",
+            pi, variant_count, seq_length
         ),
-    );
-
-    log(
-        LogLevel::Info,
-        &format!("Calculated nucleotide diversity (π): {:.6}", pi),
     );
 
     pi
