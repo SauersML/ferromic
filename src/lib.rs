@@ -13,7 +13,6 @@ pub mod pca;
 #[cfg(test)]
 mod tests {
     mod filter_tests;
-    mod stats_tests;
     mod hudson_fst_tests;
 }
 

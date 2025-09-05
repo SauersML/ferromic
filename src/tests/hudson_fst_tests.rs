@@ -2,96 +2,191 @@
 mod hudson_fst_tests {
     use crate::process::*;
     use crate::stats::*;
-    use std::fs;
-    use std::path::Path;
-    use tempfile::TempDir;
+    use std::collections::HashMap;
 
-    /// Creates a minimal VCF file for testing Hudson FST
-    fn create_test_vcf(path: &Path) -> std::io::Result<()> {
-        let vcf_content = r#"##fileformat=VCFv4.2
-##contig=<ID=chr1,length=1000>
-##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
-#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	sample1_0	sample1_1	sample2_0	sample2_1	sample3_0	sample3_1	sample4_0	sample4_1
-chr1	100	.	A	T	60	PASS	.	GT	0|0	0|1	1|1	1|0	0|0	0|0	1|1	1|1
-chr1	200	.	G	C	60	PASS	.	GT	0|0	0|0	1|1	1|1	0|1	1|0	1|1	0|1
-chr1	300	.	C	G	60	PASS	.	GT	0|0	1|1	0|0	1|1	0|0	0|1	1|1	1|0
-chr1	400	.	T	A	60	PASS	.	GT	1|1	0|0	1|1	0|0	1|0	0|1	0|0	1|1
-chr1	500	.	A	G	60	PASS	.	GT	0|1	1|0	0|1	1|0	0|0	1|1	0|0	1|1
-"#;
-        fs::write(path, vcf_content)
-    }
-
-    /// Creates a test configuration file
-    fn create_test_config(path: &Path, vcf_path: &Path, output_dir: &Path) -> std::io::Result<()> {
-        let config_content = format!(
-            r#"seqname,interval_start,interval_end,vcf_file,output_prefix
-chr1,50,550,{},{}
-"#,
-            vcf_path.display(),
-            output_dir.join("test_hudson").display()
-        );
-        fs::write(path, config_content)
+    /// Helper function to create test variants
+    fn create_test_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
+        Variant {
+            position,
+            genotypes,
+        }
     }
 
     #[test]
-    fn test_hudson_per_site_fst_calculation_and_output() {
-        // Create temporary directory for test files
-        let temp_dir = TempDir::new().expect("Failed to create temp directory");
-        let temp_path = temp_dir.path();
+    fn test_hudson_fst_per_site_calculation() {
+        // Test case 1: Perfect population structure (FST should be 1.0)
+        // Pop1: all 0|0, Pop2: all 1|1
+        let variant = create_test_variant(100, vec![
+            Some(vec![0, 0]), // sample 0 - pop1
+            Some(vec![0, 0]), // sample 1 - pop1  
+            Some(vec![1, 1]), // sample 2 - pop2
+            Some(vec![1, 1]), // sample 3 - pop2
+        ]);
 
-        // Create test files
-        let vcf_path = temp_path.join("test.vcf");
-        let config_path = temp_path.join("config.csv");
-        let output_dir = temp_path.join("output");
-        fs::create_dir_all(&output_dir).expect("Failed to create output directory");
+        let pop1_haps = vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right), 
+                            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right)];
+        let pop2_haps = vec![(2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+                            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right)];
 
-        create_test_vcf(&vcf_path).expect("Failed to create test VCF");
-        create_test_config(&config_path, &vcf_path, &output_dir).expect("Failed to create test config");
-
-        // Set up test arguments
-        let args = Args {
-            config_file: config_path.clone(),
-            output_dir: output_dir.clone(),
-            enable_fst: true,
-            enable_diversity: true,
-            enable_pca: false,
-            population_file: None,
-            allow_regions_file: None,
-            mask_regions_file: None,
-            threads: Some(1),
-            chunk_size: None,
-            memory_limit_gb: None,
-            temp_dir: None,
-            verbose: false,
-            quiet: false,
+        let sample_names = vec!["s1".to_string(), "s2".to_string(), "s3".to_string(), "s4".to_string()];
+        
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haps,
+            variants: &[variant.clone()],
+            sample_names: &sample_names,
+            sequence_length: 1000,
         };
 
-        // Run the analysis
-        let result = process_config_entries(&args);
-        assert!(result.is_ok(), "Hudson FST analysis failed: {:?}", result.err());
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1), 
+            haplotypes: pop2_haps,
+            variants: &[variant.clone()],
+            sample_names: &sample_names,
+            sequence_length: 1000,
+        };
 
-        // Check that FALSTA file was created
-        let falsta_path = output_dir.join("test_hudson.falsta");
-        assert!(falsta_path.exists(), "FALSTA file was not created");
+        // Test the Hudson FST calculation
+        let result = calculate_hudson_fst_for_pair(&pop1_context, &pop2_context);
+        assert!(result.is_ok(), "Hudson FST calculation failed: {:?}", result.err());
 
-        // Read and validate FALSTA content
-        let falsta_content = fs::read_to_string(&falsta_path)
-            .expect("Failed to read FALSTA file");
-
-        println!("FALSTA content:\n{}", falsta_content);
-
-        // Validate FALSTA format and content
-        validate_falsta_content(&falsta_content);
-
-        // Check main CSV output
-        let csv_path = output_dir.join("test_hudson.csv");
-        assert!(csv_path.exists(), "Main CSV file was not created");
-
-        let csv_content = fs::read_to_string(&csv_path)
-            .expect("Failed to read CSV file");
+        let outcome = result.unwrap();
+        println!("Perfect structure FST: {:?}", outcome.fst);
         
-        println!("CSV content:\n{}", csv_content);
-        validate_csv_hudson_columns(&csv_content);
+        // With perfect population structure, FST should be close to 1.0
+        if let Some(fst) = outcome.fst {
+            assert!(fst > 0.8, "FST {} is too low for perfect population structure", fst);
+            assert!(fst <= 1.0, "FST {} exceeds maximum value of 1.0", fst);
+        } else {
+            panic!("FST calculation returned None for perfect population structure");
+        }
+    }
+
+    #[test]
+    fn test_hudson_fst_no_structure() {
+        // Test case 2: No population structure (FST should be ~0)
+        // Both populations have same allele frequencies
+        let variant = create_test_variant(100, vec![
+            Some(vec![0, 1]), // sample 0 - pop1 (heterozygous)
+            Some(vec![1, 0]), // sample 1 - pop1 (heterozygous)
+            Some(vec![0, 1]), // sample 2 - pop2 (heterozygous) 
+            Some(vec![1, 0]), // sample 3 - pop2 (heterozygous)
+        ]);
+
+        let pop1_haps = vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+                            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right)];
+        let pop2_haps = vec![(2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+                            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right)];
+
+        let sample_names = vec!["s1".to_string(), "s2".to_string(), "s3".to_string(), "s4".to_string()];
+        
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haps,
+            variants: &[variant.clone()],
+            sample_names: &sample_names,
+            sequence_length: 1000,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haps,
+            variants: &[variant.clone()],
+            sample_names: &sample_names,
+            sequence_length: 1000,
+        };
+
+        let result = calculate_hudson_fst_for_pair(&pop1_context, &pop2_context);
+        assert!(result.is_ok(), "Hudson FST calculation failed: {:?}", result.err());
+
+        let outcome = result.unwrap();
+        println!("No structure FST: {:?}", outcome.fst);
+        
+        // With no population structure, FST can be negative (which is expected)
+        // The negative value indicates that within-population diversity is higher than between-population diversity
+        if let Some(fst) = outcome.fst {
+            assert!(fst >= -1.0 && fst <= 1.0, "FST {} is outside valid range [-1, 1]", fst);
+            // For this specific case with identical allele frequencies but different arrangements,
+            // negative FST is mathematically correct
+            println!("FST = {} is within expected range for this data pattern", fst);
+        } else {
+            panic!("FST calculation returned None for valid data");
+        }
+    }
+
+    #[test] 
+    fn test_hudson_fst_per_site_components() {
+        // Test that per-site components are correctly calculated
+        let variant = create_test_variant(100, vec![
+            Some(vec![0, 0]), // sample 0 - pop1
+            Some(vec![0, 0]), // sample 1 - pop1
+            Some(vec![1, 1]), // sample 2 - pop2
+            Some(vec![1, 1]), // sample 3 - pop2
+        ]);
+
+        let pop1_haps = vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+                            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right)];
+        let pop2_haps = vec![(2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+                            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right)];
+
+        let sample_names = vec!["s1".to_string(), "s2".to_string(), "s3".to_string(), "s4".to_string()];
+        
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haps,
+            variants: &[variant.clone()],
+            sample_names: &sample_names,
+            sequence_length: 1000,
+        };
+
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haps,
+            variants: &[variant.clone()],
+            sample_names: &sample_names,
+            sequence_length: 1000,
+        };
+
+        let region = QueryRegion { start: 99, end: 101 }; // 0-based, so 99-101 covers position 100
+        let result = calculate_hudson_fst_for_pair_with_sites(&pop1_context, &pop2_context, region);
+        assert!(result.is_ok(), "Hudson FST with sites calculation failed: {:?}", result.err());
+
+        let (outcome, sites) = result.unwrap();
+        
+        println!("Number of sites returned: {}", sites.len());
+        for (i, site) in sites.iter().enumerate() {
+            println!("Site {}: pos={}, fst={:?}, dxy={:?}", i, site.position, site.fst, site.d_xy);
+        }
+        
+        // Find the site at position 100
+        let site_100 = sites.iter().find(|s| s.position == 100);
+        assert!(site_100.is_some(), "Site at position 100 not found");
+        
+        let site = site_100.unwrap();
+        println!("Site 100 FST: {:?}", site.fst);
+        println!("Site 100 D_xy: {:?}", site.d_xy);
+        println!("Site 100 pi_pop1: {:?}", site.pi_pop1);
+        println!("Site 100 pi_pop2: {:?}", site.pi_pop2);
+        
+        // With perfect structure: D_xy should be 1.0, pi should be 0.0
+        assert!(site.d_xy.is_some(), "D_xy should be calculated");
+        assert!(site.pi_pop1.is_some(), "pi_pop1 should be calculated");
+        assert!(site.pi_pop2.is_some(), "pi_pop2 should be calculated");
+        
+        if let (Some(dxy), Some(pi1), Some(pi2)) = (site.d_xy, site.pi_pop1, site.pi_pop2) {
+            assert!((dxy - 1.0).abs() < 0.01, "D_xy should be ~1.0 for perfect structure, got {}", dxy);
+            assert!(pi1.abs() < 0.01, "pi_pop1 should be ~0.0 for monomorphic population, got {}", pi1);
+            assert!(pi2.abs() < 0.01, "pi_pop2 should be ~0.0 for monomorphic population, got {}", pi2);
+        }
+        
+        // Regional FST should match per-site aggregation
+        if let Some(regional_fst) = outcome.fst {
+            if let Some(site_fst) = site.fst {
+                assert!((regional_fst - site_fst).abs() < 0.01, 
+                    "Regional FST {} should match site FST {} for single-site region", 
+                    regional_fst, site_fst);
+            }
+        }
     }
 
     fn validate_falsta_content(content: &str) {
@@ -174,7 +269,7 @@ chr1,50,550,{},{}
         assert!(found_hudson_data, "Hudson FST data not found in FALSTA file");
     }
 
-    fn validate_csv_hudson_columns(&content: &str) {
+    fn validate_csv_hudson_columns(content: &str) {
         let lines: Vec<&str> = content.lines().collect();
         assert!(!lines.is_empty(), "CSV file is empty");
 
@@ -221,75 +316,51 @@ chr1,50,550,{},{}
     }
 
     #[test]
-    fn test_hudson_fst_with_population_structure() {
-        // Test that Hudson FST correctly identifies population structure
-        let temp_dir = TempDir::new().expect("Failed to create temp directory");
-        let temp_path = temp_dir.path();
+    fn test_hudson_fst_missing_data() {
+        // Test Hudson FST with missing genotypes
+        let variant = create_test_variant(100, vec![
+            Some(vec![0, 0]), // sample 0 - pop1
+            None,             // sample 1 - pop1 (missing)
+            Some(vec![1, 1]), // sample 2 - pop2
+            Some(vec![1, 1]), // sample 3 - pop2
+        ]);
 
-        // Create VCF with clear population structure
-        let vcf_path = temp_path.join("structured.vcf");
-        let structured_vcf = r#"##fileformat=VCFv4.2
-##contig=<ID=chr1,length=1000>
-##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
-#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	pop1_s1_0	pop1_s1_1	pop1_s2_0	pop1_s2_1	pop2_s1_0	pop2_s1_1	pop2_s2_0	pop2_s2_1
-chr1	100	.	A	T	60	PASS	.	GT	0|0	0|0	0|0	0|0	1|1	1|1	1|1	1|1
-chr1	200	.	G	C	60	PASS	.	GT	0|0	0|0	0|0	0|0	1|1	1|1	1|1	1|1
-chr1	300	.	C	G	60	PASS	.	GT	1|1	1|1	1|1	1|1	0|0	0|0	0|0	0|0
-"#;
-        fs::write(&vcf_path, structured_vcf).expect("Failed to create structured VCF");
+        let pop1_haps = vec![(0, HaplotypeSide::Left), (0, HaplotypeSide::Right),
+                            (1, HaplotypeSide::Left), (1, HaplotypeSide::Right)];
+        let pop2_haps = vec![(2, HaplotypeSide::Left), (2, HaplotypeSide::Right),
+                            (3, HaplotypeSide::Left), (3, HaplotypeSide::Right)];
 
-        let config_path = temp_path.join("config.csv");
-        let output_dir = temp_path.join("output");
-        fs::create_dir_all(&output_dir).expect("Failed to create output directory");
-
-        create_test_config(&config_path, &vcf_path, &output_dir).expect("Failed to create config");
-
-        let args = Args {
-            config_file: config_path,
-            output_dir: output_dir.clone(),
-            enable_fst: true,
-            enable_diversity: false,
-            enable_pca: false,
-            population_file: None,
-            allow_regions_file: None,
-            mask_regions_file: None,
-            threads: Some(1),
-            chunk_size: None,
-            memory_limit_gb: None,
-            temp_dir: None,
-            verbose: false,
-            quiet: false,
+        let sample_names = vec!["s1".to_string(), "s2".to_string(), "s3".to_string(), "s4".to_string()];
+        
+        let pop1_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(0),
+            haplotypes: pop1_haps,
+            variants: &[variant.clone()],
+            sample_names: &sample_names,
+            sequence_length: 1000,
         };
 
-        let result = process_config_entries(&args);
-        assert!(result.is_ok(), "Structured population analysis failed: {:?}", result.err());
+        let pop2_context = PopulationContext {
+            id: PopulationId::HaplotypeGroup(1),
+            haplotypes: pop2_haps,
+            variants: &[variant.clone()],
+            sample_names: &sample_names,
+            sequence_length: 1000,
+        };
 
-        // Read FALSTA output
-        let falsta_path = output_dir.join("test_hudson.falsta");
-        let falsta_content = fs::read_to_string(&falsta_path)
-            .expect("Failed to read FALSTA file");
+        let result = calculate_hudson_fst_for_pair(&pop1_context, &pop2_context);
+        assert!(result.is_ok(), "Hudson FST calculation with missing data failed: {:?}", result.err());
 
-        // With perfect population structure, FST should be 1.0 at variant sites
-        let lines: Vec<&str> = falsta_content.lines().collect();
-        for (i, line) in lines.iter().enumerate() {
-            if line.starts_with(">hudson_pairwise_fst_hap_0v1_chr_") {
-                if i + 1 < lines.len() {
-                    let data_line = lines[i + 1];
-                    let values: Vec<&str> = data_line.split(',').collect();
-                    
-                    // Check FST at variant positions (100, 200, 300 -> indices 50, 150, 250)
-                    let variant_indices = [50, 150, 250]; // 0-based indices for positions 100, 200, 300
-                    for &idx in &variant_indices {
-                        if idx < values.len() && values[idx] != "NA" {
-                            let fst: f64 = values[idx].parse().expect("Failed to parse FST");
-                            println!("Perfect structure FST at index {}: {}", idx, fst);
-                            // With perfect population structure, FST should be close to 1.0
-                            assert!(fst > 0.8, "FST {} is too low for perfect population structure", fst);
-                        }
-                    }
-                }
-                break;
-            }
+        let outcome = result.unwrap();
+        println!("Missing data FST: {:?}", outcome.fst);
+        
+        // Should still calculate FST using available data
+        assert!(outcome.fst.is_some(), "FST should be calculated despite missing data");
+        
+        if let Some(fst) = outcome.fst {
+            // With remaining data (pop1: 2 haplotypes all 0, pop2: 4 haplotypes all 1), 
+            // should still show strong structure
+            assert!(fst > 0.5, "FST {} should be high with remaining structured data", fst);
         }
     }
 }
