@@ -1,6 +1,6 @@
 use crate::stats::{
     calculate_adjusted_sequence_length, calculate_fst_wc_csv_populations,
-    calculate_fst_wc_haplotype_groups, calculate_hudson_fst_for_pair,
+    calculate_fst_wc_haplotype_groups, calculate_hudson_fst_for_pair_with_sites,
     calculate_inversion_allele_frequency, calculate_per_site_diversity, calculate_pi,
     calculate_watterson_theta, FstWcResults, HudsonFSTOutcome, PopulationContext, PopulationId,
     SiteDiversity,
@@ -1131,11 +1131,13 @@ pub fn process_config_entries(
 
     // We will process each chromosome in parallel (for speed),
     // then flatten the per-chromosome results.
-    // `process_chromosome_entries` now returns a tuple: (Vec_for_main_csv, Vec_for_hudson_csv)
+    // `process_chromosome_entries` now returns a tuple:
+    // (Vec_for_main_csv, Vec_for_hudson_csv)
     let mut all_main_csv_data_tuples: Vec<(
         CsvRowData,
         Vec<(i64, f64, f64, u8, bool)>,
         Vec<(i64, f64, f64)>,
+        Vec<(i64, f64)>,
     )> = Vec::new();
     let mut all_regional_hudson_outcomes: Vec<RegionalHudsonFSTOutcome> = Vec::new();
 
@@ -1171,6 +1173,7 @@ pub fn process_config_entries(
             CsvRowData,
             Vec<(i64, f64, f64, u8, bool)>,
             Vec<(i64, f64, f64)>,
+            Vec<(i64, f64)>,
         )>,
         Vec<RegionalHudsonFSTOutcome>,
     )> = grouped
@@ -1212,7 +1215,7 @@ pub fn process_config_entries(
 
     let all_results: Vec<CsvRowData> = all_main_csv_data_tuples
         .iter()
-        .map(|(csv_row, _sites, _fst)| csv_row.clone())
+        .map(|(csv_row, _sites, _fst_wc, _fst_hudson)| csv_row.clone())
         .collect();
 
     // Create a count of rows by chromosome
@@ -1277,7 +1280,7 @@ pub fn process_config_entries(
 
     // Populate our all_columns map with the data from each region–group combo.
     // Data for per-site diversity comes from the second element of the tuple in all_main_csv_data_tuples
-    for (csv_row, per_site_diversity_vec, _fst_data_wc) in &all_main_csv_data_tuples {
+    for (csv_row, per_site_diversity_vec, _fst_data_wc, _fst_data_hudson) in &all_main_csv_data_tuples {
         // We'll produce 4 columns for each region+group combo.
         // We want to fill these columns for each entry in per_site_diversity_vec:
         // If is_filtered=false, we fill the "unfiltered_pi_" and "unfiltered_theta_" columns.
@@ -1427,7 +1430,7 @@ pub fn process_config_entries(
     // We do this for each region row in all_pairs.
 
     // Data for per-site diversity comes from the second element of the tuple in all_main_csv_data_tuples
-    for (csv_row, per_site_diversity_vec, _fst_data_wc) in &all_main_csv_data_tuples {
+    for (csv_row, per_site_diversity_vec, _fst_data_wc, _fst_data_hudson) in &all_main_csv_data_tuples {
         let region =
             ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
         let region_len = region.len();
@@ -1575,9 +1578,9 @@ pub fn process_config_entries(
     let mut fst_fasta_writer = BufWriter::new(fst_fasta_file);
 
     // Process FST data for each region
-    for (csv_row, _, fst_data) in &all_main_csv_data_tuples {
+    for (csv_row, _, fst_data_wc, fst_data_hudson) in &all_main_csv_data_tuples {
         // Process FST data between groups 0 and 1
-        if !fst_data.is_empty() {
+        if !fst_data_wc.is_empty() || !fst_data_hudson.is_empty() {
             // Define the region length for FALSTA output.
             // csv_row.region_start and csv_row.region_end are 1-based inclusive as outputted in the main CSV.
             let falsta_region_zbh =
@@ -1585,7 +1588,7 @@ pub fn process_config_entries(
             let region_length_for_falsta = falsta_region_zbh.len();
 
             // Write header and data for Overall Haplotype FST
-            if !fst_data.is_empty() {
+            if !fst_data_wc.is_empty() {
                 // Only write if there's haplotype FST data
                 // Headers use 1-based inclusive coordinates matching the CSV output.
                 let header_overall_hap_fst = format!(
@@ -1604,7 +1607,7 @@ pub fn process_config_entries(
                         ))
                     })?;
 
-                for &(pos_1based, overall_hap_fst_val, _) in fst_data {
+                for &(pos_1based, overall_hap_fst_val, _) in fst_data_wc {
                     // Convert absolute 1-based position from fst_data to 0-based index relative to region start
                     let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| {
                         VcfError::Parse(format!(
@@ -1643,7 +1646,7 @@ pub fn process_config_entries(
                 writeln!(fst_fasta_writer, "{}", header_pairwise_0v1_hap_fst)?;
 
                 let mut pairwise_0v1_values_str = vec!["NA".to_string(); region_length_for_falsta];
-                for &(pos_1based, _, pairwise_0v1_hap_fst_val) in fst_data {
+                for &(pos_1based, _, pairwise_0v1_hap_fst_val) in fst_data_wc {
                     let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| {
                         VcfError::Parse(format!(
                             "Invalid 1-based site position for FST FALSTA pairwise: {}, error: {}",
@@ -1670,6 +1673,53 @@ pub fn process_config_entries(
                     }
                 }
                 writeln!(fst_fasta_writer, "{}", pairwise_0v1_values_str.join(","))?;
+            }
+
+            // Write Hudson per-site FST for haplotype groups if available
+            if !fst_data_hudson.is_empty() {
+                let header_hudson = format!(
+                    ">hudson_pairwise_fst_hap_0v1_chr_{}_start_{}_end_{}",
+                    csv_row.seqname, csv_row.region_start, csv_row.region_end
+                );
+                writeln!(fst_fasta_writer, "{}", header_hudson)?;
+                let mut hudson_values_str = vec!["NA".to_string(); region_length_for_falsta];
+                let region_start_1based = OneBasedPosition::new(csv_row.region_start).map_err(|e| {
+                    VcfError::Parse(format!(
+                        "Invalid 1-based region_start for Hudson FALSTA: {}, error: {}",
+                        csv_row.region_start, e
+                    ))
+                })?;
+                for &(pos_1based, fst_site) in fst_data_hudson {
+                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| {
+                        VcfError::Parse(format!(
+                            "Invalid 1-based site position for Hudson FALSTA: {}, error: {}",
+                            pos_1based, e
+                        ))
+                    })?;
+                    let rel_pos_0based_i64 =
+                        site_pos_1based.zero_based() - region_start_1based.zero_based();
+                    if rel_pos_0based_i64 >= 0
+                        && (rel_pos_0based_i64 as usize) < region_length_for_falsta
+                    {
+                        let idx = rel_pos_0based_i64 as usize;
+                        hudson_values_str[idx] = if fst_site.is_nan() {
+                            "NA".to_string()
+                        } else {
+                            format!("{:.6}", fst_site)
+                        };
+                    } else if rel_pos_0based_i64 < 0 {
+                        log(LogLevel::Warning, &format!(
+                            "Hudson FST site at 1-based position {} is before current FALSTA region start {}. Skipping.",
+                            pos_1based, csv_row.region_start
+                        ));
+                    } else {
+                        log(LogLevel::Warning, &format!(
+                            "Hudson FST site at 1-based position {} is outside current FALSTA region ({}:{}-{}). Skipping.",
+                            pos_1based, csv_row.seqname, csv_row.region_start, csv_row.region_end
+                        ));
+                    }
+                }
+                writeln!(fst_fasta_writer, "{}", hudson_values_str.join(","))?;
             }
 
             // Process and write population pairwise FST data if available
@@ -2021,6 +2071,7 @@ fn process_chromosome_entries(
             CsvRowData,
             Vec<(i64, f64, f64, u8, bool)>,
             Vec<(i64, f64, f64)>,
+            Vec<(i64, f64)>,
         )>,
         Vec<RegionalHudsonFSTOutcome>,
     ),
@@ -2109,14 +2160,19 @@ fn process_chromosome_entries(
                 &format!("Error finding VCF file for chr{}: {:?}", chr, e),
             );
             finish_step_progress(&format!("Failed to find VCF for chr{}", chr));
-            return Ok((Vec::new(), Vec::new())); // Return empty tuple for both main CSV data and Hudson FST results
+            return Ok((Vec::new(), Vec::new())); // Return empty tuple for all results
         }
     };
 
     finish_step_progress(&format!("Loaded resources for chr{}", chr));
 
-    // Stores tuples for the main CSV output (W&C FST, diversity stats)
-    let mut main_csv_tuples = Vec::with_capacity(entries.len());
+    // Stores tuples for the main CSV output (W&C FST, diversity stats, Hudson per-site FST)
+    let mut main_csv_tuples: Vec<(
+        CsvRowData,
+        Vec<(i64, f64, f64, u8, bool)>,
+        Vec<(i64, f64, f64)>,
+        Vec<(i64, f64)>,
+    )> = Vec::with_capacity(entries.len());
     // Stores RegionalHudsonFSTOutcome for the dedicated Hudson FST output file for this chromosome
     let mut chromosome_hudson_fst_results: Vec<RegionalHudsonFSTOutcome> = Vec::new();
 
@@ -2129,7 +2185,7 @@ fn process_chromosome_entries(
                     LogLevel::Error,
                     &format!("Error finding VCF file for chr{} for PCA: {:?}", chr, e),
                 );
-                return Ok((Vec::new(), Vec::new())); // Return empty tuple for both main CSV data and Hudson FST results
+                return Ok((Vec::new(), Vec::new())); // Return empty tuple for all results
             }
         };
 
@@ -2191,21 +2247,18 @@ fn process_chromosome_entries(
         );
 
         match result {
-            // A 4-element tuple from process_single_config_entry
             Ok(Some((
                 main_csv_tuple_content,
                 per_site_diversity_data,
                 per_site_wc_fst_data,
+                per_site_hudson_fst_records,
                 mut hudson_outcomes_for_entry,
             ))) => {
-                // The main_csv_tuple_content is CsvRowData
-                // The per_site_diversity_data is Vec<(i64, f64, f64, u8, bool)>
-                // The per_site_wc_fst_data is Vec<(i64, f64, f64)>
-                // These two Vecs are for the .falsta output files and are aggregated in process_config_entries
                 main_csv_tuples.push((
                     main_csv_tuple_content,
                     per_site_diversity_data,
                     per_site_wc_fst_data,
+                    per_site_hudson_fst_records,
                 ));
                 chromosome_hudson_fst_results.append(&mut hudson_outcomes_for_entry);
                 log(
@@ -2491,6 +2544,7 @@ fn process_single_config_entry(
         CsvRowData, // Data for the main CSV output (W&C FST, diversity stats, etc.)
         Vec<(i64, f64, f64, u8, bool)>, // Per-site diversity data (pos, pi, theta, group_id, is_filtered) for falsta output
         Vec<(i64, f64, f64)>, // Per-site W&C FST data (pos, overall_wc_fst, pairwise_wc_fst_0vs1) for falsta output
+        Vec<(i64, f64)>, // Per-site Hudson FST data (pos_1based, fst) for haplotype groups
         Vec<RegionalHudsonFSTOutcome>, // Hudson FST results specific to this config entry
     )>,
     VcfError,
@@ -2643,6 +2697,19 @@ fn process_single_config_entry(
         ));
         &[]
     };
+
+    let hudson_query_region = if hudson_analysis_region_end_0based_exclusive
+        > hudson_analysis_region_start_0based
+    {
+        QueryRegion {
+            start: hudson_analysis_region_start_0based,
+            end: hudson_analysis_region_end_0based_exclusive - 1,
+        }
+    } else {
+        // Empty or invalid region
+        QueryRegion { start: 0, end: -1 }
+    };
+    let hudson_region_is_valid = hudson_query_region.start <= hudson_query_region.end;
 
     // Calculate FST if enabled
     let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
@@ -3014,6 +3081,7 @@ fn process_single_config_entry(
     let mut hudson_pi_avg_hap_group_0v1_val: Option<f64> = None;
 
     let mut local_regional_hudson_outcomes: Vec<RegionalHudsonFSTOutcome> = Vec::new();
+    let mut per_site_hudson_fst_records: Vec<(i64, f64)> = Vec::new();
 
     if args.enable_fst {
         log(
@@ -3050,25 +3118,32 @@ fn process_single_config_entry(
                     sequence_length: adjusted_sequence_length,
                 };
 
-                match calculate_hudson_fst_for_pair(&pop0_context, &pop1_context) {
-                    Ok(outcome) => {
-                        // Store for the separate Hudson FST file
-                        local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
-                            chr: entry.seqname.clone(),
-                            region_start: entry.interval.start as i64, // 0-based inclusive
-                            region_end: entry.interval.get_0based_inclusive_end_coord(), // 0-based inclusive
-                            outcome: outcome.clone(), // Clone outcome for separate storage
-                        });
-                        // Populate values for the main CSV CsvRowData
-                        hudson_fst_hap_group_0v1_val = outcome.fst;
-                        hudson_dxy_hap_group_0v1_val = outcome.d_xy;
-                        // Based on the context IDs used for calculate_hudson_fst_for_pair,
-                        // pop0_context was pop1 and pop1_context was pop2 to the function
-                        hudson_pi_hap_group_0_val = outcome.pi_pop1; // pi for HaplotypeGroup(0)
-                        hudson_pi_hap_group_1_val = outcome.pi_pop2; // pi for HaplotypeGroup(1)
-                        hudson_pi_avg_hap_group_0v1_val = outcome.pi_xy_avg;
+                if hudson_region_is_valid {
+                    match calculate_hudson_fst_for_pair_with_sites(
+                        &pop0_context,
+                        &pop1_context,
+                        hudson_query_region,
+                    ) {
+                        Ok((outcome, site_values)) => {
+                            local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
+                                chr: entry.seqname.clone(),
+                                region_start: entry.interval.start as i64, // 0-based inclusive
+                                region_end: entry.interval.get_0based_inclusive_end_coord(), // 0-based inclusive
+                                outcome: outcome.clone(),
+                            });
+                            for site in site_values {
+                                if let Some(fst_val) = site.fst {
+                                    per_site_hudson_fst_records.push((site.position, fst_val));
+                                }
+                            }
+                            hudson_fst_hap_group_0v1_val = outcome.fst;
+                            hudson_dxy_hap_group_0v1_val = outcome.d_xy;
+                            hudson_pi_hap_group_0_val = outcome.pi_pop1;
+                            hudson_pi_hap_group_1_val = outcome.pi_pop2;
+                            hudson_pi_avg_hap_group_0v1_val = outcome.pi_xy_avg;
+                        }
+                        Err(e) => log(LogLevel::Error, &format!("Error calculating Hudson FST for haplotype groups 0 vs 1 in region {}: {}", region_desc, e)),
                     }
-                    Err(e) => log(LogLevel::Error, &format!("Error calculating Hudson FST for haplotype groups 0 vs 1 in region {}: {}", region_desc, e)),
                 }
             } else {
                 log(LogLevel::Warning, &format!("Skipping Hudson FST for haplotype groups 0 vs 1 in region {}: one or both groups have fewer than 2 haplotypes.", region_desc));
@@ -3129,16 +3204,19 @@ fn process_single_config_entry(
                             sequence_length: adjusted_sequence_length,
                         };
 
-                        match calculate_hudson_fst_for_pair(&pop_a_context_csv, &pop_b_context_csv) {
-                            Ok(outcome) => {
-                                local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
-                                    chr: entry.seqname.clone(),
-                                    region_start: entry.interval.start as i64, // entry.interval.start is 0-based inclusive start
-                                    region_end: entry.interval.get_0based_inclusive_end_coord(), // get_0based_inclusive_end_coord provides the 0-based inclusive end
-                                    outcome,
-                                });
+                        if hudson_region_is_valid {
+                            match calculate_hudson_fst_for_pair_with_sites(&pop_a_context_csv, &pop_b_context_csv, hudson_query_region) {
+                                Ok((outcome, site_values)) => {
+                                    local_regional_hudson_outcomes.push(RegionalHudsonFSTOutcome {
+                                        chr: entry.seqname.clone(),
+                                        region_start: entry.interval.start as i64, // entry.interval.start is 0-based inclusive start
+                                        region_end: entry.interval.get_0based_inclusive_end_coord(), // get_0based_inclusive_end_coord provides the 0-based inclusive end
+                                        outcome: outcome.clone(),
+                                    });
+                                    // No per-site Hudson TSV output for CSV-defined populations
+                                }
+                                Err(e) => log(LogLevel::Error, &format!("Error calculating Hudson FST for CSV populations '{}' vs '{}' in region {}: {}", pop_name_a, pop_name_b, region_desc, e)),
                             }
-                            Err(e) => log(LogLevel::Error, &format!("Error calculating Hudson FST for CSV populations '{}' vs '{}' in region {}: {}", pop_name_a, pop_name_b, region_desc, e)),
                         }
                     } else {
                         log(LogLevel::Warning, &format!("Skipping Hudson FST for CSV populations '{}' vs '{}' in region {}: one or both groups have fewer than 2 haplotypes.", pop_name_a, pop_name_b, region_desc));
@@ -3317,6 +3395,7 @@ fn process_single_config_entry(
         row_data,
         per_site_diversity_records,
         per_site_fst_records, // Vec<(i64, FstEstimate, FstEstimate)> containing only haplotype group FSTs
+        per_site_hudson_fst_records,
         local_regional_hudson_outcomes,
     )))
 }
@@ -3331,6 +3410,7 @@ struct RegionalHudsonFSTOutcome {
     outcome: HudsonFSTOutcome,
 }
 
+#[derive(Debug, Clone)]
 /// Formats an Option<PopulationId> into type and name strings for output.
 fn format_population_id(pop_id_opt: &Option<PopulationId>) -> (String, String) {
     match pop_id_opt {
