@@ -2998,6 +2998,6 @@ pub fn extract_wc_fst_components(
 #[cfg(test)]
 mod tests {
     use super::*;
-    // include!("tests/stats_tests.rs"); // Temporarily disabled due to import issues
+    // include!("tests/stats_tests.rs"); // Disabled - needs major refactoring for current API
     include!("tests/filter_tests.rs");
 }
