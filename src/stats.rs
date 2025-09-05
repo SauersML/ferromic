@@ -172,7 +172,7 @@ impl fmt::Display for FstEstimate {
                 // For InsufficientData, sum_a and sum_b are not typically meaningful data-derived sums.
                 write!(
                     f,
-                    "InsufficientData (A: {:.1}, B: {:.1}, SitesAtt: {})",
+                    "InsufficientData (A: {:.3e}, B: {:.3e}, SitesAtt: {})",
                     sum_a, sum_b, sites_attempted
                 )
             }
@@ -1641,6 +1641,14 @@ pub fn calculate_d_xy_hudson<'a>(
         // Sites where either population has n=0 are skipped but contribute 0 to the sum
     }
 
+    log(
+        LogLevel::Debug,
+        &format!(
+            "Dxy calculation: processed {} variant sites with valid data",
+            variant_count
+        ),
+    );
+
     // Final Dxy = sum of per-site Dxy values divided by sequence length
     // Monomorphic sites (including those not in variants list) contribute 0
     let effective_sequence_length = pop1_context.sequence_length as f64;
@@ -2316,25 +2324,20 @@ pub fn calculate_inversion_allele_frequency(
     // Returns Some(frequency) or None if no haplotypes are present
     let mut num_ones = 0; // Counter for haplotypes with allele 1
     let mut total_haplotypes = 0; // Total number of haplotypes (with allele 0 or 1)
+    
     for (_sample, &(left, right)) in sample_filter.iter() {
-        // Check the left haplotype allele
-        if left == 1 {
-            num_ones += 1; // Increment if allele is 1
-            total_haplotypes += 1; // Count this haplotype
+        // Count each haplotype exactly once if it's 0 or 1
+        for allele in [left, right] {
+            if allele == 0 || allele == 1 {
+                total_haplotypes += 1;
+                if allele == 1 {
+                    num_ones += 1;
+                }
+            }
+            // Alleles other than 0 or 1 (e.g., missing or bad data) are ignored
         }
-        // Check the right haplotype allele
-        if right == 1 {
-            num_ones += 1; // Increment if allele is 1
-            total_haplotypes += 1; // Count this haplotype
-        }
-        if left == 0 {
-            total_haplotypes += 1; // Count haplotype with allele 0
-        }
-        if right == 0 {
-            total_haplotypes += 1; // Count haplotype with allele 0
-        }
-        // Alleles other than 0 or 1 (e.g., missing or bad data) are ignored
     }
+    
     if total_haplotypes > 0 {
         // Calculate frequency as the proportion of allele 1 among all counted haplotypes
         Some(num_ones as f64 / total_haplotypes as f64)
@@ -2358,8 +2361,14 @@ pub fn count_segregating_sites(variants: &[Variant]) -> usize {
 }
 
 // Calculate pairwise differences and comparable sites between all sample pairs
-/// This function computes, for each pair of samples, the number of sites where their genotypes differ
-/// and the number of sites where both have data, handling missing genotypes with parallelism.
+/// This function computes, for each pair of samples, the number of differences across comparable
+/// haplotypes, treating each haplotype separately (per-haplotype analysis).
+///
+/// **Per-Haplotype Analysis:**
+/// For each sample pair and each variant site, compares aligned haplotypes:
+/// - Left haplotype of sample i vs left haplotype of sample j
+/// - Right haplotype of sample i vs right haplotype of sample j
+/// - Counts each comparable haplotype separately
 ///
 /// # Arguments
 /// * variants - A slice of Variant structs containing genotype data for all samples
@@ -2368,8 +2377,8 @@ pub fn count_segregating_sites(variants: &[Variant]) -> usize {
 /// # Returns
 /// A vector of tuples, each containing:
 /// * (sample_idx_i, sample_idx_j) - Indices of the sample pair
-/// * difference_count - Number of sites where genotypes differ (d_ij)
-/// * comparable_site_count - Number of sites where both samples have genotypes (l_ij)
+/// * difference_count - Number of haplotype differences across all comparable sites
+/// * comparable_site_count - Number of comparable haplotypes across all sites
 pub fn calculate_pairwise_differences(
     variants: &[Variant],
     number_of_samples: usize,
@@ -2405,17 +2414,19 @@ pub fn calculate_pairwise_differences(
                     let mut difference_count = 0; // Number of sites where genotypes differ
                     let mut comparable_site_count = 0; // Number of sites with data for both samples
 
-                    // Iterate over all variants to compare this pair's genotypes
+                    // Iterate over all variants to compare this pair's haplotypes
                     for variant in variants_local.iter() {
                         if let (Some(genotype_i), Some(genotype_j)) = (
                             &variant.genotypes[sample_idx_i],
                             &variant.genotypes[sample_idx_j],
                         ) {
-                            // Both samples have genotype data at this site
-                            comparable_site_count += 1;
-                            if genotype_i != genotype_j {
-                                // Genotypes differ; humans are haploid (single allele per genotype)
-                                difference_count += 1;
+                            // Compare aligned haplotypes (left vs left, right vs right)
+                            let len = genotype_i.len().min(genotype_j.len());
+                            for haplotype_idx in 0..len {
+                                comparable_site_count += 1; // Count each comparable haplotype
+                                if genotype_i[haplotype_idx] != genotype_j[haplotype_idx] {
+                                    difference_count += 1; // Count per-haplotype differences
+                                }
                             }
                         }
                         // If either genotype is None, skip this site (missing data)
