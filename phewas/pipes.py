@@ -2,7 +2,7 @@ import threading
 from functools import partial
 from multiprocessing import get_context, cpu_count
 
-from phewas import models
+import models
 
 
 def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx):

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from phewas import iox as io
+import iox as io
 
 def sanitize_name(name):
     """Cleans a disease name to be a valid identifier."""

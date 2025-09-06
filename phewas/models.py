@@ -11,7 +11,7 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy import stats as sp_stats
 
-from phewas import iox as io
+import iox as io
 
 # --- Module-level globals for worker processes ---
 # These are populated by initializer functions.
