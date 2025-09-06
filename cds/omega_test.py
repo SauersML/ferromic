@@ -35,9 +35,9 @@ from ete3.treeview import TreeStyle, NodeStyle, TextFace, CircleFace, RectFace
 
 # --- Configuration Toggles ---
 # Set to False to disable the PAML timeout for debugging or long runs.
-ENABLE_PAML_TIMEOUT = True
+ENABLE_PAML_TIMEOUT = False
 # Toggle these flags to run only specific PAML models.
-RUN_BRANCH_MODEL_TEST = True
+RUN_BRANCH_MODEL_TEST = False
 RUN_CLADE_MODEL_TEST = True
 
 
