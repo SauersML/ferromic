@@ -615,7 +615,7 @@ Keep in mind that 0 or 1 in the config is about which haplotype group (e.g., ref
 Hence the files named group_0_<transcript>_chr_<...>.phy gather all haplotypes labeled as group 0, with lines like “SampleA_L” or “SampleB_R” (whichever sides matched group 0). Meanwhile, group_1_<transcript>_chr_<...>.phy holds group 1 haplotypes, labeled “SampleA_R,” “SampleB_L,” and so on, depending on each sample’s config. If your config uses 1 to mean “inversion,” then group_1_... will contain inverted haplotypes, while group_0_... contains non-inverted.
 */
 
-fn process_variants(
+pub fn process_variants(
     variants: &[Variant],
     sample_names: &[String],
     haplotype_group: u8,
