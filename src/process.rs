@@ -3859,7 +3859,7 @@ pub fn process_vcf(
     ))
 }
 
-fn process_variant(
+pub fn process_variant(
     line: &str,
     chr: &str,
     region: ZeroBasedHalfOpen,
