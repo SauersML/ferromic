@@ -1,8 +1,11 @@
 import threading
+import sys
 from functools import partial
 from multiprocessing import get_context, cpu_count
 
 import models
+
+MP_CONTEXT = 'fork' if sys.platform == 'linux' else 'spawn'
 
 
 def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx):
@@ -14,8 +17,8 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         models.run_single_model_worker, target_inversion=target_inversion, results_cache_dir=results_cache_dir
     )
 
-    print(f"\n--- Starting parallel model fitting with {cpu_count()} worker processes ---")
-    with get_context('spawn').Pool(
+    print(f"\n--- Starting parallel model fitting with {cpu_count()} worker processes ({MP_CONTEXT} context) ---")
+    with get_context(MP_CONTEXT).Pool(
         processes=max(1, min(cpu_count(), 8)),
         initializer=models.init_worker,
         initargs=(core_df_with_const, allowed_mask_by_cat, ctx),
@@ -75,7 +78,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
         bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
         print(f"\r[{label}] {bar} {d}/{q} ({pct}%)", end="", flush=True)
 
-    with get_context('spawn').Pool(
+    with get_context(MP_CONTEXT).Pool(
         processes=max(1, min(cpu_count(), 8)),
         initializer=models.init_worker,
         initargs=(core_df_with_const, allowed_mask_by_cat, ctx),
@@ -119,7 +122,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
             bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%)", end="", flush=True)
 
-        with get_context('spawn').Pool(
+        with get_context(MP_CONTEXT).Pool(
             processes=max(1, min(cpu_count(), 8)),
             initializer=models.init_lrt_worker,
             initargs=(core_df_with_const, allowed_mask_by_cat, anc_series, ctx),
