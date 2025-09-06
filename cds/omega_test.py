@@ -31,6 +31,69 @@ os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 from ete3 import Tree
 from ete3.treeview import TreeStyle, NodeStyle, TextFace, CircleFace, RectFace
 
+# === PAML CACHE CONFIG (ADD THIS) ============================================
+import hashlib, json, time, random
+
+PAML_CACHE_DIR = os.environ.get("PAML_CACHE_DIR", "paml_cache")
+CACHE_SCHEMA_VERSION = "paml_cache.v1"
+CACHE_FANOUT = 2  # two levels of 2 hex chars -> 256*256 buckets
+CACHE_LOCK_TIMEOUT_S = int(os.environ.get("PAML_CACHE_LOCK_TIMEOUT_S", "600"))  # 10 min
+CACHE_LOCK_POLL_MS = (50, 250)  # jittered backoff range
+
+def _sha256_bytes(b: bytes) -> str:
+    h = hashlib.sha256(); h.update(b); return h.hexdigest()
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024*1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def _read_text(path: str) -> str:
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        return f.read()
+
+def _canonical_phy_sha(path: str) -> str:
+    # Minimal canonicalization: strip trailing spaces; keep original header
+    with open(path, "rb") as f:
+        raw = f.read().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return _sha256_bytes(raw)
+
+def _exe_fingerprint(path: str) -> dict:
+    st = os.stat(path)
+    return {
+        "path": os.path.abspath(path),
+        "size": st.st_size,
+        "mtime": int(st.st_mtime),
+        "sha256": _sha256_file(path)
+    }
+
+def _fanout_dir(root: str, key_hex: str) -> str:
+    return os.path.join(root, key_hex[:CACHE_FANOUT], key_hex[CACHE_FANOUT:2*CACHE_FANOUT], key_hex)
+
+def _atomic_write_json(path: str, obj: dict):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + f".tmp.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+
+def _try_lock(cache_dir: str) -> bool:
+    lockdir = os.path.join(cache_dir, "LOCK")
+    try:
+        os.mkdir(lockdir)
+        return True
+    except FileExistsError:
+        return False
+
+def _unlock(cache_dir: str):
+    lockdir = os.path.join(cache_dir, "LOCK")
+    try:
+        os.rmdir(lockdir)
+    except FileNotFoundError:
+        pass
+
 # ==============================================================================
 # === CONFIGURATION & SETUP ====================================================
 # ==============================================================================
@@ -351,6 +414,90 @@ def parse_simple_paml_output(outfile_path):
                 if m:
                     params['omega_background'] = float(m.group(1) or m.group(2))
     return params
+
+def _ctl_string(seqfile, treefile, outfile, model_num, init_kappa, init_omega, fix_blength, base_opts: dict):
+    # Mirrors generate_paml_ctl, but returns a normalized string for hashing
+    return (
+f"""seqfile = {seqfile}
+treefile = {treefile}
+outfile = {outfile}
+noisy = 0
+verbose = 0
+runmode = 0
+seqtype = 1
+CodonFreq = 2
+model = {model_num}
+NSsites = 0
+icode = 0
+cleandata = 0
+fix_kappa = 0
+kappa = {init_kappa if init_kappa is not None else 2.0}
+fix_omega = 0
+omega = {init_omega if init_omega is not None else 0.5}
+fix_blength = {fix_blength}
+method = {base_opts.get('method', 0)}
+getSE = 0
+RateAncestor = 0
+""").strip()
+
+def _hash_key_meta(gene_phy_sha, h0_tree_str, h1_tree_str, taxa_used_list, seeds_list, exe_fp, base_opts: dict):
+    key_dict = {
+        "schema": CACHE_SCHEMA_VERSION,
+        "gene_phy_sha": gene_phy_sha,
+        "h0_tree_sha": _sha256_bytes(h0_tree_str.encode("utf-8")),
+        "h1_tree_sha": _sha256_bytes(h1_tree_str.encode("utf-8")),
+        "taxa_used": sorted(taxa_used_list),
+        "seeds": [(float(k or 2.0), float(w or 0.5)) for k, w in seeds_list],
+        "codeml": exe_fp["sha256"],
+        "opts": {
+            "PAML_FIX_BLENGTH_H0": int(PAML_FIX_BLENGTH_H0),
+            "method": 0, "seqtype":1, "CodonFreq":2, "NSsites":0, "cleandata":0, "icode":0,
+        },
+        "logic_version": 1  # bump when logic meaningfully changes
+    }
+    return _sha256_bytes(json.dumps(key_dict, sort_keys=True).encode("utf-8")), key_dict
+
+def _hash_key_attempt(gene_phy_sha, tree_str, taxa_used_list, ctl_str, exe_fp):
+    key_dict = {
+        "schema": CACHE_SCHEMA_VERSION,
+        "gene_phy_sha": gene_phy_sha,
+        "tree_sha": _sha256_bytes(tree_str.encode("utf-8")),
+        "taxa_used": sorted(taxa_used_list),
+        "ctl_sha": _sha256_bytes(ctl_str.encode("utf-8")),
+        "codeml": exe_fp["sha256"],
+    }
+    return _sha256_bytes(json.dumps(key_dict, sort_keys=True).encode("utf-8")), key_dict
+
+def cache_read_json(root: str, key_hex: str, name: str):
+    path = os.path.join(_fanout_dir(root, key_hex), name)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+    return None
+
+def cache_write_json(root: str, key_hex: str, name: str, payload: dict):
+    dest_dir = _fanout_dir(root, key_hex)
+    os.makedirs(dest_dir, exist_ok=True)
+    _atomic_write_json(os.path.join(dest_dir, name), payload)
+
+def _with_lock(cache_dir: str):
+    # contextmanager inline (py<=3.7 friendly)
+    class _LockCtx:
+        def __init__(self, d): self.d = d; self.locked = False
+        def __enter__(self):
+            start = time.time()
+            while time.time() - start < CACHE_LOCK_TIMEOUT_S:
+                if _try_lock(self.d):
+                    self.locked = True
+                    return self
+                time.sleep(random.uniform(*[x/1000 for x in CACHE_LOCK_POLL_MS]))
+            return self  # timeout → proceed without lock (best-effort)
+        def __exit__(self, *a):
+            if self.locked: _unlock(self.d)
+    return _LockCtx(cache_dir)
 
 def create_paml_tree_files(iqtree_file, work_dir, gene_name):
     logging.info(f"[{gene_name}] Labeling internal branches conservatively...")
@@ -805,17 +952,17 @@ def run_codeml_in(run_dir, ctl_path, timeout):
 def codeml_worker(gene_info, region_tree_file, region_label):
     """Run codeml for a gene using the provided region tree."""
     gene_name = gene_info['label']
-    result = {'gene': gene_name, 'region': region_label, 'status': 'runtime_error', 'reason': 'Unknown failure'}
+    final_result = {'gene': gene_name, 'region': region_label, 'status': 'runtime_error', 'reason': 'Unknown failure'}
     temp_dir = None
     start_time = datetime.now()
     logging.info(f"[{gene_name}|{region_label}] START codeml")
 
     try:
         qc_passed, qc_message = perform_qc(gene_info['path'])
-        logging.info(f"[{gene_name}|{region_label}] QC: {qc_message}")
         if not qc_passed:
-            result.update({'status': 'qc_fail', 'reason': qc_message})
-            return result
+            final_result.update({'status': 'qc_fail', 'reason': qc_message})
+            logging.warning(f"[{gene_name}|{region_label}] QC failed: {qc_message}")
+            return final_result
 
         temp_dir = tempfile.mkdtemp(prefix=f"{gene_name}_", dir=os.getenv("PAML_TMPDIR"))
 
@@ -823,161 +970,172 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         gene_taxa = read_taxa_from_phy(gene_info['path'])
         keep = [taxon for taxon in gene_taxa if taxon in set(region_taxa)]
         if len(keep) < 4:
-            result.update({'status': 'uninformative_topology',
-                           'reason': f'Fewer than four shared taxa (n={len(keep)})'})
-            return result
+            final_result.update({'status': 'uninformative_topology', 'reason': f'Fewer than four shared taxa (n={len(keep)})'})
+            return final_result
+        
         pruned_tree = os.path.join(temp_dir, f"{gene_name}_pruned.tree")
-        logging.info(f"[{gene_name}|{region_label}] Pruning region tree")
         prune_region_tree(region_tree_file, keep, pruned_tree)
         t = Tree(pruned_tree, format=1)
-        kept_taxa = t.get_leaf_names()
-        dropped = set(region_taxa) - set(kept_taxa)
-        logging.info(
-            f"[{gene_name}|{region_label}] Pruned tree to {len(kept_taxa)} taxa; dropped {','.join(sorted(dropped)) if dropped else 'none'}"
-        )
-
+        
         var_codons = count_variable_codon_sites(gene_info['path'], set(keep))
         if var_codons < 2:
-            result.update({'status': 'uninformative_topology', 'reason': f'Fewer than 2 variable codon sites ({var_codons})'})
-            return result
+            final_result.update({'status': 'uninformative_topology', 'reason': f'Fewer than 2 variable codon sites ({var_codons})'})
+            return final_result
 
-        chimp_name = next((n for n in t.get_leaf_names() if 'pantro' in n.lower() or 'pan_troglodytes' in n.lower()), None)
         if len(t.get_leaf_names()) < 4:
-            result.update({'status': 'uninformative_topology', 'reason': 'Fewer than four taxa after pruning'})
-            return result
+            final_result.update({'status': 'uninformative_topology', 'reason': 'Fewer than four taxa after pruning'})
+            return final_result
 
-        logging.info(f"[{gene_name}|{region_label}] Preparing PAML tree files")
         h1_tree, h0_tree, informative, status_tree = create_paml_tree_files(pruned_tree, temp_dir, gene_name)
         if not informative:
-            result.update({'status': 'uninformative_topology', 'reason': 'No pure internal branches found for both direct and inverted groups.'})
-            return result
+            final_result.update({'status': 'uninformative_topology', 'reason': 'No pure internal branches found for both direct and inverted groups.'})
+            return final_result
 
         phy_abs = os.path.abspath(gene_info['path'])
         
-        # ONE-RATIO warm start in its own directory
-        one_dir = os.path.join(temp_dir, "one_ratio")
-        os.makedirs(one_dir, exist_ok=True)
-        one_ctl = os.path.join(one_dir, f"{gene_name}_one.ctl")
-        one_out = os.path.join(one_dir, f"{gene_name}_one.out")
-        logging.info(f"[{gene_name}|{region_label}] Running codeml ONE-RATIO warm start in {one_dir}")
-        generate_paml_ctl(one_ctl, phy_abs, h0_tree, one_out, model_num=0)
-        run_codeml_in(one_dir, one_ctl, PAML_TIMEOUT)
-        _log_tail(one_out, 25, prefix=f"{gene_name}|{region_label} ONE out")
-        seed = parse_simple_paml_output(one_out)
+        # --- PAML CACHE LOGIC ---
+        os.makedirs(PAML_CACHE_DIR, exist_ok=True)
+        exe_fp = _exe_fingerprint(PAML_PATH)
+        gene_phy_sha = _canonical_phy_sha(phy_abs)
+        h0_tree_str = _read_text(h0_tree)
+        h1_tree_str = _read_text(h1_tree)
+        taxa_used = t.get_leaf_names()
 
-        # Define a grid of seeds to try for H0/H1, starting with the one-ratio result
-        initial_kappa = seed.get('kappa')
-        initial_omega = seed.get('omega_background')
-        seeds_to_try = [
-            (initial_kappa, initial_omega),
-            (2.0, 0.2),
-            (2.0, 1.0),
-            (5.0, 2.0)
-        ]
-
-        best_lnl_h1 = -np.inf
-        paml_params, lnl_h0, lnl_h1 = {}, np.nan, np.nan
-        paml_success = False
-        best_run_files = {}
-
-        for i, (k_init, w_init) in enumerate(seeds_to_try):
-            attempt_dir = os.path.join(temp_dir, f"attempt_{i}")
-            os.makedirs(attempt_dir, exist_ok=True)
-            logging.info(f"[{gene_name}|{region_label}] PAML H0/H1 attempt {i+1}/{len(seeds_to_try)} in {attempt_dir}")
-            
-            try:
-                # Run H0 and H1 for this attempt in the same subdirectory
-                h0_ctl = os.path.join(attempt_dir, f"{gene_name}_H0.ctl")
-                h0_out = os.path.join(attempt_dir, f"{gene_name}_H0.out")
-                generate_paml_ctl(h0_ctl, phy_abs, h0_tree, h0_out, model_num=2,
-                                  init_kappa=k_init, init_omega=w_init,
-                                  fix_blength=1 if PAML_FIX_BLENGTH_H0 else 0)
-                run_codeml_in(attempt_dir, h0_ctl, PAML_TIMEOUT)
-                _log_tail(h0_out, 20, prefix=f"{gene_name}|{region_label} H0 out (attempt {i+1})")
-                current_lnl_h0 = parse_paml_lnl(h0_out)
-
-                h1_ctl = os.path.join(attempt_dir, f"{gene_name}_H1.ctl")
-                h1_out = os.path.join(attempt_dir, f"{gene_name}_H1.out")
-                generate_paml_ctl(h1_ctl, phy_abs, h1_tree, h1_out, model_num=2,
-                                  init_kappa=k_init, init_omega=w_init)
-                run_codeml_in(attempt_dir, h1_ctl, PAML_TIMEOUT)
-                _log_tail(h1_out, 20, prefix=f"{gene_name}|{region_label} H1 out (attempt {i+1})")
-                current_lnl_h1 = parse_paml_lnl(h1_out)
-
-                if current_lnl_h1 < current_lnl_h0:
-                    logging.warning(f"[{gene_name}|{region_label}] Optim fail attempt {i+1}: H1 lnL ({current_lnl_h1}) < H0 lnL ({current_lnl_h0}).")
-                    continue
-
-                if current_lnl_h1 > best_lnl_h1:
-                    logging.info(f"[{gene_name}|{region_label}] Found new best lnL: {current_lnl_h1}")
-                    best_lnl_h1 = current_lnl_h1
-                    lnl_h0 = current_lnl_h0
-                    lnl_h1 = current_lnl_h1
-                    paml_params = parse_h1_paml_output(h1_out)
-                    paml_success = True
-                    best_run_files = {
-                        "one_ctl": one_ctl, "one_out": one_out,
-                        "h0_ctl": h0_ctl, "h0_out": h0_out,
-                        "h1_ctl": h1_ctl, "h1_out": h1_out,
-                        "h1_tree": h1_tree, "h0_tree": h0_tree,
-                        "pruned_tree": pruned_tree,
-                        "mlc": os.path.join(attempt_dir, "mlc")
-                    }
-            except Exception as e:
-                logging.error(f"[{gene_name}|{region_label}] PAML attempt {i+1} failed with exception: {e}", exc_info=True)
-                continue
-
-        if not paml_success:
-            reason = "All PAML seed attempts failed optimization (H1 lnL < H0 lnL or other error)."
-            result.update({'status': 'paml_optim_fail', 'reason': reason})
-            return result
+        # 1. Handle one-ratio run and its cache.
+        one_ratio_ctl_str = _ctl_string(phy_abs, h0_tree, "one.out", 0, None, None, 0, {})
+        one_ratio_key, _ = _hash_key_attempt(gene_phy_sha, h0_tree_str, taxa_used, one_ratio_ctl_str, exe_fp)
         
-        lrt_stat = 2 * (lnl_h1 - lnl_h0)
-        p_value = chi2.sf(lrt_stat, df=1)
-        
-        result.update({
-            'status': 'success', 'p_value': p_value, 'lrt_stat': lrt_stat,
-            'lnl_h1': lnl_h1, 'lnl_h0': lnl_h0, **paml_params,
-            'n_leaves_region': len(region_taxa),
-            'n_leaves_gene': len(gene_taxa),
-            'n_leaves_pruned': len(t.get_leaf_names()),
-            'chimp_in_region': any('pantro' in n.lower() or 'pan_troglodytes' in n.lower() for n in region_taxa),
-            'chimp_in_pruned': chimp_name is not None,
-            'taxa_used': ';'.join(t.get_leaf_names())
-        })
+        one_payload = cache_read_json(PAML_CACHE_DIR, one_ratio_key, "attempt.json")
+        if not one_payload:
+            one_dir = os.path.join(temp_dir, "one_ratio")
+            one_ctl = os.path.join(one_dir, f"{gene_name}_one.ctl")
+            one_out = os.path.join(one_dir, f"{gene_name}_one.out")
+            generate_paml_ctl(one_ctl, phy_abs, h0_tree, one_out, model_num=0)
+            run_codeml_in(one_dir, one_ctl, PAML_TIMEOUT)
+            _log_tail(one_out, 25, prefix=f"[{gene_name}|{region_label}] ONE out (recomputed)")
+            seed = parse_simple_paml_output(one_out)
+            one_payload = {"type":"one", "lnl": float(parse_paml_lnl(one_out)), "seed": seed}
+            cache_write_json(PAML_CACHE_DIR, one_ratio_key, "attempt.json", one_payload)
+            artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, one_ratio_key), "artifacts")
+            os.makedirs(artifact_dir, exist_ok=True)
+            shutil.copy(one_out, os.path.join(artifact_dir, "one.out"))
+            shutil.copy(one_ctl, os.path.join(artifact_dir, "one.ctl"))
+        else:
+            logging.info(f"[{gene_name}|{region_label}] Using cached ONE-RATIO result")
+        seed = one_payload['seed']
 
-        if KEEP_PAML_OUT:
+        # 2. Define seeds and check for a cached META result.
+        seeds_to_try = [(seed.get('kappa'), seed.get('omega_background')), (2.0, 0.2), (2.0, 1.0), (5.0, 2.0)]
+        meta_key_hex, meta_key_dict = _hash_key_meta(gene_phy_sha, h0_tree_str, h1_tree_str, taxa_used, seeds_to_try, exe_fp, {})
+        
+        cached_meta = cache_read_json(PAML_CACHE_DIR, meta_key_hex, "meta.json")
+        if cached_meta and cached_meta.get("result"):
+            logging.info(f"[{gene_name}|{region_label}] Using cached META result")
+            final_result.update(cached_meta["result"])
+        else:
+            with _with_lock(_fanout_dir(PAML_CACHE_DIR, meta_key_hex)):
+                cached_meta = cache_read_json(PAML_CACHE_DIR, meta_key_hex, "meta.json")
+                if cached_meta and cached_meta.get("result"):
+                    logging.info(f"[{gene_name}|{region_label}] Using cached META (post-lock)")
+                    final_result.update(cached_meta["result"])
+                else:
+                    best = {"lnl_h1": -np.inf, "lnl_h0": np.nan, "params": {}, "attempt_idx": None, "h0_key": None, "h1_key": None}
+                    for i, (k_init, w_init) in enumerate(seeds_to_try):
+                        attempt_dir = os.path.join(temp_dir, f"attempt_{i}")
+                        h0_ctl_str  = _ctl_string(phy_abs, h0_tree, "h0.out", 2, k_init, w_init, (1 if PAML_FIX_BLENGTH_H0 else 0), {})
+                        h1_ctl_str  = _ctl_string(phy_abs, h1_tree, "h1.out", 2, k_init, w_init, 0, {})
+                        h0_key_hex, _  = _hash_key_attempt(gene_phy_sha, h0_tree_str, taxa_used, h0_ctl_str, exe_fp)
+                        h1_key_hex, _  = _hash_key_attempt(gene_phy_sha, h1_tree_str, taxa_used, h1_ctl_str, exe_fp)
+                        
+                        h0_payload = cache_read_json(PAML_CACHE_DIR, h0_key_hex, "attempt.json")
+                        if not h0_payload:
+                            h0_ctl, h0_out = os.path.join(attempt_dir, f"{gene_name}_H0.ctl"), os.path.join(attempt_dir, f"{gene_name}_H0.out")
+                            generate_paml_ctl(h0_ctl, phy_abs, h0_tree, h0_out, 2, k_init, w_init, 1 if PAML_FIX_BLENGTH_H0 else 0)
+                            run_codeml_in(attempt_dir, h0_ctl, PAML_TIMEOUT)
+                            _log_tail(h0_out, 20, prefix=f"{gene_name}|{region_label} H0 out (attempt {i+1})")
+                            h0_payload = {"type":"h0", "lnl": float(parse_paml_lnl(h0_out))}
+                            cache_write_json(PAML_CACHE_DIR, h0_key_hex, "attempt.json", h0_payload)
+                            artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, h0_key_hex), "artifacts")
+                            os.makedirs(artifact_dir, exist_ok=True)
+                            shutil.copy(h0_out, os.path.join(artifact_dir, "h0.out"))
+                            shutil.copy(h0_ctl, os.path.join(artifact_dir, "h0.ctl"))
+
+                        h1_payload = cache_read_json(PAML_CACHE_DIR, h1_key_hex, "attempt.json")
+                        if not h1_payload:
+                            h1_ctl, h1_out = os.path.join(attempt_dir, f"{gene_name}_H1.ctl"), os.path.join(attempt_dir, f"{gene_name}_H1.out")
+                            generate_paml_ctl(h1_ctl, phy_abs, h1_tree, h1_out, 2, k_init, w_init)
+                            run_codeml_in(attempt_dir, h1_ctl, PAML_TIMEOUT)
+                            _log_tail(h1_out, 20, prefix=f"{gene_name}|{region_label} H1 out (attempt {i+1})")
+                            h1_payload = {"type":"h1", "lnl": float(parse_paml_lnl(h1_out)), "params": parse_h1_paml_output(h1_out)}
+                            cache_write_json(PAML_CACHE_DIR, h1_key_hex, "attempt.json", h1_payload)
+                            artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, h1_key_hex), "artifacts")
+                            os.makedirs(artifact_dir, exist_ok=True)
+                            shutil.copy(h1_out, os.path.join(artifact_dir, "h1.out"))
+                            shutil.copy(h1_ctl, os.path.join(artifact_dir, "h1.ctl"))
+                            mlc_path = os.path.join(attempt_dir, "mlc")
+                            if os.path.exists(mlc_path): shutil.copy(mlc_path, os.path.join(artifact_dir, "mlc"))
+
+                        if h1_payload["lnl"] >= h0_payload["lnl"] and h1_payload["lnl"] > best["lnl_h1"]:
+                            best.update({"lnl_h1": h1_payload["lnl"], "lnl_h0": h0_payload["lnl"], "params": h1_payload.get("params", {}), "attempt_idx": i, "h0_key": h0_key_hex, "h1_key": h1_key_hex})
+                    
+                    computed_result = {}
+                    if not np.isfinite(best["lnl_h1"]) or best["lnl_h1"] <= best["lnl_h0"]:
+                        computed_result = {"status":"paml_optim_fail", "reason":"No attempt achieved H1 lnL >= H0 lnL."}
+                    else:
+                        lrt_stat = 2 * (best["lnl_h1"] - best["lnl_h0"])
+                        p_value = chi2.sf(lrt_stat, df=1)
+                        computed_result = {
+                            "status":"success", "p_value": float(p_value), "lrt_stat": float(lrt_stat),
+                            "lnl_h1": float(best["lnl_h1"]), "lnl_h0": float(best["lnl_h0"]), **best["params"],
+                            "h0_key": best["h0_key"], "h1_key": best["h1_key"],
+                            "n_leaves_region": len(region_taxa), "n_leaves_gene": len(gene_taxa), "n_leaves_pruned": len(taxa_used),
+                            "chimp_in_region": any('pantro' in n.lower() for n in region_taxa),
+                            "chimp_in_pruned": any('pantro' in n.lower() for n in t.get_leaf_names()),
+                            "taxa_used": ';'.join(taxa_used)
+                        }
+                    final_result.update(computed_result)
+                    meta_payload = {"schema": CACHE_SCHEMA_VERSION, "created": datetime.now().isoformat(timespec="seconds"), "key": meta_key_dict, "exe": exe_fp, "result": final_result}
+                    cache_write_json(PAML_CACHE_DIR, meta_key_hex, "meta.json", meta_payload)
+
+        # --- Post-computation/cache-hit processing ---
+        if KEEP_PAML_OUT and final_result.get('status') == 'success':
             try:
-                import json
                 safe_region = re.sub(r'[^A-Za-z0-9_.-]+', '_', region_label)
                 safe_gene   = re.sub(r'[^A-Za-z0-9_.-]+', '_', gene_name)
                 dest_dir = os.path.join(PAML_OUT_DIR, f"{safe_gene}__{safe_region}")
                 os.makedirs(dest_dir, exist_ok=True)
                 
-                for fn_path in best_run_files.values():
-                    if os.path.exists(fn_path):
-                        shutil.copy(fn_path, os.path.join(dest_dir, os.path.basename(fn_path)))
+                for key in ["h0_key", "h1_key"]:
+                    if final_result.get(key):
+                        artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, final_result[key]), "artifacts")
+                        if os.path.isdir(artifact_dir):
+                            for f in os.listdir(artifact_dir):
+                                shutil.copy(os.path.join(artifact_dir, f), dest_dir)
+                
+                if os.path.exists(h1_tree): shutil.copy(h1_tree, dest_dir)
+                if os.path.exists(h0_tree): shutil.copy(h0_tree, dest_dir)
+                if os.path.exists(pruned_tree): shutil.copy(pruned_tree, dest_dir)
 
-                with open(os.path.join(dest_dir, "summary.json"), "w") as jf:
-                    serializable_result = {k: (float(v) if isinstance(v, (np.floating, np.integer)) else v) for k, v in result.items()}
-                    json.dump(serializable_result, jf, indent=2)
-            except Exception as copy_e:
-                logging.error(f"[{gene_name}|{region_label}] Failed to save PAML outputs: {copy_e}")
+            except Exception as e:
+                logging.error(f"[{gene_name}|{region_label}] Failed to copy artifacts for KEEP_PAML_OUT: {e}")
 
-        try:
-            generate_omega_result_figure(gene_name, region_label, status_tree, paml_params)
-        except Exception as fig_exc:
-            logging.error(f"[{gene_name}] Failed to generate PAML results figure: {fig_exc}")
+        if final_result['status'] == 'success':
+            try:
+                generate_omega_result_figure(gene_name, region_label, status_tree, final_result)
+            except Exception as fig_exc:
+                logging.error(f"[{gene_name}] Failed to generate PAML results figure: {fig_exc}")
         
-        logging.info(f"[{gene_name}|{region_label}] LRT={lrt_stat:.3f} p={p_value:.3g}")
         elapsed = (datetime.now() - start_time).total_seconds()
-        logging.info(f"[{gene_name}|{region_label}] END codeml ({elapsed:.1f}s) status={result['status']}")
-        return result
+        if final_result.get('status') == 'success':
+            logging.info(f"[{gene_name}|{region_label}] LRT={final_result['lrt_stat']:.3f} p={final_result['p_value']:.3g}")
+        logging.info(f"[{gene_name}|{region_label}] END codeml ({elapsed:.1f}s) status={final_result['status']}")
+        
+        return final_result
 
     except Exception as e:
         logging.error(f"FATAL ERROR for gene '{gene_name}' under region '{region_label}'.\n{traceback.format_exc()}")
-        result.update({'status': 'runtime_error', 'reason': str(e)})
-        return result
+        final_result.update({'status': 'runtime_error', 'reason': str(e)})
+        return final_result
     finally:
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
