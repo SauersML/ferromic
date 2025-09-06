@@ -80,6 +80,9 @@ def _atomic_write_json(path: str, obj: dict):
     os.replace(tmp, path)
 
 def _try_lock(cache_dir: str) -> bool:
+    # Ensure the target fanout directory exists before attempting to create the lock directory.
+    # This prevents race conditions and avoids FileNotFoundError when creating the LOCK directory.
+    os.makedirs(cache_dir, exist_ok=True)
     lockdir = os.path.join(cache_dir, "LOCK")
     try:
         os.mkdir(lockdir)
