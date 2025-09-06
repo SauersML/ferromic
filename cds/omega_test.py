@@ -1172,7 +1172,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                 # Run H0 and H1 codeml attempts concurrently to utilize multiple cores per gene×region.
                 with ThreadPoolExecutor(max_workers=2) as ex:
                     fut_h0 = ex.submit(get_attempt_result, h0_bm_key, h0_tree, "H0_bm.out", {"model": 2, "NSsites": 0}, None)
-                    fut_h1 = ex.submit(get_attempt_result, h1_bm_key, "H1_bm.out", {"model": 2, "NSsites": 0}, parse_h1_paml_output)
+                    fut_h1 = ex.submit(get_attempt_result, h1_bm_key, h1_tree, "H1_bm.out", {"model": 2, "NSsites": 0}, parse_h1_paml_output)
                     h0_payload = fut_h0.result()
                     h1_payload = fut_h1.result()
                 lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
