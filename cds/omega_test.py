@@ -33,6 +33,14 @@ os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 from ete3 import Tree
 from ete3.treeview import TreeStyle, NodeStyle, TextFace, CircleFace, RectFace
 
+# --- Configuration Toggles ---
+# Set to False to disable the PAML timeout for debugging or long runs.
+ENABLE_PAML_TIMEOUT = True
+# Toggle these flags to run only specific PAML models.
+RUN_BRANCH_MODEL_TEST = True
+RUN_CLADE_MODEL_TEST = True
+
+
 # === PAML CACHE CONFIG =======================================================
 import hashlib, json, time, random, shlex
 
@@ -179,7 +187,7 @@ MAKE_FIGURES = bool(int(os.environ.get("MAKE_FIGURES", "1")))
 
 # Subprocess timeouts (seconds). Tweak as appropriate for your datasets/cluster.
 IQTREE_TIMEOUT = int(os.environ.get("IQTREE_TIMEOUT", "7200"))   # 2h default
-PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "3600"))     # 1h default
+PAML_TIMEOUT   = int(os.environ.get("PAML_TIMEOUT", "3600")) if ENABLE_PAML_TIMEOUT else None     # 1h default
 
 # Prevent hidden multi-threading from MKL/OpenBLAS in child processes
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -1147,60 +1155,79 @@ def codeml_worker(gene_info, region_tree_file, region_label):
             logging.info(f"[{gene_name}|{region_label}] Cached attempt {out_name} to {cache_dir}")
             return payload
 
+        if not RUN_BRANCH_MODEL_TEST and not RUN_CLADE_MODEL_TEST:
+            logging.warning(f"[{gene_name}|{region_label}] Both tests are disabled, skipping PAML analysis.")
+            final_result.update({'status': 'skipped', 'reason': 'Both tests disabled in config.'})
+            return final_result
+
         # --- 3. Process Branch-Model LRT ---
         bm_result = {}
-        pair_key_bm, pair_key_dict_bm = _hash_key_pair(h0_bm_key, h1_bm_key, "branch_model", 1, exe_fp)
-        pair_payload_bm = cache_read_json(PAML_CACHE_DIR, pair_key_bm, "pair.json")
-        if pair_payload_bm:
-            logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for branch_model")
-            bm_result = pair_payload_bm["result"]
-        else:
-            h0_payload = get_attempt_result(h0_bm_key, h0_tree, "H0_bm.out", {"model": 2, "NSsites": 0}, None)
-            h1_payload = get_attempt_result(h1_bm_key, h1_tree, "H1_bm.out", {"model": 2, "NSsites": 0}, parse_h1_paml_output)
-            lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
-
-            if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
-                lrt = 2 * (lnl1 - lnl0)
-                p = chi2.sf(lrt, df=1)
-                bm_result = {
-                    "bm_lnl_h0": lnl0, "bm_lnl_h1": lnl1, "bm_lrt_stat": float(lrt), "bm_p_value": float(p),
-                    **{f"bm_{k}": v for k, v in h1_payload.get("params", {}).items()},
-                    "bm_h0_key": h0_bm_key, "bm_h1_key": h1_bm_key,
-                }
-                with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_bm)):
-                    cache_write_json(PAML_CACHE_DIR, pair_key_bm, "pair.json", {"key": pair_key_dict_bm, "result": bm_result})
-                logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'branch_model' (df=1)")
+        if RUN_BRANCH_MODEL_TEST:
+            pair_key_bm, pair_key_dict_bm = _hash_key_pair(h0_bm_key, h1_bm_key, "branch_model", 1, exe_fp)
+            pair_payload_bm = cache_read_json(PAML_CACHE_DIR, pair_key_bm, "pair.json")
+            if pair_payload_bm:
+                logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for branch_model")
+                bm_result = pair_payload_bm["result"]
             else:
-                bm_result = {"bm_p_value": 1.0, "bm_lrt_stat": 0.0, "bm_lnl_h0": lnl0, "bm_lnl_h1": lnl1}
+                h0_payload = get_attempt_result(h0_bm_key, h0_tree, "H0_bm.out", {"model": 2, "NSsites": 0}, None)
+                h1_payload = get_attempt_result(h1_bm_key, h1_tree, "H1_bm.out", {"model": 2, "NSsites": 0}, parse_h1_paml_output)
+                lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
+
+                if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
+                    lrt = 2 * (lnl1 - lnl0)
+                    p = chi2.sf(lrt, df=1)
+                    bm_result = {
+                        "bm_lnl_h0": lnl0, "bm_lnl_h1": lnl1, "bm_lrt_stat": float(lrt), "bm_p_value": float(p),
+                        **{f"bm_{k}": v for k, v in h1_payload.get("params", {}).items()},
+                        "bm_h0_key": h0_bm_key, "bm_h1_key": h1_bm_key,
+                    }
+                    with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_bm)):
+                        cache_write_json(PAML_CACHE_DIR, pair_key_bm, "pair.json", {"key": pair_key_dict_bm, "result": bm_result})
+                    logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'branch_model' (df=1)")
+                else:
+                    bm_result = {"bm_p_value": 1.0, "bm_lrt_stat": 0.0, "bm_lnl_h0": lnl0, "bm_lnl_h1": lnl1}
+        else:
+            logging.info(f"[{gene_name}|{region_label}] Skipping branch-model test as per configuration.")
+            bm_result = {"bm_p_value": np.nan, "bm_lrt_stat": np.nan}
+
 
         # --- 4. Process Clade-Model LRT ---
         cmc_result = {}
-        pair_key_cmc, pair_key_dict_cmc = _hash_key_pair(h0_cmc_key, h1_cmc_key, "clade_model_c", 1, exe_fp)
-        pair_payload_cmc = cache_read_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json")
-        if pair_payload_cmc:
-            logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
-            cmc_result = pair_payload_cmc["result"]
-        else:
-            h0_payload = get_attempt_result(h0_cmc_key, h0_tree, "H0_cmc.out", {"model": 0, "NSsites": 22, "ncatG": 3}, None)
-            h1_payload = get_attempt_result(h1_cmc_key, h1_tree, "H1_cmc.out", {"model": 3, "NSsites": 2, "ncatG": 3}, parse_h1_cmc_paml_output)
-            lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
-
-            if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
-                lrt = 2 * (lnl1 - lnl0)
-                p = chi2.sf(lrt, df=1)
-                cmc_result = {
-                    "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1, "cmc_lrt_stat": float(lrt), "cmc_p_value": float(p),
-                    **h1_payload.get("params", {}),
-                    "cmc_h0_key": h0_cmc_key, "cmc_h1_key": h1_cmc_key,
-                }
-                with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_cmc)):
-                    cache_write_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json", {"key": pair_key_dict_cmc, "result": cmc_result})
-                logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (df=1)")
+        if RUN_CLADE_MODEL_TEST:
+            pair_key_cmc, pair_key_dict_cmc = _hash_key_pair(h0_cmc_key, h1_cmc_key, "clade_model_c", 1, exe_fp)
+            pair_payload_cmc = cache_read_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json")
+            if pair_payload_cmc:
+                logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
+                cmc_result = pair_payload_cmc["result"]
             else:
-                cmc_result = {"cmc_p_value": 1.0, "cmc_lrt_stat": 0.0, "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1}
+                h0_payload = get_attempt_result(h0_cmc_key, h0_tree, "H0_cmc.out", {"model": 0, "NSsites": 22, "ncatG": 3}, None)
+                h1_payload = get_attempt_result(h1_cmc_key, h1_tree, "H1_cmc.out", {"model": 3, "NSsites": 2, "ncatG": 3}, parse_h1_cmc_paml_output)
+                lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
+
+                if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
+                    lrt = 2 * (lnl1 - lnl0)
+                    p = chi2.sf(lrt, df=1)
+                    cmc_result = {
+                        "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1, "cmc_lrt_stat": float(lrt), "cmc_p_value": float(p),
+                        **h1_payload.get("params", {}),
+                        "cmc_h0_key": h0_cmc_key, "cmc_h1_key": h1_cmc_key,
+                    }
+                    with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_cmc)):
+                        cache_write_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json", {"key": pair_key_dict_cmc, "result": cmc_result})
+                    logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (df=1)")
+                else:
+                    cmc_result = {"cmc_p_value": 1.0, "cmc_lrt_stat": 0.0, "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1}
+        else:
+            logging.info(f"[{gene_name}|{region_label}] Skipping clade-model test as per configuration.")
+            cmc_result = {"cmc_p_value": np.nan, "cmc_lrt_stat": np.nan}
+
 
         # --- 5. Combine results ---
-        if bm_result.get("bm_p_value", 1.0) <= 1.0 and cmc_result.get("cmc_p_value", 1.0) <= 1.0:
+        # A run is OK if the test was skipped OR if it ran and produced a p-value.
+        bm_ok = not RUN_BRANCH_MODEL_TEST or not np.isnan(bm_result.get("bm_p_value", np.nan))
+        cmc_ok = not RUN_CLADE_MODEL_TEST or not np.isnan(cmc_result.get("cmc_p_value", np.nan))
+
+        if bm_ok and cmc_ok:
             final_result.update({
                 "status": "success", **bm_result, **cmc_result,
                 "n_leaves_region": len(region_taxa), "n_leaves_gene": len(gene_taxa), "n_leaves_pruned": len(taxa_used),
@@ -1211,7 +1238,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         else:
             final_result.update({
                 "status": "paml_optim_fail",
-                "reason": "One or both LRTs failed to produce a valid result.",
+                "reason": "One or more requested LRTs failed to produce a valid result.",
                 **bm_result, **cmc_result,
             })
 
