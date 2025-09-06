@@ -34,7 +34,7 @@ from ete3 import Tree
 from ete3.treeview import TreeStyle, NodeStyle, TextFace, CircleFace, RectFace
 
 # === PAML CACHE CONFIG =======================================================
-import hashlib, json, time, random
+import hashlib, json, time, random, shlex
 
 PAML_CACHE_DIR = os.environ.get("PAML_CACHE_DIR", "paml_cache")
 CACHE_SCHEMA_VERSION = "paml_cache.v1"
@@ -136,6 +136,7 @@ PAML_PATH = os.path.abspath('../paml/bin/codeml')
 # --- Analysis Parameters ---
 DIVERGENCE_THRESHOLD = 0.10  # Max median human-chimp divergence to pass QC.
 FDR_ALPHA = 0.05             # False Discovery Rate for significance.
+PROCEED_ON_TERMINAL_ONLY = False # If True, proceed with analysis even if no pure internal branches are found.
 FLOAT_REGEX = r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
 
 # --- Visualization Configuration ---
@@ -418,46 +419,43 @@ def parse_simple_paml_output(outfile_path):
                     params['omega_background'] = float(m.group(1) or m.group(2))
     return params
 
-def _ctl_string(seqfile, treefile, outfile, model_num, init_kappa, init_omega, fix_blength, base_opts: dict):
-    # Mirrors generate_paml_ctl, but returns a normalized string for hashing
-    return (
-f"""seqfile = {seqfile}
-treefile = {treefile}
-outfile = {outfile}
-noisy = 0
-verbose = 0
-runmode = 0
-seqtype = 1
-CodonFreq = 2
-model = {model_num}
-NSsites = 0
-icode = 0
-cleandata = 0
-fix_kappa = 0
-kappa = {init_kappa if init_kappa is not None else 2.0}
-fix_omega = 0
-omega = {init_omega if init_omega is not None else 0.5}
-fix_blength = {fix_blength}
-method = {base_opts.get('method', 0)}
-getSE = 0
-RateAncestor = 0
-""").strip()
+def _ctl_string(seqfile, treefile, outfile, *, model, NSsites, ncatG=None,
+                init_kappa=None, init_omega=None, fix_blength=0, base_opts: dict = None):
+    base_opts = base_opts or {}
+    kappa = init_kappa if init_kappa is not None else 2.0
+    omega = init_omega if init_omega is not None else 0.5
+    codonfreq = base_opts.get('CodonFreq', 2)
+    method = base_opts.get('method', 0)
+    seqtype = base_opts.get('seqtype', 1)
+    icode = base_opts.get('icode', 0)
+    cleandata = base_opts.get('cleandata', 0)
 
-def _hash_key_meta(gene_phy_sha, h0_tree_str, h1_tree_str, taxa_used_list, seeds_list, exe_fp, base_opts: dict):
-    key_dict = {
-        "schema": CACHE_SCHEMA_VERSION,
-        "gene_phy_sha": gene_phy_sha,
-        "h0_tree_sha": _sha256_bytes(h0_tree_str.encode("utf-8")),
-        "h1_tree_sha": _sha256_bytes(h1_tree_str.encode("utf-8")),
-        "taxa_used": sorted(taxa_used_list),
-        "seeds": [(float(k or 2.0), float(w or 0.5)) for k, w in seeds_list],
-        "codeml": exe_fp["sha256"],
-        "opts": {
-            "method": 0, "seqtype":1, "CodonFreq":2, "NSsites":0, "cleandata":0, "icode":0,
-        },
-        "logic_version": 2  # bump when logic meaningfully changes
-    }
-    return _sha256_bytes(json.dumps(key_dict, sort_keys=True).encode("utf-8")), key_dict
+    lines = [
+        f"seqfile = {seqfile}",
+        f"treefile = {treefile}",
+        f"outfile = {outfile}",
+        "noisy = 0",
+        "verbose = 0",
+        "runmode = 0",
+        f"seqtype = {seqtype}",
+        f"CodonFreq = {codonfreq}",
+        f"model = {model}",
+        f"NSsites = {NSsites}",
+        f"icode = {icode}",
+        f"cleandata = {cleandata}",
+        "fix_kappa = 0",
+        f"kappa = {kappa}",
+        "fix_omega = 0",
+        f"omega = {omega}",
+        f"fix_blength = {fix_blength}",
+        f"method = {method}",
+        "getSE = 0",
+        "RateAncestor = 0",
+    ]
+    if ncatG is not None:
+        lines.insert(11, f"ncatG = {ncatG}")  # after NSsites for stability
+    return "\n".join(lines).strip()
+
 
 def _hash_key_attempt(gene_phy_sha, tree_str, taxa_used_list, ctl_str, exe_fp):
     key_dict = {
@@ -466,6 +464,18 @@ def _hash_key_attempt(gene_phy_sha, tree_str, taxa_used_list, ctl_str, exe_fp):
         "tree_sha": _sha256_bytes(tree_str.encode("utf-8")),
         "taxa_used": sorted(taxa_used_list),
         "ctl_sha": _sha256_bytes(ctl_str.encode("utf-8")),
+        "codeml": exe_fp["sha256"],
+    }
+    return _sha256_bytes(json.dumps(key_dict, sort_keys=True).encode("utf-8")), key_dict
+
+def _hash_key_pair(h0_key_hex: str, h1_key_hex: str, test_label: str, df: int, exe_fp: dict):
+    key_dict = {
+        "schema": CACHE_SCHEMA_VERSION,
+        "pair_version": 1,
+        "test": test_label,           # "branch_model" or "clade_model_c"
+        "df": df,                     # 1 here
+        "h0_attempt_key": h0_key_hex,
+        "h1_attempt_key": h1_key_hex,
         "codeml": exe_fp["sha256"],
     }
     return _sha256_bytes(json.dumps(key_dict, sort_keys=True).encode("utf-8")), key_dict
@@ -535,12 +545,16 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
 
     # Step 1: Propagate status up from the leaves ("post-order" traversal).
     # A temporary attribute 'group_status' is added to each node.
+    direct_leaves = 0
+    inverted_leaves = 0
     for node in t.traverse("postorder"):
         if node.is_leaf():
             if node.name.startswith('0'):
                 node.add_feature("group_status", "direct")
+                direct_leaves += 1
             elif node.name.startswith('1'):
                 node.add_feature("group_status", "inverted")
+                inverted_leaves += 1
             else:
                 node.add_feature("group_status", "outgroup")
         else:  # This is an internal node.
@@ -555,6 +569,11 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
                 # If children have different statuses (e.g., one is 'inverted' and one is 'direct',
                 # or one is 'direct' and one is 'both'), this is a shared/ambiguous ancestor.
                 node.add_feature("group_status", "both")
+
+    # Group Size Gate: Ensure there are enough samples in each group to proceed.
+    if direct_leaves < 3 or inverted_leaves < 3:
+        logging.warning(f"[{gene_name}] Skipping due to insufficient samples in a group (direct: {direct_leaves}, inverted: {inverted_leaves}).")
+        return None, None, False, t
 
     # Step 2: Check if the analysis will be informative by counting pure internal branches.
     internal_direct_count = 0
@@ -618,43 +637,37 @@ def create_paml_tree_files(iqtree_file, work_dir, gene_name):
     # Return the tree object 't' which now has the 'group_status' features attached.
     return h1_tree_path, h0_tree_path, analysis_is_informative, t
 
-def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, model_num,
+def generate_paml_ctl(ctl_path, phy_file, tree_file, out_file, *,
+                      model, NSsites, ncatG=None,
                       init_kappa=None, init_omega=None, fix_blength=0):
-    """
-    model_num: 0 (one-ratio) or 2 (branch models)
-    fix_blength: 0 = estimate branch lengths, 1/2 = keep as fixed (speed trade-off; keep 0 if unsure)
-    """
     os.makedirs(os.path.dirname(ctl_path), exist_ok=True)
-    kappa = init_kappa if init_kappa is not None else 2.0
-    omega = init_omega if init_omega is not None else 0.5
-    ctl_content = f"""
-      seqfile = {phy_file}
-      treefile = {tree_file}
-      outfile = {out_file}
-
-        noisy = 0
-      verbose = 0
-      runmode = 0
-
-      seqtype = 1
-    CodonFreq = 2
-        model = {model_num}
-      NSsites = 0
-        icode = 0
-    cleandata = 0
-
-      fix_kappa = 0
-        kappa = {kappa}
-      fix_omega = 0
-        omega = {omega}
-
-      fix_blength = {fix_blength}
-      method = 0
-      getSE = 0
-      RateAncestor = 0
-    """
-    with open(ctl_path, 'w') as f:
-        f.write(ctl_content.strip())
+    kappa = 2.0 if init_kappa is None else init_kappa
+    omega = 0.5 if init_omega is None else init_omega
+    content = f"""
+seqfile = {phy_file}
+treefile = {tree_file}
+outfile = {out_file}
+noisy = 0
+verbose = 0
+runmode = 0
+seqtype = 1
+CodonFreq = 2
+model = {model}
+NSsites = {NSsites}
+{('ncatG = ' + str(ncatG)) if ncatG is not None else ''}
+icode = 0
+cleandata = 0
+fix_kappa = 0
+kappa = {kappa}
+fix_omega = 0
+omega = {omega}
+fix_blength = {fix_blength}
+method = 0
+getSE = 0
+RateAncestor = 0
+""".strip() + "\n"
+    with open(ctl_path, "w") as f:
+        f.write(content)
 
 def parse_paml_lnl(outfile_path):
     """Extracts the log-likelihood (lnL) value from a PAML output file."""
@@ -693,6 +706,57 @@ def parse_h1_paml_output(outfile_path):
             if m:
                 v = m.group(1) or m.group(2)
                 if v: params['omega_background'] = float(v)
+    return params
+
+def parse_h1_cmc_paml_output(outfile_path):
+    """
+    Parse parameters from a Clade Model C (model=3, NSsites=2) output.
+    Extracts shared p0, p1, w0, and clade-specific w2 values.
+    """
+    params = {
+        'cmc_kappa': np.nan, 'cmc_p0': np.nan, 'cmc_p1': np.nan, 'cmc_p2': np.nan,
+        'cmc_omega0': np.nan, 'cmc_omega2_direct': np.nan, 'cmc_omega2_inverted': np.nan
+    }
+    with open(outfile_path, 'r') as f:
+        content = f.read()
+
+    kappa_m = re.search(r'kappa \(ts/tv\)\s*=\s*(' + FLOAT_REGEX + ')', content)
+    if kappa_m: params['cmc_kappa'] = float(kappa_m.group(1))
+
+    # Site class parameters can be in various formats
+    p_m = re.search(r'p0\s*=\s*(' + FLOAT_REGEX + r')\s*p1\s*=\s*(' + FLOAT_REGEX + ')', content)
+    if p_m:
+        params['cmc_p0'] = float(p_m.group(1))
+        params['cmc_p1'] = float(p_m.group(2))
+    else:
+        p_m_line = re.search(r'p\s*\(proportion\):\s*([\d\.\s]+)', content)
+        if p_m_line:
+            props = p_m_line.group(1).strip().split()
+            if len(props) >= 2:
+                params['cmc_p0'] = float(props[0])
+                params['cmc_p1'] = float(props[1])
+
+    w0_m = re.search(r'w0\s*=\s*(' + FLOAT_REGEX + ')', content)
+    if w0_m:
+        params['cmc_omega0'] = float(w0_m.group(1))
+    else:
+        w_m_line = re.search(r'w\s*\(dN/dS\):\s*([\d\.\s]+)', content)
+        if w_m_line:
+            omegas = w_m_line.group(1).strip().split()
+            if len(omegas) >= 1:
+                params['cmc_omega0'] = float(omegas[0])
+
+    # Clade-specific parameters for w2, with permissive regex
+    w2_direct_m = re.search(r'w2.*(?:clade|foreground)\s*#?\s*1\s*:\s*(' + FLOAT_REGEX + ')', content, re.I)
+    if w2_direct_m: params['cmc_omega2_direct'] = float(w2_direct_m.group(1))
+
+    w2_inverted_m = re.search(r'w2.*(?:clade|foreground)\s*#?\s*2\s*:\s*(' + FLOAT_REGEX + ')', content, re.I)
+    if w2_inverted_m: params['cmc_omega2_inverted'] = float(w2_inverted_m.group(1))
+
+    # Compute p2 if p0 and p1 were found
+    if not np.isnan(params['cmc_p0']) and not np.isnan(params['cmc_p1']):
+        params['cmc_p2'] = max(0.0, 1.0 - params['cmc_p0'] - params['cmc_p1'])
+
     return params
 
 # ============================================================================
@@ -982,8 +1046,9 @@ def run_codeml_in(run_dir, ctl_path, timeout):
                 pass
 
     cmd = [PAML_PATH, ctl_path]
-    abs_cmd_str = f"{os.path.abspath(cmd[0])} {os.path.abspath(cmd[1])}"
-    logging.info(f"Executing PAML command in {os.path.abspath(run_dir)}: {abs_cmd_str}")
+    # For logging, create a fully reproducible, shell-quoted command string
+    repro_cmd = f"{shlex.quote(os.path.abspath(PAML_PATH))} {shlex.quote(os.path.abspath(ctl_path))}"
+    logging.info(f"REPRODUCE PAML: {repro_cmd}")
     run_command(cmd, run_dir, timeout=timeout, input_data="\n")
 
 def codeml_worker(gene_info, region_tree_file, region_label):
@@ -1027,8 +1092,11 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 
         h1_tree, h0_tree, informative, status_tree = create_paml_tree_files(pruned_tree, temp_dir, gene_name)
         if not informative:
-            final_result.update({'status': 'uninformative_topology', 'reason': 'No pure internal branches found for both direct and inverted groups.'})
-            return final_result
+            if PROCEED_ON_TERMINAL_ONLY:
+                logging.warning(f"[{gene_name}] No pure internal branches in both clades; proceeding as PROCEED_ON_TERMINAL_ONLY is True (lower power).")
+            else:
+                final_result.update({'status': 'uninformative_topology', 'reason': 'No pure internal branches found for both direct and inverted groups.'})
+                return final_result
 
         phy_abs = os.path.abspath(gene_info['path'])
         
@@ -1040,101 +1108,121 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         h1_tree_str = _read_text(h1_tree)
         taxa_used = t.get_leaf_names()
 
-        # 1. Handle one-ratio run and its cache.
-        one_ratio_ctl_str = _ctl_string(phy_abs, h0_tree, "one.out", 0, None, None, 0, {})
-        one_ratio_key, _ = _hash_key_attempt(gene_phy_sha, h0_tree_str, taxa_used, one_ratio_ctl_str, exe_fp)
-        
-        one_payload = cache_read_json(PAML_CACHE_DIR, one_ratio_key, "attempt.json")
-        if not one_payload:
-            one_dir = os.path.join(temp_dir, "one_ratio")
-            one_ctl = os.path.join(one_dir, f"{gene_name}_one.ctl")
-            one_out = os.path.join(one_dir, f"{gene_name}_one.out")
-            generate_paml_ctl(one_ctl, phy_abs, h0_tree, one_out, model_num=0)
-            run_codeml_in(one_dir, one_ctl, PAML_TIMEOUT)
-            _log_tail(one_out, 25, prefix=f"[{gene_name}|{region_label}] ONE out (recomputed)")
-            seed = parse_simple_paml_output(one_out)
-            one_payload = {"type":"one", "lnl": float(parse_paml_lnl(one_out)), "seed": seed}
-            cache_write_json(PAML_CACHE_DIR, one_ratio_key, "attempt.json", one_payload)
-            artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, one_ratio_key), "artifacts")
-            os.makedirs(artifact_dir, exist_ok=True)
-            shutil.copy(one_out, os.path.join(artifact_dir, "one.out"))
-            shutil.copy(one_ctl, os.path.join(artifact_dir, "one.ctl"))
+        # --- 1. Define all four attempts and their cache keys ---
+
+        # Branch-model (bm) attempts
+        ctl_bm_h0 = _ctl_string(phy_abs, h0_tree, "H0_bm.out", model=2, NSsites=0)
+        ctl_bm_h1 = _ctl_string(phy_abs, h1_tree, "H1_bm.out", model=2, NSsites=0)
+        h0_bm_key, _ = _hash_key_attempt(gene_phy_sha, h0_tree_str, taxa_used, ctl_bm_h0, exe_fp)
+        h1_bm_key, _ = _hash_key_attempt(gene_phy_sha, h1_tree_str, taxa_used, ctl_bm_h1, exe_fp)
+
+        # Clade-model (cmc) attempts
+        ctl_cmc_h0 = _ctl_string(phy_abs, h0_tree, "H0_cmc.out", model=0, NSsites=22, ncatG=3)
+        ctl_cmc_h1 = _ctl_string(phy_abs, h1_tree, "H1_cmc.out", model=3, NSsites=2, ncatG=3)
+        h0_cmc_key, _ = _hash_key_attempt(gene_phy_sha, h0_tree_str, taxa_used, ctl_cmc_h0, exe_fp)
+        h1_cmc_key, _ = _hash_key_attempt(gene_phy_sha, h1_tree_str, taxa_used, ctl_cmc_h1, exe_fp)
+
+        # --- 2. Helper function to run a single codeml attempt if not cached ---
+        def get_attempt_result(key_hex, tree_path, out_name, model_params, parser_func):
+            payload = cache_read_json(PAML_CACHE_DIR, key_hex, "attempt.json")
+            if payload:
+                logging.info(f"[{gene_name}|{region_label}] Using cached ATTEMPT: {out_name}")
+                return payload
+
+            run_dir = os.path.join(temp_dir, out_name.replace(".out", ""))
+            ctl_file = os.path.join(run_dir, f"{gene_name}_{out_name}.ctl")
+            out_file = os.path.join(run_dir, f"{gene_name}_{out_name}")
+
+            # Add fixed initial params to a copy of the model_params dict
+            params = {**model_params, 'init_kappa': 2.0, 'init_omega': 0.5, 'fix_blength': 0}
+            generate_paml_ctl(ctl_file, phy_abs, tree_path, out_file, **params)
+            run_codeml_in(run_dir, ctl_file, PAML_TIMEOUT)
+            _log_tail(out_file, 25, prefix=f"[{gene_name}|{region_label}] {out_name} out (recomputed)")
+
+            lnl = parse_paml_lnl(out_file)
+            params = parser_func(out_file) if parser_func else {}
+            payload = {"lnl": float(lnl), "params": params}
+
+            with _with_lock(_fanout_dir(PAML_CACHE_DIR, key_hex)):
+                cache_write_json(PAML_CACHE_DIR, key_hex, "attempt.json", payload)
+                artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, key_hex), "artifacts")
+                os.makedirs(artifact_dir, exist_ok=True)
+                shutil.copy(out_file, os.path.join(artifact_dir, out_name))
+                shutil.copy(ctl_file, os.path.join(artifact_dir, f"{out_name}.ctl"))
+                mlc_path = os.path.join(run_dir, "mlc")
+                if os.path.exists(mlc_path): shutil.copy(mlc_path, os.path.join(artifact_dir, "mlc"))
+
+            cache_dir = _fanout_dir(PAML_CACHE_DIR, key_hex)
+            logging.info(f"[{gene_name}|{region_label}] Cached attempt {out_name} to {cache_dir}")
+            return payload
+
+        # --- 3. Process Branch-Model LRT ---
+        bm_result = {}
+        pair_key_bm, pair_key_dict_bm = _hash_key_pair(h0_bm_key, h1_bm_key, "branch_model", 1, exe_fp)
+        pair_payload_bm = cache_read_json(PAML_CACHE_DIR, pair_key_bm, "pair.json")
+        if pair_payload_bm:
+            logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for branch_model")
+            bm_result = pair_payload_bm["result"]
         else:
-            logging.info(f"[{gene_name}|{region_label}] Using cached ONE-RATIO result")
-        seed = one_payload['seed']
+            h0_payload = get_attempt_result(h0_bm_key, h0_tree, "H0_bm.out", {"model": 2, "NSsites": 0}, None)
+            h1_payload = get_attempt_result(h1_bm_key, h1_tree, "H1_bm.out", {"model": 2, "NSsites": 0}, parse_h1_paml_output)
+            lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
 
-        # 2. Define seeds and check for a cached META result.
-        seeds_to_try = [(seed.get('kappa'), seed.get('omega_background')), (2.0, 0.2), (2.0, 1.0), (5.0, 2.0)]
-        meta_key_hex, meta_key_dict = _hash_key_meta(gene_phy_sha, h0_tree_str, h1_tree_str, taxa_used, seeds_to_try, exe_fp, {})
-        
-        cached_meta = cache_read_json(PAML_CACHE_DIR, meta_key_hex, "meta.json")
-        if cached_meta and cached_meta.get("result"):
-            logging.info(f"[{gene_name}|{region_label}] Using cached META result")
-            final_result.update(cached_meta["result"])
+            if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
+                lrt = 2 * (lnl1 - lnl0)
+                p = chi2.sf(lrt, df=1)
+                bm_result = {
+                    "bm_lnl_h0": lnl0, "bm_lnl_h1": lnl1, "bm_lrt_stat": float(lrt), "bm_p_value": float(p),
+                    **{f"bm_{k}": v for k, v in h1_payload.get("params", {}).items()},
+                    "bm_h0_key": h0_bm_key, "bm_h1_key": h1_bm_key,
+                }
+                with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_bm)):
+                    cache_write_json(PAML_CACHE_DIR, pair_key_bm, "pair.json", {"key": pair_key_dict_bm, "result": bm_result})
+                logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'branch_model' (df=1)")
+            else:
+                bm_result = {"bm_p_value": 1.0, "bm_lrt_stat": 0.0, "bm_lnl_h0": lnl0, "bm_lnl_h1": lnl1}
+
+        # --- 4. Process Clade-Model LRT ---
+        cmc_result = {}
+        pair_key_cmc, pair_key_dict_cmc = _hash_key_pair(h0_cmc_key, h1_cmc_key, "clade_model_c", 1, exe_fp)
+        pair_payload_cmc = cache_read_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json")
+        if pair_payload_cmc:
+            logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
+            cmc_result = pair_payload_cmc["result"]
         else:
-            with _with_lock(_fanout_dir(PAML_CACHE_DIR, meta_key_hex)):
-                cached_meta = cache_read_json(PAML_CACHE_DIR, meta_key_hex, "meta.json")
-                if cached_meta and cached_meta.get("result"):
-                    logging.info(f"[{gene_name}|{region_label}] Using cached META (post-lock)")
-                    final_result.update(cached_meta["result"])
-                else:
-                    best = {"lnl_h1": -np.inf, "lnl_h0": np.nan, "params": {}, "attempt_idx": None, "h0_key": None, "h1_key": None}
-                    for i, (k_init, w_init) in enumerate(seeds_to_try):
-                        attempt_dir = os.path.join(temp_dir, f"attempt_{i}")
-                        h0_ctl_str  = _ctl_string(phy_abs, h0_tree, "h0.out", 2, k_init, w_init, 0, {})
-                        h1_ctl_str  = _ctl_string(phy_abs, h1_tree, "h1.out", 2, k_init, w_init, 0, {})
-                        h0_key_hex, _  = _hash_key_attempt(gene_phy_sha, h0_tree_str, taxa_used, h0_ctl_str, exe_fp)
-                        h1_key_hex, _  = _hash_key_attempt(gene_phy_sha, h1_tree_str, taxa_used, h1_ctl_str, exe_fp)
-                        
-                        h0_payload = cache_read_json(PAML_CACHE_DIR, h0_key_hex, "attempt.json")
-                        if not h0_payload:
-                            h0_ctl, h0_out = os.path.join(attempt_dir, f"{gene_name}_H0.ctl"), os.path.join(attempt_dir, f"{gene_name}_H0.out")
-                            generate_paml_ctl(h0_ctl, phy_abs, h0_tree, h0_out, 2, k_init, w_init, fix_blength=0)
-                            run_codeml_in(attempt_dir, h0_ctl, PAML_TIMEOUT)
-                            _log_tail(h0_out, 20, prefix=f"{gene_name}|{region_label} H0 out (attempt {i+1})")
-                            h0_payload = {"type":"h0", "lnl": float(parse_paml_lnl(h0_out))}
-                            cache_write_json(PAML_CACHE_DIR, h0_key_hex, "attempt.json", h0_payload)
-                            artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, h0_key_hex), "artifacts")
-                            os.makedirs(artifact_dir, exist_ok=True)
-                            shutil.copy(h0_out, os.path.join(artifact_dir, "h0.out"))
-                            shutil.copy(h0_ctl, os.path.join(artifact_dir, "h0.ctl"))
+            h0_payload = get_attempt_result(h0_cmc_key, h0_tree, "H0_cmc.out", {"model": 0, "NSsites": 22, "ncatG": 3}, None)
+            h1_payload = get_attempt_result(h1_cmc_key, h1_tree, "H1_cmc.out", {"model": 3, "NSsites": 2, "ncatG": 3}, parse_h1_cmc_paml_output)
+            lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
 
-                        h1_payload = cache_read_json(PAML_CACHE_DIR, h1_key_hex, "attempt.json")
-                        if not h1_payload:
-                            h1_ctl, h1_out = os.path.join(attempt_dir, f"{gene_name}_H1.ctl"), os.path.join(attempt_dir, f"{gene_name}_H1.out")
-                            generate_paml_ctl(h1_ctl, phy_abs, h1_tree, h1_out, 2, k_init, w_init)
-                            run_codeml_in(attempt_dir, h1_ctl, PAML_TIMEOUT)
-                            _log_tail(h1_out, 20, prefix=f"{gene_name}|{region_label} H1 out (attempt {i+1})")
-                            h1_payload = {"type":"h1", "lnl": float(parse_paml_lnl(h1_out)), "params": parse_h1_paml_output(h1_out)}
-                            cache_write_json(PAML_CACHE_DIR, h1_key_hex, "attempt.json", h1_payload)
-                            artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, h1_key_hex), "artifacts")
-                            os.makedirs(artifact_dir, exist_ok=True)
-                            shutil.copy(h1_out, os.path.join(artifact_dir, "h1.out"))
-                            shutil.copy(h1_ctl, os.path.join(artifact_dir, "h1.ctl"))
-                            mlc_path = os.path.join(attempt_dir, "mlc")
-                            if os.path.exists(mlc_path): shutil.copy(mlc_path, os.path.join(artifact_dir, "mlc"))
+            if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
+                lrt = 2 * (lnl1 - lnl0)
+                p = chi2.sf(lrt, df=1)
+                cmc_result = {
+                    "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1, "cmc_lrt_stat": float(lrt), "cmc_p_value": float(p),
+                    **h1_payload.get("params", {}),
+                    "cmc_h0_key": h0_cmc_key, "cmc_h1_key": h1_cmc_key,
+                }
+                with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_cmc)):
+                    cache_write_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json", {"key": pair_key_dict_cmc, "result": cmc_result})
+                logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (df=1)")
+            else:
+                cmc_result = {"cmc_p_value": 1.0, "cmc_lrt_stat": 0.0, "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1}
 
-                        if h1_payload["lnl"] >= h0_payload["lnl"] and h1_payload["lnl"] > best["lnl_h1"]:
-                            best.update({"lnl_h1": h1_payload["lnl"], "lnl_h0": h0_payload["lnl"], "params": h1_payload.get("params", {}), "attempt_idx": i, "h0_key": h0_key_hex, "h1_key": h1_key_hex})
-                    
-                    computed_result = {}
-                    if not np.isfinite(best["lnl_h1"]) or best["lnl_h1"] <= best["lnl_h0"]:
-                        computed_result = {"status":"paml_optim_fail", "reason":"No attempt achieved H1 lnL >= H0 lnL."}
-                    else:
-                        lrt_stat = 2 * (best["lnl_h1"] - best["lnl_h0"])
-                        p_value = chi2.sf(lrt_stat, df=1)
-                        computed_result = {
-                            "status":"success", "p_value": float(p_value), "lrt_stat": float(lrt_stat),
-                            "lnl_h1": float(best["lnl_h1"]), "lnl_h0": float(best["lnl_h0"]), **best["params"],
-                            "h0_key": best["h0_key"], "h1_key": best["h1_key"],
-                            "n_leaves_region": len(region_taxa), "n_leaves_gene": len(gene_taxa), "n_leaves_pruned": len(taxa_used),
-                            "chimp_in_region": any('pantro' in n.lower() for n in region_taxa),
-                            "chimp_in_pruned": any('pantro' in n.lower() for n in t.get_leaf_names()),
-                            "taxa_used": ';'.join(taxa_used)
-                        }
-                    final_result.update(computed_result)
-                    meta_payload = {"schema": CACHE_SCHEMA_VERSION, "created": datetime.now().isoformat(timespec="seconds"), "key": meta_key_dict, "exe": exe_fp, "result": final_result}
-                    cache_write_json(PAML_CACHE_DIR, meta_key_hex, "meta.json", meta_payload)
+        # --- 5. Combine results ---
+        if bm_result.get("bm_p_value", 1.0) <= 1.0 and cmc_result.get("cmc_p_value", 1.0) <= 1.0:
+            final_result.update({
+                "status": "success", **bm_result, **cmc_result,
+                "n_leaves_region": len(region_taxa), "n_leaves_gene": len(gene_taxa), "n_leaves_pruned": len(taxa_used),
+                "chimp_in_region": any('pantro' in n.lower() for n in region_taxa),
+                "chimp_in_pruned": any('pantro' in n.lower() for n in t.get_leaf_names()),
+                "taxa_used": ';'.join(taxa_used)
+            })
+        else:
+            final_result.update({
+                "status": "paml_optim_fail",
+                "reason": "One or both LRTs failed to produce a valid result.",
+                **bm_result, **cmc_result,
+            })
 
         # --- Post-computation/cache-hit processing ---
         if KEEP_PAML_OUT and final_result.get('status') == 'success':
@@ -1144,7 +1232,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                 dest_dir = os.path.join(PAML_OUT_DIR, f"{safe_gene}__{safe_region}")
                 os.makedirs(dest_dir, exist_ok=True)
                 
-                for key in ["h0_key", "h1_key"]:
+                for key in ["bm_h0_key", "bm_h1_key", "cmc_h0_key", "cmc_h1_key"]:
                     if final_result.get(key):
                         artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, final_result[key]), "artifacts")
                         if os.path.isdir(artifact_dir):
@@ -1160,13 +1248,23 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 
         if final_result['status'] == 'success':
             try:
-                generate_omega_result_figure(gene_name, region_label, status_tree, final_result)
+                # The figure visualizes the branch-model results.
+                bm_params = {
+                    'omega_direct': final_result.get('bm_omega_direct'),
+                    'omega_inverted': final_result.get('bm_omega_inverted'),
+                    'omega_background': final_result.get('bm_omega_background'),
+                }
+                generate_omega_result_figure(gene_name, region_label, status_tree, bm_params)
             except Exception as fig_exc:
                 logging.error(f"[{gene_name}] Failed to generate PAML results figure: {fig_exc}")
         
         elapsed = (datetime.now() - start_time).total_seconds()
         if final_result.get('status') == 'success':
-            logging.info(f"[{gene_name}|{region_label}] LRT={final_result['lrt_stat']:.3f} p={final_result['p_value']:.3g}")
+            bm_stat = final_result.get('bm_lrt_stat'); bm_p = final_result.get('bm_p_value')
+            cmc_stat = final_result.get('cmc_lrt_stat'); cmc_p = final_result.get('cmc_p_value')
+            logging.info(f"[{gene_name}|{region_label}] "
+                         f"BM LRT={bm_stat if pd.notna(bm_stat) else 'NA'} p={bm_p if pd.notna(bm_p) else 'NA'} | "
+                         f"CMC LRT={cmc_stat if pd.notna(cmc_stat) else 'NA'} p={cmc_p if pd.notna(cmc_p) else 'NA'}")
         logging.info(f"[{gene_name}|{region_label}] END codeml ({elapsed:.1f}s) status={final_result['status']}")
         
         return final_result
@@ -1531,11 +1629,18 @@ def main():
         all_results = run_overlapped(region_infos, region_gene_map, log_q, status_dict)
         results_df = pd.DataFrame(all_results)
 
-        ordered_columns = ['region', 'gene', 'status', 'p_value', 'q_value', 'lrt_stat',
-                           'omega_inverted', 'omega_direct', 'omega_background', 'kappa',
-                           'lnl_h1', 'lnl_h0', 'n_leaves_region', 'n_leaves_gene',
-                           'n_leaves_pruned', 'chimp_in_region', 'chimp_in_pruned',
-                           'taxa_used', 'reason']
+        ordered_columns = [
+            'region', 'gene', 'status',
+            'bm_p_value', 'bm_q_value', 'bm_lrt_stat',
+            'bm_omega_inverted', 'bm_omega_direct', 'bm_omega_background', 'bm_kappa',
+            'bm_lnl_h1', 'bm_lnl_h0',
+            'cmc_p_value', 'cmc_q_value', 'cmc_lrt_stat',
+            'cmc_p0', 'cmc_p1', 'cmc_p2', 'cmc_omega0', 'cmc_omega2_direct', 'cmc_omega2_inverted', 'cmc_kappa',
+            'cmc_lnl_h1', 'cmc_lnl_h0',
+            'n_leaves_region', 'n_leaves_gene', 'n_leaves_pruned',
+            'chimp_in_region', 'chimp_in_pruned',
+            'taxa_used', 'reason'
+        ]
         for col in ordered_columns:
             if col not in results_df.columns:
                 results_df[col] = np.nan
@@ -1556,12 +1661,19 @@ def main():
 
         successful = results_df[results_df['status'] == 'success'].copy()
         if not successful.empty:
-            pvals = successful['p_value'].dropna()
-            if not pvals.empty:
-                rejected, qvals = fdrcorrection(pvals, alpha=FDR_ALPHA, method='indep')
-                qmap = {pvals.index[i]: q for i, q in enumerate(qvals)}
-                results_df['q_value'] = results_df.index.map(qmap)
-                logging.info(f"Applied FDR correction across {len(pvals)} gene×region tests")
+            # FDR for branch-model test
+            bm_pvals = successful['bm_p_value'].dropna()
+            if not bm_pvals.empty:
+                _, qvals = fdrcorrection(bm_pvals, alpha=FDR_ALPHA, method='indep')
+                results_df['bm_q_value'] = results_df.index.map(pd.Series(qvals, index=bm_pvals.index))
+                logging.info(f"Applied FDR correction to {len(bm_pvals)} branch-model tests.")
+
+            # FDR for clade-model test
+            cmc_pvals = successful['cmc_p_value'].dropna()
+            if not cmc_pvals.empty:
+                _, qvals = fdrcorrection(cmc_pvals, alpha=FDR_ALPHA, method='indep')
+                results_df['cmc_q_value'] = results_df.index.map(pd.Series(qvals, index=cmc_pvals.index))
+                logging.info(f"Applied FDR correction to {len(cmc_pvals)} clade-model tests.")
 
         results_df = results_df[ordered_columns]
         results_df.to_csv(RESULTS_TSV, sep='\t', index=False, float_format='%.6g')
@@ -1575,11 +1687,13 @@ def main():
             logging.info(f"  - {status}: {count}")
         logging.info("="*75 + "\n")
 
-        sig = results_df[(results_df['status'] == 'success') & (results_df['q_value'] < FDR_ALPHA)]
+        sig = results_df[(results_df['status'] == 'success') & ((results_df['bm_q_value'] < FDR_ALPHA) | (results_df['cmc_q_value'] < FDR_ALPHA))]
         if not sig.empty:
             logging.info(f"Significant gene×region tests (q < {FDR_ALPHA}):")
-            for _, row in sig.sort_values('q_value').iterrows():
-                logging.info(f"{row['region']} - {row['gene']}: q={row['q_value']:.4g}")
+            # Sort by the minimum q-value of the two tests
+            min_q = sig[['bm_q_value', 'cmc_q_value']].min(axis=1)
+            for idx, row in sig.loc[min_q.sort_values().index].iterrows():
+                logging.info(f"{row['region']} - {row['gene']}: bm_q={row['bm_q_value']:.4g}, cmc_q={row['cmc_q_value']:.4g}")
         else:
             logging.info("No significant tests.")
 
