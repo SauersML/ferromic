@@ -15,9 +15,9 @@ from google.cloud import bigquery
 from statsmodels.stats.multitest import multipletests
 from scipy import stats
 
-from phewas import iox as io
-from phewas import pheno
-from phewas import pipes
+import iox as io
+import pheno
+import pipes
 
 faulthandler.enable()
 

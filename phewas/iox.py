@@ -2,6 +2,7 @@ import os
 import time
 import psutil
 import ast
+import tempfile
 
 import numpy as np
 import pandas as pd
@@ -116,7 +117,8 @@ def atomic_write_json(path, data_obj):
     Writes JSON atomically by first writing to a unique temp path and then moving it into place.
     Accepts either a dict-like object or a pandas Series.
     """
-    tmp_path = f"{path}.tmp.{os.getpid()}.{int(time.time() * 1000)}"
+    fd, tmp_path = tempfile.mkstemp(dir='.', prefix=os.path.basename(path) + '.tmp.')
+    os.close(fd)
     try:
         if isinstance(data_obj, pd.Series):
             data_obj.to_json(tmp_path)

@@ -10,6 +10,7 @@ import shutil
 import queue
 import platform
 import resource
+from unittest.mock import patch
 
 import pytest
 import numpy as np
@@ -387,13 +388,16 @@ def test_lrt_overall_meta_idempotency(test_ctx):
         assert f.stat().st_mtime == m0
 
 def test_final_results_has_ci_and_ancestry_fields():
-    with temp_workspace() as tmpdir, preserve_run_globals():
+    with temp_workspace() as tmpdir, preserve_run_globals(), \
+         patch('run.bigquery.Client'), \
+         patch('run.io.load_related_to_remove', return_value=set()):
         core_data, phenos = make_synth_cohort()
         defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
         local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
         run.TARGET_INVERSION = TEST_TARGET_INVERSION
         run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
-        run.FDR_ALPHA = run.LRT_SELECT_ALPHA = 0.4
+        run.FDR_ALPHA = 0.4
+        run.LRT_SELECT_ALPHA = 0.8
         run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
         run.INVERSION_DOSAGES_FILE = "dummy.tsv"
         write_tsv(run.INVERSION_DOSAGES_FILE, core_data["inversion_main"].reset_index().rename(columns={'person_id':'SampleID'}))
