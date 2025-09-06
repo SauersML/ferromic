@@ -513,30 +513,21 @@ def _with_lock(cache_dir: str):
 
 
 def _validate_internal_branch_labels(paml_tree_str: str, tree_obj: Tree, expected_marks: list):
-    """
-    Validates that internal branches are correctly labeled in the PAML tree string.
-    An internal node is identified by a closing parenthesis.
-    """
-    # Count how many internal nodes we expect to be labeled for each mark
     expected_counts = {mark: 0 for mark in expected_marks}
     for node in tree_obj.traverse():
         if not node.is_leaf() and hasattr(node, "paml_mark"):
-            mark = node.paml_mark
-            if mark in expected_counts:
-                expected_counts[mark] += 1
+            if node.paml_mark in expected_counts:
+                expected_counts[node.paml_mark] += 1
 
-    # Count how many labels are actually attached to internal nodes in the string
     actual_counts = {mark: 0 for mark in expected_marks}
     for mark in expected_marks:
-        pattern = re.compile(re.escape(")") + r"\s*" + re.escape(mark))
+        # allow optional ": <float>" between the closing paren and the label
+        pattern = re.compile(r"\)\s*(?::\s*" + FLOAT_REGEX + r")?\s*" + re.escape(mark))
         actual_counts[mark] = len(pattern.findall(paml_tree_str))
 
-    # Assert that the counts match
     for mark in expected_marks:
         assert actual_counts[mark] == expected_counts[mark], \
-            f"Internal branch label validation failed for mark '{mark}'. " \
-            f"Expected {expected_counts[mark]}, found {actual_counts[mark]}. " \
-            f"Tree string: {paml_tree_str}"
+            f"Internal branch label validation failed for mark '{mark}'. Expected {expected_counts[mark]}, found {actual_counts[mark]}. Tree string: {paml_tree_str}"
 
 
 def create_paml_tree_files(iqtree_file, work_dir, gene_name):
