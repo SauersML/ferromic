@@ -817,7 +817,7 @@ pub fn parse_population_csv(csv_path: &Path) -> Result<HashMap<String, Vec<Strin
 /// # Returns
 /// A HashMap mapping `(vcf_sample_index, HaplotypeSide)` tuples to group identifier strings ("0" or "1").
 /// Extract core sample ID by removing _L/_R suffix if present
-fn core_sample_id(name: &str) -> &str {
+pub fn core_sample_id(name: &str) -> &str {
     if let Some(s) = name.strip_suffix("_L").or_else(|| name.strip_suffix("_R")) {
         s
     } else {
@@ -2591,10 +2591,10 @@ pub fn calculate_pi(
                 haplotypes_in_group.len()
             ),
         );
-        return f64::NAN;
+        return 0.0;
     }
 
-    if seq_length <= 0 {
+    if seq_length < 0 {
         log(
             LogLevel::Warning,
             &format!(
@@ -2602,7 +2602,15 @@ pub fn calculate_pi(
                 seq_length
             ),
         );
-        return f64::NAN;
+        return 0.0;
+    }
+    
+    if seq_length == 0 {
+        log(
+            LogLevel::Warning,
+            "Cannot calculate pi: zero sequence length causes division by zero",
+        );
+        return f64::INFINITY;
     }
 
     let spinner = create_spinner(&format!(
