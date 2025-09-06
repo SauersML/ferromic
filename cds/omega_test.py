@@ -11,7 +11,7 @@ from logging.handlers import QueueHandler, QueueListener
 import traceback
 from datetime import datetime
 import shutil
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from collections import deque
 import threading
 import time
@@ -1169,8 +1169,12 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                 logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for branch_model")
                 bm_result = pair_payload_bm["result"]
             else:
-                h0_payload = get_attempt_result(h0_bm_key, h0_tree, "H0_bm.out", {"model": 2, "NSsites": 0}, None)
-                h1_payload = get_attempt_result(h1_bm_key, h1_tree, "H1_bm.out", {"model": 2, "NSsites": 0}, parse_h1_paml_output)
+                # Run H0 and H1 codeml attempts concurrently to utilize multiple cores per gene×region.
+                with ThreadPoolExecutor(max_workers=2) as ex:
+                    fut_h0 = ex.submit(get_attempt_result, h0_bm_key, h0_tree, "H0_bm.out", {"model": 2, "NSsites": 0}, None)
+                    fut_h1 = ex.submit(get_attempt_result, h1_bm_key, "H1_bm.out", {"model": 2, "NSsites": 0}, parse_h1_paml_output)
+                    h0_payload = fut_h0.result()
+                    h1_payload = fut_h1.result()
                 lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
 
                 if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
@@ -1190,7 +1194,6 @@ def codeml_worker(gene_info, region_tree_file, region_label):
             logging.info(f"[{gene_name}|{region_label}] Skipping branch-model test as per configuration.")
             bm_result = {"bm_p_value": np.nan, "bm_lrt_stat": np.nan}
 
-
         # --- 4. Process Clade-Model LRT ---
         cmc_result = {}
         if RUN_CLADE_MODEL_TEST:
@@ -1200,8 +1203,12 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                 logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
                 cmc_result = pair_payload_cmc["result"]
             else:
-                h0_payload = get_attempt_result(h0_cmc_key, h0_tree, "H0_cmc.out", {"model": 0, "NSsites": 22, "ncatG": 3}, None)
-                h1_payload = get_attempt_result(h1_cmc_key, h1_tree, "H1_cmc.out", {"model": 3, "NSsites": 2, "ncatG": 3}, parse_h1_cmc_paml_output)
+                # Run H0 and H1 codeml attempts concurrently to utilize multiple cores per gene×region.
+                with ThreadPoolExecutor(max_workers=2) as ex:
+                    fut_h0 = ex.submit(get_attempt_result, h0_cmc_key, h0_tree, "H0_cmc.out", {"model": 0, "NSsites": 22, "ncatG": 3}, None)
+                    fut_h1 = ex.submit(get_attempt_result, h1_cmc_key, h1_tree, "H1_cmc.out", {"model": 3, "NSsites": 2, "ncatG": 3}, parse_h1_cmc_paml_output)
+                    h0_payload = fut_h0.result()
+                    h1_payload = fut_h1.result()
                 lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
 
                 if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
@@ -1220,6 +1227,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         else:
             logging.info(f"[{gene_name}|{region_label}] Skipping clade-model test as per configuration.")
             cmc_result = {"cmc_p_value": np.nan, "cmc_lrt_stat": np.nan}
+
 
 
         # --- 5. Combine results ---
