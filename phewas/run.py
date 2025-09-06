@@ -420,4 +420,6 @@ def main():
         print("=" * 70)
 
 if __name__ == "__main__":
+    for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]:
+        os.environ[v] = "1"
     main()
