@@ -16,7 +16,7 @@ import iox as io
 
 CTX = {}  # Worker context with constants from run.py
 
-def _safe_basename(name: str) -> str:
+def safe_basename(name: str) -> str:
     """Allow only [-._a-zA-Z0-9], map others to '_'."""
     return "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in str(name))
 
@@ -189,7 +189,7 @@ def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, c
 def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     """CONSUMER: Runs a single model. Executed in a separate process."""
     s_name, category, case_idx = pheno_data["name"], pheno_data["category"], pheno_data["case_idx"]
-    s_name_safe = _safe_basename(s_name)
+    s_name_safe = safe_basename(s_name)
     result_path = os.path.join(results_cache_dir, f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
 
@@ -282,7 +282,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 def lrt_overall_worker(task):
     """Worker for Stage-1 overall LRT."""
     s_name, cat, target = task["name"], task["category"], task["target"]
-    s_name_safe = _safe_basename(s_name)
+    s_name_safe = safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
     try:
@@ -351,7 +351,7 @@ def lrt_overall_worker(task):
 def lrt_followup_worker(task):
     """Worker for Stage-2 ancestry×dosage LRT and per-ancestry splits."""
     s_name, category, target = task["name"], task["category"], task["target"]
-    s_name_safe = _safe_basename(s_name)
+    s_name_safe = safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_FOLLOWUP_CACHE_DIR"], f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
     try:
