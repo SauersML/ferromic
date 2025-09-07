@@ -569,7 +569,15 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
     log.info(f"Saved CSV → {out_csv}")
 
     # Plot
+    # Render grouped plot including all available categories along with the overall aggregate.
     _plot_multi(x_centers, group_stats, y_label, title, out_png, x_label)
+
+    # Render an additional plot that contains only the overall aggregate.
+    # File name is derived deterministically from the grouped figure by appending "_overall_only" before the extension.
+    overall_only_png = out_png.with_name(f"{out_png.stem}_overall_only.png")
+    overall_only_title = f"{title} — overall only"
+    overall_stats = {"overall": group_stats["overall"]} if "overall" in group_stats else {}
+    _plot_multi(x_centers, overall_stats, y_label, overall_only_title, overall_only_png, x_label)
 
 def run_metric(which: str,
                falsta: Path,
