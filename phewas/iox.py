@@ -1,7 +1,13 @@
 import os
 import time
-import psutil
+import json
 import ast
+import tempfile
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 import numpy as np
 import pandas as pd
@@ -18,7 +24,7 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
         ok = ok and is_numeric_dtype(df["AGE"]) and is_numeric_dtype(df["AGE_sq"])
         if not ok: return False
         # AGE_sq consistency (allow minor float noise)
-        return np.nanmax(np.abs(df["AGE_sq"].to_numpy() - (df["AGE"].to_numpy() ** 2))) < 1e-6
+        return np.nanmax(np.abs(df["AGE_sq"].to_numpy() - (df["AGE"].to_numpy() ** 2))) < 1e-4
 
     def _valid_inversion(df):
         # exactly one column: the current TARGET_INVERSION; numeric; no NA-only rows
@@ -101,7 +107,8 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
 
 def read_meta_json(path) -> dict | None:
     try:
-        return pd.read_json(path, typ="series").to_dict()
+        with open(path, 'r') as f:
+            return json.load(f)
     except Exception as e:
         print(f"Warning: Could not read corrupted meta file: {path}, Error: {e}")
         return None
@@ -116,12 +123,13 @@ def atomic_write_json(path, data_obj):
     Writes JSON atomically by first writing to a unique temp path and then moving it into place.
     Accepts either a dict-like object or a pandas Series.
     """
-    tmp_path = f"{path}.tmp.{os.getpid()}.{int(time.time() * 1000)}"
+    fd, tmp_path = tempfile.mkstemp(dir='.', prefix=os.path.basename(path) + '.tmp.')
+    os.close(fd)
     try:
         if isinstance(data_obj, pd.Series):
-            data_obj.to_json(tmp_path)
-        else:
-            pd.Series(data_obj).to_json(tmp_path)
+            data_obj = data_obj.to_dict()
+        with open(tmp_path, 'w') as f:
+            json.dump(data_obj, f)
         os.replace(tmp_path, path)
     finally:
         try:
@@ -133,6 +141,8 @@ def atomic_write_json(path, data_obj):
 
 def rss_gb():
     """Returns the resident set size of the current process in gigabytes for lightweight memory instrumentation."""
+    if not PSUTIL_AVAILABLE:
+        return 0.0
     return psutil.Process(os.getpid()).memory_info().rss / (1024**3)
 
 

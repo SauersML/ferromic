@@ -1,4 +1,7 @@
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 import time
 import warnings
 import gc
@@ -15,9 +18,9 @@ from google.cloud import bigquery
 from statsmodels.stats.multitest import multipletests
 from scipy import stats
 
-from phewas import iox as io
-from phewas import pheno
-from phewas import pipes
+import iox as io
+import pheno
+import pipes
 
 faulthandler.enable()
 
@@ -320,6 +323,7 @@ def main():
                 df = df.merge(overall_df, on="Phenotype", how="left")
                 mask_overall = pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna()
                 m_total = int(mask_overall.sum())
+                df["P_FDR"] = np.nan
                 if m_total > 0:
                     _, p_adj_overall, _, _ = multipletests(df.loc[mask_overall, "P_LRT_Overall"], alpha=FDR_ALPHA, method="fdr_bh")
                     df.loc[mask_overall, "P_FDR"] = p_adj_overall
