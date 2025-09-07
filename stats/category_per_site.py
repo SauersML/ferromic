@@ -74,7 +74,7 @@ def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
     Load inv_info.csv robustly; pull Chromosome/Start/End and recurrence flag.
 
     Recurrence logic:
-      - If column '0_single_1_recur' exists and equals 1 → recurrent; 0 → single-event
+      - If column '0_single_1_recur_consensus' exists and equals 1 → recurrent; 0 → single-event
       - If missing or NA → uncategorized
     """
     if not inv_csv.is_file():
@@ -88,7 +88,7 @@ def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
 
     # Find the recurrence column
     recur_col = None
-    for candidate in ["0_single_1_recur"]:
+    for candidate in ["0_single_1_recur_consensus"]:
         if candidate in df.columns:
             recur_col = candidate
             break
