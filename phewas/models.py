@@ -66,14 +66,14 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None):
         warnings.filterwarnings("error", category=PerfectSeparationWarning)
         try:
             fit_try = _logit_fit(sm.Logit(y, X), 'newton', maxiter=200, tol=1e-8)
-            if _converged(fit_try) and hasattr(fit_try, 'bse'):
+            if _converged(fit_try) and hasattr(fit_try, 'bse') and np.all(np.isfinite(fit_try.bse)):
                 if np.max(fit_try.bse) > 100: raise PerfectSeparationWarning("Large SEs detected")
                 setattr(fit_try, "_used_ridge", False); setattr(fit_try, "_final_is_mle", True)
                 return fit_try, "newton"
         except (Exception, PerfectSeparationWarning): pass
         try:
             fit_try = _logit_fit(sm.Logit(y, X), 'bfgs', maxiter=800, gtol=1e-8)
-            if _converged(fit_try) and hasattr(fit_try, 'bse'):
+            if _converged(fit_try) and hasattr(fit_try, 'bse') and np.all(np.isfinite(fit_try.bse)):
                 if np.max(fit_try.bse) > 100: raise PerfectSeparationWarning("Large SEs detected")
                 setattr(fit_try, "_used_ridge", False); setattr(fit_try, "_final_is_mle", True)
                 return fit_try, "bfgs"
@@ -93,11 +93,42 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None):
 
             ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0, maxiter=800)
             try:
-                refit = _logit_fit(sm.Logit(y, X), 'newton', maxiter=400, tol=1e-8, start_params=ridge_fit.params)
-                if _converged(refit):
+                # FIRST: try Newton refit with ridge params
+                refit = _logit_fit(
+                    sm.Logit(y, X),
+                    'newton',
+                    maxiter=400,
+                    tol=1e-8,
+                    start_params=ridge_fit.params,
+                    _already_failed=True,        # <-- add this
+                )
+                if _converged(refit) and hasattr(refit, 'bse') and np.all(np.isfinite(refit.bse)):
+                    if np.max(refit.bse) > 100:
+                        raise PerfectSeparationWarning("Large SEs detected")
                     setattr(refit, "_used_ridge_seed", True); setattr(refit, "_final_is_mle", True)
                     return refit, "ridge_seeded_refit"
-            except Exception: pass
+            except Exception:
+                pass
+
+            # OPTIONAL but robust: try BFGS refit as a fallback
+            try:
+                refit = _logit_fit(
+                    sm.Logit(y, X),
+                    'bfgs',
+                    maxiter=800,
+                    gtol=1e-8,
+                    start_params=ridge_fit.params,
+                    _already_failed=True,        # <-- add this
+                )
+                if _converged(refit) and hasattr(refit, 'bse') and np.all(np.isfinite(refit.bse)):
+                    if np.max(refit.bse) > 100:
+                        raise PerfectSeparationWarning("Large SEs detected")
+                    setattr(refit, "_used_ridge_seed", True); setattr(refit, "_final_is_mle", True)
+                    return refit, "ridge_seeded_refit"
+            except Exception:
+                pass
+
+            # if both refits fail, fall back to ridge_only
             setattr(ridge_fit, "_used_ridge", True); setattr(ridge_fit, "_final_is_mle", False)
             return ridge_fit, "ridge_only"
         except Exception as e: return None, f"ridge_exception:{type(e).__name__}"
