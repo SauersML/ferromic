@@ -2,8 +2,7 @@ use crate::stats::{
     calculate_adjusted_sequence_length, calculate_fst_wc_csv_populations,
     calculate_fst_wc_haplotype_groups, calculate_hudson_fst_for_pair_with_sites,
     calculate_inversion_allele_frequency, calculate_per_site_diversity, calculate_pi,
-    calculate_watterson_theta, FstWcResults, HudsonFSTOutcome, PopulationContext, PopulationId,
-    SiteDiversity,
+    calculate_watterson_theta, HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity,
 };
 
 use crate::parse::{
@@ -30,8 +29,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use prettytable::{row, Table};
 use rayon::prelude::*;
-use std::collections::HashMap as Map2;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead};
 use std::io::{BufWriter, Write};
@@ -466,7 +464,6 @@ struct CsvRowData {
     hudson_pi_avg_hap_group_0v1: Option<f64>,
     // Fields for population FST from CSV have been removed as per request to only include haplotype group (0vs1) info here.
     // The full FstWcResults for CSV populations are still processed for other outputs (e.g., .falsta), but not summarized in this main CSV row.
-    population_fst_wc_results: Option<FstWcResults>, // Retained for passing to .falsta, but not for direct CSV column output of regional summary.
 }
 
 // Custom error types
@@ -623,7 +620,7 @@ pub fn process_variants(
     inversion_interval: ZeroBasedHalfOpen,
     extended_region: ZeroBasedHalfOpen,
     adjusted_sequence_length: Option<i64>,
-    position_allele_map: Arc<Mutex<HashMap<i64, (u8, u8)>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     chromosome: String,
     is_filtered_set: bool,
     reference_sequence: &[u8],
@@ -1822,7 +1819,7 @@ fn generate_full_region_alignment(
     region_variants: &[Variant],
     sample_names: &[String],
     full_ref_sequence: &[u8],
-    position_allele_map: &Arc<Mutex<HashMap<i64, (u8, u8)>>>,
+    position_allele_map: &Arc<Mutex<HashMap<i64, (char, char)>>>,
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     vcf_sample_id_to_index: &HashMap<String, usize>,
@@ -1867,7 +1864,7 @@ fn generate_full_region_alignment(
                         if let Some((_ref_allele, alt_allele)) = pos_map.get(&variant.position) {
                             let rel = (variant.position - entry.interval.start as i64) as usize;
                             if rel < seq.len() {
-                                seq[rel] = *alt_allele;
+                                seq[rel] = *alt_allele as u8;
                             }
                         }
                     }
@@ -2004,7 +2001,7 @@ fn process_single_config_entry(
         extended_region.get_1based_inclusive_end_coord()
     ));
 
-    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (u8, u8)>::new()));
+    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
 
     set_stage(ProcessingStage::VcfProcessing);
     init_step_progress(&format!("Processing VCF for {}", region_desc), 2);
@@ -2025,8 +2022,8 @@ fn process_single_config_entry(
         all_variants,
         filtered_idxs,
         sample_names,
-        _chr_len,
-        _missing_data_info,
+        _,
+        _,
         filtering_stats,
     ) = match process_vcf(
         vcf_file,
@@ -2102,7 +2099,7 @@ fn process_single_config_entry(
     let hudson_region_is_valid = hudson_query_region.start <= hudson_query_region.end;
 
     // Calculate FST if enabled
-    let (fst_results_filtered, fst_results_pop_filtered) = if args.enable_fst {
+    let (fst_results_filtered, _) = if args.enable_fst {
         let spinner = create_spinner("Calculating FST statistics");
 
         // Define the FST analysis region.
@@ -2287,7 +2284,7 @@ fn process_single_config_entry(
         variants: &'a [Variant],
         sample_filter: &'a HashMap<String, (u8, u8)>,
         maybe_adjusted_len: Option<i64>,
-        position_allele_map: Arc<Mutex<HashMap<i64, (u8, u8)>>>,
+        position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
     }
 
     // Set up the four analysis invocations (filtered/unfiltered × group 0/1)
@@ -2667,7 +2664,6 @@ fn process_single_config_entry(
         hudson_pi_hap_group_0: hudson_pi_hap_group_0_val,
         hudson_pi_hap_group_1: hudson_pi_hap_group_1_val,
         hudson_pi_avg_hap_group_0v1: hudson_pi_avg_hap_group_0v1_val,
-        population_fst_wc_results: fst_results_pop_filtered.clone(),
     };
 
     // Display summary of results
@@ -3057,7 +3053,7 @@ pub fn process_vcf(
     min_gq: u16,
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
-    position_allele_map: Arc<Mutex<HashMap<i64, (u8, u8)>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
 ) -> Result<
     (
         Vec<Variant>,
@@ -3417,10 +3413,10 @@ pub fn process_variant(
     missing_data_info: &mut MissingDataInfo,
     sample_names: &[String],
     min_gq: u16,
-    _filtering_stats: &mut FilteringStats,
+    filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    position_allele_map: &Mutex<HashMap<i64, (u8, u8)>>>,
+    position_allele_map: &Mutex<HashMap<i64, (char, char)>>,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
@@ -3451,7 +3447,7 @@ pub fn process_variant(
         return Ok(None);
     }
 
-    _filtering_stats.total_variants += 1; // DO NOT MOVE THIS LINE ABOVE THE CHECK FOR WITHIN RANGE
+    filtering_stats.total_variants += 1; // DO NOT MOVE THIS LINE ABOVE THE CHECK FOR WITHIN RANGE
 
     // Only variants within the range get passed the collector which increments statistics.
     // For variants outside the range, the consumer thread does not send any result to the collector.
@@ -3467,21 +3463,21 @@ pub fn process_variant(
     // Check allow regions
     if let Some(allow_regions_chr) = allow_regions.and_then(|ar| ar.get(vcf_chr)) {
         if !position_in_regions(zero_based_position, allow_regions_chr) {
-            _filtering_stats._filtered_variants += 1;
-            _filtering_stats.filtered_due_to_allow += 1;
-            _filtering_stats
+            filtering_stats._filtered_variants += 1;
+            filtering_stats.filtered_due_to_allow += 1;
+            filtering_stats
                 .filtered_positions
                 .insert(zero_based_position);
-            _filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
+            filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
             return Ok(None);
         }
     } else if allow_regions.is_some() {
-        _filtering_stats._filtered_variants += 1;
-        _filtering_stats.filtered_due_to_allow += 1;
-        _filtering_stats
+        filtering_stats._filtered_variants += 1;
+        filtering_stats.filtered_due_to_allow += 1;
+        filtering_stats
             .filtered_positions
             .insert(zero_based_position);
-        _filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
+        filtering_stats.add_example(format!("{}: Filtered due to allow", line.trim()));
         return Ok(None);
     }
 
@@ -3503,12 +3499,12 @@ pub fn process_variant(
         });
 
         if is_masked {
-            _filtering_stats._filtered_variants += 1;
-            _filtering_stats.filtered_due_to_mask += 1;
-            _filtering_stats
+            filtering_stats._filtered_variants += 1;
+            filtering_stats.filtered_due_to_mask += 1;
+            filtering_stats
                 .filtered_positions
                 .insert(zero_based_position);
-            _filtering_stats.add_example(format!("{}: Filtered due to mask", line.trim()));
+            filtering_stats.add_example(format!("{}: Filtered due to mask", line.trim()));
             return Ok(None);
         }
     } else if mask_regions.is_some() {
@@ -3525,8 +3521,20 @@ pub fn process_variant(
 
     // Store reference and alternate alleles
     if !fields[3].is_empty() && !fields[4].is_empty() {
-        let ref_allele = fields[3].as_bytes().get(0).copied().unwrap_or(b'N');
-        let alt_allele = fields[4].as_bytes().get(0).copied().unwrap_or(b'N');
+        let ref_allele = match fields[3].chars().next().unwrap_or('N') {
+            'A' | 'a' => 'A',
+            'C' | 'c' => 'C',
+            'G' | 'g' => 'G',
+            'T' | 't' => 'T',
+            _ => 'N',
+        };
+        let alt_allele = match fields[4].chars().next().unwrap_or('N') {
+            'A' | 'a' => 'A',
+            'C' | 'c' => 'C',
+            'G' | 'g' => 'G',
+            'T' | 't' => 'T',
+            _ => 'N',
+        };
         position_allele_map
             .lock()
             .insert(zero_based_position, (ref_allele, alt_allele));
@@ -3535,7 +3543,7 @@ pub fn process_variant(
     let alt_alleles: Vec<&str> = fields[4].split(',').collect();
     let is_multiallelic = alt_alleles.len() > 1;
     if is_multiallelic {
-        _filtering_stats.multi_allelic_variants += 1;
+        filtering_stats.multi_allelic_variants += 1;
         eprintln!(
             "{}",
             format!(
@@ -3543,14 +3551,14 @@ pub fn process_variant(
                 one_based_vcf_position.0
             ).yellow()
         );
-        _filtering_stats.add_example(format!(
+        filtering_stats.add_example(format!(
             "{}: Filtered due to multi-allelic variant",
             line.trim()
         ));
         return Ok(None);
     }
     if alt_alleles.get(0).map_or(false, |s| s.len() > 1) {
-        _filtering_stats.multi_allelic_variants += 1;
+        filtering_stats.multi_allelic_variants += 1;
         eprintln!(
             "{}",
             format!(
@@ -3558,7 +3566,7 @@ pub fn process_variant(
                 one_based_vcf_position.0
             ).yellow()
         );
-        _filtering_stats.add_example(format!(
+        filtering_stats.add_example(format!(
             "{}: Filtered due to multi-nucleotide alt allele",
             line.trim()
         ));
@@ -3599,7 +3607,6 @@ pub fn process_variant(
         .collect();
 
     let mut sample_has_low_gq = false;
-    let mut _num_samples_below_gq = 0;
     for gt_field in fields[9..].iter() {
         let gt_subfields: Vec<&str> = gt_field.split(':').collect();
         if gq_index >= gt_subfields.len() {
@@ -3629,18 +3636,17 @@ pub fn process_variant(
         // Check if GQ value is below the minimum threshold
         if gq_value < min_gq {
             sample_has_low_gq = true;
-            _num_samples_below_gq += 1;
         }
     }
 
     if sample_has_low_gq {
         // Skip this variant
-        _filtering_stats.low_gq_variants += 1;
-        _filtering_stats._filtered_variants += 1;
-        _filtering_stats
+        filtering_stats.low_gq_variants += 1;
+        filtering_stats._filtered_variants += 1;
+        filtering_stats
             .filtered_positions
             .insert(zero_based_position);
-        _filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
+        filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
 
         let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
         let passes_filters = !sample_has_low_gq && !has_missing_genotypes && !is_multiallelic;
@@ -3652,8 +3658,8 @@ pub fn process_variant(
     }
 
     if genotypes.iter().any(|gt| gt.is_none()) {
-        _filtering_stats.missing_data_variants += 1;
-        _filtering_stats.add_example(format!("{}: Filtered due to missing data", line.trim()));
+        filtering_stats.missing_data_variants += 1;
+        filtering_stats.add_example(format!("{}: Filtered due to missing data", line.trim()));
     }
 
     let has_missing_genotypes = genotypes.iter().any(|gt| gt.is_none());
@@ -3661,22 +3667,22 @@ pub fn process_variant(
 
     // Update filtering stats if variant is filtered out
     if !passes_filters {
-        _filtering_stats._filtered_variants += 1;
-        _filtering_stats
+        filtering_stats._filtered_variants += 1;
+        filtering_stats
             .filtered_positions
             .insert(zero_based_position);
 
         if sample_has_low_gq {
-            _filtering_stats.low_gq_variants += 1;
-            _filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
+            filtering_stats.low_gq_variants += 1;
+            filtering_stats.add_example(format!("{}: Filtered due to low GQ", line.trim()));
         }
         if genotypes.iter().any(|gt| gt.is_none()) {
-            _filtering_stats.missing_data_variants += 1;
-            _filtering_stats.add_example(format!("{}: Filtered due to missing data", line.trim()));
+            filtering_stats.missing_data_variants += 1;
+            filtering_stats.add_example(format!("{}: Filtered due to missing data", line.trim()));
         }
         if is_multiallelic {
-            _filtering_stats.multi_allelic_variants += 1;
-            _filtering_stats.add_example(format!(
+            filtering_stats.multi_allelic_variants += 1;
+            filtering_stats.add_example(format!(
                 "{}: Filtered due to multi-allelic variant",
                 line.trim()
             ));
