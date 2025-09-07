@@ -1,5 +1,5 @@
 from __future__ import annotations
-import logging, re, sys, time
+import logging, re, sys, time, subprocess, shutil
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from collections import defaultdict, Counter
@@ -13,17 +13,26 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 
 # ------------------------- CONFIG -------------------------
 
-INV_CSV       = Path("inv_info.csv")  # recurrence mapping input
+INV_CSV        = Path("inv_info.csv")  # recurrence mapping input
 
 DIVERSITY_FILE = Path("per_site_diversity_output.falsta")
 FST_FILE       = Path("per_site_fst_output.falsta")
+
 OUTDIR         = Path("length_norm_trend_fast")
 
 MIN_LEN_PI     = 100_000
 MIN_LEN_FST    = 100_000
 
-NUM_BINS       = 100
+# Proportion mode (same as before)
+NUM_BINS_PROP  = 100
+
+# Base-pair mode 
+MAX_BP         = 2_000_000          # cap distance from edge at 2 Mbp
+NUM_BINS_BP    = 250                # number of bins between 0..MAX_BP
+
+# Plotting/analysis rules
 LOWESS_FRAC    = 0.4
+MIN_INV_PER_BIN = 5                 # if <5 inversions in a bin → don't plot that bin
 
 # Visual
 SCATTER_SIZE   = 36
@@ -32,12 +41,13 @@ LINE_WIDTH     = 3.0
 BAND_ALPHA     = 0.22
 
 # Palette (3 lines → 3 distinct colors; keep prior look & feel)
-COLOR_OVERALL  = "#4F46E5"  # indigo-600  (formerly line color)
+COLOR_OVERALL  = "#4F46E5"  # indigo-600
 COLOR_RECUR    = "#EF4444"  # red-500
-COLOR_SINGLE   = "#22C55E"  # emerald-500 (formerly dots)
-COLOR_BAND     = "#8B5CF6"  # violet-500 (shading, reused)
+COLOR_SINGLE   = "#22C55E"  # emerald-500
 
 N_CORES        = max(1, mp.cpu_count() - 1)
+
+OPEN_PLOTS_ON_LINUX = True  # auto open PNGs using `xdg-open` if available
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,7 +92,7 @@ def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
         return pd.DataFrame(columns=["chrom", "start", "end", "group"])
 
     df = pd.read_csv(inv_csv, engine="python")
-    # Normalize column names (tolerate weird headers)
+    # Normalize column names
     cols = {c: c.strip() for c in df.columns}
     df.rename(columns=cols, inplace=True)
 
@@ -101,7 +111,7 @@ def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
     df["_start"] = pd.to_numeric(df["Start"], errors="coerce").astype("Int64")
     df["_end"]   = pd.to_numeric(df["End"],   errors="coerce").astype("Int64")
 
-    # Determine group and align it to filtered rows using indexes
+    # Determine group
     if recur_col is not None:
         rc = pd.to_numeric(df[recur_col], errors="coerce")
         group = pd.Series(
@@ -135,7 +145,7 @@ def _build_fuzzy_lookup(inv_df: pd.DataFrame) -> Dict[Tuple[str,int,int], str]:
     priority = recurrent > single-event > uncategorized.
     """
     prio = {"recurrent": 2, "single-event": 1, "uncategorized": 0}
-    lut: Dict[Tuple[str,int,int], Tuple[str,int]] = {}  # key → (group, priority)
+    lut: Dict[Tuple[str,int,int], Tuple[str,int]] = {}
 
     for chrom, s, e, g in inv_df[["chrom","start","end","group"]].itertuples(index=False):
         for ds in (-1, 0, 1):
@@ -147,7 +157,6 @@ def _build_fuzzy_lookup(inv_df: pd.DataFrame) -> Dict[Tuple[str,int,int], str]:
                 else:
                     lut[key] = (g, prio[g])
 
-    # Strip priorities
     return {k: v[0] for k, v in lut.items()}
 
 # -------------------- FALSTA ITERATION ----------------------
@@ -160,7 +169,8 @@ def _iter_falsta(file_path: Path, which: str, min_len: int):
     if which not in ("pi","hudson"):
         raise ValueError("which must be 'pi' or 'hudson'")
     if not file_path.is_file():
-        log.error(f"File not found: {file_path}"); return
+        log.error(f"File not found: {file_path}")
+        return
 
     rx = _RE_PI if which=="pi" else _RE_HUD
     total, loaded, skip_len, skip_mismatch = 0,0,0,0
@@ -205,36 +215,76 @@ def _iter_falsta(file_path: Path, which: str, min_len: int):
 
 # --------------- BIN EDGES (shared in workers) --------------
 
-_BIN_EDGES = None
-_NUM_BINS  = None
+# Globals set in pool initializer
+_BIN_EDGES: Optional[np.ndarray] = None
+_NUM_BINS: Optional[int] = None
+_MODE: Optional[str] = None   # 'proportion' or 'bp'
+_MAX_BP: Optional[int] = None
 
-def _pool_init(num_bins: int):
-    """Initializer to create global bin edges once per worker."""
-    global _BIN_EDGES, _NUM_BINS
-    _NUM_BINS  = int(num_bins)
-    _BIN_EDGES = np.linspace(0.0, 1.0, _NUM_BINS + 1, dtype=np.float64)
-    _BIN_EDGES[-1] = _BIN_EDGES[-1] + 1e-9
+def _pool_init(mode: str, num_bins: int, max_bp: Optional[int]):
+    """
+    Initializer for workers: set global bin edges and mode.
+    - proportion: bins across [0, 1]
+    - bp:         bins across [0, MAX_BP]
+    """
+    global _BIN_EDGES, _NUM_BINS, _MODE, _MAX_BP
+    _MODE = mode
+    _NUM_BINS = int(num_bins)
+    _MAX_BP = int(max_bp) if max_bp is not None else None
+
+    if mode == "proportion":
+        _BIN_EDGES = np.linspace(0.0, 1.0, _NUM_BINS + 1, dtype=np.float64)
+        _BIN_EDGES[-1] = _BIN_EDGES[-1] + 1e-9  # to include right edge
+    elif mode == "bp":
+        if _MAX_BP is None or _MAX_BP <= 0:
+            raise ValueError("MAX_BP must be positive for bp mode.")
+        _BIN_EDGES = np.linspace(0.0, float(_MAX_BP), _NUM_BINS + 1, dtype=np.float64)
+        _BIN_EDGES[-1] = _BIN_EDGES[-1] + 1e-9
+    else:
+        raise ValueError("mode must be 'proportion' or 'bp'")
 
 def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
     """
-    Map one sequence to normalized distance (center=0 → edge=1), then bin.
+    Map one sequence to distance-from-edge based on global _MODE, then bin.
     Returns per-bin MEANS (length _NUM_BINS_, NaN where empty).
+    - proportion mode: uses normalized distance-from-center (0=center→1=edge internally),
+                       which is converted to distance-from-edge via (1 - center) later.
+      Here we directly bin by 'center distance' in [0..1], because the down-stream code
+      converts to 'distance from edge'.
+    - bp mode: uses base-pair distance from nearest edge, capped at _MAX_BP.
+               Only positions with distance<=_MAX_BP are binned.
     """
-    global _BIN_EDGES, _NUM_BINS
+    global _BIN_EDGES, _NUM_BINS, _MODE, _MAX_BP
+    if _BIN_EDGES is None or _NUM_BINS is None or _MODE is None:
+        raise RuntimeError("Worker not initialized with _pool_init.")
     L = int(seq.shape[0])
-    if L < 2: return None
+    if L < 2:
+        return None
 
-    # 0=center → 1=edge
     idx = np.arange(L, dtype=np.float64)
-    dc  = np.minimum(1.0, np.abs(idx - (L-1)/2.0) / (L/2.0))
-
     valid = ~np.isnan(seq)
-    if not np.any(valid): return None
+    if not np.any(valid):
+        return None
 
-    dc = dc[valid]
     vv = seq[valid].astype(np.float64)
 
-    bi = np.digitize(dc, _BIN_EDGES[1:], right=False)
+    if _MODE == "proportion":
+        # 0=center → 1=edge
+        dc_center = np.minimum(1.0, np.abs(idx - (L-1)/2.0) / (L/2.0))
+        xvals = dc_center[valid]
+    elif _MODE == "bp":
+        # distance in *bp* to nearest edge, cap at _MAX_BP and keep only ≤ cap
+        dist_bp = np.minimum(idx, (L - 1) - idx)  # 0 at edges, up to ~L/2 at center
+        dist_bp = dist_bp[valid]
+        keep = dist_bp <= float(_MAX_BP)
+        if not np.any(keep):
+            return None
+        xvals = dist_bp[keep]
+        vv = vv[keep]
+    else:
+        raise RuntimeError("Unknown mode in _bin_one_sequence")
+
+    bi = np.digitize(xvals, _BIN_EDGES[1:], right=False)
 
     sums   = np.bincount(bi, weights=vv, minlength=_NUM_BINS).astype(np.float64)
     counts = np.bincount(bi, minlength=_NUM_BINS).astype(np.int32)
@@ -248,7 +298,7 @@ def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
 
 def _aggregate_unweighted(per_seq_means: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Script-5-style: mean across sequences per bin; SEM across sequences; n_seq per bin.
+    Mean across sequences per bin; SEM across sequences; n_seq per bin.
     """
     M = np.vstack(per_seq_means)  # [n_seq, num_bins]
     n_seq_per = np.sum(~np.isnan(M), axis=0)
@@ -260,49 +310,76 @@ def _aggregate_unweighted(per_seq_means: List[np.ndarray]) -> Tuple[np.ndarray, 
             se_per[mask] = sem(M[:, mask], axis=0, nan_policy="omit")
     return mean_per, se_per, n_seq_per
 
-def _spearman(dist_edge: np.ndarray, mean_y: np.ndarray) -> Tuple[Optional[float], Optional[float]]:
-    ok = ~np.isnan(dist_edge) & ~np.isnan(mean_y)
-    x, y = dist_edge[ok], mean_y[ok]
-    if x.size < 5: return (None, None)
-    rho, p = spearmanr(x, y)
-    if np.isnan(rho) or np.isnan(p): return (None, None)
+def _spearman(x: np.ndarray, y: np.ndarray) -> Tuple[Optional[float], Optional[float]]:
+    ok = ~np.isnan(x) & ~np.isnan(y)
+    xx, yy = x[ok], y[ok]
+    if xx.size < 5:
+        return (None, None)
+    rho, p = spearmanr(xx, yy)
+    if np.isnan(rho) or np.isnan(p):
+        return (None, None)
     return float(rho), float(p)
+
+# -------------------- UTILS --------------------
+
+def _maybe_open_png(path: Path):
+    if not OPEN_PLOTS_ON_LINUX:
+        return
+    try:
+        if sys.platform.startswith("linux") and shutil.which("xdg-open"):
+            # Non-blocking open
+            subprocess.Popen(
+                ["xdg-open", str(path)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+    except Exception as e:
+        log.warning(f"Could not auto-open {path}: {e}")
 
 # ----------------------- PLOTTING ---------------------------
 
-def _plot_multi(dist_edge: np.ndarray,
+def _plot_multi(x_centers: np.ndarray,
                 group_stats: Dict[str, dict],
                 y_label: str,
                 title: str,
-                out_png: Path):
+                out_png: Path,
+                x_label: str):
     """
     Plot multiple groups on the same axes. group_stats[group] contains:
        { 'mean': np.ndarray, 'se': np.ndarray, 'n_per_bin': np.ndarray,
-         'N_total': int, 'rho': float|None, 'p': float|None, 'color': str }
+         'N_total': int, 'rho': float|None, 'p': float|None,
+         'color': str, 'plot_mask': np.ndarray[bool] }
+    x_centers: x coordinate for each bin center (same length as mean/se)
+    x_label:   label string for x-axis
     """
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(10.5, 6.5))
 
-    # Order for consistent legend
     draw_order = ["recurrent", "single-event", "overall"]
     for grp in draw_order:
-        if grp not in group_stats: continue
+        if grp not in group_stats:
+            continue
         st  = group_stats[grp]
         col = st["color"]
-        mean_y = st["mean"]
-        se_y   = st["se"]
+        mean_y = st["mean"].copy()
+        se_y   = st["se"].copy()
+        mask_allowed = st["plot_mask"].astype(bool)
 
-        ok = ~np.isnan(dist_edge) & ~np.isnan(mean_y)
+        # Mask out bins with insufficient inversions
+        mean_y[~mask_allowed] = np.nan
+        se_y[~mask_allowed]   = np.nan
+
+        ok = ~np.isnan(x_centers) & ~np.isnan(mean_y)
         if ok.sum() < 5:
             log.warning(f"[plot] Not enough bins with data to plot for group '{grp}': {ok.sum()}")
             continue
-        x = dist_edge[ok]; y = mean_y[ok]; e = se_y[ok] if se_y is not None else np.full_like(y, np.nan)
 
-        # LOWESS
+        x = x_centers[ok]; y = mean_y[ok]; e = se_y[ok]
+
+        # LOWESS on allowed bins
         sm = lowess(y, x, frac=LOWESS_FRAC, it=1, return_sorted=True)
         xs, ys = sm[:, 0], sm[:, 1]
 
-        # Interpolate SEM onto smooth x
+        # Interpolate SEM onto smooth x (only where available)
         try:
             mask_e = ~np.isnan(e)
             if mask_e.sum() >= 2:
@@ -314,7 +391,15 @@ def _plot_multi(dist_edge: np.ndarray,
         except Exception:
             es = np.full_like(xs, np.nan)
 
-        label = f"{grp} (N={st['N_total']}, ρ={st['rho']:.3f} p={'<0.001' if (st['p'] is not None and st['p']<1e-3) else (f'{st['p']:.3g}' if st['p'] is not None else 'N/A')})"
+        # Label with Spearman
+        rho = st.get("rho", np.nan)
+        p   = st.get("p",   np.nan)
+        if p is not None and not np.isnan(p):
+            ptext = "<0.001" if p < 1e-3 else f"{p:.3g}"
+        else:
+            ptext = "N/A"
+        label = f"{grp} (N={st['N_total']}, ρ={rho:.3f} p={ptext})"
+
         # Scatter of binned means (light alpha)
         ax.scatter(x, y, s=SCATTER_SIZE, alpha=SCATTER_ALPHA, color=col, edgecolors="none", label=None)
         # Smooth line
@@ -324,8 +409,7 @@ def _plot_multi(dist_edge: np.ndarray,
             m = ~np.isnan(es)
             ax.fill_between(xs[m], ys[m]-es[m], ys[m]+es[m], color=col, alpha=BAND_ALPHA, edgecolor="none")
 
-    ax.set_xlim(-0.05, 1.05)
-    ax.set_xlabel("Normalized distance from segment edge (0 = edge, 1 = center)")
+    ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_title(title)
     ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
@@ -336,41 +420,52 @@ def _plot_multi(dist_edge: np.ndarray,
     plt.savefig(out_png, dpi=300)
     plt.close(fig)
     log.info(f"Saved plot → {out_png}")
+    _maybe_open_png(out_png)
 
 # --------------------- END-TO-END RUN -----------------------
 
 def _collect_grouped_means(which: str,
                            falsta: Path,
                            min_len: int,
-                           fuzzy_map: Dict[Tuple[str,int,int], str]) -> Tuple[Dict[str, List[np.ndarray]], Dict[str,int]]:
+                           fuzzy_map: Dict[Tuple[str,int,int], str],
+                           mode: str,
+                           num_bins: int,
+                           max_bp: Optional[int]) -> Tuple[Dict[str, List[np.ndarray]], Dict[str,int]]:
     """
     Iterate falsta, assign each record to a group using fuzzy_map (±1 bp),
-    and compute per-sequence binned means. Returns:
+    and compute per-sequence binned means for the requested mode ('proportion' or 'bp').
+    Returns:
        per_group_means: group -> list of per-seq means
        per_group_counts: group -> number of sequences contributing
     """
     per_group_means = defaultdict(list)
     per_group_counts = Counter()
 
-    log.info(f"[{which}] scanning sequences and assigning groups...")
-    # Pre-warm pool once; we'll reuse it for binning
-    with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(NUM_BINS,)) as pool:
-        # Batch up sequences then map
-        seqs_with_group = []
-        for rec in _iter_falsta(falsta, which=which, min_len=min_len):
-            c = rec["coords"]
-            key = (c["chrom"], c["start"], c["end"])
-            grp = fuzzy_map.get(key, "uncategorized")
-            # Always also contribute to 'overall' later (handled after binning)
-            seqs_with_group.append((grp, rec["data"]))
+    log.info(f"[{which}/{mode}] scanning sequences and assigning groups...")
+    seqs_with_group = []
 
-        # Bin all sequences (fast, in parallel)
-        per_means = pool.map(_bin_one_sequence, [x[1] for x in seqs_with_group],
-                             chunksize=max(1, len(seqs_with_group)//(N_CORES*4) if seqs_with_group else 1))
+    for rec in _iter_falsta(falsta, which=which, min_len=min_len):
+        c = rec["coords"]
+        key = (c["chrom"], c["start"], c["end"])
+        grp = fuzzy_map.get(key, "uncategorized")
+        seqs_with_group.append((grp, rec["data"]))
+
+    if not seqs_with_group:
+        log.warning(f"[{which}/{mode}] No sequences to bin.")
+        return per_group_means, per_group_counts
+
+    # Bin all sequences (fast, in parallel)
+    with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(mode, num_bins, max_bp)) as pool:
+        per_means = pool.map(
+            _bin_one_sequence,
+            [x[1] for x in seqs_with_group],
+            chunksize=max(1, len(seqs_with_group)//(N_CORES*4) if seqs_with_group else 1)
+        )
 
     # Collect by group (+ overall)
     for (grp, _), m in zip(seqs_with_group, per_means):
-        if m is None: continue
+        if m is None:
+            continue
         per_group_means[grp].append(m)
         per_group_counts[grp] += 1
         per_group_means["overall"].append(m)
@@ -379,32 +474,64 @@ def _collect_grouped_means(which: str,
     # Log counts
     for g in ["recurrent","single-event","uncategorized","overall"]:
         if per_group_counts.get(g, 0):
-            log.info(f"[{which}] N {g:>13} = {per_group_counts[g]}")
+            log.info(f"[{which}/{mode}] N {g:>13} = {per_group_counts[g]}")
 
     return per_group_means, per_group_counts
 
 def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       per_group_counts: Dict[str,int],
+                      which: str,
+                      mode: str,
+                      num_bins: int,
+                      max_bp: Optional[int],
                       y_label: str,
-                      title: str,
                       out_png: Path,
                       out_csv: Path):
-    # Centers (dist_center) are fixed for equal-width bins
-    edges = np.linspace(0.0, 1.0, NUM_BINS + 1, dtype=np.float64)
-    centers_dc = (edges[:-1] + edges[1:]) / 2.0
-    dist_edge   = 1.0 - centers_dc
+    """
+    Build tables, compute stats, and plot for given mode.
+    """
+    # Build x-axis centers for this mode
+    if mode == "proportion":
+        edges = np.linspace(0.0, 1.0, num_bins + 1, dtype=np.float64)
+        centers_dc = (edges[:-1] + edges[1:]) / 2.0  # distance-from-center (0=center,1=edge)
+        dist_edge = 1.0 - centers_dc                  # 0=edge → 1=center (as label)
+        x_centers = dist_edge
+        x_label   = "Normalized distance from segment edge (0 = edge, 1 = center)"
+    elif mode == "bp":
+        assert max_bp is not None and max_bp > 0
+        edges = np.linspace(0.0, float(max_bp), num_bins + 1, dtype=np.float64)
+        x_centers = (edges[:-1] + edges[1:]) / 2.0  # bp from edge
+        x_label   = f"Distance from segment edge (bp; capped at {max_bp:,})"
+    else:
+        raise ValueError("mode must be 'proportion' or 'bp'")
 
     # Aggregate per group
     color_map = {"recurrent": COLOR_RECUR, "single-event": COLOR_SINGLE, "overall": COLOR_OVERALL}
     group_stats = {}
     all_rows = []
 
+    plot_title_core = {
+        "pi": "π vs. distance from edge (grouped)",
+        "hudson": "Hudson FST vs. distance from edge (grouped)"
+    }[which]
+    title = f"{plot_title_core} — {mode}"
+
     for grp in ["recurrent","single-event","overall"]:
         seqs = per_group_means.get(grp, [])
         if not seqs:
             continue
         mean_per, se_per, nseq_per = _aggregate_unweighted(seqs)
-        rho, p = _spearman(dist_edge, mean_per)
+
+        # Apply plotting rule via mask (bins must have ≥ MIN_INV_PER_BIN inversions)
+        plot_mask = (nseq_per >= MIN_INV_PER_BIN)
+
+        # Spearman is computed ONLY on bins that pass the plotting rule
+        mean_for_corr = mean_per.copy()
+        mean_for_corr[~plot_mask] = np.nan
+        x_for_corr = x_centers.copy()
+        x_for_corr[~plot_mask] = np.nan
+        rho, p = _spearman(x_for_corr, mean_for_corr)
+
         group_stats[grp] = {
             "mean": mean_per,
             "se": se_per,
@@ -413,20 +540,24 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
             "rho": (np.nan if rho is None else rho),
             "p": (np.nan if p is None else p),
             "color": color_map[grp],
+            "plot_mask": plot_mask,
         }
+
         # Save table rows
-        for bi in range(NUM_BINS):
+        for bi in range(num_bins):
             all_rows.append({
                 "group": grp,
                 "bin_index": bi,
-                "dist_edge": dist_edge[bi],
-                "dist_center": centers_dc[bi],
+                "x_center": x_centers[bi],
                 "mean_value": mean_per[bi],
                 "stderr_value": se_per[bi],
                 "n_sequences_in_bin": int(nseq_per[bi]),
-                "N_total_sequences": per_group_counts.get(grp, 0),
-                "spearman_rho": group_stats[grp]["rho"],
-                "spearman_p": group_stats[grp]["p"],
+                "plotting_allowed": bool(plot_mask[bi]),
+                "N_total_sequences_in_group": per_group_counts.get(grp, 0),
+                "spearman_rho_over_allowed_bins": group_stats[grp]["rho"],
+                "spearman_p_over_allowed_bins": group_stats[grp]["p"],
+                "mode": mode,
+                "metric": which,
             })
 
     # Save CSV (combined)
@@ -436,22 +567,64 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
     log.info(f"Saved CSV → {out_csv}")
 
     # Plot
-    _plot_multi(dist_edge, group_stats, y_label, title, out_png)
+    _plot_multi(x_centers, group_stats, y_label, title, out_png, x_label)
 
-def run_metric(which: str, falsta: Path, min_len: int, fuzzy_map: Dict[Tuple[str,int,int], str],
-               y_label: str, out_png: Path, out_csv: Path):
+def run_metric(which: str,
+               falsta: Path,
+               min_len: int,
+               fuzzy_map: Dict[Tuple[str,int,int], str],
+               y_label: str,
+               # proportion mode outputs
+               out_png_prop: Path,
+               out_csv_prop: Path,
+               # bp mode outputs
+               out_png_bp: Path,
+               out_csv_bp: Path):
     t0 = time.time()
 
-    per_group_means, per_group_counts = _collect_grouped_means(which, falsta, min_len, fuzzy_map)
-    # If absolutely nothing loaded, bail
-    total_loaded = sum(per_group_counts.values())
-    if total_loaded == 0:
-        log.error(f"[{which}] No sequences loaded from {falsta}."); return
+    # ---------- PROPORTION MODE ----------
+    per_group_means_prop, per_group_counts_prop = _collect_grouped_means(
+        which=which,
+        falsta=falsta,
+        min_len=min_len,
+        fuzzy_map=fuzzy_map,
+        mode="proportion",
+        num_bins=NUM_BINS_PROP,
+        max_bp=None,
+    )
+    total_loaded_prop = sum(per_group_counts_prop.values())
+    if total_loaded_prop == 0:
+        log.error(f"[{which}/proportion] No sequences loaded from {falsta}.")
+    else:
+        _assemble_outputs(
+            per_group_means_prop, per_group_counts_prop,
+            which=which, mode="proportion", num_bins=NUM_BINS_PROP, max_bp=None,
+            y_label=y_label,
+            out_png=out_png_prop,
+            out_csv=out_csv_prop,
+        )
 
-    title = "π vs. normalized distance from edge (grouped)" if which=="pi" \
-            else "Hudson FST vs. normalized distance from edge (grouped)"
-
-    _assemble_outputs(per_group_means, per_group_counts, y_label, title, out_png, out_csv)
+    # ---------- BASE-PAIR MODE  ----------
+    per_group_means_bp, per_group_counts_bp = _collect_grouped_means(
+        which=which,
+        falsta=falsta,
+        min_len=min_len,
+        fuzzy_map=fuzzy_map,
+        mode="bp",
+        num_bins=NUM_BINS_BP,
+        max_bp=MAX_BP,
+    )
+    total_loaded_bp = sum(per_group_counts_bp.values())
+    if total_loaded_bp == 0:
+        log.error(f"[{which}/bp] No sequences loaded from {falsta}.")
+    else:
+        _assemble_outputs(
+            per_group_means_bp, per_group_counts_bp,
+            which=which, mode="bp", num_bins=NUM_BINS_BP, max_bp=MAX_BP,
+            y_label=y_label,
+            out_png=out_png_bp,
+            out_csv=out_csv_bp,
+        )
 
     log.info(f"[{which}] done in {time.time() - t0:.2f}s\n")
 
@@ -464,15 +637,19 @@ def main():
     inv_df = _load_inv_mapping(INV_CSV)
     fuzzy_map = _build_fuzzy_lookup(inv_df) if not inv_df.empty else {}
 
-    # π
+    # π (diversity)
     run_metric(
         which="pi",
         falsta=DIVERSITY_FILE,
         min_len=MIN_LEN_PI,
         fuzzy_map=fuzzy_map,
         y_label="Mean nucleotide diversity (π per site)",
-        out_png=OUTDIR / f"pi_overall_vs_dist_edge_{NUM_BINS}bins.png",     # keep filenames
-        out_csv=OUTDIR / f"pi_overall_vs_dist_edge_{NUM_BINS}bins.csv",
+        # proportion mode outputs (keep original filenames)
+        out_png_prop=OUTDIR / f"pi_overall_vs_dist_edge_{NUM_BINS_PROP}bins.png",
+        out_csv_prop=OUTDIR / f"pi_overall_vs_dist_edge_{NUM_BINS_PROP}bins.csv",
+        # bp mode outputs 
+        out_png_bp=OUTDIR / f"pi_overall_vs_dist_bp_cap{MAX_BP//1000}kb_{NUM_BINS_BP}bins.png",
+        out_csv_bp=OUTDIR / f"pi_overall_vs_dist_bp_cap{MAX_BP//1000}kb_{NUM_BINS_BP}bins.csv",
     )
 
     # Hudson FST
@@ -482,8 +659,12 @@ def main():
         min_len=MIN_LEN_FST,
         fuzzy_map=fuzzy_map,
         y_label="Mean Hudson FST (per site)",
-        out_png=OUTDIR / f"hudson_fst_overall_vs_dist_edge_{NUM_BINS}bins.png",
-        out_csv=OUTDIR / f"hudson_fst_overall_vs_dist_edge_{NUM_BINS}bins.csv",
+        # proportion mode outputs (keep original filenames)
+        out_png_prop=OUTDIR / f"hudson_fst_overall_vs_dist_edge_{NUM_BINS_PROP}bins.png",
+        out_csv_prop=OUTDIR / f"hudson_fst_overall_vs_dist_edge_{NUM_BINS_PROP}bins.csv",
+        # bp mode outputs
+        out_png_bp=OUTDIR / f"hudson_fst_overall_vs_dist_bp_cap{MAX_BP//1000}kb_{NUM_BINS_BP}bins.png",
+        out_csv_bp=OUTDIR / f"hudson_fst_overall_vs_dist_bp_cap{MAX_BP//1000}kb_{NUM_BINS_BP}bins.csv",
     )
 
 if __name__ == "__main__":
