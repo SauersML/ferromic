@@ -30,6 +30,16 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
         base.update(extra)
     io.atomic_write_json(meta_path, base)
 
+def _converged(fit_obj):
+    """Checks for convergence in a statsmodels fit object."""
+    try:
+        if hasattr(fit_obj, "mle_retvals") and isinstance(fit_obj.mle_retvals, dict):
+            return bool(fit_obj.mle_retvals.get("converged", False))
+        if hasattr(fit_obj, "converged"):
+            return bool(fit_obj.converged)
+        return False
+    except Exception:
+        return False
 
 def _fit_logit_ladder(X, y, ridge_ok=True):
     """
@@ -37,44 +47,49 @@ def _fit_logit_ladder(X, y, ridge_ok=True):
     Includes a ridge-seeded refit attempt.
     Returns (fit, reason_str)
     """
-    # 1. Newton-Raphson
-    try:
-        fit_try = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=False)
-        if fit_try.mle_retvals['converged']:
-            setattr(fit_try, "_used_ridge", False)
-            return fit_try, "newton"
-    except Exception:
-        pass
-
-    # 2. BFGS
-    try:
-        fit_try = sm.Logit(y, X).fit(disp=0, method='bfgs', maxiter=800, gtol=1e-8, warn_convergence=False)
-        if fit_try.mle_retvals['converged']:
-            setattr(fit_try, "_used_ridge", False)
-            return fit_try, "bfgs"
-    except Exception:
-        pass
-
-    # 3. Ridge-seeded refit
-    if ridge_ok:
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", category=PerfectSeparationWarning)
+        # 1. Newton-Raphson
         try:
-            p = X.shape[1] - (1 if 'const' in X.columns else 0)
-            n = max(1, X.shape[0])
-            alpha = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / float(n)), 1e-6)
-            ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=800)
+            fit_try = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=False)
+            if _converged(fit_try):
+                setattr(fit_try, "_used_ridge", False)
+                return fit_try, "newton"
+        except (Exception, PerfectSeparationWarning):
+            pass
 
+        # 2. BFGS
+        try:
+            fit_try = sm.Logit(y, X).fit(disp=0, method='bfgs', maxiter=800, gtol=1e-8, warn_convergence=False)
+            if _converged(fit_try):
+                setattr(fit_try, "_used_ridge", False)
+                return fit_try, "bfgs"
+        except (Exception, PerfectSeparationWarning):
+            pass
+
+        # 3. Ridge-seeded refit
+        if ridge_ok:
             try:
-                refit = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=400, tol=1e-8, start_params=ridge_fit.params, warn_convergence=False)
-                if refit.mle_retvals['converged']:
-                    setattr(refit, "_used_ridge", True)
-                    return refit, "ridge_seeded_refit"
-            except Exception:
-                pass
+                p = X.shape[1] - (1 if 'const' in X.columns else 0)
+                n = max(1, X.shape[0])
+                alpha_scalar = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / float(n)), 1e-6)
+                alphas = np.full(X.shape[1], alpha_scalar, dtype=float)
+                if 'const' in X.columns:
+                    alphas[X.columns.get_loc('const')] = 0.0
+                ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0, maxiter=800)
 
-            setattr(ridge_fit, "_used_ridge", True)
-            return ridge_fit, "ridge_only"
-        except Exception as e:
-            return None, f"ridge_exception:{type(e).__name__}"
+                try:
+                    refit = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=400, tol=1e-8, start_params=ridge_fit.params, warn_convergence=False)
+                    if _converged(refit):
+                        setattr(refit, "_used_ridge", True)
+                        return refit, "ridge_seeded_refit"
+                except Exception:
+                    pass
+
+                setattr(ridge_fit, "_used_ridge", True)
+                return ridge_fit, "ridge_only"
+            except Exception as e:
+                return None, f"ridge_exception:{type(e).__name__}"
 
     return None, "all_methods_failed"
 
@@ -257,7 +272,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
                         worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_idx_fp,
                         extra={"skip_reason": "insufficient_cases_or_controls"})
-            print(f"[fit SKIP] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} reason=insufficient_counts", flush=True)
+            print(f"[fit SKIP] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} reason=insufficient_cases_or_controls", flush=True)
             return
 
         drop_candidates = [c for c in X_clean.columns if c not in ('const', target_inversion)]
@@ -275,16 +290,6 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                         worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_idx_fp)
             print(f"[fit SKIP] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} reason=target_constant", flush=True)
             return
-
-        def _converged(fit_obj):
-            try:
-                if hasattr(fit_obj, "mle_retvals") and isinstance(fit_obj.mle_retvals, dict):
-                    return bool(fit_obj.mle_retvals.get("converged", False))
-                if hasattr(fit_obj, "converged"):
-                    return bool(fit_obj.converged)
-                return False
-            except Exception:
-                return False
 
         X_work = X_clean
         y_work = y_clean
@@ -306,9 +311,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if note:
             model_notes_worker.append(note)
 
-        # After any restriction, re-drop zero-variance columns
-        drop_candidates = [c for c in X_work.columns if c not in ('const', target_inversion)]
-        zvars = [c for c in drop_candidates if X_work[c].nunique(dropna=False) <= 1]
+        zvars = [c for c in X_work.columns if c not in ['const', target_inversion] and X_work[c].nunique(dropna=False) <= 1]
         if zvars:
             X_work = X_work.drop(columns=zvars)
 
@@ -343,24 +346,32 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 se = float(fit.bse[target_inversion])
             except Exception:
                 se = None
+
+        used_ridge = bool(getattr(fit, "_used_ridge", False))
         or_ci95_str = None
-        if se is not None and np.isfinite(se) and se > 0.0:
+        if se is not None and np.isfinite(se) and se > 0.0 and not used_ridge:
             lo = float(np.exp(beta - 1.96 * se))
             hi = float(np.exp(beta + 1.96 * se))
             or_ci95_str = f"{lo:.3f},{hi:.3f}"
 
         notes = []
         if hasattr(fit, "_model_note"): notes.append(fit._model_note)
-        if hasattr(fit, "_used_ridge") and fit._used_ridge: notes.append("used_ridge")
+        if used_ridge: notes.append("used_ridge")
         if pval_reason: notes.append(pval_reason)
         notes_str = ";".join(filter(None, notes))
-        print(f"[fit OK] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} beta={beta:+.4f} OR={np.exp(beta):.4f} p={pval:.3e} notes={notes_str}", flush=True)
+
+        n_total_used = int(len(y_work))
+        n_cases_used = int(y_work.sum())
+        n_ctrls_used = n_total_used - n_cases_used
+
+        print(f"[fit OK] name={s_name} N={n_total_used} cases={n_cases_used} ctrls={n_ctrls_used} beta={beta:+.4f} OR={np.exp(beta):.4f} p={pval:.3e} notes={notes_str}", flush=True)
 
         result_data = {
-            "Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
+            "Phenotype": s_name,
+            "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
+            "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
             "Beta": beta, "OR": float(np.exp(beta)), "P_Value": pval, "OR_CI95": or_ci95_str,
-            "Model_Notes": notes_str,
-            "Used_Ridge": bool(getattr(fit, "_used_ridge", False))
+            "Model_Notes": notes_str, "Used_Ridge": used_ridge
         }
         io.atomic_write_json(result_path, result_data)
         _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
