@@ -144,7 +144,7 @@ def main():
             # Add ancestry labels for Stage-1 adjustment (shared across all models)
             ancestry = io.get_cached_or_generate(
                 os.path.join(CACHE_DIR, "ancestry_labels.parquet"),
-                io.load_ancestry_labels, gcp_project, PCS_URI
+                io.load_ancestry_labels, gcp_project, LABELS_URI=PCS_URI
             )
             anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"].str.lower()
 
