@@ -190,7 +190,9 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         codes_upper = sorted({str(c).upper() for c in codes if str(c).strip()})
         meta[s_name] = {"category": category, "codes": codes_upper}
         for c in codes_upper:
-            code_map.append((c, s_name))
+            # BigQuery STRUCT array parameters must be a list of dicts keyed by field names.
+            code_map.append({"code": c, "pheno": s_name})
+
 
     if not code_map:
         # nothing to fetch; emit empty caches
