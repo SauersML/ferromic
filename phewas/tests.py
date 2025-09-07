@@ -72,6 +72,8 @@ def make_synth_cohort(N=200, NUM_PCS=10, seed=42):
 
     demographics = pd.DataFrame({"AGE": rng.uniform(30, 75, N)}, index=pd.Index(person_ids, name="person_id"))
     demographics["AGE_sq"] = demographics["AGE"]**2
+    demographics['AGE_c'] = demographics['AGE'] - demographics['AGE'].mean()
+    demographics['AGE_c_sq'] = demographics['AGE_c'] ** 2
     sex = pd.DataFrame({"sex": rng.binomial(1, 0.55, N).astype(float)}, index=demographics.index)
     pcs = pd.DataFrame(rng.normal(0, 0.01, (N, NUM_PCS)), index=demographics.index, columns=[f"PC{i}" for i in range(1, NUM_PCS + 1)])
     inversion_main = pd.DataFrame({TEST_TARGET_INVERSION: np.clip(rng.normal(0, 0.5, N), -2, 2)}, index=demographics.index)
@@ -139,7 +141,8 @@ def read_rss_bytes():
         pass
     try:
         r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return int(r * (1024 if platform.system() != "Linux" else 1))
+        # On Linux, getrusage returns KB. On macOS, it returns bytes.
+        return int(r * 1024 if platform.system() == "Linux" else r)
     except Exception:
         pass
     raise RuntimeError("Cannot measure RSS on this platform without psutil")
@@ -218,7 +221,12 @@ def test_pheno_cache_loader_returns_correct_indices():
 def test_worker_constant_dosage_emits_nan(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
-        core_df = pd.concat([core_data['demographics'], core_data['sex'], core_data['pcs'], core_data['inversion_const']], axis=1)
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_const']
+        ], axis=1)
         core_df_with_const = sm.add_constant(core_df)
 
         Path(test_ctx["RESULTS_CACHE_DIR"]).mkdir(parents=True, exist_ok=True)
@@ -237,7 +245,12 @@ def test_worker_constant_dosage_emits_nan(test_ctx):
 def test_worker_insufficient_counts_skips(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
-        core_df = pd.concat([core_data['demographics'], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main']
+        ], axis=1)
         core_df_with_const = sm.add_constant(core_df)
 
         Path(test_ctx["RESULTS_CACHE_DIR"]).mkdir(parents=True, exist_ok=True)
@@ -257,8 +270,16 @@ def test_lrt_rank_and_df_positive(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
         prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
-        core_df = pd.concat([core_data['demographics'], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main']
+        ], axis=1)
         core_df_with_const = sm.add_constant(core_df)
+        anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
+        A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
 
         Path(test_ctx["LRT_OVERALL_CACHE_DIR"]).mkdir(parents=True, exist_ok=True)
         models.init_worker(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
@@ -277,8 +298,16 @@ def test_followup_includes_ancestry_levels_and_splits(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
         prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
-        core_df = pd.concat([core_data['demographics'], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main']
+        ], axis=1)
         core_df_with_const = sm.add_constant(core_df)
+        anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
+        A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
 
         Path(test_ctx["LRT_FOLLOWUP_CACHE_DIR"]).mkdir(parents=True, exist_ok=True)
         models.init_lrt_worker(core_df_with_const, {"neuro": np.ones(len(core_df), dtype=bool)}, core_data['ancestry']['ANCESTRY'], test_ctx)
@@ -321,7 +350,12 @@ def test_pipes_run_fits_creates_atomic_results(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
         pheno_defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
-        core_df = pd.concat([core_data['demographics'], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main']
+        ], axis=1)
         core_df_with_const = sm.add_constant(core_df)
 
         pan_cases = {"cardio": phenos["A_strong_signal"]["cases"] | phenos["B_insufficient"]["cases"], "neuro": phenos["C_moderate_signal"]["cases"]}
@@ -346,7 +380,12 @@ def test_cache_equivalence_skips_work(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
         prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
-        core_df = pd.concat([core_data['demographics'], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main']
+        ], axis=1)
         core_df_with_const = sm.add_constant(core_df)
         allowed_mask_by_cat = {"cardio": np.ones(len(core_df), dtype=bool), "neuro": np.ones(len(core_df), dtype=bool)}
 
@@ -375,8 +414,16 @@ def test_lrt_overall_meta_idempotency(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
         prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
-        X = sm.add_constant(pd.concat([core_data['demographics'], core_data['sex'],
-                                       core_data['pcs'], core_data['inversion_main']], axis=1))
+        X_base = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main']
+        ], axis=1)
+        X = sm.add_constant(X_base)
+        anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
+        A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
+        X = X.join(A, how="left").fillna({c: 0.0 for c in A.columns})
         Path(test_ctx["LRT_OVERALL_CACHE_DIR"]).mkdir(parents=True, exist_ok=True)
         models.init_worker(X, {"cardio": np.ones(len(X), bool), "neuro": np.ones(len(X), bool)}, test_ctx)
         task = {"name": "A_strong_signal", "category": "cardio", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
