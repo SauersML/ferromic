@@ -82,6 +82,42 @@ def _fit_logit_ladder(X, y, ridge_ok=True):
         except Exception as e: return None, f"ridge_exception:{type(e).__name__}"
     return None, "all_methods_failed"
 
+def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=()):
+    """Drops columns with no variance, keeping specified columns."""
+    keep = set(keep_cols) | set(always_keep)
+    cols = []
+    for c in X.columns:
+        if c in keep:
+            cols.append(c); continue
+        s = X[c]
+        if pd.isna(s).all() or s.nunique(dropna=True) <= 1:
+            continue
+        cols.append(c)
+    return X.loc[:, cols]
+
+def _suppress_worker_warnings():
+    """Suppresses known-noisy warnings inside worker processes."""
+    warnings.filterwarnings(
+        "ignore", message=r"^overflow encountered in exp",
+        category=RuntimeWarning, module=r"^statsmodels\.discrete\.discrete_model$",
+    )
+    warnings.filterwarnings(
+        "ignore", message=r"^divide by zero encountered in log",
+        category=RuntimeWarning, module=r"^statsmodels\.discrete\.discrete_model$",
+    )
+
+REQUIRED_CTX_KEYS = {
+ "NUM_PCS", "MIN_CASES_FILTER", "MIN_CONTROLS_FILTER", "CACHE_DIR",
+ "RESULTS_CACHE_DIR", "LRT_OVERALL_CACHE_DIR", "LRT_FOLLOWUP_CACHE_DIR", "RIDGE_L2_BASE",
+ "PER_ANC_MIN_CASES", "PER_ANC_MIN_CONTROLS"
+}
+
+def _validate_ctx(ctx):
+    """Raises RuntimeError if required context keys are missing."""
+    missing = [k for k in REQUIRED_CTX_KEYS if k not in ctx]
+    if missing:
+        raise RuntimeError(f"[Worker-{os.getpid()}] Missing CTX keys: {', '.join(missing)}")
+
 def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
     """
     Enforce: if all cases are one sex, only use that sex's rows (and drop 'sex').
@@ -102,17 +138,23 @@ worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, finite_mask_work
 def init_worker(df_to_share, masks, ctx):
     """Sends the large core_df, precomputed masks, and context to each worker process."""
     for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]: os.environ[v] = "1"
+    _suppress_worker_warnings()
+    _validate_ctx(ctx)
     global worker_core_df, allowed_mask_by_cat, N_core, CTX, finite_mask_worker
     worker_core_df, allowed_mask_by_cat, N_core, CTX = df_to_share, masks, len(df_to_share), ctx
     finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
+    print(f"[Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks.", flush=True)
 
 def init_lrt_worker(df_to_share, masks, anc_series, ctx):
     """Initializer for LRT pools that also provides ancestry labels and context."""
     for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]: os.environ[v] = "1"
+    _suppress_worker_warnings()
+    _validate_ctx(ctx)
     global worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, CTX, finite_mask_worker
     worker_core_df, allowed_mask_by_cat, N_core, CTX = df_to_share, masks, len(df_to_share), ctx
     worker_anc_series = anc_series.reindex(df_to_share.index).str.lower()
     finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
+    print(f"[LRT-Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks, {worker_anc_series.nunique()} ancestries.", flush=True)
 
 def _index_fingerprint(index):
     """Order-insensitive fingerprint of a person_id index."""
@@ -146,70 +188,88 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     s_name_safe = _safe_basename(s_name)
     result_path = os.path.join(results_cache_dir, f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
-    case_ids_for_fp = worker_core_df.index[case_idx] if case_idx.size > 0 else pd.Index([], name=worker_core_df.index.name)
-    case_idx_fp = _index_fingerprint(case_ids_for_fp)
-    allowed_mask = allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool))
-    allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df.index)
-    if os.path.exists(result_path) and _should_skip(meta_path, worker_core_df, case_idx_fp, category, target_inversion, allowed_fp): return
 
-    case_mask = np.zeros(N_core, dtype=bool)
-    if case_idx.size > 0: case_mask[case_idx] = True
-    valid_mask = (allowed_mask | case_mask) & finite_mask_worker
+    try:
+        case_ids_for_fp = worker_core_df.index[case_idx] if case_idx.size > 0 else pd.Index([], name=worker_core_df.index.name)
+        case_idx_fp = _index_fingerprint(case_ids_for_fp)
+        allowed_mask = allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool))
+        allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df.index)
 
-    n_total = int(valid_mask.sum())
-    y = np.zeros(n_total, dtype=np.int8)
-    case_positions = np.nonzero(case_mask[valid_mask])[0]
-    if case_positions.size > 0: y[case_positions] = 1
+        if os.path.exists(result_path) and _should_skip(meta_path, worker_core_df, case_idx_fp, category, target_inversion, allowed_fp):
+            return
 
-    X_clean = worker_core_df[valid_mask].astype(np.float64, copy=False)
-    y_clean = pd.Series(y, index=X_clean.index, name='is_case')
+        case_mask = np.zeros(N_core, dtype=bool)
+        if case_idx.size > 0: case_mask[case_idx] = True
+        valid_mask = (allowed_mask | case_mask) & finite_mask_worker
 
-    n_cases = int(y_clean.sum())
-    n_ctrls = int(n_total - n_cases)
+        X_clean = worker_core_df[valid_mask].astype(np.float64, copy=False)
+        y_clean = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_clean.index, name='is_case')
+        n_total, n_cases, n_ctrls = len(y_clean), int(y_clean.sum()), len(y_clean) - int(y_clean.sum())
 
-    def write_skip(reason):
-        result_data = {"Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
-                       "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": reason}
-        io.atomic_write_json(result_path, result_data)
+        skip_reason, notes = "", []
+        if valid_mask.sum() == 0: skip_reason = "no_valid_rows_after_mask"
+        elif n_cases < CTX["MIN_CASES_FILTER"] or n_ctrls < CTX["MIN_CONTROLS_FILTER"]: skip_reason = "insufficient_cases_or_controls"
+        elif X_clean[target_inversion].nunique(dropna=False) <= 1: skip_reason = "target_constant"
+
+        if skip_reason:
+            result_data = {"Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
+                           "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": skip_reason}
+            io.atomic_write_json(result_path, result_data)
+            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df.columns,
+                        _index_fingerprint(worker_core_df.index), case_idx_fp,
+                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": skip_reason})
+            return
+
+        X_work, y_work, sex_note, sex_skip = _apply_sex_restriction(X_clean, y_clean)
+        if sex_note: notes.append(sex_note)
+        if sex_skip:
+            result_data = {"Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
+                           "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": sex_skip, "Model_Notes": ";".join(notes)}
+            io.atomic_write_json(result_path, result_data)
+            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df.columns,
+                        _index_fingerprint(worker_core_df.index), case_idx_fp,
+                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": sex_skip})
+            return
+
+        n_total_used, n_cases_used, n_ctrls_used = len(y_work), int(y_work.sum()), len(y_work) - int(y_work.sum())
+        X_work = _drop_zero_variance(X_work, keep_cols=('const',), always_keep=(target_inversion,))
+        fit, fit_reason = _fit_logit_ladder(X_work, y_work)
+        if fit_reason in ("ridge_seeded_refit", "ridge_only"): notes.append(fit_reason)
+
+        if not fit or target_inversion not in fit.params:
+            result_data = {"Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
+                           "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
+                           "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": f"fit_failed:{fit_reason}", "Model_Notes": ";".join(notes)}
+            io.atomic_write_json(result_path, result_data)
+            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df.columns,
+                        _index_fingerprint(worker_core_df.index), case_idx_fp,
+                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": f"fit_failed:{fit_reason}"})
+            return
+
+        beta = float(fit.params[target_inversion])
+        pval = float(fit.pvalues.get(target_inversion, np.nan))
+        se = float(fit.bse.get(target_inversion, np.nan)) if hasattr(fit, "bse") else np.nan
+        final_is_mle = getattr(fit, "_final_is_mle", False)
+        or_ci95_str = None
+        if final_is_mle and np.isfinite(se) and se > 0:
+            lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
+            or_ci95_str = f"{lo:.3f},{hi:.3f}"
+
+        result = {"Phenotype": s_name, "N_Cases": n_cases, "N_Controls": n_ctrls, "Beta": beta, "OR": np.exp(beta),
+                  "P_Value": pval, "OR_CI95": or_ci95_str, "Used_Ridge": not final_is_mle, "Final_Is_MLE": final_is_mle}
+        result.update({"N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
+                       "Model_Notes": ";".join(notes) if notes else ""})
+        io.atomic_write_json(result_path, result)
         _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df.columns,
                     _index_fingerprint(worker_core_df.index), case_idx_fp,
-                    extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": reason})
+                    extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+        print(f"[fit OK] name={s_name_safe} OR={np.exp(beta):.3f} p={pval:.3e} notes={'|'.join(notes)}", flush=True)
 
-    if n_cases < CTX["MIN_CASES_FILTER"] or n_ctrls < CTX["MIN_CONTROLS_FILTER"]:
-        write_skip("insufficient_cases_or_controls")
-        return
-
-    if X_clean[target_inversion].nunique(dropna=False) <= 1:
-        write_skip("target_constant")
-        return
-
-    X_work, y_work, sex_note, sex_skip = _apply_sex_restriction(X_clean, y_clean)
-    if sex_skip:
-        write_skip(sex_skip)
-        return
-
-    fit, fit_reason = _fit_logit_ladder(X_work, y_work)
-
-    if not fit or target_inversion not in fit.params:
-        write_skip(f"fit_failed:{fit_reason}")
-        return
-
-    beta = float(fit.params[target_inversion])
-    pval = float(fit.pvalues.get(target_inversion, np.nan))
-    se = float(fit.bse.get(target_inversion, np.nan)) if hasattr(fit, "bse") else np.nan
-
-    final_is_mle = getattr(fit, "_final_is_mle", False)
-    or_ci95_str = None
-    if final_is_mle and np.isfinite(se) and se > 0:
-        lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
-        or_ci95_str = f"{lo:.3f},{hi:.3f}"
-
-    result = {"Phenotype": s_name, "N_Cases": n_cases, "N_Controls": n_ctrls, "Beta": beta, "OR": np.exp(beta),
-              "P_Value": pval, "OR_CI95": or_ci95_str, "Used_Ridge": not final_is_mle, "Final_Is_MLE": final_is_mle}
-    io.atomic_write_json(result_path, result)
-    _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df.columns,
-                _index_fingerprint(worker_core_df.index), case_idx_fp,
-                extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+    except Exception as e:
+        io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
+        traceback.print_exc()
+    finally:
+        gc.collect()
 
 def lrt_overall_worker(task):
     """Worker for Stage-1 overall LRT."""
@@ -217,63 +277,68 @@ def lrt_overall_worker(task):
     s_name_safe = _safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
-    pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
-    if not os.path.exists(pheno_path):
-        io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": "missing_case_cache"})
-        return
-    case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
-    case_idx = worker_core_df.index.get_indexer(case_ids)
-    case_idx = case_idx[case_idx >= 0]
-    case_fp = _index_fingerprint(worker_core_df.index[case_idx] if case_idx.size > 0 else pd.Index([]))
-    allowed_mask = allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool))
-    allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df.index)
-    if os.path.exists(result_path) and _lrt_meta_should_skip(result_path + ".meta.json", worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_fp, cat, target, allowed_fp): return
+    try:
+        pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
+        if not os.path.exists(pheno_path):
+            io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": "missing_case_cache"})
+            return
+        case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+        case_idx = worker_core_df.index.get_indexer(case_ids)
+        case_idx = case_idx[case_idx >= 0]
+        case_fp = _index_fingerprint(worker_core_df.index[case_idx] if case_idx.size > 0 else pd.Index([]))
+        allowed_mask = allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool))
+        allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df.index)
+        if os.path.exists(result_path) and _lrt_meta_should_skip(meta_path, worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_fp, cat, target, allowed_fp): return
 
-    case_mask = np.zeros(N_core, dtype=bool)
-    if case_idx.size > 0: case_mask[case_idx] = True
-    valid_mask = (allowed_mask | case_mask) & finite_mask_worker
-    pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
-    anc_cols = [c for c in worker_core_df.columns if c.startswith("ANC_")]
-    base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq'] + anc_cols
-    X_base = worker_core_df.loc[valid_mask, base_cols].astype(np.float64)
-    y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base.index)
+        case_mask = np.zeros(N_core, dtype=bool)
+        if case_idx.size > 0: case_mask[case_idx] = True
+        valid_mask = (allowed_mask | case_mask) & finite_mask_worker
+        pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
+        anc_cols = [c for c in worker_core_df.columns if c.startswith("ANC_")]
+        base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq'] + anc_cols
+        X_base = worker_core_df.loc[valid_mask, base_cols].astype(np.float64, copy=False)
+        y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base.index)
 
-    X_full, X_red = X_base, X_base.drop(columns=[target])
+        Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
+        if skip:
+            io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": skip})
+            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df.columns,
+                        _index_fingerprint(worker_core_df.index), case_fp,
+                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": skip})
+            return
 
-    def _fit_logit_hardened(X, y):
-        try:
-            fit = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=200)
-            return fit, "", True
-        except Exception: pass
-        try:
-            fit = sm.Logit(y, X).fit(disp=0, method='bfgs', maxiter=800)
-            return fit, "", True
-        except Exception: pass
-        p, n = X.shape[1], X.shape[0]
-        alphas = np.full(p, max(CTX.get("RIDGE_L2_BASE", 1.0) * (p / max(1, n)), 1e-6))
-        if 'const' in X.columns: alphas[X.columns.get_loc('const')] = 0.0
-        try:
-            ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0)
-            return ridge_fit, "", False
-        except Exception as e: return None, f"fit_exception:{type(e).__name__}", False
+        X_full, X_red = Xb, Xb.drop(columns=[target])
+        X_red = _drop_zero_variance(X_red, keep_cols=('const',))
+        X_full = _drop_zero_variance(X_full, keep_cols=('const',), always_keep=(target,))
 
-    fit_red, _, red_is_mle = _fit_logit_hardened(X_red, y_series)
-    fit_full, _, full_is_mle = _fit_logit_hardened(X_full, y_series)
+        fit_red, _ = _fit_logit_ladder(X_red, yb)
+        fit_full, _ = _fit_logit_ladder(X_full, yb)
+        red_is_mle = getattr(fit_red, "_final_is_mle", False)
+        full_is_mle = getattr(fit_full, "_final_is_mle", False)
 
-    out = {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_df_Overall": np.nan}
-    if red_is_mle and full_is_mle and fit_full and fit_red and fit_full.llf >= fit_red.llf:
-        r_full, r_red = np.linalg.matrix_rank(X_full), np.linalg.matrix_rank(X_red)
-        df_lrt = max(0, int(r_full - r_red))
-        if df_lrt > 0:
-            llr = 2 * (fit_full.llf - fit_red.llf)
-            out["P_LRT_Overall"] = sp_stats.chi2.sf(llr, df_lrt)
-            out["LRT_df_Overall"] = df_lrt
-    else:
-        out["LRT_Overall_Reason"] = "penalized_fit_in_path" if (fit_red or fit_full) else "fit_failed"
-    io.atomic_write_json(result_path, out)
-    _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df.columns,
-                _index_fingerprint(worker_core_df.index), case_fp,
-                extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+        out = {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_df_Overall": np.nan, "Model_Notes": note}
+        if red_is_mle and full_is_mle and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
+            r_full, r_red = np.linalg.matrix_rank(X_full), np.linalg.matrix_rank(X_red)
+            df_lrt = max(0, int(r_full - r_red))
+            if df_lrt > 0:
+                llr = 2 * (fit_full.llf - fit_red.llf)
+                out["P_LRT_Overall"] = sp_stats.chi2.sf(llr, df_lrt)
+                out["LRT_df_Overall"] = df_lrt
+                print(f"[LRT-Stage1-OK] name={s_name_safe} p={out['P_LRT_Overall']:.3e} df={df_lrt}", flush=True)
+            else:
+                out["LRT_Overall_Reason"] = "zero_df_lrt"
+        else:
+            out["LRT_Overall_Reason"] = "penalized_fit_in_path" if (fit_red or fit_full) else "fit_failed"
+
+        io.atomic_write_json(result_path, out)
+        _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df.columns,
+                    _index_fingerprint(worker_core_df.index), case_fp,
+                    extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+    except Exception as e:
+        io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
+        traceback.print_exc()
+    finally:
+        gc.collect()
 
 def lrt_followup_worker(task):
     """Worker for Stage-2 ancestry×dosage LRT and per-ancestry splits."""
@@ -281,78 +346,99 @@ def lrt_followup_worker(task):
     s_name_safe = _safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_FOLLOWUP_CACHE_DIR"], f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
-    pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
+    try:
+        pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
+        if not os.path.exists(pheno_path):
+            io.atomic_write_json(result_path, {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "missing_case_cache"})
+            return
 
-    if not os.path.exists(pheno_path):
-        io.atomic_write_json(result_path, {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "missing_case_cache"})
-        return
+        case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+        case_idx = worker_core_df.index.get_indexer(case_ids)
+        case_idx = case_idx[case_idx >= 0]
+        case_fp = _index_fingerprint(worker_core_df.index[case_idx] if case_idx.size > 0 else pd.Index([]))
+        allowed_mask = allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool))
+        allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df.index)
 
-    case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
-    case_idx = worker_core_df.index.get_indexer(case_ids)
-    case_idx = case_idx[case_idx >= 0]
-    case_fp = _index_fingerprint(worker_core_df.index[case_idx] if case_idx.size > 0 else pd.Index([]))
-    allowed_mask = allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool))
-    allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df.index)
+        if os.path.exists(result_path) and _lrt_meta_should_skip(meta_path, worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_fp, category, target, allowed_fp):
+            return
 
-    if os.path.exists(result_path) and _lrt_meta_should_skip(meta_path, worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_fp, category, target, allowed_fp):
-        return
+        case_mask = np.zeros(N_core, dtype=bool)
+        if case_idx.size > 0: case_mask[case_idx] = True
+        valid_mask = (allowed_mask | case_mask) & finite_mask_worker
 
-    case_mask = np.zeros(N_core, dtype=bool)
-    if case_idx.size > 0: case_mask[case_idx] = True
-    valid_mask = (allowed_mask | case_mask) & finite_mask_worker
+        pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
+        base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq']
+        X_base = worker_core_df.loc[valid_mask, base_cols].astype(np.float64, copy=False)
+        y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base.index)
 
-    pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
-    base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq']
-    X_base = worker_core_df.loc[valid_mask, base_cols].astype(np.float64)
-    y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base.index)
-    anc_vec = worker_anc_series.loc[X_base.index]
+        Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
+        out = {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "", "Model_Notes": note}
+        if skip:
+            out['LRT_Reason'] = skip
+            io.atomic_write_json(result_path, out)
+            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": skip})
+            return
 
-    anc_levels = anc_vec.dropna().unique().tolist()
-    out = {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Ancestry_Levels': ",".join(anc_levels), 'LRT_Reason': ""}
+        anc_vec = worker_anc_series.loc[Xb.index]
+        levels = pd.Index(anc_vec.dropna().unique(), dtype=str).tolist()
+        levels_sorted = (['eur'] if 'eur' in levels else []) + [x for x in sorted(levels) if x != 'eur']
+        out['LRT_Ancestry_Levels'] = ",".join(levels_sorted)
 
-    if len(anc_levels) < 2:
-        out['LRT_Reason'] = "only_one_ancestry_level"
+        if len(levels_sorted) < 2:
+            out['LRT_Reason'] = "only_one_ancestry_level"
+            io.atomic_write_json(result_path, out)
+            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": "only_one_ancestry_level"})
+            return
+
+        A = pd.get_dummies(anc_vec, prefix='ANC', drop_first=True).reindex(Xb.index, fill_value=0)
+        X_red = Xb.join(A)
+        X_full = X_red.copy()
+        for c in A.columns: X_full[f"{target}:{c}"] = X_red[target] * X_red[c]
+
+        interaction_terms = [c for c in X_full.columns if c.startswith(f"{target}:")]
+        X_red_zv = _drop_zero_variance(X_red, keep_cols=('const',), always_keep=(target,))
+        X_full_zv = _drop_zero_variance(X_full, keep_cols=('const',), always_keep=[target] + interaction_terms)
+
+        fit_red, _ = _fit_logit_ladder(X_red_zv, yb)
+        fit_full, _ = _fit_logit_ladder(X_full_zv, yb)
+        red_is_mle, full_is_mle = getattr(fit_red, "_final_is_mle", False), getattr(fit_full, "_final_is_mle", False)
+
+        if red_is_mle and full_is_mle and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
+            r_full, r_red = np.linalg.matrix_rank(X_full_zv), np.linalg.matrix_rank(X_red_zv)
+            df_lrt = max(0, int(r_full - r_red))
+            if df_lrt > 0:
+                llr = 2 * (fit_full.llf - fit_red.llf)
+                out['P_LRT_AncestryxDosage'] = sp_stats.chi2.sf(llr, df_lrt)
+                out['LRT_df'] = df_lrt
+                print(f"[LRT-Stage2-OK] name={s_name_safe} p={out['P_LRT_AncestryxDosage']:.3e} df={df_lrt}", flush=True)
+            else: out['LRT_Reason'] = "zero_df_lrt"
+        else: out['LRT_Reason'] = "penalized_fit_in_path"
+
+        for anc in levels_sorted:
+            anc_mask = anc_vec == anc
+            X_anc, y_anc = Xb[anc_mask], yb[anc_mask]
+            out[f"{anc.upper()}_N"], out[f"{anc.upper()}_N_Cases"], out[f"{anc.upper()}_N_Controls"] = len(y_anc), int(y_anc.sum()), len(y_anc) - int(y_anc.sum())
+            if out[f"{anc.upper()}_N_Cases"] < CTX["PER_ANC_MIN_CASES"] or out[f"{anc.upper()}_N_Controls"] < CTX["PER_ANC_MIN_CONTROLS"]:
+                out[f"{anc.upper()}_REASON"] = "insufficient_stratum_counts"; continue
+
+            X_anc_zv = _drop_zero_variance(X_anc, keep_cols=('const',), always_keep=(target,))
+            fit, _ = _fit_logit_ladder(X_anc_zv, y_anc)
+            if fit and target in fit.params:
+                beta, pval = float(fit.params[target]), float(fit.pvalues.get(target, np.nan))
+                out[f"{anc.upper()}_OR"], out[f"{anc.upper()}_P"] = float(np.exp(beta)), pval
+                if getattr(fit, "_final_is_mle", False) and not getattr(fit, '_used_ridge_seed', False):
+                    se = float(fit.bse.get(target, np.nan))
+                    if np.isfinite(se) and se > 0:
+                        lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
+                        out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
+            else: out[f"{anc.upper()}_REASON"] = "subset_fit_failed"
+
         io.atomic_write_json(result_path, out)
-        return
-
-    A = pd.get_dummies(anc_vec, prefix='ANC', drop_first=True)
-    X_red = X_base.join(A)
-    X_full = X_red.copy()
-    for c in A.columns: X_full[f"{target}:{c}"] = X_red[target] * X_red[c]
-
-    fit_red, _ = _fit_logit_ladder(X_red, y_series)
-    fit_full, _ = _fit_logit_ladder(X_full, y_series)
-    red_is_mle = getattr(fit_red, "_final_is_mle", False)
-    full_is_mle = getattr(fit_full, "_final_is_mle", False)
-
-    if red_is_mle and full_is_mle and fit_full and fit_red and fit_full.llf >= fit_red.llf:
-        r_full, r_red = np.linalg.matrix_rank(X_full), np.linalg.matrix_rank(X_red)
-        df_lrt = max(0, int(r_full - r_red))
-        if df_lrt > 0:
-            llr = 2 * (fit_full.llf - fit_red.llf)
-            out['P_LRT_AncestryxDosage'] = sp_stats.chi2.sf(llr, df_lrt)
-            out['LRT_df'] = df_lrt
-    else:
-        out['LRT_Reason'] = "penalized_fit_in_path"
-
-    for anc in anc_levels:
-        anc_mask = anc_vec == anc
-        X_anc = X_base[anc_mask]
-        y_anc = y_series[anc_mask]
-        n_cases, n_ctrls = y_anc.sum(), len(y_anc) - y_anc.sum()
-        out[f"{anc.upper()}_N_Cases"], out[f"{anc.upper()}_N_Controls"] = n_cases, n_ctrls
-        if n_cases < CTX["PER_ANC_MIN_CASES"] or n_ctrls < CTX["PER_ANC_MIN_CONTROLS"]:
-            out[f"{anc.upper()}_REASON"] = "insufficient_stratum_counts"
-            continue
-        fit, _ = _fit_logit_ladder(X_anc, y_anc)
-        if fit and target in fit.params:
-            beta = fit.params[target]
-            out[f"{anc.upper()}_OR"] = np.exp(beta)
-            out[f"{anc.upper()}_P"] = fit.pvalues[target]
-        else:
-            out[f"{anc.upper()}_REASON"] = "subset_fit_failed"
-
-    io.atomic_write_json(result_path, out)
-    _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df.columns,
-                _index_fingerprint(worker_core_df.index), case_fp,
-                extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+        _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df.columns,
+                    _index_fingerprint(worker_core_df.index), case_fp,
+                    extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+    except Exception as e:
+        io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
+        traceback.print_exc()
+    finally:
+        gc.collect()

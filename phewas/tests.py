@@ -358,6 +358,106 @@ def test_perfect_separation_promoted_to_ridge(test_ctx):
         fit, reason = models._fit_logit_ladder(X, y)
         assert mock_logit.return_value.fit_regularized.called
 
+def test_worker_reports_n_used_after_sex_restriction(test_ctx):
+    """Verifies that N_*_Used fields are correctly reported after sex restriction."""
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort()
+        male_ids = core_data['sex'][core_data['sex']['sex'] == 1.0].index
+        cases = set(np.random.default_rng(1).choice(male_ids, 20, replace=False))
+        phenos['sex_restricted_pheno'] = {'disease': 'sex_restricted', 'category': 'endo', 'cases': cases}
+
+        core_df = sm.add_constant(pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main']
+        ], axis=1))
+
+        allowed_mask = {"endo": np.ones(len(core_df), dtype=bool)}
+        models.init_worker(core_df, allowed_mask, test_ctx)
+        case_idx = core_df.index.get_indexer(list(cases))
+        pheno_data = {"name": "sex_restricted_pheno", "category": "endo", "case_idx": case_idx[case_idx >= 0]}
+
+        models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
+
+        result_path = Path(test_ctx["RESULTS_CACHE_DIR"]) / "sex_restricted_pheno.json"
+        assert result_path.exists()
+        with open(result_path) as f:
+            res = json.load(f)
+
+        assert 'sex_restricted_to_1' in res['Model_Notes']
+        assert res['N_Cases'] == len(cases)
+        assert res['N_Total_Used'] == len(male_ids)
+        assert res['N_Cases_Used'] == len(cases)
+        assert res['N_Controls_Used'] == len(male_ids) - len(cases)
+
+def test_lrt_overall_invalidated_by_penalized_fit(test_ctx):
+    """Verifies Stage-1 LRT is skipped if a penalized fit is required."""
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort(N=100)
+        cases = list(phenos["A_strong_signal"]["cases"])
+        core_data['pcs'].loc[cases, 'PC1'] = 1000
+        core_data['pcs'].loc[~core_data['pcs'].index.isin(cases), 'PC1'] = -1000
+
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+
+        core_df = pd.concat([core_data['demographics'][['AGE_c', 'AGE_c_sq']], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
+        core_df = sm.add_constant(core_df)
+        anc_cols = pd.get_dummies(core_data['ancestry']['ANCESTRY'], prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df = core_df.join(anc_cols)
+
+        models.init_lrt_worker(core_df, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
+
+        task = {"name": "A_strong_signal", "category": "cardio", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", PerfectSeparationWarning)
+            models.lrt_overall_worker(task)
+
+        result_path = Path(test_ctx["LRT_OVERALL_CACHE_DIR"]) / "A_strong_signal.json"
+        assert result_path.exists()
+        with open(result_path) as f:
+            res = json.load(f)
+
+        assert res['LRT_Overall_Reason'] == 'penalized_fit_in_path'
+        assert pd.isna(res['P_LRT_Overall'])
+
+def test_lrt_followup_penalized_fit_omits_ci(test_ctx):
+    """Verifies Stage-2 per-ancestry CI is omitted for penalized fits."""
+    with temp_workspace():
+        rng = np.random.default_rng(42)
+        N=300
+        core_data, phenos = make_synth_cohort(N=N)
+        core_data['ancestry']['ANCESTRY'] = rng.choice(['eur', 'afr', 'amr'], N)
+
+        afr_ids = core_data['ancestry'][core_data['ancestry']['ANCESTRY'] == 'afr'].index
+        cases = list(phenos["C_moderate_signal"]["cases"])
+        afr_cases = [pid for pid in cases if pid in afr_ids]
+        afr_non_cases = [pid for pid in afr_ids if pid not in cases]
+
+        core_data['pcs'].loc[afr_cases, 'PC1'] = 1000
+        core_data['pcs'].loc[afr_non_cases, 'PC1'] = -1000
+
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+        core_df = pd.concat([core_data['demographics'][['AGE_c', 'AGE_c_sq']], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
+        core_df = sm.add_constant(core_df)
+
+        models.init_lrt_worker(core_df, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
+
+        task = {"name": "C_moderate_signal", "category": "neuro", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", PerfectSeparationWarning)
+            models.lrt_followup_worker(task)
+
+        result_path = Path(test_ctx["LRT_FOLLOWUP_CACHE_DIR"]) / "C_moderate_signal.json"
+        assert result_path.exists()
+        with open(result_path) as f:
+            res = json.load(f)
+
+        assert 'AFR_CI95' not in res
+        assert 'EUR_CI95' in res
+        assert 'AMR_CI95' in res
+        assert 'EUR_REASON' not in res
+
 # --- Integration Tests ---
 def test_fetcher_producer_drains_cache_only():
     with temp_workspace():
