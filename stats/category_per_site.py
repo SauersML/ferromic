@@ -101,17 +101,21 @@ def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
     df["_start"] = pd.to_numeric(df["Start"], errors="coerce").astype("Int64")
     df["_end"]   = pd.to_numeric(df["End"],   errors="coerce").astype("Int64")
 
-    # Determine group
+    # Determine group and align it to filtered rows using indexes
     if recur_col is not None:
         rc = pd.to_numeric(df[recur_col], errors="coerce")
-        group = np.where(rc == 1, "recurrent", np.where(rc == 0, "single-event", "uncategorized"))
+        group = pd.Series(
+            np.where(rc == 1, "recurrent", np.where(rc == 0, "single-event", "uncategorized")),
+            index=df.index,
+        )
     else:
-        group = np.full(len(df), "uncategorized", dtype=object)
+        group = pd.Series("uncategorized", index=df.index)
 
-    out = df.loc[df["_chrom"].notna() & df["_start"].notna() & df["_end"].notna(),
-                 ["_chrom", "_start", "_end"]].copy()
+    # Build filtered output and attach the aligned group labels
+    mask = df["_chrom"].notna() & df["_start"].notna() & df["_end"].notna()
+    out = df.loc[mask, ["_chrom", "_start", "_end"]].copy()
     out.rename(columns={"_chrom": "chrom", "_start": "start", "_end": "end"}, inplace=True)
-    out["group"] = group[df.index]  # aligned
+    out["group"] = group.loc[out.index].values
     out["start"] = out["start"].astype(int)
     out["end"]   = out["end"].astype(int)
 
