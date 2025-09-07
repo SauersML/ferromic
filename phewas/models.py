@@ -2,7 +2,7 @@ import os
 import gc
 import hashlib
 import warnings
-from datetime import datetime
+from datetime import datetime, timezone
 import traceback
 import sys
 
@@ -11,7 +11,7 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy import stats as sp_stats
 
-from phewas import iox as io
+import iox as io
 
 # --- Module-level globals for worker processes ---
 # These are populated by initializer functions.
@@ -19,6 +19,7 @@ worker_core_df = None
 allowed_mask_by_cat = None
 N_core = 0
 worker_anc_series = None
+finite_mask_worker = None
 CTX = {}  # Worker context with constants from run.py
 
 
@@ -27,11 +28,15 @@ def init_worker(df_to_share, masks, ctx):
     warnings.filterwarnings("ignore", message=r"^overflow encountered in exp", category=RuntimeWarning)
     warnings.filterwarnings("ignore", message=r"^divide by zero encountered in log", category=RuntimeWarning)
 
-    global worker_core_df, allowed_mask_by_cat, N_core, CTX
+    for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]:
+        os.environ[v] = "1"
+
+    global worker_core_df, allowed_mask_by_cat, N_core, CTX, finite_mask_worker
     worker_core_df = df_to_share
     allowed_mask_by_cat = masks
     N_core = len(df_to_share)
     CTX = ctx
+    finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
 
     required_keys = ["NUM_PCS", "MIN_CASES_FILTER", "MIN_CONTROLS_FILTER", "CACHE_DIR", "RESULTS_CACHE_DIR", "RIDGE_L2_BASE"]
     for key in required_keys:
@@ -46,12 +51,16 @@ def init_lrt_worker(df_to_share, masks, anc_series, ctx):
     warnings.filterwarnings("ignore", message=r"^overflow encountered in exp", category=RuntimeWarning)
     warnings.filterwarnings("ignore", message=r"^divide by zero encountered in log", category=RuntimeWarning)
 
-    global worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, CTX
+    for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]:
+        os.environ[v] = "1"
+
+    global worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, CTX, finite_mask_worker
     worker_core_df = df_to_share
     allowed_mask_by_cat = masks
     N_core = len(df_to_share)
     worker_anc_series = anc_series.reindex(df_to_share.index).str.lower()
     CTX = ctx
+    finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
 
     required_keys = ["NUM_PCS", "MIN_CASES_FILTER", "MIN_CONTROLS_FILTER", "CACHE_DIR", "LRT_FOLLOWUP_CACHE_DIR", "PER_ANC_MIN_CASES", "PER_ANC_MIN_CONTROLS", "RIDGE_L2_BASE"]
     for key in required_keys:
@@ -120,8 +129,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if case_idx.size > 0:
             case_mask[case_idx] = True
 
-        # Ensure modeling matrix contains only finite values across all covariates to prevent silent NaN/Inf propagation.
-        finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
+        # Use the pre-computed finite mask.
         valid_mask = (allowed_mask_by_cat[category] | case_mask) & finite_mask_worker
 
         n_total = int(valid_mask.sum())
@@ -135,111 +143,16 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if case_positions.size > 0:
             y[case_positions] = 1
 
-        # Harden design matrix for numeric stability and emit immediate diagnostics if any non-finite values slip through.
-        X_clean = worker_core_df[valid_mask].copy().astype(np.float64, copy=False)
-        try:
-            _X = X_clean.copy()
-            _num_cols = [c for c in _X.columns if pd.api.types.is_numeric_dtype(_X[c])]
-            _X = _X[_num_cols].astype(np.float64, copy=False)
-            _t = target_inversion
-            _tvec = _X[_t].to_numpy()
-
-            # Basic stats for target
-            _u = pd.Series(_tvec).nunique(dropna=False)
-            _mn = float(np.nanmin(_tvec)) if _u > 0 else float('nan')
-            _mx = float(np.nanmax(_tvec)) if _u > 0 else float('nan')
-            _sd = float(np.nanstd(_tvec))
-
-            # How many unique AGE values? (quadratic degeneracy check)
-            _age_unique = _X['AGE'].nunique(dropna=True) if 'AGE' in _X.columns else np.nan
-            _age_flag = (_age_unique <= 2) if pd.notna(_age_unique) else False
-
-            # Columns equal/affine to target (exact within float tol)
-            _eq_cols = []
-            for c in _X.columns:
-                if c == _t:
-                    continue
-                v = _X[c].to_numpy()
-                if np.allclose(v, _tvec, equal_nan=True):
-                    _eq_cols.append(c)
-                else:
-                    A = np.vstack([v, np.ones_like(v)]).T
-                    try:
-                        coef, *_ = np.linalg.lstsq(A, _tvec, rcond=None)
-                        resid = _tvec - (coef[0]*v + coef[1])
-                        if np.nanmax(np.abs(resid)) < 1e-10:
-                            _eq_cols.append(c + "[affine]")
-                    except Exception:
-                        pass
-
-            # R^2 of target explained by other covariates
-            _others = [c for c in _X.columns if c not in ['const', _t]]
-            _r2 = np.nan
-            if len(_others) > 0:
-                _A = _X[_others].to_numpy()
-                try:
-                    coef, *_ = np.linalg.lstsq(_A, _tvec, rcond=None)
-                    pred = _A.dot(coef)
-                    ss_res = float(np.nansum(( _tvec - pred )**2))
-                    ss_tot = float(np.nansum(( _tvec - np.nanmean(_tvec))**2))
-                    _r2 = 1.0 - (ss_res/ss_tot) if ss_tot > 0 else np.nan
-                except Exception:
-                    pass
-
-            # Matrix rank & condition number
-            try:
-                _arr = _X.to_numpy()
-                _rank = int(np.linalg.matrix_rank(_arr))
-                _s = np.linalg.svd(_arr, compute_uv=False)
-                _cond = float((_s[0] / _s[-1]) if (_s[-1] != 0) else np.inf)
-            except Exception:
-                _rank = -1
-                _cond = np.nan
-
-            # Zero-variance columns (after valid_mask)
-            _zv = [c for c in _X.columns if c not in ['const', _t] and pd.Series(_X[c]).nunique(dropna=False) <= 1]
-
-            # Print concise one-line summary
-            _age_note = " AGE_DEGENERATE(const,AGE,AGE_sq collinear!)" if _age_flag else ""
-            print(f"[DEBUG_COLLINEARITY] {s_name} N={len(_X)} rank={_rank} cond={_cond:.2e} "
-                  f"target_unique={_u} min={_mn:.4g} max={_mx:.4g} sd={_sd:.4g} "
-                  f"R2(target~others)={_r2:.6f} zero_var={_zv} eq_cols={_eq_cols}{_age_note}",
-                  flush=True)
-        except Exception as _e:
-            print(f"[DEBUG_COLLINEARITY] {s_name} failed: {type(_e).__name__}: {_e}", flush=True)
-
+        # Harden design matrix for numeric stability.
+        X_clean = worker_core_df[valid_mask].astype(np.float64, copy=False)
         if not np.isfinite(X_clean.to_numpy()).all():
             bad_cols = [c for c in X_clean.columns if not np.isfinite(X_clean[c].to_numpy()).all()]
             bad_rows_mask = ~np.isfinite(X_clean.to_numpy()).all(axis=1)
             bad_idx_sample = X_clean.index[bad_rows_mask][:10].tolist()
-            print(f"[TRACEBACK] Non-finite in worker design for phenotype '{s_name}'", flush=True)
-            print(f"[DEBUG] columns={','.join(bad_cols)} sample_rows={bad_idx_sample}", flush=True)
-            traceback.print_stack()
+            print(f"[fit FAIL] name={s_name} err=non_finite_in_design columns={','.join(bad_cols)} sample_rows={bad_idx_sample}", flush=True)
+            traceback.print_stack(file=sys.stderr)
             sys.stderr.flush()
         y_clean = pd.Series(y, index=X_clean.index, name='is_case')
-
-        try:
-            predictor_counts = X_clean[target_inversion].value_counts(dropna=False)
-            if len(predictor_counts) > 10:
-                counts_str = (
-                    f"{predictor_counts.head(5).to_string()}\n"
-                    f"...\n"
-                    f"{predictor_counts.tail(5).to_string()}"
-                )
-            else:
-                counts_str = predictor_counts.to_string()
-
-            print(
-                f"\n--- [DEBUG] Pre-fit diagnostics for phenotype '{s_name}' in Worker-{os.getpid()} ---"
-                f"\n[DEBUG] Total rows in design matrix: {len(X_clean):,}"
-                f"\n[DEBUG] Predictor '{target_inversion}' statistics:\n{X_clean[target_inversion].describe().to_string()}"
-                f"\n[DEBUG] Predictor '{target_inversion}' value counts (truncated):\n{counts_str}"
-                f"\n[DEBUG] Outcome 'is_case' value counts:\n{y_clean.value_counts().to_string()}"
-                "\n--- [DEBUG] End of diagnostics ---\n",
-                flush=True
-            )
-        except Exception as diag_e:
-            print(f"[DEBUG] Diagnostic printing failed for '{s_name}': {diag_e}", flush=True)
 
         n_cases = int(y_clean.sum())
         n_ctrls = int(n_total - n_cases)
@@ -255,14 +168,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
                 "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-                "case_idx_fp": case_idx_fp, "created_at": datetime.utcnow().isoformat() + "Z",
+                "case_idx_fp": case_idx_fp, "created_at": datetime.now(timezone.utc).isoformat(),
                 "skip_reason": "insufficient_cases_or_controls"
             })
-            print(
-                f"[Worker-{os.getpid()}] - [SKIP] {s_name:<40s} | N={n_total:,} Cases={n_cases:,} Ctrls={n_ctrls:,} "
-                f"| Reason=insufficient_cases_or_controls thresholds(cases>={CTX['MIN_CASES_FILTER']}, ctrls>={CTX['MIN_CONTROLS_FILTER']})",
-                flush=True
-            )
+            print(f"[fit SKIP] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} reason=insufficient_counts", flush=True)
             return
 
         drop_candidates = [c for c in X_clean.columns if c not in ('const', target_inversion)]
@@ -281,10 +190,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
                 "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-                "case_idx_fp": case_idx_fp, "created_at": datetime.utcnow().isoformat() + "Z",
+                "case_idx_fp": case_idx_fp, "created_at": datetime.now(timezone.utc).isoformat(),
             })
-            uvals = X_clean[target_inversion].dropna().unique().tolist()
-            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan | CONSTANT_DOSAGE unique_values={uvals}", flush=True)
+            print(f"[fit SKIP] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} reason=target_constant", flush=True)
             return
 
         def _converged(fit_obj):
@@ -386,10 +294,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
                 "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-                "case_idx_fp": case_idx_fp, "created_at": datetime.utcnow().isoformat() + "Z",
+                "case_idx_fp": case_idx_fp, "created_at": datetime.now(timezone.utc).isoformat(),
             })
-            what = f"AUTO_FIT_FAILED:{fit_reason}" if fit is None else "COEFFICIENT_MISSING_IN_FIT_PARAMS"
-            print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta=nan | OR=nan | P=nan | {what}", flush=True)
+            what = f"fit_failed:{fit_reason}" if fit is None else "coefficient_missing"
+            print(f"[fit FAIL] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} err={what}", flush=True)
             return
 
         beta = float(fit.params[target_inversion])
@@ -412,8 +320,12 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             hi = float(np.exp(beta + 1.96 * se))
             or_ci95_str = f"{lo:.3f},{hi:.3f}"
 
-        suffix = f" | P_CAUSE={pval_reason}" if (not np.isfinite(pval) and pval_reason) else ""
-        print(f"[Worker-{os.getpid()}] - [OK] {s_name:<40s} | N={n_total:,} | Cases={n_cases:,} | Beta={beta:+.3f} | OR={np.exp(beta):.3f} | P={pval:.2e}{suffix}", flush=True)
+        notes = []
+        if hasattr(fit, "_model_note"): notes.append(fit._model_note)
+        if hasattr(fit, "_used_ridge") and fit._used_ridge: notes.append("used_ridge")
+        if pval_reason: notes.append(pval_reason)
+        notes_str = ";".join(filter(None, notes))
+        print(f"[fit OK] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} beta={beta:+.4f} OR={np.exp(beta):.4f} p={pval:.3e} notes={notes_str}", flush=True)
 
         result_data = {
             "Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
@@ -425,7 +337,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
             "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
             "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-            "case_idx_fp": case_idx_fp, "created_at": datetime.utcnow().isoformat() + "Z",
+            "case_idx_fp": case_idx_fp, "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
     except Exception as e:
@@ -465,7 +377,7 @@ def lrt_overall_worker(task):
                 "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
                 "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-                "case_idx_fp": "", "created_at": datetime.utcnow().isoformat() + "Z"
+                "case_idx_fp": "", "created_at": datetime.now(timezone.utc).isoformat()
             })
             print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason=missing_case_cache", flush=True)
             return
@@ -485,12 +397,11 @@ def lrt_overall_worker(task):
             print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} CACHE_HIT", flush=True)
             return
 
-        finite_mask = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
         allowed_mask = allowed_mask_by_cat.get(category, np.ones(len(core_index), dtype=bool))
         case_mask = np.zeros(len(core_index), dtype=bool)
         if case_idx.size > 0:
             case_mask[case_idx] = True
-        valid_mask = (allowed_mask | case_mask) & finite_mask
+        valid_mask = (allowed_mask | case_mask) & finite_mask_worker
         n_valid = int(valid_mask.sum())
         y = np.zeros(n_valid, dtype=np.int8)
         case_positions = np.nonzero(case_mask[valid_mask])[0]
@@ -535,7 +446,7 @@ def lrt_overall_worker(task):
                 "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
                 "target": target_inversion, "core_index_fp": _index_fingerprint(core_index),
-                "case_idx_fp": case_fp, "created_at": datetime.utcnow().isoformat() + "Z"
+                "case_idx_fp": case_fp, "created_at": datetime.now(timezone.utc).isoformat()
             })
             print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason=insufficient_counts", flush=True)
             return
@@ -550,14 +461,10 @@ def lrt_overall_worker(task):
                 "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
                 "target": target_inversion, "core_index_fp": _index_fingerprint(core_index),
-                "case_idx_fp": case_fp, "created_at": datetime.utcnow().isoformat() + "Z"
+                "case_idx_fp": case_fp, "created_at": datetime.now(timezone.utc).isoformat()
             })
             print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason=target_constant", flush=True)
             return
-
-        def _design_rank(X):
-            try: return int(np.linalg.matrix_rank(X.values))
-            except Exception: return int(np.linalg.matrix_rank(np.asarray(X)))
 
         def _fit_logit_hardened(X, y_in, require_target):
             if not isinstance(X, pd.DataFrame): X = pd.DataFrame(X)
@@ -593,9 +500,7 @@ def lrt_overall_worker(task):
         }
 
         if (fit_red is not None) and (fit_full is not None) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
-            rank_red = _design_rank(X_red)
-            rank_full = _design_rank(X_full)
-            df_lrt = int(max(0, rank_full - rank_red))
+            df_lrt = int(max(0, X_full.shape[1] - X_red.shape[1]))
             if df_lrt > 0:
                 llr = 2.0 * (fit_full.llf - fit_red.llf)
                 out["P_LRT_Overall"] = float(sp_stats.chi2.sf(llr, df_lrt))
@@ -621,7 +526,7 @@ def lrt_overall_worker(task):
             "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
             "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
             "target": target_inversion, "core_index_fp": _index_fingerprint(core_index),
-            "case_idx_fp": case_fp, "created_at": datetime.utcnow().isoformat() + "Z"
+            "case_idx_fp": case_fp, "created_at": datetime.now(timezone.utc).isoformat()
         })
     except Exception:
         print(f"[LRT-Stage1-Worker-{os.getpid()}] {task.get('name','?')} FAILED with exception, writing error stub", flush=True)
@@ -658,7 +563,7 @@ def lrt_followup_worker(task):
                 "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
                 "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-                "case_idx_fp": "", "created_at": datetime.utcnow().isoformat() + "Z"
+                "case_idx_fp": "", "created_at": datetime.now(timezone.utc).isoformat()
             })
             print(f"[Ancestry-Worker-{os.getpid()}] {s_name} SKIP reason=missing_case_cache", flush=True)
             return
@@ -678,11 +583,10 @@ def lrt_followup_worker(task):
             print(f"[Ancestry-Worker-{os.getpid()}] {s_name} CACHE_HIT", flush=True)
             return
 
-        finite_mask = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
         allowed_mask = allowed_mask_by_cat.get(category, np.ones(len(core_index), dtype=bool))
         case_mask = np.zeros(len(core_index), dtype=bool)
         if case_idx.size > 0: case_mask[case_idx] = True
-        valid_mask = (allowed_mask | case_mask) & finite_mask
+        valid_mask = (allowed_mask | case_mask) & finite_mask_worker
         if int(valid_mask.sum()) == 0:
             io.atomic_write_json(result_path, {
                 'Phenotype': s_name, 'P_LRT_AncestryxDosage': float('nan'), 'LRT_df': float('nan'),
@@ -693,7 +597,7 @@ def lrt_followup_worker(task):
                 "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
                 "target": target_inversion, "core_index_fp": _index_fingerprint(core_index),
-                "case_idx_fp": case_fp, "created_at": datetime.utcnow().isoformat() + "Z"
+                "case_idx_fp": case_fp, "created_at": datetime.now(timezone.utc).isoformat()
             })
             print(f"[Ancestry-Worker-{os.getpid()}] {s_name} SKIP reason=no_valid_rows_after_mask", flush=True)
             return
@@ -724,7 +628,7 @@ def lrt_followup_worker(task):
                 "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
                 "target": target_inversion, "core_index_fp": _index_fingerprint(core_index),
-                "case_idx_fp": case_fp, "created_at": datetime.utcnow().isoformat() + "Z"
+                "case_idx_fp": case_fp, "created_at": datetime.now(timezone.utc).isoformat()
             })
             print(f"[Ancestry-Worker-{os.getpid()}] {s_name} SKIP reason=only_one_ancestry_level", flush=True)
             return
@@ -766,12 +670,8 @@ def lrt_followup_worker(task):
         fit_red, rr = _fit_logit(X_red, y_series, require_target=False)
         fit_full, fr = _fit_logit(X_full, y_series, require_target=True)
 
-        def _rank(X):
-            try: return int(np.linalg.matrix_rank(X.values))
-            except Exception: return int(np.linalg.matrix_rank(np.asarray(X)))
-
         if (fit_red is not None) and (fit_full is not None) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
-            df_lrt = int(max(0, _rank(X_full) - _rank(X_red)))
+            df_lrt = int(max(0, X_full.shape[1] - X_red.shape[1]))
             if df_lrt > 0:
                 llr = 2.0 * (fit_full.llf - fit_red.llf)
                 out['P_LRT_AncestryxDosage'] = float(sp_stats.chi2.sf(llr, df_lrt))
@@ -833,7 +733,7 @@ def lrt_followup_worker(task):
             "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
             "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
             "target": target_inversion, "core_index_fp": _index_fingerprint(core_index),
-            "case_idx_fp": case_fp, "created_at": datetime.utcnow().isoformat() + "Z"
+            "case_idx_fp": case_fp, "created_at": datetime.now(timezone.utc).isoformat()
         })
     except Exception:
         print(f"[Ancestry-Worker-{os.getpid()}] {task.get('name','?')} FAILED with exception, writing error stub", flush=True)
