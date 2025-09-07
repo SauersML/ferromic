@@ -298,15 +298,14 @@ def main():
                     return f"{float(np.exp(b - 1.96 * se)):.3f},{float(np.exp(b + 1.96 * se)):.3f}"
                 except Exception: return np.nan
 
-            if "Used_Ridge" not in df.columns:
-                df["Used_Ridge"] = False
-            df["Used_Ridge"] = df["Used_Ridge"].fillna(False)
-
-            missing_ci_mask = (
-                (df["OR_CI95"].isna() | (df["OR_CI95"].astype(str) == "") | (df["OR_CI95"].astype(str).str.lower() == "nan")) &
-                (df["Used_Ridge"] == False)
-            )
-            df.loc[missing_ci_mask, "OR_CI95"] = df.loc[missing_ci_mask, ["Beta", "P_Value"]].apply(lambda r: _compute_overall_or_ci(r["Beta"], r["P_Value"]), axis=1)
+            missing_ci_mask = (df["OR_CI95"].isna()
+                               | (df["OR_CI95"].astype(str) == "")
+                               | (df["OR_CI95"].astype(str).str.lower() == "nan"))
+            if "Used_Ridge" in df.columns:
+                missing_ci_mask &= (df["Used_Ridge"] == False)
+            df.loc[missing_ci_mask, "OR_CI95"] = (
+                df.loc[missing_ci_mask, ["Beta", "P_Value"]]
+                  .apply(lambda r: _compute_overall_or_ci(r["Beta"], r["P_Value"]), axis=1))
 
             total_core = int(len(core_df_with_const.index))
             known_anc = int(anc_series.notna().sum())
@@ -420,7 +419,7 @@ def main():
                                 sig_groups.append(anc)
                     df.at[idx, "FINAL_INTERPRETATION"] = ",".join(sig_groups) if sig_groups else "unable to determine"
 
-            safe_inversion_id = TARGET_INVERSION.replace(":", "_").replace("-", "_")
+            safe_inversion_id = TARGET_INVERSION.replace("/", "_").replace("..", "_").replace(":", "_")
             output_filename = f"phewas_results_{safe_inversion_id}.csv"
             print(f"\n--- Saving final results to '{output_filename}' ---")
             df.to_csv(output_filename, index=False)
