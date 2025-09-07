@@ -96,15 +96,9 @@ def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=()):
     return X.loc[:, cols]
 
 def _suppress_worker_warnings():
-    """Suppresses known-noisy warnings inside worker processes."""
-    warnings.filterwarnings(
-        "ignore", message=r"^overflow encountered in exp",
-        category=RuntimeWarning, module=r"^statsmodels\.discrete\.discrete_model$",
-    )
-    warnings.filterwarnings(
-        "ignore", message=r"^divide by zero encountered in log",
-        category=RuntimeWarning, module=r"^statsmodels\.discrete\.discrete_model$",
-    )
+    """ALL WARNINGS ARE ENABLED. This function now ensures all warnings are always shown."""
+    warnings.simplefilter("always")
+    return
 
 REQUIRED_CTX_KEYS = {
  "NUM_PCS", "MIN_CASES_FILTER", "MIN_CONTROLS_FILTER", "CACHE_DIR",
@@ -143,6 +137,11 @@ def init_worker(df_to_share, masks, ctx):
     global worker_core_df, allowed_mask_by_cat, N_core, CTX, finite_mask_worker
     worker_core_df, allowed_mask_by_cat, N_core, CTX = df_to_share, masks, len(df_to_share), ctx
     finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
+    bad = ~finite_mask_worker
+    if bad.any():
+        rows = worker_core_df.index[bad][:5].tolist()
+        bad_cols = [c for c in worker_core_df.columns if not np.isfinite(worker_core_df[c]).all()]
+        print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={bad_cols[:10]}", flush=True)
     print(f"[Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks.", flush=True)
 
 def init_lrt_worker(df_to_share, masks, anc_series, ctx):
@@ -154,6 +153,11 @@ def init_lrt_worker(df_to_share, masks, anc_series, ctx):
     worker_core_df, allowed_mask_by_cat, N_core, CTX = df_to_share, masks, len(df_to_share), ctx
     worker_anc_series = anc_series.reindex(df_to_share.index).str.lower()
     finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
+    bad = ~finite_mask_worker
+    if bad.any():
+        rows = worker_core_df.index[bad][:5].tolist()
+        bad_cols = [c for c in worker_core_df.columns if not np.isfinite(worker_core_df[c]).all()]
+        print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={bad_cols[:10]}", flush=True)
     print(f"[LRT-Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks, {worker_anc_series.nunique()} ancestries.", flush=True)
 
 def _index_fingerprint(index):
@@ -212,6 +216,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         elif X_clean[target_inversion].nunique(dropna=False) <= 1: skip_reason = "target_constant"
 
         if skip_reason:
+            print(f"[fit SKIP] name={s_name_safe} reason={skip_reason}", flush=True)
             result_data = {"Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
                            "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": skip_reason}
             io.atomic_write_json(result_path, result_data)
@@ -223,6 +228,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         X_work, y_work, sex_note, sex_skip = _apply_sex_restriction(X_clean, y_clean)
         if sex_note: notes.append(sex_note)
         if sex_skip:
+            print(f"[fit SKIP] name={s_name_safe} reason={sex_skip}", flush=True)
             result_data = {"Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
                            "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": sex_skip, "Model_Notes": ";".join(notes)}
             io.atomic_write_json(result_path, result_data)
@@ -237,13 +243,15 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if fit_reason in ("ridge_seeded_refit", "ridge_only"): notes.append(fit_reason)
 
         if not fit or target_inversion not in fit.params:
+            fit_reason_str = f"fit_failed:{fit_reason}"
+            print(f"[fit FAIL] name={s_name_safe} err={fit_reason_str}", flush=True)
             result_data = {"Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
                            "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
-                           "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": f"fit_failed:{fit_reason}", "Model_Notes": ";".join(notes)}
+                           "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": fit_reason_str, "Model_Notes": ";".join(notes)}
             io.atomic_write_json(result_path, result_data)
             _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df.columns,
                         _index_fingerprint(worker_core_df.index), case_idx_fp,
-                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": f"fit_failed:{fit_reason}"})
+                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": fit_reason_str})
             return
 
         beta = float(fit.params[target_inversion])
@@ -390,7 +398,12 @@ def lrt_followup_worker(task):
             _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": "only_one_ancestry_level"})
             return
 
-        A = pd.get_dummies(anc_vec, prefix='ANC', drop_first=True).reindex(Xb.index, fill_value=0)
+        if 'eur' in levels:
+            cat = pd.Categorical(anc_vec, categories=['eur'] + sorted([x for x in levels if x != 'eur']))
+        else:
+            cat = pd.Categorical(anc_vec)  # fallback
+
+        A = pd.get_dummies(cat, prefix='ANC', drop_first=True).reindex(Xb.index, fill_value=0)
         X_red = Xb.join(A)
         X_full = X_red.copy()
         for c in A.columns: X_full[f"{target}:{c}"] = X_red[target] * X_red[c]
@@ -425,6 +438,10 @@ def lrt_followup_worker(task):
             fit, _ = _fit_logit_ladder(X_anc_zv, y_anc)
             if fit and target in fit.params:
                 beta, pval = float(fit.params[target]), float(fit.pvalues.get(target, np.nan))
+                or_val = float(np.exp(beta))
+                print(f"[Ancestry-fit OK] name={s_name_safe} anc={anc.upper()} OR={or_val:.3f} p={pval:.3e}"
+                      f"{' (MLE)' if getattr(fit,'_final_is_mle', False) else ' (penalized)'}",
+                      flush=True)
                 out[f"{anc.upper()}_OR"], out[f"{anc.upper()}_P"] = float(np.exp(beta)), pval
                 if getattr(fit, "_final_is_mle", False) and not getattr(fit, '_used_ridge_seed', False):
                     se = float(fit.bse.get(target, np.nan))
