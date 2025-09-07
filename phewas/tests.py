@@ -489,7 +489,7 @@ def test_pipes_run_fits_creates_atomic_results(test_ctx):
             case_idx = core_df_with_const.index.get_indexer(list(p_data['cases']))
             q.put({"name": s_name, "category": p_data['category'], "case_idx": case_idx[case_idx != -1]})
         q.put(None)
-        pipes.run_fits(q, core_df_with_const, allowed_mask_by_cat, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"], test_ctx)
+        pipes.run_fits(q, core_df_with_const, allowed_mask_by_cat, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"], test_ctx, 4.0)
         result_files = os.listdir(test_ctx["RESULTS_CACHE_DIR"])
         assert len(result_files) >= 2 # B_insufficient is skipped
         with open(Path(test_ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json") as f: res = json.load(f)
@@ -507,7 +507,7 @@ def test_cache_equivalence_skips_work(test_ctx):
             case_idx = core_df_with_const.index.get_indexer(list(p_data['cases']))
             q.put({"name": s_name, "category": p_data['category'], "case_idx": case_idx[case_idx != -1]})
         q.put(None)
-        pipes.run_fits(q, core_df_with_const, allowed_mask_by_cat, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"], test_ctx)
+        pipes.run_fits(q, core_df_with_const, allowed_mask_by_cat, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"], test_ctx, 4.0)
         mtimes = {f: f.stat().st_mtime for f in Path(test_ctx["RESULTS_CACHE_DIR"]).glob("*.json")}
         time.sleep(1)
         q2 = queue.Queue()
@@ -515,7 +515,7 @@ def test_cache_equivalence_skips_work(test_ctx):
             case_idx = core_df_with_const.index.get_indexer(list(p_data['cases']))
             q2.put({"name": s_name, "category": p_data['category'], "case_idx": case_idx[case_idx != -1]})
         q2.put(None)
-        pipes.run_fits(q2, core_df_with_const, allowed_mask_by_cat, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"], test_ctx)
+        pipes.run_fits(q2, core_df_with_const, allowed_mask_by_cat, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"], test_ctx, 4.0)
         mtimes_after = {f: f.stat().st_mtime for f in Path(test_ctx["RESULTS_CACHE_DIR"]).glob("*.json")}
         assert mtimes == mtimes_after
 
@@ -553,14 +553,13 @@ def test_final_results_has_ci_and_ancestry_fields():
         assert "OR_CI95" in df.columns and "FINAL_INTERPRETATION" in df.columns
 
 def test_memory_envelope_relative():
-    if not os.environ.get("RUN_SLOW"):
-        pytest.skip("Memory test is slow, requires RUN_SLOW=1")
     with temp_workspace():
         base_rss = read_rss_bytes()
-        n_phenos, n_participants = (100, 10000) if os.environ.get("RUN_SLOW") == "1" else (20, 2000)
-        envelope_gb = 1.0 if os.environ.get("RUN_SLOW") == "1" else 0.25
+        n_phenos, n_participants = (100, 10000)
+        envelope_gb = 1.0
         core_data, phenos_base = make_synth_cohort(N=n_participants)
         phenos = {f"pheno_{i}": phenos_base["A_strong_signal"] for i in range(n_phenos)}
+        phenos.update(phenos_base)
         pheno_defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
         local_defs_path = make_local_pheno_defs_tsv(pheno_defs_df, Path("."))
         with preserve_run_globals():
