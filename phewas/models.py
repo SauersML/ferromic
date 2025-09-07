@@ -432,7 +432,33 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         X_work, y_work, sex_note, sex_skip, sex_col_dropped = _apply_sex_restriction_np(X_work, y_work, sex_ix)
         if sex_note: notes.append(sex_note)
         if sex_skip:
-            # ... (identical skip logic)
+            # Persist a deterministic skip result when sex restriction leaves no valid control stratum.
+            n_total_used = len(y_work)
+            n_cases_used = int(y_work.sum())
+            n_ctrls_used = n_total_used - n_cases_used
+            result_data = {
+                "Phenotype": s_name,
+                "N_Total": n_total,
+                "N_Cases": n_cases,
+                "N_Controls": n_ctrls,
+                "Skip_Reason": sex_skip,
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+                "Model_Notes": ";".join(notes) if notes else ""
+            }
+            io.atomic_write_json(result_path, result_data)
+            _write_meta(
+                meta_path,
+                "phewas_result",
+                s_name,
+                category,
+                target_inversion,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_idx_fp,
+                extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": sex_skip}
+            )
             return
 
         if sex_col_dropped:
@@ -454,7 +480,30 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if fit_reason in ("ridge_seeded_refit", "ridge_only"): notes.append(fit_reason)
 
         if not fit or target_ix_final is None or target_ix_final >= len(fit.params):
-            # ... (identical skip logic)
+            # Persist a deterministic skip result when the fit fails or the target coefficient is unavailable.
+            result_data = {
+                "Phenotype": s_name,
+                "N_Total": n_total,
+                "N_Cases": n_cases,
+                "N_Controls": n_ctrls,
+                "Skip_Reason": "fit_failed_or_target_missing",
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+                "Model_Notes": ";".join(notes) if notes else ""
+            }
+            io.atomic_write_json(result_path, result_data)
+            _write_meta(
+                meta_path,
+                "phewas_result",
+                s_name,
+                category,
+                target_inversion,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_idx_fp,
+                extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": "fit_failed_or_target_missing"}
+            )
             return
 
         beta = float(fit.params[target_ix_final])
