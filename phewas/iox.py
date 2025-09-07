@@ -20,11 +20,14 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
     If the existing file fails shape/schema/NA checks, regenerate it by calling generation_func.
     """
     def _valid_demographics(df):
-        ok = all(c in df.columns for c in ["AGE", "AGE_sq"])
-        ok = ok and is_numeric_dtype(df["AGE"]) and is_numeric_dtype(df["AGE_sq"])
-        if not ok: return False
-        # AGE_sq consistency (allow minor float noise)
-        return np.nanmax(np.abs(df["AGE_sq"].to_numpy() - (df["AGE"].to_numpy() ** 2))) < 1e-4
+        if not all(c in df.columns for c in ("AGE","AGE_sq")): return False
+        if not (is_numeric_dtype(df["AGE"]) and is_numeric_dtype(df["AGE_sq"])): return False
+        vals = df[["AGE","AGE_sq"]].astype(float)
+        if vals.isna().any().any():  # fail caches with NA; you regenerate anyway
+            return False
+        return np.allclose(vals["AGE_sq"].to_numpy(),
+                           (vals["AGE"]**2).to_numpy(),
+                           rtol=0, atol=1e-6)
 
     def _valid_inversion(df):
         """Validate that the inversion dosage file contains the target column and it's numeric."""
@@ -35,12 +38,13 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
         return is_numeric_dtype(df[validate_target]) and df[validate_target].notna().any()
 
     def _valid_pcs(df):
-        if validate_num_pcs is None:
-            return True
+        if validate_num_pcs is None: return True
         expected = [f"PC{i}" for i in range(1, validate_num_pcs + 1)]
-        if list(df.columns) != expected:
+        cols = list(df.columns)
+        try:
+            _ = [cols.index(c) for c in expected]  # preserves order requirement
+        except ValueError:
             return False
-        # all numeric, no all-NA columns
         return all(is_numeric_dtype(df[c]) and df[c].notna().any() for c in expected)
 
     def _valid_sex(df):
@@ -74,34 +78,36 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
         # everything else: accept as-is
         return True
 
+    def _coerce_index(df):
+        out = df.copy()
+        out.index = out.index.astype(str)
+        out.index.name = "person_id"
+        return out
+
     if os.path.exists(cache_path):
         print(f"  -> Found cache, loading from '{cache_path}'...")
         try:
             df = pd.read_parquet(cache_path)
         except Exception as e:
             print(f"  -> Cache unreadable ({e}); regenerating...")
-            df = generation_func(*args, **kwargs)
+            df = _coerce_index(generation_func(*args, **kwargs))
             df.to_parquet(cache_path)
             return df
 
         # Basic index hygiene for joins
-        try:
-            df.index = df.index.astype(str)
-            df.index.name = "person_id"
-        except Exception:
-            pass
+        df = _coerce_index(df)
 
         # Only validate known core covariates; regenerate if invalid
         if _needs_validation(cache_path) and not _validate(cache_path, df):
             print(f"  -> Cache at '{cache_path}' failed validation; regenerating...")
-            df = generation_func(*args, **kwargs)
+            df = _coerce_index(generation_func(*args, **kwargs))
             df.to_parquet(cache_path)
         return df
 
     print(f"  -> No cache found at '{cache_path}'. Generating data...")
-    data = generation_func(*args, **kwargs)
-    data.to_parquet(cache_path)
-    return data
+    df = _coerce_index(generation_func(*args, **kwargs))
+    df.to_parquet(cache_path)
+    return df
 
 
 def read_meta_json(path) -> dict | None:
@@ -114,7 +120,7 @@ def read_meta_json(path) -> dict | None:
 
 
 def write_meta_json(path, meta: dict):
-    pd.Series(meta).to_json(path)
+    atomic_write_json(path, meta)
 
 
 def atomic_write_json(path, data_obj):
@@ -163,6 +169,7 @@ def load_inversions(TARGET_INVERSION, INVERSION_DOSAGES_FILE):
     """Loads the target inversion dosage."""
     try:
         df = pd.read_csv(INVERSION_DOSAGES_FILE, sep="\t", usecols=["SampleID", TARGET_INVERSION])
+        df[TARGET_INVERSION] = pd.to_numeric(df[TARGET_INVERSION], errors="coerce")
         df['SampleID'] = df['SampleID'].astype(str)
         return df.set_index('SampleID').rename_axis('person_id')
     except Exception as e:
@@ -215,10 +222,10 @@ def load_genetic_sex(gcp_project, SEX_URI):
     return sex_df[['person_id', 'sex']].dropna().set_index('person_id')
 
 
-def load_ancestry_labels(gcp_project, PCS_URI):
+def load_ancestry_labels(gcp_project, LABELS_URI):
     """Loads predicted ancestry labels for each person."""
     print("    -> Loading genetic ancestry labels...")
-    raw = pd.read_csv(PCS_URI, sep="\t", storage_options={"project": gcp_project, "requester_pays": True},
+    raw = pd.read_csv(LABELS_URI, sep="\t", storage_options={"project": gcp_project, "requester_pays": True},
                       usecols=['research_id', 'ancestry_pred'])
     df = raw.rename(columns={'research_id': 'person_id', 'ancestry_pred': 'ANCESTRY'})
     df['person_id'] = df['person_id'].astype(str)
