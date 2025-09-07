@@ -197,18 +197,23 @@ def test_should_skip_meta_equivalence(test_ctx):
     with temp_workspace():
         core_df = pd.DataFrame(np.ones((10, 2)), columns=['const', TEST_TARGET_INVERSION])
         allowed_fp = "dummy_allowed_fp"
-        meta = {"model_columns": list(core_df.columns), "num_pcs": 10, "min_cases": 10, "min_ctrls": 10,
-                "target": TEST_TARGET_INVERSION, "category": "cat", "core_index_fp": models._index_fingerprint(core_df.index),
-                "case_idx_fp": "dummy_fp", "allowed_mask_fp": allowed_fp, "ridge_l2_base": 1.0}
+        # Define the metadata for the test
+        meta = {
+            "model_columns": list(core_df.columns), "num_pcs": 10, "min_cases": 10, "min_ctrls": 10,
+            "target": TEST_TARGET_INVERSION, "category": "cat", "core_index_fp": models._index_fingerprint(core_df.index),
+            "case_idx_fp": "dummy_fp", "allowed_mask_fp": allowed_fp, "ridge_l2_base": 1.0
+        }
+        # Write the metadata to a JSON file
         io.write_meta_json("test.meta.json", meta)
         models.CTX = test_ctx
+        # Check that the skip function returns True when the context is the same
         assert models._should_skip("test.meta.json", core_df, "dummy_fp", "cat", TEST_TARGET_INVERSION, allowed_fp)
-        test_ctx_changed = test_ctx.copy(); test_ctx_changed["MIN_CASES_FILTER"] = 11
+        # Change the context
+        test_ctx_changed = test_ctx.copy()
+        test_ctx_changed["MIN_CASES_FILTER"] = 11
         models.CTX = test_ctx_changed
-        # This test is tricky, as _should_skip relies on global CTX.
-        # The logic in _should_skip should be checked manually.
-        # For now, we assume the logic is correct if it passes with the same context.
-        pass
+        # Check that the skip function returns False when the context is different
+        assert not models._should_skip("test.meta.json", core_df, "dummy_fp", "cat", TEST_TARGET_INVERSION, allowed_fp)
 
 def test_pheno_cache_loader_returns_correct_indices():
     with temp_workspace():
@@ -552,7 +557,7 @@ def test_final_results_has_ci_and_ancestry_fields():
         run.main()
         output_path = Path(run.MASTER_RESULTS_CSV)
         assert output_path.exists()
-        df = pd.read_csv(output_path)
+        df = pd.read_csv(output_path, sep='\t')
         assert "OR_CI95" in df.columns and "FINAL_INTERPRETATION" in df.columns and "Q_GLOBAL" in df.columns
 
 def test_memory_envelope_relative():
@@ -631,7 +636,7 @@ def test_multi_inversion_pipeline_produces_master_file():
         output_path = Path(run.MASTER_RESULTS_CSV)
         assert output_path.exists(), "Master CSV file was not created"
 
-        df = pd.read_csv(output_path)
+        df = pd.read_csv(output_path, sep='\t')
 
         # Assert per-inversion directories were created
         assert (Path("./phewas_cache") / models.safe_basename(INV_A)).is_dir()
