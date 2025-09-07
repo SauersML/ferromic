@@ -20,8 +20,8 @@ FST_FILE       = Path("per_site_fst_output.falsta")
 
 OUTDIR         = Path("length_norm_trend_fast")
 
-MIN_LEN_PI     = 100_000
-MIN_LEN_FST    = 100_000
+MIN_LEN_PI     = 150_000
+MIN_LEN_FST    = 150_000
 
 # Proportion mode
 NUM_BINS_PROP  = 250
@@ -188,17 +188,19 @@ def _iter_falsta(file_path: Path, which: str, min_len: int):
             if header is None: continue
             m = rx.search(header)
             if not m:
+                # Header does not correspond to the requested metric; skip this record without treating it as a formatting error.
                 header = None
                 continue
             chrom, s, e = _norm_chr(m.group(1)), int(m.group(2)), int(m.group(3))
+
             data = _parse_values_fast(line)
-            # FALSTA sanity: length matches header bounds
+            # FALSTA sanity: the parsed vector length must exactly match the bounds from the header.
             exp_len = e - s + 1
             if data.size != exp_len:
-                skip_mismatch += 1
-                header = None
-                continue
+                # Treat any formatting or parsing inconsistency as a fatal error to prevent silent data loss.
+                raise RuntimeError(f"Parsed values length {data.size} does not match header bounds {exp_len} for metric '{which}' in {file_path} with header: {header}")
             if data.size < min_len or np.all(np.isnan(data)):
+                # Data-quality filter: too short or entirely NaN is not a formatting/parsing failure.
                 skip_len += 1
                 header = None
                 continue
