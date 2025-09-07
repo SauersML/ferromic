@@ -10,8 +10,97 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy import stats as sp_stats
+from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
 
 import iox as io
+
+def _safe_basename(name: str) -> str:
+    """Allow only [-._a-zA-Z0-9], map others to '_'."""
+    return "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in os.path.basename(str(name)))
+
+def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_fp, case_fp, extra=None):
+    """Helper to write a standardized metadata JSON file."""
+    base = {
+        "kind": kind, "s_name": s_name, "category": category, "model_columns": list(core_cols),
+        "num_pcs": CTX["NUM_PCS"], "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+        "target": target, "core_index_fp": core_idx_fp, "case_idx_fp": case_fp,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if extra:
+        base.update(extra)
+    io.atomic_write_json(meta_path, base)
+
+
+def _fit_logit_ladder(X, y, ridge_ok=True):
+    """
+    Tries fitting a logistic regression model with a ladder of increasingly robust methods.
+    Includes a ridge-seeded refit attempt.
+    Returns (fit, reason_str)
+    """
+    # 1. Newton-Raphson
+    try:
+        fit_try = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=False)
+        if fit_try.mle_retvals['converged']:
+            setattr(fit_try, "_used_ridge", False)
+            return fit_try, "newton"
+    except Exception:
+        pass
+
+    # 2. BFGS
+    try:
+        fit_try = sm.Logit(y, X).fit(disp=0, method='bfgs', maxiter=800, gtol=1e-8, warn_convergence=False)
+        if fit_try.mle_retvals['converged']:
+            setattr(fit_try, "_used_ridge", False)
+            return fit_try, "bfgs"
+    except Exception:
+        pass
+
+    # 3. Ridge-seeded refit
+    if ridge_ok:
+        try:
+            p = X.shape[1] - (1 if 'const' in X.columns else 0)
+            n = max(1, X.shape[0])
+            alpha = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / float(n)), 1e-6)
+            ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=800)
+
+            try:
+                refit = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=400, tol=1e-8, start_params=ridge_fit.params, warn_convergence=False)
+                if refit.mle_retvals['converged']:
+                    setattr(refit, "_used_ridge", True)
+                    return refit, "ridge_seeded_refit"
+            except Exception:
+                pass
+
+            setattr(ridge_fit, "_used_ridge", True)
+            return ridge_fit, "ridge_only"
+        except Exception as e:
+            return None, f"ridge_exception:{type(e).__name__}"
+
+    return None, "all_methods_failed"
+
+def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
+    """
+    Enforce: if all cases are one sex, only use that sex's rows (and drop 'sex').
+    If that sex has zero controls, signal skip.
+    Returns: (X2, y2, note:str, skip_reason:str|None)
+    """
+    if 'sex' not in X.columns:
+        return X, y, "", None
+
+    tab = pd.crosstab(X['sex'], y).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
+    case_sexes = [s for s in [0.0, 1.0] if s in tab.index and tab.loc[s, 1] > 0]
+
+    if len(case_sexes) != 1:
+        return X, y, "", None
+
+    s = case_sexes[0]
+    if tab.loc[s, 0] == 0:
+        return X, y, "", "sex_no_controls_in_case_sex"
+
+    keep = X['sex'].eq(s)
+    X2 = X.loc[keep].drop(columns=['sex'])
+    y2 = y.loc[keep]
+    return X2, y2, "sex_restricted", None
 
 # --- Module-level globals for worker processes ---
 # These are populated by initializer functions.
@@ -114,9 +203,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     """CONSUMER: Runs a single model. Executed in a separate process using integer indices and precomputed masks."""
     global worker_core_df, allowed_mask_by_cat, N_core
     s_name = pheno_data["name"]
+    s_name_safe = _safe_basename(s_name)
     category = pheno_data["category"]
     case_idx = pheno_data["case_idx"]
-    result_path = os.path.join(results_cache_dir, f"{s_name}.json")
+    result_path = os.path.join(results_cache_dir, f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
     # Order-insensitive fingerprint of the case set based on person_id values to ensure stable caching across runs.
     case_ids_for_fp = worker_core_df.index[case_idx] if case_idx.size > 0 else pd.Index([], name=worker_core_df.index.name)
@@ -130,7 +220,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             case_mask[case_idx] = True
 
         # Use the pre-computed finite mask.
-        valid_mask = (allowed_mask_by_cat[category] | case_mask) & finite_mask_worker
+        allowed_mask = allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool))
+        valid_mask = (allowed_mask | case_mask) & finite_mask_worker
 
         n_total = int(valid_mask.sum())
         if n_total == 0:
@@ -163,14 +254,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "Skip_Reason": "insufficient_cases_or_controls"
             }
             io.atomic_write_json(result_path, result_data)
-            io.atomic_write_json(meta_path, {
-                "kind": "phewas_result", "s_name": s_name, "category": category, "model": "Logit",
-                "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-                "case_idx_fp": case_idx_fp, "created_at": datetime.now(timezone.utc).isoformat(),
-                "skip_reason": "insufficient_cases_or_controls"
-            })
+            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
+                        worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_idx_fp,
+                        extra={"skip_reason": "insufficient_cases_or_controls"})
             print(f"[fit SKIP] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} reason=insufficient_counts", flush=True)
             return
 
@@ -185,13 +271,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "Beta": float('nan'), "OR": float('nan'), "P_Value": float('nan')
             }
             io.atomic_write_json(result_path, result_data)
-            io.atomic_write_json(meta_path, {
-                "kind": "phewas_result", "s_name": s_name, "category": category, "model": "Logit",
-                "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-                "case_idx_fp": case_idx_fp, "created_at": datetime.now(timezone.utc).isoformat(),
-            })
+            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
+                        worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_idx_fp)
             print(f"[fit SKIP] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} reason=target_constant", flush=True)
             return
 
@@ -208,80 +289,33 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         X_work = X_clean
         y_work = y_clean
         model_notes_worker = []
-        if 'sex' in X_work.columns:
-            try:
-                tab = pd.crosstab(X_work['sex'], y_work).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
-                valid_sexes = []
-                for s in [0.0, 1.0]:
-                    if s in tab.index:
-                        has_ctrl = bool(tab.loc[s, 0] > 0)
-                        has_case = bool(tab.loc[s, 1] > 0)
-                        if has_ctrl and has_case:
-                            valid_sexes.append(s)
-                if len(valid_sexes) == 1:
-                    mask = X_work['sex'].isin(valid_sexes)
-                    X_work = X_work.loc[mask]
-                    y_work = y_work.loc[X_work.index]
-                    model_notes_worker.append("sex_restricted")
-                elif len(valid_sexes) == 0:
-                    X_work = X_work.drop(columns=['sex'])
-                    model_notes_worker.append("sex_dropped_for_separation")
-            except Exception:
-                pass
 
-        fit = None
-        fit_reason = ""
-        try:
-            fit_try = sm.Logit(y_work, X_work).fit(disp=0, method='newton', maxiter=200, tol=1e-8, warn_convergence=True)
-            if _converged(fit_try):
-                setattr(fit_try, "_model_note", ";".join(model_notes_worker) if model_notes_worker else "")
-                setattr(fit_try, "_used_ridge", False)
-                fit = fit_try
-        except Exception as e:
-            print("[TRACEBACK] run_single_model_worker newton failed:", flush=True)
-            traceback.print_exc()
-            fit_reason = f"newton_exception:{type(e).__name__}:{e}"
+        X_work, y_work, note, skip_reason = _apply_sex_restriction(X_work, y_work)
+        if skip_reason:
+            result_data = {
+                "Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
+                "Beta": float('nan'), "OR": float('nan'), "P_Value": float('nan'), "Skip_Reason": skip_reason
+            }
+            io.atomic_write_json(result_path, result_data)
+            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
+                        worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_idx_fp,
+                        extra={"skip_reason": skip_reason})
+            print(f"[fit SKIP] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} reason={skip_reason}", flush=True)
+            return
 
-        if fit is None:
-            try:
-                fit_try = sm.Logit(y_work, X_work).fit(disp=0, maxiter=800, method='bfgs', gtol=1e-8, warn_convergence=True)
-                if _converged(fit_try):
-                    setattr(fit_try, "_model_note", ";".join(model_notes_worker) if model_notes_worker else "")
-                    setattr(fit_try, "_used_ridge", False)
-                    fit = fit_try
-                else:
-                    fit_reason = "bfgs_not_converged"
-            except Exception as e:
-                print("[TRACEBACK] run_single_model_worker bfgs failed:", flush=True)
-                traceback.print_exc()
-                fit_reason = f"bfgs_exception:{type(e).__name__}:{e}"
+        if note:
+            model_notes_worker.append(note)
 
-        if fit is None:
-            try:
-                p = X_work.shape[1] - (1 if 'const' in X_work.columns else 0)
-                n = max(1, X_work.shape[0])
-                alpha = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / float(n)), 1e-6)
-                ridge_fit = sm.Logit(y_work, X_work).fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=800)
-                try:
-                    refit = sm.Logit(y_work, X_work).fit(disp=0, method='newton', maxiter=400, tol=1e-8, start_params=ridge_fit.params, warn_convergence=True)
-                    if _converged(refit):
-                        model_notes_worker.append("ridge_seeded_refit")
-                        setattr(refit, "_model_note", ";".join(model_notes_worker))
-                        setattr(refit, "_used_ridge", True)
-                        fit = refit
-                    else:
-                        model_notes_worker.append("ridge_only")
-                        setattr(ridge_fit, "_model_note", ";".join(model_notes_worker))
-                        setattr(ridge_fit, "_used_ridge", True)
-                        fit = ridge_fit
-                except Exception:
-                    model_notes_worker.append("ridge_only")
-                    setattr(ridge_fit, "_model_note", ";".join(model_notes_worker))
-                    setattr(ridge_fit, "_used_ridge", True)
-                    fit = ridge_fit
-            except Exception as e:
-                fit = None
-                fit_reason = f"ridge_exception:{type(e).__name__}:{e}"
+        # After any restriction, re-drop zero-variance columns
+        drop_candidates = [c for c in X_work.columns if c not in ('const', target_inversion)]
+        zvars = [c for c in drop_candidates if X_work[c].nunique(dropna=False) <= 1]
+        if zvars:
+            X_work = X_work.drop(columns=zvars)
+
+        fit, fit_reason = _fit_logit_ladder(X_work, y_work, ridge_ok=True)
+        if fit:
+            model_notes_worker.append(fit_reason)
+            setattr(fit, "_model_note", ";".join(model_notes_worker))
 
         if fit is None or target_inversion not in fit.params:
             result_data = {
@@ -289,13 +323,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "Beta": float('nan'), "OR": float('nan'), "P_Value": float('nan')
             }
             io.atomic_write_json(result_path, result_data)
-            io.atomic_write_json(meta_path, {
-                "kind": "phewas_result", "s_name": s_name, "category": category, "model": "Logit",
-                "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-                "case_idx_fp": case_idx_fp, "created_at": datetime.now(timezone.utc).isoformat(),
-            })
+            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
+                        worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_idx_fp)
             what = f"fit_failed:{fit_reason}" if fit is None else "coefficient_missing"
             print(f"[fit FAIL] name={s_name} N={n_total} cases={n_cases} ctrls={n_ctrls} err={what}", flush=True)
             return
@@ -329,16 +358,13 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         result_data = {
             "Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls,
-            "Beta": beta, "OR": float(np.exp(beta)), "P_Value": pval, "OR_CI95": or_ci95_str
+            "Beta": beta, "OR": float(np.exp(beta)), "P_Value": pval, "OR_CI95": or_ci95_str,
+            "Model_Notes": notes_str,
+            "Used_Ridge": bool(getattr(fit, "_used_ridge", False))
         }
         io.atomic_write_json(result_path, result_data)
-        io.atomic_write_json(meta_path, {
-            "kind": "phewas_result", "s_name": s_name, "category": category, "model": "Logit",
-            "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
-            "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-            "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-            "case_idx_fp": case_idx_fp, "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
+                    worker_core_df.columns, _index_fingerprint(worker_core_df.index), case_idx_fp)
 
     except Exception as e:
         print(f"[Worker-{os.getpid()}] - [FAIL] {s_name:<40s} | Error occurred. Full traceback follows:", flush=True)
@@ -360,10 +386,11 @@ def lrt_overall_worker(task):
     """
     try:
         s_name = task["name"]
+        s_name_safe = _safe_basename(s_name)
         category = task["category"]
         cdr_codename = task["cdr_codename"]
         target_inversion = task["target"]
-        result_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name}.json")
+        result_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name_safe}.json")
         meta_path = result_path + ".meta.json"
 
         pheno_cache_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{cdr_codename}.parquet")
@@ -372,13 +399,8 @@ def lrt_overall_worker(task):
                 "Phenotype": s_name, "P_LRT_Overall": float('nan'), "LRT_df_Overall": float('nan'),
                 "LRT_Overall_Reason": "missing_case_cache"
             })
-            io.atomic_write_json(meta_path, {
-                "kind": "lrt_overall", "s_name": s_name, "category": category,
-                "model_columns": list(worker_core_df.columns), "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "target": target_inversion, "core_index_fp": _index_fingerprint(worker_core_df.index),
-                "case_idx_fp": "", "created_at": datetime.now(timezone.utc).isoformat()
-            })
+            _write_meta(meta_path, "lrt_overall", s_name, category, target_inversion,
+                        worker_core_df.columns, _index_fingerprint(worker_core_df.index), "")
             print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason=missing_case_cache", flush=True)
             return
 
@@ -409,7 +431,8 @@ def lrt_overall_worker(task):
             y[case_positions] = 1
 
         pc_cols_local = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
-        base_cols = ['const', target_inversion, 'sex'] + pc_cols_local + ['AGE']
+        anc_cols = [c for c in worker_core_df.columns if c.startswith("ANC_")]
+        base_cols = ['const', target_inversion, 'sex'] + pc_cols_local + ['AGE_c', 'AGE_c_sq'] + anc_cols
         X_base = worker_core_df.loc[valid_mask, base_cols].astype(np.float64, copy=False)
         y_series = pd.Series(y, index=X_base.index, name='is_case')
 
@@ -603,7 +626,8 @@ def lrt_followup_worker(task):
             return
 
         pc_cols_local = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
-        base_cols = ['const', target_inversion, 'sex'] + pc_cols_local + ['AGE']
+        anc_cols = [c for c in worker_core_df.columns if c.startswith("ANC_")]
+        base_cols = ['const', target_inversion, 'sex'] + pc_cols_local + ['AGE_c', 'AGE_c_sq'] + anc_cols
         X_base = worker_core_df.loc[valid_mask, base_cols].astype(np.float64, copy=False)
         y = np.zeros(X_base.shape[0], dtype=np.int8)
         case_positions = np.nonzero(case_mask[valid_mask])[0]
@@ -695,7 +719,7 @@ def lrt_followup_worker(task):
                 out[f"{anc.upper()}_OR"] = float('nan'); out[f"{anc.upper()}_CI95"] = float('nan'); out[f"{anc.upper()}_P"] = float('nan')
                 out[f"{anc.upper()}_REASON"] = "no_rows_in_group"
                 continue
-            X_g = worker_core_df.loc[group_mask, ['const', target_inversion, 'sex'] + pc_cols_local + ['AGE']].astype(np.float64, copy=False)
+            X_g = worker_core_df.loc[group_mask, ['const', target_inversion, 'sex'] + pc_cols_local + ['AGE_c', 'AGE_c_sq']].astype(np.float64, copy=False)
             y_g = np.zeros(X_g.shape[0], dtype=np.int8)
             case_positions_g = np.nonzero(case_mask[group_mask])[0]
             if case_positions_g.size > 0: y_g[case_positions_g] = 1

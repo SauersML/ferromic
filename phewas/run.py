@@ -182,7 +182,6 @@ def main():
             sex_df.index = sex_df.index.astype(str)
 
             pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-            covariate_cols = [TARGET_INVERSION] + ["sex"] + pc_cols + ["AGE"]
 
             core_df = (
                 demographics_df.join(inversion_df, how="inner")
@@ -194,12 +193,19 @@ def main():
             core_df = core_df[~core_df.index.isin(related_ids_to_remove)]
             print(f"[Setup]    - Post-filter unrelated cohort size: {len(core_df):,}")
 
+            # Center age and create squared term for better model stability
+            age_mean = core_df['AGE'].mean()
+            core_df['AGE_c'] = core_df['AGE'] - age_mean
+            core_df['AGE_c_sq'] = core_df['AGE_c'] ** 2
+            print(f"[Setup]    - Age centered around mean ({age_mean:.2f}). AGE_c and AGE_c_sq created.")
+
+            covariate_cols = [TARGET_INVERSION] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
             core_df = core_df[covariate_cols]
             core_df_with_const = sm.add_constant(core_df, prepend=True)
 
             print("\n--- [DIAGNOSTIC] Testing matrix condition number ---")
             try:
-                cols = ['const', 'sex', 'AGE', TARGET_INVERSION] + [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+                cols = ['const', 'sex', 'AGE_c', 'AGE_c_sq', TARGET_INVERSION] + [f"PC{i}" for i in range(1, NUM_PCS + 1)]
                 mat = core_df_with_const[cols].dropna().to_numpy()
                 cond = np.linalg.cond(mat)
                 print(f"[DIAGNOSTIC] Condition number (current model cols): {cond:,.2f}")
@@ -213,6 +219,18 @@ def main():
 
             if core_df_with_const.shape[0] == 0:
                 raise RuntimeError("FATAL: Core covariate DataFrame has 0 rows after join. Check input data alignment.")
+
+            # Add ancestry main effects to adjust for population structure in Stage-1 LRT
+            print("[Setup]    - Loading ancestry labels for Stage-1 model adjustment...")
+            ancestry = io.get_cached_or_generate(
+                os.path.join(CACHE_DIR, "ancestry_labels.parquet"),
+                io.load_ancestry_labels, gcp_project, PCS_URI
+            )
+            anc_series = ancestry.reindex(core_df_with_const.index)["ANCESTRY"].str.lower()
+            anc_cat = pd.Categorical(anc_series)
+            A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True, dtype=np.float64)
+            core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
+            print(f"[Setup]    - Added {len(A.columns)} ancestry columns for adjustment: {list(A.columns)}")
 
             core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
             global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
@@ -280,14 +298,15 @@ def main():
                     return f"{float(np.exp(b - 1.96 * se)):.3f},{float(np.exp(b + 1.96 * se)):.3f}"
                 except Exception: return np.nan
 
-            missing_ci_mask = df["OR_CI95"].isna() | (df["OR_CI95"].astype(str) == "") | (df["OR_CI95"].astype(str).str.lower() == "nan")
-            df.loc[missing_ci_mask, "OR_CI95"] = df.loc[missing_ci_mask, ["Beta", "P_Value"]].apply(lambda r: _compute_overall_or_ci(r["Beta"], r["P_Value"]), axis=1)
+            if "Used_Ridge" not in df.columns:
+                df["Used_Ridge"] = False
+            df["Used_Ridge"] = df["Used_Ridge"].fillna(False)
 
-            ancestry_labels_df = io.get_cached_or_generate(
-                os.path.join(CACHE_DIR, "ancestry_labels.parquet"),
-                io.load_ancestry_labels, gcp_project, PCS_URI
+            missing_ci_mask = (
+                (df["OR_CI95"].isna() | (df["OR_CI95"].astype(str) == "") | (df["OR_CI95"].astype(str).str.lower() == "nan")) &
+                (df["Used_Ridge"] == False)
             )
-            anc_series = ancestry_labels_df.reindex(core_df_with_const.index)["ANCESTRY"].str.lower()
+            df.loc[missing_ci_mask, "OR_CI95"] = df.loc[missing_ci_mask, ["Beta", "P_Value"]].apply(lambda r: _compute_overall_or_ci(r["Beta"], r["P_Value"]), axis=1)
 
             total_core = int(len(core_df_with_const.index))
             known_anc = int(anc_series.notna().sum())
@@ -401,7 +420,8 @@ def main():
                                 sig_groups.append(anc)
                     df.at[idx, "FINAL_INTERPRETATION"] = ",".join(sig_groups) if sig_groups else "unable to determine"
 
-            output_filename = f"phewas_results_{TARGET_INVERSION}.csv"
+            safe_inversion_id = TARGET_INVERSION.replace(":", "_").replace("-", "_")
+            output_filename = f"phewas_results_{safe_inversion_id}.csv"
             print(f"\n--- Saving final results to '{output_filename}' ---")
             df.to_csv(output_filename, index=False)
 
