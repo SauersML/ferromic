@@ -44,18 +44,44 @@ def _converged(fit_obj):
         return False
 
 def _logit_fit(model, method, **kw):
-    """Helper to fit a logit model, trying with and without warn_convergence for statsmodels compat."""
-    try:
-        # Try with modern signature
-        return model.fit(disp=0, method=method, maxiter=kw.get("maxiter", 200),
-                         tol=kw.get("tol", 1e-8), gtol=kw.get("gtol", None),
-                         start_params=kw.get("start_params", None),
-                         warn_convergence=False)
-    except TypeError:
-        # Fallback for older statsmodels that don't have warn_convergence
-        return model.fit(disp=0, method=method, maxiter=kw.get("maxiter", 200),
-                         tol=kw.get("tol", 1e-8), gtol=kw.get("gtol", None),
-                         start_params=kw.get("start_params", None))
+    """
+    Helper to fit a logit model with per-solver argument routing for stability and correctness.
+
+    For 'newton', only pass 'tol' since 'gtol' is unsupported for that solver.
+    For 'bfgs' and 'cg', pass 'gtol' and do not pass 'tol'.
+    Falls back gracefully when 'warn_convergence' is unavailable in the installed statsmodels.
+    """
+    maxiter = kw.get("maxiter", 200)
+    start_params = kw.get("start_params", None)
+
+    if method in ("bfgs", "cg"):
+        fit_kwargs = {
+            "disp": 0,
+            "method": method,
+            "maxiter": maxiter,
+            "start_params": start_params,
+        }
+        gtol = kw.get("gtol", 1e-8)
+        if gtol is not None:
+            fit_kwargs["gtol"] = gtol
+        try:
+            return model.fit(warn_convergence=False, **fit_kwargs)
+        except TypeError:
+            return model.fit(**fit_kwargs)
+    else:
+        fit_kwargs = {
+            "disp": 0,
+            "method": method,
+            "maxiter": maxiter,
+            "start_params": start_params,
+        }
+        tol = kw.get("tol", 1e-8)
+        if tol is not None:
+            fit_kwargs["tol"] = tol
+        try:
+            return model.fit(warn_convergence=False, **fit_kwargs)
+        except TypeError:
+            return model.fit(**fit_kwargs)
 
 def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None):
     """
