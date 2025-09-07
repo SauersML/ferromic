@@ -335,51 +335,57 @@ uniq_recur_counts = data.groupby('orig_index')['0_single_1_recur'].nunique()
 valid_indices = uniq_recur_counts[uniq_recur_counts == 1].index
 inter_df = data[data['orig_index'].isin(valid_indices)].copy()
 
-# Prepare numeric pi values and remove non-finite entries
+# Prepare numeric pi values and clean non-finite and sentinel values that indicate prior infinity handling
 inter_df['pi_direct'] = pd.to_numeric(inter_df['0_pi_filtered'], errors='coerce')
 inter_df['pi_inverted'] = pd.to_numeric(inter_df['1_pi_filtered'], errors='coerce')
-inter_df = inter_df.replace([np.inf, -np.inf], np.nan)
+inter_df.replace([np.inf, -np.inf], np.nan, inplace=True)
+inter_df.loc[inter_df['pi_direct'] >= 1000000000, 'pi_direct'] = np.nan
+inter_df.loc[inter_df['pi_inverted'] >= 1000000000, 'pi_inverted'] = np.nan
 inter_df = inter_df.dropna(subset=['pi_direct', 'pi_inverted', '0_single_1_recur'])
 
-# Long format: each inversion contributes two rows (direct, inverted)
-long = inter_df[['orig_index', '0_single_1_recur', 'pi_direct', 'pi_inverted']].rename(columns={'0_single_1_recur': 'recur'})
-long = long.melt(id_vars=['orig_index', 'recur'], value_vars=['pi_direct', 'pi_inverted'], var_name='status', value_name='pi')
+# Log transform for variance stabilization
+inter_df['log_pi_direct'] = np.log1p(inter_df['pi_direct'])
+inter_df['log_pi_inverted'] = np.log1p(inter_df['pi_inverted'])
 
-# Status indicator: 1 = inverted, 0 = direct
-long['status_inv'] = (long['status'] == 'pi_inverted').astype(int)
+# Compute within-inversion paired differences on the log scale
+paired = inter_df[['orig_index', '0_single_1_recur', 'log_pi_direct', 'log_pi_inverted']].dropna()
+paired['delta_log_pi'] = paired['log_pi_inverted'] - paired['log_pi_direct']
 
-# Response transform to stabilize variance and reduce skew
-long['log_pi'] = np.log1p(long['pi'])
-long = long.dropna(subset=['log_pi', 'status_inv', 'recur'])
+# Split deltas by recurrence group
+delta_rec = paired.loc[paired['0_single_1_recur'] == 1, 'delta_log_pi'].dropna()
+delta_nonrec = paired.loc[paired['0_single_1_recur'] == 0, 'delta_log_pi'].dropna()
 
-# Fit mixed model with interaction
-import statsmodels.formula.api as smf
-md = smf.mixedlm("log_pi ~ status_inv * C(recur)", data=long, groups=long["orig_index"])
-mdf = md.fit()
+print("\nPaired within-inversion tests on log-transformed pi:")
+if len(delta_rec) > 0 and not np.allclose(delta_rec.values, 0.0):
+    w_stat_rec, w_p_rec = stats.wilcoxon(delta_rec)
+    print(f"  Recurrent: n={len(delta_rec)}, Wilcoxon signed-rank statistic={w_stat_rec}, p={w_p_rec:.6f}")
+else:
+    w_stat_rec, w_p_rec = np.nan, np.nan
+    print("  Recurrent: insufficient non-zero paired differences")
 
-print("\nMixed-effects model: log(1 + pi) ~ status_inv * C(recur) with random intercept per inversion")
-print(f"Number of inversions (groups) used: {long['orig_index'].nunique()}")
-print(f"Number of observations: {len(long)}")
+if len(delta_nonrec) > 0 and not np.allclose(delta_nonrec.values, 0.0):
+    w_stat_nonrec, w_p_nonrec = stats.wilcoxon(delta_nonrec)
+    print(f"  Non-recurrent: n={len(delta_nonrec)}, Wilcoxon signed-rank statistic={w_stat_nonrec}, p={w_p_nonrec:.6f}")
+else:
+    w_stat_nonrec, w_p_nonrec = np.nan, np.nan
+    print("  Non-recurrent: insufficient non-zero paired differences")
 
-# Extract and print coefficients and p-values
-params = mdf.params
-pvals = mdf.pvalues
+print("\nBetween-group test on paired deltas (inverted minus direct):")
+if len(delta_rec) > 0 and len(delta_nonrec) > 0:
+    u_stat_delta, p_delta = stats.mannwhitneyu(delta_rec.values, delta_nonrec.values, alternative='two-sided')
+    print(f"  Mann-Whitney U on deltas: U={u_stat_delta}, p={p_delta:.6f}")
+else:
+    u_stat_delta, p_delta = np.nan, np.nan
+    print("  Insufficient paired data for between-group test")
 
-coef_status = params.get('status_inv', np.nan)
-p_status = pvals.get('status_inv', np.nan)
-
-coef_recur = params.get('C(recur)[T.1]', np.nan)
-p_recur = pvals.get('C(recur)[T.1]', np.nan)
-
-interaction_name = 'status_inv:C(recur)[T.1]'
-coef_inter = params.get(interaction_name, np.nan)
-p_inter = pvals.get(interaction_name, np.nan)
-
-print(f"Main effect (status_inv): coef={coef_status:.6f}, p={p_status:.6g}")
-print(f"Main effect (C(recur)[T.1]): coef={coef_recur:.6f}, p={p_recur:.6g}")
-print(f"Interaction (status_inv:C(recur)[T.1]): coef={coef_inter:.6f}, p={p_inter:.6g}")
+# Save paired and between-group results
+paired_results = pd.DataFrame([
+    {'Comparison': 'Paired (Recurrent): inverted - direct (log)', 'Test': 'Wilcoxon signed-rank', 'n': len(delta_rec), 'Statistic': w_stat_rec, 'P-value': w_p_rec},
+    {'Comparison': 'Paired (Non-recurrent): inverted - direct (log)', 'Test': 'Wilcoxon signed-rank', 'n': len(delta_nonrec), 'Statistic': w_stat_nonrec, 'P-value': w_p_nonrec},
+    {'Comparison': 'Between groups: delta_log_pi (Recurrent vs Non-recurrent)', 'Test': 'Mann-Whitney U', 'n1': len(delta_rec), 'n2': len(delta_nonrec), 'Statistic': u_stat_delta, 'P-value': p_delta}
+])
+paired_results.to_csv('inversion_within_between_delta_tests.csv', index=False)
 
 plt.close()
 print("\nViolin plots saved to 'inversion_pi_violins.png'")
-
 print("\nAnalysis complete!")
