@@ -280,8 +280,8 @@ def test_followup_includes_ancestry_levels_and_splits(test_ctx):
         assert result_path.exists()
 
 def test_safe_basename():
-    assert models._safe_basename("endo/../../weird:thing") == "endo_.._.._weird_thing"
-    assert models._safe_basename("normal_name-1.0") == "normal_name-1.0"
+    assert models.safe_basename("endo/../../weird:thing") == "endo_.._.._weird_thing"
+    assert models.safe_basename("normal_name-1.0") == "normal_name-1.0"
 
 def test_cache_idempotency_on_mask_change(test_ctx):
     with temp_workspace():
@@ -542,15 +542,18 @@ def test_final_results_has_ci_and_ancestry_fields():
         core_data, phenos = make_synth_cohort()
         defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
         local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
-        run.TARGET_INVERSION = TEST_TARGET_INVERSION
+        run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]  # Now a list
+        run.MASTER_RESULTS_CSV = "master_results.csv"
         run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
         run.FDR_ALPHA = run.LRT_SELECT_ALPHA = 0.4
         run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
         run.INVERSION_DOSAGES_FILE = "dummy.tsv"
         write_tsv(run.INVERSION_DOSAGES_FILE, core_data["inversion_main"].reset_index().rename(columns={'person_id':'SampleID'}))
         run.main()
-        df = pd.read_csv(f"phewas_results_chr_test-1-INV-1.csv")
-        assert "OR_CI95" in df.columns and "FINAL_INTERPRETATION" in df.columns
+        output_path = Path(run.MASTER_RESULTS_CSV)
+        assert output_path.exists()
+        df = pd.read_csv(output_path)
+        assert "OR_CI95" in df.columns and "FINAL_INTERPRETATION" in df.columns and "Q_GLOBAL" in df.columns
 
 def test_memory_envelope_relative():
     with temp_workspace():
@@ -565,7 +568,7 @@ def test_memory_envelope_relative():
         with preserve_run_globals():
             run.MIN_CASES_FILTER, run.MIN_CONTROLS_FILTER = 10, 10
             run.PHENOTYPE_DEFINITIONS_URL = str(local_defs_path)
-            run.TARGET_INVERSION = TEST_TARGET_INVERSION
+            run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]
             run.INVERSION_DOSAGES_FILE = "dummy.tsv"
             write_tsv(run.INVERSION_DOSAGES_FILE, core_data["inversion_main"].reset_index().rename(columns={'person_id':'SampleID'}))
             peak_rss = [base_rss]
@@ -580,3 +583,71 @@ def test_memory_envelope_relative():
             finally: stop_event.set(); poll_thread.join()
             peak_delta_gb = (peak_rss[0] - base_rss) / (1024**3)
             assert peak_delta_gb < envelope_gb, f"Peak memory delta {peak_delta_gb:.3f} GB exceeded envelope"
+
+def test_multi_inversion_pipeline_produces_master_file():
+    """
+    Integration test for the primary new feature: running two inversions, applying
+    a global FDR, and producing a single master result file.
+    """
+    with temp_workspace() as tmpdir, preserve_run_globals(), patch('run.bigquery.Client'), patch('run.io.load_related_to_remove', return_value=set()):
+        # 1. Define two inversions and their synthetic data
+        INV_A, INV_B = 'chr_test-A-INV-1', 'chr_test-B-INV-2'
+        core_data, phenos = make_synth_cohort()
+        rng = np.random.default_rng(101)
+        core_data['inversion_A'] = pd.DataFrame({INV_A: np.clip(rng.normal(0.8, 0.5, 200), -2, 2)}, index=core_data['demographics'].index)
+        core_data['inversion_B'] = pd.DataFrame({INV_B: np.zeros(200)}, index=core_data['demographics'].index)
+
+        # Re-generate the 'strong signal' phenotype to be associated with INV_A
+        p_a = sigmoid(2.5 * core_data['inversion_A'][INV_A] + 0.02 * (core_data["demographics"]["AGE"] - 50) - 0.2 * core_data["sex"]["sex"])
+        cases_a = set(core_data["demographics"].index[rng.random(200) < p_a])
+        phenos['A_strong_signal']['cases'] = cases_a
+
+        # 2. Prime caches for both inversions
+        # Base caches (demographics, etc.)
+        defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, INV_A) # target_inversion here is just a dummy
+        # Overwrite with specific inversion caches
+        write_parquet(Path("./phewas_cache") / f"inversion_{INV_A}.parquet", core_data["inversion_A"])
+        write_parquet(Path("./phewas_cache") / f"inversion_{INV_B}.parquet", core_data["inversion_B"])
+
+        # 3. Configure and run the main pipeline
+        local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
+        run.TARGET_INVERSIONS = [INV_A, INV_B]
+        run.MASTER_RESULTS_CSV = "multi_inversion_master.csv"
+        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
+        run.FDR_ALPHA = 0.9  # High alpha to ensure we get some hits
+        run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
+        # Write dummy dosage files (needed for io.load_inversions)
+        run.INVERSION_DOSAGES_FILE = "dummy_dosages.tsv"
+        dummy_dosage_df = pd.DataFrame({
+            'SampleID': core_data['demographics'].index,
+            INV_A: core_data['inversion_A'][INV_A],
+            INV_B: core_data['inversion_B'][INV_B],
+        })
+        write_tsv(run.INVERSION_DOSAGES_FILE, dummy_dosage_df)
+
+        run.main()
+
+        # 4. Assert correctness of outputs
+        output_path = Path(run.MASTER_RESULTS_CSV)
+        assert output_path.exists(), "Master CSV file was not created"
+
+        df = pd.read_csv(output_path)
+
+        # Assert per-inversion directories were created
+        assert (Path("./phewas_cache") / models.safe_basename(INV_A)).is_dir()
+        assert (Path("./phewas_cache") / models.safe_basename(INV_B)).is_dir()
+
+        # Assert results from both inversions are in the file
+        assert set(df['Inversion'].unique()) == {INV_A, INV_B}
+
+        # Assert global Q value was computed correctly
+        assert 'Q_GLOBAL' in df.columns
+        # All valid (non-NA) p-values should have been included in a single correction run
+        valid_ps = df['P_LRT_Overall'].notna()
+        assert df.loc[valid_ps, 'Q_GLOBAL'].nunique() >= 1 # Should have some q-values
+
+        # A_strong_signal should be a hit for INV_A but not INV_B
+        strong_hit_a = df[(df['Phenotype'] == 'A_strong_signal') & (df['Inversion'] == INV_A)]
+        strong_hit_b = df[(df['Phenotype'] == 'A_strong_signal') & (df['Inversion'] == INV_B)]
+        assert strong_hit_a['P_LRT_Overall'].iloc[0] < 0.1
+        assert pd.isna(strong_hit_b['P_LRT_Overall'].iloc[0]), "P-value for constant inversion should be NaN"
