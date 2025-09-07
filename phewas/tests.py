@@ -487,7 +487,7 @@ def test_fetcher_producer_drains_cache_only():
 
 def test_pipes_run_fits_creates_atomic_results(test_ctx):
     with temp_workspace():
-        core_data, phenos = make_synth_cohort()
+        core_data, phenos = make_synth_cohort(seed=42)
         pheno_defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
         core_df = pd.concat([core_data['demographics'][['AGE_c', 'AGE_c_sq']], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
         core_df_with_const = sm.add_constant(core_df)
@@ -676,3 +676,63 @@ def test_demographics_age_clipping():
         assert demographics_df.loc['p2', 'AGE'] == 100
         assert demographics_df.loc['p3', 'AGE'] == 0
         pd.testing.assert_series_equal(demographics_df['AGE_sq'], demographics_df['AGE']**2, check_names=False)
+
+
+def test_ridge_seeded_refit_matches_mle():
+    rng = np.random.default_rng(0)
+    n = 400
+    X = pd.DataFrame({'const': 1.0,
+                      'x1': rng.normal(size=n),
+                      'x2': rng.normal(size=n)})
+    beta = np.array([-0.2, 1.1, -0.6])
+    p = 1/(1+np.exp(-(X.values @ beta)))
+    y = pd.Series(rng.binomial(1, p))
+
+    fit_mle = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=200)
+
+    import models
+    orig = models._logit_fit
+    def flaky(model, method, **kw):
+        if method in ('newton','bfgs') and not kw.get('_already_failed', False):
+            from statsmodels.tools.sm_exceptions import PerfectSeparationError
+            raise PerfectSeparationError('force ridge seed')
+        return orig(model, method, **{**kw, '_already_failed': True})
+    try:
+        models._logit_fit = flaky
+        fit, reason = models._fit_logit_ladder(X, y, ridge_ok=True)
+        assert reason in ('ridge_seeded_refit',)
+        np.testing.assert_allclose(fit.params.values, fit_mle.params.values, rtol=1e-3, atol=1e-3)
+        assert abs(fit.llf - fit_mle.llf) < 1e-3
+    finally:
+        models._logit_fit = orig
+
+
+def test_lrt_allows_when_ridge_seeded_but_final_is_mle(test_ctx):
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort()
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+        X = sm.add_constant(pd.concat([core_data['demographics'][['AGE_c','AGE_c_sq']],
+                                       core_data['sex'], core_data['pcs'],
+                                       core_data['inversion_main']], axis=1))
+        anc = pd.get_dummies(core_data['ancestry']['ANCESTRY'], prefix='ANC', drop_first=True, dtype=np.float64)
+        X = X.join(anc)
+
+        models.init_lrt_worker(X, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
+
+        import models as M
+        orig = M._logit_fit
+        def flaky(model, method, **kw):
+            if method in ('newton','bfgs') and not kw.get('_already_failed', False):
+                from statsmodels.tools.sm_exceptions import PerfectSeparationError
+                raise PerfectSeparationError('force ridge seed')
+            return orig(model, method, **{**kw, '_already_failed': True})
+        try:
+            M._logit_fit = flaky
+            task = {"name": "A_strong_signal", "category": "cardio",
+                    "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
+            M.lrt_overall_worker(task)
+            res = json.load(open(Path(test_ctx["LRT_OVERALL_CACHE_DIR"]) / "A_strong_signal.json"))
+            assert np.isfinite(res['P_LRT_Overall'])
+            assert res.get('LRT_Overall_Reason') in (None, '',) or pd.isna(res['LRT_Overall_Reason'])
+        finally:
+            M._logit_fit = orig
