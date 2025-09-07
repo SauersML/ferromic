@@ -13,16 +13,16 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 
 # ------------------------- CONFIG -------------------------
 
-INV_CSV       = Path("inv_info.csv")  # NEW: recurrence mapping input
+INV_CSV       = Path("inv_info.csv")  # recurrence mapping input
 
 DIVERSITY_FILE = Path("per_site_diversity_output.falsta")
 FST_FILE       = Path("per_site_fst_output.falsta")
 OUTDIR         = Path("length_norm_trend_fast")
 
-MIN_LEN_PI     = 150_000
-MIN_LEN_FST    = 150_000
+MIN_LEN_PI     = 100_000
+MIN_LEN_FST    = 100_000
 
-NUM_BINS       = 200
+NUM_BINS       = 100
 LOWESS_FRAC    = 0.4
 
 # Visual
@@ -67,7 +67,7 @@ def _parse_values_fast(line: str) -> np.ndarray:
     """Fast parser: replace 'NA' with 'nan' and use np.fromstring with sep=','."""
     return np.fromstring(line.strip().replace("NA", "nan"), sep=",", dtype=np.float32)
 
-# -------------------- INVERSION MAPPING (NEW) --------------
+# -------------------- INVERSION MAPPING --------------
 
 def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
     """
