@@ -1,5 +1,6 @@
 import os
 import re
+import hashlib
 import numpy as np
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,7 +22,25 @@ def load_definitions(url) -> pd.DataFrame:
     """Copies the snippet from run: read TSV, add `sanitized_name`, compute `all_codes` using `parse_icd_codes`."""
     print("[Setup]    - Loading phenotype definitions...")
     pheno_defs_df = pd.read_csv(url, sep="\t")
-    pheno_defs_df["sanitized_name"] = pheno_defs_df["disease"].apply(sanitize_name)
+
+    sanitized_names = pheno_defs_df["disease"].apply(sanitize_name)
+
+    if sanitized_names.duplicated().any():
+        print("[defs WARN] Sanitized name collisions detected. Appending short hash to duplicates.")
+        dupes = sanitized_names[sanitized_names.duplicated()].unique()
+
+        for d in dupes:
+            idx = pheno_defs_df.index[sanitized_names == d]
+            for i in idx:
+                original_name = pheno_defs_df.loc[i, "disease"]
+                short_hash = hashlib.sha256(original_name.encode()).hexdigest()[:6]
+                sanitized_names[i] = f"{sanitized_names[i]}_{short_hash}"
+
+    pheno_defs_df["sanitized_name"] = sanitized_names
+
+    if pheno_defs_df["sanitized_name"].duplicated().any():
+        print("[defs ERROR] Sanitized name collisions persist after hashing.")
+
     pheno_defs_df["all_codes"] = pheno_defs_df.apply(
         lambda row: parse_icd_codes(row["icd9_codes"]).union(parse_icd_codes(row["icd10_codes"])),
         axis=1,
@@ -81,6 +100,35 @@ def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
         print(f"[CacheLoader] - [FAIL] Failed to load '{s_name}': {e}", flush=True)
         return None
 
+def _query_single_pheno_bq(pheno_info, bq_client, cdr_id, core_index, cache_dir, cdr_codename):
+    """THREAD WORKER: Queries one phenotype from BigQuery, caches it, and returns integer case indices."""
+    s_name, category, all_codes = pheno_info['sanitized_name'], pheno_info['disease_category'], pheno_info['all_codes']
+    print(f"[Fetcher]  - [BQ] Querying '{s_name}'...", flush=True)
+
+    if not all_codes:
+        case_idx = np.empty(0, dtype=np.int32)
+        pids = []
+    else:
+        formatted_codes = ','.join([repr(c) for c in all_codes])
+        q = f"SELECT DISTINCT person_id FROM `{cdr_id}.condition_occurrence` WHERE condition_source_value IN ({formatted_codes})"
+        try:
+            df_ids = bq_client.query(q).to_dataframe()
+            pids = df_ids["person_id"].astype(str)
+            idx = core_index.get_indexer(pids)
+            case_idx = idx[idx >= 0].astype(np.int32)
+        except Exception as e:
+            print(f"[Fetcher]  - [FAIL] BQ query failed for {s_name}. Error: {str(e)[:150]}", flush=True)
+            case_idx = np.empty(0, dtype=np.int32)
+            pids = []
+
+    pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
+    pids_for_cache = pd.Index(pids, dtype=str, name='person_id')
+    df_to_cache = pd.DataFrame({'is_case': 1}, index=pids_for_cache, dtype=np.int8)
+    df_to_cache.to_parquet(pheno_cache_path)
+    print(f"[Fetcher]  - Cached {len(pids_for_cache):,} new cases for '{s_name}'", flush=True)
+
+    return {"name": s_name, "category": category, "case_idx": case_idx}
+
 def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, category_to_pan_cases, cdr_codename, core_index, cache_dir, loader_chunk_size, loader_threads):
     """PRODUCER: High-performance, memory-stable data loader that works in chunks without constructing per-phenotype controls."""
     print("[Fetcher]  - Categorizing phenotypes into cached vs. uncached...")
@@ -104,35 +152,18 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, categor
         print(f"[Mem] RSS after chunk {chunk_num}/{num_chunks}: {io.rss_gb():.2f} GB", flush=True)
     print("[Fetcher]  - Finished all parallel cache loading chunks.")
 
-    # STAGE 2: SLOW SEQUENTIAL BIGQUERY QUERIES
-    for pheno_info in phenos_to_query_from_bq:
-        s_name, category, all_codes = pheno_info['sanitized_name'], pheno_info['disease_category'], pheno_info['all_codes']
-        print(f"[Fetcher]  - [BQ] Querying '{s_name}'...", flush=True)
-
-        if not all_codes:
-            case_idx = np.empty(0, dtype=np.int32)
-        else:
-            formatted_codes = ','.join([repr(c) for c in all_codes])
-            q = f"SELECT DISTINCT person_id FROM `{cdr_id}.condition_occurrence` WHERE condition_source_value IN ({formatted_codes})"
-            try:
-                df_ids = bq_client.query(q).to_dataframe()
-                pids = df_ids["person_id"].astype(str)
-                idx = core_index.get_indexer(pids)
-                idx = idx[idx >= 0].astype(np.int32)
-                case_idx = idx
-            except Exception as e:
-                print(f"[Fetcher]  - [FAIL] BQ query failed for {s_name}. Error: {str(e)[:150]}", flush=True)
-                case_idx = np.empty(0, dtype=np.int32)
-
-        print(f"[Fetcher]  - Caching {len(case_idx):,} new cases for '{s_name}'", flush=True)
-        pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
-        # Cache the full set of case person_ids from BQ (not just the current core intersection)
-        pids_for_cache = pd.Index(pids if 'pids' in locals() else [], dtype=str, name='person_id')
-        df_to_cache = pd.DataFrame({'is_case': 1}, index=pids_for_cache, dtype=np.int8)
-        df_to_cache.to_parquet(pheno_cache_path)
-
-
-        pheno_queue.put({"name": s_name, "category": category, "case_idx": case_idx})
+    # STAGE 2: CONCURRENT BIGQUERY QUERIES
+    if phenos_to_query_from_bq:
+        print(f"[Fetcher]  - Processing {len(phenos_to_query_from_bq)} uncached phenotypes from BQ with concurrency...")
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            future_to_pheno = {
+                executor.submit(_query_single_pheno_bq, p_info, bq_client, cdr_id, core_index, cache_dir, cdr_codename): p_info
+                for p_info in phenos_to_query_from_bq
+            }
+            for future in as_completed(future_to_pheno):
+                result = future.result()
+                if result:
+                    pheno_queue.put(result)
 
     pheno_queue.put(None)
     print("[Fetcher]  - All phenotypes fetched. Producer thread finished.")
