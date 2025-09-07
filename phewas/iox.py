@@ -124,13 +124,26 @@ def atomic_write_json(path, data_obj):
     Accepts either a dict-like object or a pandas Series.
     """
     tmpdir = os.path.dirname(path) or "."
+    os.makedirs(tmpdir, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=tmpdir, prefix=os.path.basename(path) + '.tmp.')
     os.close(fd)
     try:
         if isinstance(data_obj, pd.Series):
             data_obj = data_obj.to_dict()
+
+        # Custom JSON encoder to handle numpy types
+        class NpEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                if isinstance(obj, np.floating):
+                    return float(obj)
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                return super(NpEncoder, self).default(obj)
+
         with open(tmp_path, 'w') as f:
-            json.dump(data_obj, f)
+            json.dump(data_obj, f, cls=NpEncoder)
         os.replace(tmp_path, path)
     finally:
         try:
