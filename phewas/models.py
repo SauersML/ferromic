@@ -19,6 +19,7 @@ worker_core_df = None
 allowed_mask_by_cat = None
 N_core = 0
 worker_anc_series = None
+finite_mask_worker = None
 CTX = {}  # Worker context with constants from run.py
 
 
@@ -30,11 +31,12 @@ def init_worker(df_to_share, masks, ctx):
     for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]:
         os.environ[v] = "1"
 
-    global worker_core_df, allowed_mask_by_cat, N_core, CTX
+    global worker_core_df, allowed_mask_by_cat, N_core, CTX, finite_mask_worker
     worker_core_df = df_to_share
     allowed_mask_by_cat = masks
     N_core = len(df_to_share)
     CTX = ctx
+    finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
 
     required_keys = ["NUM_PCS", "MIN_CASES_FILTER", "MIN_CONTROLS_FILTER", "CACHE_DIR", "RESULTS_CACHE_DIR", "RIDGE_L2_BASE"]
     for key in required_keys:
@@ -52,12 +54,13 @@ def init_lrt_worker(df_to_share, masks, anc_series, ctx):
     for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]:
         os.environ[v] = "1"
 
-    global worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, CTX
+    global worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, CTX, finite_mask_worker
     worker_core_df = df_to_share
     allowed_mask_by_cat = masks
     N_core = len(df_to_share)
     worker_anc_series = anc_series.reindex(df_to_share.index).str.lower()
     CTX = ctx
+    finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
 
     required_keys = ["NUM_PCS", "MIN_CASES_FILTER", "MIN_CONTROLS_FILTER", "CACHE_DIR", "LRT_FOLLOWUP_CACHE_DIR", "PER_ANC_MIN_CASES", "PER_ANC_MIN_CONTROLS", "RIDGE_L2_BASE"]
     for key in required_keys:
@@ -126,8 +129,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         if case_idx.size > 0:
             case_mask[case_idx] = True
 
-        # Ensure modeling matrix contains only finite values across all covariates to prevent silent NaN/Inf propagation.
-        finite_mask_worker = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
+        # Use the pre-computed finite mask.
         valid_mask = (allowed_mask_by_cat[category] | case_mask) & finite_mask_worker
 
         n_total = int(valid_mask.sum())
@@ -142,7 +144,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             y[case_positions] = 1
 
         # Harden design matrix for numeric stability.
-        X_clean = worker_core_df[valid_mask].copy().astype(np.float64, copy=False)
+        X_clean = worker_core_df[valid_mask].astype(np.float64, copy=False)
         if not np.isfinite(X_clean.to_numpy()).all():
             bad_cols = [c for c in X_clean.columns if not np.isfinite(X_clean[c].to_numpy()).all()]
             bad_rows_mask = ~np.isfinite(X_clean.to_numpy()).all(axis=1)
@@ -395,12 +397,11 @@ def lrt_overall_worker(task):
             print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} CACHE_HIT", flush=True)
             return
 
-        finite_mask = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
         allowed_mask = allowed_mask_by_cat.get(category, np.ones(len(core_index), dtype=bool))
         case_mask = np.zeros(len(core_index), dtype=bool)
         if case_idx.size > 0:
             case_mask[case_idx] = True
-        valid_mask = (allowed_mask | case_mask) & finite_mask
+        valid_mask = (allowed_mask | case_mask) & finite_mask_worker
         n_valid = int(valid_mask.sum())
         y = np.zeros(n_valid, dtype=np.int8)
         case_positions = np.nonzero(case_mask[valid_mask])[0]
@@ -465,10 +466,6 @@ def lrt_overall_worker(task):
             print(f"[LRT-Stage1-Worker-{os.getpid()}] {s_name} SKIP reason=target_constant", flush=True)
             return
 
-        def _design_rank(X):
-            try: return int(np.linalg.matrix_rank(X.values))
-            except Exception: return int(np.linalg.matrix_rank(np.asarray(X)))
-
         def _fit_logit_hardened(X, y_in, require_target):
             if not isinstance(X, pd.DataFrame): X = pd.DataFrame(X)
             X = X.astype(np.float64, copy=False)
@@ -503,9 +500,7 @@ def lrt_overall_worker(task):
         }
 
         if (fit_red is not None) and (fit_full is not None) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
-            rank_red = _design_rank(X_red)
-            rank_full = _design_rank(X_full)
-            df_lrt = int(max(0, rank_full - rank_red))
+            df_lrt = int(max(0, X_full.shape[1] - X_red.shape[1]))
             if df_lrt > 0:
                 llr = 2.0 * (fit_full.llf - fit_red.llf)
                 out["P_LRT_Overall"] = float(sp_stats.chi2.sf(llr, df_lrt))
@@ -588,11 +583,10 @@ def lrt_followup_worker(task):
             print(f"[Ancestry-Worker-{os.getpid()}] {s_name} CACHE_HIT", flush=True)
             return
 
-        finite_mask = np.isfinite(worker_core_df.to_numpy()).all(axis=1)
         allowed_mask = allowed_mask_by_cat.get(category, np.ones(len(core_index), dtype=bool))
         case_mask = np.zeros(len(core_index), dtype=bool)
         if case_idx.size > 0: case_mask[case_idx] = True
-        valid_mask = (allowed_mask | case_mask) & finite_mask
+        valid_mask = (allowed_mask | case_mask) & finite_mask_worker
         if int(valid_mask.sum()) == 0:
             io.atomic_write_json(result_path, {
                 'Phenotype': s_name, 'P_LRT_AncestryxDosage': float('nan'), 'LRT_df': float('nan'),
@@ -676,12 +670,8 @@ def lrt_followup_worker(task):
         fit_red, rr = _fit_logit(X_red, y_series, require_target=False)
         fit_full, fr = _fit_logit(X_full, y_series, require_target=True)
 
-        def _rank(X):
-            try: return int(np.linalg.matrix_rank(X.values))
-            except Exception: return int(np.linalg.matrix_rank(np.asarray(X)))
-
         if (fit_red is not None) and (fit_full is not None) and hasattr(fit_full, "llf") and hasattr(fit_red, "llf") and (fit_full.llf >= fit_red.llf):
-            df_lrt = int(max(0, _rank(X_full) - _rank(X_red)))
+            df_lrt = int(max(0, X_full.shape[1] - X_red.shape[1]))
             if df_lrt > 0:
                 llr = 2.0 * (fit_full.llf - fit_red.llf)
                 out['P_LRT_AncestryxDosage'] = float(sp_stats.chi2.sf(llr, df_lrt))
