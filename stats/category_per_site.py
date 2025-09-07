@@ -23,8 +23,8 @@ OUTDIR         = Path("length_norm_trend_fast")
 MIN_LEN_PI     = 100_000
 MIN_LEN_FST    = 100_000
 
-# Proportion mode (same as before)
-NUM_BINS_PROP  = 100
+# Proportion mode
+NUM_BINS_PROP  = 250
 
 # Base-pair mode 
 MAX_BP         = 2_000_000          # cap distance from edge at 2 Mbp
