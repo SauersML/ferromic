@@ -179,10 +179,11 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
     """
     from google.cloud import bigquery  # local import to not affect unit tests that bypass BQ
 
-    # 1) Build the (code, pheno) map for the batch
-    #    - normalize codes to UPPER once
-    code_map = []
-    meta = {}  # pheno_name -> {"category": ..., "codes": set([...])}
+    # 1) Build aligned arrays for parameterization to avoid STRUCT typing issues.
+    #    Each position i of codes_list aligns with phenos_list[i].
+    codes_list = []
+    phenos_list = []
+    meta = {}  # pheno_name -> {"category": ..., "codes": [...]}
     for row in batch_infos:
         s_name = row["sanitized_name"]
         category = row["disease_category"]
@@ -190,11 +191,10 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         codes_upper = sorted({str(c).upper() for c in codes if str(c).strip()})
         meta[s_name] = {"category": category, "codes": codes_upper}
         for c in codes_upper:
-            # BigQuery STRUCT array parameters must be a list of dicts keyed by field names.
-            code_map.append({"code": c, "pheno": s_name})
+            codes_list.append(c)
+            phenos_list.append(s_name)
 
-
-    if not code_map:
+    if not codes_list:
         # nothing to fetch; emit empty caches
         out = []
         for s_name, m in meta.items():
@@ -204,12 +204,17 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         return out
 
     sql = f"""
-      WITH code_map AS (SELECT * FROM UNNEST(@code_map))
-      SELECT DISTINCT CAST(co.person_id AS STRING) AS person_id, code_map.pheno AS pheno
+      WITH code_pairs AS (
+        SELECT code, pheno
+        FROM UNNEST(@codes) AS code WITH OFFSET off
+        JOIN UNNEST(@phenos) AS pheno WITH OFFSET off2
+        ON off = off2
+      )
+      SELECT DISTINCT CAST(co.person_id AS STRING) AS person_id, cp.pheno AS pheno
       FROM `{cdr_id}.condition_occurrence` AS co
-      JOIN code_map
+      JOIN code_pairs AS cp
         ON co.condition_source_value IS NOT NULL
-       AND UPPER(TRIM(co.condition_source_value)) = code_map.code
+       AND UPPER(TRIM(co.condition_source_value)) = cp.code
       WHERE MOD(ABS(FARM_FINGERPRINT(CAST(co.person_id AS STRING))), @bucket_count) = @bucket_id
     """
 
@@ -223,11 +228,8 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
             for bucket_id in range(bucket_count):
                 job_cfg = bigquery.QueryJobConfig(
                     query_parameters=[
-                        bigquery.ArrayQueryParameter(
-                            "code_map",
-                            "STRUCT<code STRING, pheno STRING>",
-                            code_map
-                        ),
+                        bigquery.ArrayQueryParameter("codes", "STRING", codes_list),
+                        bigquery.ArrayQueryParameter("phenos", "STRING", phenos_list),
                         bigquery.ScalarQueryParameter("bucket_count", "INT64", bucket_count),
                         bigquery.ScalarQueryParameter("bucket_id", "INT64", bucket_id),
                     ]
