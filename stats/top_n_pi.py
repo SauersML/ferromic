@@ -128,7 +128,7 @@ def main():
     start_time = time.time()
     print(f"INFO: Script started at {time.ctime()}")
     
-    file_path = 'per_site_output.falsta'
+    file_path = 'per_site_diversity_output.falsta'
     if not os.path.exists(file_path):
         print(f"ERROR: File {file_path} not found!")
         return
