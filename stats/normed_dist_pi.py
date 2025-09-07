@@ -38,7 +38,7 @@ SCATTER_SIZE = 8          # Size for underlying bin points
 N_CORES = max(1, multiprocessing.cpu_count() - 1)
 
 # File paths (Update these paths if necessary)
-PI_DATA_FILE = 'per_site_output.falsta'
+PI_DATA_FILE = 'per_site_diversity_output.falsta'
 # No inversion file needed for overall analysis
 #Output Directory Name
 OUTPUT_DIR = Path('pi_analysis_results_overall_distance_edge_fast_lenfilter_reversed_axis') # Unique output directory
