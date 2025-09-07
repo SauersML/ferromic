@@ -45,24 +45,12 @@ try:
 except Exception:
     pass
 
-warnings.filterwarnings(
-    "ignore",
-    message=r"^overflow encountered in exp",
-    category=RuntimeWarning,
-    module=r"^statsmodels\.discrete\.discrete_model$",
-)
-warnings.filterwarnings(
-    "ignore",
-    message=r"^divide by zero encountered in log",
-    category=RuntimeWarning,
-    module=r"^statsmodels\.discrete\.discrete_model$",
-)
-
 # --- Configuration ---
 TARGET_INVERSION = 'chr17-45585160-INV-706887'
 PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads/main/data/significant_heritability_diseases.tsv"
 
 # --- Performance & Memory Tuning ---
+MIN_AVAILABLE_MEMORY_GB = 4.0
 QUEUE_MAX_SIZE = os.cpu_count() * 4
 LOADER_THREADS = 32
 LOADER_CHUNK_SIZE = 128
@@ -206,9 +194,11 @@ def main():
             print("\n--- [DIAGNOSTIC] Testing matrix condition number ---")
             try:
                 cols = ['const', 'sex', 'AGE_c', 'AGE_c_sq', TARGET_INVERSION] + [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-                mat = core_df_with_const[cols].dropna().to_numpy()
-                cond = np.linalg.cond(mat)
-                print(f"[DIAGNOSTIC] Condition number (current model cols): {cond:,.2f}")
+                mat = core_df_with_const[cols].dropna()
+                if len(mat) > 100_000:
+                    mat = mat.sample(100_000, random_state=0)
+                cond = np.linalg.cond(mat.to_numpy())
+                print(f"[DIAGNOSTIC] Condition number (sampled): {cond:,.2f}")
             except Exception as e:
                 print(f"[DIAGNOSTIC] Could not compute condition number. Error: {e}")
             print("--- [DIAGNOSTIC] End of test ---\n")
@@ -254,7 +244,7 @@ def main():
         )
         fetcher_thread.start()
 
-        pipes.run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, TARGET_INVERSION, RESULTS_CACHE_DIR, ctx)
+        pipes.run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, TARGET_INVERSION, RESULTS_CACHE_DIR, ctx, MIN_AVAILABLE_MEMORY_GB)
 
         fetcher_thread.join()
         print("\n--- All models finished. ---")
@@ -318,7 +308,7 @@ def main():
             name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
             phenos_list = df["Phenotype"].astype(str).tolist()
 
-            pipes.run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, TARGET_INVERSION, ctx)
+            pipes.run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, TARGET_INVERSION, ctx, MIN_AVAILABLE_MEMORY_GB)
 
             overall_records = []
             files_overall = [f for f in os.listdir(LRT_OVERALL_CACHE_DIR) if f.endswith(".json") and not f.endswith(".meta.json")]
@@ -351,7 +341,7 @@ def main():
                 df["Sig_FDR"] = False
 
             hit_names = df.loc[df["Sig_FDR"] == True, "Phenotype"].astype(str).tolist()
-            pipes.run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_names, name_to_cat, cdr_codename, TARGET_INVERSION, ctx)
+            pipes.run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_names, name_to_cat, cdr_codename, TARGET_INVERSION, ctx, MIN_AVAILABLE_MEMORY_GB)
 
             follow_records = []
             files_follow = [f for f in os.listdir(LRT_FOLLOWUP_CACHE_DIR) if f.endswith(".json") and not f.endswith(".meta.json")]

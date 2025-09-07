@@ -2,6 +2,7 @@ import threading
 import sys
 from functools import partial
 from multiprocessing import get_context, cpu_count
+import os
 
 import models
 import time
@@ -35,7 +36,7 @@ class MemoryMonitor(threading.Thread):
         self.stop_event.set()
 
 
-def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx):
+def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, min_available_memory_gb):
     """
     Creates the process pool with models.init_worker and submits models.run_single_model_worker
     with the same callback/progress bar logic.
@@ -81,12 +82,11 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                 failed_tasks.append(e)
 
             # Consume items until sentinel is received
-            MIN_AVAILABLE_MEMORY_GB = 4.0
             while True:
                 item = pheno_queue.get()
                 if item is None:
                     break  # producer finished
-                if PSUTIL_AVAILABLE and monitor.available_memory_gb < MIN_AVAILABLE_MEMORY_GB and monitor.available_memory_gb > 0:
+                if PSUTIL_AVAILABLE and monitor.available_memory_gb < min_available_memory_gb and monitor.available_memory_gb > 0:
                     print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
                     time.sleep(5)
                 queued += 1
@@ -101,7 +101,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         monitor.stop()
 
 
-def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx):
+def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb):
     """
     Same pool pattern; submits models.lrt_overall_worker.
     """
@@ -145,9 +145,8 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
                 print(f"[pool ERR] Worker failed: {e}", flush=True)
                 failed_tasks.append(e)
 
-            MIN_AVAILABLE_MEMORY_GB = 4.0
             for task in tasks:
-                if PSUTIL_AVAILABLE and monitor.available_memory_gb < MIN_AVAILABLE_MEMORY_GB and monitor.available_memory_gb > 0:
+                if PSUTIL_AVAILABLE and monitor.available_memory_gb < min_available_memory_gb and monitor.available_memory_gb > 0:
                     print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
                     time.sleep(5)
 
@@ -162,51 +161,62 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
         monitor.stop()
 
 
-def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_names, name_to_cat, cdr_codename, target_inversion, ctx):
-    """
-    Same pool pattern; initializer is models.init_lrt_worker(...); submits models.lrt_followup_worker.
-    """
+def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_names, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb):
     if len(hit_names) > 0:
         tasks_follow = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": target_inversion} for s in hit_names]
         random.shuffle(tasks_follow)
         print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes.", flush=True)
 
-        bar_len = 40
-        queued = 0
-        done = 0
-        lock = threading.Lock()
+        # NEW: start monitor (symmetry with Stage-1)
+        monitor = MemoryMonitor()
+        monitor.start()
+        try:
+            bar_len = 40
+            queued = 0
+            done = 0
+            lock = threading.Lock()
 
-        def _print_bar(q, d, label):
-            q = int(q)
-            d = int(d)
-            pct = int((d * 100) / q) if q else 0
-            filled = int(bar_len * (d / q)) if q else 0
-            bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-            print(f"\r[{label}] {bar} {d}/{q} ({pct}%)", end="", flush=True)
+            def _print_bar(q, d, label):
+                q = int(q); d = int(d)
+                pct = int((d * 100) / q) if q else 0
+                filled = int(bar_len * (d / q)) if q else 0
+                bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+                # NEW: show memory info like Stage-1
+                mem_info = ""
+                if PSUTIL_AVAILABLE:
+                    mem_info = f" | Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB"
+                print(f"\r[{label}] {bar} {d}/{q} ({pct}%)" + mem_info, end="", flush=True)
 
-        with get_context(MP_CONTEXT).Pool(
-            processes=max(1, min(cpu_count(), 8)),
-            initializer=models.init_lrt_worker,
-            initargs=(core_df_with_const, allowed_mask_by_cat, anc_series, ctx),
-            maxtasksperchild=50,
-        ) as pool:
-            def _cb2(_):
-                nonlocal done, queued
-                with lock:
-                    done += 1
+            with get_context(MP_CONTEXT).Pool(
+                processes=max(1, min(cpu_count(), 8)),
+                initializer=models.init_lrt_worker,
+                initargs=(core_df_with_const, allowed_mask_by_cat, anc_series, ctx),
+                maxtasksperchild=50,
+            ) as pool:
+                def _cb2(_):
+                    nonlocal done, queued
+                    with lock:
+                        done += 1
+                        _print_bar(queued, done, "Ancestry")
+
+                failed_tasks = []
+                def _err_cb(e):
+                    nonlocal failed_tasks
+                    print(f"[pool ERR] Worker failed: {e}", flush=True)
+                    failed_tasks.append(e)
+
+                for task in tasks_follow:
+                    if PSUTIL_AVAILABLE and monitor.available_memory_gb > 0 and monitor.available_memory_gb < min_available_memory_gb:
+                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
+                        time.sleep(5)
+
+                    queued += 1
+                    pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
                     _print_bar(queued, done, "Ancestry")
 
-            failed_tasks = []
-            def _err_cb(e):
-                nonlocal failed_tasks
-                print(f"[pool ERR] Worker failed: {e}", flush=True)
-                failed_tasks.append(e)
-
-            for task in tasks_follow:
-                queued += 1
-                pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
+                pool.close()
+                pool.join()
                 _print_bar(queued, done, "Ancestry")
-            pool.close()
-            pool.join()
-            _print_bar(queued, done, "Ancestry")
-            print("")
+                print("")
+        finally:
+            monitor.stop()
