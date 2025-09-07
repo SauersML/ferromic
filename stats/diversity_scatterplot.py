@@ -96,7 +96,7 @@ def create_plots(theta_dists, theta_vals, pi_dists, pi_vals):
 def main():
     print("=== Starting Execution ===")
     start_time = time.time()
-    file_path = 'per_site_output.falsta'
+    file_path = 'per_site_diversity_output.falsta'
     (theta_dists, theta_vals), (pi_dists, pi_vals) = load_data(file_path)
     
     if not theta_dists.size and not pi_dists.size:
