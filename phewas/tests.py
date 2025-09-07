@@ -340,7 +340,8 @@ def test_sex_restriction_policy(test_ctx):
     _, _, _, skip = models._apply_sex_restriction(X.loc[y.index != 2], y.loc[y.index != 2])
     assert skip is not None
 
-def test_penalized_fit_ci_suppression(test_ctx):
+def test_penalized_fit_ci_and_pval_suppression(test_ctx):
+    """Verifies that CIs and P-values are suppressed for penalized (ridge) fits."""
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
         cases = list(phenos["A_strong_signal"]["cases"])
@@ -352,7 +353,9 @@ def test_penalized_fit_ci_suppression(test_ctx):
         pheno_data = {"name": "A_strong_signal", "category": "cardio", "case_idx": case_idx[case_idx >= 0]}
         models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
         res = json.load(open(Path(test_ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json"))
-        assert res['Used_Ridge'] == True and res['OR_CI95'] is None
+        assert res['Used_Ridge'] is True
+        assert res['OR_CI95'] is None
+        assert pd.isna(res['P_Value'])
 
 def test_perfect_separation_promoted_to_ridge(test_ctx):
     X = pd.DataFrame({'const': 1, 'x': [0, 0, 1, 1]}); y = pd.Series([0, 0, 1, 1])
@@ -378,7 +381,8 @@ def test_worker_reports_n_used_after_sex_restriction(test_ctx):
             core_data['inversion_main']
         ], axis=1))
 
-        allowed_mask = {"endo": np.ones(len(core_df), dtype=bool)}
+        allowed_mask_arr = ~core_df.index.isin(list(cases))
+        allowed_mask = {"endo": allowed_mask_arr}
         models.init_worker(core_df, allowed_mask, test_ctx)
         case_idx = core_df.index.get_indexer(list(cases))
         pheno_data = {"name": "sex_restricted_pheno", "category": "endo", "case_idx": case_idx[case_idx >= 0]}
@@ -656,3 +660,19 @@ def test_multi_inversion_pipeline_produces_master_file():
         strong_hit_b = df[(df['Phenotype'] == 'A_strong_signal') & (df['Inversion'] == INV_B)]
         assert strong_hit_a['P_LRT_Overall'].iloc[0] < 0.1
         assert pd.isna(strong_hit_b['P_LRT_Overall'].iloc[0]), "P-value for constant inversion should be NaN"
+
+def test_demographics_age_clipping():
+    """Tests that age is correctly clipped to [0, 120] in io.load_demographics_with_stable_age."""
+    with temp_workspace():
+        mock_bq_client = MagicMock()
+        yob_df = pd.DataFrame({'person_id': ['p1', 'p2', 'p3'], 'year_of_birth': [2000, 1900, 2020]})
+        obs_df = pd.DataFrame({'person_id': ['p1', 'p2', 'p3'], 'obs_end_year': [2200, 2000, 2000]})
+        mock_bq_client.query.side_effect = [
+            MagicMock(to_dataframe=MagicMock(return_value=yob_df)),
+            MagicMock(to_dataframe=MagicMock(return_value=obs_df))
+        ]
+        demographics_df = io.load_demographics_with_stable_age(mock_bq_client, "dummy_cdr_id")
+        assert demographics_df.loc['p1', 'AGE'] == 120
+        assert demographics_df.loc['p2', 'AGE'] == 100
+        assert demographics_df.loc['p3', 'AGE'] == 0
+        pd.testing.assert_series_equal(demographics_df['AGE_sq'], demographics_df['AGE']**2, check_names=False)
