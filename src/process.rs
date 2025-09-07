@@ -32,7 +32,7 @@ use prettytable::{row, Table};
 use rayon::prelude::*;
 use std::collections::HashMap as Map2;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead};
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -623,8 +623,7 @@ pub fn process_variants(
     inversion_interval: ZeroBasedHalfOpen,
     extended_region: ZeroBasedHalfOpen,
     adjusted_sequence_length: Option<i64>,
-    seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
-    position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (u8, u8)>>>,
     chromosome: String,
     is_filtered_set: bool,
     reference_sequence: &[u8],
@@ -892,30 +891,6 @@ pub fn process_variants(
         }
     }
 
-    // Check SeqInfo for validation
-    let locked_seqinfo = seqinfo_storage.lock();
-    if locked_seqinfo.is_empty() {
-        log(
-            LogLevel::Warning,
-            &format!("No SeqInfo in stats pass for group {}", haplotype_group),
-        );
-    } else {
-        if region_hap_count > 20 {
-            // Only display the table for smaller sample sets to avoid cluttering
-            log(
-                LogLevel::Info,
-                &format!(
-                    "Processed {} haplotypes for group {}",
-                    region_hap_count, haplotype_group
-                ),
-            );
-        } else {
-            display_seqinfo_entries(&locked_seqinfo, 12);
-        }
-    }
-    drop(locked_seqinfo);
-    seqinfo_storage.lock().clear();
-
     // Generate sequence files if this is the filtered set
     if is_filtered_set {
         log(
@@ -1128,17 +1103,6 @@ pub fn process_config_entries(
             }
         }
     }
-
-    // We will process each chromosome in parallel (for speed),
-    // then flatten the per-chromosome results.
-    // `process_chromosome_entries` now returns a tuple:
-    // (Vec_for_main_csv, Vec_for_hudson_csv)
-    let mut all_main_csv_data_tuples: Vec<(
-        CsvRowData,
-        Vec<(i64, f64, f64, u8, bool)>,
-        Vec<(i64, f64, f64)>,
-        Vec<(i64, f64)>,
-    )> = Vec::new();
     let mut all_regional_hudson_outcomes: Vec<RegionalHudsonFSTOutcome> = Vec::new();
 
     // Parse population CSV once if --fst and --fst_populations are provided.
@@ -1207,594 +1171,42 @@ pub fn process_config_entries(
         .filter_map(|optional_result| optional_result) // Remove None entries (failed chromosomes)
         .collect();
 
-    // Aggregate results from all chromosomes
+    // BEFORE: big aggregation into all_main_csv_data_tuples + later write
+    // AFTER:
     for (mut main_data_for_chr, mut hudson_data_for_chr) in per_chromosome_collected_results {
-        all_main_csv_data_tuples.append(&mut main_data_for_chr);
-        all_regional_hudson_outcomes.append(&mut hudson_data_for_chr);
-    }
-
-    let all_results: Vec<CsvRowData> = all_main_csv_data_tuples
-        .iter()
-        .map(|(csv_row, _sites, _fst_wc, _fst_hudson)| csv_row.clone())
-        .collect();
-
-    // Create a count of rows by chromosome
-    let mut chr_counts = HashMap::new();
-    for row in &all_results {
-        *chr_counts.entry(row.seqname.clone()).or_insert(0) += 1;
-    }
-
-    // Log the count by chromosome
-    log(
-        LogLevel::Info,
-        "STATISTICS: Regions in final output by chromosome:",
-    );
-    for (chr, count) in &chr_counts {
-        log(LogLevel::Info, &format!("  - {}: {} regions", chr, count));
-    }
-
-    // Write all rows to the CSV file
-    log(
-        LogLevel::Info,
-        &format!("Writing {} total rows to CSV", all_results.len()),
-    );
-    for row_data in all_results {
-        write_csv_row(&mut writer, &row_data)?;
-
-        if row_data.seqname.contains("X") || row_data.seqname.contains("x") {
-            log(
-                LogLevel::Info,
-                &format!(
-                    "DEBUG X: Wrote chrX region {}:{}-{} to output CSV",
-                    row_data.seqname, row_data.region_start, row_data.region_end
-                ),
-            );
-        }
-    }
-
-    // Now write per-site statistics in wide format to multiple FASTA-like files:
-    // 1. Diversity statistics (pi, theta)
-    // 2. FST statistics between groups 0 and 1 (0_vs_1)
-    // 3. FST statistics between populations from CSV file
-    // Now write per-site statistics in wide format to a single CSV file.
-    // For diversity:
-    // Each row is a relative_position (1-based), and each set of columns corresponds to
-    // (unfiltered_pi_, unfiltered_theta_, filtered_pi_, filtered_theta_) for a region+group.
-
-    // A structure to store columns for each region+group+filter combination.
-    // Each column is keyed by a unique name (e.g., "filtered_pi_chr_2_start_3403_end_9934_group_0"),
-    // and for each relative_position, we store the (f64) value. We also store the maximum
-    // relative_position encountered, so we know how many rows to write.
-    let mut all_columns: HashMap<String, BTreeMap<usize, f64>> = HashMap::new();
-    let mut max_position = 0_usize;
-
-    // A small helper function to build the column name.
-    // prefix is one of: "filtered_pi_", "filtered_theta_", "unfiltered_pi_", or "unfiltered_theta_"
-    // region_tag is "chr_{chr}_start_{start}_end_{end}_group_{g}"
-    fn build_col_name(prefix: &str, row: &CsvRowData, group_id: u8) -> String {
-        format!(
-            "{}chr_{}_start_{}_end_{}_group_{}",
-            prefix, row.seqname, row.region_start, row.region_end, group_id
-        )
-    }
-
-    // Populate our all_columns map with the data from each region–group combo.
-    // Data for per-site diversity comes from the second element of the tuple in all_main_csv_data_tuples
-    for (csv_row, per_site_diversity_vec, _fst_data_wc, _fst_data_hudson) in &all_main_csv_data_tuples {
-        // We'll produce 4 columns for each region+group combo.
-        // We want to fill these columns for each entry in per_site_diversity_vec:
-        // If is_filtered=false, we fill the "unfiltered_pi_" and "unfiltered_theta_" columns.
-        // If is_filtered=true, we fill "filtered_pi_" and "filtered_theta_" columns.
-        // The relative position is (pos - region_start + 1).
-
-        for &(pos_1based_in_vec, pi_val, theta_val, group_id, is_filtered) in per_site_diversity_vec
+        // write each main CSV row + per-site outputs now
+        for (csv_row, per_site_diversity_vec, fst_data_wc, fst_data_hudson) in
+            main_data_for_chr.drain(..)
         {
-            // csv_row.region_start and csv_row.region_end now store 1-based inclusive coordinates.
-            // Convert these to a 0-based half-open interval for the bounds check.
-            // This represents the original entry.interval for comparison.
-            let check_region_zbh =
-                ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
+            append_csv_row(&temp_output_file, &csv_row)?; // CSV (temp) immediate
 
-            // pos_1based_in_vec is the 1-based position from SiteDiversity calculations.
-            // Convert it to a 0-based value for comparison with the 0-based half-open check_region_zbh.
-            // We use OneBasedPosition and its zero_based() method to encapsulate the conversion.
-            // Positions from SiteDiversity are expected to be valid (>=1).
-            let pos_0based_for_check = match OneBasedPosition::new(pos_1based_in_vec) {
-                Ok(one_based_pos) => one_based_pos.zero_based(),
-                Err(_) => {
-                    // This case should ideally not be reached if positions are generated correctly.
-                    eprintln!("Error: Invalid 1-based position {} encountered from diversity vector. Skipping check.", pos_1based_in_vec);
-                    continue;
-                }
+            append_diversity_falsta(
+                &temp_dir_path.join("per_site_diversity_output.falsta"),
+                &csv_row,
+                &per_site_diversity_vec,
+            )?;
+
+            append_fst_falsta(
+                &temp_dir_path.join("per_site_fst_output.falsta"),
+                &csv_row,
+                &fst_data_wc,
+                &fst_data_hudson,
+            )?;
+        }
+
+        // Hudson TSV append for this chromosome
+        if args.enable_fst && !hudson_data_for_chr.is_empty() {
+            let hudson_output_filename = "hudson_fst_results.tsv".to_string();
+            let hudson_output_path = if let Some(main_output_parent) = output_file.parent() {
+                main_output_parent.join(&hudson_output_filename)
+            } else {
+                std::path::Path::new(&hudson_output_filename).to_path_buf()
             };
-
-            // Check if the 0-based position is outside the 0-based half-open check_region_zbh.
-            // check_region_zbh.start is 0-based inclusive.
-            // check_region_zbh.end is 0-based exclusive.
-            // The 'region' variable here is equivalent to 'check_region_zbh', representing the current CSV processing region
-            // as a ZeroBasedHalfOpen interval.
-            if pos_0based_for_check < check_region_zbh.start as i64
-                || pos_0based_for_check >= check_region_zbh.end as i64
-            {
-                eprintln!(
-                    "Warning: Position {} (1-based) is outside region {}-{} (1-based inclusive) for FALSTA all_columns map. This site was at 0-based pos {} against 0-based half-open interval [{}, {}).",
-                    pos_1based_in_vec,      // Print the original 1-based position from the diversity vector
-                    csv_row.region_start, // This is the 1-based inclusive start from CsvRowData
-                    csv_row.region_end,   // This is the 1-based inclusive end from CsvRowData
-                    pos_0based_for_check,
-                    check_region_zbh.start,
-                    check_region_zbh.end
-                );
-                continue;
-            }
-
-            // Calculate the 1-based relative position of pos_1based_in_vec within the current region (check_region_zbh).
-            // check_region_zbh (or equivalently 'region' from the outer scope) is ZeroBasedHalfOpen.
-            match check_region_zbh.relative_position_1based_inclusive(pos_1based_in_vec) {
-                Some(rel_pos_usize) => {
-                    // rel_pos_usize is the 1-based relative position
-                    if rel_pos_usize > max_position {
-                        // Ensure max_position is usize
-                        max_position = rel_pos_usize;
-                    }
-
-                    if is_filtered {
-                        let pi_col = build_col_name("filtered_pi_", csv_row, group_id);
-                        let theta_col = build_col_name("filtered_theta_", csv_row, group_id);
-
-                        all_columns
-                            .entry(pi_col)
-                            .or_insert_with(BTreeMap::new)
-                            .insert(rel_pos_usize, pi_val); // Use rel_pos_usize as key
-                        all_columns
-                            .entry(theta_col)
-                            .or_insert_with(BTreeMap::new)
-                            .insert(rel_pos_usize, theta_val); // Use rel_pos_usize as key
-                    } else {
-                        let pi_col = build_col_name("unfiltered_pi_", csv_row, group_id);
-                        let theta_col = build_col_name("unfiltered_theta_", csv_row, group_id);
-
-                        all_columns
-                            .entry(pi_col)
-                            .or_insert_with(BTreeMap::new)
-                            .insert(rel_pos_usize, pi_val); // Use rel_pos_usize as key
-                        all_columns
-                            .entry(theta_col)
-                            .or_insert_with(BTreeMap::new)
-                            .insert(rel_pos_usize, theta_val); // Use rel_pos_usize as key
-                    }
-                }
-                None => {
-                    // This path indicates that pos_1based_in_vec, despite passing the earlier coarse bounds check,
-                    // could not be mapped to a relative position within the region. This might occur if
-                    // the region itself is empty or if there's an edge case in relative_position_1based_inclusive
-                    // for positions at the exact boundaries, though the prior check should ideally prevent this.
-                    eprintln!(
-                        "Warning: Site at 1-based absolute position {} could not be relatively positioned within region {}:{}-{} (0-based HO: [{},{})) for FALSTA `all_columns` map. Skipping this site for this entry.",
-                        pos_1based_in_vec,
-                        csv_row.seqname,
-                        csv_row.region_start, // 1-based inclusive start from CsvRowData
-                        csv_row.region_end,   // 1-based inclusive end from CsvRowData
-                        check_region_zbh.start,
-                        check_region_zbh.end
-                    );
-                    continue;
-                }
-            }
+            append_hudson_tsv(&hudson_output_path, &hudson_data_for_chr)?;
+            all_regional_hudson_outcomes.append(&mut hudson_data_for_chr);
         }
+        // all per-chr vectors drop here ✅
     }
-
-    // Now we generate a FASTA-style file, one record per combination of prefix, region, and group.
-    // Each record has one header line beginning with '>', and then one line of comma-separated values
-    // corresponding to each position in the region. If a value is zero, we store it as an integer '0'.
-    // Otherwise, we format as a float with six decimals.
-
-    let temp_fasta_path = {
-        let locked_opt = TEMP_DIR.lock();
-        if let Some(dir) = locked_opt.as_ref() {
-            dir.path().join("per_site_diversity_output.falsta")
-        } else {
-            return Err(VcfError::Parse(
-                "Failed to access temporary directory".to_string(),
-            ));
-        }
-    };
-    let fasta_file = File::create(&temp_fasta_path)?;
-    let mut fasta_writer = BufWriter::new(fasta_file);
-
-    // We will map each distinct (prefix, row.seqname, row.region_start, row.region_end, group_id)
-    // to a vector of values for positions from row.region_start..=row.region_end.
-    // The positions are stored 1-based, but we have them in the per_site_diversity_vec as 1-based positions already.
-
-    // We define a helper to build the full FASTA-style header.
-    fn build_fasta_header(prefix: &str, row: &CsvRowData, group_id: u8) -> String {
-        let mut header = String::new();
-        header.push('>');
-        header.push_str(prefix);
-        header.push_str("chr_");
-        header.push_str(&row.seqname);
-        header.push_str("_start_");
-        header.push_str(&row.region_start.to_string());
-        header.push_str("_end_");
-        header.push_str(&row.region_end.to_string());
-        header.push_str("_group_");
-        header.push_str(&group_id.to_string());
-        header
-    }
-
-    // We will create a nested map:
-    // outer key: a String for the FASTA header
-    // inner value: a Vec<Option<f64>> with length = region_length, storing pi or theta or None if missing
-    // Because each row is a single region, but we may have up to 4 combos (filtered/unfiltered × pi/theta × group).
-    // The site records contain (position, pi, watterson_theta, group_id, is_filtered).
-    // We do this for each region row in all_pairs.
-
-    // Data for per-site diversity comes from the second element of the tuple in all_main_csv_data_tuples
-    for (csv_row, per_site_diversity_vec, _fst_data_wc, _fst_data_hudson) in &all_main_csv_data_tuples {
-        let region =
-            ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
-        let region_len = region.len();
-
-        // We store 4 possible keys: "unfiltered_pi", "unfiltered_theta", "filtered_pi", "filtered_theta".
-        // Each key maps to a vector of the same length as region_len, initially None.
-        let mut group_ids = Vec::new();
-        for &(_, _, _, group_id, _) in per_site_diversity_vec {
-            if !group_ids.contains(&group_id) {
-                group_ids.push(group_id);
-            }
-        }
-        let mut records_map: Map2<String, Vec<Option<f64>>> = Map2::new();
-        for &grp in group_ids.iter() {
-            records_map.insert(
-                format!("unfiltered_pi_group_{}", grp),
-                vec![None; region_len],
-            );
-            records_map.insert(
-                format!("unfiltered_theta_group_{}", grp),
-                vec![None; region_len],
-            );
-            records_map.insert(format!("filtered_pi_group_{}", grp), vec![None; region_len]);
-            records_map.insert(
-                format!("filtered_theta_group_{}", grp),
-                vec![None; region_len],
-            );
-        }
-
-        // Fill in data from per_site_diversity_vec
-        for &(pos_1based, pi_val, theta_val, group_id, is_filtered) in per_site_diversity_vec {
-            // 'region' refers to the defined ZeroBasedHalfOpen interval for the current csv_row.
-            if let Some(rel_pos_usize) = region.relative_position_1based_inclusive(pos_1based) {
-                // rel_pos_usize is a 1-based relative index. Convert to 0-based for vector indexing.
-                let idx_0based = OneBasedPosition::new(rel_pos_usize as i64)
-                    .expect("Relative position from relative_position_1based_inclusive should be valid and >= 1")
-                    .zero_based() as usize;
-                let key_prefix = if is_filtered {
-                    "filtered_"
-                } else {
-                    "unfiltered_"
-                };
-                {
-                    let combo_key = format!("{}pi_group_{}", key_prefix, group_id);
-                    if let Some(vec_ref) = records_map.get_mut(&combo_key) {
-                        if pi_val == 0.0 {
-                            vec_ref[idx_0based] = Some(0.0);
-                        } else {
-                            vec_ref[idx_0based] = Some(pi_val);
-                        }
-                    }
-                }
-                {
-                    let combo_key = format!("{}theta_group_{}", key_prefix, group_id);
-                    if let Some(vec_ref) = records_map.get_mut(&combo_key) {
-                        if theta_val == 0.0 {
-                            vec_ref[idx_0based] = Some(0.0);
-                        } else {
-                            vec_ref[idx_0based] = Some(theta_val);
-                        }
-                    }
-                }
-            }
-        }
-
-        // We'll find all distinct group_ids in per_site_diversity_vec. Then we produce separate FASTA blocks for each group.
-        let mut group_ids_found = HashSet::new();
-        for &(_, _, _, grp, _) in per_site_diversity_vec {
-            group_ids_found.insert(grp);
-        }
-
-        for grp in group_ids_found {
-            // We produce four lines, one for unfiltered_pi_, unfiltered_theta_, filtered_pi_, filtered_theta_.
-            // We see if there's at least one non-None in each vector. If so, we output it.
-
-            let possible_keys = [
-                "unfiltered_pi_",
-                "unfiltered_theta_",
-                "filtered_pi_",
-                "filtered_theta_",
-            ];
-
-            for key_base in possible_keys.iter() {
-                // We'll read from records_map. For the final string, we build the FASTA header:
-                // e.g. >unfiltered_pi_chr_14_start_244000_end_248905_group_1
-                // Then below it, we produce region_len comma separated values. We skip if the data is all None.
-
-                let full_key = format!("{}group_{}", key_base, grp);
-                if let Some(vec_ref) = records_map.get(&full_key) {
-                    let mut any_data = false;
-                    for val_opt in vec_ref.iter() {
-                        if val_opt.is_some() {
-                            any_data = true;
-                            break;
-                        }
-                    }
-                    if !any_data {
-                        continue;
-                    }
-
-                    let header = build_fasta_header(key_base, csv_row, grp);
-                    writeln!(fasta_writer, "{}", header)?;
-
-                    // Now build the single line of comma-separated numeric data.
-                    // We'll store 0 as "0".
-                    // If Some(0.0), that's "0". Otherwise format with six decimals.
-
-                    let mut line_values = Vec::with_capacity(region_len);
-                    for val_opt in vec_ref.iter() {
-                        match val_opt {
-                            Some(x) => {
-                                if *x == 0.0 {
-                                    line_values.push("0".to_string());
-                                } else {
-                                    line_values.push(format!("{:.6}", x));
-                                }
-                            }
-                            None => {
-                                // Represent missing data as "NA". Should never happen.
-                                line_values.push("NA".to_string());
-                            }
-                        }
-                    }
-                    let joined = line_values.join(",");
-                    writeln!(fasta_writer, "{}", joined)?;
-                }
-            }
-        }
-    }
-
-    fasta_writer.flush()?;
-
-    // Create a separate FASTA-style file for FST values
-    let temp_fst_fasta_path = {
-        let locked_opt = TEMP_DIR.lock();
-        if let Some(dir) = locked_opt.as_ref() {
-            dir.path().join("per_site_fst_output.falsta")
-        } else {
-            return Err(VcfError::Parse(
-                "Failed to access temporary directory".to_string(),
-            ));
-        }
-    };
-    let fst_fasta_file = File::create(&temp_fst_fasta_path)?;
-    let mut fst_fasta_writer = BufWriter::new(fst_fasta_file);
-
-    // Process FST data for each region
-    for (csv_row, _, fst_data_wc, fst_data_hudson) in &all_main_csv_data_tuples {
-        // Process FST data between groups 0 and 1
-        if !fst_data_wc.is_empty() || !fst_data_hudson.is_empty() {
-            // Define the region length for FALSTA output.
-            // csv_row.region_start and csv_row.region_end are 1-based inclusive as outputted in the main CSV.
-            let falsta_region_zbh =
-                ZeroBasedHalfOpen::from_1based_inclusive(csv_row.region_start, csv_row.region_end);
-            let region_length_for_falsta = falsta_region_zbh.len();
-
-            // Write header and data for Overall Haplotype FST
-            if !fst_data_wc.is_empty() {
-                // Only write if there's haplotype FST data
-                // Headers use 1-based inclusive coordinates matching the CSV output.
-                let header_overall_hap_fst = format!(
-                    ">haplotype_overall_fst_summary_chr_{}_start_{}_end_{}",
-                    csv_row.seqname, csv_row.region_start, csv_row.region_end
-                );
-                writeln!(fst_fasta_writer, "{}", header_overall_hap_fst)?;
-
-                let mut overall_values_str = vec!["NA".to_string(); region_length_for_falsta];
-                // fst_data contains (1-based_pos, OverallHaplotypeFstEstimate_f64, Pairwise0v1HaplotypeFstEstimate_f64)
-                let region_start_1based =
-                    OneBasedPosition::new(csv_row.region_start).map_err(|e| {
-                        VcfError::Parse(format!(
-                            "Invalid 1-based region_start for FST FALSTA: {}, error: {}",
-                            csv_row.region_start, e
-                        ))
-                    })?;
-
-                for &(pos_1based, overall_hap_fst_val, _) in fst_data_wc {
-                    // Convert absolute 1-based position from fst_data to 0-based index relative to region start
-                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| {
-                        VcfError::Parse(format!(
-                            "Invalid 1-based site position for FST FALSTA: {}, error: {}",
-                            pos_1based, e
-                        ))
-                    })?;
-
-                    let rel_pos_0based_i64 =
-                        site_pos_1based.zero_based() - region_start_1based.zero_based();
-
-                    if rel_pos_0based_i64 >= 0
-                        && (rel_pos_0based_i64 as usize) < region_length_for_falsta
-                    {
-                        let rel_pos_0based = rel_pos_0based_i64 as usize;
-                        overall_values_str[rel_pos_0based] = if overall_hap_fst_val.is_nan() {
-                            "NA".to_string()
-                        } else {
-                            format!("{:.6}", overall_hap_fst_val)
-                        };
-                    } else if rel_pos_0based_i64 < 0 {
-                        // This case implies the site is before the region
-                        log(LogLevel::Warning, &format!("Site at 1-based position {} is before current FALSTA FST region start {} (1-based). Skipping.", pos_1based, csv_row.region_start));
-                    } else {
-                        // This case implies the site is after the region end
-                        log(LogLevel::Warning, &format!("Site at 1-based position {} is outside current FALSTA FST region ({}:{}-{}, length {}). Rel 0-based idx {} out of bounds. Skipping.", pos_1based, csv_row.seqname, csv_row.region_start, csv_row.region_end, region_length_for_falsta, rel_pos_0based_i64));
-                    }
-                }
-                writeln!(fst_fasta_writer, "{}", overall_values_str.join(","))?;
-
-                // Write header and data for Pairwise Haplotype FST (0 vs 1)
-                let header_pairwise_0v1_hap_fst = format!(
-                    ">haplotype_0v1_pairwise_fst_summary_chr_{}_start_{}_end_{}",
-                    csv_row.seqname, csv_row.region_start, csv_row.region_end
-                );
-                writeln!(fst_fasta_writer, "{}", header_pairwise_0v1_hap_fst)?;
-
-                let mut pairwise_0v1_values_str = vec!["NA".to_string(); region_length_for_falsta];
-                for &(pos_1based, _, pairwise_0v1_hap_fst_val) in fst_data_wc {
-                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| {
-                        VcfError::Parse(format!(
-                            "Invalid 1-based site position for FST FALSTA pairwise: {}, error: {}",
-                            pos_1based, e
-                        ))
-                    })?;
-                    let rel_pos_0based_i64 =
-                        site_pos_1based.zero_based() - region_start_1based.zero_based();
-
-                    if rel_pos_0based_i64 >= 0
-                        && (rel_pos_0based_i64 as usize) < region_length_for_falsta
-                    {
-                        let rel_pos_0based = rel_pos_0based_i64 as usize;
-                        pairwise_0v1_values_str[rel_pos_0based] =
-                            if pairwise_0v1_hap_fst_val.is_nan() {
-                                "NA".to_string()
-                            } else {
-                                format!("{:.6}", pairwise_0v1_hap_fst_val)
-                            };
-                    } else if rel_pos_0based_i64 < 0 {
-                        log(LogLevel::Warning, &format!("Pairwise FST Site at 1-based position {} is before current FALSTA FST region start {} (1-based). Skipping.", pos_1based, csv_row.region_start));
-                    } else {
-                        log(LogLevel::Warning, &format!("Pairwise FST Site at 1-based position {} is outside current FALSTA FST region ({}:{}-{}, length {}). Rel 0-based idx {} out of bounds. Skipping.", pos_1based, csv_row.seqname, csv_row.region_start, csv_row.region_end, region_length_for_falsta, rel_pos_0based_i64));
-                    }
-                }
-                writeln!(fst_fasta_writer, "{}", pairwise_0v1_values_str.join(","))?;
-            }
-
-            // Write Hudson per-site FST for haplotype groups if available
-            if !fst_data_hudson.is_empty() {
-                let header_hudson = format!(
-                    ">hudson_pairwise_fst_hap_0v1_chr_{}_start_{}_end_{}",
-                    csv_row.seqname, csv_row.region_start, csv_row.region_end
-                );
-                writeln!(fst_fasta_writer, "{}", header_hudson)?;
-                let mut hudson_values_str = vec!["NA".to_string(); region_length_for_falsta];
-                let region_start_1based = OneBasedPosition::new(csv_row.region_start).map_err(|e| {
-                    VcfError::Parse(format!(
-                        "Invalid 1-based region_start for Hudson FALSTA: {}, error: {}",
-                        csv_row.region_start, e
-                    ))
-                })?;
-                for &(pos_1based, fst_site) in fst_data_hudson {
-                    let site_pos_1based = OneBasedPosition::new(pos_1based).map_err(|e| {
-                        VcfError::Parse(format!(
-                            "Invalid 1-based site position for Hudson FALSTA: {}, error: {}",
-                            pos_1based, e
-                        ))
-                    })?;
-                    let rel_pos_0based_i64 =
-                        site_pos_1based.zero_based() - region_start_1based.zero_based();
-                    if rel_pos_0based_i64 >= 0
-                        && (rel_pos_0based_i64 as usize) < region_length_for_falsta
-                    {
-                        let idx = rel_pos_0based_i64 as usize;
-                        hudson_values_str[idx] = if fst_site.is_nan() {
-                            "NA".to_string()
-                        } else {
-                            format!("{:.6}", fst_site)
-                        };
-                    } else if rel_pos_0based_i64 < 0 {
-                        log(LogLevel::Warning, &format!(
-                            "Hudson FST site at 1-based position {} is before current FALSTA region start {}. Skipping.",
-                            pos_1based, csv_row.region_start
-                        ));
-                    } else {
-                        log(LogLevel::Warning, &format!(
-                            "Hudson FST site at 1-based position {} is outside current FALSTA region ({}:{}-{}). Skipping.",
-                            pos_1based, csv_row.seqname, csv_row.region_start, csv_row.region_end
-                        ));
-                    }
-                }
-                writeln!(fst_fasta_writer, "{}", hudson_values_str.join(","))?;
-            }
-
-            // Process and write population pairwise FST data if available
-            if let Some(ref pop_results) = csv_row.population_fst_wc_results {
-                // Create a map of all pairwise comparisons across all sites
-                let mut all_pairs = HashSet::new();
-                for site in &pop_results.site_fst {
-                    for pair_name in site.pairwise_fst.keys() {
-                        all_pairs.insert(pair_name.clone());
-                    }
-                }
-
-                // For each population pair, create a separate record
-                for pair_name in all_pairs {
-                    // Write header for this population pair
-                    let header = format!(
-                        ">fst_pop_{}_{}_start_{}_end_{}",
-                        pair_name, csv_row.seqname, csv_row.region_start, csv_row.region_end
-                    );
-                    writeln!(fst_fasta_writer, "{}", header)?;
-
-                    // Format values for this pair
-                    let mut pair_values = vec!["NA".to_string(); region_length_for_falsta];
-                    // csv_row.region_start is 1-based inclusive. Convert to 0-based for comparison with site.position.
-                    let region_start_0based = OneBasedPosition::new(csv_row.region_start)
-                        .map_err(|e| {
-                            VcfError::Parse(format!(
-                                "Invalid 1-based region_start for PopFST FALSTA: {}, error: {}",
-                                csv_row.region_start, e
-                            ))
-                        })?
-                        .zero_based();
-                    // csv_row.region_end is 1-based inclusive. Convert to 0-based for comparison.
-                    let region_end_0based_inclusive = OneBasedPosition::new(csv_row.region_end)
-                        .map_err(|e| {
-                            VcfError::Parse(format!(
-                                "Invalid 1-based region_end for PopFST FALSTA: {}, error: {}",
-                                csv_row.region_end, e
-                            ))
-                        })?
-                        .zero_based();
-
-                    for site in &pop_results.site_fst {
-                        // site.position is 0-based from SiteFstWc.
-                        if site.position >= region_start_0based
-                            && site.position <= region_end_0based_inclusive
-                        {
-                            let rel_pos_i64 = site.position - region_start_0based;
-                            // This check should be redundant if the above condition is met and region_start_0based <= region_end_0based_inclusive
-                            if rel_pos_i64 < 0 {
-                                log(LogLevel::Warning, &format!("Population FST site position {} (0-based) resulted in negative relative offset from region start {} (0-based). Skipping.", site.position, region_start_0based));
-                                continue;
-                            }
-                            let rel_pos = rel_pos_i64 as usize;
-
-                            if rel_pos < region_length_for_falsta {
-                                // Get this pair's FST value if it exists
-                                if let Some(&fst_estimate_val) = site.pairwise_fst.get(&pair_name) {
-                                    // Use the Display trait of FstEstimate for formatting
-                                    pair_values[rel_pos] = fst_estimate_val.to_string();
-                                }
-                            } else {
-                                log(LogLevel::Warning, &format!("Population FST site position {} (0-based), relative index {} is out of bounds for length {}. Region {}:{}-{}. Skipping.", site.position, rel_pos, region_length_for_falsta, csv_row.seqname, csv_row.region_start, csv_row.region_end));
-                            }
-                        }
-                    }
-
-                    // Write the pairwise FST values to the FASTA file
-                    writeln!(fst_fasta_writer, "{}", pair_values.join(","))?;
-                }
-            }
-        }
-    }
-
-    fst_fasta_writer.flush()?;
 
     writer.flush().map_err(|e| VcfError::Io(e.into()))?;
     println!("Wrote FASTA-style per-site diversity data to per_site_diversity_output.falsta");
@@ -2407,10 +1819,10 @@ fn process_chromosome_entries(
 fn generate_full_region_alignment(
     entry: &ConfigEntry,
     haplotype_group: u8,
-    all_filtered_variants: &[Variant],
+    region_variants: &[Variant],
     sample_names: &[String],
     full_ref_sequence: &[u8],
-    position_allele_map: &Arc<Mutex<HashMap<i64, (char, char)>>>,
+    position_allele_map: &Arc<Mutex<HashMap<i64, (u8, u8)>>>,
     mask: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow: &Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     vcf_sample_id_to_index: &HashMap<String, usize>,
@@ -2436,15 +1848,6 @@ fn generate_full_region_alignment(
     let region_end = entry.interval.end as usize;
     let reference_slice = &full_ref_sequence[region_start..region_end];
 
-    // Restrict variants to this region using binary search
-    let start_idx = all_filtered_variants
-        .binary_search_by_key(&(entry.interval.start as i64), |v| v.position)
-        .unwrap_or_else(|idx| idx);
-    let end_idx = all_filtered_variants
-        .binary_search_by_key(&(entry.interval.end as i64), |v| v.position)
-        .unwrap_or_else(|idx| idx);
-    let region_variants = &all_filtered_variants[start_idx..end_idx];
-
     let pos_map = position_allele_map.lock();
     let mask_map = mask.as_ref().map(|m| m.as_ref());
     let allow_map = allow.as_ref().map(|a| a.as_ref());
@@ -2461,10 +1864,10 @@ fn generate_full_region_alignment(
                         HaplotypeSide::Right => genotype_vec.get(1),
                     };
                     if let Some(&1) = allele_opt {
-                        if let Some((_, alt)) = pos_map.get(&variant.position) {
+                        if let Some((_ref_allele, alt_allele)) = pos_map.get(&variant.position) {
                             let rel = (variant.position - entry.interval.start as i64) as usize;
                             if rel < seq.len() {
-                                seq[rel] = *alt as u8;
+                                seq[rel] = *alt_allele;
                             }
                         }
                     }
@@ -2601,10 +2004,7 @@ fn process_single_config_entry(
         extended_region.get_1based_inclusive_end_coord()
     ));
 
-    let seqinfo_storage_unfiltered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
-    let position_allele_map_unfiltered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
-    let seqinfo_storage_filtered = Arc::new(Mutex::new(Vec::<SeqInfo>::new()));
-    let position_allele_map_filtered = Arc::new(Mutex::new(HashMap::<i64, (char, char)>::new()));
+    let position_allele_map = Arc::new(Mutex::new(HashMap::<i64, (u8, u8)>::new()));
 
     set_stage(ProcessingStage::VcfProcessing);
     init_step_progress(&format!("Processing VCF for {}", region_desc), 2);
@@ -2622,8 +2022,8 @@ fn process_single_config_entry(
     );
 
     let (
-        unfiltered_variants,
-        filtered_variants,
+        all_variants,
+        filtered_idxs,
         sample_names,
         _chr_len,
         _missing_data_info,
@@ -2636,10 +2036,7 @@ fn process_single_config_entry(
         min_gq,
         mask.clone(),
         allow.clone(),
-        seqinfo_storage_unfiltered.clone(),
-        seqinfo_storage_filtered.clone(),
-        position_allele_map_unfiltered.clone(),
-        position_allele_map_filtered.clone(),
+        position_allele_map.clone(),
     ) {
         Ok(data) => data,
         Err(e) => {
@@ -2656,14 +2053,29 @@ fn process_single_config_entry(
 
     update_step_progress(1, "Analyzing variant statistics");
 
-    if !filtered_variants.is_empty() {
-        let is_sorted = filtered_variants
+    // UNFILTERED (unchanged behavior)
+    let region_variants_unfiltered: Vec<Variant> = all_variants
+        .iter()
+        .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
+        .cloned()
+        .collect();
+
+    // FILTERED (new): project indices -> variants, then restrict to region
+    let region_variants_filtered: Vec<Variant> = filtered_idxs
+        .iter()
+        .map(|&i| &all_variants[i])
+        .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
+        .cloned()
+        .collect();
+
+    if !region_variants_filtered.is_empty() {
+        let is_sorted = region_variants_filtered
             .windows(2)
             .all(|w| w[0].position <= w[1].position);
         if !is_sorted {
             // This should not happen if process_vcf sorts them.
             // Log an error or panic, as this is a critical pre-condition for efficient and correct sub-slicing.
-            log(LogLevel::Error, "CRITICAL: filtered_variants are not sorted by position in process_single_config_entry. Hudson FST results may be incorrect.");
+            log(LogLevel::Error, "CRITICAL: region_variants_filtered are not sorted by position in process_single_config_entry. Hudson FST results may be incorrect.");
         }
     }
 
@@ -2673,30 +2085,8 @@ fn process_single_config_entry(
     // entry.interval.end is exclusive for ZeroBasedHalfOpen.
     let hudson_analysis_region_end_0based_exclusive = entry.interval.end as i64;
 
-    // Create a sub-slice of filtered_variants that strictly corresponds to this Hudson analysis region.
-    // This uses binary search, relying on filtered_variants being sorted by position.
-    let start_idx_for_hudson_slice = filtered_variants
-        .binary_search_by_key(&hudson_analysis_region_start_0based, |v| v.position)
-        .unwrap_or_else(|idx| idx); // Returns Ok(idx) if found, or Err(idx) for insertion point. Both are fine.
-
-    let end_idx_for_hudson_slice = filtered_variants
-        .binary_search_by_key(&hudson_analysis_region_end_0based_exclusive, |v| v.position)
-        .unwrap_or_else(|idx| idx); // Insertion point is the correct exclusive end for the slice.
-
-    let variants_for_hudson_slice: &[Variant] = if start_idx_for_hudson_slice
-        < end_idx_for_hudson_slice
-        && end_idx_for_hudson_slice <= filtered_variants.len()
-    {
-        &filtered_variants[start_idx_for_hudson_slice..end_idx_for_hudson_slice]
-    } else {
-        // If the region is empty or indices are problematic, use an empty slice.
-        // This might happen if entry.interval is outside the range of filtered_variants.
-        log(LogLevel::Debug, &format!(
-            "Hudson FST: No variants from filtered_variants fall within entry.interval {}:{}-{}. Using empty variant slice.",
-            entry.seqname, entry.interval.start, entry.interval.end
-        ));
-        &[]
-    };
+    // The variants for Hudson FST should be the filtered variants within the specific region of the entry.
+    let variants_for_hudson_slice: &[Variant] = &region_variants_filtered[..];
 
     let hudson_query_region = if hudson_analysis_region_end_0based_exclusive
         > hudson_analysis_region_start_0based
@@ -2728,7 +2118,7 @@ fn process_single_config_entry(
             "Calculating FST between haplotype groups (0 vs 1)",
         );
         let haplotype_fst = calculate_fst_wc_haplotype_groups(
-            &filtered_variants,
+            &region_variants_filtered,
             &sample_names,
             &entry.samples_filtered,
             fst_query_region,
@@ -2741,7 +2131,7 @@ fn process_single_config_entry(
                 &format!("Calculating FST between population groups from {}", pop_csv),
             );
             match calculate_fst_wc_csv_populations(
-                &filtered_variants,
+                &region_variants_filtered,
                 &sample_names,
                 Path::new(pop_csv),
                 fst_query_region,
@@ -2778,26 +2168,20 @@ fn process_single_config_entry(
     };
 
     // Store filtered variants for PCA if enabled and the pca_storage is provided
-    if let Some((variants_storage, sample_names_storage)) = &pca_storage {
-        // Store filtered variants for this chromosome
-        variants_storage
-            .lock()
-            .insert(chr.to_string(), filtered_variants.clone());
+    if args.enable_pca {
+        if let Some((variants_storage, sample_names_storage)) = &pca_storage {
+            let filtered_for_chr: Vec<Variant> =
+                filtered_idxs.iter().map(|&i| all_variants[i].clone()).collect();
+            variants_storage
+                .lock()
+                .insert(chr.to_string(), filtered_for_chr);
 
-        // Store sample names if not already stored
-        let mut names = sample_names_storage.lock();
-        if names.is_empty() {
-            *names = sample_names.clone();
+            // Store sample names if not already stored
+            let mut names = sample_names_storage.lock();
+            if names.is_empty() {
+                *names = sample_names.clone();
+            }
         }
-
-        log(
-            LogLevel::Info,
-            &format!(
-                "Stored {} filtered variants from chr{} for PCA analysis",
-                filtered_variants.len(),
-                chr
-            ),
-        );
     }
 
     // Display variant filtering statistics
@@ -2880,13 +2264,6 @@ fn process_single_config_entry(
         ),
     );
 
-    // Filter to variants specifically in this region
-    let region_variants_unfiltered: Vec<_> = unfiltered_variants
-        .iter()
-        .filter(|v| entry.interval.contains(ZeroBasedPosition(v.position)))
-        .cloned()
-        .collect();
-
     log(
         LogLevel::Info,
         &format!(
@@ -2910,8 +2287,7 @@ fn process_single_config_entry(
         variants: &'a [Variant],
         sample_filter: &'a HashMap<String, (u8, u8)>,
         maybe_adjusted_len: Option<i64>,
-        seqinfo_storage: Arc<Mutex<Vec<SeqInfo>>>,
-        position_allele_map: Arc<Mutex<HashMap<i64, (char, char)>>>,
+        position_allele_map: Arc<Mutex<HashMap<i64, (u8, u8)>>>,
     }
 
     // Set up the four analysis invocations (filtered/unfiltered × group 0/1)
@@ -2922,20 +2298,18 @@ fn process_single_config_entry(
         VariantInvocation {
             group_id: 0,
             is_filtered: true,
-            variants: &filtered_variants,
+            variants: &region_variants_filtered,
             sample_filter: &entry.samples_filtered,
             maybe_adjusted_len: Some(adjusted_sequence_length),
-            seqinfo_storage: seqinfo_storage_filtered.clone(),
-            position_allele_map: position_allele_map_filtered.clone(),
+            position_allele_map: position_allele_map.clone(),
         },
         VariantInvocation {
             group_id: 1,
             is_filtered: true,
-            variants: &filtered_variants,
+            variants: &region_variants_filtered,
             sample_filter: &entry.samples_filtered,
             maybe_adjusted_len: Some(adjusted_sequence_length),
-            seqinfo_storage: seqinfo_storage_filtered.clone(),
-            position_allele_map: position_allele_map_filtered.clone(),
+            position_allele_map: position_allele_map.clone(),
         },
         VariantInvocation {
             group_id: 0,
@@ -2943,8 +2317,7 @@ fn process_single_config_entry(
             variants: &region_variants_unfiltered,
             sample_filter: &entry.samples_unfiltered,
             maybe_adjusted_len: None,
-            seqinfo_storage: seqinfo_storage_unfiltered.clone(),
-            position_allele_map: position_allele_map_unfiltered.clone(),
+            position_allele_map: position_allele_map.clone(),
         },
         VariantInvocation {
             group_id: 1,
@@ -2952,8 +2325,7 @@ fn process_single_config_entry(
             variants: &region_variants_unfiltered,
             sample_filter: &entry.samples_unfiltered,
             maybe_adjusted_len: None,
-            seqinfo_storage: seqinfo_storage_unfiltered.clone(),
-            position_allele_map: position_allele_map_unfiltered.clone(),
+            position_allele_map: position_allele_map.clone(),
         },
     ];
 
@@ -2979,7 +2351,6 @@ fn process_single_config_entry(
             entry.interval,
             extended_region,
             call.maybe_adjusted_len,
-            call.seqinfo_storage.clone(),
             call.position_allele_map.clone(),
             entry.seqname.clone(),
             call.is_filtered,
@@ -3235,10 +2606,10 @@ fn process_single_config_entry(
         generate_full_region_alignment(
             &entry,
             haplotype_group,
-            &filtered_variants,
+            &region_variants_filtered,
             &sample_names,
             ref_sequence,
-            &position_allele_map_filtered,
+            &position_allele_map,
             mask,
             allow,
             &vcf_sample_id_to_index,
@@ -3442,6 +2813,199 @@ fn format_optional_usize(val_opt: Option<usize>) -> String {
     }
 }
 
+// ── shared append opener ──────────────────────────────────────────────────────
+fn open_append(path: &std::path::Path) -> std::io::Result<BufWriter<std::fs::File>> {
+    let f = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    Ok(BufWriter::new(f))
+}
+
+// ── csv append: write ONE row (no header) ─────────────────────────────────────
+fn append_csv_row(csv_path: &std::path::Path, row: &CsvRowData) -> Result<(), VcfError> {
+    let f = open_append(csv_path).map_err(VcfError::Io)?;
+    let mut w = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(f);
+    write_csv_row(&mut w, row)?;
+    w.flush().map_err(|e| VcfError::Io(e.into()))
+}
+
+// ── FALSTA helpers (use your existing header/value formats) ───────────────────
+fn build_fasta_header(prefix: &str, row: &CsvRowData, group_id: u8) -> String {
+    format!(
+        ">{}chr_{}_start_{}_end_{}_group_{}",
+        prefix, row.seqname, row.region_start, row.region_end, group_id
+    )
+}
+
+// per-site diversity: (pos_1based, pi, theta, group_id, is_filtered)
+fn append_diversity_falsta<P: AsRef<std::path::Path>>(
+    path: P,
+    row: &CsvRowData,
+    per_site: &[(i64, f64, f64, u8, bool)],
+) -> Result<(), VcfError> {
+    let mut w = open_append(path.as_ref()).map_err(VcfError::Io)?;
+    // region in 0-based half-open for mapping
+    let region = ZeroBasedHalfOpen::from_1based_inclusive(row.region_start, row.region_end);
+    let region_len = region.len();
+
+    // group ids present
+    let mut gids = std::collections::BTreeSet::<u8>::new();
+    for &(_, _, _, g, _) in per_site {
+        gids.insert(g);
+    }
+
+    // for each group × {unfiltered,filtered} × {pi,theta}
+    for &g in &gids {
+        for &(is_filtered, which, prefix) in &[
+            (false, "pi", "unfiltered_pi_"),
+            (false, "theta", "unfiltered_theta_"),
+            (true, "pi", "filtered_pi_"),
+            (true, "theta", "filtered_theta_"),
+        ] {
+            // allocate a line of NAs
+            let mut line = vec![String::from("NA"); region_len];
+            let mut any = false;
+
+            for &(pos1, pi, th, gg, filt) in per_site {
+                if gg != g || filt != is_filtered {
+                    continue;
+                }
+                if let Some(rel1) = region.relative_position_1based_inclusive(pos1) {
+                    let idx = (rel1 - 1) as usize;
+                    let v = if which == "pi" { pi } else { th };
+                    line[idx] = if v == 0.0 {
+                        "0".into()
+                    } else {
+                        format!("{:.6}", v)
+                    };
+                    any = true;
+                }
+            }
+
+            if any {
+                writeln!(w, "{}", build_fasta_header(prefix, row, g)).map_err(VcfError::Io)?;
+                writeln!(w, "{}", line.join(",")).map_err(VcfError::Io)?;
+            }
+        }
+    }
+    w.flush().map_err(VcfError::Io)
+}
+
+// per-site WC FST: (pos_1based, overall_wc, pairwise_0v1_wc)
+// and Hudson hap FST: (pos_1based, fst)
+fn append_fst_falsta<P: AsRef<std::path::Path>>(
+    path: P,
+    row: &CsvRowData,
+    wc_sites: &[(i64, f64, f64)],
+    hudson_sites: &[(i64, f64)],
+) -> Result<(), VcfError> {
+    let mut w = open_append(path.as_ref()).map_err(VcfError::Io)?;
+    let region = ZeroBasedHalfOpen::from_1based_inclusive(row.region_start, row.region_end);
+    let n = region.len();
+
+    // WC overall
+    if !wc_sites.is_empty() {
+        writeln!(
+            w,
+            ">haplotype_overall_fst_summary_chr_{}_start_{}_end_{}",
+            row.seqname, row.region_start, row.region_end
+        )
+        .map_err(VcfError::Io)?;
+        let mut v = vec![String::from("NA"); n];
+        for &(p1, ovl, _) in wc_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(p1) {
+                let i = (rel1 - 1) as usize;
+                v[i] = if ovl.is_nan() {
+                    "NA".into()
+                } else {
+                    format!("{:.6}", ovl)
+                };
+            }
+        }
+        writeln!(w, "{}", v.join(",")).map_err(VcfError::Io)?;
+
+        // WC pairwise 0v1
+        writeln!(
+            w,
+            ">haplotype_0v1_pairwise_fst_summary_chr_{}_start_{}_end_{}",
+            row.seqname, row.region_start, row.region_end
+        )
+        .map_err(VcfError::Io)?;
+        let mut pv = vec![String::from("NA"); n];
+        for &(p1, _, pair) in wc_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(p1) {
+                let i = (rel1 - 1) as usize;
+                pv[i] = if pair.is_nan() {
+                    "NA".into()
+                } else {
+                    format!("{:.6}", pair)
+                };
+            }
+        }
+        writeln!(w, "{}", pv.join(",")).map_err(VcfError::Io)?;
+    }
+
+    // Hudson per-site hap FST 0v1
+    if !hudson_sites.is_empty() {
+        writeln!(
+            w,
+            ">hudson_pairwise_fst_hap_0v1_chr_{}_start_{}_end_{}",
+            row.seqname, row.region_start, row.region_end
+        )
+        .map_err(VcfError::Io)?;
+        let mut hv = vec![String::from("NA"); n];
+        for &(p1, fst) in hudson_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(p1) {
+                let i = (rel1 - 1) as usize;
+                hv[i] = if fst.is_nan() {
+                    "NA".into()
+                } else {
+                    format!("{:.6}", fst)
+                };
+            }
+        }
+        writeln!(w, "{}", hv.join(",")).map_err(VcfError::Io)?;
+    }
+
+    w.flush().map_err(VcfError::Io)
+}
+
+// write Hudson TSV rows (the “regional outcomes”)
+fn append_hudson_tsv(
+    out_path: &std::path::Path,
+    rows: &[RegionalHudsonFSTOutcome],
+) -> Result<(), VcfError> {
+    let f = open_append(out_path).map_err(VcfError::Io)?;
+    let mut w = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .has_headers(false)
+        .from_writer(f);
+
+    for r in rows {
+        let (p1t, p1n) = format_population_id(&r.outcome.pop1_id);
+        let (p2t, p2n) = format_population_id(&r.outcome.pop2_id);
+        w.write_record(&[
+            &r.chr,
+            &r.region_start.to_string(),
+            &r.region_end.to_string(),
+            &p1t,
+            &p1n,
+            &p2t,
+            &p2n,
+            &format_optional_float(r.outcome.d_xy),
+            &format_optional_float(r.outcome.pi_pop1),
+            &format_optional_float(r.outcome.pi_pop2),
+            &format_optional_float(r.outcome.pi_xy_avg),
+            &format_optional_float(r.outcome.fst),
+        ])
+        .map_err(|e| VcfError::Io(e.into()))?;
+    }
+    w.flush().map_err(|e| VcfError::Io(e.into()))
+}
+
 /// Retrieves VCF sample indices and HaplotypeSides for samples belonging to a specified population
 /// as defined in a population definition CSV file.
 ///
@@ -3493,14 +3057,11 @@ pub fn process_vcf(
     min_gq: u16,
     mask_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
     allow_regions: Option<Arc<HashMap<String, Vec<(i64, i64)>>>>,
-    seqinfo_storage_unfiltered: Arc<Mutex<Vec<SeqInfo>>>,
-    seqinfo_storage_filtered: Arc<Mutex<Vec<SeqInfo>>>,
-    position_allele_map_unfiltered: Arc<Mutex<HashMap<i64, (char, char)>>>,
-    position_allele_map_filtered: Arc<Mutex<HashMap<i64, (char, char)>>>,
+    position_allele_map: Arc<Mutex<HashMap<i64, (u8, u8)>>>,
 ) -> Result<
     (
         Vec<Variant>,
-        Vec<Variant>,
+        Vec<usize>,
         Vec<String>,
         i64,
         MissingDataInfo,
@@ -3542,8 +3103,8 @@ pub fn process_vcf(
     );
 
     // Small vectors to hold variants in batches, limiting memory usage
-    let unfiltered_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
-    let filtered_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
+    let all_variants = Arc::new(Mutex::new(Vec::with_capacity(10000)));
+    let filtered_idxs = Arc::new(Mutex::new(Vec::<usize>::with_capacity(10000)));
 
     // Shared stats
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
@@ -3639,7 +3200,7 @@ pub fn process_vcf(
         let arc_mask = mask_regions.clone();
         let arc_allow = allow_regions.clone();
         let chr_copy = chr.to_string();
-        let pos_map_unfiltered = Arc::clone(&position_allele_map_unfiltered);
+        let pos_map = Arc::clone(&position_allele_map);
         consumers.push(thread::spawn(move || -> Result<(), VcfError> {
             while let Ok(line) = line_receiver.recv() {
                 let mut single_line_miss_info = MissingDataInfo::default();
@@ -3661,7 +3222,7 @@ pub fn process_vcf(
                     &mut single_line_filt_stats,
                     arc_allow.as_ref().map(|x| x.as_ref()),
                     arc_mask.as_ref().map(|x| x.as_ref()),
-                    &pos_map_unfiltered,
+                    &pos_map,
                 ) {
                     Ok(variant_opt) => {
                         rs.send(Ok((
@@ -3682,40 +3243,20 @@ pub fn process_vcf(
 
     // Collector merges results from consumers.
     let collector_thread = thread::spawn({
-        let unfiltered_variants = Arc::clone(&unfiltered_variants);
-        let filtered_variants = Arc::clone(&filtered_variants);
+        let all_variants = Arc::clone(&all_variants);
+        let filtered_idxs = Arc::clone(&filtered_idxs);
         let missing_data_info = Arc::clone(&missing_data_info);
         let _filtering_stats = Arc::clone(&_filtering_stats);
         move || -> Result<(), VcfError> {
             while let Ok(msg) = result_receiver.recv() {
                 match msg {
                     Ok((Some((variant, passes)), local_miss, mut local_stats)) => {
-                        {
-                            let mut u = unfiltered_variants.lock();
-                            u.push(variant.clone());
-                        }
+                        let mut u = all_variants.lock();
+                        u.push(variant); // single owner of the heavy genotypes
+                        let idx = u.len() - 1;
                         if passes {
-                            let mut f = filtered_variants.lock();
-                            f.push(variant.clone());
-                            position_allele_map_filtered.lock().insert(
-                                variant.position,
-                                position_allele_map_unfiltered
-                                    .lock()
-                                    .get(&variant.position)
-                                    .copied()
-                                    .unwrap_or(('N', 'N')),
-                            );
+                            filtered_idxs.lock().push(idx); // just remember the index
                         }
-
-                        // Write SeqInfo for unfiltered
-                        // ???
-                        //
-                        // TODO
-
-                        // Write SeqInfo for filtered
-                        // ???
-                        //
-                        // TODO
 
                         {
                             let mut global_miss = missing_data_info.lock();
@@ -3785,25 +3326,35 @@ pub fn process_vcf(
         .expect("Collector thread panicked")?;
     progress_thread.join().expect("Progress thread panicked");
 
-    // Display the final SeqInfo if present.
-    if !seqinfo_storage_unfiltered.lock().is_empty() {
-        display_seqinfo_entries(&seqinfo_storage_unfiltered.lock(), 12);
-    }
-    if !seqinfo_storage_filtered.lock().is_empty() {
-        display_seqinfo_entries(&seqinfo_storage_filtered.lock(), 12);
-    }
-
     // Extract final variant vectors.
-    let mut final_unfiltered = Arc::try_unwrap(unfiltered_variants)
-        .map_err(|_| VcfError::Parse("Unfiltered variants still have multiple owners".to_string()))?
+    let mut final_all = Arc::try_unwrap(all_variants)
+        .map_err(|_| VcfError::Parse("Variants still have multiple owners".to_string()))?
         .into_inner();
-    let mut final_filtered = Arc::try_unwrap(filtered_variants)
+    let mut final_filtered_idxs = Arc::try_unwrap(filtered_idxs)
         .map_err(|_| VcfError::Parse("Filtered variants still have multiple owners".to_string()))?
         .into_inner();
 
-    // Sort variants by position to ensure consistent order and enable efficient searching.
-    final_unfiltered.sort_by_key(|v| v.position);
-    final_filtered.sort_by_key(|v| v.position);
+    // build a set of filtered positions (single-alt enforced, so unique per pos)
+    let filt_pos: std::collections::HashSet<i64> = final_filtered_idxs
+        .iter()
+        .map(|&i| final_all[i].position)
+        .collect();
+
+    // sort the all-variants in place by position
+    final_all.sort_by_key(|v| v.position);
+
+    // rebuild filtered indices in the new order
+    final_filtered_idxs = final_all
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| {
+            if filt_pos.contains(&v.position) {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
 
     // Extract stats.
     let final_miss = Arc::try_unwrap(missing_data_info)
@@ -3822,8 +3373,8 @@ pub fn process_vcf(
             chr,
             region.start,
             region.end,
-            final_unfiltered.len(),
-            final_filtered.len()
+            final_all.len(),
+            final_filtered_idxs.len()
         ),
     );
 
@@ -3832,8 +3383,8 @@ pub fn process_vcf(
             LogLevel::Info,
             &format!(
                 "DEBUG X: chrX VCF processing complete with {} unfiltered and {} filtered variants",
-                final_unfiltered.len(),
-                final_filtered.len()
+                final_all.len(),
+                final_filtered_idxs.len()
             ),
         );
     }
@@ -3850,8 +3401,8 @@ pub fn process_vcf(
     );
 
     Ok((
-        final_unfiltered,
-        final_filtered,
+        final_all,
+        final_filtered_idxs,
         final_names,
         chr_length,
         final_miss,
@@ -3869,7 +3420,7 @@ pub fn process_variant(
     _filtering_stats: &mut FilteringStats,
     allow_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
     mask_regions: Option<&HashMap<String, Vec<(i64, i64)>>>,
-    position_allele_map: &Mutex<HashMap<i64, (char, char)>>,
+    position_allele_map: &Mutex<HashMap<i64, (u8, u8)>>>,
 ) -> Result<Option<(Variant, bool)>, VcfError> {
     let fields: Vec<&str> = line.split('\t').collect();
 
@@ -3974,8 +3525,8 @@ pub fn process_variant(
 
     // Store reference and alternate alleles
     if !fields[3].is_empty() && !fields[4].is_empty() {
-        let ref_allele = fields[3].chars().next().unwrap_or('N');
-        let alt_allele = fields[4].chars().next().unwrap_or('N');
+        let ref_allele = fields[3].as_bytes().get(0).copied().unwrap_or(b'N');
+        let alt_allele = fields[4].as_bytes().get(0).copied().unwrap_or(b'N');
         position_allele_map
             .lock()
             .insert(zero_based_position, (ref_allele, alt_allele));
