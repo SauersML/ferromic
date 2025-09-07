@@ -27,11 +27,10 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
         return np.nanmax(np.abs(df["AGE_sq"].to_numpy() - (df["AGE"].to_numpy() ** 2))) < 1e-4
 
     def _valid_inversion(df):
-        # exactly one column: the current TARGET_INVERSION; numeric; no NA-only rows
+        """Validate that the inversion dosage file contains the target column and it's numeric."""
         if validate_target is None:
             return True
-        cols = list(df.columns)
-        if cols != [validate_target]:
+        if validate_target not in df.columns:
             return False
         return is_numeric_dtype(df[validate_target]) and df[validate_target].notna().any()
 
@@ -174,12 +173,24 @@ def load_pcs(gcp_project, PCS_URI, NUM_PCS):
     """Loads genetic PCs."""
     try:
         raw_pcs = pd.read_csv(PCS_URI, sep="\t", storage_options={"project": gcp_project, "requester_pays": True})
-        def _parse_and_pad(s):
-            vals = ast.literal_eval(s) if pd.notna(s) else []
-            return (vals + [np.nan] * NUM_PCS)[:NUM_PCS]
+        def _parse_and_pad_fast(s):
+            """Fast parser for string-encoded lists of floats."""
+            if pd.isna(s): return [np.nan] * NUM_PCS
+            s = s.strip()
+            if not s.startswith('[') or not s.endswith(']'): return [np.nan] * NUM_PCS
+            s = s[1:-1]
+            if not s: return [np.nan] * NUM_PCS
+            try:
+                vals = [float(x) for x in s.split(',')]
+                # Pad with NaNs if the list is shorter than NUM_PCS
+                if len(vals) < NUM_PCS:
+                    vals.extend([np.nan] * (NUM_PCS - len(vals)))
+                return vals[:NUM_PCS]
+            except ValueError:
+                return [np.nan] * NUM_PCS
 
         pc_mat = pd.DataFrame(
-            raw_pcs["pca_features"].apply(_parse_and_pad).tolist(),
+            raw_pcs["pca_features"].apply(_parse_and_pad_fast).tolist(),
             columns=[f"PC{i}" for i in range(1, NUM_PCS + 1)]
         )
         pc_df = pc_mat.assign(person_id=raw_pcs["research_id"].astype(str)).set_index("person_id")
@@ -252,6 +263,8 @@ def load_demographics_with_stable_age(bq_client, cdr_id):
     # Calculate age and age-squared, handling potential data errors gracefully
     demographics['year_of_birth'] = pd.to_numeric(demographics['year_of_birth'], errors='coerce')
     demographics['AGE'] = demographics['obs_end_year'] - demographics['year_of_birth']
+    # Sanity-bound ages to handle data glitches
+    demographics['AGE'] = demographics['AGE'].clip(lower=0, upper=120)
     demographics['AGE_sq'] = demographics['AGE'] ** 2
 
     # Set index and select final columns, dropping anyone with missing age info
