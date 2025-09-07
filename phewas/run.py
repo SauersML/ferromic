@@ -11,6 +11,8 @@ import queue
 import faulthandler
 import sys
 import traceback
+import psutil
+
 
 import numpy as np
 import pandas as pd
@@ -40,6 +42,59 @@ def _thread_excepthook(args):
     _global_excepthook(args.exc_type, args.exc_value, args.exc_traceback)
 
 threading.excepthook = _thread_excepthook
+
+class SystemMonitor(threading.Thread):
+    """
+    A thread that monitors and reports system resource usage periodically.
+    """
+    def __init__(self, interval=15):
+        super().__init__(daemon=True)
+        self.interval = interval
+        try:
+            self._main_process = psutil.Process()
+        except psutil.NoSuchProcess:
+            self._main_process = None
+
+    def run(self):
+        """Monitors and reports system stats until the main program exits."""
+        if not self._main_process:
+            print("[SysMonitor] Could not find main process to monitor.", flush=True)
+            return
+
+        while True:
+            try:
+                # Get system-wide stats
+                cpu_percent = psutil.cpu_percent(interval=None)
+                ram_percent = psutil.virtual_memory().percent
+
+                # Get stats specific to this application's process tree
+                child_processes = self._main_process.children(recursive=True)
+                num_children = len(child_processes)
+                num_threads = self._main_process.num_threads()
+
+                # Consolidate main and child process memory
+                main_mem = self._main_process.memory_info()
+                child_mem = sum(p.memory_info().rss for p in child_processes)
+                total_rss_gb = (main_mem.rss + child_mem) / (1024**3)
+
+
+                stats_line = (
+                    f"[SysMonitor] "
+                    f"CPU: {cpu_percent:5.1f}% | "
+                    f"RAM: {ram_percent:5.1f}% | "
+                    f"App RSS: {total_rss_gb:.2f}GB | "
+                    f"Workers: {num_children} | "
+                    f"Threads: {num_threads}"
+                )
+                print(stats_line, flush=True)
+
+            except psutil.NoSuchProcess:
+                # Main process has exited, so we should too.
+                break
+            except Exception as e:
+                print(f"[SysMonitor] Error: {e}", flush=True)
+
+            time.sleep(self.interval)
 
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -97,6 +152,11 @@ class Timer:
 def main():
     import run
     script_start_time = time.time()
+
+    # --- Start system resource monitoring ---
+    monitor_thread = SystemMonitor(interval=15)
+    monitor_thread.start()
+
     print("=" * 70)
     print(" Starting Robust, Memory-Stable PheWAS Pipeline (Chunked Producer)")
     print("=" * 70)
