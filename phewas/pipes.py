@@ -80,26 +80,17 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                 print(f"[pool ERR] Worker failed: {e}", flush=True)
                 failed_tasks.append(e)
 
-            # Drain queue → submit jobs with a completion callback
-            all_phenos = []
-            while True:
-                try:
-                    item = pheno_queue.get_nowait()
-                    if item is None:
-                        break
-                    all_phenos.append(item)
-                except queue.Empty:
-                    break
-            random.shuffle(all_phenos)
-
+            # Consume items until sentinel is received
             MIN_AVAILABLE_MEMORY_GB = 4.0
-            for pheno_data in all_phenos:
+            while True:
+                item = pheno_queue.get()
+                if item is None:
+                    break  # producer finished
                 if PSUTIL_AVAILABLE and monitor.available_memory_gb < MIN_AVAILABLE_MEMORY_GB and monitor.available_memory_gb > 0:
                     print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
                     time.sleep(5)
-
                 queued += 1
-                pool.apply_async(worker_func, (pheno_data,), callback=_cb, error_callback=_err_cb)
+                pool.apply_async(worker_func, (item,), callback=_cb, error_callback=_err_cb)
                 _print_bar(queued, done)
 
             pool.close()
