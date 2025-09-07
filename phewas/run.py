@@ -2,6 +2,7 @@ import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+from datetime import datetime
 import time
 import warnings
 import gc
@@ -49,7 +50,7 @@ except Exception:
 # --- Configuration ---
 TARGET_INVERSIONS = ['chr17-45585160-INV-706887']
 PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads/main/data/significant_heritability_diseases.tsv"
-MASTER_RESULTS_CSV = "phewas_results_MASTER.csv"
+MASTER_RESULTS_CSV = f"phewas_results_{datetime.now().strftime('%Y%m%d%H%M%S')}.tsv"
 
 # --- Performance & Memory Tuning ---
 MIN_AVAILABLE_MEMORY_GB = 4.0
@@ -411,7 +412,7 @@ def main():
                     df.at[idx, "FINAL_INTERPRETATION"] = ",".join(sig_groups) if sig_groups else "unable to determine"
 
             print(f"\n--- Saving final results to '{MASTER_RESULTS_CSV}' ---")
-            df.to_csv(MASTER_RESULTS_CSV, index=False)
+            df.to_csv(MASTER_RESULTS_CSV, index=False, sep='\t')
 
             out_df = df[df['Sig_Global'] == True].copy()
             if not out_df.empty:

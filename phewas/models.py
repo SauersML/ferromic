@@ -174,9 +174,14 @@ def _should_skip(meta_path, core_df, case_idx_fp, category, target, allowed_fp):
     """Determines if a model run can be skipped based on metadata."""
     meta = io.read_meta_json(meta_path)
     if not meta: return False
-    return (meta.get("model_columns")==list(core_df.columns) and meta.get("ridge_l2_base")==CTX["RIDGE_L2_BASE"] and
-            meta.get("core_index_fp")==_index_fingerprint(core_df.index) and meta.get("case_idx_fp")==case_idx_fp and
-            meta.get("allowed_mask_fp")==allowed_fp)
+    # Check that the metadata matches the current context
+    return (meta.get("model_columns") == list(core_df.columns) and
+            meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
+            meta.get("core_index_fp") == _index_fingerprint(core_df.index) and
+            meta.get("case_idx_fp") == case_idx_fp and
+            meta.get("allowed_mask_fp") == allowed_fp and
+            meta.get("min_cases") == CTX["MIN_CASES_FILTER"] and
+            meta.get("min_ctrls") == CTX["MIN_CONTROLS_FILTER"])
 
 def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp):
     """Determines if an LRT run can be skipped based on metadata."""
