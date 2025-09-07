@@ -123,7 +123,8 @@ def atomic_write_json(path, data_obj):
     Writes JSON atomically by first writing to a unique temp path and then moving it into place.
     Accepts either a dict-like object or a pandas Series.
     """
-    fd, tmp_path = tempfile.mkstemp(dir='.', prefix=os.path.basename(path) + '.tmp.')
+    tmpdir = os.path.dirname(path) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=tmpdir, prefix=os.path.basename(path) + '.tmp.')
     os.close(fd)
     try:
         if isinstance(data_obj, pd.Series):
@@ -160,12 +161,16 @@ def load_pcs(gcp_project, PCS_URI, NUM_PCS):
     """Loads genetic PCs."""
     try:
         raw_pcs = pd.read_csv(PCS_URI, sep="\t", storage_options={"project": gcp_project, "requester_pays": True})
+        def _parse_and_pad(s):
+            vals = ast.literal_eval(s) if pd.notna(s) else []
+            return (vals + [np.nan] * NUM_PCS)[:NUM_PCS]
+
         pc_mat = pd.DataFrame(
-            raw_pcs["pca_features"].apply(lambda s: ast.literal_eval(s) if pd.notna(s) else [np.nan]*16).tolist(),
-            columns=[f"PC{i}" for i in range(1, 17)]
+            raw_pcs["pca_features"].apply(_parse_and_pad).tolist(),
+            columns=[f"PC{i}" for i in range(1, NUM_PCS + 1)]
         )
         pc_df = pc_mat.assign(person_id=raw_pcs["research_id"].astype(str)).set_index("person_id")
-        return pc_df[[f'PC{i}' for i in range(1, NUM_PCS + 1)]]
+        return pc_df
     except Exception as e:
         raise RuntimeError(f"Failed to load PCs: {e}")
 
