@@ -348,13 +348,11 @@ def main():
     for snp in TARGET_SNPS:
         snp_id = snp["id"]
         pos = snp["pos"]
-        rsid = snp["rsid"]
         H1 = TARGET_LOCI_INFO_3SNP[snp_id]["H1"].upper()
         H2 = TARGET_LOCI_INFO_3SNP[snp_id]["H2"].upper()
 
         var = fetch_snp_variant(vcf, CHROM, pos)
         info = {
-            "rsid": rsid,
             "pos": pos,
             "usable": False,
             "reason": "",
@@ -368,7 +366,7 @@ def main():
             info["reason"] = "Variant not found or not a biallelic SNP"
             snp_status[snp_id] = info
             snp_dosages[snp_id] = np.full(len(vcf_samples_used), np.nan)
-            logging.warning(f"{snp_id} ({rsid}) not usable: {info['reason']}")
+            logging.warning(f"{snp_id} not usable: {info['reason']}")
             continue
 
         ref = var.REF
@@ -384,7 +382,7 @@ def main():
             info["reason"] = f"Allele mismatch (H2={H2}, REF={ref}, ALT={alt}, and complements)"
             snp_status[snp_id] = info
             snp_dosages[snp_id] = np.full(len(vcf_samples_used), np.nan)
-            logging.warning(f"{snp_id} ({rsid}) not usable: {info['reason']}")
+            logging.warning(f"{snp_id} not usable: {info['reason']}")
             continue
 
         # Compute H2 dosage
@@ -398,7 +396,7 @@ def main():
         snp_status[snp_id] = info
 
         flip_note = " (strand-flipped)" if flipped else ""
-        logging.info(f"{snp_id} ({rsid}) usable via mode={mode}{flip_note}; REF={ref} ALT={alt}; non-missing calls: {int(np.isfinite(dos).sum())}/{len(dos)}")
+        logging.info(f"{snp_id} usable via mode={mode}{flip_note}; REF={ref} ALT={alt}; non-missing calls: {int(np.isfinite(dos).sum())}/{len(dos)}")
 
     present_snp_ids = choose_present_snps(snp_status)
 
@@ -424,7 +422,6 @@ def main():
     single_snp_stats = {}
     for snp in TARGET_SNPS:
         sid = snp["id"]
-        rsid = snp["rsid"]
         pos = snp["pos"]
         col = f"dosage_{sid.replace(':', '_')}"
         x = df_per_sample[col].astype(float)
@@ -451,7 +448,6 @@ def main():
         direction = "H2 increases dosage (positive correlation)" if np.isfinite(r_val) and r_val > 0 else ("H1 increases dosage (negative correlation)" if np.isfinite(r_val) and r_val < 0 else "No direction (undefined or zero correlation)")
         st = snp_status.get(sid, {})
         single_snp_stats[sid] = {
-            "rsid": rsid,
             "position": pos,
             "ref": st.get("ref"),
             "alt": st.get("alt"),
@@ -463,7 +459,7 @@ def main():
             "y_means_by_dosage": means,
             "direction": direction
         }
-        logging.info(f"SNP {sid} ({rsid}) correlation with dosage: r={(0.0 if not np.isfinite(r_val) else r_val):.4f} using n={int(mask.sum())}")
+        logging.info(f"SNP {sid} correlation with dosage: r={(0.0 if not np.isfinite(r_val) else r_val):.4f} using n={int(mask.sum())}")
         logging.info(f"SNP {sid} counts by H2-dosage: 0={counts['dose0_n']} 1={counts['dose1_n']} 2={counts['dose2_n']}")
         logging.info(f"SNP {sid} y-mean by H2-dosage: dose0={means['y_mean_dose0']:.4f} dose1={means['y_mean_dose1']:.4f} dose2={means['y_mean_dose2']:.4f}")
         logging.info(f"SNP {sid} direction: {direction}")
