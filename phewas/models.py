@@ -41,6 +41,53 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
         base.update(extra)
     io.atomic_write_json(meta_path, base)
 
+# thresholds (configured via CTX; here are defaults/fallbacks)
+DEFAULT_MIN_CASES = 1000
+DEFAULT_MIN_CONTROLS = 1000
+DEFAULT_MIN_NEFF = 100  # optional gate; set 0 to disable
+
+def _thresholds(cases_key="MIN_CASES_FILTER", controls_key="MIN_CONTROLS_FILTER", neff_key="MIN_NEFF_FILTER"):
+    return (
+        int(CTX.get(cases_key, DEFAULT_MIN_CASES)),
+        int(CTX.get(controls_key, DEFAULT_MIN_CONTROLS)),
+        float(CTX.get(neff_key, DEFAULT_MIN_NEFF)),
+    )
+
+def _counts_from_y(y):
+    y = np.asarray(y, dtype=np.int8)
+    n = y.size
+    n_cases = int(np.sum(y))
+    n_ctrls = int(n - n_cases)
+    pi = (n_cases / n) if n > 0 else 0.0
+    n_eff = 4.0 * n * pi * (1.0 - pi) if n > 0 else 0.0
+    return n, n_cases, n_ctrls, n_eff
+
+def validate_min_counts_for_fit(y, stage_tag, extra_context=None, cases_key="MIN_CASES_FILTER", controls_key="MIN_CONTROLS_FILTER", neff_key="MIN_NEFF_FILTER"):
+    """
+    Validate *final* y used for the fit. Returns (ok: bool, reason: str, details: dict)
+    stage_tag: 'phewas' | 'lrt_stage1' | 'lrt_followup:<ANC>'
+    """
+    min_cases, min_ctrls, min_neff = _thresholds(cases_key=cases_key, controls_key=controls_key, neff_key=neff_key)
+    n, n_cases, n_ctrls, n_eff = _counts_from_y(y)
+    ok = True
+    reasons = []
+    if n_cases < min_cases:
+        ok = False; reasons.append(f"cases<{min_cases}({n_cases})")
+    if n_ctrls < min_ctrls:
+        ok = False; reasons.append(f"controls<{min_ctrls}({n_ctrls})")
+    if min_neff > 0 and n_eff < min_neff:
+        ok = False; reasons.append(f"neff<{min_neff:g}({n_eff:.1f})")
+
+    details = {
+        "stage": stage_tag,
+        "N": n, "N_cases": n_cases, "N_ctrls": n_ctrls, "N_eff": n_eff,
+        "min_cases": min_cases, "min_ctrls": min_ctrls, "min_neff": min_neff,
+    }
+    if extra_context:
+        details.update(extra_context)
+    reason = "OK" if ok else "insufficient_counts:" + "|".join(reasons)
+    return ok, reason, details
+
 def _converged(fit_obj):
     """Checks for convergence in a statsmodels fit object."""
     try:
@@ -92,7 +139,7 @@ def _logit_fit(model, method, **kw):
         except TypeError:
             return model.fit(**fit_kwargs)
 
-def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None):
+def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, **kwargs):
     """
     Ridge-first logistic fit with strict MLE gating based on numerical diagnostics.
     If numpy arrays are provided, const_ix identifies the intercept column for zero-penalty.
@@ -114,7 +161,7 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None):
         elif not is_pandas and const_ix is not None and const_ix < X.shape[1]:
             alphas[const_ix] = 0.0
 
-        ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0, maxiter=800)
+        ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0, maxiter=800, **kwargs)
         setattr(ridge_fit, "_used_ridge", True)
         setattr(ridge_fit, "_final_is_mle", False)
 
@@ -123,18 +170,35 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None):
         except Exception:
             max_abs_linpred, frac_lo, frac_hi = float("inf"), 1.0, 1.0
 
-        if (max_abs_linpred > 50.0) or (frac_lo > 0.20) or (frac_hi > 0.20):
+        # Optional n_eff gate (default off). We still guard hard on separation-like diagnostics.
+        neff_gate = float(CTX.get("MLE_REFIT_MIN_NEFF", 0.0))
+        if (max_abs_linpred > 15.0) or (frac_lo > 0.02) or (frac_hi > 0.02) or (neff_gate > 0 and n_eff < neff_gate):
             return ridge_fit, "ridge_only"
 
         with warnings.catch_warnings():
             warnings.filterwarnings("error", category=PerfectSeparationWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="overflow encountered in exp",
+                category=RuntimeWarning,
+                module=r"statsmodels\.discrete\.discrete_model"
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message="divide by zero encountered in log",
+                category=RuntimeWarning,
+                module=r"statsmodels\.discrete\.discrete_model"
+            )
             try:
+                extra_flag = {} if ('_already_failed' in kwargs) else {'_already_failed': True}
                 refit_newton = _logit_fit(
                     sm.Logit(y, X),
                     "newton",
                     maxiter=400,
                     tol=1e-8,
-                    start_params=ridge_fit.params
+                    start_params=ridge_fit.params,
+                    **extra_flag,
+                    **kwargs
                 )
                 if _converged(refit_newton) and hasattr(refit_newton, "bse") and np.all(np.isfinite(refit_newton.bse)):
                     if np.max(refit_newton.bse) > 100.0:
@@ -146,12 +210,15 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None):
                 pass
 
             try:
+                extra_flag = {} if ('_already_failed' in kwargs) else {'_already_failed': True}
                 refit_bfgs = _logit_fit(
                     sm.Logit(y, X),
                     "bfgs",
                     maxiter=800,
                     gtol=1e-8,
-                    start_params=ridge_fit.params
+                    start_params=ridge_fit.params,
+                    **extra_flag,
+                    **kwargs
                 )
                 if _converged(refit_bfgs) and hasattr(refit_bfgs, "bse") and np.all(np.isfinite(refit_bfgs.bse)):
                     if np.max(refit_bfgs.bse) > 100.0:
@@ -522,19 +589,19 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         n_total, n_cases, n_ctrls = len(y_clean), int(y_clean.sum()), len(y_clean) - int(y_clean.sum())
 
         # --- Pre-fit sanity checks ---
-        skip_reason, notes = "", []
+        notes = []
         target_ix = col_ix.get(target_inversion)
         const_ix = col_ix.get('const')
         sex_ix = col_ix.get('sex')
 
-        if n_cases < CTX["MIN_CASES_FILTER"] or n_ctrls < CTX["MIN_CONTROLS_FILTER"]:
-            skip_reason = "insufficient_cases_or_controls"
-        elif target_ix is None:
+        if target_ix is None:
             skip_reason = "target_inversion_not_in_cols"
         elif X_clean.shape[0] == 0:
             skip_reason = "no_valid_rows"
-        elif np.nanstd(X_clean[:, target_ix]) < 1e-12:
+        elif X_clean.shape[0] > 0 and np.nanstd(X_clean[:, target_ix]) < 1e-12:
             skip_reason = "target_constant"
+        else:
+            skip_reason = ""
 
         if skip_reason:
             # ... (identical skip logic as before, just using different N vars)
@@ -597,6 +664,18 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         current_col_indices = current_col_indices[kept_indices_after_fd]
         target_ix_final = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_ix is not None else None
         const_ix_final = np.where(current_col_indices == col_ix.get('const'))[0][0] if const_ix is not None else None
+
+        ok, reason, det = validate_min_counts_for_fit(y_work, stage_tag="phewas", extra_context={"phenotype": s_name})
+        if not ok:
+            print(f"[skip] name={s_name_safe} stage=phewas reason={reason} "
+                  f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
+                  f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}", flush=True)
+            result_data = {"Phenotype": s_name, "N_Total": det['N'], "N_Cases": det['N_cases'], "N_Controls": det['N_ctrls'], "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": reason}
+            io.atomic_write_json(result_path, result_data)
+            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
+                        worker_core_df_cols, _index_fingerprint(worker_core_df_index),
+                        case_idx_fp, extra={"skip_reason": reason, "counts": det, "allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+            return
 
         fit, fit_reason = _fit_logit_ladder(X_work_fd, y_work, const_ix=const_ix_final)
         if fit_reason in ("ridge_seeded_refit", "ridge_only"): notes.append(fit_reason)
@@ -705,6 +784,15 @@ def lrt_overall_worker(task):
         if skip:
             io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": skip, "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used})
             _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": skip})
+            return
+
+        ok, reason, det = validate_min_counts_for_fit(yb, stage_tag="lrt_stage1", extra_context={"phenotype": s_name})
+        if not ok:
+            print(f"[skip] name={s_name_safe} stage=LRT-Stage1 reason={reason} "
+                  f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
+                  f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}", flush=True)
+            io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": reason, "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls']})
+            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": reason, "counts": det})
             return
 
         X_full_df, X_red_df = Xb, Xb.drop(columns=[target])
@@ -895,9 +983,23 @@ def lrt_followup_worker(task):
         for anc in levels_sorted:
             anc_mask = (anc_vec == anc).to_numpy()
             X_anc, y_anc = Xb[anc_mask], yb[anc_mask]
-            out[f"{anc.upper()}_N"], out[f"{anc.upper()}_N_Cases"], out[f"{anc.upper()}_N_Controls"] = len(y_anc), int(y_anc.sum()), len(y_anc) - int(y_anc.sum())
-            if out[f"{anc.upper()}_N_Cases"] < CTX["PER_ANC_MIN_CASES"] or out[f"{anc.upper()}_N_Controls"] < CTX["PER_ANC_MIN_CONTROLS"]:
-                out[f"{anc.upper()}_REASON"] = "insufficient_stratum_counts"; continue
+
+            _, n_cases_anc, n_ctrls_anc, _ = _counts_from_y(y_anc)
+            out[f"{anc.upper()}_N"], out[f"{anc.upper()}_N_Cases"], out[f"{anc.upper()}_N_Controls"] = len(y_anc), n_cases_anc, n_ctrls_anc
+
+            ok, reason, det = validate_min_counts_for_fit(
+                y_anc,
+                stage_tag=f"lrt_followup:{anc}",
+                extra_context={"phenotype": s_name, "ancestry": anc},
+                cases_key="PER_ANC_MIN_CASES",
+                controls_key="PER_ANC_MIN_CONTROLS"
+            )
+            if not ok:
+                print(f"[skip] name={s_name_safe} stage=LRT-Followup anc={anc} reason={reason} "
+                      f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
+                      f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}", flush=True)
+                out[f"{anc.upper()}_REASON"] = reason
+                continue
 
             X_anc_zv = _drop_zero_variance(X_anc, keep_cols=('const',), always_keep=(target,))
             const_ix_anc = X_anc_zv.columns.get_loc('const') if 'const' in X_anc_zv.columns else None
@@ -906,7 +1008,7 @@ def lrt_followup_worker(task):
             if fit and target in fit.params:
                 beta, pval = float(fit.params[target]), float(fit.pvalues.get(target, np.nan))
                 out[f"{anc.upper()}_OR"], out[f"{anc.upper()}_P"] = float(np.exp(beta)), pval
-                if getattr(fit, "_final_is_mle", False) and not getattr(fit, '_used_ridge_seed', False):
+                if getattr(fit, "_final_is_mle", False):
                     se = float(fit.bse.get(target, np.nan))
                     if np.isfinite(se) and se > 0:
                         lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)

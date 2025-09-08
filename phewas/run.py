@@ -123,12 +123,13 @@ RELATEDNESS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/au
 # --- Model parameters ---
 NUM_PCS = 10
 MIN_CASES_FILTER = 1000
-MIN_CONTROLS_FILTER = 500
+MIN_CONTROLS_FILTER = 1000
+MIN_NEFF_FILTER = 0 # Default off
 FDR_ALPHA = 0.05
 
 # --- Per-ancestry thresholds and multiple-testing for ancestry splits ---
-PER_ANC_MIN_CASES = 50
-PER_ANC_MIN_CONTROLS = 50
+PER_ANC_MIN_CASES = 100
+PER_ANC_MIN_CONTROLS = 100
 ANCESTRY_ALPHA = 0.05
 ANCESTRY_P_ADJ_METHOD = "fdr_bh"
 LRT_SELECT_ALPHA = 0.05
@@ -228,6 +229,7 @@ def main():
             # --- Create the context dictionary with per-inversion paths ---
             ctx = {
                 "NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
+                "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
                 "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
                 "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE,
                 "RESULTS_CACHE_DIR": results_cache_dir,
@@ -282,9 +284,28 @@ def main():
             print(f"\n--- All models finished for {target_inversion}. ---")
 
             name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
-            result_files = [f for f in os.listdir(results_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
-            phenos_list = [f.replace(".json", "") for f in result_files]
-            print(f"[LRT-Stage1] Found {len(phenos_list)} model results to schedule for overall LRT.")
+
+            # Filter phenotypes before scheduling Stage-1 LRT
+            result_paths = [
+                os.path.join(results_cache_dir, f)
+                for f in os.listdir(results_cache_dir)
+                if f.endswith(".json") and not f.endswith(".meta.json")
+            ]
+
+            phenos_list = []
+            for path in result_paths:
+                try:
+                    s = pd.read_json(path, typ="series")
+                    # Skip anything that failed earlier or is under thresholds
+                    if pd.notna(s.get("Skip_Reason", np.nan)):
+                        continue
+                    if (s.get("N_Cases", 0) < MIN_CASES_FILTER) or (s.get("N_Controls", 0) < MIN_CONTROLS_FILTER):
+                        continue
+                    phenos_list.append(os.path.splitext(os.path.basename(path))[0])
+                except Exception:
+                    pass
+
+            print(f"[LRT-Stage1] Found {len(phenos_list)} valid model results to schedule for overall LRT.")
             pipes.run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, MIN_AVAILABLE_MEMORY_GB)
 
         # --- PART 3: CONSOLIDATE & ANALYZE RESULTS (ACROSS ALL INVERSIONS) ---
@@ -393,6 +414,7 @@ def main():
                 inversion_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion))
                 ctx = {
                     "NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
+                    "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
                     "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
                     "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE,
                     "RESULTS_CACHE_DIR": os.path.join(inversion_cache_dir, "results_atomic"),
