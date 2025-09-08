@@ -202,16 +202,78 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
         return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
 
 def get_effective_max_components(X_train, y_train, max_components):
-    if X_train.shape[1] == 0: return 0
-    max_components = min(max_components, X_train.shape[1])
-    if max_components <= 1: return max_components
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        PLSRegression(n_components=max_components).fit(X_train, y_train)
+    """
+    Determine a safe per-fold upper bound for PLS components that will not fail.
+    Uses both dimensional caps, numerical rank under LD, and early-stop signals.
+    """
+    n_samples = int(X_train.shape[0])
+    n_features = int(X_train.shape[1]) if X_train.ndim == 2 else 0
+    logging.info(f"[PLS-BOUND] start: n={n_samples}, p={n_features}, requested_max={int(max_components)}")
+
+    # Guard: no features means no components are possible.
+    if n_features == 0:
+        logging.warning("[PLS-BOUND] no features available; returning 0 components")
+        return 0
+
+    # Dimensional safety cap: PLSRegression cannot exceed min(n, p).
+    hard_bound_dim = min(n_samples, n_features)
+    logging.info(f"[PLS-BOUND] dimensional cap min(n,p)={hard_bound_dim}")
+
+    # Numerical rank cap to respect LD/collinearity and duplicated SNP patterns.
+    hard_bound = hard_bound_dim
+    try:
+        numeric_rank = int(np.linalg.matrix_rank(X_train))
+        logging.info(f"[PLS-BOUND] numeric matrix rank={numeric_rank}")
+        hard_bound = min(hard_bound, numeric_rank)
+        logging.info(f"[PLS-BOUND] cap after rank={hard_bound}")
+    except Exception as rank_err:
+        logging.warning(f"[PLS-BOUND] rank computation failed ({type(rank_err).__name__}); using dimensional cap={hard_bound_dim}")
+
+    # Requested maximum cannot exceed the hard bound derived above.
+    bound = min(int(max_components), hard_bound)
+    logging.info(f"[PLS-BOUND] requested_max clipped to bound={bound}")
+
+    # If bound is trivial (≤1), return immediately.
+    if bound <= 1:
+        logging.info(f"[PLS-BOUND] bound ≤ 1; returning {bound}")
+        return bound
+
+    # Probe-fit at the bound to detect early-stop signals that indicate
+    # the algorithm exhausted useful components before reaching the bound.
+    try:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            PLSRegression(n_components=bound).fit(X_train, y_train)
+
+        # Inspect captured warnings for early-stop clues and record the earliest iteration.
+        earliest_stop = None
         for msg in w:
-            if issubclass(msg.category, UserWarning) and "y residual is constant" in str(msg.message):
-                if match := re.search(r'iteration (\d+)', str(msg.message)): return min(max_components, int(match.group(1)))
-    return max_components
+            text = str(msg.message)
+            logging.info(f"[PLS-BOUND] captured warning during probe-fit: {text}")
+            m = re.search(r"iteration (\d+)", text)
+            if m and ("y residual is constant" in text or "x_scores are null" in text):
+                k = int(m.group(1))
+                earliest_stop = k if earliest_stop is None else min(earliest_stop, k)
+
+        if earliest_stop is not None:
+            new_bound = max(1, min(bound, earliest_stop))
+            logging.info(f"[PLS-BOUND] early-stop at iteration={earliest_stop}; returning tightened bound={new_bound}")
+            return new_bound
+
+    except ValueError as e:
+        # Fallback: parse any bound error text to recover a feasible limit.
+        logging.warning(f"[PLS-BOUND] ValueError during probe-fit: {e}")
+        m = re.search(r"upper bound is (\d+)", str(e))
+        if m:
+            recovered = max(1, int(m.group(1)))
+            logging.info(f"[PLS-BOUND] recovered feasible bound from error={recovered}")
+            return recovered
+        # Unknown failure mode: re-raise after logging.
+        logging.exception("[PLS-BOUND] unrecoverable error during probe-fit")
+        raise
+
+    logging.info(f"[PLS-BOUND] returning final bound={bound}")
+    return bound
 
 def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_dir: str):
     inversion_id = preloaded_data['id']
