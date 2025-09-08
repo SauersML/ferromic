@@ -368,7 +368,7 @@ def main():
         ymax = ymin + 1.0
 
     # Figure with a right-side column for key (top) and color bar (under it)
-    fig = plt.figure(figsize=(11.6, 6.6), layout="constrained")
+    fig = plt.figure(figsize=(11.6, 6.6))
     gs  = fig.add_gridspec(nrows=1, ncols=2, width_ratios=[1.0, 0.42], wspace=0.04)
     ax  = fig.add_subplot(gs[0, 0])
 
