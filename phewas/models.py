@@ -10,7 +10,9 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy import stats as sp_stats
+from scipy.special import expit
 from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
+
 
 import iox as io
 
@@ -23,10 +25,17 @@ def safe_basename(name: str) -> str:
 def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_fp, case_fp, extra=None):
     """Helper to write a standardized metadata JSON file."""
     base = {
-        "kind": kind, "s_name": s_name, "category": category, "model_columns": list(core_cols),
-        "num_pcs": CTX["NUM_PCS"], "min_cases": CTX["MIN_CASES_FILTER"], "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-        "target": target, "core_index_fp": core_idx_fp, "case_idx_fp": case_fp,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "kind": kind,
+        "s_name": s_name,
+        "category": category,
+        "model_columns": list(core_cols),
+        "num_pcs": CTX["NUM_PCS"],
+        "min_cases": CTX["MIN_CASES_FILTER"],
+        "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+        "target": target,
+        "core_index_fp": core_idx_fp,
+        "case_idx_fp": case_fp,
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
     if extra:
         base.update(extra)
@@ -85,80 +94,78 @@ def _logit_fit(model, method, **kw):
 
 def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None):
     """
-    Tries fitting a logistic regression model with a ladder of increasingly robust methods.
-    Accepts pandas DataFrame or numpy array for X. If numpy, `const_ix` is needed for ridge.
+    Ridge-first logistic fit with strict MLE gating based on numerical diagnostics.
+    If numpy arrays are provided, const_ix identifies the intercept column for zero-penalty.
+    Returns a tuple (fit_result, reason_tag).
     """
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", category=PerfectSeparationWarning)
-        try:
-            fit_try = _logit_fit(sm.Logit(y, X), 'newton', maxiter=200, tol=1e-8)
-            if _converged(fit_try) and hasattr(fit_try, 'bse') and np.all(np.isfinite(fit_try.bse)):
-                if np.max(fit_try.bse) > 100: raise PerfectSeparationWarning("Large SEs detected")
-                setattr(fit_try, "_used_ridge", False); setattr(fit_try, "_final_is_mle", True)
-                return fit_try, "newton"
-        except (Exception, PerfectSeparationWarning): pass
-        try:
-            fit_try = _logit_fit(sm.Logit(y, X), 'bfgs', maxiter=800, gtol=1e-8)
-            if _converged(fit_try) and hasattr(fit_try, 'bse') and np.all(np.isfinite(fit_try.bse)):
-                if np.max(fit_try.bse) > 100: raise PerfectSeparationWarning("Large SEs detected")
-                setattr(fit_try, "_used_ridge", False); setattr(fit_try, "_final_is_mle", True)
-                return fit_try, "bfgs"
-        except (Exception, PerfectSeparationWarning): pass
-    if ridge_ok:
-        try:
-            is_pandas = hasattr(X, 'columns')
-            p = X.shape[1] - (1 if (is_pandas and 'const' in X.columns) or (not is_pandas and const_ix is not None) else 0)
-            n = max(1, X.shape[0])
-            alpha_scalar = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / float(n)), 1e-6)
-            alphas = np.full(X.shape[1], alpha_scalar, dtype=float)
+    is_pandas = hasattr(X, "columns")
+    if not ridge_ok:
+        return None, "ridge_disabled"
 
-            if is_pandas and 'const' in X.columns:
-                alphas[X.columns.get_loc('const')] = 0.0
-            elif not is_pandas and const_ix is not None and const_ix < X.shape[1]:
-                alphas[const_ix] = 0.0
+    try:
+        p = X.shape[1] - (1 if (is_pandas and "const" in X.columns) or (not is_pandas and const_ix is not None) else 0)
+        n = max(1, X.shape[0])
+        pi = float(np.mean(y)) if len(y) > 0 else 0.5
+        n_eff = max(1.0, 4.0 * float(len(y)) * pi * (1.0 - pi))
+        alpha_scalar = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / n_eff), 1e-6)
+        alphas = np.full(X.shape[1], alpha_scalar, dtype=float)
+        if is_pandas and "const" in X.columns:
+            alphas[X.columns.get_loc("const")] = 0.0
+        elif not is_pandas and const_ix is not None and const_ix < X.shape[1]:
+            alphas[const_ix] = 0.0
 
-            ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0, maxiter=800)
+        ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0, maxiter=800)
+        setattr(ridge_fit, "_used_ridge", True)
+        setattr(ridge_fit, "_final_is_mle", False)
+
+        try:
+            max_abs_linpred, frac_lo, frac_hi = _fit_diagnostics(X, y, ridge_fit.params)
+        except Exception:
+            max_abs_linpred, frac_lo, frac_hi = float("inf"), 1.0, 1.0
+
+        if (max_abs_linpred > 50.0) or (frac_lo > 0.20) or (frac_hi > 0.20):
+            return ridge_fit, "ridge_only"
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", category=PerfectSeparationWarning)
             try:
-                # FIRST: try Newton refit with ridge params
-                refit = _logit_fit(
+                refit_newton = _logit_fit(
                     sm.Logit(y, X),
-                    'newton',
+                    "newton",
                     maxiter=400,
                     tol=1e-8,
-                    start_params=ridge_fit.params,
-                    _already_failed=True,        # <-- add this
+                    start_params=ridge_fit.params
                 )
-                if _converged(refit) and hasattr(refit, 'bse') and np.all(np.isfinite(refit.bse)):
-                    if np.max(refit.bse) > 100:
+                if _converged(refit_newton) and hasattr(refit_newton, "bse") and np.all(np.isfinite(refit_newton.bse)):
+                    if np.max(refit_newton.bse) > 100.0:
                         raise PerfectSeparationWarning("Large SEs detected")
-                    setattr(refit, "_used_ridge_seed", True); setattr(refit, "_final_is_mle", True)
-                    return refit, "ridge_seeded_refit"
-            except Exception:
+                    setattr(refit_newton, "_used_ridge_seed", True)
+                    setattr(refit_newton, "_final_is_mle", True)
+                    return refit_newton, "ridge_seeded_refit"
+            except (Exception, PerfectSeparationWarning):
                 pass
 
-            # OPTIONAL but robust: try BFGS refit as a fallback
             try:
-                refit = _logit_fit(
+                refit_bfgs = _logit_fit(
                     sm.Logit(y, X),
-                    'bfgs',
+                    "bfgs",
                     maxiter=800,
                     gtol=1e-8,
-                    start_params=ridge_fit.params,
-                    _already_failed=True,        # <-- add this
+                    start_params=ridge_fit.params
                 )
-                if _converged(refit) and hasattr(refit, 'bse') and np.all(np.isfinite(refit.bse)):
-                    if np.max(refit.bse) > 100:
+                if _converged(refit_bfgs) and hasattr(refit_bfgs, "bse") and np.all(np.isfinite(refit_bfgs.bse)):
+                    if np.max(refit_bfgs.bse) > 100.0:
                         raise PerfectSeparationWarning("Large SEs detected")
-                    setattr(refit, "_used_ridge_seed", True); setattr(refit, "_final_is_mle", True)
-                    return refit, "ridge_seeded_refit"
-            except Exception:
+                    setattr(refit_bfgs, "_used_ridge_seed", True)
+                    setattr(refit_bfgs, "_final_is_mle", True)
+                    return refit_bfgs, "ridge_seeded_refit"
+            except (Exception, PerfectSeparationWarning):
                 pass
 
-            # if both refits fail, fall back to ridge_only
-            setattr(ridge_fit, "_used_ridge", True); setattr(ridge_fit, "_final_is_mle", False)
-            return ridge_fit, "ridge_only"
-        except Exception as e: return None, f"ridge_exception:{type(e).__name__}"
-    return None, "all_methods_failed"
+        return ridge_fit, "ridge_only"
+    except Exception as e:
+        return None, f"ridge_exception:{type(e).__name__}"
+
 
 def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), eps=1e-12):
     """Drops columns with no or near-zero variance, keeping specified columns."""
@@ -177,6 +184,81 @@ def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), e
         cols.append(c)
     return X.loc[:, cols]
 
+
+def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), rtol=1e-10):
+    """
+    Removes columns that render the design matrix rank-deficient by greedily dropping
+    non-essential columns based on ascending column standard deviation while preserving
+    columns listed in keep_cols and always_keep whenever possible.
+    Returns a DataFrame with full column rank or the best achievable subset if no removable columns remain.
+    """
+    keep = set(keep_cols) | set(always_keep)
+    if X.shape[1] == 0:
+        return X
+    M = X.to_numpy(dtype=np.float64, copy=False)
+    rank = np.linalg.matrix_rank(M)
+    if rank == X.shape[1]:
+        return X
+    remaining = list(X.columns)
+    removable = [c for c in remaining if c not in keep]
+    X_work = X.copy()
+    while np.linalg.matrix_rank(X_work.to_numpy(dtype=np.float64, copy=False)) < X_work.shape[1]:
+        if not removable:
+            break
+        stds = np.nanstd(X_work.to_numpy(dtype=np.float64, copy=False), axis=0)
+        col_order = np.argsort(stds)
+        dropped = False
+        for k in col_order:
+            colname = X_work.columns[k]
+            if colname not in removable:
+                continue
+            trial = X_work.drop(columns=[colname])
+            if np.linalg.matrix_rank(trial.to_numpy(dtype=np.float64, copy=False)) == trial.shape[1]:
+                X_work = trial
+                remaining = list(X_work.columns)
+                removable = [c for c in remaining if c not in keep]
+                dropped = True
+                break
+        if not dropped:
+            break
+    return X_work
+
+
+def _fit_diagnostics(X, y, params):
+    """
+    Computes simple numerical diagnostics for a fitted logistic model:
+      - max absolute linear predictor
+      - fraction of probabilities effectively at 0 or 1
+    """
+    X_arr = np.asarray(X, dtype=np.float64)
+    params_arr = np.asarray(params, dtype=np.float64)
+    linpred = X_arr @ params_arr
+    if not np.all(np.isfinite(linpred)):
+        max_abs_linpred = float("inf")
+        frac_lo = 0.0
+        frac_hi = 0.0
+    else:
+        max_abs_linpred = float(np.max(np.abs(linpred))) if linpred.size else 0.0
+        p = expit(linpred)
+        frac_lo = float(np.mean(p < 1e-12)) if p.size else 0.0
+        frac_hi = float(np.mean(p > 1.0 - 1e-12)) if p.size else 0.0
+    return max_abs_linpred, frac_lo, frac_hi
+
+
+def _print_fit_diag(s_name_safe, stage, model_tag, N_total, N_cases, N_ctrls, solver_tag, X, y, params, notes):
+    """
+    Emits a single-line diagnostic message for a fit attempt. This is intended for real-time visibility
+    into numerical behavior and sample composition while models are running in worker processes.
+    """
+    max_abs_linpred, frac_lo, frac_hi = _fit_diagnostics(X, y, params)
+    msg = (
+        f"[fit] name={s_name_safe} stage={stage} model={model_tag} "
+        f"N={int(N_total)}/{int(N_cases)}/{int(N_ctrls)} solver={solver_tag} "
+        f"max|Xb|={max_abs_linpred:.6g} p<1e-12:{frac_lo:.2%} p>1-1e-12:{frac_hi:.2%} "
+        f"notes={'|'.join(notes) if notes else ''}"
+    )
+    print(msg, flush=True)
+
 def _suppress_worker_warnings():
     """ALL WARNINGS ARE ENABLED. This function now ensures all warnings are always shown."""
     warnings.simplefilter("always")
@@ -193,7 +275,6 @@ def _validate_ctx(ctx):
     missing = [k for k in REQUIRED_CTX_KEYS if k not in ctx]
     if missing:
         raise RuntimeError(f"[Worker-{os.getpid()}] Missing CTX keys: {', '.join(missing)}")
-
 def _drop_zero_variance_np(X, keep_ix=(), eps=1e-12):
     """
     Drops columns with no or near-zero variance from a NumPy array.
@@ -207,6 +288,35 @@ def _drop_zero_variance_np(X, keep_ix=(), eps=1e-12):
             good_mask[i] = True
     kept_original_indices = np.flatnonzero(good_mask)
     return X[:, kept_original_indices], kept_original_indices
+
+
+def _drop_rank_deficiency_np(X, keep_ix=(), max_iter=100):
+    """
+    Greedily removes columns from a NumPy design matrix until it achieves full column rank.
+    Columns listed in keep_ix are preserved whenever possible. Removal order is by ascending
+    column standard deviation among removable columns, recomputed after each drop.
+    Returns the pruned matrix and the kept column indices relative to the original X.
+    """
+    if X.shape[1] == 0:
+        return X, np.array([], dtype=int)
+    original_cols = np.arange(X.shape[1])
+    keep_ix = set(int(i) for i in keep_ix)
+    X_work = X
+    cols_work = original_cols.copy()
+    iter_ct = 0
+    while np.linalg.matrix_rank(X_work) < X_work.shape[1] and iter_ct < max_iter:
+        removable_positions = [k for k, j in enumerate(cols_work) if j not in keep_ix]
+        if not removable_positions:
+            break
+        stds = np.nanstd(X_work, axis=0)
+        stds_removable = stds[removable_positions]
+        kmin_local = int(np.argmin(stds_removable))
+        pos_to_drop = removable_positions[kmin_local]
+        cols_work = np.delete(cols_work, pos_to_drop, axis=0)
+        X_work = np.delete(X_work, pos_to_drop, axis=1)
+        iter_ct += 1
+    return X_work, cols_work
+
 
 def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
     """
@@ -361,15 +471,17 @@ def _should_skip(meta_path, core_df, case_idx_fp, category, target, allowed_fp):
             meta.get("case_idx_fp") == case_idx_fp and
             meta.get("allowed_mask_fp") == allowed_fp and
             meta.get("min_cases") == CTX["MIN_CASES_FILTER"] and
-            meta.get("min_ctrls") == CTX["MIN_CONTROLS_FILTER"])
+            meta.get("min_ctrls") == CTX["MIN_CONTROLS_FILTER"]
 
 def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp):
     """Determines if an LRT run can be skipped based on metadata."""
     meta = io.read_meta_json(meta_path)
     if not meta: return False
-    return (meta.get("model_columns")==list(core_df_cols) and meta.get("ridge_l2_base")==CTX["RIDGE_L2_BASE"] and
-            meta.get("core_index_fp")==core_index_fp and meta.get("case_idx_fp")==case_idx_fp and
-            meta.get("allowed_mask_fp")==allowed_fp)
+    return (meta.get("model_columns") == list(core_df_cols) and
+            meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
+            meta.get("core_index_fp") == core_index_fp and
+            meta.get("case_idx_fp") == case_idx_fp and
+            meta.get("allowed_mask_fp") == allowed_fp
 
 def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     """CONSUMER: Runs a single model. Executed in a separate process using NumPy arrays."""
@@ -468,16 +580,34 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             const_ix = np.where(current_col_indices == const_ix)[0][0] if const_ix is not None else None
 
         n_total_used, n_cases_used, n_ctrls_used = len(y_work), int(y_work.sum()), len(y_work) - int(y_work.sum())
-
         keep_ix_zv = {idx for idx in [target_ix, const_ix] if idx is not None}
         X_work_zv, kept_indices_after_zv = _drop_zero_variance_np(X_work, keep_ix=keep_ix_zv)
 
         current_col_indices = current_col_indices[kept_indices_after_zv]
+        target_ix_mid = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_ix is not None else None
+        const_ix_mid = np.where(current_col_indices == col_ix.get('const'))[0][0] if const_ix is not None else None
+
+        X_work_fd, kept_indices_after_fd = _drop_rank_deficiency_np(X_work_zv, keep_ix={i for i in [target_ix_mid, const_ix_mid] if i is not None})
+        current_col_indices = current_col_indices[kept_indices_after_fd]
         target_ix_final = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_ix is not None else None
         const_ix_final = np.where(current_col_indices == col_ix.get('const'))[0][0] if const_ix is not None else None
 
-        fit, fit_reason = _fit_logit_ladder(X_work_zv, y_work, const_ix=const_ix_final)
+        fit, fit_reason = _fit_logit_ladder(X_work_fd, y_work, const_ix=const_ix_final)
         if fit_reason in ("ridge_seeded_refit", "ridge_only"): notes.append(fit_reason)
+        if fit is not None:
+            _print_fit_diag(
+                s_name_safe=s_name_safe,
+                stage="phewas",
+                model_tag="full",
+                N_total=n_total_used,
+                N_cases=n_cases_used,
+                N_ctrls=n_ctrls_used,
+                solver_tag=fit_reason,
+                X=X_work_fd,
+                y=y_work,
+                params=fit.params,
+                notes=notes
+            )
 
         if not fit or target_ix_final is None or target_ix_final >= len(fit.params):
             # Persist a deterministic skip result when the fit fails or the target coefficient is unavailable.
@@ -573,15 +703,45 @@ def lrt_overall_worker(task):
 
         X_full_df, X_red_df = Xb, Xb.drop(columns=[target])
 
-        # Ranks for LRT df are computed on matrices *after* dropping degenerate columns.
+        # Ranks for LRT df are computed on matrices after dropping degenerate and rank-deficient columns.
         X_red_zv = _drop_zero_variance(X_red_df, keep_cols=('const',))
+        X_red_zv = _drop_rank_deficient(X_red_zv, keep_cols=('const',))
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=(target,))
+        X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=(target,))
 
         const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
 
-        fit_red, _ = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red)
-        fit_full, _ = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full)
+        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red)
+        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full)
+        if fit_red is not None:
+            _print_fit_diag(
+                s_name_safe=s_name_safe,
+                stage="LRT-Stage1",
+                model_tag="reduced",
+                N_total=n_total_used,
+                N_cases=n_cases_used,
+                N_ctrls=n_ctrls_used,
+                solver_tag=reason_red,
+                X=X_red_zv,
+                y=yb,
+                params=fit_red.params,
+                notes=[note] if note else []
+            )
+        if fit_full is not None:
+            _print_fit_diag(
+                s_name_safe=s_name_safe,
+                stage="LRT-Stage1",
+                model_tag="full",
+                N_total=n_total_used,
+                N_cases=n_cases_used,
+                N_ctrls=n_ctrls_used,
+                solver_tag=reason_full,
+                X=X_full_zv,
+                y=yb,
+                params=fit_full.params,
+                notes=[note] if note else []
+            )
         red_is_mle = getattr(fit_red, "_final_is_mle", False)
         full_is_mle = getattr(fit_full, "_final_is_mle", False)
 
@@ -677,13 +837,43 @@ def lrt_followup_worker(task):
         X_full_df = pd.concat([X_red_df, pd.DataFrame(interaction_mat, index=X_red_df.index, columns=interaction_cols)], axis=1)
 
         X_red_zv = _drop_zero_variance(X_red_df, keep_cols=('const',), always_keep=(target,))
+        X_red_zv = _drop_rank_deficient(X_red_zv, keep_cols=('const',), always_keep=(target,))
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=[target] + interaction_cols)
+        X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=[target] + interaction_cols)
 
         const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
 
-        fit_red, _ = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red)
-        fit_full, _ = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full)
+        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red)
+        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full)
+        if fit_red is not None:
+            _print_fit_diag(
+                s_name_safe=s_name_safe,
+                stage="LRT-Stage2",
+                model_tag="reduced",
+                N_total=len(yb),
+                N_cases=int(yb.sum()),
+                N_ctrls=int(len(yb) - int(yb.sum())),
+                solver_tag=reason_red,
+                X=X_red_zv,
+                y=yb,
+                params=fit_red.params,
+                notes=[note] if note else []
+            )
+        if fit_full is not None:
+            _print_fit_diag(
+                s_name_safe=s_name_safe,
+                stage="LRT-Stage2",
+                model_tag="full",
+                N_total=len(yb),
+                N_cases=int(yb.sum()),
+                N_ctrls=int(len(yb) - int(yb.sum())),
+                solver_tag=reason_full,
+                X=X_full_zv,
+                y=yb,
+                params=fit_full.params,
+                notes=[note] if note else []
+            )
         red_is_mle, full_is_mle = getattr(fit_red, "_final_is_mle", False), getattr(fit_full, "_final_is_mle", False)
 
         if red_is_mle and full_is_mle and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
