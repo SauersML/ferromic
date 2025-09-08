@@ -39,9 +39,9 @@ MIN_INV_PER_BIN = 5                 # if <5 inversions in a bin → don't plot t
 
 # Visual
 SCATTER_SIZE   = 34
-SCATTER_ALPHA  = 0.60   # 60% transparent dots
+SCATTER_ALPHA  = 0.10   # transparent dots
 LINE_WIDTH     = 2.8
-BAND_ALPHA     = 0.22
+BAND_ALPHA     = 0.1
 
 # ----------- Color scheme & formatting (match example) ------------
 # Orientation colors
