@@ -11,7 +11,11 @@ import queue
 import faulthandler
 import sys
 import traceback
-import psutil
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except Exception:
+    PSUTIL_AVAILABLE = False
 
 
 import numpy as np
@@ -50,10 +54,12 @@ class SystemMonitor(threading.Thread):
     def __init__(self, interval=15):
         super().__init__(daemon=True)
         self.interval = interval
-        try:
-            self._main_process = psutil.Process()
-        except psutil.NoSuchProcess:
-            self._main_process = None
+        self._main_process = None
+        if PSUTIL_AVAILABLE:
+            try:
+                self._main_process = psutil.Process()
+            except psutil.NoSuchProcess:
+                self._main_process = None
 
     def run(self):
         """Monitors and reports system stats until the main program exits."""
@@ -155,8 +161,9 @@ def main():
     script_start_time = time.time()
 
     # --- Start system resource monitoring ---
-    monitor_thread = SystemMonitor(interval=15)
-    monitor_thread.start()
+    if PSUTIL_AVAILABLE:
+        monitor_thread = SystemMonitor(interval=15)
+        monitor_thread.start()
 
     print("=" * 70)
     print(" Starting Robust, Memory-Stable PheWAS Pipeline (Chunked Producer)")
@@ -335,14 +342,13 @@ def main():
             if "OR_CI95" not in df.columns: df["OR_CI95"] = np.nan
             def _compute_overall_or_ci(beta_val, p_val):
                 if pd.isna(beta_val) or pd.isna(p_val): return np.nan
-                try:
-                    b, p = float(beta_val), float(p_val)
-                    if not (np.isfinite(b) and np.isfinite(p) and 0.0 < p < 1.0): return np.nan
-                    z = float(stats.norm.ppf(1.0 - p / 2.0));
-                    if not np.isfinite(z) or z == 0.0: return np.nan
-                    se = abs(b) / z
-                    return f"{float(np.exp(b - 1.96 * se)):.3f},{float(np.exp(b + 1.96 * se)):.3f}"
-                except Exception: return np.nan
+                b = float(beta_val); p = float(p_val)
+                if not (np.isfinite(b) and np.isfinite(p) and 0.0 < p < 1.0): return np.nan
+                z = stats.norm.ppf(1.0 - p / 2.0)
+                if not (np.isfinite(z) and z > 0): return np.nan
+                se = abs(b) / z
+                lo, hi = np.exp(b - 1.96 * se), np.exp(b + 1.96 * se)
+                return f"{lo:.3f},{hi:.3f}"
             missing_ci_mask = (df["OR_CI95"].isna() | (df["OR_CI95"].astype(str) == "") | (df["OR_CI95"].astype(str).str.lower() == "nan"))
             if "Used_Ridge" in df.columns:
                 missing_ci_mask &= (df["Used_Ridge"] == False)
