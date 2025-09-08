@@ -600,6 +600,15 @@ if __name__ == '__main__':
 
     if successful_runs:
         results_df = pd.DataFrame(successful_runs).set_index('id').sort_values('unbiased_pearson_r2', ascending=False)
+        newly_successful_ids = list(results_df.index)
+        logging.info("\n--- Newly Successful IDs ---\n" + "\n".join(f"  - {i}" for i in newly_successful_ids))
+        ids_txt_path = os.path.join(output_dir, "newly_successful_ids.txt")
+        with open(ids_txt_path, "w") as fh:
+            for i in newly_successful_ids:
+                fh.write(f"{i}\n")
+        results_csv_path = os.path.join(output_dir, "newly_successful_models.csv")
+        results_df.to_csv(results_csv_path)
+        logging.info(f"\nSaved IDs to: {ids_txt_path}\nSaved metrics to: {results_csv_path}")
         logging.info(f"\n--- Performance of {len(successful_runs)} NEWLY Successful Models ---")
         high_perf_df = results_df[(results_df['unbiased_pearson_r2'] > 0.5) & (results_df['model_p_value'] < 0.05)]
         if not high_perf_df.empty:
