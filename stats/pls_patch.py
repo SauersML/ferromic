@@ -250,18 +250,20 @@ class _PLS(
         p = X.shape[1]
         q = y.shape[1]
 
-        n_components = self.n_components
-        # With PLSRegression n_components is bounded by the rank of (X.T X) see
-        # Wegelin page 25. With CCA and PLSCanonical, n_components is bounded
-        # by the rank of X and the rank of y: see Wegelin page 12
+        # The requested number of latent components.
+        requested_n_components = self.n_components
+        # The admissible upper bound depends on the problem type.
         rank_upper_bound = (
             min(n, p) if self.deflation_mode == "regression" else min(n, p, q)
         )
-        if n_components > rank_upper_bound:
-            raise ValueError(
-                f"`n_components` upper bound is {rank_upper_bound}. "
-                f"Got {n_components} instead. Reduce `n_components`."
+        # Clip instead of failing: e.g., CV folds can differ in effective rank
+        if requested_n_components > rank_upper_bound:
+            warnings.warn(
+                f"n_components={requested_n_components} exceeds the admissible upper bound "
+                f"{rank_upper_bound} for this data; using n_components={rank_upper_bound} instead.",
+                ConvergenceWarning,
             )
+        n_components = min(requested_n_components, rank_upper_bound)
 
         self._norm_y_weights = self.deflation_mode == "canonical"  # 1.1
         norm_y_weights = self._norm_y_weights
