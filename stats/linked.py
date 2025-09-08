@@ -268,6 +268,10 @@ def get_effective_max_components(X_train, y_train, max_components):
 
 def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_dir: str):
     inversion_id = preloaded_data['id']
+    logging.info(f"[{inversion_id}] START: modeling begins "
+                 f"(n_samples={len(preloaded_data['y_diploid'])}, "
+                 f"n_snps={len(preloaded_data.get('snp_metadata', []))})")
+
     try:
         y_full = preloaded_data['y_diploid']
         X_hap1, X_hap2 = preloaded_data['X_hap1'], preloaded_data['X_hap2']
@@ -329,7 +333,7 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         y_true_pooled, y_pred_pls_pooled, y_pred_dummy_pooled = [], [], []
 
         cv_iterator = outer_cv.split(X_combined, y_combined, groups=groups) if use_group_kfold else outer_cv.split(X_combined, y_combined)
-        for train_idx, test_idx in cv_iterator:
+        for fold_idx, (train_idx, test_idx) in enumerate(cv_iterator, start=1):
             X_train, y_train = X_combined[train_idx], y_combined[train_idx]
             X_test, y_test = X_combined[test_idx], y_combined[test_idx]
             
@@ -365,8 +369,31 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
                 warnings.filterwarnings("ignore", "y residual is constant", UserWarning); grid_search.fit(X_train_resampled, y_train_resampled)
             
             dummy_model_fold = DummyRegressor(strategy='mean').fit(X_train, y_train)
-            y_true_pooled.extend(y_test); y_pred_pls_pooled.extend(grid_search.best_estimator_.predict(X_test).flatten()); y_pred_dummy_pooled.extend(dummy_model_fold.predict(X_test))
-        
+            y_pred_pls_fold = grid_search.best_estimator_.predict(X_test).flatten()
+            y_pred_dummy_fold = dummy_model_fold.predict(X_test)
+
+            # Per-fold metrics (always print, even if not “high-performance”)
+            if len(y_test) < 2 or np.std(y_test) == 0 or np.std(y_pred_pls_fold) == 0:
+                fold_corr = np.nan
+                fold_r2 = 0.0
+            else:
+                fold_corr, _ = pearsonr(y_test, y_pred_pls_fold)
+                fold_r2 = (fold_corr if not np.isnan(fold_corr) else 0.0) ** 2
+
+            fold_rmse = np.sqrt(mean_squared_error(y_test, y_pred_pls_fold))
+            fold_rmse_dummy = np.sqrt(mean_squared_error(y_test, y_pred_dummy_fold))
+            best_ncomp = grid_search.best_params_.get('pls__n_components', 'NA') if hasattr(grid_search, 'best_params_') else 'NA'
+
+            logging.info(f"[{inversion_id}] EVAL fold {fold_idx}/{n_outer_splits}: "
+                         f"n_train={len(train_idx)} n_test={len(test_idx)} "
+                         f"best_ncomp={best_ncomp} r2={fold_r2:.4f} rmse={fold_rmse:.4f} "
+                         f"dummy_rmse={fold_rmse_dummy:.4f}")
+
+            # Pool for unbiased summary
+            y_true_pooled.extend(y_test)
+            y_pred_pls_pooled.extend(y_pred_pls_fold)
+            y_pred_dummy_pooled.extend(y_pred_dummy_fold)
+          
         if not y_true_pooled:
             reason = "Nested CV failed on all folds, possibly due to data structure after rescue."
             logging.error(f"[{inversion_id}] FAILED: {reason}")
@@ -377,7 +404,14 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         else: corr, _ = pearsonr(y_true_arr, y_pred_arr)
         
         pearson_r2 = (corr if not np.isnan(corr) else 0.0)**2
-        _, p_value = wilcoxon(np.abs(y_true_arr - y_pred_arr), np.abs(y_true_arr - np.array(y_pred_dummy_pooled)), alternative='less', zero_method='zsplit')
+        _, p_value = wilcoxon(np.abs(y_true_arr - y_pred_arr),
+                              np.abs(y_true_arr - np.array(y_pred_dummy_pooled)),
+                              alternative='less', zero_method='zsplit')
+
+        pooled_rmse = np.sqrt(mean_squared_error(y_true_pooled, y_pred_pls_pooled))
+        logging.info(f"[{inversion_id}] EVAL summary (pooled over outer folds): "
+                     f"unbiased_r2={pearson_r2:.4f} pooled_rmse={pooled_rmse:.4f} "
+                     f"p_wilcoxon={p_value:.3g} (PLS vs Dummy)")
         
         # Augment the final training set as well for a more robust model
         final_aug_confidence_mask = confidence_mask
@@ -420,7 +454,21 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         dump(final_grid_search.best_estimator_, model_filename)
         pd.DataFrame(preloaded_data['snp_metadata']).to_json(os.path.join(output_dir, f"{inversion_id}.snps.json"), orient='records')
         
-        return {'status': 'SUCCESS', 'id': inversion_id, 'unbiased_pearson_r2': pearson_r2, 'unbiased_rmse': np.sqrt(mean_squared_error(y_true_pooled, y_pred_pls_pooled)), 'model_p_value': p_value, 'best_n_components': final_grid_search.best_params_['pls__n_components'], 'num_snps_in_model': X_full.shape[1], 'model_path': model_filename}
+        unbiased_rmse_val = np.sqrt(mean_squared_error(y_true_pooled, y_pred_pls_pooled))
+        logging.info(f"[{inversion_id}] SUCCESS: saved model -> {model_filename} | "
+                     f"unbiased_r2={pearson_r2:.4f} unbiased_rmse={unbiased_rmse_val:.4f} "
+                     f"best_ncomp={final_grid_search.best_params_['pls__n_components']} "
+                     f"snps={X_full.shape[1]}")
+        return {
+            'status': 'SUCCESS',
+            'id': inversion_id,
+            'unbiased_pearson_r2': pearson_r2,
+            'unbiased_rmse': unbiased_rmse_val,
+            'model_p_value': p_value,
+            'best_n_components': final_grid_search.best_params_['pls__n_components'],
+            'num_snps_in_model': X_full.shape[1],
+            'model_path': model_filename
+        }
     except Exception as e:
         reason = f"Analysis Error: {type(e).__name__}: {e}"
         logging.error(f"[{inversion_id}] FAILED: {reason}")
@@ -428,12 +476,30 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
 
 def process_locus_end_to_end(job: dict, n_jobs_inner: int, allowed_snps_dict: dict, output_dir: str):
     inversion_id = job.get('orig_ID', 'Unknown_ID')
+    chrom = job.get('seqnames', 'NA'); start = job.get('start', 'NA'); end = job.get('end', 'NA')
+    logging.info(f"[{inversion_id}] START: processing locus chr={chrom} start={start} end={end}")
+
     success_receipt = os.path.join(output_dir, f"{inversion_id}.model.joblib")
     if os.path.exists(success_receipt):
+        logging.info(f"[{inversion_id}] CACHED: model already exists at {success_receipt}")
         return {'status': 'CACHED', 'id': inversion_id, 'reason': 'SUCCESS receipt found.'}
+
     result = extract_haplotype_data_for_locus(job, allowed_snps_dict)
     if result.get('status') == 'PREPROCESSED':
         result = analyze_and_model_locus_pls(result, n_jobs_inner, output_dir)
+
+    # Loud completion status
+    if isinstance(result, dict):
+        status = result.get('status', 'UNKNOWN')
+        reason = result.get('reason', '')
+        if status == 'SUCCESS':
+            logging.info(f"[{inversion_id}] COMPLETE: SUCCESS")
+        elif status == 'SKIPPED':
+            logging.info(f"[{inversion_id}] COMPLETE: SKIPPED ({reason})")
+        elif status == 'FAILED':
+            logging.info(f"[{inversion_id}] COMPLETE: FAILED ({reason})")
+        else:
+            logging.info(f"[{inversion_id}] COMPLETE: {status}")
     return result
 
 def load_and_normalize_snp_list(filepath: str):
