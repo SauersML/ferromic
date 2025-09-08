@@ -551,6 +551,7 @@ if __name__ == '__main__':
     
     logging.info("\n\n" + "="*100 + "\n---      FINAL PIPELINE REPORT      ---\n" + "="*100)
     
+    # Aggregate incomplete outcomes by reason.
     summary_counts = Counter()
     for r in other_runs:
         summary_counts[f"({r.get('status')}) {r.get('reason', 'No reason provided.')}"] += 1
@@ -562,8 +563,46 @@ if __name__ == '__main__':
     logging.info(f"  - Found previously completed (Cached): {len(cached_runs)}")
     if summary_counts:
         logging.info("\n--- Details of Incomplete Loci From This Run ---")
-        for reason, count in sorted(summary_counts.items(), key=lambda item: item[1], reverse=True): 
+        for reason, count in sorted(summary_counts.items(), key=lambda item: item[1], reverse=True):
             logging.info(f"  - ({count: >3} loci): {reason}")
+
+        # Build a mapping from inversion id to original job for coordinate lookup.
+        id_to_job = {job['orig_ID']: job for job in all_jobs}
+
+        # Loud per-locus printout for all non-successful runs with coordinates.
+        logging.info("\n--- Per-locus details for incomplete runs ---")
+        for r in other_runs:
+            j = id_to_job.get(r.get('id'), {})
+            chrom = j.get('seqnames', 'NA')
+            start = j.get('start', 'NA')
+            end = j.get('end', 'NA')
+            status = r.get('status')
+            rid = r.get('id')
+            reason = r.get('reason', 'No reason provided.')
+            logging.info(f"[LOCI] [{status}] {rid} chr={chrom} start={start} end={end} reason={reason}")
+
+        # Highlight component-bound failures explicitly.
+        comp_bound = [r for r in other_runs if "upper bound" in str(r.get('reason', '')).lower() or "n_components" in str(r.get('reason', '')).lower()]
+        if comp_bound:
+            logging.info("\n--- Component-bound failures (with coordinates) ---")
+            for r in comp_bound:
+                j = id_to_job.get(r.get('id'), {})
+                chrom = j.get('seqnames', 'NA')
+                start = j.get('start', 'NA')
+                end = j.get('end', 'NA')
+                rid = r.get('id')
+                reason = r.get('reason', 'No reason provided.')
+                logging.info(f"[COMP-BOUND] {rid} chr={chrom} start={start} end={end} reason={reason}")
+
+        # Print crashed workers with coordinates.
+        if crashed_ids:
+            logging.info("\n--- Crashed worker loci (with coordinates) ---")
+            for rid in sorted(crashed_ids):
+                j = id_to_job.get(rid, {})
+                chrom = j.get('seqnames', 'NA')
+                start = j.get('start', 'NA')
+                end = j.get('end', 'NA')
+                logging.info(f"[CRASHED] {rid} chr={chrom} start={start} end={end}")
 
     final_models = [f for f in os.listdir(output_dir) if f.endswith('.model.joblib')]
     logging.info(f"\n--- Total Successful Models in Output Directory: {len(final_models)} ---")
