@@ -29,6 +29,22 @@ import traceback
 warnings.filterwarnings("ignore", category=FutureWarning)
 rng = np.random.default_rng(seed=42)
 
+def _ensure_worker_logging():
+    """
+    If we're inside a joblib 'loky' worker, the root logger has no handlers.
+    Attach a FileHandler (append) and a StreamHandler so INFO logs show up.
+    """
+    root = logging.getLogger()
+    if not root.handlers:  # worker process
+        fmt = '[%(asctime)s] [%(levelname)s] [%(message)s]'
+        datefmt = '%Y-%m-%d %H:%M:%S'
+        root.setLevel(logging.INFO)
+        fh = logging.FileHandler("log.txt", mode='a')
+        sh = logging.StreamHandler(sys.stdout)
+        for h in (fh, sh):
+            h.setFormatter(logging.Formatter(fmt, datefmt))
+            root.addHandler(h)
+          
 def create_synthetic_data(X_hap1: np.ndarray, X_hap2: np.ndarray, raw_gts: pd.Series, 
                           sample_indices: np.ndarray, confidence_mask: np.ndarray, 
                           X_existing: np.ndarray, target_counts: dict = None):
@@ -267,7 +283,9 @@ def get_effective_max_components(X_train, y_train, max_components):
     return bound
 
 def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_dir: str):
+    _ensure_worker_logging()
     inversion_id = preloaded_data['id']
+
     logging.info(f"[{inversion_id}] START: modeling begins "
                  f"(n_samples={len(preloaded_data['y_diploid'])}, "
                  f"n_snps={len(preloaded_data.get('snp_metadata', []))})")
@@ -475,7 +493,9 @@ def analyze_and_model_locus_pls(preloaded_data: dict, n_jobs_inner: int, output_
         return {'status': 'FAILED', 'id': inversion_id, 'reason': reason, 'traceback': traceback.format_exc()}
 
 def process_locus_end_to_end(job: dict, n_jobs_inner: int, allowed_snps_dict: dict, output_dir: str):
+    _ensure_worker_logging()
     inversion_id = job.get('orig_ID', 'Unknown_ID')
+
     chrom = job.get('seqnames', 'NA'); start = job.get('start', 'NA'); end = job.get('end', 'NA')
     logging.info(f"[{inversion_id}] START: processing locus chr={chrom} start={start} end={end}")
 
@@ -668,6 +688,16 @@ if __name__ == '__main__':
         results_df = pd.DataFrame(successful_runs).set_index('id').sort_values('unbiased_pearson_r2', ascending=False)
         newly_successful_ids = list(results_df.index)
         logging.info("\n--- Newly Successful IDs ---\n" + "\n".join(f"  - {i}" for i in newly_successful_ids))
+    
+        # Always echo per-locus metrics from parent so they can't get lost
+        for _id, r in results_df.iterrows():
+            logging.info(
+                f"[{_id}] METRICS: r2={r['unbiased_pearson_r2']:.3f} "
+                f"rmse={r['unbiased_rmse']:.3f} p={r['model_p_value']:.3g} "
+                f"ncomp={int(r['best_n_components'])} snps={int(r['num_snps_in_model'])} "
+                f"path={r['model_path']}"
+            )
+
         ids_txt_path = os.path.join(output_dir, "newly_successful_ids.txt")
         with open(ids_txt_path, "w") as fh:
             for i in newly_successful_ids:
