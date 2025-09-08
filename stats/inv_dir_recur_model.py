@@ -400,23 +400,22 @@ def print_diagnostics(matched: pd.DataFrame, dfA: pd.DataFrame, floor_used: floa
     print("Δ-logπ summary (logFC):", q(dfA["logFC"].to_numpy(float)))
 
     print("\nPaired Wilcoxon (Direct vs Inverted) within each class:")
-    else:
-        for grp in ["Single-event", "Recurrent"]:
-            sub = matched.loc[matched["Recurrence"] == grp, ["pi_direct","pi_inverted"]].dropna()
-            pval = float("nan")
-            if len(sub) >= 2:
+    for grp in ["Single-event", "Recurrent"]:
+        sub = matched.loc[matched["Recurrence"] == grp, ["pi_direct","pi_inverted"]].dropna()
+        pval = float("nan")
+        if len(sub) >= 2:
+            try:
+                _, pval = wilcoxon(sub["pi_direct"].to_numpy(float),
+                                   sub["pi_inverted"].to_numpy(float),
+                                   alternative="two-sided", zero_method="wilcox")
+            except Exception:
                 try:
                     _, pval = wilcoxon(sub["pi_direct"].to_numpy(float),
                                        sub["pi_inverted"].to_numpy(float),
-                                       alternative="two-sided", zero_method="wilcox")
+                                       alternative="two-sided", zero_method="zsplit")
                 except Exception:
-                    try:
-                        _, pval = wilcoxon(sub["pi_direct"].to_numpy(float),
-                                           sub["pi_inverted"].to_numpy(float),
-                                           alternative="two-sided", zero_method="zsplit")
-                    except Exception:
-                        pval = float("nan")
-            print(f"  {grp:<13} p = {_fmt_p(pval)}")
+                    pval = float("nan")
+        print(f"  {grp:<13} p = {_fmt_p(pval)}")
 
     _print_header("AGREEMENT CHECK (Model A vs Model B), log scale")
     a_SE = float(_linear_combo(resA, {"const":1.0})[0])
