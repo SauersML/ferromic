@@ -30,15 +30,19 @@ OUTPUT_DIR = "three_snp_results"
 
 # Target SNPs and alleles (H1/H2 per your instruction)
 CHROM = "chr17"
-TARGET_LOCI_INFO_3SNP = {
-    "chr17:45996523": {"H1": "A", "H2": "G"},  # rs1052553
-    "chr17:45974480": {"H1": "A", "H2": "G"},  # rs1800547
-    "chr17:46024197": {"H1": "T", "H2": "C"},  # rs9468
+# Tagging SNPs for the 17q21.31 inversion (GRCh38 / hg38)
+TARGET_LOCI_INFO = {
+    "chr17:45974480": {"H1": "A", "H2": "G"},  # 45,974,480
+    "chr17:45996523": {"H1": "A", "H2": "G"},  # 45,996,523
+    "chr17:46003698": {"H1": "A", "H2": "G"},  # 46,003,698
+    "chr17:46024197": {"H1": "T", "H2": "C"},  # 46,024,197
 }
+
 TARGET_SNPS = [
-    {"id": "chr17:45996523", "pos": 45996523, "rsid": "rs1052553"},
-    {"id": "chr17:45974480", "pos": 45974480, "rsid": "rs1800547"},
-    {"id": "chr17:46024197", "pos": 46024197, "rsid": "rs9468"},
+    {"id": "chr17:45974480", "pos": 45974480},
+    {"id": "chr17:45996523", "pos": 45996523},
+    {"id": "chr17:46003698", "pos": 46003698},
+    {"id": "chr17:46024197", "pos": 46024197},
 ]
 
 # -----------------------------
