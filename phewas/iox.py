@@ -1,7 +1,6 @@
 import os
 import time
 import json
-import ast
 import tempfile
 try:
     import psutil
@@ -30,20 +29,18 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
                            rtol=0, atol=1e-6)
 
     def _valid_inversion(df):
-        """Validate that the inversion dosage file contains the target column and it's numeric."""
+        """Validate that the inversion dosage file contains the target column, it's numeric, and is not constant."""
         if validate_target is None:
             return True
         if validate_target not in df.columns:
             return False
-        return is_numeric_dtype(df[validate_target]) and df[validate_target].notna().any()
+        s = pd.to_numeric(df[validate_target], errors="coerce")
+        return is_numeric_dtype(s) and s.notna().sum() > 0 and s.nunique(dropna=True) > 1
 
     def _valid_pcs(df):
         if validate_num_pcs is None: return True
         expected = [f"PC{i}" for i in range(1, validate_num_pcs + 1)]
-        cols = list(df.columns)
-        try:
-            _ = [cols.index(c) for c in expected]  # preserves order requirement
-        except ValueError:
+        if not set(expected).issubset(df.columns):
             return False
         return all(is_numeric_dtype(df[c]) and df[c].notna().any() for c in expected)
 
