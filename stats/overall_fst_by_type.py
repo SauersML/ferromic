@@ -71,7 +71,7 @@ SCATTER_PLOT_CONFIG = [
 ]
 
 SUMMARY_STATS_COORDINATE_COLUMNS = {'chr': 'chr', 'start': 'region_start', 'end': 'region_end'}
-INVERSION_FILE_COLUMNS = ['Chromosome', 'Start', 'End', '0_single_1_recur']
+INVERSION_FILE_COLUMNS = ['Chromosome', 'Start', 'End', '0_single_1_recur_consensus']
 MAP_FILE_COLUMNS = ['Original_Chr', 'Original_Start', 'Original_End', 'New_Chr', 'New_Start', 'New_End']
 
 
@@ -178,7 +178,7 @@ def map_coordinates_to_inversion_types(inversion_info_df, map_df, perform_mappin
     single_event_regions = {}
     warn_key = "inversion_file_row_processing" # Renamed for clarity
     
-    required_cols_inv = ['Chromosome', 'Start', 'End', '0_single_1_recur']
+    required_cols_inv = ['Chromosome', 'Start', 'End', '0_single_1_recur_consensus']
     if not all(col in inversion_info_df.columns for col in required_cols_inv):
         missing_cols = [c for c in required_cols_inv if c not in inversion_info_df.columns]
         logger.critical(f"Inversion data '{INVERSION_FILE}' missing required columns: {missing_cols}. Exiting.")
@@ -212,19 +212,19 @@ def map_coordinates_to_inversion_types(inversion_info_df, map_df, perform_mappin
 
     for index, row in inversion_info_df.iterrows():
         # Check for NaN in essential columns before any processing
-        essential_cols_check = ['Chromosome', 'Start', 'End', '0_single_1_recur']
+        essential_cols_check = ['Chromosome', 'Start', 'End', '0_single_1_recur_consensus']
         if any(pd.isna(row[col]) for col in essential_cols_check):
             nan_cols_found = [col for col in essential_cols_check if pd.isna(row[col])]
             global_warning_tracker.log_warning(warn_key, lambda r, i, nc: f"Skipping row {i+2} in inversion data: NaN in {', '.join(nc)}. Row: {r.to_dict()}", row, index, nan_cols_found)
             skipped_count += 1
             continue
 
-        # Attempt to convert Start, End, 0_single_1_recur to numeric types safely
+        # Attempt to convert Start, End, 0_single_1_recur_consensus to numeric types safely
         try:
             original_chrom_val = str(row['Chromosome'])
             original_start_val = int(row['Start'])
             original_end_val = int(row['End'])
-            cat_code_val = int(row['0_single_1_recur'])
+            cat_code_val = int(row['0_single_1_recur_consensus'])
         except ValueError:
             global_warning_tracker.log_warning(warn_key, lambda r, i: f"Skipping row {i+2} in inversion data: Non-integer values in coordinate/category columns. Row: {r.to_dict()}", row, index)
             skipped_count += 1
