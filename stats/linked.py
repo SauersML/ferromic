@@ -22,7 +22,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 from scipy.stats import wilcoxon, pearsonr
 import traceback
 
-#TARGET="$HOME/.pytargets/sklearn171" && python3 -m pip install --upgrade --no-cache-dir --ignore-installed   --target "$TARGET" "scikit-learn>=1.6,<2" && PYTHONPATH="$TARGET:$PYTHONPATH" python3 -c  && 'import sklearn,sys; print(sklearn.__version__, "->", sklearn.__file__)' && PYTHONPATH="$TARGET:$PYTHONPATH" python3 /home/hsiehph/sauer354/di/ferromic/linked.py
+#TARGET="$HOME/.pytargets/sklearn171" && python3 -m pip install --upgrade --no-cache-dir --ignore-installed   --target "$TARGET" "scikit-learn>=1.6,<2" && PYTHONPATH="$TARGET:$PYTHONPATH" python3 -c 'import sklearn,sys; print(sklearn.__version__, "->", sklearn.__file__)' && PYTHONPATH="$TARGET:$PYTHONPATH" python3 /home/hsiehph/sauer354/di/ferromic/linked.py
 
 #PYTHONPATH="$TARGET:$PYTHONPATH" nohup setsid python3 -u /home/hsiehph/sauer354/di/ferromic/linked.py > linked.log 2>&1 & tail -f linked.log
 
