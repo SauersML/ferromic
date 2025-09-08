@@ -419,7 +419,8 @@ class PatternHandler(HandlerBase):
         if overlay == "single":
             artists.append(Line2D([xm], [y], linestyle="None", marker="o",
                                   markersize=3.5, markerfacecolor=OVERLAY_SINGLE,
-                                  markeredgecolor=OVERLAY_SINGLE, transform=trans))
+                                  markeredgecolor=getattr(orig_handle, "color", COLOR_OVERALL), markeredgewidth=0.9, transform=trans))
+
         elif overlay == "recurrent":
             artists.append(Line2D([xm], [y], linestyle="None", marker="_",
                                   markersize=6.0, color=OVERLAY_RECUR, transform=trans))
@@ -445,7 +446,8 @@ class AltPatternHandler(HandlerBase):
         if overlay == "single":
             artists.append(Line2D([xm], [y], linestyle="None", marker="o",
                                   markersize=3.5, markerfacecolor=OVERLAY_SINGLE,
-                                  markeredgecolor=OVERLAY_SINGLE, transform=trans))
+                                  markeredgecolor=c0, markeredgewidth=0.9, transform=trans))
+
         elif overlay == "recurrent":
             artists.append(Line2D([xm], [y], linestyle="None", marker="_",
                                   markersize=6.0, color=OVERLAY_RECUR, transform=trans))
@@ -514,7 +516,8 @@ def _draw_patterned_line(ax,
             mid = (g0 + g1) // 2
             if overlay == "single":
                 ax.plot(xs[mid:mid+1], ys[mid:mid+1], linestyle="None", marker="o",
-                        markersize=3.6, markerfacecolor=OVERLAY_SINGLE, markeredgecolor=OVERLAY_SINGLE, zorder=6)
+                        markersize=3.6, markerfacecolor=OVERLAY_SINGLE, markeredgecolor=(base_color if base_color is not None else (alt_colors[0] if alt_colors is not None else COLOR_OVERALL)), markeredgewidth=0.9, zorder=6)
+
             elif overlay == "recurrent":
                 ax.plot(xs[mid:mid+1], ys[mid:mid+1], linestyle="None", marker="_",
                         markersize=6.2, color=OVERLAY_RECUR, zorder=6)
