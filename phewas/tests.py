@@ -158,6 +158,10 @@ def test_ctx():
         "LRT_OVERALL_CACHE_DIR": "./phewas_cache/lrt_overall",
         "LRT_FOLLOWUP_CACHE_DIR": "./phewas_cache/lrt_followup",
         "RIDGE_L2_BASE": 1.0,
+        # Disable new filters for tests by default.
+        # We will override these in specific tests that check the filters.
+        "MIN_NEFF_FILTER": 0,
+        "MLE_REFIT_MIN_NEFF": 0,
     }
 
 # --- Unit Tests ---
@@ -240,6 +244,11 @@ def test_worker_constant_dosage_emits_nan(test_ctx):
         assert all(pd.isna(res.get(k)) for k in ["Beta", "OR", "P_Value"])
 
 def test_worker_insufficient_counts_skips(test_ctx):
+    # This test specifically checks the insufficient counts filter, so we
+    # override the default-disabled test context.
+    test_ctx = test_ctx.copy()
+    test_ctx["MIN_NEFF_FILTER"] = 100
+
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
         core_df = pd.concat([core_data['demographics'][['AGE_c', 'AGE_c_sq']], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
@@ -252,7 +261,7 @@ def test_worker_insufficient_counts_skips(test_ctx):
         assert result_path.exists()
         with open(result_path) as f:
             res = json.load(f)
-        assert res["Skip_Reason"] == "insufficient_cases_or_controls"
+        assert res["Skip_Reason"].startswith("insufficient_counts")
 
 def test_lrt_rank_and_df_positive(test_ctx):
     with temp_workspace():
@@ -691,6 +700,9 @@ def test_ridge_seeded_refit_matches_mle():
     fit_mle = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=200)
 
     import models
+    # This test does not use the test_ctx fixture, so we must set the context manually
+    # to disable the n_eff gate that would otherwise cause this test to fail.
+    models.CTX = {"MLE_REFIT_MIN_NEFF": 0, "RIDGE_L2_BASE": 1.0}
     orig = models._logit_fit
     def flaky(model, method, **kw):
         if method in ('newton','bfgs') and not kw.get('_already_failed', False):
