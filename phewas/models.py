@@ -327,7 +327,7 @@ def _print_fit_diag(s_name_safe, stage, model_tag, N_total, N_cases, N_ctrls, so
     print(msg, flush=True)
 
 def _suppress_worker_warnings():
-    """ALL WARNINGS ARE ENABLED. This function now ensures all warnings are always shown."""
+    """DEPRECATED: This function was misnamed. It now ensures all warnings are always shown for the worker process."""
     warnings.simplefilter("always")
     return
 
@@ -357,32 +357,28 @@ def _drop_zero_variance_np(X, keep_ix=(), eps=1e-12):
     return X[:, kept_original_indices], kept_original_indices
 
 
-def _drop_rank_deficiency_np(X, keep_ix=(), max_iter=100):
+def _drop_rank_deficiency_np(X, keep_ix=()):
     """
     Greedily removes columns from a NumPy design matrix until it achieves full column rank.
     Columns listed in keep_ix are preserved whenever possible. Removal order is by ascending
-    column standard deviation among removable columns, recomputed after each drop.
+    column standard deviation among removable columns. This continues until the matrix is full rank
+    or no more columns can be removed.
     Returns the pruned matrix and the kept column indices relative to the original X.
     """
-    if X.shape[1] == 0:
-        return X, np.array([], dtype=int)
-    original_cols = np.arange(X.shape[1])
+    if X.shape[1] == 0: return X, np.array([], int)
     keep_ix = set(int(i) for i in keep_ix)
-    X_work = X
-    cols_work = original_cols.copy()
-    iter_ct = 0
-    while np.linalg.matrix_rank(X_work) < X_work.shape[1] and iter_ct < max_iter:
-        removable_positions = [k for k, j in enumerate(cols_work) if j not in keep_ix]
+    cols = np.arange(X.shape[1])
+    while np.linalg.matrix_rank(X) < X.shape[1]:
+        removable_positions = [k for k, j in enumerate(cols) if j not in keep_ix]
         if not removable_positions:
             break
-        stds = np.nanstd(X_work, axis=0)
-        stds_removable = stds[removable_positions]
-        kmin_local = int(np.argmin(stds_removable))
-        pos_to_drop = removable_positions[kmin_local]
-        cols_work = np.delete(cols_work, pos_to_drop, axis=0)
-        X_work = np.delete(X_work, pos_to_drop, axis=1)
-        iter_ct += 1
-    return X_work, cols_work
+        stds = np.nanstd(X, axis=0)
+        # Find the position of the column with the minimum standard deviation among those that can be removed.
+        # np.argmin operates on the filtered stds, so we need to map the index back to the original position.
+        min_std_removable_pos = removable_positions[int(np.argmin(stds[removable_positions]))]
+        X = np.delete(X, min_std_removable_pos, axis=1)
+        cols = np.delete(cols, min_std_removable_pos, axis=0)
+    return X, cols
 
 
 def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
@@ -612,7 +608,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         # --- Model fitting pipeline (on arrays) ---
         X_work, y_work = X_clean, y_clean
+        # current_col_indices tracks the original column indices from X_all as columns are dropped.
         current_col_indices = np.arange(X_all.shape[1])
+        assert current_col_indices.ndim == 1 and current_col_indices.dtype.kind in "iu"
 
         X_work, y_work, sex_note, sex_skip, sex_col_dropped = _apply_sex_restriction_np(X_work, y_work, sex_ix)
         if sex_note: notes.append(sex_note)
@@ -648,22 +646,26 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         if sex_col_dropped:
             current_col_indices = np.delete(current_col_indices, sex_ix)
-            # Update indices of other key columns if they were after the sex column
-            target_ix = np.where(current_col_indices == target_ix)[0][0] if target_ix is not None else None
-            const_ix = np.where(current_col_indices == const_ix)[0][0] if const_ix is not None else None
+            # After dropping the sex column, the *positions* of other columns may change.
+            # We find the new positions by looking up the original column index in the current index array.
+            # `target_ix` is now a *position* in the current `X_work`, not the original `X_all`.
+            target_ix = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_inversion in col_ix else None
+            const_ix = np.where(current_col_indices == col_ix.get('const'))[0][0] if 'const' in col_ix else None
 
         n_total_used, n_cases_used, n_ctrls_used = len(y_work), int(y_work.sum()), len(y_work) - int(y_work.sum())
         keep_ix_zv = {idx for idx in [target_ix, const_ix] if idx is not None}
         X_work_zv, kept_indices_after_zv = _drop_zero_variance_np(X_work, keep_ix=keep_ix_zv)
 
         current_col_indices = current_col_indices[kept_indices_after_zv]
-        target_ix_mid = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_ix is not None else None
-        const_ix_mid = np.where(current_col_indices == col_ix.get('const'))[0][0] if const_ix is not None else None
+        # After dropping zero-variance columns, find the new positions of our key columns.
+        target_ix_mid = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_inversion in col_ix and col_ix.get(target_inversion) in current_col_indices else None
+        const_ix_mid = np.where(current_col_indices == col_ix.get('const'))[0][0] if 'const' in col_ix and col_ix.get('const') in current_col_indices else None
 
         X_work_fd, kept_indices_after_fd = _drop_rank_deficiency_np(X_work_zv, keep_ix={i for i in [target_ix_mid, const_ix_mid] if i is not None})
         current_col_indices = current_col_indices[kept_indices_after_fd]
-        target_ix_final = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_ix is not None else None
-        const_ix_final = np.where(current_col_indices == col_ix.get('const'))[0][0] if const_ix is not None else None
+        # Final pass after rank-deficiency removal to get final positions.
+        target_ix_final = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_inversion in col_ix and col_ix.get(target_inversion) in current_col_indices else None
+        const_ix_final = np.where(current_col_indices == col_ix.get('const'))[0][0] if 'const' in col_ix and col_ix.get('const') in current_col_indices else None
 
         ok, reason, det = validate_min_counts_for_fit(y_work, stage_tag="phewas", extra_context={"phenotype": s_name})
         if not ok:
@@ -795,13 +797,20 @@ def lrt_overall_worker(task):
             _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": reason, "counts": det})
             return
 
-        X_full_df, X_red_df = Xb, Xb.drop(columns=[target])
+        X_full_df = Xb
 
-        # Ranks for LRT df are computed on matrices after dropping degenerate and rank-deficient columns.
-        X_red_zv = _drop_zero_variance(X_red_df, keep_cols=('const',))
-        X_red_zv = _drop_rank_deficient(X_red_zv, keep_cols=('const',))
+        # Prune the full model first to resolve rank deficiency.
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=(target,))
         X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=(target,))
+
+        # The reduced model MUST be a subset of the pruned full model for the LRT to be valid.
+        # Construct it by dropping the target column from the *already pruned* full model columns.
+        if target in X_full_zv.columns:
+            red_cols = [c for c in X_full_zv.columns if c != target]
+            X_red_zv = X_full_zv[red_cols]
+        else:
+            # If the target was dropped during pruning, the models are identical.
+            X_red_zv = X_full_zv
 
         const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
@@ -930,10 +939,15 @@ def lrt_followup_worker(task):
         interaction_cols = [f"{target}:{c}" for c in A_df.columns]
         X_full_df = pd.concat([X_red_df, pd.DataFrame(interaction_mat, index=X_red_df.index, columns=interaction_cols)], axis=1)
 
-        X_red_zv = _drop_zero_variance(X_red_df, keep_cols=('const',), always_keep=(target,))
-        X_red_zv = _drop_rank_deficient(X_red_zv, keep_cols=('const',), always_keep=(target,))
+        # Prune the full model (with interactions) first.
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=[target] + interaction_cols)
         X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=[target] + interaction_cols)
+
+        # Construct the reduced model by dropping interaction terms from the pruned full model.
+        # This ensures the reduced model is properly nested within the full model.
+        kept_interaction_cols = [c for c in interaction_cols if c in X_full_zv.columns]
+        red_cols = [c for c in X_full_zv.columns if c not in kept_interaction_cols]
+        X_red_zv = X_full_zv[red_cols]
 
         const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None

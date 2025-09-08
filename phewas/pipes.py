@@ -86,9 +86,10 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                 item = pheno_queue.get()
                 if item is None:
                     break  # producer finished
-                if PSUTIL_AVAILABLE and monitor.available_memory_gb < min_available_memory_gb and monitor.available_memory_gb > 0:
+                if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
                     print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
-                    time.sleep(5)
+                    while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
+                        time.sleep(2)
                 queued += 1
                 pool.apply_async(worker_func, (item,), callback=_cb, error_callback=_err_cb)
                 _print_bar(queued, done)
@@ -146,9 +147,10 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
                 failed_tasks.append(e)
 
             for task in tasks:
-                if PSUTIL_AVAILABLE and monitor.available_memory_gb < min_available_memory_gb and monitor.available_memory_gb > 0:
+                if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
                     print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
-                    time.sleep(5)
+                    while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
+                        time.sleep(2)
 
                 queued += 1
                 pool.apply_async(models.lrt_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
@@ -206,9 +208,10 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                     failed_tasks.append(e)
 
                 for task in tasks_follow:
-                    if PSUTIL_AVAILABLE and monitor.available_memory_gb > 0 and monitor.available_memory_gb < min_available_memory_gb:
+                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
                         print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
-                        time.sleep(5)
+                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
+                            time.sleep(2)
 
                     queued += 1
                     pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
