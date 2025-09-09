@@ -157,16 +157,13 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
     inversion_id = inversion_job.get('orig_ID', 'Unknown_ID')
     vcf_path = None
     try:
-        chrom = inversion_job['seqnames']
-        start = int(inversion_job['start'])
-        end = int(inversion_job['end'])
+        chrom, start, end = inversion_job['seqnames'], inversion_job['start'], inversion_job['end']
         vcf_path = f"../vcfs/{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
         if not os.path.exists(vcf_path):
             reason = f"VCF file not found: {vcf_path}"
             logging.error(f"[{inversion_id}] FAILED: {reason}")
             return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
 
-        # Discover VCF samples and map TSV sample columns to VCF sample names.
         vcf_reader = VCF(vcf_path, lazy=True)
         vcf_samples = vcf_reader.samples
         tsv_samples = [col for col in inversion_job.keys() if col.startswith(('HG', 'NA'))]
@@ -176,112 +173,75 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
             logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
 
-        # Parse genotype labels used for synthetic data generation later in the pipeline.
         def parse_gt_for_synth(gt_str: any):
             high_conf_map = {"0|0": 0, "1|0": 1, "0|1": 1, "1|1": 2}
             low_conf_map = {"0|0_lowconf": 0, "1|0_lowconf": 1, "0|1_lowconf": 1, "1|1_lowconf": 2}
-            if gt_str in high_conf_map:
-                return (high_conf_map[gt_str], True, gt_str)
-            if gt_str in low_conf_map:
-                return (low_conf_map[gt_str], False, gt_str.replace("_lowconf", ""))
+            if gt_str in high_conf_map: return (high_conf_map[gt_str], True, gt_str)
+            if gt_str in low_conf_map: return (low_conf_map[gt_str], False, gt_str.replace("_lowconf", ""))
             return (None, None, None)
 
-        gt_data = {
-            vcf_s: {'dosage': d, 'is_high_conf': hc, 'raw_gt': rgt}
-            for tsv_s, vcf_s in sample_map.items()
-            for d, hc, rgt in [parse_gt_for_synth(inversion_job.get(tsv_s))]
-            if d is not None
-        }
+        gt_data = {vcf_s: {'dosage': d, 'is_high_conf': hc, 'raw_gt': rgt}
+                   for tsv_s, vcf_s in sample_map.items()
+                   for d, hc, rgt in [parse_gt_for_synth(inversion_job.get(tsv_s))]
+                   if d is not None}
         if not gt_data:
             reason = 'No samples with a valid inversion dosage.'
             logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
 
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
-
-        # Build internal-only regions:
-        # - Full inversion if length < 100 kb
-        # - Otherwise two internal 50 kb windows adjacent to each breakpoint
-        flank_size = 50000
-        inv_len = end - start + 1
-        if inv_len < 100000:
-            region_strs = [f"{chrom}:{start}-{end}"]
-        else:
-            left_start = start
-            left_end = min(end, start + flank_size - 1)
-            right_start = max(start, end - flank_size + 1)
-            right_end = end
-            region_strs = [
-                f"{chrom}:{left_start}-{left_end}",
-                f"{chrom}:{right_start}-{right_end}"
-            ]
-
-        # Subset VCF to the mapped samples.
+        flank_size = 90000
+        region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
         vcf_subset = VCF(vcf_path, samples=list(gt_df.index))
 
-        # Collect haplotype-encoded genotypes and SNP metadata, de-duplicating by position.
         h1_data, h2_data, snp_meta, processed_pos = [], [], [], set()
 
-        for region_str in region_strs:
-            for var in vcf_subset(region_str):
-                if var.POS in processed_pos:
-                    continue
-                normalized_chrom = var.CHROM.replace('chr', '')
-                snp_id_str = f"{normalized_chrom}:{var.POS}"
-                if snp_id_str not in allowed_snps_dict:
-                    continue
-                if not (var.is_snp and not var.is_indel and len(var.ALT) == 1 and all(-1 not in gt[:2] for gt in var.genotypes)):
-                    continue
-
-                effect_allele = allowed_snps_dict[snp_id_str]
-                ref_allele, alt_allele = var.REF, var.ALT[0]
-
-                # Encode diploid genotypes with respect to the effect allele.
-                genotypes = np.array([gt[:2] for gt in var.genotypes], dtype=int)
-                if effect_allele == alt_allele:
-                    encoded_gts = genotypes
-                elif effect_allele == ref_allele:
-                    encoded_gts = 1 - genotypes
-                else:
-                    # Effect allele not present among REF/ALT; skip to avoid mis-encoding.
-                    continue
-
-                h1_data.append(encoded_gts[:, 0])
-                h2_data.append(encoded_gts[:, 1])
-                snp_meta.append({'id': snp_id_str, 'pos': var.POS, 'effect_allele': effect_allele})
-                processed_pos.add(var.POS)
+        for var in vcf_subset(region_str):
+            if var.POS in processed_pos:
+                continue
+            normalized_chrom = var.CHROM.replace('chr', '')
+            snp_id_str = f"{normalized_chrom}:{var.POS}"
+            if snp_id_str not in allowed_snps_dict:
+                continue
+            if not (var.is_snp and not var.is_indel and len(var.ALT) == 1 and all(-1 not in gt[:2] for gt in var.genotypes)):
+                continue
+            effect_allele = allowed_snps_dict[snp_id_str]
+            ref_allele, alt_allele = var.REF, var.ALT[0]
+            genotypes = np.array([gt[:2] for gt in var.genotypes], dtype=int)
+            if effect_allele == alt_allele:
+                encoded_gts = genotypes
+            elif effect_allele == ref_allele:
+                encoded_gts = 1 - genotypes
+            else:
+                continue
+            h1_data.append(encoded_gts[:, 0]); h2_data.append(encoded_gts[:, 1])
+            snp_meta.append({'id': snp_id_str, 'pos': var.POS, 'effect_allele': effect_allele})
+            processed_pos.add(var.POS)
 
         if not snp_meta:
             reason = 'No suitable SNPs from the whitelist were found in the region.'
             logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
-
-        # Construct haplotype matrices aligned to the subset VCF sample order.
         df_H1 = pd.DataFrame(np.array(h1_data).T, index=vcf_subset.samples)
         df_H2 = pd.DataFrame(np.array(h2_data).T, index=vcf_subset.samples)
-
-        # Align to the genotype label dataframe and ensure sufficient sample size.
         common_samples = df_H1.index.intersection(gt_df.index)
         if len(common_samples) < 20:
             reason = f'Insufficient overlapping samples ({len(common_samples)}) for modeling.'
             logging.warning(f"[{inversion_id}] SKIPPING: {reason}")
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
 
-        return {
-            'status': 'PREPROCESSED',
-            'id': inversion_id,
-            'X_hap1': df_H1.loc[common_samples].values,
-            'X_hap2': df_H2.loc[common_samples].values,
-            'y_diploid': gt_df.loc[common_samples, 'dosage'].values.astype(int),
-            'confidence_mask': gt_df.loc[common_samples, 'is_high_conf'].values.astype(bool),
-            'raw_gts': gt_df.loc[common_samples, 'raw_gt'],
-            'snp_metadata': snp_meta
-        }
+        return {'status': 'PREPROCESSED',
+                'id': inversion_id,
+                'X_hap1': df_H1.loc[common_samples].values,
+                'X_hap2': df_H2.loc[common_samples].values,
+                'y_diploid': gt_df.loc[common_samples, 'dosage'].values.astype(int),
+                'confidence_mask': gt_df.loc[common_samples, 'is_high_conf'].values.astype(bool),
+                'raw_gts': gt_df.loc[common_samples, 'raw_gt'],
+                'snp_metadata': snp_meta}
     except Exception as e:
         reason = f"Data Extraction Error: {type(e).__name__}: {e}. Problem VCF: '{vcf_path}'"
         logging.error(f"[{inversion_id}] FAILED: {reason}")
         return {'status': 'FAILED', 'id': inversion_id, 'reason': reason}
-
 
 def get_effective_max_components(X_train, y_train, max_components):
     """
@@ -647,25 +607,15 @@ def check_snp_availability_for_locus(job: dict, allowed_snps_dict: dict):
         vcf_path = f"../vcfs/{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
         if not os.path.exists(vcf_path):
             return {'status': 'VCF_NOT_FOUND', 'id': inversion_id, 'reason': f"VCF file not found: {vcf_path}"}
-        flank_size = 50000
-        # Internal-only SNP availability check. Mirrors the analysis logic:
-        # - If inversion length < 100 kb: scan the full inversion [start, end].
-        # - Otherwise: scan the two internal 50 kb windows adjacent to breakpoints.
-        inv_len = int(end) - int(start) + 1
-        if inv_len < 100000:
-            region_strs = [f"{chrom}:{start}-{end}"]
-        else:
-            left_end = min(end, start + flank_size - 1)
-            right_start = max(start, end - flank_size + 1)
-            region_strs = [f"{chrom}:{start}-{left_end}", f"{chrom}:{right_start}-{end}"]
+        flank_size = 90000
+        region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
         vcf_reader = VCF(vcf_path, lazy=True)
-        for region_str in region_strs:
-            for var in vcf_reader(region_str):
-                normalized_chrom = var.CHROM.replace('chr', '')
-                snp_id_str = f"{normalized_chrom}:{var.POS}"
-                if snp_id_str in allowed_snps_dict:
-                    return {'status': 'FOUND', 'id': inversion_id}
-        return {'status': 'NOT_FOUND', 'id': inversion_id, 'region': ", ".join(region_strs)}
+        for var in vcf_reader(region_str):
+            normalized_chrom = var.CHROM.replace('chr', '')
+            snp_id_str = f"{normalized_chrom}:{var.POS}"
+            if snp_id_str in allowed_snps_dict:
+                return {'status': 'FOUND', 'id': inversion_id}
+        return {'status': 'NOT_FOUND', 'id': inversion_id, 'region': region_str}
     except Exception as e:
         return {'status': 'PRECHECK_FAILED', 'id': inversion_id, 'reason': str(e)}
 
