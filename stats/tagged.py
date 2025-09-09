@@ -28,6 +28,13 @@ GROUND_TRUTH_FILE = "../variants_freeze4inv_sv_inv_hg38_processed_arbigent_filte
 VCF_PATH = "../vcfs/chr17.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
 OUTPUT_DIR = "three_snp_results"
 
+# -----------------------------
+# Subsetting controls
+# -----------------------------
+SUBSET_TO_GROUP = True  # When True, restrict analysis to VCF samples whose names begin with group prefix
+GROUP_PREFIX = "EUR_"        # Prefix that denotes group samples in VCF sample names.
+
+
 # Target SNPs and alleles (H1/H2 per your instruction)
 CHROM = "chr17"
 TARGET_LOCI_INFO_3SNP = {
@@ -329,7 +336,19 @@ def main():
     # 2) Open VCF and map samples
     vcf_full = VCF(VCF_PATH, lazy=True)
     vcf_samples_all = vcf_full.samples
+
+    # Limit to group samples when requested via flag. This relies on the explicit prefix present in VCF sample names.
+    if SUBSET_TO_GROUP:
+        vcf_samples_all = [s for s in vcf_samples_all if isinstance(s, str) and s.startswith(GROUP_PREFIX)]
+        if len(vcf_samples_all) == 0:
+            logging.critical(f"No VCF samples found with prefix '{GROUP_PREFIX}' while SUBSET_TO_GROUP is True.")
+            sys.exit(1)
+        logging.info(f"Subsetting enabled: using {len(vcf_samples_all)} group VCF samples with prefix '{GROUP_PREFIX}'.")
+    else:
+        logging.info("Subsetting disabled: using all VCF samples.")
+
     sample_map = map_samples_to_vcf(row, vcf_samples_all)
+
 
     # Build y (ordered by VCF sample names we will actually read)
     y_true_list, is_high_conf_list, raw_gt_list, vcf_samples_used = build_y_from_tsv_row(row, sample_map)
