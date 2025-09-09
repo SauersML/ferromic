@@ -846,6 +846,13 @@ def main():
     chrom_order, winners_records = load_winners_from_subset_bim()
     # Reorder shards to match subset.bim chrom order
     shards = list_shards_for_bim_chroms()
+    # Re-populate BPF into the newly created shards list before assembly.
+    # The BPF value is derived from the final subset.fam file, which is the
+    # source of truth for the number of samples (N).
+    N = sum(1 for _ in open(OUT_FAM, "r"))
+    bpf = math.ceil(N/4)
+    for sh in shards:
+        sh.bpf = bpf
     sel_by_shard = map_snpids_to_indices(shards, winners_records)
     assemble_bed_resume(shards, sel_by_shard)
 
