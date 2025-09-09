@@ -191,12 +191,23 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
 
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
         flank_size = 50000
-        region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
+        # Only analyze SNPs internal to the inversion:
+        # - If inversion length < 100 kb: use the full inversion interval [start, end].
+        # - Otherwise: use the two internal 50 kb windows adjacent to each breakpoint:
+        #   [start, start+50kb-1] and [end-50kb+1, end]. These windows are clipped to [start, end].
+        inv_len = int(end) - int(start) + 1
+        if inv_len < 100000:
+            region_strs = [f"{chrom}:{start}-{end}"]
+        else:
+            left_end = min(end, start + flank_size - 1)
+            right_start = max(start, end - flank_size + 1)
+            region_strs = [f"{chrom}:{start}-{left_end}", f"{chrom}:{right_start}-{end}"]
         vcf_subset = VCF(vcf_path, samples=list(gt_df.index))
 
         h1_data, h2_data, snp_meta, processed_pos = [], [], [], set()
 
-        for var in vcf_subset(region_str):
+        for region_str in region_strs:
+            for var in vcf_subset(region_str):
             if var.POS in processed_pos:
                 continue
             normalized_chrom = var.CHROM.replace('chr', '')
@@ -608,14 +619,24 @@ def check_snp_availability_for_locus(job: dict, allowed_snps_dict: dict):
         if not os.path.exists(vcf_path):
             return {'status': 'VCF_NOT_FOUND', 'id': inversion_id, 'reason': f"VCF file not found: {vcf_path}"}
         flank_size = 50000
-        region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
+        # Internal-only SNP availability check. Mirrors the analysis logic:
+        # - If inversion length < 100 kb: scan the full inversion [start, end].
+        # - Otherwise: scan the two internal 50 kb windows adjacent to breakpoints.
+        inv_len = int(end) - int(start) + 1
+        if inv_len < 100000:
+            region_strs = [f"{chrom}:{start}-{end}"]
+        else:
+            left_end = min(end, start + flank_size - 1)
+            right_start = max(start, end - flank_size + 1)
+            region_strs = [f"{chrom}:{start}-{left_end}", f"{chrom}:{right_start}-{end}"]
         vcf_reader = VCF(vcf_path, lazy=True)
-        for var in vcf_reader(region_str):
-            normalized_chrom = var.CHROM.replace('chr', '')
-            snp_id_str = f"{normalized_chrom}:{var.POS}"
-            if snp_id_str in allowed_snps_dict:
-                return {'status': 'FOUND', 'id': inversion_id}
-        return {'status': 'NOT_FOUND', 'id': inversion_id, 'region': region_str}
+        for region_str in region_strs:
+            for var in vcf_reader(region_str):
+                normalized_chrom = var.CHROM.replace('chr', '')
+                snp_id_str = f"{normalized_chrom}:{var.POS}"
+                if snp_id_str in allowed_snps_dict:
+                    return {'status': 'FOUND', 'id': inversion_id}
+        return {'status': 'NOT_FOUND', 'id': inversion_id, 'region': ", ".join(region_strs)}
     except Exception as e:
         return {'status': 'PRECHECK_FAILED', 'id': inversion_id, 'reason': str(e)}
 
