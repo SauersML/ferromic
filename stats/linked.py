@@ -190,7 +190,7 @@ def extract_haplotype_data_for_locus(inversion_job: dict, allowed_snps_dict: dic
             return {'status': 'SKIPPED', 'id': inversion_id, 'reason': reason}
 
         gt_df = pd.DataFrame.from_dict(gt_data, orient='index')
-        flank_size = 90000
+        flank_size = 50000
         region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
         vcf_subset = VCF(vcf_path, samples=list(gt_df.index))
 
@@ -607,7 +607,7 @@ def check_snp_availability_for_locus(job: dict, allowed_snps_dict: dict):
         vcf_path = f"../vcfs/{chrom}.fixedPH.simpleINV.mod.all.wAA.myHardMask98pc.vcf.gz"
         if not os.path.exists(vcf_path):
             return {'status': 'VCF_NOT_FOUND', 'id': inversion_id, 'reason': f"VCF file not found: {vcf_path}"}
-        flank_size = 90000
+        flank_size = 50000
         region_str = f"{chrom}:{max(0, start - flank_size)}-{end + flank_size}"
         vcf_reader = VCF(vcf_path, lazy=True)
         for var in vcf_reader(region_str):
