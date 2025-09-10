@@ -576,8 +576,8 @@ def _apply_sex_restriction_np(X, y, sex_ix):
     if sex_ix is None:
         return X, y, "", None, False
 
-    mode = str(CTX.get("SEX_RESTRICT_MODE", "strict")).lower()
-    majority_prop = float(CTX.get("SEX_RESTRICT_PROP", 1.0))
+    mode = str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower()
+    majority_prop = float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP))
     max_other = int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0))
 
     sex_col = X[:, sex_ix]
