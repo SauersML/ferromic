@@ -41,12 +41,14 @@ class MemoryMonitor(threading.Thread):
         self.stop_event = threading.Event()
         self.available_memory_gb = 0
         self.rss_gb = 0
+        self.sys_cpu_percent = 0.0
 
     def run(self):
         while not self.stop_event.is_set():
             if PSUTIL_AVAILABLE:
                 self.available_memory_gb = psutil.virtual_memory().available / (1024**3)
                 self.rss_gb = psutil.Process().memory_info().rss / (1024**3)
+                self.sys_cpu_percent = psutil.cpu_percent(interval=None)
             time.sleep(self.interval)
 
     def stop(self):

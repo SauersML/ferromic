@@ -11,6 +11,7 @@ import queue
 import faulthandler
 import sys
 import traceback
+import json
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -44,7 +45,10 @@ warnings.filterwarnings('ignore', message=r'QC check did not pass', category=Con
 # 4. ConvergenceWarning: Could not trim params automatically
 warnings.filterwarnings('ignore', message=r'Could not trim params automatically', category=ConvergenceWarning)
 
-faulthandler.enable()
+try:
+    faulthandler.enable()
+except Exception:
+    pass
 
 def _global_excepthook(exc_type, exc, tb):
     """
@@ -396,7 +400,7 @@ def main():
             bq_client = bigquery.Client(project=gcp_project)
             cdr_codename = cdr_dataset_id.split(".")[-1]
             demographics_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"), io.load_demographics_with_stable_age, bq_client=bq_client, cdr_id=cdr_dataset_id)
-            pc_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, "pcs_10.parquet"), io.load_pcs, gcp_project, PCS_URI, NUM_PCS, validate_num_pcs=NUM_PCS)
+            pc_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, f"pcs_{NUM_PCS}.parquet"), io.load_pcs, gcp_project, PCS_URI, NUM_PCS, validate_num_pcs=NUM_PCS)
             sex_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, "genetic_sex.parquet"), io.load_genetic_sex, gcp_project, SEX_URI)
             related_ids_to_remove = io.load_related_to_remove(gcp_project=gcp_project, RELATEDNESS_URI=RELATEDNESS_URI)
             demographics_df.index, pc_df.index, sex_df.index = [df.index.astype(str) for df in (demographics_df, pc_df, sex_df)]
@@ -561,14 +565,12 @@ def main():
                 if governor.can_admit_next_inv(predicted_gb):
                     target_inv = pending_inversions.popleft()
                     print(f"[Orchestrator] Admitting inversion '{target_inv}'...")
-                    baseline_rss = monitor_thread.snapshot().app_rss_gb
+                    baseline_rss = (monitor_thread.snapshot().app_rss_gb if monitor_thread else 0.0)
                     thread = threading.Thread(target=run_single_inversion, args=(target_inv, baseline_rss, shared_data_for_threads))
                     running_inversions[thread] = target_inv
                     thread.start()
 
             time.sleep(1.0)
-
-        print("\n--- All inversions processed. ---")
 
         print("\n--- All inversions processed. ---")
 
