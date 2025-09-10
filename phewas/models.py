@@ -11,8 +11,7 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy import stats as sp_stats
 from scipy.special import expit
-from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
-
+from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationWarning
 
 import iox as io
 
@@ -452,8 +451,18 @@ def _print_fit_diag(s_name_safe, stage, model_tag, N_total, N_cases, N_ctrls, so
     print(msg, flush=True)
 
 def _suppress_worker_warnings():
-    """DEPRECATED: This function was misnamed. It now ensures all warnings are always shown for the worker process."""
-    warnings.simplefilter("always")
+    """Configures warning filters for the worker process to ignore specific, benign warnings."""
+    # RuntimeWarning: overflow encountered in exp
+    warnings.filterwarnings('ignore', message='overflow encountered in exp', category=RuntimeWarning)
+    
+    # RuntimeWarning: divide by zero encountered in log
+    warnings.filterwarnings('ignore', message='divide by zero encountered in log', category=RuntimeWarning)
+    
+    # ConvergenceWarning: QC check did not pass for X out of Y parameters
+    warnings.filterwarnings('ignore', message=r'QC check did not pass', category=ConvergenceWarning)
+    
+    # ConvergenceWarning: Could not trim params automatically
+    warnings.filterwarnings('ignore', message=r'Could not trim params automatically', category=ConvergenceWarning)
     return
 
 REQUIRED_CTX_KEYS = {
