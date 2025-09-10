@@ -88,8 +88,9 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
         except Exception as e:
             print(f"  -> Cache unreadable ({e}); regenerating...")
             df = _coerce_index(generation_func(*args, **kwargs))
-            df.to_parquet(cache_path)
+            atomic_write_parquet(cache_path, df)
             return df
+
 
         # Basic index hygiene for joins
         df = _coerce_index(df)
@@ -98,12 +99,12 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
         if _needs_validation(cache_path) and not _validate(cache_path, df):
             print(f"  -> Cache at '{cache_path}' failed validation; regenerating...")
             df = _coerce_index(generation_func(*args, **kwargs))
-            df.to_parquet(cache_path)
+            atomic_write_parquet(cache_path, df)
         return df
 
     print(f"  -> No cache found at '{cache_path}'. Generating data...")
     df = _coerce_index(generation_func(*args, **kwargs))
-    df.to_parquet(cache_path)
+    atomic_write_parquet(cache_path, df)
     return df
 
 
