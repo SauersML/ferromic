@@ -30,6 +30,20 @@ import pheno
 import pipes
 import models
 
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
+
+# 1. RuntimeWarning: overflow encountered in exp
+warnings.filterwarnings('ignore', message='overflow encountered in exp', category=RuntimeWarning)
+
+# 2. RuntimeWarning: divide by zero encountered in log
+warnings.filterwarnings('ignore', message='divide by zero encountered in log', category=RuntimeWarning)
+
+# 3. ConvergenceWarning: QC check did not pass
+warnings.filterwarnings('ignore', message=r'QC check did not pass', category=ConvergenceWarning)
+
+# 4. ConvergenceWarning: Could not trim params automatically
+warnings.filterwarnings('ignore', message=r'Could not trim params automatically', category=ConvergenceWarning)
+
 faulthandler.enable()
 
 def _global_excepthook(exc_type, exc, tb):
