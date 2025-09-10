@@ -633,8 +633,8 @@ def _apply_sex_restriction_np(X, y, sex_ix):
 worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, finite_mask_worker = None, None, 0, None, None
 # Array-based versions for performance
 X_all, col_ix, worker_core_df_cols, worker_core_df_index = None, None, None, None
-# Per-category cached data for Stage 1
-control_indices_by_cat, X_controls_by_cat, y_controls_by_cat = {}, {}, {}
+# Per-category cached indices only (no big matrices)
+control_indices_by_cat = {}
 
 
 def init_worker(df_to_share, masks, ctx):
@@ -647,7 +647,7 @@ def init_worker(df_to_share, masks, ctx):
     _validate_ctx(ctx)
     global worker_core_df, allowed_mask_by_cat, N_core, CTX, finite_mask_worker
     global X_all, col_ix, worker_core_df_cols, worker_core_df_index
-    global control_indices_by_cat, X_controls_by_cat, y_controls_by_cat
+    global control_indices_by_cat
 
     worker_core_df = df_to_share  # Keep for fingerprints, metadata, and index
     allowed_mask_by_cat, N_core, CTX = masks, len(df_to_share), ctx
@@ -656,17 +656,19 @@ def init_worker(df_to_share, masks, ctx):
 
     # --- Array conversion ---
     X_all = df_to_share.to_numpy(dtype=np.float64, copy=False)
+    # Protect CoW: never write to the shared design matrix
+    try:
+        X_all.setflags(write=False)
+    except Exception:
+        pass
     col_ix = {name: i for i, name in enumerate(worker_core_df_cols)}
 
     finite_mask_worker = np.isfinite(X_all).all(axis=1)
 
-    # --- Pre-cache control matrices per category ---
+    # --- Pre-cache control indices per category (NO matrices) ---
     for category, allowed_mask in allowed_mask_by_cat.items():
         control_mask = allowed_mask & finite_mask_worker
-        control_indices = np.flatnonzero(control_mask)
-        control_indices_by_cat[category] = control_indices
-        X_controls_by_cat[category] = X_all[control_indices]
-        y_controls_by_cat[category] = np.zeros(len(control_indices), dtype=np.int8)
+        control_indices_by_cat[category] = np.flatnonzero(control_mask)
 
     bad = ~finite_mask_worker
     if bad.any():
@@ -769,14 +771,19 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         # --- Array-based data assembly ---
         case_indices_in_X_all = case_idx_global[finite_mask_worker[case_idx_global]]
 
-        X_controls = X_controls_by_cat.get(category, np.empty((0, X_all.shape[1])))
-        y_controls = y_controls_by_cat.get(category, np.empty((0,)))
+        ctrl_idx = control_indices_by_cat.get(category, np.array([], dtype=int))
+        # Fancy indexing returns a copy (that’s OK; it’s ephemeral and per-fit)
+        X_controls = X_all[ctrl_idx] if ctrl_idx.size else np.empty((0, X_all.shape[1]))
+        y_controls = np.zeros(len(X_controls), dtype=np.int8)
 
         X_cases = X_all[case_indices_in_X_all]
         y_cases = np.ones(len(X_cases), dtype=np.int8)
 
         X_clean = np.vstack([X_controls, X_cases])
         y_clean = np.concatenate([y_controls, y_cases])
+
+        # Free big temporaries ASAP after each fit
+        del X_controls, y_controls, X_cases
 
         n_total, n_cases, n_ctrls = len(y_clean), int(y_clean.sum()), len(y_clean) - int(y_clean.sum())
 
