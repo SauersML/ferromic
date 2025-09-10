@@ -43,7 +43,8 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
 # thresholds (configured via CTX; here are defaults/fallbacks)
 DEFAULT_MIN_CASES = 1000
 DEFAULT_MIN_CONTROLS = 1000
-DEFAULT_MIN_NEFF = 100  # optional gate; set 0 to disable
+DEFAULT_MIN_NEFF = 100  # set 0 to disable
+DEFAULT_SEX_RESTRICT_PROP = 0.99
 
 def _thresholds(cases_key="MIN_CASES_FILTER", controls_key="MIN_CONTROLS_FILTER", neff_key="MIN_NEFF_FILTER"):
     return (
@@ -517,35 +518,20 @@ def _drop_rank_deficiency_np(X, keep_ix=()):
 
 def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
     """
-    Enforce sex restriction for sex-linked phenotypes.
-
-    Behavior is controlled via CTX:
-      - CTX['SEX_RESTRICT_MODE']: 'strict' or 'majority'. Defaults to 'strict'.
-      - CTX['SEX_RESTRICT_PROP']: threshold in [0, 1]. Used when mode='majority'. Defaults to 1.0.
-      - CTX['SEX_RESTRICT_MAX_OTHER_CASES']: integer cap on stray other-sex cases when mode='majority'. Defaults to 0.
-
     Returns: (X2, y2, note:str, skip_reason:str|None)
     """
-    if 'sex' not in X.columns:
-        return X, y, "", None
-
-    mode = str(CTX.get("SEX_RESTRICT_MODE", "strict")).lower()
-    majority_prop = float(CTX.get("SEX_RESTRICT_PROP", 1.0))
-    max_other = int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0))
-
+    if 'sex' not in X.columns: return X, y, "", None
     tab = pd.crosstab(X['sex'], y).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
-    n_f_case = int(tab.loc[0.0, 1])
-    n_m_case = int(tab.loc[1.0, 1])
-    n_f_ctrl = int(tab.loc[0.0, 0])
-    n_m_ctrl = int(tab.loc[1.0, 0])
-
-    def _restrict_to(s: float, tag: str):
-        if s == 0.0 and n_f_ctrl == 0:
-            return X, y, "", "sex_no_controls_in_case_sex"
-        if s == 1.0 and n_m_ctrl == 0:
-            return X, y, "", "sex_no_controls_in_case_sex"
-        keep = X['sex'].eq(s)
-        return X.loc[keep].drop(columns=['sex']), y.loc[keep], f"{tag}_{int(s)}", None
+    total_cases = int(tab.loc[0.0, 1] + tab.loc[1.0, 1])
+    if total_cases <= 0: return X, y, "", None
+    thr = float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP))
+    cases_by_sex = {0.0: int(tab.loc[0.0, 1]), 1.0: int(tab.loc[1.0, 1])}
+    dominant_sex = 0.0 if cases_by_sex[0.0] >= cases_by_sex[1.0] else 1.0
+    frac = (cases_by_sex[dominant_sex] / total_cases) if total_cases > 0 else 0.0
+    if frac < thr: return X, y, "", None
+    if int(tab.loc[dominant_sex, 0]) == 0: return X, y, "", "sex_no_controls_in_case_sex"
+    keep = X['sex'].eq(dominant_sex)
+    return X.loc[keep].drop(columns=['sex']), y.loc[keep], f"sex_restricted_to_{int(dominant_sex)}", None
 
     case_sexes = []
     if n_f_case > 0:
