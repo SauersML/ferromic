@@ -3,6 +3,8 @@ import sys
 from functools import partial
 from multiprocessing import get_context, cpu_count
 import os
+import json
+import math
 
 import models
 import time
@@ -90,6 +92,31 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                     print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
                     while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
                         time.sleep(2)
+                # Cache policy: if a previous result exists but has an invalid or NA P_Value and the
+                # association was attempted (no Skip_Reason), evict the meta to force a fresh run.
+                try:
+                    res_path = os.path.join(results_cache_dir, f"{item['name']}.json")
+                    meta_path = os.path.join(results_cache_dir, f"{item['name']}.meta.json")
+                    if os.path.exists(res_path) and os.path.exists(meta_path):
+                        with open(res_path, "r") as _rf:
+                            _res_obj = json.load(_rf)
+                        _skip_reason = _res_obj.get("Skip_Reason", None)
+                        if not _skip_reason:
+                            _pv = _res_obj.get("P_Value", None)
+                            _valid_p = False
+                            try:
+                                _pvf = float(_pv)
+                                _valid_p = math.isfinite(_pvf) and (0.0 < _pvf < 1.0)
+                            except Exception:
+                                _valid_p = False
+                            if not _valid_p:
+                                try:
+                                    os.remove(meta_path)
+                                    print(f"\n[cache POLICY] Invalid or missing P_Value for '{item['name']}'. Forcing re-run by removing meta.", flush=True)
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
                 queued += 1
                 pool.apply_async(worker_func, (item,), callback=_cb, error_callback=_err_cb)
                 _print_bar(queued, done)
@@ -152,9 +179,34 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
                     while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
                         time.sleep(2)
 
+                # Cache policy: if a previous Stage-1 LRT result exists but has an invalid or NA P_LRT_Overall,
+                # evict the meta to force a fresh run. LRT tasks are only scheduled for non-skipped models.
+                try:
+                    _res_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.json")
+                    _meta_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.meta.json")
+                    if os.path.exists(_res_path) and os.path.exists(_meta_path):
+                        with open(_res_path, "r") as _rf:
+                            _res_obj = json.load(_rf)
+                        _p = _res_obj.get("P_LRT_Overall", None)
+                        _valid = False
+                        try:
+                            _pf = float(_p)
+                            _valid = math.isfinite(_pf) and (0.0 < _pf < 1.0)
+                        except Exception:
+                            _valid = False
+                        if not _valid:
+                            try:
+                                os.remove(_meta_path)
+                                print(f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.", flush=True)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
                 queued += 1
                 pool.apply_async(models.lrt_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
                 _print_bar(queued, done, "LRT-Stage1")
+
             pool.close()
             pool.join()
             _print_bar(queued, done, "LRT-Stage1")
