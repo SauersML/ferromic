@@ -298,9 +298,11 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         XtWX_inv = np.linalg.pinv(XtWX)
                     except Exception:
                         break
-                WX = X_np * np.sqrt(W)[:, None]
-                H = WX @ XtWX_inv @ WX.T
-                h = np.clip(np.diag(H), 0.0, 1.0)
+                # Compute leverages without constructing the full N×N hat matrix.
+                # h_i = w_i * x_i^T (X' W X)^{-1} x_i
+                T = X_np @ XtWX_inv
+                s = np.einsum("ij,ij->i", T, X_np)
+                h = np.clip(W * s, 0.0, 1.0)
                 adj = (0.5 - p) * h
                 score = X_np.T @ (y_np - p + adj)
                 try:
@@ -329,6 +331,12 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                 with np.errstate(divide="ignore", invalid="ignore"):
                     z = beta / bse
                 pvals = 2.0 * sp_stats.norm.sf(np.abs(z))
+                # Penalized log-likelihood for Firth logistic regression for LRT compatibility.
+                # Uses l(β) + 0.5 * log|X' W X|.
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    loglik = float(np.sum(y_np * np.log(p) + (1.0 - y_np) * np.log(1.0 - p)))
+                sign_det, logdet = np.linalg.slogdet(XtWX)
+                pll = loglik + 0.5 * logdet if sign_det > 0 else -np.inf
                 class _Result:
                     """Lightweight container to mimic statsmodels results where needed."""
                     pass
@@ -341,6 +349,7 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     firth_res.params = beta
                     firth_res.bse = bse
                     firth_res.pvalues = pvals
+                setattr(firth_res, "llf", float(pll))
                 setattr(firth_res, "_final_is_mle", True)
                 setattr(firth_res, "_used_firth", True)
                 return firth_res, "firth_refit"
