@@ -58,7 +58,10 @@ def build_pan_category_cases(defs, bq_client, cdr_id, cache_dir, cdr_codename) -
     print("[Setup]    - Pre-calculating pan-category case sets...")
     category_cache_path = os.path.join(cache_dir, f"pan_category_cases_{cdr_codename}.pkl")
     if os.path.exists(category_cache_path):
-        return pd.read_pickle(category_cache_path)
+        try:
+            return pd.read_pickle(category_cache_path)
+        except Exception:
+            pass
 
     from google.cloud import bigquery
     category_to_pan_cases = {}
@@ -81,7 +84,7 @@ def build_pan_category_cases(defs, bq_client, cdr_id, cache_dir, cdr_codename) -
         df = bq_client.query(sql, job_config=job_cfg).to_dataframe()
         category_to_pan_cases[category] = set(df["person_id"].astype(str))
 
-    pd.to_pickle(category_to_pan_cases, category_cache_path)
+    io.atomic_write_pickle(category_cache_path, category_to_pan_cases)
     return category_to_pan_cases
 
 def build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask) -> dict:
@@ -146,7 +149,7 @@ def _query_single_pheno_bq(pheno_info, bq_client, cdr_id, core_index, cache_dir,
     pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
     pids_for_cache = pd.Index(sorted(pids), dtype=str, name='person_id')
     df_to_cache = pd.DataFrame({'is_case': 1}, index=pids_for_cache, dtype=np.int8)
-    df_to_cache.to_parquet(pheno_cache_path, compression="snappy")
+    io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
     print(f"[Fetcher]  - Cached {len(pids_for_cache):,} new cases for '{s_name}'", flush=True)
 
     return {"name": s_name, "category": category, "case_idx": case_idx}
@@ -199,9 +202,14 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         out = []
         for s_name, m in meta.items():
             pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
-            pd.DataFrame({'is_case': []}, index=pd.Index([], name='person_id'), dtype=np.int8).to_parquet(pheno_cache_path, compression="snappy")
+            io.atomic_write_parquet(
+                pheno_cache_path,
+                pd.DataFrame({'is_case': []}, index=pd.Index([], name='person_id'), dtype=np.int8),
+                compression="snappy"
+            )
             out.append({"name": s_name, "category": m["category"], "case_idx": np.empty(0, dtype=np.int32)})
         return out
+
 
     sql = f"""
       WITH code_pairs AS (
@@ -267,7 +275,7 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
         idx_for_cache = pd.Index(sorted(list(pids)), name='person_id')
         df_to_cache = pd.DataFrame({'is_case': 1}, index=idx_for_cache, dtype=np.int8)
-        df_to_cache.to_parquet(pheno_cache_path, compression="snappy")
+        io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
         if succeeded:
             idx = core_index.get_indexer(df_to_cache.index)
             case_idx = idx[idx >= 0].astype(np.int32)
@@ -288,6 +296,7 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, categor
 
     # ---  STAGE 1 - PACED PARALLEL CACHE LOADING IN CHUNKS ---
     num_chunks = (len(phenos_to_load_from_cache) + loader_chunk_size - 1) // loader_chunk_size
+    failed_cache_loads = []
     for i in range(0, len(phenos_to_load_from_cache), loader_chunk_size):
         chunk = phenos_to_load_from_cache[i:i + loader_chunk_size]
         chunk_num = (i // loader_chunk_size) + 1
@@ -298,8 +307,11 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, categor
                 result = future.result()
                 if result:
                     pheno_queue.put(result)
+                else:
+                    failed_cache_loads.append(future_to_pheno[future])
         print(f"[Mem] RSS after chunk {chunk_num}/{num_chunks}: {io.rss_gb():.2f} GB", flush=True)
     print("[Fetcher]  - Finished all parallel cache loading chunks.")
+    phenos_to_query_from_bq.extend(failed_cache_loads)
 
     # STAGE 2: CONCURRENT BIGQUERY QUERIES (BATCHED)
     if phenos_to_query_from_bq:
