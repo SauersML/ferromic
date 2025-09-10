@@ -1016,18 +1016,26 @@ def lrt_followup_worker(task):
                 continue
 
             X_anc_zv = _drop_zero_variance(X_anc, keep_cols=('const',), always_keep=(target,))
+            X_anc_zv = _drop_rank_deficient(X_anc_zv, keep_cols=('const',), always_keep=(target,))
             const_ix_anc = X_anc_zv.columns.get_loc('const') if 'const' in X_anc_zv.columns else None
             fit, _ = _fit_logit_ladder(X_anc_zv, y_anc, const_ix=const_ix_anc)
 
-            if fit and target in fit.params:
-                beta, pval = float(fit.params[target]), float(fit.pvalues.get(target, np.nan))
-                out[f"{anc.upper()}_OR"], out[f"{anc.upper()}_P"] = float(np.exp(beta)), pval
-                if getattr(fit, "_final_is_mle", False):
-                    se = float(fit.bse.get(target, np.nan))
+            if fit and target in getattr(fit, "params", {}):
+                beta = float(fit.params[target])
+                out[f"{anc.upper()}_OR"] = float(np.exp(beta))
+                final_is_mle = getattr(fit, "_final_is_mle", False)
+                if final_is_mle and hasattr(fit, "pvalues"):
+                    pval = float(fit.pvalues.get(target, np.nan))
+                    out[f"{anc.upper()}_P"] = pval
+                    se = float(getattr(fit, "bse", {}).get(target, np.nan)) if hasattr(fit, "bse") else np.nan
                     if np.isfinite(se) and se > 0:
                         lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
                         out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
-            else: out[f"{anc.upper()}_REASON"] = "subset_fit_failed"
+                else:
+                    out[f"{anc.upper()}_REASON"] = "subset_fit_penalized"
+            else:
+                out[f"{anc.upper()}_REASON"] = "subset_fit_failed"
+
 
         io.atomic_write_json(result_path, out)
         _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
