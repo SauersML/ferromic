@@ -156,6 +156,26 @@ class Timer:
         self.end_time = time.time()
         self.duration = self.end_time - self.start_time
 
+def _find_upwards(pathname: str) -> str:
+    """
+    Resolves a filesystem path for a filename by searching the current working directory
+    and then walking up parent directories until the file is found. Returns the absolute
+    path when found; returns the original pathname if not found.
+    """
+    if os.path.isabs(pathname):
+        return pathname
+    name = os.path.basename(pathname)
+    cur = os.getcwd()
+    while True:
+        candidate = os.path.join(cur, name)
+        if os.path.exists(candidate):
+            return candidate
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return pathname
+
 def main():
     import run
     script_start_time = time.time()
@@ -246,11 +266,13 @@ for target_inversion in run.TARGET_INVERSIONS:
         }
 
         # --- Load inversion-specific data and build the final core dataframe ---
+        dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
         inversion_df = io.get_cached_or_generate(
             os.path.join(CACHE_DIR, f"inversion_{target_inversion}.parquet"),
-            io.load_inversions, target_inversion, INVERSION_DOSAGES_FILE, validate_target=target_inversion,
+            io.load_inversions, target_inversion, dosages_path, validate_target=target_inversion,
         )
         inversion_df.index = inversion_df.index.astype(str)
+
 
         core_df = shared_covariates_df.join(inversion_df, how="inner")
         print(f"[Setup-{target_inversion}] - Post-join cohort size: {len(core_df):,}")
@@ -401,11 +423,13 @@ for target_inversion in run.TARGET_INVERSIONS:
 
             for target_inversion in run.TARGET_INVERSIONS:
                 # Re-create the inversion-specific context and data to ensure correct follow-up
+                dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
                 inversion_df = io.get_cached_or_generate(
                     os.path.join(CACHE_DIR, f"inversion_{target_inversion}.parquet"),
-                    io.load_inversions, target_inversion, INVERSION_DOSAGES_FILE, validate_target=target_inversion,
+                    io.load_inversions, target_inversion, dosages_path, validate_target=target_inversion,
                 )
                 inversion_df.index = inversion_df.index.astype(str)
+
                 core_df = shared_covariates_df.join(inversion_df, how="inner")
                 age_mean = core_df['AGE'].mean()
                 core_df['AGE_c'] = core_df['AGE'] - age_mean
