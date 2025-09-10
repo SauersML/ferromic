@@ -204,7 +204,8 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
         elif not is_pandas and const_ix is not None and const_ix < X.shape[1]:
             alphas[const_ix] = 0.0
 
-        ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0, maxiter=800, **kwargs)
+        ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0, maxiter=800, disp=0, **kwargs)
+
         setattr(ridge_fit, "_used_ridge", True)
         setattr(ridge_fit, "_final_is_mle", False)
 
@@ -356,7 +357,6 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
         return ridge_fit, "ridge_only"
     except Exception as e:
         return None, f"ridge_exception:{type(e).__name__}"
-
 
 def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), eps=1e-12):
     """Drops columns with no or near-zero variance, keeping specified columns."""
