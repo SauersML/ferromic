@@ -517,54 +517,130 @@ def _drop_rank_deficiency_np(X, keep_ix=()):
 
 def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
     """
-    Enforce: if all cases are one sex, only use that sex's rows (and drop 'sex').
-    If that sex has zero controls, signal skip.
+    Enforce sex restriction for sex-linked phenotypes.
+
+    Behavior is controlled via CTX:
+      - CTX['SEX_RESTRICT_MODE']: 'strict' or 'majority'. Defaults to 'strict'.
+      - CTX['SEX_RESTRICT_PROP']: threshold in [0, 1]. Used when mode='majority'. Defaults to 1.0.
+      - CTX['SEX_RESTRICT_MAX_OTHER_CASES']: integer cap on stray other-sex cases when mode='majority'. Defaults to 0.
+
     Returns: (X2, y2, note:str, skip_reason:str|None)
     """
-    if 'sex' not in X.columns: return X, y, "", None
+    if 'sex' not in X.columns:
+        return X, y, "", None
+
+    mode = str(CTX.get("SEX_RESTRICT_MODE", "strict")).lower()
+    majority_prop = float(CTX.get("SEX_RESTRICT_PROP", 1.0))
+    max_other = int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0))
+
     tab = pd.crosstab(X['sex'], y).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
-    case_sexes = [s for s in [0.0, 1.0] if s in tab.index and tab.loc[s, 1] > 0]
-    if len(case_sexes) != 1: return X, y, "", None
-    s = float(case_sexes[0])
-    if tab.loc[s, 0] == 0: return X, y, "", "sex_no_controls_in_case_sex"
-    keep = X['sex'].eq(s)
-    return X.loc[keep].drop(columns=['sex']), y.loc[keep], f"sex_restricted_to_{int(s)}", None
+    n_f_case = int(tab.loc[0.0, 1])
+    n_m_case = int(tab.loc[1.0, 1])
+    n_f_ctrl = int(tab.loc[0.0, 0])
+    n_m_ctrl = int(tab.loc[1.0, 0])
+
+    def _restrict_to(s: float, tag: str):
+        if s == 0.0 and n_f_ctrl == 0:
+            return X, y, "", "sex_no_controls_in_case_sex"
+        if s == 1.0 and n_m_ctrl == 0:
+            return X, y, "", "sex_no_controls_in_case_sex"
+        keep = X['sex'].eq(s)
+        return X.loc[keep].drop(columns=['sex']), y.loc[keep], f"{tag}_{int(s)}", None
+
+    case_sexes = []
+    if n_f_case > 0:
+        case_sexes.append(0.0)
+    if n_m_case > 0:
+        case_sexes.append(1.0)
+
+    if mode == "strict":
+        if len(case_sexes) == 1:
+            return _restrict_to(case_sexes[0], "sex_restricted_to")
+        return X, y, "", None
+
+    total_cases = n_f_case + n_m_case
+    if total_cases > 0:
+        if n_f_case >= n_m_case:
+            prop = n_f_case / total_cases
+            other = n_m_case
+            s_dom = 0.0
+        else:
+            prop = n_m_case / total_cases
+            other = n_f_case
+            s_dom = 1.0
+        if (prop >= majority_prop) or (other <= max_other):
+            X2, y2, note, skip = _restrict_to(s_dom, "sex_majority_restricted_to")
+            if note:
+                note = f"{note}:prop={prop:.3f};other_cases={other}"
+            return X2, y2, note, skip
+
+    return X, y, "", None
+
 
 def _apply_sex_restriction_np(X, y, sex_ix):
     """
-    NumPy-based sex restriction. If all cases are one sex, filters to that sex.
+    NumPy-based sex restriction with strict or majority gating.
+
+    Behavior is controlled via CTX:
+      - CTX['SEX_RESTRICT_MODE']: 'strict' or 'majority'.
+      - CTX['SEX_RESTRICT_PROP']: float in [0, 1] for majority.
+      - CTX['SEX_RESTRICT_MAX_OTHER_CASES']: int cap on stray other-sex cases.
     Returns: (X_restr, y_restr, note:str, skip_reason:str|None, sex_col_dropped:bool)
     """
     if sex_ix is None:
         return X, y, "", None, False
 
+    mode = str(CTX.get("SEX_RESTRICT_MODE", "strict")).lower()
+    majority_prop = float(CTX.get("SEX_RESTRICT_PROP", 1.0))
+    max_other = int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0))
+
     sex_col = X[:, sex_ix]
     y_bool = y.astype(bool)
 
-    n_xx_case = np.sum((sex_col == 0.0) & y_bool)
-    n_xy_case = np.sum((sex_col == 1.0) & y_bool)
+    n_f_case = int(np.sum((sex_col == 0.0) & y_bool))
+    n_m_case = int(np.sum((sex_col == 1.0) & y_bool))
+    n_f_ctrl = int(np.sum((sex_col == 0.0) & (~y_bool)))
+    n_m_ctrl = int(np.sum((sex_col == 1.0) & (~y_bool)))
+
+    def _restrict_to(s: float, tag: str):
+        if s == 0.0 and n_f_ctrl == 0:
+            return X, y, "", "sex_no_controls_in_case_sex", False
+        if s == 1.0 and n_m_ctrl == 0:
+            return X, y, "", "sex_no_controls_in_case_sex", False
+        keep_mask = (sex_col == s)
+        cols_to_keep = np.arange(X.shape[1]) != sex_ix
+        X_restr = X[keep_mask][:, cols_to_keep]
+        y_restr = y[keep_mask]
+        return X_restr, y_restr, f"{tag}_{int(s)}", None, True
 
     case_sexes_present = []
-    if n_xx_case > 0: case_sexes_present.append(0.0)
-    if n_xy_case > 0: case_sexes_present.append(1.0)
+    if n_f_case > 0:
+        case_sexes_present.append(0.0)
+    if n_m_case > 0:
+        case_sexes_present.append(1.0)
 
-    if len(case_sexes_present) != 1:
+    if mode == "strict":
+        if len(case_sexes_present) == 1:
+            return _restrict_to(case_sexes_present[0], "sex_restricted_to")
         return X, y, "", None, False
 
-    s = case_sexes_present[0]
+    total_cases = n_f_case + n_m_case
+    if total_cases > 0:
+        if n_f_case >= n_m_case:
+            prop = n_f_case / total_cases
+            other = n_m_case
+            s_dom = 0.0
+        else:
+            prop = n_m_case / total_cases
+            other = n_f_case
+            s_dom = 1.0
+        if (prop >= majority_prop) or (other <= max_other):
+            X2, Y2, note, skip, dropped = _restrict_to(s_dom, "sex_majority_restricted_to")
+            if note:
+                note = f"{note}:prop={prop:.3f};other_cases={other}"
+            return X2, Y2, note, skip, dropped
 
-    n_s_ctrl = np.sum((sex_col == s) & (~y_bool))
-
-    if n_s_ctrl == 0:
-        return X, y, "", "sex_no_controls_in_case_sex", False
-
-    keep_mask = (sex_col == s)
-    cols_to_keep = np.arange(X.shape[1]) != sex_ix
-
-    X_restr = X[keep_mask][:, cols_to_keep]
-    y_restr = y[keep_mask]
-
-    return X_restr, y_restr, f"sex_restricted_to_{int(s)}", None, True
+    return X, y, "", None, False
 
 # --- Worker globals ---
 # Populated by init_worker and read-only thereafter.
@@ -746,8 +822,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         current_col_indices = np.arange(X_all.shape[1])
         assert current_col_indices.ndim == 1 and current_col_indices.dtype.kind in "iu"
 
+        # Sex restriction behavior is driven by CTX keys: SEX_RESTRICT_MODE, SEX_RESTRICT_PROP, SEX_RESTRICT_MAX_OTHER_CASES.
         X_work, y_work, sex_note, sex_skip, sex_col_dropped = _apply_sex_restriction_np(X_work, y_work, sex_ix)
         if sex_note: notes.append(sex_note)
+
         if sex_skip:
             # Persist a deterministic skip result when sex restriction leaves no valid control stratum.
             n_total_used = len(y_work)
