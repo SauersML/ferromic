@@ -215,8 +215,10 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
             max_abs_linpred, frac_lo, frac_hi = float("inf"), 1.0, 1.0
 
         neff_gate = float(CTX.get("MLE_REFIT_MIN_NEFF", 0.0))
-        if (max_abs_linpred > 15.0) or (frac_lo > 0.02) or (frac_hi > 0.02) or (neff_gate > 0 and n_eff < neff_gate):
+        blocked_by_gate = ((max_abs_linpred > 15.0) or (frac_lo > 0.02) or (frac_hi > 0.02) or (neff_gate > 0 and n_eff < neff_gate))
+        if blocked_by_gate and not prefer_mle_first:
             return ridge_fit, "ridge_only"
+        # When prefer_mle_first is True, proceed to attempt an unpenalized refit seeded by ridge even if diagnostics indicate separation-like behavior.
 
         with warnings.catch_warnings():
             warnings.filterwarnings("error", category=PerfectSeparationWarning)
@@ -271,6 +273,77 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     return refit_bfgs, "ridge_seeded_refit"
             except (Exception, PerfectSeparationWarning):
                 pass
+
+        # Firth fallback for separation-prone designs under prefer_mle_first.
+        # This implements bias-reduced logistic regression using the adjusted-score iteration.
+        if prefer_mle_first:
+            X_np = np.asarray(X, dtype=np.float64)
+            y_np = np.asarray(y, dtype=np.float64)
+            beta = np.zeros(X_np.shape[1], dtype=np.float64)
+            maxiter_firth = 200
+            tol_firth = 1e-8
+            converged_firth = False
+            for _it in range(maxiter_firth):
+                eta = X_np @ beta
+                p = expit(eta)
+                W = p * (1.0 - p)
+                if not np.all(np.isfinite(W)) or np.any(W <= 0):
+                    break
+                XTW = X_np.T * W
+                XtWX = XTW @ X_np
+                try:
+                    XtWX_inv = np.linalg.inv(XtWX)
+                except np.linalg.LinAlgError:
+                    try:
+                        XtWX_inv = np.linalg.pinv(XtWX)
+                    except Exception:
+                        break
+                WX = X_np * np.sqrt(W)[:, None]
+                H = WX @ XtWX_inv @ WX.T
+                h = np.clip(np.diag(H), 0.0, 1.0)
+                adj = (0.5 - p) * h
+                score = X_np.T @ (y_np - p + adj)
+                try:
+                    delta = XtWX_inv @ score
+                except Exception:
+                    break
+                beta_new = beta + delta
+                if not np.all(np.isfinite(beta_new)):
+                    break
+                if np.max(np.abs(delta)) < tol_firth:
+                    beta = beta_new
+                    converged_firth = True
+                    break
+                beta = beta_new
+            if converged_firth:
+                eta = X_np @ beta
+                p = expit(eta)
+                W = p * (1.0 - p)
+                XTW = X_np.T * W
+                XtWX = XTW @ X_np
+                try:
+                    cov = np.linalg.inv(XtWX)
+                except np.linalg.LinAlgError:
+                    cov = np.linalg.pinv(XtWX)
+                bse = np.sqrt(np.clip(np.diag(cov), 0.0, np.inf))
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    z = beta / bse
+                pvals = 2.0 * sp_stats.norm.sf(np.abs(z))
+                class _Result:
+                    """Lightweight container to mimic statsmodels results where needed."""
+                    pass
+                firth_res = _Result()
+                if is_pandas and hasattr(X, "columns"):
+                    firth_res.params = pd.Series(beta, index=X.columns)
+                    firth_res.bse = pd.Series(bse, index=X.columns)
+                    firth_res.pvalues = pd.Series(pvals, index=X.columns)
+                else:
+                    firth_res.params = beta
+                    firth_res.bse = bse
+                    firth_res.pvalues = pvals
+                setattr(firth_res, "_final_is_mle", True)
+                setattr(firth_res, "_used_firth", True)
+                return firth_res, "firth_refit"
 
         return ridge_fit, "ridge_only"
     except Exception as e:
@@ -1064,7 +1137,7 @@ def lrt_followup_worker(task):
             X_anc_zv = _drop_zero_variance(X_anc, keep_cols=('const',), always_keep=(target,))
             X_anc_zv = _drop_rank_deficient(X_anc_zv, keep_cols=('const',), always_keep=(target,))
             const_ix_anc = X_anc_zv.columns.get_loc('const') if 'const' in X_anc_zv.columns else None
-            fit, _ = _fit_logit_ladder(X_anc_zv, y_anc, const_ix=const_ix_anc)
+            fit, _ = _fit_logit_ladder(X_anc_zv, y_anc, const_ix=const_ix_anc, prefer_mle_first=bool(note))
 
             if fit and target in getattr(fit, "params", {}):
                 beta = float(fit.params[target])
