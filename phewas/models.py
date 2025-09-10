@@ -43,7 +43,7 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
 # thresholds (configured via CTX; here are defaults/fallbacks)
 DEFAULT_MIN_CASES = 1000
 DEFAULT_MIN_CONTROLS = 1000
-DEFAULT_MIN_NEFF = 100  # set 0 to disable
+DEFAULT_MIN_NEFF = 0  # set 0 to disable
 DEFAULT_SEX_RESTRICT_PROP = 0.99
 
 def _thresholds(cases_key="MIN_CASES_FILTER", controls_key="MIN_CONTROLS_FILTER", neff_key="MIN_NEFF_FILTER"):
