@@ -7,6 +7,11 @@ try:
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
+try:
+    import pyarrow.parquet as pq
+    PYARROW_AVAILABLE = True
+except ImportError:
+    PYARROW_AVAILABLE = False
 
 import numpy as np
 import pandas as pd
@@ -314,3 +319,72 @@ def load_demographics_with_stable_age(bq_client, cdr_id):
 
     print(f"    -> Successfully calculated stable age for {len(final_df):,} participants.")
     return final_df
+
+
+def create_lock(path: str, payload: dict) -> bool:
+    """Creates a lock file atomically, returning True if the lock was acquired."""
+    try:
+        # O_CREAT | O_EXCL is the atomic "create if not exists" operation
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, 'w') as f:
+            json.dump(payload, f)
+        return True
+    except FileExistsError:
+        return False
+    except Exception:
+        # In case of other errors, ensure we don't leave a broken lock file
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+        return False
+
+def release_lock(path: str) -> None:
+    """Deletes a lock file if it exists."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass  # It's already gone, which is fine.
+    except Exception as e:
+        print(f"Warning: Failed to release lock '{path}': {e}")
+
+def is_lock_stale(path: str, max_age_sec: float) -> bool:
+    """
+    Checks if a lock file is stale.
+    Returns True if the lock is missing, invalid, or older than the threshold.
+    """
+    if not os.path.exists(path):
+        return True
+    try:
+        with open(path, 'r') as f:
+            payload = json.load(f)
+        lock_time = payload.get("ts", 0)
+        return (time.time() - lock_time) > max_age_sec
+    except (json.JSONDecodeError, TypeError):
+        # Invalid JSON or structure, treat as stale
+        return True
+    except Exception:
+        # Any other read error, better to assume it's stale
+        return True
+
+def ensure_lock(path: str, max_age_sec: float) -> bool:
+    """
+    Ensures a lock is acquired. If a stale lock exists, it is removed.
+    Returns True if the lock is now held by the current process.
+    """
+    lock_payload = {"pid": os.getpid(), "ts": time.time()}
+    if os.path.exists(path) and is_lock_stale(path, max_age_sec):
+        print(f"  -> Stale lock found: '{os.path.basename(path)}'. Reclaiming...")
+        release_lock(path)
+
+    return create_lock(path, lock_payload)
+
+def parquet_n_rows(path: str) -> int | None:
+    """Fast row-count via pyarrow metadata if present; return None on failure."""
+    if not PYARROW_AVAILABLE or not os.path.exists(path):
+        return None
+    try:
+        return pq.read_metadata(path).num_rows
+    except Exception:
+        return None
