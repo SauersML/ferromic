@@ -219,101 +219,106 @@ def main():
         print(f"\n--- Total Shared Setup Time: {t_setup.duration:.2f}s ---")
 
         # --- Main loop to process each inversion ---
-        for target_inversion in run.TARGET_INVERSIONS:
-            print("\n" + "=" * 70)
-            print(f" PROCESSING INVERSION: {target_inversion}")
-            print("=" * 70)
+for target_inversion in run.TARGET_INVERSIONS:
+    try:
+        print("\n" + "=" * 70)
+        print(f" PROCESSING INVERSION: {target_inversion}")
+        print("=" * 70)
 
-            # --- Create per-inversion cache directories to prevent collisions ---
-            inversion_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion))
-            results_cache_dir = os.path.join(inversion_cache_dir, "results_atomic")
-            lrt_overall_cache_dir = os.path.join(inversion_cache_dir, "lrt_overall")
-            lrt_followup_cache_dir = os.path.join(inversion_cache_dir, "lrt_followup")
-            os.makedirs(results_cache_dir, exist_ok=True)
-            os.makedirs(lrt_overall_cache_dir, exist_ok=True)
-            os.makedirs(lrt_followup_cache_dir, exist_ok=True)
+        # --- Create per-inversion cache directories to prevent collisions ---
+        inversion_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion))
+        results_cache_dir = os.path.join(inversion_cache_dir, "results_atomic")
+        lrt_overall_cache_dir = os.path.join(inversion_cache_dir, "lrt_overall")
+        lrt_followup_cache_dir = os.path.join(inversion_cache_dir, "lrt_followup")
+        os.makedirs(results_cache_dir, exist_ok=True)
+        os.makedirs(lrt_overall_cache_dir, exist_ok=True)
+        os.makedirs(lrt_followup_cache_dir, exist_ok=True)
 
-            # --- Create the context dictionary with per-inversion paths ---
-            ctx = {
-                "NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
-                "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
-                "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
-                "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE,
-                "RESULTS_CACHE_DIR": results_cache_dir,
-                "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir,
-                "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir,
-            }
+        # --- Create the context dictionary with per-inversion paths ---
+        ctx = {
+            "NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
+            "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
+            "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
+            "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE,
+            "RESULTS_CACHE_DIR": results_cache_dir,
+            "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir,
+            "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir,
+        }
 
-            # --- Load inversion-specific data and build the final core dataframe ---
-            inversion_df = io.get_cached_or_generate(
-                os.path.join(CACHE_DIR, f"inversion_{target_inversion}.parquet"),
-                io.load_inversions, target_inversion, INVERSION_DOSAGES_FILE, validate_target=target_inversion,
-            )
-            inversion_df.index = inversion_df.index.astype(str)
+        # --- Load inversion-specific data and build the final core dataframe ---
+        inversion_df = io.get_cached_or_generate(
+            os.path.join(CACHE_DIR, f"inversion_{target_inversion}.parquet"),
+            io.load_inversions, target_inversion, INVERSION_DOSAGES_FILE, validate_target=target_inversion,
+        )
+        inversion_df.index = inversion_df.index.astype(str)
 
-            core_df = shared_covariates_df.join(inversion_df, how="inner")
-            print(f"[Setup-{target_inversion}] - Post-join cohort size: {len(core_df):,}")
+        core_df = shared_covariates_df.join(inversion_df, how="inner")
+        print(f"[Setup-{target_inversion}] - Post-join cohort size: {len(core_df):,}")
 
-            age_mean = core_df['AGE'].mean()
-            core_df['AGE_c'] = core_df['AGE'] - age_mean
-            core_df['AGE_c_sq'] = core_df['AGE_c'] ** 2
+        age_mean = core_df['AGE'].mean()
+        core_df['AGE_c'] = core_df['AGE'] - age_mean
+        core_df['AGE_c_sq'] = core_df['AGE_c'] ** 2
 
-            pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-            covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
-            core_df_subset = core_df[covariate_cols]
-            core_df_with_const = sm.add_constant(core_df_subset, prepend=True)
+        pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
+        covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
+        core_df_subset = core_df[covariate_cols]
+        core_df_with_const = sm.add_constant(core_df_subset, prepend=True)
 
-            anc_cat = pd.Categorical(anc_series.reindex(core_df_with_const.index))
-            A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True, dtype=np.float64)
-            core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
-            print(f"[Setup-{target_inversion}] - Added {len(A.columns)} ancestry columns for adjustment.")
+        anc_cat = pd.Categorical(anc_series.reindex(core_df_with_const.index))
+        A = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
+        print(f"[Setup-{target_inversion}] - Added {len(A.columns)} ancestry columns for adjustment.")
 
-            core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
-            global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
+        core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
+        global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
 
-            category_to_pan_cases = pheno.build_pan_category_cases(pheno_defs_df, bq_client, cdr_dataset_id, CACHE_DIR, cdr_codename)
-            allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
+        category_to_pan_cases = pheno.build_pan_category_cases(pheno_defs_df, bq_client, cdr_dataset_id, CACHE_DIR, cdr_codename)
+        allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
 
-            # --- PART 2: RUNNING THE PIPELINE (per inversion) ---
-            pheno_queue = queue.Queue(maxsize=QUEUE_MAX_SIZE)
-            fetcher_thread = threading.Thread(
-                target=pheno.phenotype_fetcher_worker,
-                args=(
-                    pheno_queue, pheno_defs_df, bq_client, cdr_dataset_id,
-                    category_to_pan_cases, cdr_codename, core_index,
-                    CACHE_DIR, LOADER_CHUNK_SIZE, LOADER_THREADS
-                ),
-            )
-            fetcher_thread.start()
+        # --- PART 2: RUNNING THE PIPELINE (per inversion) ---
+        pheno_queue = queue.Queue(maxsize=QUEUE_MAX_SIZE)
+        fetcher_thread = threading.Thread(
+            target=pheno.phenotype_fetcher_worker,
+            args=(
+                pheno_queue, pheno_defs_df, bq_client, cdr_dataset_id,
+                category_to_pan_cases, cdr_codename, core_index,
+                CACHE_DIR, LOADER_CHUNK_SIZE, LOADER_THREADS
+            ),
+        )
+        fetcher_thread.start()
 
-            pipes.run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, MIN_AVAILABLE_MEMORY_GB)
-            fetcher_thread.join()
-            print(f"\n--- All models finished for {target_inversion}. ---")
+        pipes.run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, MIN_AVAILABLE_MEMORY_GB)
+        fetcher_thread.join()
+        print(f"\n--- All models finished for {target_inversion}. ---")
 
-            name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
+        name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
 
-            # Filter phenotypes before scheduling Stage-1 LRT
-            result_paths = [
-                os.path.join(results_cache_dir, f)
-                for f in os.listdir(results_cache_dir)
-                if f.endswith(".json") and not f.endswith(".meta.json")
-            ]
+        # Filter phenotypes before scheduling Stage-1 LRT
+        result_paths = [
+            os.path.join(results_cache_dir, f)
+            for f in os.listdir(results_cache_dir)
+            if f.endswith(".json") and not f.endswith(".meta.json")
+        ]
 
-            phenos_list = []
-            for path in result_paths:
-                try:
-                    s = pd.read_json(path, typ="series")
-                    # Skip anything that failed earlier or is under thresholds
-                    if pd.notna(s.get("Skip_Reason", np.nan)):
-                        continue
-                    if (s.get("N_Cases", 0) < MIN_CASES_FILTER) or (s.get("N_Controls", 0) < MIN_CONTROLS_FILTER):
-                        continue
-                    phenos_list.append(os.path.splitext(os.path.basename(path))[0])
-                except Exception:
-                    pass
+        phenos_list = []
+        for path in result_paths:
+            try:
+                s = pd.read_json(path, typ="series")
+                # Skip anything that failed earlier or is under thresholds
+                if pd.notna(s.get("Skip_Reason", np.nan)):
+                    continue
+                if (s.get("N_Cases", 0) < MIN_CASES_FILTER) or (s.get("N_Controls", 0) < MIN_CONTROLS_FILTER):
+                    continue
+                phenos_list.append(os.path.splitext(os.path.basename(path))[0])
+            except Exception:
+                pass
 
-            print(f"[LRT-Stage1] Found {len(phenos_list)} valid model results to schedule for overall LRT.")
-            pipes.run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, MIN_AVAILABLE_MEMORY_GB)
+        print(f"[LRT-Stage1] Found {len(phenos_list)} valid model results to schedule for overall LRT.")
+        pipes.run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, MIN_AVAILABLE_MEMORY_GB)
+    except Exception as e:
+        print(f"\n[INVERR] Skipping inversion '{target_inversion}' due to error: {e}", flush=True)
+        traceback.print_exc()
+        continue
 
         # --- PART 3: CONSOLIDATE & ANALYZE RESULTS (ACROSS ALL INVERSIONS) ---
         print("\n" + "=" * 70)
