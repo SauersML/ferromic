@@ -109,7 +109,39 @@ except Exception:
     pass
 
 # --- Configuration ---
-TARGET_INVERSIONS = ['chr17-45585160-INV-706887']
+TARGET_INVERSIONS = {
+    "chr3-195680867-INV-272256",
+    "chr3-195749464-INV-230745",
+    "chr6-76111919-INV-44661",
+    "chr12-46897663-INV-16289",
+    "chr6-141867315-INV-29159",
+    "chr3-131969892-INV-7927",
+    "chr6-167181003-INV-209976",
+    "chr11-71571191-INV-6980",
+    "chr9-102565835-INV-4446",
+    "chr4-33098029-INV-7075",
+    "chr7-57835189-INV-284465",
+    "chr10-46135869-INV-77646",
+    "chr11-24263185-INV-392",
+    "chr13-79822252-INV-17591",
+    "chr1-60775308-INV-5023",
+    "chr6-130527042-INV-4267",
+    "chr13-48199211-INV-7451",
+    "chr21-13992018-INV-65632",
+    "chr8-7301025-INV-5297356",
+    "chr9-30951702-INV-5595",
+    "chr17-45585160-INV-706887",
+    "chr12-131333944-INV-289865",
+    "chr7-70955928-INV-18020",
+    "chr16-28471894-INV-165758",
+    "chr7-65219158-INV-312667",
+    "chr10-79542902-INV-674513",
+    "chr1-13084312-INV-62181",
+    "chr10-37102555-INV-11157",
+    "chr4-40233409-INV-2010",
+    "chr2-138246733-INV-5010",
+}
+
 PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads/main/data/significant_heritability_diseases.tsv"
 MASTER_RESULTS_CSV = f"phewas_results_{datetime.now().strftime('%Y%m%d%H%M%S')}.tsv"
 
