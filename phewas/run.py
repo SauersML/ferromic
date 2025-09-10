@@ -209,7 +209,9 @@ def _find_upwards(pathname: str) -> str:
     return pathname
 
 def main():
-    import run
+    """
+    Entry point for the PheWAS pipeline. Uses module-level configuration directly.
+    """
     script_start_time = time.time()
 
     # --- Start system resource monitoring ---
@@ -222,11 +224,15 @@ def main():
     print("=" * 70)
 
     # --- Backward compatibility: if a string is given for TARGET_INVERSIONS, wrap it in a list ---
-    if isinstance(run.TARGET_INVERSIONS, str):
-        run.TARGET_INVERSIONS = [run.TARGET_INVERSIONS]
+    global TARGET_INVERSIONS
+    if isinstance(TARGET_INVERSIONS, str):
+        TARGET_INVERSIONS = [TARGET_INVERSIONS]
+
+    # Provide a local namespace named 'run' so references below remain unchanged without self-import.
+    from types import SimpleNamespace
+    run = SimpleNamespace(TARGET_INVERSIONS=TARGET_INVERSIONS)
 
     os.makedirs(CACHE_DIR, exist_ok=True)
-
 
     try:
         # --- PART 1: SETUP & SHARED DATA LOADING (ONCE) ---
@@ -562,7 +568,21 @@ def main():
                     df.at[idx, "FINAL_INTERPRETATION"] = ",".join(sig_groups) if sig_groups else "unable to determine"
 
             print(f"\n--- Saving final results to '{MASTER_RESULTS_CSV}' ---")
-            df.to_csv(MASTER_RESULTS_CSV, index=False, sep='\t')
+            # Atomic write of the master results TSV to guard against partial files.
+            _tmp_dir = os.path.dirname(MASTER_RESULTS_CSV) or "."
+            os.makedirs(_tmp_dir, exist_ok=True)
+            import tempfile
+            _fd, _tmp_path = tempfile.mkstemp(dir=_tmp_dir, prefix=os.path.basename(MASTER_RESULTS_CSV) + ".tmp.")
+            os.close(_fd)
+            try:
+                df.to_csv(_tmp_path, index=False, sep='\t')
+                os.replace(_tmp_path, MASTER_RESULTS_CSV)
+            finally:
+                try:
+                    if _tmp_path and os.path.exists(_tmp_path):
+                        os.remove(_tmp_path)
+                except Exception:
+                    pass
 
             out_df = df[df['Sig_Global'] == True].copy()
             if not out_df.empty:
