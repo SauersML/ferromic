@@ -139,9 +139,9 @@ def _logit_fit(model, method, **kw):
         except TypeError:
             return model.fit(**fit_kwargs)
 
-def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, **kwargs):
+def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False, **kwargs):
     """
-    Ridge-first logistic fit with strict MLE gating based on numerical diagnostics.
+    Logistic fit ladder with an option to attempt unpenalized MLE first.
     If numpy arrays are provided, const_ix identifies the intercept column for zero-penalty.
     Returns a tuple (fit_result, reason_tag).
     """
@@ -150,6 +150,50 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, **kwargs):
         return None, "ridge_disabled"
 
     try:
+        # If requested, try unpenalized MLE first. This is particularly effective after design restrictions.
+        if prefer_mle_first:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("error", category=PerfectSeparationWarning)
+                warnings.filterwarnings(
+                    "ignore",
+                    message="overflow encountered in exp",
+                    category=RuntimeWarning,
+                    module=r"statsmodels\.discrete\.discrete_model"
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message="divide by zero encountered in log",
+                    category=RuntimeWarning,
+                    module=r"statsmodels\.discrete\.discrete_model"
+                )
+                try:
+                    mle_newton = _logit_fit(
+                        sm.Logit(y, X),
+                        "newton",
+                        maxiter=400,
+                        tol=1e-8,
+                        start_params=kwargs.get("start_params", None)
+                    )
+                    if _converged(mle_newton) and hasattr(mle_newton, "bse") and np.all(np.isfinite(mle_newton.bse)) and np.max(mle_newton.bse) <= 100.0:
+                        setattr(mle_newton, "_final_is_mle", True)
+                        return mle_newton, "mle_first_newton"
+                except (Exception, PerfectSeparationWarning):
+                    pass
+                try:
+                    mle_bfgs = _logit_fit(
+                        sm.Logit(y, X),
+                        "bfgs",
+                        maxiter=800,
+                        gtol=1e-8,
+                        start_params=kwargs.get("start_params", None)
+                    )
+                    if _converged(mle_bfgs) and hasattr(mle_bfgs, "bse") and np.all(np.isfinite(mle_bfgs.bse)) and np.max(mle_bfgs.bse) <= 100.0:
+                        setattr(mle_bfgs, "_final_is_mle", True)
+                        return mle_bfgs, "mle_first_bfgs"
+                except (Exception, PerfectSeparationWarning):
+                    pass
+
+        # Ridge-first pathway with strict MLE gating based on numerical diagnostics.
         p = X.shape[1] - (1 if (is_pandas and "const" in X.columns) or (not is_pandas and const_ix is not None) else 0)
         n = max(1, X.shape[0])
         pi = float(np.mean(y)) if len(y) > 0 else 0.5
@@ -170,7 +214,6 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, **kwargs):
         except Exception:
             max_abs_linpred, frac_lo, frac_hi = float("inf"), 1.0, 1.0
 
-        # Optional n_eff gate (default off). We still guard hard on separation-like diagnostics.
         neff_gate = float(CTX.get("MLE_REFIT_MIN_NEFF", 0.0))
         if (max_abs_linpred > 15.0) or (frac_lo > 0.02) or (frac_hi > 0.02) or (neff_gate > 0 and n_eff < neff_gate):
             return ridge_fit, "ridge_only"
@@ -679,8 +722,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                         case_idx_fp, extra={"skip_reason": reason, "counts": det, "allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
             return
 
-        fit, fit_reason = _fit_logit_ladder(X_work_fd, y_work, const_ix=const_ix_final)
-        if fit_reason in ("ridge_seeded_refit", "ridge_only"): notes.append(fit_reason)
+        fit, fit_reason = _fit_logit_ladder(X_work_fd, y_work, const_ix=const_ix_final, prefer_mle_first=bool(sex_col_dropped))
+        if fit_reason: notes.append(fit_reason)
         if fit is not None:
             _print_fit_diag(
                 s_name_safe=s_name_safe,
@@ -695,6 +738,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 params=fit.params,
                 notes=notes
             )
+
 
         if not fit or target_ix_final is None or target_ix_final >= len(fit.params):
             # Persist a deterministic skip result when the fit fails or the target coefficient is unavailable.
@@ -815,8 +859,9 @@ def lrt_overall_worker(task):
         const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
 
-        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red)
-        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full)
+        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red, prefer_mle_first=bool(note))
+        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
+
         if fit_red is not None:
             _print_fit_diag(
                 s_name_safe=s_name_safe,
@@ -952,8 +997,9 @@ def lrt_followup_worker(task):
         const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
 
-        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red)
-        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full)
+        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red, prefer_mle_first=bool(note))
+        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
+
         if fit_red is not None:
             _print_fit_diag(
                 s_name_safe=s_name_safe,
