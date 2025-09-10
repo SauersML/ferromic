@@ -520,47 +520,22 @@ def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
     """
     Returns: (X2, y2, note:str, skip_reason:str|None)
     """
-    if 'sex' not in X.columns: return X, y, "", None
+    if 'sex' not in X.columns:
+        return X, y, "", None
     tab = pd.crosstab(X['sex'], y).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
     total_cases = int(tab.loc[0.0, 1] + tab.loc[1.0, 1])
-    if total_cases <= 0: return X, y, "", None
+    if total_cases <= 0:
+        return X, y, "", None
     thr = float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP))
     cases_by_sex = {0.0: int(tab.loc[0.0, 1]), 1.0: int(tab.loc[1.0, 1])}
     dominant_sex = 0.0 if cases_by_sex[0.0] >= cases_by_sex[1.0] else 1.0
     frac = (cases_by_sex[dominant_sex] / total_cases) if total_cases > 0 else 0.0
-    if frac < thr: return X, y, "", None
-    if int(tab.loc[dominant_sex, 0]) == 0: return X, y, "", "sex_no_controls_in_case_sex"
+    if frac < thr:
+        return X, y, "", None
+    if int(tab.loc[dominant_sex, 0]) == 0:
+        return X, y, "", "sex_no_controls_in_case_sex"
     keep = X['sex'].eq(dominant_sex)
     return X.loc[keep].drop(columns=['sex']), y.loc[keep], f"sex_restricted_to_{int(dominant_sex)}", None
-
-    case_sexes = []
-    if n_f_case > 0:
-        case_sexes.append(0.0)
-    if n_m_case > 0:
-        case_sexes.append(1.0)
-
-    if mode == "strict":
-        if len(case_sexes) == 1:
-            return _restrict_to(case_sexes[0], "sex_restricted_to")
-        return X, y, "", None
-
-    total_cases = n_f_case + n_m_case
-    if total_cases > 0:
-        if n_f_case >= n_m_case:
-            prop = n_f_case / total_cases
-            other = n_m_case
-            s_dom = 0.0
-        else:
-            prop = n_m_case / total_cases
-            other = n_f_case
-            s_dom = 1.0
-        if (prop >= majority_prop) or (other <= max_other):
-            X2, y2, note, skip = _restrict_to(s_dom, "sex_majority_restricted_to")
-            if note:
-                note = f"{note}:prop={prop:.3f};other_cases={other}"
-            return X2, y2, note, skip
-
-    return X, y, "", None
 
 
 def _apply_sex_restriction_np(X, y, sex_ix):
