@@ -65,7 +65,10 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
     monitor = MemoryMonitor()
     monitor.start()
     try:
-        n_procs = max(1, min(cpu_count(), 8))
+        C = cpu_count()
+        usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
+        idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
+        n_procs = idle_cores
         print(f"\n--- Starting parallel model fitting with {n_procs} worker processes ({MP_CONTEXT} context) ---")
         with get_context(MP_CONTEXT).Pool(
             processes=n_procs,
@@ -75,7 +78,11 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         ) as pool:
             if on_pool_started:
                 try:
-                    on_pool_started(n_procs)
+                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                except Exception:
+                    worker_pids = []
+                try:
+                    on_pool_started(n_procs, worker_pids)
                 except Exception as e:
                     print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
             bar_len = 40
@@ -151,7 +158,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         monitor.stop()
 
 
-def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb, on_pool_started=None):
+def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb, on_pool_started=None):
     """
     Same pool pattern; submits models.lrt_overall_worker.
     """
@@ -161,7 +168,10 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
     monitor = MemoryMonitor()
     monitor.start()
     try:
-        n_procs = max(1, min(cpu_count(), 8))
+        C = cpu_count()
+        usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
+        idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
+        n_procs = idle_cores
         print(f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching ({n_procs} workers).", flush=True)
         bar_len = 40
         queued = 0
@@ -179,13 +189,17 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
 
         with get_context(MP_CONTEXT).Pool(
             processes=n_procs,
-            initializer=models.init_worker,
-            initargs=(core_df_with_const, allowed_mask_by_cat, ctx),
+            initializer=models.init_lrt_worker,
+            initargs=(core_df_with_const, allowed_mask_by_cat, anc_series, ctx),
             maxtasksperchild=50,
         ) as pool:
             if on_pool_started:
                 try:
-                    on_pool_started(n_procs)
+                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                except Exception:
+                    worker_pids = []
+                try:
+                    on_pool_started(n_procs, worker_pids)
                 except Exception as e:
                     print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
 
@@ -252,7 +266,10 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         monitor = MemoryMonitor()
         monitor.start()
         try:
-            n_procs = max(1, min(cpu_count(), 8))
+            C = cpu_count()
+            usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
+            idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
+            n_procs = idle_cores
             print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).", flush=True)
             bar_len = 40
             queued = 0
@@ -277,7 +294,11 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
             ) as pool:
                 if on_pool_started:
                     try:
-                        on_pool_started(n_procs)
+                        worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    except Exception:
+                        worker_pids = []
+                    try:
+                        on_pool_started(n_procs, worker_pids)
                     except Exception as e:
                         print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
                 def _cb2(_):

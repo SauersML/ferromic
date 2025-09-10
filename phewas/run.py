@@ -196,6 +196,73 @@ class ResourceGovernor:
         # Raise the floor based on the predicted steady-state footprint of one inversion
         return max(base_floor, predicted_ss_footprint + 0.5)
 
+class MultiTenantGovernor(ResourceGovernor):
+    def __init__(self, monitor, history_sec=30):
+        super().__init__(monitor, history_sec)
+        self.inv_pools = {}
+        self.inv_rss_gb = {}
+        self.observed_steady_state_gb_per_inv = []
+
+    def register_pool(self, inv_id, pids):
+        self.inv_pools[inv_id] = list(pids)
+
+    def deregister_pool(self, inv_id):
+        self.inv_pools.pop(inv_id, None)
+        self.inv_rss_gb.pop(inv_id, None)
+
+    def measure_inv(self, inv_id):
+        total = 0
+        pids = self.inv_pools.get(inv_id, [])
+        if not pids:
+            self.inv_rss_gb[inv_id] = 0
+            return 0
+
+        valid_pids = []
+        for pid in pids:
+            try:
+                proc = psutil.Process(pid)
+                total += proc.memory_info().rss
+                valid_pids.append(pid)
+            except psutil.NoSuchProcess:
+                pass
+            except Exception:
+                pass
+
+        if len(valid_pids) < len(pids):
+            self.inv_pools[inv_id] = valid_pids
+
+        measured_gb = total / (1024**3)
+        self.inv_rss_gb[inv_id] = measured_gb
+        return measured_gb
+
+    def total_active_footprint(self):
+        return sum(self.inv_rss_gb.values())
+
+    def update_steady_state(self, inv_id, measured_gb):
+        with self._lock:
+            self.observed_steady_state_gb_per_inv.append(measured_gb)
+        print(f"[Governor] Observed steady-state for {inv_id}: {measured_gb:.2f}GB")
+
+    def predict_extra_gb_after_pool(self) -> float:
+        with self._lock:
+            if not self.observed_steady_state_gb_per_inv:
+                return super().predict_extra_gb_after_pool()
+            return np.percentile(self.observed_steady_state_gb_per_inv, 75)
+
+    def can_admit_next_inv(self, predicted_gb):
+        self._update_history()
+        if not self._history: return False
+        latest_avail = self._history[-1].sys_available_gb
+        active = self.total_active_footprint()
+        mem_ok = (latest_avail - predicted_gb) >= self.mem_guard_gb
+        cpu_hist = [s.sys_cpu_percent for s in self._history]
+        avg_idle = 1.0 - (sum(cpu_hist) / len(cpu_hist)) / 100.0 if cpu_hist else 0.0
+        cpu_ok = avg_idle >= self.min_cpu_idle_frac
+        if not (cpu_ok and mem_ok):
+            print(f"[Governor] Hold: cpu_idle={avg_idle:.2f}, mem_avail={latest_avail:.2f}GB,"
+                  f" active={active:.2f}GB, next_pred={predicted_gb:.2f}GB")
+        return cpu_ok and mem_ok
+
 # --- Configuration ---
 TARGET_INVERSIONS = {
     "chr3-195680867-INV-272256",
@@ -346,7 +413,7 @@ def main():
         except Exception as e:
             print(f"[Prepass WARN] Cache prepass failed: {e}", flush=True)
 
-        governor = ResourceGovernor(monitor_thread)
+        governor = MultiTenantGovernor(monitor_thread)
         
         def run_single_inversion(target_inversion: str, baseline_rss_gb: float, shared_data: dict):
             inv_safe_name = models.safe_basename(target_inversion)
@@ -391,10 +458,11 @@ def main():
                 fetcher_thread.start()
 
                 dynamic_mem_floor = governor.dynamic_floor_callable
-                def on_pool_started_callback(num_procs):
+                def on_pool_started_callback(num_procs, worker_pids):
+                    governor.register_pool(inv_safe_name, worker_pids)
                     time.sleep(10)
-                    delta_gb = monitor_thread.snapshot().app_rss_gb - baseline_rss_gb
-                    governor.update_steady_state(delta_gb)
+                    measured_gb = governor.measure_inv(inv_safe_name)
+                    governor.update_steady_state(inv_safe_name, measured_gb)
 
                 pipes.run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, dynamic_mem_floor, on_pool_started=on_pool_started_callback)
                 fetcher_thread.join()
@@ -414,7 +482,7 @@ def main():
                 phenos_list = [os.path.splitext(os.path.basename(p))[0] for p in result_paths if is_valid_result(p, MIN_CASES_FILTER, MIN_CONTROLS_FILTER)]
 
                 print(f"{log_prefix} Found {len(phenos_list)} valid models for Stage-1 LRT.")
-                pipes.run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, shared_data['cdr_codename'], target_inversion, ctx, dynamic_mem_floor, on_pool_started=on_pool_started_callback)
+                pipes.run_lrt_overall(core_df_with_const, allowed_mask_by_cat, shared_data['anc_series'], phenos_list, name_to_cat, shared_data['cdr_codename'], target_inversion, ctx, dynamic_mem_floor, on_pool_started=on_pool_started_callback)
 
                 try:
                     lrt_files = [f for f in os.listdir(lrt_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
@@ -470,7 +538,11 @@ def main():
             finished_threads = [t for t in running_inversions if not t.is_alive()]
             for t in finished_threads:
                 inv = running_inversions.pop(t)
+                governor.deregister_pool(inv)
                 print(f"[Orchestrator] Inversion '{inv}' thread finished.")
+
+            for inv_name in running_inversions.values():
+                governor.measure_inv(inv_name)
 
             if pending_inversions:
                 target_inv = pending_inversions[0]
@@ -486,7 +558,7 @@ def main():
                     print(f"[Orchestrator] Could not predict memory for {target_inv}, using fallback. Error: {e}")
                     predicted_gb = 2.0
 
-                if governor.can_admit_next(predicted_gb):
+                if governor.can_admit_next_inv(predicted_gb):
                     target_inv = pending_inversions.popleft()
                     print(f"[Orchestrator] Admitting inversion '{target_inv}'...")
                     baseline_rss = monitor_thread.snapshot().app_rss_gb
