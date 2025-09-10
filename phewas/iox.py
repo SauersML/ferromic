@@ -154,6 +154,43 @@ def atomic_write_json(path, data_obj):
         except Exception:
             pass
 
+def atomic_write_parquet(path, df, **to_parquet_kwargs):
+    """
+    Atomically writes a parquet file by first writing to a unique temp path and then moving it into place.
+    This prevents partial files from being observed if the process is killed mid-write.
+    """
+    tmpdir = os.path.dirname(path) or "."
+    os.makedirs(tmpdir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=tmpdir, prefix=os.path.basename(path) + '.tmp.')
+    os.close(fd)
+    try:
+        df.to_parquet(tmp_path, **to_parquet_kwargs)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+
+def atomic_write_pickle(path, obj):
+    """
+    Atomically writes a pickle by first writing to a unique temp path and then moving it into place.
+    """
+    tmpdir = os.path.dirname(path) or "."
+    os.makedirs(tmpdir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=tmpdir, prefix=os.path.basename(path) + '.tmp.')
+    os.close(fd)
+    try:
+        pd.to_pickle(obj, tmp_path)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 def rss_gb():
     """Returns the resident set size of the current process in gigabytes for lightweight memory instrumentation."""
