@@ -278,7 +278,7 @@ def main():
         print(f"\n--- Total Shared Setup Time: {t_setup.duration:.2f}s ---")
 
         # --- Main loop to process each inversion ---
-        for target_inversion in run.TARGET_INVERSIONS:
+        for inv_idx, target_inversion in enumerate(run.TARGET_INVERSIONS, start=1):
             try:
                 print("\n" + "=" * 70)
                 print(f" PROCESSING INVERSION: {target_inversion}")
@@ -376,6 +376,80 @@ def main():
         
                 print(f"[LRT-Stage1] Found {len(phenos_list)} valid model results to schedule for overall LRT.")
                 pipes.run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, MIN_AVAILABLE_MEMORY_GB)
+
+                # Per-inversion BIG summary with provisional within-inversion BH and top hits.
+                try:
+                    lrt_files = [f for f in os.listdir(lrt_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+                    rows = []
+                    for fn in lrt_files:
+                        try:
+                            s = pd.read_json(os.path.join(lrt_overall_cache_dir, fn), typ="series")
+                            rows.append({
+                                "Phenotype": os.path.splitext(fn)[0],
+                                "P_LRT_Overall": pd.to_numeric(s.get("P_LRT_Overall"), errors="coerce")
+                            })
+                        except Exception:
+                            pass
+                    lrt_df = pd.DataFrame(rows)
+
+                    res_files = [f for f in os.listdir(results_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+                    rrows = []
+                    for fn in res_files:
+                        try:
+                            s = pd.read_json(os.path.join(results_cache_dir, fn), typ="series")
+                            rrows.append({
+                                "Phenotype": os.path.splitext(fn)[0],
+                                "OR": pd.to_numeric(s.get("OR"), errors="coerce"),
+                                "Beta": pd.to_numeric(s.get("Beta"), errors="coerce"),
+                                "N_Cases": pd.to_numeric(s.get("N_Cases"), errors="coerce"),
+                                "N_Controls": pd.to_numeric(s.get("N_Controls"), errors="coerce")
+                            })
+                        except Exception:
+                            pass
+                    res_df = pd.DataFrame(rrows)
+                    inv_df = lrt_df.merge(res_df, on="Phenotype", how="left") if not lrt_df.empty else pd.DataFrame(columns=["Phenotype","P_LRT_Overall","OR","Beta","N_Cases","N_Controls"])
+
+                    m = int(inv_df["P_LRT_Overall"].notna().sum()) if not inv_df.empty else 0
+                    inv_df["Q_within"] = np.nan
+                    if m > 0:
+                        mask = inv_df["P_LRT_Overall"].notna()
+                        _, q_within, _, _ = multipletests(inv_df.loc[mask, "P_LRT_Overall"], alpha=FDR_ALPHA, method="fdr_bh")
+                        inv_df.loc[mask, "Q_within"] = q_within
+                    likely_sig = int((inv_df["Q_within"] < FDR_ALPHA).fillna(False).sum()) if m > 0 else 0
+
+                    def _fmt(v, fmt):
+                        try:
+                            return f"{float(v):{fmt}}" if pd.notna(v) else ""
+                        except Exception:
+                            return ""
+
+                    top = inv_df.sort_values("P_LRT_Overall").head(10).copy() if m > 0 else inv_df.head(0)
+                    top["P"] = top["P_LRT_Overall"].apply(lambda v: _fmt(v, ".3e"))
+                    top["Q"] = top["Q_within"].apply(lambda v: _fmt(v, ".3f"))
+                    top["OR"] = top["OR"].apply(lambda v: _fmt(v, "0.3f"))
+                    top["Beta"] = top["Beta"].apply(lambda v: _fmt(v, "+0.4f"))
+                    top["N"] = (pd.to_numeric(top["N_Cases"], errors="coerce").fillna(0).astype(int)).astype(str) + "/" + (pd.to_numeric(top["N_Controls"], errors="coerce").fillna(0).astype(int)).astype(str)
+
+                    banner = "=" * 70
+                    print("\n" + banner)
+                    print(f" INVERSION COMPLETE: {target_inversion}")
+                    print(banner)
+                    print(f"  Models written: {len(res_files):,}")
+                    print(f"  Stage-1 overall LRT p-values: {m:,}")
+                    print(f"  Likely significant within inversion (BH @ α={FDR_ALPHA}): {likely_sig:,}")
+                    if not top.empty:
+                        print("\n  Top hits (provisional within-inversion BH):")
+                        print(top[["Phenotype","P","Q","OR","Beta","N"]].to_string(index=False))
+                    else:
+                        print("\n  No LRT results available for summary.")
+                    print(banner + "\n")
+
+                    total_inversions = len(run.TARGET_INVERSIONS)
+                    pct_complete = int((inv_idx * 100) / max(1, total_inversions))
+                    print(f"[Overall] Inversions completed: {inv_idx}/{total_inversions} ({pct_complete}%)\n")
+                except Exception as _inv_summary_err:
+                    print(f"[Summary WARN] Could not produce per-inversion summary for {target_inversion}.", flush=True)
+
             except Exception as e:
                 print(f"\n[INVERR] Skipping inversion '{target_inversion}' due to error: {e}", flush=True)
                 traceback.print_exc()
