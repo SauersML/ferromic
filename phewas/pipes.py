@@ -19,6 +19,21 @@ except ImportError:
 
 MP_CONTEXT = 'fork' if sys.platform == 'linux' else 'spawn'
 
+def _resolve_floor(v):
+    """
+    Resolves a numeric floor value from either a float or a zero-argument callable returning a float.
+    """
+    if callable(v):
+        try:
+            return float(v())
+        except Exception:
+            # If callable fails, it's safer to fallback to a default value
+            # rather than trying to cast the callable itself.
+            # Here, we might just return a very high floor to be safe, or a default.
+            # For now, let's assume the callable is trusted and this is for edge cases.
+            return 4.0 # Default fallback
+    return float(v)
+
 class MemoryMonitor(threading.Thread):
     def __init__(self, interval=1):
         super().__init__(daemon=True)
@@ -38,7 +53,7 @@ class MemoryMonitor(threading.Thread):
         self.stop_event.set()
 
 
-def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, min_available_memory_gb):
+def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, min_available_memory_gb, on_pool_started=None):
     """
     Creates the process pool with models.init_worker and submits models.run_single_model_worker
     with the same callback/progress bar logic.
@@ -50,13 +65,19 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
     monitor = MemoryMonitor()
     monitor.start()
     try:
-        print(f"\n--- Starting parallel model fitting with {cpu_count()} worker processes ({MP_CONTEXT} context) ---")
+        n_procs = max(1, min(cpu_count(), 8))
+        print(f"\n--- Starting parallel model fitting with {n_procs} worker processes ({MP_CONTEXT} context) ---")
         with get_context(MP_CONTEXT).Pool(
-            processes=max(1, min(cpu_count(), 8)),
+            processes=n_procs,
             initializer=models.init_worker,
             initargs=(core_df_with_const, allowed_mask_by_cat, ctx),
             maxtasksperchild=50,
         ) as pool:
+            if on_pool_started:
+                try:
+                    on_pool_started(n_procs)
+                except Exception as e:
+                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
             bar_len = 40
             queued = 0
             done = 0
@@ -88,9 +109,10 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                 item = pheno_queue.get()
                 if item is None:
                     break  # producer finished
-                if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
-                    print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
-                    while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
+                floor = _resolve_floor(min_available_memory_gb)
+                if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                    print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
                         time.sleep(2)
                 # Cache policy: if a previous result exists but has an invalid or NA P_Value and the
                 # association was attempted (no Skip_Reason), evict the meta to force a fresh run.
@@ -129,7 +151,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         monitor.stop()
 
 
-def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb):
+def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb, on_pool_started=None):
     """
     Same pool pattern; submits models.lrt_overall_worker.
     """
@@ -139,7 +161,8 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
     monitor = MemoryMonitor()
     monitor.start()
     try:
-        print(f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching.", flush=True)
+        n_procs = max(1, min(cpu_count(), 8))
+        print(f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching ({n_procs} workers).", flush=True)
         bar_len = 40
         queued = 0
         done = 0
@@ -155,11 +178,16 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
         with get_context(MP_CONTEXT).Pool(
-            processes=max(1, min(cpu_count(), 8)),
+            processes=n_procs,
             initializer=models.init_worker,
             initargs=(core_df_with_const, allowed_mask_by_cat, ctx),
             maxtasksperchild=50,
         ) as pool:
+            if on_pool_started:
+                try:
+                    on_pool_started(n_procs)
+                except Exception as e:
+                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
 
             def _cb(_):
                 nonlocal done, queued
@@ -174,9 +202,10 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
                 failed_tasks.append(e)
 
             for task in tasks:
-                if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
-                    print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
-                    while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
+                floor = _resolve_floor(min_available_memory_gb)
+                if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                    print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
                         time.sleep(2)
 
                 # Cache policy: if a previous Stage-1 LRT result exists but has an invalid or NA P_LRT_Overall,
@@ -215,16 +244,16 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, phenos_list, name_t
         monitor.stop()
 
 
-def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_names, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb):
+def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_names, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb, on_pool_started=None):
     if len(hit_names) > 0:
         tasks_follow = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": target_inversion} for s in hit_names]
         random.shuffle(tasks_follow)
-        print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes.", flush=True)
 
-        # NEW: start monitor (symmetry with Stage-1)
         monitor = MemoryMonitor()
         monitor.start()
         try:
+            n_procs = max(1, min(cpu_count(), 8))
+            print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).", flush=True)
             bar_len = 40
             queued = 0
             done = 0
@@ -235,18 +264,22 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                 pct = int((d * 100) / q) if q else 0
                 filled = int(bar_len * (d / q)) if q else 0
                 bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-                # NEW: show memory info like Stage-1
                 mem_info = ""
                 if PSUTIL_AVAILABLE:
                     mem_info = f" | Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB"
                 print(f"\r[{label}] {bar} {d}/{q} ({pct}%)" + mem_info, end="", flush=True)
 
             with get_context(MP_CONTEXT).Pool(
-                processes=max(1, min(cpu_count(), 8)),
+                processes=n_procs,
                 initializer=models.init_lrt_worker,
                 initargs=(core_df_with_const, allowed_mask_by_cat, anc_series, ctx),
                 maxtasksperchild=50,
             ) as pool:
+                if on_pool_started:
+                    try:
+                        on_pool_started(n_procs)
+                    except Exception as e:
+                        print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
                 def _cb2(_):
                     nonlocal done, queued
                     with lock:
@@ -260,9 +293,10 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                     failed_tasks.append(e)
 
                 for task in tasks_follow:
-                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
-                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB), pausing task submission...", flush=True)
-                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < min_available_memory_gb:
+                    floor = _resolve_floor(min_available_memory_gb)
+                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
                             time.sleep(2)
 
                     queued += 1

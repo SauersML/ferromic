@@ -102,6 +102,70 @@ def build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_
         allowed_mask_by_cat[category] = mask
     return allowed_mask_by_cat
 
+def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_dir, cdr_codename, max_lock_age_sec=600):
+    """
+    Populates phenotype caches deterministically using a single-writer, per-phenotype lock protocol.
+    This function is safe to re-run and is resilient to crashes.
+    """
+    print("[Prepass]  - Starting crash-safe phenotype cache prepass.", flush=True)
+    lock_dir = os.path.join(cache_dir, "locks")
+    os.makedirs(lock_dir, exist_ok=True)
+
+    # 1. Pre-calculate pan-category cases with locking
+    category_cache_path = os.path.join(cache_dir, f"pan_category_cases_{cdr_codename}.pkl")
+    category_lock_path = os.path.join(lock_dir, f"pan_category_cases_{cdr_codename}.lock")
+    if not os.path.exists(category_cache_path):
+        if io.ensure_lock(category_lock_path, max_lock_age_sec):
+            try:
+                if not os.path.exists(category_cache_path): # Check again inside lock
+                    print("[Prepass]  - Generating pan-category case sets...", flush=True)
+                    build_pan_category_cases(pheno_defs_df, bq_client, cdr_id, cache_dir, cdr_codename)
+            finally:
+                io.release_lock(category_lock_path)
+        else:
+            print("[Prepass]  - Waiting for another process to generate pan-category cases...", flush=True)
+            while not os.path.exists(category_cache_path):
+                time.sleep(5) # Wait for the other process to finish
+
+    # 2. Process per-phenotype caches
+    missing = [row.to_dict() for _, row in pheno_defs_df.iterrows() if not os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))]
+    print(f"[Prepass]  - Found {len(missing)} missing phenotype caches.", flush=True)
+    if not missing:
+        return
+
+    def _process_one(pheno_info):
+        s_name = pheno_info['sanitized_name']
+        lock_path = os.path.join(lock_dir, f"pheno_{s_name}_{cdr_codename}.lock")
+
+        if not io.ensure_lock(lock_path, max_age_sec):
+            print(f"[Prepass]  - Skipping '{s_name}', another process has the lock.", flush=True)
+            return None
+
+        try:
+            # Check again inside the lock in case another process finished
+            if os.path.exists(os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")):
+                return None
+
+            # Use the single-phenotype query function which is simpler and sufficient here
+            _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename)
+            return s_name
+        except Exception as e:
+            print(f"[Prepass]  - [FAIL] Failed to process '{s_name}': {e}", flush=True)
+            return None
+        finally:
+            io.release_lock(lock_path)
+
+    # Use a thread pool to process phenotypes in parallel, respecting locks
+    with ThreadPoolExecutor(max_workers=BQ_BATCH_WORKERS * 2) as executor:
+        futures = [executor.submit(_process_one, p_info) for p_info in missing]
+        completed_count = 0
+        for fut in as_completed(futures):
+            if fut.result():
+                completed_count += 1
+        print(f"[Prepass]  - Successfully populated {completed_count} new caches.")
+
+    print("[Prepass]  - Phenotype cache prepass complete.", flush=True)
+
 def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
     """THREAD WORKER: Loads one cached phenotype file from disk and returns integer case indices."""
     s_name, category = pheno_info['sanitized_name'], pheno_info['disease_category']
@@ -116,9 +180,10 @@ def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
         print(f"[CacheLoader] - [FAIL] Failed to load '{s_name}': {e}", flush=True)
         return None
 
-def _query_single_pheno_bq(pheno_info, bq_client, cdr_id, core_index, cache_dir, cdr_codename):
+def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename):
     """THREAD WORKER: Queries one phenotype from BigQuery, caches it, and returns integer case indices."""
-    from google.cloud import bigquery  # local import for symmetry with batch
+    from google.cloud import bigquery
+    bq_client = bigquery.Client() # Create a client per thread for safety
     s_name, category, all_codes = pheno_info['sanitized_name'], pheno_info['disease_category'], pheno_info['all_codes']
     print(f"[Fetcher]  - [BQ] Querying '{s_name}'...", flush=True)
 
@@ -262,7 +327,7 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         results = []
         for row in batch_infos:
             try:
-                results.append(_query_single_pheno_bq(row, bq_client, cdr_id, core_index, cache_dir, cdr_codename))
+                results.append(_query_single_pheno_bq(row, cdr_id, core_index, cache_dir, cdr_codename))
             except Exception as e:
                 print(f"[Fetcher]  - [FAIL] Fallback single query failed for {row['sanitized_name']}: {str(e)[:200]}", flush=True)
                 results.append({"name": row["sanitized_name"], "category": row["disease_category"], "case_idx": np.empty(0, dtype=np.int32)})
@@ -286,7 +351,7 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
 
     return results
 
-def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, category_to_pan_cases, cdr_codename, core_index, cache_dir, loader_chunk_size, loader_threads):
+def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_codename, core_index, cache_dir, loader_chunk_size, loader_threads, allow_bq=True):
     """PRODUCER: High-performance, memory-stable data loader that works in chunks without constructing per-phenotype controls."""
     print("[Fetcher]  - Categorizing phenotypes into cached vs. uncached...")
     phenos_to_load_from_cache = [row.to_dict() for _, row in pheno_defs.iterrows() if os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))]
@@ -315,27 +380,31 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, categor
 
     # STAGE 2: CONCURRENT BIGQUERY QUERIES (BATCHED)
     if phenos_to_query_from_bq:
-        print(f"[Fetcher]  - Processing {len(phenos_to_query_from_bq)} uncached phenotypes from BQ in batches...", flush=True)
-        # Sort by number of codes to make batches more uniform in size
-        phenos_to_query_from_bq.sort(key=lambda r: len(r.get("all_codes") or []), reverse=True)
-        # Build batches respecting phenotype and code-count caps
-        batches = list(_batch_pheno_defs(phenos_to_query_from_bq, BQ_BATCH_PHENOS, BQ_BATCH_MAX_CODES))
-        print(f"[Fetcher]  - Created {len(batches)} batches "
-              f"(<= {BQ_BATCH_PHENOS} phenos and <= {BQ_BATCH_MAX_CODES} codes per batch).", flush=True)
+        if allow_bq and bq_client is not None and cdr_id is not None:
+            print(f"[Fetcher]  - Processing {len(phenos_to_query_from_bq)} uncached phenotypes from BQ in batches...", flush=True)
+            # Sort by number of codes to make batches more uniform in size
+            phenos_to_query_from_bq.sort(key=lambda r: len(r.get("all_codes") or []), reverse=True)
+            # Build batches respecting phenotype and code-count caps
+            batches = list(_batch_pheno_defs(phenos_to_query_from_bq, BQ_BATCH_PHENOS, BQ_BATCH_MAX_CODES))
+            print(f"[Fetcher]  - Created {len(batches)} batches "
+                  f"(<= {BQ_BATCH_PHENOS} phenos and <= {BQ_BATCH_MAX_CODES} codes per batch).", flush=True)
 
-        # Use conservative concurrency because each batch scans the table once
-        with ThreadPoolExecutor(max_workers=min(BQ_BATCH_WORKERS, len(batches))) as executor:
-            futures = [
-                executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
-                for batch in batches
-            ]
-            for fut in as_completed(futures):
-                try:
-                    results = fut.result()
-                    for r in results:
-                        pheno_queue.put(r)
-                except Exception as e:
-                    print(f"[Fetcher]  - [FAIL] Batch query failed: {str(e)[:200]}", flush=True)
+            # Use conservative concurrency because each batch scans the table once
+            with ThreadPoolExecutor(max_workers=min(BQ_BATCH_WORKERS, len(batches))) as executor:
+                futures = [
+                    executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
+                    for batch in batches
+                ]
+                for fut in as_completed(futures):
+                    try:
+                        results = fut.result()
+                        for r in results:
+                            pheno_queue.put(r)
+                    except Exception as e:
+                        print(f"[Fetcher]  - [FAIL] Batch query failed: {str(e)[:200]}", flush=True)
+        else:
+            if phenos_to_query_from_bq:
+                print(f"[Fetcher]  - [WARN] Skipping {len(phenos_to_query_from_bq)} uncached phenotypes because allow_bq=False. Sample: {phenos_to_query_from_bq[0]['sanitized_name']}", flush=True)
 
     pheno_queue.put(None)
     print("[Fetcher]  - All phenotypes fetched. Producer thread finished.")
