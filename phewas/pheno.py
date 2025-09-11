@@ -1,6 +1,7 @@
 import os
 import re
 import hashlib
+import time
 import numpy as np
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -104,7 +105,7 @@ def build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_
         allowed_mask_by_cat[category] = mask
     return allowed_mask_by_cat
 
-def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_dir, cdr_codename, max_lock_age_sec=600):
+def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_dir, cdr_codename, max_lock_age_sec=LOCK_MAX_AGE_SEC):
     """
     Populates phenotype caches deterministically using a single-writer, per-phenotype lock protocol.
     This function is safe to re-run and is resilient to crashes.
@@ -139,7 +140,7 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
         s_name = pheno_info['sanitized_name']
         lock_path = os.path.join(lock_dir, f"pheno_{s_name}_{cdr_codename}.lock")
 
-        if not io.ensure_lock(lock_path, max_age_sec):
+        if not io.ensure_lock(lock_path, max_lock_age_sec):
             print(f"[Prepass]  - Skipping '{s_name}', another process has the lock.", flush=True)
             return None
 
