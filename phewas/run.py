@@ -397,7 +397,15 @@ def _pipeline_once():
     pipes.BUDGET.init_total(fraction=0.92)
 
     def mem_floor_callable():
-        return pipes.BUDGET.floor_gb()
+        """
+        Returns the memory floor used by the submission throttle.
+        Uses the empirical governor prediction of steady-state footprint for this workload,
+        with a small guard to prevent thrashing. This keeps task submission moving even when
+        the static fraction-based floor would be overly conservative.
+        """
+        # Lower-bound at 4 GB guard; raise to predicted steady state + small cushion.
+        return max(4.0, governor.dynamic_floor_callable())
+
 
     print("=" * 70)
     print(" Starting Robust, Parallel PheWAS Pipeline")
