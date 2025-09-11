@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import iox as io
 
+LOCK_MAX_AGE_SEC = 360000 # 100h
+
 # --- BigQuery batch fetch tuning ---
 PHENO_BUCKET_SERIES = [1, 4, 16, 64]  # escalate result sharding if needed
 BQ_PAGE_ROWS = int(os.getenv("BQ_PAGE_ROWS", "50000"))  # page size for streaming results
