@@ -33,6 +33,8 @@ import phewas.models as models
 import phewas.pipes as pipes
 from scipy.special import expit as sigmoid
 
+pytestmark = pytest.mark.timeout(30)
+
 # --- Test Constants ---
 TEST_TARGET_INVERSION = 'chr_test-1-INV-1'
 TEST_CDR_CODENAME = "dataset"
@@ -513,7 +515,10 @@ def test_fetcher_producer_drains_cache_only():
         pheno_defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
         core_index = pd.Index([f"p{i:07d}" for i in range(1, 201)], name="person_id")
         q = queue.Queue(maxsize=100)
-        fetcher_thread = threading.Thread(target=pheno.phenotype_fetcher_worker, args=(q, pheno_defs_df, None, None, {}, TEST_CDR_CODENAME, core_index, "./phewas_cache", 128, 4))
+        fetcher_thread = threading.Thread(
+            target=pheno.phenotype_fetcher_worker,
+            args=(q, pheno_defs_df, None, None, TEST_CDR_CODENAME, core_index, "./phewas_cache", 128, 4)
+        )
         fetcher_thread.start()
         results = []
         for _ in range(len(phenos) + 1):
