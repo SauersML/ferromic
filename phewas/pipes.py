@@ -5,8 +5,10 @@ from multiprocessing import get_context, cpu_count
 import os
 import json
 import math
+import gc
 
-import models
+from . import models
+from . import iox as io
 import time
 import random
 import queue
@@ -17,7 +19,7 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
-MP_CONTEXT = 'fork' if sys.platform == 'linux' else 'spawn'
+MP_CONTEXT = 'forkserver' if sys.platform.startswith('linux') else 'spawn'
 
 def _resolve_floor(v):
     """
@@ -72,90 +74,103 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         n_procs = idle_cores
         print(f"\n--- Starting parallel model fitting with {n_procs} worker processes ({MP_CONTEXT} context) ---")
-        with get_context(MP_CONTEXT).Pool(
-            processes=n_procs,
-            initializer=models.init_worker,
-            initargs=(core_df_with_const, allowed_mask_by_cat, ctx),
-            maxtasksperchild=50,
-        ) as pool:
-            if on_pool_started:
-                try:
-                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
-                except Exception:
-                    worker_pids = []
-                try:
-                    on_pool_started(n_procs, worker_pids)
-                except Exception as e:
-                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
-            bar_len = 40
-            queued = 0
-            done = 0
-            lock = threading.Lock()
 
-            def _print_bar(q, d):
-                q = int(q)
-                d = int(d)
-                pct = int((d * 100) / q) if q else 0
-                filled = int(bar_len * (d / q)) if q else 0
-                bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-                mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB" if PSUTIL_AVAILABLE else ""
-                print(f"\r[Fit] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
+        # Prepare shared memory for the core design matrix
+        X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
+        base_meta, base_shm = io.create_shared_from_ndarray(X_base, readonly=True)
+        core_cols = list(core_df_with_const.columns)
+        core_index = core_df_with_const.index.astype(str)
+        del X_base, core_df_with_const
+        gc.collect()
 
-            def _cb(_):
-                nonlocal done, queued
-                with lock:
-                    done += 1
+        try:
+            with get_context(MP_CONTEXT).Pool(
+                processes=n_procs,
+                initializer=models.init_worker,
+                initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, ctx),
+                maxtasksperchild=50,
+            ) as pool:
+                if on_pool_started:
+                    try:
+                        worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    except Exception:
+                        worker_pids = []
+                    try:
+                        on_pool_started(n_procs, worker_pids)
+                    except Exception as e:
+                        print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+                bar_len = 40
+                queued = 0
+                done = 0
+                lock = threading.Lock()
+
+                def _print_bar(q, d):
+                    q = int(q)
+                    d = int(d)
+                    pct = int((d * 100) / q) if q else 0
+                    filled = int(bar_len * (d / q)) if q else 0
+                    bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+                    mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB" if PSUTIL_AVAILABLE else ""
+                    print(f"\r[Fit] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
+
+                def _cb(_):
+                    nonlocal done, queued
+                    with lock:
+                        done += 1
+                        _print_bar(queued, done)
+
+                failed_tasks = []
+                def _err_cb(e):
+                    nonlocal failed_tasks
+                    print(f"[pool ERR] Worker failed: {e}", flush=True)
+                    failed_tasks.append(e)
+
+                # Consume items until sentinel is received
+                while True:
+                    item = pheno_queue.get()
+                    if item is None:
+                        break  # producer finished
+                    floor = _resolve_floor(min_available_memory_gb)
+                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                            time.sleep(2)
+                    # Cache policy: if a previous result exists but has an invalid or NA P_Value and the
+                    # association was attempted (no Skip_Reason), evict the meta to force a fresh run.
+                    try:
+                        res_path = os.path.join(results_cache_dir, f"{item['name']}.json")
+                        meta_path = os.path.join(results_cache_dir, f"{item['name']}.meta.json")
+                        if os.path.exists(res_path) and os.path.exists(meta_path):
+                            with open(res_path, "r") as _rf:
+                                _res_obj = json.load(_rf)
+                            _skip_reason = _res_obj.get("Skip_Reason", None)
+                            if not _skip_reason:
+                                _pv = _res_obj.get("P_Value", None)
+                                _valid_p = False
+                                try:
+                                    _pvf = float(_pv)
+                                    _valid_p = math.isfinite(_pvf) and (0.0 < _pvf < 1.0)
+                                except Exception:
+                                    _valid_p = False
+                                if not _valid_p:
+                                    try:
+                                        os.remove(meta_path)
+                                        print(f"\n[cache POLICY] Invalid or missing P_Value for '{item['name']}'. Forcing re-run by removing meta.", flush=True)
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+                    queued += 1
+                    pool.apply_async(worker_func, (item,), callback=_cb, error_callback=_err_cb)
                     _print_bar(queued, done)
 
-            failed_tasks = []
-            def _err_cb(e):
-                nonlocal failed_tasks
-                print(f"[pool ERR] Worker failed: {e}", flush=True)
-                failed_tasks.append(e)
-
-            # Consume items until sentinel is received
-            while True:
-                item = pheno_queue.get()
-                if item is None:
-                    break  # producer finished
-                floor = _resolve_floor(min_available_memory_gb)
-                if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                    print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                    while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                        time.sleep(2)
-                # Cache policy: if a previous result exists but has an invalid or NA P_Value and the
-                # association was attempted (no Skip_Reason), evict the meta to force a fresh run.
-                try:
-                    res_path = os.path.join(results_cache_dir, f"{item['name']}.json")
-                    meta_path = os.path.join(results_cache_dir, f"{item['name']}.meta.json")
-                    if os.path.exists(res_path) and os.path.exists(meta_path):
-                        with open(res_path, "r") as _rf:
-                            _res_obj = json.load(_rf)
-                        _skip_reason = _res_obj.get("Skip_Reason", None)
-                        if not _skip_reason:
-                            _pv = _res_obj.get("P_Value", None)
-                            _valid_p = False
-                            try:
-                                _pvf = float(_pv)
-                                _valid_p = math.isfinite(_pvf) and (0.0 < _pvf < 1.0)
-                            except Exception:
-                                _valid_p = False
-                            if not _valid_p:
-                                try:
-                                    os.remove(meta_path)
-                                    print(f"\n[cache POLICY] Invalid or missing P_Value for '{item['name']}'. Forcing re-run by removing meta.", flush=True)
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
-                queued += 1
-                pool.apply_async(worker_func, (item,), callback=_cb, error_callback=_err_cb)
-                _print_bar(queued, done)
-
-            pool.close()
-            pool.join()  # callbacks keep updating the bar while we wait
-            _print_bar(queued, done)  # ensure 100% line
-            print("")  # newline after the bar
+                pool.close()
+                pool.join()  # callbacks keep updating the bar while we wait
+        finally:
+            base_shm.close()
+            base_shm.unlink()
+        _print_bar(queued, done)  # ensure 100% line
+        print("")  # newline after the bar
     finally:
         monitor.stop()
 
@@ -189,71 +204,82 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
             mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB" if PSUTIL_AVAILABLE else ""
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
-        with get_context(MP_CONTEXT).Pool(
-            processes=n_procs,
-            initializer=models.init_lrt_worker,
-            initargs=(core_df_with_const, allowed_mask_by_cat, anc_series, ctx),
-            maxtasksperchild=50,
-        ) as pool:
-            if on_pool_started:
-                try:
-                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
-                except Exception:
-                    worker_pids = []
-                try:
-                    on_pool_started(n_procs, worker_pids)
-                except Exception as e:
-                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+        X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
+        base_meta, base_shm = io.create_shared_from_ndarray(X_base, readonly=True)
+        core_cols = list(core_df_with_const.columns)
+        core_index = core_df_with_const.index.astype(str)
+        del X_base, core_df_with_const
+        gc.collect()
 
-            def _cb(_):
-                nonlocal done, queued
-                with lock:
-                    done += 1
+        try:
+            with get_context(MP_CONTEXT).Pool(
+                processes=n_procs,
+                initializer=models.init_lrt_worker,
+                initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+                maxtasksperchild=50,
+            ) as pool:
+                if on_pool_started:
+                    try:
+                        worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    except Exception:
+                        worker_pids = []
+                    try:
+                        on_pool_started(n_procs, worker_pids)
+                    except Exception as e:
+                        print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+
+                def _cb(_):
+                    nonlocal done, queued
+                    with lock:
+                        done += 1
+                        _print_bar(queued, done, "LRT-Stage1")
+
+                failed_tasks = []
+                def _err_cb(e):
+                    nonlocal failed_tasks
+                    print(f"[pool ERR] Worker failed: {e}", flush=True)
+                    failed_tasks.append(e)
+
+                for task in tasks:
+                    floor = _resolve_floor(min_available_memory_gb)
+                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                            time.sleep(2)
+
+                    # Cache policy: if a previous Stage-1 LRT result exists but has an invalid or NA P_LRT_Overall,
+                    # evict the meta to force a fresh run. LRT tasks are only scheduled for non-skipped models.
+                    try:
+                        _res_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.json")
+                        _meta_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.meta.json")
+                        if os.path.exists(_res_path) and os.path.exists(_meta_path):
+                            with open(_res_path, "r") as _rf:
+                                _res_obj = json.load(_rf)
+                            _p = _res_obj.get("P_LRT_Overall", None)
+                            _valid = False
+                            try:
+                                _pf = float(_p)
+                                _valid = math.isfinite(_pf) and (0.0 < _pf < 1.0)
+                            except Exception:
+                                _valid = False
+                            if not _valid:
+                                try:
+                                    os.remove(_meta_path)
+                                    print(f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.", flush=True)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
+                    queued += 1
+                    pool.apply_async(models.lrt_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
                     _print_bar(queued, done, "LRT-Stage1")
 
-            failed_tasks = []
-            def _err_cb(e):
-                nonlocal failed_tasks
-                print(f"[pool ERR] Worker failed: {e}", flush=True)
-                failed_tasks.append(e)
-
-            for task in tasks:
-                floor = _resolve_floor(min_available_memory_gb)
-                if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                    print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                    while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                        time.sleep(2)
-
-                # Cache policy: if a previous Stage-1 LRT result exists but has an invalid or NA P_LRT_Overall,
-                # evict the meta to force a fresh run. LRT tasks are only scheduled for non-skipped models.
-                try:
-                    _res_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.json")
-                    _meta_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.meta.json")
-                    if os.path.exists(_res_path) and os.path.exists(_meta_path):
-                        with open(_res_path, "r") as _rf:
-                            _res_obj = json.load(_rf)
-                        _p = _res_obj.get("P_LRT_Overall", None)
-                        _valid = False
-                        try:
-                            _pf = float(_p)
-                            _valid = math.isfinite(_pf) and (0.0 < _pf < 1.0)
-                        except Exception:
-                            _valid = False
-                        if not _valid:
-                            try:
-                                os.remove(_meta_path)
-                                print(f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.", flush=True)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-
-                queued += 1
-                pool.apply_async(models.lrt_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
-                _print_bar(queued, done, "LRT-Stage1")
-
-            pool.close()
-            pool.join()
+                pool.close()
+                pool.join()
+        finally:
+            base_shm.close()
+            base_shm.unlink()
             _print_bar(queued, done, "LRT-Stage1")
             print("")
     finally:
@@ -267,31 +293,37 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
 
         monitor = MemoryMonitor()
         monitor.start()
+        C = cpu_count()
+        usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
+        idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
+        n_procs = idle_cores
+        print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).", flush=True)
+        bar_len = 40
+        queued = 0
+        done = 0
+        lock = threading.Lock()
+
+        def _print_bar(q, d, label):
+            q = int(q); d = int(d)
+            pct = int((d * 100) / q) if q else 0
+            filled = int(bar_len * (d / q)) if q else 0
+            bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+            mem_info = ""
+            if PSUTIL_AVAILABLE:
+                mem_info = f" | Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB"
+            print(f"\r[{label}] {bar} {d}/{q} ({pct}%)" + mem_info, end="", flush=True)
+
+        X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
+        base_meta, base_shm = io.create_shared_from_ndarray(X_base, readonly=True)
+        core_cols = list(core_df_with_const.columns)
+        core_index = core_df_with_const.index.astype(str)
+        del X_base, core_df_with_const
+        gc.collect()
         try:
-            C = cpu_count()
-            usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
-            idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
-            n_procs = idle_cores
-            print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).", flush=True)
-            bar_len = 40
-            queued = 0
-            done = 0
-            lock = threading.Lock()
-
-            def _print_bar(q, d, label):
-                q = int(q); d = int(d)
-                pct = int((d * 100) / q) if q else 0
-                filled = int(bar_len * (d / q)) if q else 0
-                bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-                mem_info = ""
-                if PSUTIL_AVAILABLE:
-                    mem_info = f" | Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB"
-                print(f"\r[{label}] {bar} {d}/{q} ({pct}%)" + mem_info, end="", flush=True)
-
             with get_context(MP_CONTEXT).Pool(
                 processes=n_procs,
                 initializer=models.init_lrt_worker,
-                initargs=(core_df_with_const, allowed_mask_by_cat, anc_series, ctx),
+                initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
                 maxtasksperchild=50,
             ) as pool:
                 if on_pool_started:
@@ -303,6 +335,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                         on_pool_started(n_procs, worker_pids)
                     except Exception as e:
                         print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+
                 def _cb2(_):
                     nonlocal done, queued
                     with lock:
@@ -315,20 +348,22 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                     print(f"[pool ERR] Worker failed: {e}", flush=True)
                     failed_tasks.append(e)
 
-                for task in tasks_follow:
-                    floor = _resolve_floor(min_available_memory_gb)
-                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                            time.sleep(2)
+                    for task in tasks_follow:
+                        floor = _resolve_floor(min_available_memory_gb)
+                        if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                            print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                            while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                                time.sleep(2)
 
-                    queued += 1
+                        queued += 1
                     pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
                     _print_bar(queued, done, "Ancestry")
 
                 pool.close()
                 pool.join()
-                _print_bar(queued, done, "Ancestry")
-                print("")
+            _print_bar(queued, done, "Ancestry")
+            print("")
         finally:
+            base_shm.close()
+            base_shm.unlink()
             monitor.stop()
