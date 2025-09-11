@@ -458,7 +458,7 @@ def main():
                 allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
 
                 pheno_queue = queue.Queue(maxsize=QUEUE_MAX_SIZE)
-                fetcher_thread = threading.Thread(target=pheno.phenotype_fetcher_worker, args=(pheno_queue, shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], shared_data['cdr_codename'], core_index, CACHE_DIR, LOADER_CHUNK_SIZE, LOADER_THREADS, False))
+                fetcher_thread = threading.Thread(target=pheno.phenotype_fetcher_worker, args=(pheno_queue, shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], shared_data['cdr_codename'], core_index, CACHE_DIR, LOADER_CHUNK_SIZE, LOADER_THREADS, True))
                 fetcher_thread.start()
 
                 dynamic_mem_floor = governor.dynamic_floor_callable
