@@ -295,9 +295,10 @@ class MultiTenantGovernor(ResourceGovernor):
 
     def predict_extra_gb_after_pool(self) -> float:
         with self._lock:
-            if not self.observed_steady_state_gb_per_inv:
-                return super().predict_extra_gb_after_pool()
-            return np.percentile(self.observed_steady_state_gb_per_inv, 75)
+            values = list(self.observed_steady_state_gb_per_inv)
+        if not values:
+            return super().predict_extra_gb_after_pool()
+        return np.percentile(values, 75)
 
     def can_admit_next_inv(self, predicted_gb):
         self._update_history()
@@ -690,6 +691,7 @@ def _pipeline_once():
         }
         num_ancestry_dummies = len(A_cols)
         C = 1 + 1 + 1 + NUM_PCS + 2 + num_ancestry_dummies
+        MAX_CONCURRENT_INVERSIONS = int(os.getenv("MAX_CONCURRENT_INVERSIONS", "8"))
         pending_inversions = deque(sorted(list(run.TARGET_INVERSIONS)))
         running_inversions = {}
 
@@ -703,10 +705,19 @@ def _pipeline_once():
                 pipes.BUDGET.release(inv, "core_shm")
                 print(f"[Orchestrator] Inversion '{inv}' thread finished.")
 
+            if len(running_inversions) >= MAX_CONCURRENT_INVERSIONS:
+                time.sleep(0.5)
+                continue
+
             for inv_name in running_inversions.values():
                 governor.measure_inv(inv_name)
 
             if pending_inversions:
+                predicted_gb = governor.predict_extra_gb_after_pool()
+                if not governor.can_admit_next_inv(predicted_gb):
+                    time.sleep(0.5)
+                    continue
+
                 target_inv = pending_inversions[0]
                 try:
                     inversion_path = os.path.join(CACHE_DIR, f"inversion_{target_inv}.parquet")

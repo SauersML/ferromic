@@ -126,6 +126,7 @@ class ProgressRegistry:
 PROGRESS = ProgressRegistry()
 
 _WORKER_GB_EST = 0.5
+POOL_PROCS_PER_INV = int(os.getenv("POOL_PROCS_PER_INV", "8"))
 
 try:
     import psutil
@@ -167,26 +168,63 @@ class MemoryMonitor(threading.Thread):
         self.app_cpu_percent = 0.0
 
     def run(self):
+        try:
+            import psutil, os, time
+        except Exception:
+            while not self.stop_event.is_set():
+                time.sleep(self.interval)
+            return
+
+        p = psutil.Process()
+        n_cpus = psutil.cpu_count(logical=True) or os.cpu_count() or 1
+
+        def _cgroup_bytes():
+            for path in ("/sys/fs/cgroup/memory.current",
+                         "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
+                try:
+                    return int(open(path, "r").read().strip())
+                except Exception:
+                    pass
+            return None
+
         while not self.stop_event.is_set():
-            if PSUTIL_AVAILABLE:
+            try:
                 vm = psutil.virtual_memory()
                 self.available_memory_gb = vm.available / (1024**3)
-                p = psutil.Process()
-                try:
-                    kids = p.children(recursive=True)
-                except Exception:
-                    kids = []
-                rss = p.memory_info().rss + sum((k.memory_info().rss for k in kids if k.is_running()), 0)
-                self.rss_gb = rss / (1024**3)
-                n_cpus = psutil.cpu_count(logical=True) or os.cpu_count() or 1
-                cpu0 = sum((k.cpu_percent(interval=None) for k in kids if k.is_running()), 0.0)
-                time.sleep(0.2)
-                cpu1 = sum((k.cpu_percent(interval=None) for k in kids if k.is_running()), 0.0)
-                app_raw = (cpu0 + cpu1) / 2.0
-                self.app_cpu_percent = min(100.0, app_raw / n_cpus)
-                time.sleep(max(0, self.interval - 0.2))
-            else:
-                time.sleep(self.interval)
+
+                cg = _cgroup_bytes()
+                if cg is not None:
+                    self.rss_gb = cg / (1024**3)
+                else:
+                    total = 0
+                    for proc in [p] + (p.children(recursive=True) or []):
+                        try:
+                            finfo = proc.memory_full_info()
+                            total += getattr(finfo, "uss", finfo.rss)
+                        except Exception:
+                            try:
+                                total += proc.memory_info().rss
+                            except Exception:
+                                pass
+                    self.rss_gb = total / (1024**3)
+
+                cpu0 = 0.0
+                for proc in (p.children(recursive=True) or []):
+                    try:
+                        cpu0 += proc.cpu_percent(interval=None)
+                    except Exception:
+                        pass
+                time.sleep(0.25)
+                cpu1 = 0.0
+                for proc in (p.children(recursive=True) or []):
+                    try:
+                        cpu1 += proc.cpu_percent(interval=None)
+                    except Exception:
+                        pass
+                self.app_cpu_percent = min(100.0, (cpu0 + cpu1) / 2.0 / n_cpus)
+            except Exception:
+                pass
+            time.sleep(self.interval)
 
     def stop(self):
         self.stop_event.set()
@@ -216,7 +254,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
-        n_procs = max(1, min(idle_cores, max_by_budget))
+        n_procs = max(1, min(idle_cores, max_by_budget, POOL_PROCS_PER_INV))
         print(f"\n--- Starting parallel model fitting with {n_procs} worker processes ({MP_CONTEXT} context) ---")
 
         X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
@@ -227,96 +265,102 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         gc.collect()
 
         BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
+        pool = get_context(MP_CONTEXT).Pool(
+            processes=n_procs,
+            initializer=models.init_worker,
+            initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, ctx),
+            maxtasksperchild=500,
+        )
         try:
-            with get_context(MP_CONTEXT).Pool(
-                processes=n_procs,
-                initializer=models.init_worker,
-                initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, ctx),
-                maxtasksperchild=500,
-            ) as pool:
-                if on_pool_started:
-                    try:
-                        worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
-                    except Exception:
-                        worker_pids = []
-                    try:
-                        on_pool_started(n_procs, worker_pids)
-                    except Exception as e:
-                        print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
-                bar_len = 40
-                queued = 0
-                done = 0
-                lock = threading.Lock()
+            if on_pool_started:
+                try:
+                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                except Exception:
+                    worker_pids = []
+                try:
+                    on_pool_started(n_procs, worker_pids)
+                except Exception as e:
+                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+            bar_len = 40
+            queued = 0
+            done = 0
+            lock = threading.Lock()
+            # Track AsyncResult handles so we can wait before shutting the pool.
+            inflight = []
 
-                def _print_bar(q, d):
-                    q = int(q)
-                    d = int(d)
-                    pct = int((d * 100) / q) if q else 0
-                    filled = int(bar_len * (d / q)) if q else 0
-                    bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-                    mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {BUDGET.remaining_gb():.2f}GB"
-                    PROGRESS.update(target_inversion, "Fit", d, q)
-                    print(f"\r[Fit] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
+            def _print_bar(q, d):
+                q = int(q)
+                d = int(d)
+                pct = int((d * 100) / q) if q else 0
+                filled = int(bar_len * (d / q)) if q else 0
+                bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+                mem_info = (f"| App≈{monitor.rss_gb:.2f}GB  "
+                            f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
+                            f"Budget≈{BUDGET.remaining_gb():.2f}GB")
+                PROGRESS.update(target_inversion, "Fit", d, q)
+                print(f"\r[Fit] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
-                def _cb(_):
-                    nonlocal done, queued
-                    with lock:
-                        done += 1
-                        _print_bar(queued, done)
-
-                failed_tasks = []
-                def _err_cb(e):
-                    nonlocal failed_tasks
-                    print(f"[pool ERR] Worker failed: {e}", flush=True)
-                    failed_tasks.append(e)
-
-                # Consume items until sentinel is received
-                while True:
-                    item = pheno_queue.get()
-                    if item is None:
-                        break  # producer finished
-                    floor = _resolve_floor(min_available_memory_gb)
-                    while BUDGET.remaining_gb() < floor:
-                        print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                        time.sleep(2)
-                    # Cache policy: if a previous result exists but has an invalid or NA P_Value and the
-                    # association was attempted (no Skip_Reason), evict the meta to force a fresh run.
-                    try:
-                        res_path = os.path.join(results_cache_dir, f"{item['name']}.json")
-                        meta_path = os.path.join(results_cache_dir, f"{item['name']}.meta.json")
-                        if os.path.exists(res_path) and os.path.exists(meta_path):
-                            with open(res_path, "r") as _rf:
-                                _res_obj = json.load(_rf)
-                            _skip_reason = _res_obj.get("Skip_Reason", None)
-                            if not _skip_reason:
-                                _pv = _res_obj.get("P_Value", None)
-                                _valid_p = False
-                                try:
-                                    _pvf = float(_pv)
-                                    _valid_p = math.isfinite(_pvf) and (0.0 < _pvf < 1.0)
-                                except Exception:
-                                    _valid_p = False
-                                if not _valid_p:
-                                    try:
-                                        os.remove(meta_path)
-                                        print(f"\n[cache POLICY] Invalid or missing P_Value for '{item['name']}'. Forcing re-run by removing meta.", flush=True)
-                                    except Exception:
-                                        pass
-                    except Exception:
-                        pass
-                    queued += 1
-                    pool.apply_async(worker_func, (item,), callback=_cb, error_callback=_err_cb)
+            def _cb(_):
+                nonlocal done, queued
+                with lock:
+                    done += 1
                     _print_bar(queued, done)
 
-                pool.close()
-                pool.join()  # callbacks keep updating the bar while we wait
+            failed_tasks = []
+            def _err_cb(e):
+                nonlocal failed_tasks
+                print(f"[pool ERR] Worker failed: {e}", flush=True)
+                failed_tasks.append(e)
+
+            while True:
+                item = pheno_queue.get()
+                if item is None:
+                    break  # producer finished
+                floor = _resolve_floor(min_available_memory_gb)
+                while BUDGET.remaining_gb() < floor:
+                    print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    time.sleep(2)
+                # Cache policy: if a previous result exists but has an invalid or NA P_Value and the
+                # association was attempted (no Skip_Reason), evict the meta to force a fresh run.
+                try:
+                    res_path = os.path.join(results_cache_dir, f"{item['name']}.json")
+                    meta_path = os.path.join(results_cache_dir, f"{item['name']}.meta.json")
+                    if os.path.exists(res_path) and os.path.exists(meta_path):
+                        with open(res_path, "r") as _rf:
+                            _res_obj = json.load(_rf)
+                        _skip_reason = _res_obj.get("Skip_Reason", None)
+                        if not _skip_reason:
+                            _pv = _res_obj.get("P_Value", None)
+                            _valid_p = False
+                            try:
+                                _pvf = float(_pv)
+                                _valid_p = math.isfinite(_pvf) and (0.0 < _pvf < 1.0)
+                            except Exception:
+                                _valid_p = False
+                            if not _valid_p:
+                                try:
+                                    os.remove(meta_path)
+                                    print(f"\n[cache POLICY] Invalid or missing P_Value for '{item['name']}'. Forcing re-run by removing meta.", flush=True)
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+                queued += 1
+                ar = pool.apply_async(worker_func, (item,), callback=_cb, error_callback=_err_cb)
+                inflight.append(ar)
+                _print_bar(queued, done)
+
+            # Stop accepting new work and wait for all pending results to finish.
+            pool.close()
+            for ar in inflight:
+                ar.wait()
+            pool.join()
+            _print_bar(queued, done); print("")
         finally:
             base_shm.close()
             base_shm.unlink()
             BUDGET.release(target_inversion, "pool_steady")
             BUDGET.release(target_inversion, "core_shm")
-        _print_bar(queued, done)  # ensure 100% line
-        print("")  # newline after the bar
     finally:
         monitor.stop()
 
@@ -343,7 +387,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
-        n_procs = max(1, min(idle_cores, max_by_budget))
+        n_procs = max(1, min(idle_cores, max_by_budget, POOL_PROCS_PER_INV))
         print(f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching ({n_procs} workers).", flush=True)
         bar_len = 40
         queued = 0
@@ -356,7 +400,9 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
             pct = int((d * 100) / q) if q else 0
             filled = int(bar_len * (d / q)) if q else 0
             bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-            mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {BUDGET.remaining_gb():.2f}GB"
+            mem_info = (f"| App≈{monitor.rss_gb:.2f}GB  "
+                        f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
+                        f"Budget≈{BUDGET.remaining_gb():.2f}GB")
             PROGRESS.update(target_inversion, label, d, q)
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
@@ -368,78 +414,83 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         gc.collect()
 
         BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
+        pool = get_context(MP_CONTEXT).Pool(
+            processes=n_procs,
+            initializer=models.init_lrt_worker,
+            initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+            maxtasksperchild=500,
+        )
         try:
-            with get_context(MP_CONTEXT).Pool(
-                processes=n_procs,
-                initializer=models.init_lrt_worker,
-                initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
-                maxtasksperchild=500,
-            ) as pool:
-                if on_pool_started:
-                    try:
-                        worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
-                    except Exception:
-                        worker_pids = []
-                    try:
-                        on_pool_started(n_procs, worker_pids)
-                    except Exception as e:
-                        print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+            if on_pool_started:
+                try:
+                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                except Exception:
+                    worker_pids = []
+                try:
+                    on_pool_started(n_procs, worker_pids)
+                except Exception as e:
+                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
 
-                def _cb(_):
-                    nonlocal done, queued
-                    with lock:
-                        done += 1
-                        _print_bar(queued, done, "LRT-Stage1")
+            inflight = []
 
-                failed_tasks = []
-                def _err_cb(e):
-                    nonlocal failed_tasks
-                    print(f"[pool ERR] Worker failed: {e}", flush=True)
-                    failed_tasks.append(e)
-
-                for task in tasks:
-                    floor = _resolve_floor(min_available_memory_gb)
-                    while BUDGET.remaining_gb() < floor:
-                        print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                        time.sleep(2)
-
-                    # Cache policy: if a previous Stage-1 LRT result exists but has an invalid or NA P_LRT_Overall,
-                    # evict the meta to force a fresh run. LRT tasks are only scheduled for non-skipped models.
-                    try:
-                        _res_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.json")
-                        _meta_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.meta.json")
-                        if os.path.exists(_res_path) and os.path.exists(_meta_path):
-                            with open(_res_path, "r") as _rf:
-                                _res_obj = json.load(_rf)
-                            _p = _res_obj.get("P_LRT_Overall", None)
-                            _valid = False
-                            try:
-                                _pf = float(_p)
-                                _valid = math.isfinite(_pf) and (0.0 < _pf < 1.0)
-                            except Exception:
-                                _valid = False
-                            if not _valid:
-                                try:
-                                    os.remove(_meta_path)
-                                    print(f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.", flush=True)
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-
-                    queued += 1
-                    pool.apply_async(models.lrt_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
+            def _cb(_):
+                nonlocal done, queued
+                with lock:
+                    done += 1
                     _print_bar(queued, done, "LRT-Stage1")
 
-                pool.close()
-                pool.join()
+            failed_tasks = []
+            def _err_cb(e):
+                nonlocal failed_tasks
+                print(f"[pool ERR] Worker failed: {e}", flush=True)
+                failed_tasks.append(e)
+
+            for task in tasks:
+                floor = _resolve_floor(min_available_memory_gb)
+                while BUDGET.remaining_gb() < floor:
+                    print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    time.sleep(2)
+
+                # Cache policy: if a previous Stage-1 LRT result exists but has an invalid or NA P_LRT_Overall,
+                # evict the meta to force a fresh run. LRT tasks are only scheduled for non-skipped models.
+                try:
+                    _res_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.json")
+                    _meta_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.meta.json")
+                    if os.path.exists(_res_path) and os.path.exists(_meta_path):
+                        with open(_res_path, "r") as _rf:
+                            _res_obj = json.load(_rf)
+                        _p = _res_obj.get("P_LRT_Overall", None)
+                        _valid = False
+                        try:
+                            _pf = float(_p)
+                            _valid = math.isfinite(_pf) and (0.0 < _pf < 1.0)
+                        except Exception:
+                            _valid = False
+                        if not _valid:
+                            try:
+                                os.remove(_meta_path)
+                                print(f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.", flush=True)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                queued += 1
+                ar = pool.apply_async(models.lrt_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
+                inflight.append(ar)
+                _print_bar(queued, done, "LRT-Stage1")
+
+            pool.close()
+            for ar in inflight:
+                ar.wait()
+            pool.join()
+            _print_bar(queued, done, "LRT-Stage1")
+            print("")
         finally:
             base_shm.close()
             base_shm.unlink()
             BUDGET.release(target_inversion, "pool_steady")
             BUDGET.release(target_inversion, "core_shm")
-            _print_bar(queued, done, "LRT-Stage1")
-            print("")
     finally:
         monitor.stop()
 
@@ -463,7 +514,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
-        n_procs = max(1, min(idle_cores, max_by_budget))
+        n_procs = max(1, min(idle_cores, max_by_budget, POOL_PROCS_PER_INV))
         print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).", flush=True)
         bar_len = 40
         queued = 0
@@ -475,7 +526,9 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
             pct = int((d * 100) / q) if q else 0
             filled = int(bar_len * (d / q)) if q else 0
             bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-            mem_info = f" | Mem RSS: {monitor.rss_gb:.2f}GB Avail: {BUDGET.remaining_gb():.2f}GB"
+            mem_info = (f" | App≈{monitor.rss_gb:.2f}GB  "
+                        f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
+                        f"Budget≈{BUDGET.remaining_gb():.2f}GB")
             PROGRESS.update(target_inversion, label, d, q)
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%)" + mem_info, end="", flush=True)
 
@@ -486,48 +539,53 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         del X_base, core_df_with_const
         gc.collect()
         BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
+        pool = get_context(MP_CONTEXT).Pool(
+            processes=n_procs,
+            initializer=models.init_lrt_worker,
+            initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+            maxtasksperchild=500,
+        )
         try:
-            with get_context(MP_CONTEXT).Pool(
-                processes=n_procs,
-                initializer=models.init_lrt_worker,
-                initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
-                maxtasksperchild=500,
-            ) as pool:
-                if on_pool_started:
-                    try:
-                        worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
-                    except Exception:
-                        worker_pids = []
-                    try:
-                        on_pool_started(n_procs, worker_pids)
-                    except Exception as e:
-                        print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+            if on_pool_started:
+                try:
+                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                except Exception:
+                    worker_pids = []
+                try:
+                    on_pool_started(n_procs, worker_pids)
+                except Exception as e:
+                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
 
-                def _cb2(_):
-                    nonlocal done, queued
-                    with lock:
-                        done += 1
-                        _print_bar(queued, done, "Ancestry")
+            inflight = []
 
-                failed_tasks = []
-
-                def _err_cb(e):
-                    nonlocal failed_tasks
-                    print(f"[pool ERR] Worker failed: {e}", flush=True)
-                    failed_tasks.append(e)
-
-                for task in tasks_follow:
-                    floor = _resolve_floor(min_available_memory_gb)
-                    while BUDGET.remaining_gb() < floor:
-                        print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                        time.sleep(2)
-
-                    queued += 1
-                    pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
+            def _cb2(_):
+                nonlocal done, queued
+                with lock:
+                    done += 1
                     _print_bar(queued, done, "Ancestry")
 
-                pool.close()
-                pool.join()
+            failed_tasks = []
+
+            def _err_cb(e):
+                nonlocal failed_tasks
+                print(f"[pool ERR] Worker failed: {e}", flush=True)
+                failed_tasks.append(e)
+
+            for task in tasks_follow:
+                floor = _resolve_floor(min_available_memory_gb)
+                while BUDGET.remaining_gb() < floor:
+                    print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    time.sleep(2)
+
+                queued += 1
+                ar = pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
+                inflight.append(ar)
+                _print_bar(queued, done, "Ancestry")
+
+            pool.close()
+            for ar in inflight:
+                ar.wait()
+            pool.join()
             _print_bar(queued, done, "Ancestry")
             print("")
         finally:
