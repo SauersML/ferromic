@@ -82,6 +82,7 @@ class BudgetManager:
     def revise(self, inv_id: str, component: str, new_gb: float):
         new_gb = max(0.0, float(new_gb))
         with self._cond:
+            self._reserved_by_inv.setdefault(inv_id, {})
             cur = self._reserved_by_inv.get(inv_id, {}).get(component, 0.0)
             delta = new_gb - cur
             if delta <= 0:
@@ -106,6 +107,25 @@ class BudgetManager:
 
 # module-global singleton
 BUDGET = BudgetManager()
+
+
+class ProgressRegistry:
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._data = {}
+
+    def update(self, inv, stage, done, total):
+        with self._lock:
+            self._data[(inv, stage)] = (int(done), int(total), time.time())
+
+    def snapshot(self):
+        with self._lock:
+            return dict(self._data)
+
+
+PROGRESS = ProgressRegistry()
+
+_WORKER_GB_EST = 0.5
 
 try:
     import psutil
@@ -169,6 +189,8 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
     monitor = MemoryMonitor()
     monitor.start()
     try:
+        BUDGET.reserve(target_inversion, "core_shm", 0.0, block=True)
+        # core_df_with_const is cast to float32 immediately after; 4 bytes per value
         bytes_needed = int(core_df_with_const.index.size) * int(len(core_df_with_const.columns)) * 4
         shm_gb = bytes_needed / (1024**3)
         BUDGET.revise(target_inversion, "core_shm", shm_gb)
@@ -177,7 +199,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         C = cpu_count()
         usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
-        W_gb = 0.5
+        W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
         n_procs = max(1, min(idle_cores, max_by_budget))
         print(f"\n--- Starting parallel model fitting with {n_procs} worker processes ({MP_CONTEXT} context) ---")
@@ -218,6 +240,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                     filled = int(bar_len * (d / q)) if q else 0
                     bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
                     mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {BUDGET.remaining_gb():.2f}GB"
+                    PROGRESS.update(target_inversion, "Fit", d, q)
                     print(f"\r[Fit] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
                 def _cb(_):
@@ -293,6 +316,8 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
     monitor = MemoryMonitor()
     monitor.start()
     try:
+        BUDGET.reserve(target_inversion, "core_shm", 0.0, block=True)
+        # core_df_with_const is cast to float32 immediately after; 4 bytes per value
         bytes_needed = int(core_df_with_const.index.size) * int(len(core_df_with_const.columns)) * 4
         shm_gb = bytes_needed / (1024**3)
         BUDGET.revise(target_inversion, "core_shm", shm_gb)
@@ -301,7 +326,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         C = cpu_count()
         usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
-        W_gb = 0.5
+        W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
         n_procs = max(1, min(idle_cores, max_by_budget))
         print(f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching ({n_procs} workers).", flush=True)
@@ -317,6 +342,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
             filled = int(bar_len * (d / q)) if q else 0
             bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
             mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {BUDGET.remaining_gb():.2f}GB"
+            PROGRESS.update(target_inversion, label, d, q)
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
         X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
@@ -410,6 +436,8 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
 
         monitor = MemoryMonitor()
         monitor.start()
+        BUDGET.reserve(target_inversion, "core_shm", 0.0, block=True)
+        # core_df_with_const is cast to float32 immediately after; 4 bytes per value
         bytes_needed = int(core_df_with_const.index.size) * int(len(core_df_with_const.columns)) * 4
         shm_gb = bytes_needed / (1024**3)
         BUDGET.revise(target_inversion, "core_shm", shm_gb)
@@ -418,7 +446,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         C = cpu_count()
         usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
-        W_gb = 0.5
+        W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
         n_procs = max(1, min(idle_cores, max_by_budget))
         print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).", flush=True)
@@ -433,6 +461,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
             filled = int(bar_len * (d / q)) if q else 0
             bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
             mem_info = f" | Mem RSS: {monitor.rss_gb:.2f}GB Avail: {BUDGET.remaining_gb():.2f}GB"
+            PROGRESS.update(target_inversion, label, d, q)
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%)" + mem_info, end="", flush=True)
 
         X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
