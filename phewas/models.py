@@ -139,6 +139,19 @@ def _logit_fit(model, method, **kw):
         except TypeError:
             return model.fit(**fit_kwargs)
 
+
+def _leverages_batched(X_np, XtWX_inv, W, batch=100_000):
+    """Compute hat matrix leverages in batches to bound memory usage."""
+    n = X_np.shape[0]
+    h = np.empty(n, dtype=np.float64)
+    for i0 in range(0, n, batch):
+        i1 = min(i0 + batch, n)
+        Xb = X_np[i0:i1]
+        Tb = Xb @ XtWX_inv
+        s = np.einsum("ij,ij->i", Tb, Xb)
+        h[i0:i1] = np.clip(W[i0:i1] * s, 0.0, 1.0)
+    return h
+
 def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False, **kwargs):
     """
     Logistic fit ladder with an option to attempt unpenalized MLE first.
@@ -199,13 +212,9 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
         pi = float(np.mean(y)) if len(y) > 0 else 0.5
         n_eff = max(1.0, 4.0 * float(len(y)) * pi * (1.0 - pi))
         alpha_scalar = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / n_eff), 1e-6)
-        alphas = np.full(X.shape[1], alpha_scalar, dtype=float)
-        if is_pandas and "const" in X.columns:
-            alphas[X.columns.get_loc("const")] = 0.0
-        elif not is_pandas and const_ix is not None and const_ix < X.shape[1]:
-            alphas[const_ix] = 0.0
-
-        ridge_fit = sm.Logit(y, X).fit_regularized(alpha=alphas, L1_wt=0.0, maxiter=800, disp=0, **kwargs)
+        # DiscreteModel.fit_regularized expects scalar alpha; per-parameter weights are not reliably supported.
+        # Using scalar ridge is OK since we refit MLE (unpenalized) when possible.
+        ridge_fit = sm.Logit(y, X).fit_regularized(alpha=float(alpha_scalar), L1_wt=0.0, maxiter=800, disp=0, **kwargs)
 
         setattr(ridge_fit, "_used_ridge", True)
         setattr(ridge_fit, "_final_is_mle", False)
@@ -301,9 +310,7 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         break
                 # Compute leverages without constructing the full N×N hat matrix.
                 # h_i = w_i * x_i^T (X' W X)^{-1} x_i
-                T = X_np @ XtWX_inv
-                s = np.einsum("ij,ij->i", T, X_np)
-                h = np.clip(W * s, 0.0, 1.0)
+                h = _leverages_batched(X_np, XtWX_inv, W)
                 adj = (0.5 - p) * h
                 score = X_np.T @ (y_np - p + adj)
                 try:
@@ -719,6 +726,11 @@ def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, c
     )
 
 
+def _pos_in_current(orig_ix, current_ix_array):
+    pos = np.flatnonzero(current_ix_array == orig_ix)
+    return int(pos[0]) if pos.size else None
+
+
 def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     """CONSUMER: Runs a single model. Executed in a separate process using NumPy arrays."""
     s_name, category, case_idx_global = pheno_data["name"], pheno_data["category"], pheno_data["case_idx"]
@@ -828,11 +840,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         if sex_col_dropped:
             current_col_indices = np.delete(current_col_indices, sex_ix)
-            # After dropping the sex column, the *positions* of other columns may change.
-            # We find the new positions by looking up the original column index in the current index array.
-            # `target_ix` is now a *position* in the current `X_work`, not the original `X_all`.
-            target_ix = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_inversion in col_ix else None
-            const_ix = np.where(current_col_indices == col_ix.get('const'))[0][0] if 'const' in col_ix else None
+            tgt_orig = col_ix.get(target_inversion) if target_inversion in col_ix else None
+            cst_orig = col_ix.get('const') if 'const' in col_ix else None
+            target_ix = _pos_in_current(tgt_orig, current_col_indices) if tgt_orig is not None else None
+            const_ix = _pos_in_current(cst_orig, current_col_indices) if cst_orig is not None else None
 
         n_total_used, n_cases_used, n_ctrls_used = len(y_work), int(y_work.sum()), len(y_work) - int(y_work.sum())
         keep_ix_zv = {idx for idx in [target_ix, const_ix] if idx is not None}
@@ -840,14 +851,16 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         current_col_indices = current_col_indices[kept_indices_after_zv]
         # After dropping zero-variance columns, find the new positions of our key columns.
-        target_ix_mid = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_inversion in col_ix and col_ix.get(target_inversion) in current_col_indices else None
-        const_ix_mid = np.where(current_col_indices == col_ix.get('const'))[0][0] if 'const' in col_ix and col_ix.get('const') in current_col_indices else None
+        tgt_orig = col_ix.get(target_inversion) if target_inversion in col_ix else None
+        cst_orig = col_ix.get('const') if 'const' in col_ix else None
+        target_ix_mid = _pos_in_current(tgt_orig, current_col_indices) if (tgt_orig is not None) else None
+        const_ix_mid = _pos_in_current(cst_orig, current_col_indices) if (cst_orig is not None) else None
 
         X_work_fd, kept_indices_after_fd = _drop_rank_deficiency_np(X_work_zv, keep_ix={i for i in [target_ix_mid, const_ix_mid] if i is not None})
         current_col_indices = current_col_indices[kept_indices_after_fd]
         # Final pass after rank-deficiency removal to get final positions.
-        target_ix_final = np.where(current_col_indices == col_ix.get(target_inversion))[0][0] if target_inversion in col_ix and col_ix.get(target_inversion) in current_col_indices else None
-        const_ix_final = np.where(current_col_indices == col_ix.get('const'))[0][0] if 'const' in col_ix and col_ix.get('const') in current_col_indices else None
+        target_ix_final = _pos_in_current(tgt_orig, current_col_indices) if (tgt_orig is not None) else None
+        const_ix_final = _pos_in_current(cst_orig, current_col_indices) if (cst_orig is not None) else None
 
         ok, reason, det = validate_min_counts_for_fit(y_work, stage_tag="phewas", extra_context={"phenotype": s_name})
         if not ok:
