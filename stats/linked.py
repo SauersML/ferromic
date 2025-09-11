@@ -29,6 +29,8 @@ import traceback
 warnings.filterwarnings("ignore", category=FutureWarning)
 rng = np.random.default_rng(seed=42)
 
+# chr8-7301025-INV-5297356, chr9-102565835-INV-4446, chr9-30951702-INV-5595
+
 def _ensure_worker_logging():
     """
     If we're inside a joblib 'loky' worker, the root logger has no handlers.
