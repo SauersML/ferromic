@@ -137,6 +137,19 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
     return df
 
 
+def get_cached_or_generate_pickle(cache_path, generation_func, *args, **kwargs):
+    """Simple cache wrapper for pickled objects."""
+    if os.path.exists(cache_path):
+        print(f"  -> Found cache, loading from '{cache_path}'...")
+        try:
+            return pd.read_pickle(cache_path)
+        except Exception as e:
+            print(f"  -> Cache unreadable ({e}); regenerating...")
+    obj = generation_func(*args, **kwargs)
+    atomic_write_pickle(cache_path, obj)
+    return obj
+
+
 def read_meta_json(path) -> dict | None:
     try:
         with open(path, 'r') as f:
