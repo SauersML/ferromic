@@ -410,6 +410,7 @@ def _pipeline_once():
     from types import SimpleNamespace
     run = SimpleNamespace(TARGET_INVERSIONS=TARGET_INVERSIONS)
     os.makedirs(CACHE_DIR, exist_ok=True)
+    os.makedirs(os.path.join(CACHE_DIR, "locks"), exist_ok=True)
 
     try:
         with Timer() as t_setup:
@@ -497,7 +498,12 @@ def _pipeline_once():
 
                 core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
                 global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
-                category_to_pan_cases = pd.read_pickle(os.path.join(CACHE_DIR, f"pan_category_cases_{shared_data['cdr_codename']}.pkl"))
+                pan_path = os.path.join(CACHE_DIR, f"pan_category_cases_{shared_data['cdr_codename']}.pkl")
+                category_to_pan_cases = io.get_cached_or_generate_pickle(
+                    pan_path,
+                    pheno.build_pan_category_cases,
+                    shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], CACHE_DIR, shared_data['cdr_codename']
+                )
                 allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
 
                 sex_vec = core_df_with_const['sex'].to_numpy(dtype=np.float32, copy=False)
@@ -742,7 +748,12 @@ def _pipeline_once():
                 core_df_with_const = pd.concat([core_df_with_const, A_slice], axis=1, copy=False)
                 core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
                 global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
-                category_to_pan_cases = pheno.build_pan_category_cases(pheno_defs_df, bq_client, cdr_dataset_id, CACHE_DIR, cdr_codename)
+                pan_path = os.path.join(CACHE_DIR, f"pan_category_cases_{cdr_codename}.pkl")
+                category_to_pan_cases = io.get_cached_or_generate_pickle(
+                    pan_path,
+                    pheno.build_pan_category_cases,
+                    pheno_defs_df, bq_client, cdr_dataset_id, CACHE_DIR, cdr_codename
+                )
                 allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
 
                 inversion_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion))
