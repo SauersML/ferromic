@@ -114,6 +114,19 @@ def get_cached_or_generate(cache_path, generation_func, *args, validate_target=N
     return df
 
 
+def get_cached_or_generate_pickle(cache_path, generation_func, *args, **kwargs):
+    """Simple cache wrapper for pickled objects."""
+    if os.path.exists(cache_path):
+        print(f"  -> Found cache, loading from '{cache_path}'...")
+        try:
+            return pd.read_pickle(cache_path)
+        except Exception as e:
+            print(f"  -> Cache unreadable ({e}); regenerating...")
+    obj = generation_func(*args, **kwargs)
+    atomic_write_pickle(cache_path, obj)
+    return obj
+
+
 def read_meta_json(path) -> dict | None:
     try:
         with open(path, 'r') as f:
@@ -153,6 +166,8 @@ def atomic_write_json(path, data_obj):
 
         with open(tmp_path, 'w') as f:
             json.dump(data_obj, f, cls=NpEncoder)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, path)
     finally:
         try:
@@ -171,7 +186,10 @@ def atomic_write_parquet(path, df, **to_parquet_kwargs):
     fd, tmp_path = tempfile.mkstemp(dir=tmpdir, prefix=os.path.basename(path) + '.tmp.')
     os.close(fd)
     try:
-        df.to_parquet(tmp_path, **to_parquet_kwargs)
+        with open(tmp_path, 'wb') as f:
+            df.to_parquet(f, **to_parquet_kwargs)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, path)
     finally:
         try:
@@ -190,7 +208,10 @@ def atomic_write_pickle(path, obj):
     fd, tmp_path = tempfile.mkstemp(dir=tmpdir, prefix=os.path.basename(path) + '.tmp.')
     os.close(fd)
     try:
-        pd.to_pickle(obj, tmp_path)
+        with open(tmp_path, 'wb') as f:
+            pd.to_pickle(obj, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, path)
     finally:
         try:
