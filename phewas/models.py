@@ -656,13 +656,18 @@ def init_worker(base_shm_meta, core_cols, core_index, masks, ctx):
         control_mask = allowed_mask & finite_mask_worker
         control_indices_by_cat[category] = np.flatnonzero(control_mask)
 
+    # Precompute per-category allowed-mask fingerprints once (used in skip checks)
+    global allowed_fp_by_cat
+    allowed_fp_by_cat = {}
+    for category, idx in control_indices_by_cat.items():
+        allowed_fp_by_cat[category] = _index_fingerprint(worker_core_df_index[idx] if len(idx) else pd.Index([]))
+
     bad = ~finite_mask_worker
     if bad.any():
         rows = worker_core_df_index[bad][:5].tolist()
         nonfinite_cols = [c for j, c in enumerate(worker_core_df_cols) if not np.isfinite(X_all[:, j]).all()]
         print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={nonfinite_cols[:10]}", flush=True)
     print(f"[Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks. Array is shared, no per-worker copy.", flush=True)
-
 
 def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx):
     """Initializer for LRT pools that also provides ancestry labels and context."""
@@ -770,21 +775,35 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     meta_path = result_path + ".meta.json"
 
     try:
-        case_idx_fp = _index_fingerprint(case_ids_for_fp)
+        # Prefer precomputed fingerprint if provided
+        case_idx_fp = pheno_data.get("case_fp")
+        if case_idx_fp is None:
+            case_idx_fp = _index_fingerprint(case_ids_for_fp if case_ids_for_fp is not None
+                                             else (worker_core_df_index[case_idx_global]
+                                                   if case_idx_global.size > 0 else pd.Index([])))
 
-        # Fingerprint the controls for this category for skipping
-        control_indices = control_indices_by_cat.get(category, np.array([], dtype=int))
-        allowed_fp = _index_fingerprint(worker_core_df_index[control_indices])
+        # Use per-category fingerprint computed in init_worker (fallback to one-off if missing)
+        allowed_fp = allowed_fp_by_cat.get(category) if 'allowed_fp_by_cat' in globals() else None
+        if allowed_fp is None:
+            control_indices = control_indices_by_cat.get(category, np.array([], dtype=int))
+            allowed_fp = _index_fingerprint(worker_core_df_index[control_indices])
+
+        core_fp = _index_fingerprint(worker_core_df_index)
+
+        # Repair missing meta for an existing result (enables fast skip)
+        if os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False):
+            _write_meta(
+                meta_path, "phewas_result", s_name, category, target_inversion,
+                worker_core_df_cols, core_fp, case_idx_fp,
+                extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]}
+            )
+            print(f"[meta repaired] {s_name_safe}", flush=True)
+            return
 
         if os.path.exists(result_path) and _should_skip(
-            meta_path,
-            worker_core_df_cols,
-            _index_fingerprint(worker_core_df_index),
-            case_idx_fp,
-            category,
-            target_inversion,
-            allowed_fp,
+            meta_path, worker_core_df_cols, core_fp, case_idx_fp, category, target_inversion, allowed_fp
         ):
+            print(f"[skip cache-ok] {s_name_safe}", flush=True)
             return
 
         # --- Array-based data assembly ---
@@ -985,15 +1004,33 @@ def lrt_overall_worker(task):
             io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": "missing_case_cache"})
             return
 
-        case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
-        case_idx = worker_core_df_index.get_indexer(case_ids)
-        case_idx = case_idx[case_idx >= 0]
-        case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
+        # Prefer precomputed case_fp if present in task
+        case_fp = task.get("case_fp")
+        if case_fp is None:
+            case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+            case_idx = worker_core_df_index.get_indexer(case_ids)
+            case_idx = case_idx[case_idx >= 0]
+            case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
 
-        allowed_mask = allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool))
-        allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df_index)
+        # Use per-category allowed fingerprint computed once in worker
+        allowed_fp = allowed_fp_by_cat.get(cat) if 'allowed_fp_by_cat' in globals() else _mask_fingerprint(
+            allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool)), worker_core_df_index
+        )
 
-        if os.path.exists(result_path) and _lrt_meta_should_skip(meta_path, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, cat, target, allowed_fp): return
+        core_fp = _index_fingerprint(worker_core_df_index)
+
+        # Optional meta repair to enable skip when result exists but meta is missing
+        if os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False):
+            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, core_fp, case_fp,
+                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+            print(f"[meta repaired] {s_name_safe} (LRT-Stage1)", flush=True)
+            return
+
+        if os.path.exists(result_path) and _lrt_meta_should_skip(
+            meta_path, worker_core_df_cols, core_fp, case_fp, cat, target, allowed_fp
+        ):
+            print(f"[skip cache-ok] {s_name_safe} (LRT-Stage1)", flush=True)
+            return
 
         case_mask = np.zeros(N_core, dtype=bool)
         if case_idx.size > 0: case_mask[case_idx] = True
@@ -1119,15 +1156,29 @@ def lrt_followup_worker(task):
             io.atomic_write_json(result_path, {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "missing_case_cache"})
             return
 
-        case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
-        case_idx = worker_core_df_index.get_indexer(case_ids)
-        case_idx = case_idx[case_idx >= 0]
-        case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
+        case_fp = task.get("case_fp")
+        if case_fp is None:
+            case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+            case_idx = worker_core_df_index.get_indexer(case_ids)
+            case_idx = case_idx[case_idx >= 0]
+            case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
 
-        allowed_mask = allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool))
-        allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df_index)
+        allowed_fp = allowed_fp_by_cat.get(category) if 'allowed_fp_by_cat' in globals() else _mask_fingerprint(
+            allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool)), worker_core_df_index
+        )
 
-        if os.path.exists(result_path) and _lrt_meta_should_skip(meta_path, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, category, target, allowed_fp):
+        core_fp = _index_fingerprint(worker_core_df_index)
+
+        if os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False):
+            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, core_fp, case_fp,
+                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+            print(f"[meta repaired] {s_name_safe} (LRT-Stage2)", flush=True)
+            return
+
+        if os.path.exists(result_path) and _lrt_meta_should_skip(
+            meta_path, worker_core_df_cols, core_fp, case_fp, category, target, allowed_fp
+        ):
+            print(f"[skip cache-ok] {s_name_safe} (LRT-Stage2)", flush=True)
             return
 
         case_mask = np.zeros(N_core, dtype=bool)
