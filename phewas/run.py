@@ -104,7 +104,7 @@ class SystemMonitor(threading.Thread):
 
         while True:
             try:
-                cpu = psutil.cpu_percent(interval=None)
+                cpu = psutil.cpu_percent(interval=1.0)
                 mem = psutil.virtual_memory()
                 ram_percent = mem.percent
                 available_gb = mem.available / (1024**3)
@@ -112,13 +112,16 @@ class SystemMonitor(threading.Thread):
                 main_mem = self._main_process.memory_info()
                 child_mem = sum(p.memory_info().rss for p in child_processes)
                 total_rss_gb = (main_mem.rss + child_mem) / (1024**3)
+                n_cpus = psutil.cpu_count(logical=True) or os.cpu_count() or 1
+                app_cpu_raw = sum(c.cpu_percent(interval=None) for c in child_processes)
+                app_cpu = min(100.0, app_cpu_raw / n_cpus)
 
                 with self._lock:
                     self.sys_cpu_percent = cpu
                     self.sys_available_gb = available_gb
                     self.app_rss_gb = total_rss_gb
 
-                print(f"[SysMonitor] CPU: {cpu:5.1f}% | RAM: {ram_percent:5.1f}% (avail: {available_gb:.2f}GB) | App RSS: {total_rss_gb:.2f}GB | Budget: {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB", flush=True)
+                print(f"[SysMonitor] CPU: {cpu:5.1f}% | AppCPU: {app_cpu:5.1f}% | RAM: {ram_percent:5.1f}% (avail: {available_gb:.2f}GB) | App RSS: {total_rss_gb:.2f}GB | Budget: {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB", flush=True)
                 try:
                     prog = pipes.PROGRESS.snapshot()
                     by_inv = {}
@@ -503,8 +506,23 @@ def _pipeline_once():
                 )
                 allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
 
+                sex_vec = core_df_with_const['sex'].to_numpy(dtype=np.float32, copy=False)
+
                 pheno_queue = queue.Queue(maxsize=QUEUE_MAX_SIZE)
-                fetcher_thread = threading.Thread(target=pheno.phenotype_fetcher_worker, args=(pheno_queue, shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], shared_data['cdr_codename'], core_index, CACHE_DIR, LOADER_CHUNK_SIZE, LOADER_THREADS, True))
+                fetcher_thread = threading.Thread(
+                    target=pheno.phenotype_fetcher_worker,
+                    args=(pheno_queue, shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], shared_data['cdr_codename'], core_index, CACHE_DIR, LOADER_CHUNK_SIZE, LOADER_THREADS, True),
+                    kwargs=dict(
+                        allowed_mask_by_cat=allowed_mask_by_cat,
+                        sex_vec=sex_vec,
+                        min_cases=MIN_CASES_FILTER,
+                        min_ctrls=MIN_CONTROLS_FILTER,
+                        sex_mode="majority",
+                        sex_prop=models.DEFAULT_SEX_RESTRICT_PROP,
+                        max_other=ctx.get("SEX_RESTRICT_MAX_OTHER_CASES", 0),
+                        min_neff=MIN_NEFF_FILTER,
+                    ),
+                )
                 fetcher_thread.start()
 
                 def on_pool_started_callback(num_procs, worker_pids):

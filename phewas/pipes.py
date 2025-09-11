@@ -164,14 +164,29 @@ class MemoryMonitor(threading.Thread):
         self.available_memory_gb = 0
         self.rss_gb = 0
         self.sys_cpu_percent = 0.0
+        self.app_cpu_percent = 0.0
 
     def run(self):
         while not self.stop_event.is_set():
             if PSUTIL_AVAILABLE:
-                self.available_memory_gb = psutil.virtual_memory().available / (1024**3)
-                self.rss_gb = psutil.Process().memory_info().rss / (1024**3)
-                self.sys_cpu_percent = psutil.cpu_percent(interval=None)
-            time.sleep(self.interval)
+                vm = psutil.virtual_memory()
+                self.available_memory_gb = vm.available / (1024**3)
+                p = psutil.Process()
+                try:
+                    kids = p.children(recursive=True)
+                except Exception:
+                    kids = []
+                rss = p.memory_info().rss + sum((k.memory_info().rss for k in kids if k.is_running()), 0)
+                self.rss_gb = rss / (1024**3)
+                n_cpus = psutil.cpu_count(logical=True) or os.cpu_count() or 1
+                cpu0 = sum((k.cpu_percent(interval=None) for k in kids if k.is_running()), 0.0)
+                time.sleep(0.2)
+                cpu1 = sum((k.cpu_percent(interval=None) for k in kids if k.is_running()), 0.0)
+                app_raw = (cpu0 + cpu1) / 2.0
+                self.app_cpu_percent = min(100.0, app_raw / n_cpus)
+                time.sleep(max(0, self.interval - 0.2))
+            else:
+                time.sleep(self.interval)
 
     def stop(self):
         self.stop_event.set()
@@ -197,7 +212,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
 
         C = cpu_count()
-        usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
+        usage = getattr(monitor, "app_cpu_percent", 0.0)
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
@@ -217,7 +232,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                 processes=n_procs,
                 initializer=models.init_worker,
                 initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, ctx),
-                maxtasksperchild=50,
+                maxtasksperchild=500,
             ) as pool:
                 if on_pool_started:
                     try:
@@ -324,7 +339,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
 
         C = cpu_count()
-        usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
+        usage = getattr(monitor, "app_cpu_percent", 0.0)
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
@@ -358,7 +373,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
                 processes=n_procs,
                 initializer=models.init_lrt_worker,
                 initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
-                maxtasksperchild=50,
+                maxtasksperchild=500,
             ) as pool:
                 if on_pool_started:
                     try:
@@ -444,7 +459,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
 
         C = cpu_count()
-        usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
+        usage = getattr(monitor, "app_cpu_percent", 0.0)
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
@@ -476,7 +491,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                 processes=n_procs,
                 initializer=models.init_lrt_worker,
                 initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
-                maxtasksperchild=50,
+                maxtasksperchild=500,
             ) as pool:
                 if on_pool_started:
                     try:

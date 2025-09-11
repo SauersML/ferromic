@@ -19,6 +19,29 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
 
+def _best_effort_fsync(fobj):
+    try:
+        fobj.flush()
+    except Exception:
+        pass
+    try:
+        os.fsync(fobj.fileno())
+    except Exception:
+        pass
+
+
+def _fsync_dir(path):
+    d = os.path.dirname(os.path.abspath(path)) or "."
+    try:
+        dir_fd = os.open(d, os.O_DIRECTORY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except Exception:
+        pass
+
+
 def get_cached_or_generate(cache_path, generation_func, *args, validate_target=None, validate_num_pcs=None, **kwargs):
     """
     Generic caching wrapper with validation. Compatible with pre-existing caches.
@@ -166,9 +189,9 @@ def atomic_write_json(path, data_obj):
 
         with open(tmp_path, 'w') as f:
             json.dump(data_obj, f, cls=NpEncoder)
-            f.flush()
-            os.fsync(f.fileno())
+            _best_effort_fsync(f)
         os.replace(tmp_path, path)
+        _fsync_dir(path)
     finally:
         try:
             if os.path.exists(tmp_path):
@@ -186,11 +209,11 @@ def atomic_write_parquet(path, df, **to_parquet_kwargs):
     fd, tmp_path = tempfile.mkstemp(dir=tmpdir, prefix=os.path.basename(path) + '.tmp.')
     os.close(fd)
     try:
-        with open(tmp_path, 'wb') as f:
-            df.to_parquet(f, **to_parquet_kwargs)
-            f.flush()
-            os.fsync(f.fileno())
+        df.to_parquet(tmp_path, **to_parquet_kwargs)
+        with open(tmp_path, 'rb') as f:
+            _best_effort_fsync(f)
         os.replace(tmp_path, path)
+        _fsync_dir(path)
     finally:
         try:
             if os.path.exists(tmp_path):
@@ -208,11 +231,11 @@ def atomic_write_pickle(path, obj):
     fd, tmp_path = tempfile.mkstemp(dir=tmpdir, prefix=os.path.basename(path) + '.tmp.')
     os.close(fd)
     try:
-        with open(tmp_path, 'wb') as f:
-            pd.to_pickle(obj, f)
-            f.flush()
-            os.fsync(f.fileno())
+        pd.to_pickle(obj, tmp_path)
+        with open(tmp_path, 'rb') as f:
+            _best_effort_fsync(f)
         os.replace(tmp_path, path)
+        _fsync_dir(path)
     finally:
         try:
             if os.path.exists(tmp_path):
