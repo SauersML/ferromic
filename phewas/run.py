@@ -119,6 +119,19 @@ class SystemMonitor(threading.Thread):
                     self.app_rss_gb = total_rss_gb
 
                 print(f"[SysMonitor] CPU: {cpu:5.1f}% | RAM: {ram_percent:5.1f}% (avail: {available_gb:.2f}GB) | App RSS: {total_rss_gb:.2f}GB | Budget: {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB", flush=True)
+                try:
+                    prog = pipes.PROGRESS.snapshot()
+                    by_inv = {}
+                    for (inv, stage), (d, q, ts) in prog.items():
+                        prev = by_inv.get(inv)
+                        if (prev is None) or (ts > prev[-1]):
+                            pct = int((100*d/q)) if q else 0
+                            by_inv[inv] = (stage, d, q, pct, ts)
+                    if by_inv:
+                        parts = [f"{inv}:{stage} {pct}%" for inv,(stage,_,_,pct,_) in sorted(by_inv.items())]
+                        print("[Progress] " + " | ".join(parts), flush=True)
+                except Exception:
+                    pass
             except psutil.NoSuchProcess:
                 break
             except Exception as e:
@@ -494,6 +507,8 @@ def _pipeline_once():
                     measured_gb = governor.measure_inv(inv_safe_name)
                     governor.update_steady_state(inv_safe_name, measured_gb)
                     pipes.BUDGET.revise(inv_safe_name, "pool_steady", measured_gb)
+                    per_worker = max(0.25, measured_gb / max(1, num_procs))
+                    pipes._WORKER_GB_EST = 0.5 * pipes._WORKER_GB_EST + 0.5 * per_worker
                     print(f"[Budget] {inv_safe_name}.pool_steady: set {measured_gb:.2f}GB | remaining {pipes.BUDGET.remaining_gb():.2f}GB", flush=True)
 
                 pipes.run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, mem_floor_callable, on_pool_started=on_pool_started_callback)
@@ -597,7 +612,7 @@ def _pipeline_once():
 
                 if pipes.BUDGET.reserve(target_inv, "core_shm", core_gb, block=False):
                     target_inv = pending_inversions.popleft()
-                    print(f"[Orchestrator] Admitting inversion '{target_inv}' (reserved {core_gb:.2f} GB core_shm)...")
+                    print(f"[Orchestrator] Admitted {target_inv} | reserved core_shm={core_gb:.2f}GB | budget {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB")
                     baseline_rss = (monitor_thread.snapshot().app_rss_gb if monitor_thread else 0.0)
                     thread = threading.Thread(target=run_single_inversion, args=(target_inv, baseline_rss, shared_data_for_threads))
                     running_inversions[thread] = target_inv
@@ -836,19 +851,40 @@ def _pipeline_once():
 
 
 def supervisor_main(max_restarts=100, backoff_sec=10):
-    import multiprocessing as mp, time
+    import multiprocessing as mp, time, signal
     ctx = mp.get_context("spawn")
+    should_stop = {"flag": False}
+
+    def _stop(*_):
+        should_stop["flag"] = True
+
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+
     restarts = 0
-    while restarts <= max_restarts:
+    while not should_stop["flag"] and restarts <= max_restarts:
         p = ctx.Process(target=_pipeline_once, name="ferromic-pipeline")
         p.start()
-        p.join()
+        while p.is_alive():
+            if should_stop["flag"]:
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
+                p.join(timeout=5)
+                return
+            time.sleep(0.2)
         code = p.exitcode
         if code == 0:
             break
+        if code in (-2, -15):
+            break
         restarts += 1
         print(f"[Supervisor] Child exited with code {code}. Restart {restarts}/{max_restarts} in {backoff_sec}s...", flush=True)
-        time.sleep(backoff_sec)
+        for _ in range(backoff_sec * 5):
+            if should_stop["flag"]:
+                return
+            time.sleep(0.2)
 
 
 def main():
