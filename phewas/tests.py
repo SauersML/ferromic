@@ -24,6 +24,18 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
+try:
+    from google.cloud import bigquery
+    bigquery.Client = MagicMock()
+except Exception:
+    pass
+
+try:
+    from phewas import iox
+    iox.load_related_to_remove = lambda *_, **__: set()
+except Exception:
+    pass
+
 # Add the current directory to the path to allow absolute imports of phewas modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import phewas.run as run
@@ -592,7 +604,10 @@ def test_lrt_overall_meta_idempotency(test_ctx):
         shm.close(); shm.unlink()
 
 def test_final_results_has_ci_and_ancestry_fields():
-    with temp_workspace() as tmpdir, preserve_run_globals(), patch('phewas.run.bigquery.Client'), patch('phewas.run.io.load_related_to_remove', return_value=set()):
+    with temp_workspace() as tmpdir, preserve_run_globals(), \
+         patch('phewas.run.bigquery.Client'), \
+         patch('phewas.run.io.load_related_to_remove', return_value=set()), \
+         patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()):
         core_data, phenos = make_synth_cohort()
         defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
         local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
@@ -643,7 +658,10 @@ def test_multi_inversion_pipeline_produces_master_file():
     Integration test for the primary new feature: running two inversions, applying
     a global FDR, and producing a single master result file.
     """
-    with temp_workspace() as tmpdir, preserve_run_globals(), patch('phewas.run.bigquery.Client'), patch('phewas.run.io.load_related_to_remove', return_value=set()):
+    with temp_workspace() as tmpdir, preserve_run_globals(), \
+         patch('phewas.run.bigquery.Client'), \
+         patch('phewas.run.io.load_related_to_remove', return_value=set()), \
+         patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()):
         # 1. Define two inversions and their synthetic data
         INV_A, INV_B = 'chr_test-A-INV-1', 'chr_test-B-INV-2'
         core_data, phenos = make_synth_cohort()
