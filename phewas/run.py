@@ -515,7 +515,7 @@ def _pipeline_once():
                 os.makedirs(lrt_overall_cache_dir, exist_ok=True)
                 os.makedirs(lrt_followup_cache_dir, exist_ok=True)
 
-                ctx = {"NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER, "MIN_NEFF_FILTER": MIN_NEFF_FILTER, "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS, "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE, "RESULTS_CACHE_DIR": results_cache_dir, "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir, "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir, "cdr_codename": shared_data['cdr_codename']}
+                ctx = {"NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER, "MIN_NEFF_FILTER": MIN_NEFF_FILTER, "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS, "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE, "RESULTS_CACHE_DIR": results_cache_dir, "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir, "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir, "cdr_codename": shared_data['cdr_codename'], "REPAIR_META_IF_MISSING": True}
                 dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
                 inversion_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, f"inversion_{target_inversion}.parquet"), io.load_inversions, target_inversion, dosages_path, validate_target=target_inversion)
                 inversion_df.index = inversion_df.index.astype(str)
@@ -546,38 +546,84 @@ def _pipeline_once():
 
                 sex_vec = core_df_with_const['sex'].to_numpy(dtype=np.float32, copy=False)
 
-                pheno_queue = queue.Queue(maxsize=QUEUE_MAX_SIZE)
-                fetcher_thread = threading.Thread(
-                    target=pheno.phenotype_fetcher_worker,
-                    args=(pheno_queue, shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], shared_data['cdr_codename'], core_index, CACHE_DIR, LOADER_CHUNK_SIZE, LOADER_THREADS, True),
-                    kwargs=dict(
-                        allowed_mask_by_cat=allowed_mask_by_cat,
-                        sex_vec=sex_vec,
-                        min_cases=MIN_CASES_FILTER,
-                        min_ctrls=MIN_CONTROLS_FILTER,
-                        sex_mode="majority",
-                        sex_prop=models.DEFAULT_SEX_RESTRICT_PROP,
-                        max_other=ctx.get("SEX_RESTRICT_MAX_OTHER_CASES", 0),
-                        min_neff=MIN_NEFF_FILTER,
-                    ),
-                )
-                fetcher_thread.start()
+                # ---- Pre-scan: if ALL phenotypes are cache-valid, skip launching the fit pool entirely ----
+                core_fp_scan = models._index_fingerprint(core_index)
+                allowed_fp_by_cat_scan = {cat: models._mask_fingerprint(mask, core_index) for cat, mask in allowed_mask_by_cat.items()}
+                need_work = False
+                for row in shared_data['pheno_defs'][['sanitized_name','disease_category']].to_dict('records'):
+                    s = row['sanitized_name']; cat = row['disease_category']
+                    result_path = os.path.join(results_cache_dir, f"{s}.json")
+                    if not os.path.exists(result_path):
+                        need_work = True
+                        break
+                    meta_path = result_path + ".meta.json"
+                    # compute case_idx_fp quickly from the cached parquet
+                    case_info = pheno._load_single_pheno_cache(row, core_index, shared_data['cdr_codename'], CACHE_DIR)
+                    case_idx = case_info['case_idx'] if case_info else np.array([], dtype=np.int32)
+                    case_fp_scan = models._index_fingerprint(core_index[case_idx] if case_idx.size > 0 else pd.Index([]))
+                    allowed_fp_scan = allowed_fp_by_cat_scan.get(cat, models._mask_fingerprint(np.ones(len(core_index), dtype=bool), core_index))
 
-                def on_pool_started_callback(num_procs, worker_pids):
-                    governor.register_pool(inv_safe_name, worker_pids)
-                    time.sleep(10)
-                    measured_gb = governor.measure_inv(inv_safe_name)
-                    core_shm_gb = float(pipes.BUDGET._reserved_by_inv.get(inv_safe_name, {}).get("core_shm", 0.0))
-                    # Do not double-charge the shared design matrix: reserve only the pool's incremental footprint.
-                    pool_steady_gb = max(0.0, measured_gb - core_shm_gb)
-                    governor.update_steady_state(inv_safe_name, pool_steady_gb)
-                    pipes.BUDGET.revise(inv_safe_name, "pool_steady", pool_steady_gb)
-                    per_worker = max(0.25, pool_steady_gb / max(1, num_procs))
-                    pipes._WORKER_GB_EST = 0.5 * pipes._WORKER_GB_EST + 0.5 * per_worker
-                    print(f"[Budget] {inv_safe_name}.pool_steady: set {pool_steady_gb:.2f}GB | remaining {pipes.BUDGET.remaining_gb():.2f}GB", flush=True)
+                    if os.path.exists(meta_path):
+                        m = io.read_meta_json(meta_path)
+                        if not m or not (
+                            m.get("model_columns") == list(core_df_with_const.columns) and
+                            m.get("ridge_l2_base") == RIDGE_L2_BASE and
+                            m.get("core_index_fp") == core_fp_scan and
+                            m.get("case_idx_fp") == case_fp_scan and
+                            m.get("allowed_mask_fp") == allowed_fp_scan and
+                            m.get("min_cases") == MIN_CASES_FILTER and
+                            m.get("min_ctrls") == MIN_CONTROLS_FILTER
+                        ):
+                            need_work = True
+                            break
+                    else:
+                        # Safe sidecar repair to enable fast-skip; does not change result JSON
+                        if ctx.get("REPAIR_META_IF_MISSING", False):
+                            models._write_meta(
+                                meta_path, "phewas_result", s, cat, target_inversion,
+                                core_df_with_const.columns, core_fp_scan, case_fp_scan,
+                                extra={"allowed_mask_fp": allowed_fp_scan, "ridge_l2_base": RIDGE_L2_BASE}
+                            )
+                            print(f"[meta repaired] {s}", flush=True)
+                        else:
+                            need_work = True
+                            break
 
-                pipes.run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, mem_floor_callable, on_pool_started=on_pool_started_callback)
-                fetcher_thread.join()
+                if not need_work:
+                    print(f"[Orchestrator] All phenotypes cache-valid for {inv_safe_name}; skipping fit pool.", flush=True)
+                else:
+                    pheno_queue = queue.Queue(maxsize=QUEUE_MAX_SIZE)
+                    fetcher_thread = threading.Thread(
+                        target=pheno.phenotype_fetcher_worker,
+                        args=(pheno_queue, shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], shared_data['cdr_codename'], core_index, CACHE_DIR, LOADER_CHUNK_SIZE, LOADER_THREADS, True),
+                        kwargs=dict(
+                            allowed_mask_by_cat=allowed_mask_by_cat,
+                            sex_vec=sex_vec,
+                            min_cases=MIN_CASES_FILTER,
+                            min_ctrls=MIN_CONTROLS_FILTER,
+                            sex_mode="majority",
+                            sex_prop=models.DEFAULT_SEX_RESTRICT_PROP,
+                            max_other=ctx.get("SEX_RESTRICT_MAX_OTHER_CASES", 0),
+                            min_neff=MIN_NEFF_FILTER,
+                        ),
+                    )
+                    fetcher_thread.start()
+
+                    def on_pool_started_callback(num_procs, worker_pids):
+                        governor.register_pool(inv_safe_name, worker_pids)
+                        time.sleep(10)
+                        measured_gb = governor.measure_inv(inv_safe_name)
+                        core_shm_gb = float(pipes.BUDGET._reserved_by_inv.get(inv_safe_name, {}).get("core_shm", 0.0))
+                        # Do not double-charge the shared design matrix: reserve only the pool's incremental footprint.
+                        pool_steady_gb = max(0.0, measured_gb - core_shm_gb)
+                        governor.update_steady_state(inv_safe_name, pool_steady_gb)
+                        pipes.BUDGET.revise(inv_safe_name, "pool_steady", pool_steady_gb)
+                        per_worker = max(0.25, pool_steady_gb / max(1, num_procs))
+                        pipes._WORKER_GB_EST = 0.5 * pipes._WORKER_GB_EST + 0.5 * per_worker
+                        print(f"[Budget] {inv_safe_name}.pool_steady: set {pool_steady_gb:.2f}GB | remaining {pipes.BUDGET.remaining_gb():.2f}GB", flush=True)
+
+                    pipes.run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, mem_floor_callable, on_pool_started=on_pool_started_callback)
+                    fetcher_thread.join()
 
                 name_to_cat = shared_data['pheno_defs'].set_index('sanitized_name')['disease_category'].to_dict()
                 result_paths = [os.path.join(results_cache_dir, f) for f in os.listdir(results_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
