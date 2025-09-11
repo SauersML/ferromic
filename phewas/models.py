@@ -1004,12 +1004,18 @@ def lrt_overall_worker(task):
             io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": "missing_case_cache"})
             return
 
-        # Prefer precomputed case_fp if present in task
-        case_fp = task.get("case_fp")
-        if case_fp is None:
+        # Prefer precomputed case_idx / case_fp; fall back to parquet
+        case_idx = None
+        if task.get("case_idx") is not None:
+            case_idx = np.asarray(task["case_idx"], dtype=np.int32)
+        if task.get("case_fp") is not None:
+            case_fp = task["case_fp"]
+            if case_idx is None:
+                case_idx = np.array([], dtype=np.int32)
+        else:
             case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
-            case_idx = worker_core_df_index.get_indexer(case_ids)
-            case_idx = case_idx[case_idx >= 0]
+            idx = worker_core_df_index.get_indexer(case_ids)
+            case_idx = idx[idx >= 0].astype(np.int32)
             case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
 
         # Use per-category allowed fingerprint computed once in worker
@@ -1032,8 +1038,10 @@ def lrt_overall_worker(task):
             print(f"[skip cache-ok] {s_name_safe} (LRT-Stage1)", flush=True)
             return
 
+        allowed_mask = allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool))
         case_mask = np.zeros(N_core, dtype=bool)
-        if case_idx.size > 0: case_mask[case_idx] = True
+        if case_idx.size > 0:
+            case_mask[case_idx] = True
         valid_mask = (allowed_mask | case_mask) & finite_mask_worker
 
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
@@ -1156,11 +1164,17 @@ def lrt_followup_worker(task):
             io.atomic_write_json(result_path, {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "missing_case_cache"})
             return
 
-        case_fp = task.get("case_fp")
-        if case_fp is None:
+        case_idx = None
+        if task.get("case_idx") is not None:
+            case_idx = np.asarray(task["case_idx"], dtype=np.int32)
+        if task.get("case_fp") is not None:
+            case_fp = task["case_fp"]
+            if case_idx is None:
+                case_idx = np.array([], dtype=np.int32)
+        else:
             case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
-            case_idx = worker_core_df_index.get_indexer(case_ids)
-            case_idx = case_idx[case_idx >= 0]
+            idx = worker_core_df_index.get_indexer(case_ids)
+            case_idx = idx[idx >= 0].astype(np.int32)
             case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
 
         allowed_fp = allowed_fp_by_cat.get(category) if 'allowed_fp_by_cat' in globals() else _mask_fingerprint(
@@ -1181,8 +1195,10 @@ def lrt_followup_worker(task):
             print(f"[skip cache-ok] {s_name_safe} (LRT-Stage2)", flush=True)
             return
 
+        allowed_mask = allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool))
         case_mask = np.zeros(N_core, dtype=bool)
-        if case_idx.size > 0: case_mask[case_idx] = True
+        if case_idx.size > 0:
+            case_mask[case_idx] = True
         valid_mask = (allowed_mask | case_mask) & finite_mask_worker
 
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
