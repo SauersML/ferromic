@@ -25,8 +25,12 @@ except ImportError:
     PSUTIL_AVAILABLE = False
 
 # Add the current directory to the path to allow absolute imports of phewas modules
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-import run, iox as io, pheno, models, pipes
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import phewas.run as run
+import phewas.iox as io
+import phewas.pheno as pheno
+import phewas.models as models
+import phewas.pipes as pipes
 from scipy.special import expit as sigmoid
 
 # --- Test Constants ---
@@ -100,6 +104,21 @@ def make_synth_cohort(N=200, NUM_PCS=10, seed=42):
         "ancestry": ancestry, "related_to_remove": set()
     }
     return core_data, phenos
+
+
+def _init_worker_from_df(df, masks, ctx):
+    """Utility to initialize model worker using shared memory."""
+    arr = df.to_numpy(dtype=np.float32, copy=True)
+    meta, shm = io.create_shared_from_ndarray(arr, readonly=True)
+    models.init_worker(meta, list(df.columns), df.index.astype(str), masks, ctx)
+    return shm
+
+
+def _init_lrt_worker_from_df(df, masks, anc_series, ctx):
+    arr = df.to_numpy(dtype=np.float32, copy=True)
+    meta, shm = io.create_shared_from_ndarray(arr, readonly=True)
+    models.init_lrt_worker(meta, list(df.columns), df.index.astype(str), masks, anc_series, ctx)
+    return shm
 
 def prime_all_caches_for_run(core_data, phenos, cdr_codename, target_inversion, cache_dir="./phewas_cache"):
     os.makedirs(cache_dir, exist_ok=True)
@@ -211,13 +230,14 @@ def test_should_skip_meta_equivalence(test_ctx):
         io.write_meta_json("test.meta.json", meta)
         models.CTX = test_ctx
         # Check that the skip function returns True when the context is the same
-        assert models._should_skip("test.meta.json", core_df, "dummy_fp", "cat", TEST_TARGET_INVERSION, allowed_fp)
+        core_index_fp = models._index_fingerprint(core_df.index)
+        assert models._should_skip("test.meta.json", core_df.columns, core_index_fp, "dummy_fp", "cat", TEST_TARGET_INVERSION, allowed_fp)
         # Change the context
         test_ctx_changed = test_ctx.copy()
         test_ctx_changed["MIN_CASES_FILTER"] = 11
         models.CTX = test_ctx_changed
         # Check that the skip function returns False when the context is different
-        assert not models._should_skip("test.meta.json", core_df, "dummy_fp", "cat", TEST_TARGET_INVERSION, allowed_fp)
+        assert not models._should_skip("test.meta.json", core_df.columns, core_index_fp, "dummy_fp", "cat", TEST_TARGET_INVERSION, allowed_fp)
 
 def test_pheno_cache_loader_returns_correct_indices():
     with temp_workspace():
@@ -234,7 +254,7 @@ def test_worker_constant_dosage_emits_nan(test_ctx):
         core_data, phenos = make_synth_cohort()
         core_df = pd.concat([core_data['demographics'][['AGE_c', 'AGE_c_sq']], core_data['sex'], core_data['pcs'], core_data['inversion_const']], axis=1)
         core_df_with_const = sm.add_constant(core_df)
-        models.init_worker(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
+        shm = _init_worker_from_df(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
         case_idx = core_df_with_const.index.get_indexer(list(phenos["A_strong_signal"]["cases"]))
         pheno_data = {"name": "A_strong_signal", "category": "cardio", "case_idx": case_idx[case_idx >= 0].astype(np.int32)}
         models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
@@ -242,6 +262,7 @@ def test_worker_constant_dosage_emits_nan(test_ctx):
         assert result_path.exists()
         with open(result_path) as f: res = json.load(f)
         assert all(pd.isna(res.get(k)) for k in ["Beta", "OR", "P_Value"])
+        shm.close(); shm.unlink()
 
 def test_worker_insufficient_counts_skips(test_ctx):
     # This test specifically checks the insufficient counts filter, so we
@@ -253,7 +274,7 @@ def test_worker_insufficient_counts_skips(test_ctx):
         core_data, phenos = make_synth_cohort()
         core_df = pd.concat([core_data['demographics'][['AGE_c', 'AGE_c_sq']], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
         core_df_with_const = sm.add_constant(core_df)
-        models.init_worker(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
+        shm = _init_worker_from_df(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
         case_idx = core_df_with_const.index.get_indexer(list(phenos["B_insufficient"]["cases"]))
         pheno_data = {"name": "B_insufficient", "category": "cardio", "case_idx": case_idx[case_idx != -1]}
         models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
@@ -262,6 +283,7 @@ def test_worker_insufficient_counts_skips(test_ctx):
         with open(result_path) as f:
             res = json.load(f)
         assert res["Skip_Reason"].startswith("insufficient_counts")
+        shm.close(); shm.unlink()
 
 def test_lrt_rank_and_df_positive(test_ctx):
     with temp_workspace():
@@ -272,11 +294,12 @@ def test_lrt_rank_and_df_positive(test_ctx):
         anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
         A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
         core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
-        models.init_worker(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
+        shm = _init_worker_from_df(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
         task = {"name": "A_strong_signal", "category": "cardio", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
         models.lrt_overall_worker(task)
         result_path = Path(test_ctx["LRT_OVERALL_CACHE_DIR"]) / "A_strong_signal.json"
         assert result_path.exists()
+        shm.close(); shm.unlink()
 
 def test_followup_includes_ancestry_levels_and_splits(test_ctx):
     with temp_workspace():
@@ -287,11 +310,12 @@ def test_followup_includes_ancestry_levels_and_splits(test_ctx):
         anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
         A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
         core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
-        models.init_lrt_worker(core_df_with_const, {"neuro": np.ones(len(core_df), dtype=bool)}, core_data['ancestry']['ANCESTRY'], test_ctx)
+        shm = _init_lrt_worker_from_df(core_df_with_const, {"neuro": np.ones(len(core_df), dtype=bool)}, core_data['ancestry']['ANCESTRY'], test_ctx)
         task = {"name": "C_moderate_signal", "category": "neuro", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
         models.lrt_followup_worker(task)
         result_path = Path(test_ctx["LRT_FOLLOWUP_CACHE_DIR"]) / "C_moderate_signal.json"
         assert result_path.exists()
+        shm.close(); shm.unlink()
 
 def test_safe_basename():
     assert models.safe_basename("endo/../../weird:thing") == "endo_.._.._weird_thing"
@@ -301,7 +325,7 @@ def test_cache_idempotency_on_mask_change(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
         core_df = sm.add_constant(pd.concat([core_data['demographics'][['AGE_c', 'AGE_c_sq']], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1))
-        models.init_worker(core_df, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
+        shm = _init_worker_from_df(core_df, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
         case_idx = core_df.index.get_indexer(list(phenos["A_strong_signal"]["cases"]))
         pheno_data = {"name": "A_strong_signal", "category": "cardio", "case_idx": case_idx[case_idx >= 0]}
         models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
@@ -311,10 +335,12 @@ def test_cache_idempotency_on_mask_change(test_ctx):
         mtime2 = (Path(test_ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json").stat().st_mtime
         assert mtime1 == mtime2
         new_mask = np.ones(len(core_df), dtype=bool); new_mask[:10] = False
-        models.init_worker(core_df, {"cardio": new_mask}, test_ctx)
+        shm.close(); shm.unlink()
+        shm = _init_worker_from_df(core_df, {"cardio": new_mask}, test_ctx)
         models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
         mtime3 = (Path(test_ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json").stat().st_mtime
         assert mtime2 < mtime3
+        shm.close(); shm.unlink()
 
 def test_ridge_intercept_is_zero(test_ctx):
     with temp_workspace():
@@ -357,7 +383,7 @@ def test_penalized_fit_ci_and_pval_suppression(test_ctx):
         core_data['pcs'].loc[cases, 'PC1'] = 1000
         core_data['pcs'].loc[~core_data['pcs'].index.isin(cases), 'PC1'] = -1000
         core_df = sm.add_constant(pd.concat([core_data['demographics'][['AGE_c']], core_data['pcs'], core_data['inversion_main']], axis=1))
-        models.init_worker(core_df, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
+        shm = _init_worker_from_df(core_df, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
         case_idx = core_df.index.get_indexer(cases)
         pheno_data = {"name": "A_strong_signal", "category": "cardio", "case_idx": case_idx[case_idx >= 0]}
         models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
@@ -365,6 +391,7 @@ def test_penalized_fit_ci_and_pval_suppression(test_ctx):
         assert res['Used_Ridge'] is True
         assert res['OR_CI95'] is None
         assert pd.isna(res['P_Value'])
+        shm.close(); shm.unlink()
 
 def test_perfect_separation_promoted_to_ridge(test_ctx):
     X = pd.DataFrame({'const': 1, 'x': [0, 0, 1, 1]}); y = pd.Series([0, 0, 1, 1])
@@ -392,7 +419,7 @@ def test_worker_reports_n_used_after_sex_restriction(test_ctx):
 
         allowed_mask_arr = ~core_df.index.isin(list(cases))
         allowed_mask = {"endo": allowed_mask_arr}
-        models.init_worker(core_df, allowed_mask, test_ctx)
+        shm = _init_worker_from_df(core_df, allowed_mask, test_ctx)
         case_idx = core_df.index.get_indexer(list(cases))
         pheno_data = {"name": "sex_restricted_pheno", "category": "endo", "case_idx": case_idx[case_idx >= 0]}
 
@@ -403,11 +430,12 @@ def test_worker_reports_n_used_after_sex_restriction(test_ctx):
         with open(result_path) as f:
             res = json.load(f)
 
-        assert 'sex_restricted_to_1' in res['Model_Notes']
+        assert 'sex_majority_restricted_to_1' in res['Model_Notes']
         assert res['N_Cases'] == len(cases)
         assert res['N_Total_Used'] == len(male_ids)
         assert res['N_Cases_Used'] == len(cases)
         assert res['N_Controls_Used'] == len(male_ids) - len(cases)
+        shm.close(); shm.unlink()
 
 def test_lrt_overall_invalidated_by_penalized_fit(test_ctx):
     """Verifies Stage-1 LRT is skipped if a penalized fit is required."""
@@ -424,7 +452,7 @@ def test_lrt_overall_invalidated_by_penalized_fit(test_ctx):
         anc_cols = pd.get_dummies(core_data['ancestry']['ANCESTRY'], prefix='ANC', drop_first=True, dtype=np.float64)
         core_df = core_df.join(anc_cols)
 
-        models.init_lrt_worker(core_df, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
+        shm = _init_lrt_worker_from_df(core_df, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
 
         task = {"name": "A_strong_signal", "category": "cardio", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
         with warnings.catch_warnings():
@@ -438,6 +466,7 @@ def test_lrt_overall_invalidated_by_penalized_fit(test_ctx):
 
         assert res['LRT_Overall_Reason'] == 'penalized_fit_in_path'
         assert pd.isna(res['P_LRT_Overall'])
+        shm.close(); shm.unlink()
 
 def test_lrt_followup_penalized_fit_omits_ci(test_ctx):
     """Verifies Stage-2 per-ancestry CI is omitted for penalized fits."""
@@ -459,7 +488,7 @@ def test_lrt_followup_penalized_fit_omits_ci(test_ctx):
         core_df = pd.concat([core_data['demographics'][['AGE_c', 'AGE_c_sq']], core_data['sex'], core_data['pcs'], core_data['inversion_main']], axis=1)
         core_df = sm.add_constant(core_df)
 
-        models.init_lrt_worker(core_df, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
+        shm = _init_lrt_worker_from_df(core_df, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
 
         task = {"name": "C_moderate_signal", "category": "neuro", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
         with warnings.catch_warnings():
@@ -475,6 +504,7 @@ def test_lrt_followup_penalized_fit_omits_ci(test_ctx):
         assert 'EUR_CI95' in res
         assert 'AMR_CI95' in res
         assert 'EUR_REASON' not in res
+        shm.close(); shm.unlink()
 
 # --- Integration Tests ---
 def test_fetcher_producer_drains_cache_only():
@@ -546,7 +576,7 @@ def test_lrt_overall_meta_idempotency(test_ctx):
         anc_series = core_data['ancestry']['ANCESTRY'].str.lower()
         A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
         X = X.join(A, how="left").fillna({c: 0.0 for c in A.columns})
-        models.init_worker(X, {"cardio": np.ones(len(X), bool), "neuro": np.ones(len(X), bool)}, test_ctx)
+        shm = _init_worker_from_df(X, {"cardio": np.ones(len(X), bool), "neuro": np.ones(len(X), bool)}, test_ctx)
         task = {"name": "A_strong_signal", "category": "cardio", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
         models.lrt_overall_worker(task)
         f = Path(test_ctx["LRT_OVERALL_CACHE_DIR"]) / "A_strong_signal.json"
@@ -554,9 +584,10 @@ def test_lrt_overall_meta_idempotency(test_ctx):
         time.sleep(1)
         models.lrt_overall_worker(task)
         assert f.stat().st_mtime == m0
+        shm.close(); shm.unlink()
 
 def test_final_results_has_ci_and_ancestry_fields():
-    with temp_workspace() as tmpdir, preserve_run_globals(), patch('run.bigquery.Client'), patch('run.io.load_related_to_remove', return_value=set()):
+    with temp_workspace() as tmpdir, preserve_run_globals(), patch('phewas.run.bigquery.Client'), patch('phewas.run.io.load_related_to_remove', return_value=set()):
         core_data, phenos = make_synth_cohort()
         defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
         local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
@@ -607,7 +638,7 @@ def test_multi_inversion_pipeline_produces_master_file():
     Integration test for the primary new feature: running two inversions, applying
     a global FDR, and producing a single master result file.
     """
-    with temp_workspace() as tmpdir, preserve_run_globals(), patch('run.bigquery.Client'), patch('run.io.load_related_to_remove', return_value=set()):
+    with temp_workspace() as tmpdir, preserve_run_globals(), patch('phewas.run.bigquery.Client'), patch('phewas.run.io.load_related_to_remove', return_value=set()):
         # 1. Define two inversions and their synthetic data
         INV_A, INV_B = 'chr_test-A-INV-1', 'chr_test-B-INV-2'
         core_data, phenos = make_synth_cohort()
@@ -699,7 +730,7 @@ def test_ridge_seeded_refit_matches_mle():
 
     fit_mle = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=200)
 
-    import models
+    import phewas.models as models
     # This test does not use the test_ctx fixture, so we must set the context manually
     # to disable the n_eff gate that would otherwise cause this test to fail.
     models.CTX = {"MLE_REFIT_MIN_NEFF": 0, "RIDGE_L2_BASE": 1.0}
@@ -729,9 +760,9 @@ def test_lrt_allows_when_ridge_seeded_but_final_is_mle(test_ctx):
         anc = pd.get_dummies(core_data['ancestry']['ANCESTRY'], prefix='ANC', drop_first=True, dtype=np.float64)
         X = X.join(anc)
 
-        models.init_lrt_worker(X, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
+        shm = _init_lrt_worker_from_df(X, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
 
-        import models as M
+        from phewas import models as M
         orig = M._logit_fit
         def flaky(model, method, **kw):
             if method in ('newton','bfgs') and not kw.get('_already_failed', False):
@@ -748,3 +779,4 @@ def test_lrt_allows_when_ridge_seeded_but_final_is_mle(test_ctx):
             assert res.get('LRT_Overall_Reason') in (None, '',) or pd.isna(res['LRT_Overall_Reason'])
         finally:
             M._logit_fit = orig
+            shm.close(); shm.unlink()
