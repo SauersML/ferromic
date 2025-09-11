@@ -13,7 +13,7 @@ from scipy import stats as sp_stats
 from scipy.special import expit
 from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationWarning
 
-import iox as io
+from . import iox as io
 
 CTX = {}  # Worker context with constants from run.py
 
@@ -422,7 +422,7 @@ def _fit_diagnostics(X, y, params):
       - max absolute linear predictor
       - fraction of probabilities effectively at 0 or 1
     """
-    X_arr = np.asarray(X, dtype=np.float64)
+    X_arr = X if (isinstance(X, np.ndarray) and X.dtype == np.float64) else np.asarray(X, dtype=np.float64)
     params_arr = np.asarray(params, dtype=np.float64)
     linpred = X_arr @ params_arr
     if not np.all(np.isfinite(linpred)):
@@ -608,39 +608,32 @@ def _apply_sex_restriction_np(X, y, sex_ix):
 worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, finite_mask_worker = None, None, 0, None, None
 # Array-based versions for performance
 X_all, col_ix, worker_core_df_cols, worker_core_df_index = None, None, None, None
+# Handle to keep shared memory alive in workers
+_BASE_SHM_HANDLE = None
 # Per-category cached indices only (no big matrices)
 control_indices_by_cat = {}
 
 
-def init_worker(df_to_share, masks, ctx):
-    """
-    Sends the large core_df, precomputed masks, and context to each worker process.
-    Converts pandas DataFrame to numpy array and pre-caches control matrices for performance.
-    """
+def init_worker(base_shm_meta, core_cols, core_index, masks, ctx):
+    """Initializer that attaches to the shared core design matrix."""
     for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]: os.environ[v] = "1"
     _suppress_worker_warnings()
     _validate_ctx(ctx)
     global worker_core_df, allowed_mask_by_cat, N_core, CTX, finite_mask_worker
-    global X_all, col_ix, worker_core_df_cols, worker_core_df_index
-    global control_indices_by_cat
+    global X_all, col_ix, worker_core_df_cols, worker_core_df_index, control_indices_by_cat, _BASE_SHM_HANDLE
 
-    worker_core_df = df_to_share  # Keep for fingerprints, metadata, and index
-    allowed_mask_by_cat, N_core, CTX = masks, len(df_to_share), ctx
-    worker_core_df_cols = df_to_share.columns
-    worker_core_df_index = df_to_share.index
+    worker_core_df = None
+    allowed_mask_by_cat, CTX = masks, ctx
+    worker_core_df_cols = pd.Index(core_cols)
+    worker_core_df_index = pd.Index(core_index)
 
-    # --- Array conversion ---
-    X_all = df_to_share.to_numpy(dtype=np.float64, copy=False)
-    # Protect CoW: never write to the shared design matrix
-    try:
-        X_all.setflags(write=False)
-    except Exception:
-        pass
+    X_all, _BASE_SHM_HANDLE = io.attach_shared_ndarray(base_shm_meta)
+    N_core = X_all.shape[0]
     col_ix = {name: i for i, name in enumerate(worker_core_df_cols)}
 
     finite_mask_worker = np.isfinite(X_all).all(axis=1)
 
-    # --- Pre-cache control indices per category (NO matrices) ---
+    control_indices_by_cat = {}
     for category, allowed_mask in allowed_mask_by_cat.items():
         control_mask = allowed_mask & finite_mask_worker
         control_indices_by_cat[category] = np.flatnonzero(control_mask)
@@ -648,34 +641,35 @@ def init_worker(df_to_share, masks, ctx):
     bad = ~finite_mask_worker
     if bad.any():
         rows = worker_core_df_index[bad][:5].tolist()
-        bad_cols = [c for c in worker_core_df_cols if not np.isfinite(worker_core_df[c]).all()]
-        print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={bad_cols[:10]}", flush=True)
-    print(f"[Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks. Array conversion complete.", flush=True)
+        nonfinite_cols = [c for j, c in enumerate(worker_core_df_cols) if not np.isfinite(X_all[:, j]).all()]
+        print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={nonfinite_cols[:10]}", flush=True)
+    print(f"[Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks. Array is shared, no per-worker copy.", flush=True)
 
 
-def init_lrt_worker(df_to_share, masks, anc_series, ctx):
+def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx):
     """Initializer for LRT pools that also provides ancestry labels and context."""
     for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]: os.environ[v] = "1"
     _suppress_worker_warnings()
     _validate_ctx(ctx)
     global worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, CTX, finite_mask_worker
-    global X_all, col_ix, worker_core_df_cols, worker_core_df_index
+    global X_all, col_ix, worker_core_df_cols, worker_core_df_index, _BASE_SHM_HANDLE
 
-    worker_core_df, allowed_mask_by_cat, N_core, CTX = df_to_share, masks, len(df_to_share), ctx
-    worker_anc_series = anc_series.reindex(df_to_share.index).str.lower()
-    worker_core_df_cols = df_to_share.columns
-    worker_core_df_index = df_to_share.index
+    worker_core_df = None
+    allowed_mask_by_cat, CTX = masks, ctx
+    worker_core_df_cols = pd.Index(core_cols)
+    worker_core_df_index = pd.Index(core_index)
+    worker_anc_series = anc_series.reindex(worker_core_df_index).str.lower()
 
-    # --- Array conversion ---
-    X_all = df_to_share.to_numpy(dtype=np.float64, copy=False)
+    X_all, _BASE_SHM_HANDLE = io.attach_shared_ndarray(base_shm_meta)
+    N_core = X_all.shape[0]
     col_ix = {name: i for i, name in enumerate(worker_core_df_cols)}
 
     finite_mask_worker = np.isfinite(X_all).all(axis=1)
     bad = ~finite_mask_worker
     if bad.any():
         rows = worker_core_df_index[bad][:5].tolist()
-        bad_cols = [c for c in worker_core_df_cols if not np.isfinite(worker_core_df[c]).all()]
-        print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={bad_cols[:10]}", flush=True)
+        nonfinite_cols = [c for j, c in enumerate(worker_core_df_cols) if not np.isfinite(X_all[:, j]).all()]
+        print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={nonfinite_cols[:10]}", flush=True)
     print(f"[LRT-Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks, {worker_anc_series.nunique()} ancestries.", flush=True)
 
 def _index_fingerprint(index):
@@ -696,15 +690,15 @@ def _mask_fingerprint(mask: np.ndarray, index: pd.Index) -> str:
         n += 1
     return f"{h:016x}:{n}"
 
-def _should_skip(meta_path, core_df, case_idx_fp, category, target, allowed_fp):
+def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp):
     """Determines if a model run can be skipped based on metadata."""
     meta = io.read_meta_json(meta_path)
-    if not meta: return False
-    # Check that the metadata matches the current context
+    if not meta:
+        return False
     return (
-        meta.get("model_columns") == list(core_df.columns) and
+        meta.get("model_columns") == list(core_df_cols) and
         meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
-        meta.get("core_index_fp") == _index_fingerprint(core_df.index) and
+        meta.get("core_index_fp") == core_index_fp and
         meta.get("case_idx_fp") == case_idx_fp and
         meta.get("allowed_mask_fp") == allowed_fp and
         meta.get("min_cases") == CTX["MIN_CASES_FILTER"] and
@@ -740,7 +734,15 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         control_indices = control_indices_by_cat.get(category, np.array([], dtype=int))
         allowed_fp = _index_fingerprint(worker_core_df_index[control_indices])
 
-        if os.path.exists(result_path) and _should_skip(meta_path, worker_core_df, case_idx_fp, category, target_inversion, allowed_fp):
+        if os.path.exists(result_path) and _should_skip(
+            meta_path,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_idx_fp,
+            category,
+            target_inversion,
+            allowed_fp,
+        ):
             return
 
         # --- Array-based data assembly ---
@@ -748,10 +750,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         ctrl_idx = control_indices_by_cat.get(category, np.array([], dtype=int))
         # Fancy indexing returns a copy (that’s OK; it’s ephemeral and per-fit)
-        X_controls = X_all[ctrl_idx] if ctrl_idx.size else np.empty((0, X_all.shape[1]))
+        X_controls = X_all[ctrl_idx].astype(np.float64, copy=False) if ctrl_idx.size else np.empty((0, X_all.shape[1]), dtype=np.float64)
         y_controls = np.zeros(len(X_controls), dtype=np.int8)
 
-        X_cases = X_all[case_indices_in_X_all]
+        X_cases = X_all[case_indices_in_X_all].astype(np.float64, copy=False)
         y_cases = np.ones(len(X_cases), dtype=np.int8)
 
         X_clean = np.vstack([X_controls, X_cases])
@@ -957,8 +959,13 @@ def lrt_overall_worker(task):
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
         anc_cols = [c for c in worker_core_df_cols if c.startswith("ANC_")]
         base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq'] + anc_cols
+        base_ix = [col_ix[c] for c in base_cols]
 
-        X_base = worker_core_df.loc[valid_mask, base_cols].astype(np.float64, copy=False)
+        X_base = pd.DataFrame(
+            X_all[np.ix_(valid_mask, base_ix)],
+            index=worker_core_df_index[valid_mask],
+            columns=base_cols,
+        ).astype(np.float64, copy=False)
         y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base.index, dtype=np.int8)
 
         Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
@@ -1048,8 +1055,8 @@ def lrt_overall_worker(task):
             out["LRT_Overall_Reason"] = "penalized_fit_in_path" if (fit_red or fit_full) else "fit_failed"
 
         io.atomic_write_json(result_path, out)
-        _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df.columns,
-                    _index_fingerprint(worker_core_df.index), case_fp,
+        _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols,
+                    _index_fingerprint(worker_core_df_index), case_fp,
                     extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
     except Exception as e:
         io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
@@ -1086,7 +1093,12 @@ def lrt_followup_worker(task):
 
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
         base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq']
-        X_base_df = worker_core_df.loc[valid_mask, base_cols].astype(np.float64, copy=False)
+        base_ix = [col_ix[c] for c in base_cols]
+        X_base_df = pd.DataFrame(
+            X_all[np.ix_(valid_mask, base_ix)],
+            index=worker_core_df_index[valid_mask],
+            columns=base_cols,
+        ).astype(np.float64, copy=False)
         y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base_df.index, dtype=np.int8)
 
         Xb, yb, note, skip = _apply_sex_restriction(X_base_df, y_series)

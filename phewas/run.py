@@ -26,10 +26,10 @@ from google.cloud import bigquery
 from statsmodels.stats.multitest import multipletests
 from scipy import stats
 
-import iox as io
-import pheno
-import pipes
-import models
+from . import iox as io
+from . import pheno
+from . import pipes
+from . import models
 
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 

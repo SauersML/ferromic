@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import iox as io
+from . import iox as io
 
 # --- BigQuery batch fetch tuning ---
 PHENO_BUCKET_SERIES = [1, 4, 16, 64]  # escalate result sharding if needed

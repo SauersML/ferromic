@@ -198,6 +198,46 @@ def atomic_write_pickle(path, obj):
         except Exception:
             pass
 
+
+# --- Shared memory helpers -------------------------------------------------
+from multiprocessing import shared_memory
+
+
+def create_shared_from_ndarray(arr: np.ndarray, readonly: bool = True):
+    """Create a shared memory block from ``arr`` and return (meta, handle).
+
+    ``meta`` is a lightweight dictionary describing the shared memory block
+    that can be sent to worker processes. ``handle`` is the ``SharedMemory``
+    instance which must be kept alive by the parent and later closed/unlinked
+    when no longer needed.
+    """
+    shm = shared_memory.SharedMemory(create=True, size=arr.nbytes)
+    view = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm.buf)
+    view[:] = arr
+    if readonly:
+        try:
+            view.setflags(write=False)
+        except Exception:
+            pass
+    meta = {"name": shm.name, "shape": arr.shape, "dtype": str(arr.dtype)}
+    return meta, shm
+
+
+def attach_shared_ndarray(meta: dict):
+    """Attach to a shared memory block created by ``create_shared_from_ndarray``.
+
+    Returns a tuple ``(array, handle)`` where ``array`` is a NumPy view of the
+    shared memory and ``handle`` is the ``SharedMemory`` object which the caller
+    is responsible for closing (but not unlinking).
+    """
+    shm = shared_memory.SharedMemory(name=meta["name"])
+    arr = np.ndarray(tuple(meta["shape"]), dtype=np.dtype(meta["dtype"]), buffer=shm.buf)
+    try:
+        arr.setflags(write=False)
+    except Exception:
+        pass
+    return arr, shm
+
 def rss_gb():
     """Returns the resident set size of the current process in gigabytes for lightweight memory instrumentation."""
     if not PSUTIL_AVAILABLE:
