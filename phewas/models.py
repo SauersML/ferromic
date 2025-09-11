@@ -5,6 +5,7 @@ import warnings
 from datetime import datetime, timezone
 import traceback
 import sys
+import atexit
 
 import numpy as np
 import pandas as pd
@@ -635,6 +636,16 @@ def init_worker(base_shm_meta, core_cols, core_index, masks, ctx):
     worker_core_df_index = pd.Index(core_index)
 
     X_all, _BASE_SHM_HANDLE = io.attach_shared_ndarray(base_shm_meta)
+
+    def _cleanup():
+        try:
+            if _BASE_SHM_HANDLE:
+                _BASE_SHM_HANDLE.close()
+        except Exception:
+            pass
+
+    atexit.register(_cleanup)
+
     N_core = X_all.shape[0]
     col_ix = {name: i for i, name in enumerate(worker_core_df_cols)}
 
@@ -668,6 +679,16 @@ def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx
     worker_anc_series = anc_series.reindex(worker_core_df_index).str.lower()
 
     X_all, _BASE_SHM_HANDLE = io.attach_shared_ndarray(base_shm_meta)
+
+    def _cleanup():
+        try:
+            if _BASE_SHM_HANDLE:
+                _BASE_SHM_HANDLE.close()
+        except Exception:
+            pass
+
+    atexit.register(_cleanup)
+
     N_core = X_all.shape[0]
     col_ix = {name: i for i, name in enumerate(worker_core_df_cols)}
 
@@ -734,15 +755,21 @@ def _pos_in_current(orig_ix, current_ix_array):
 def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     """CONSUMER: Runs a single model. Executed in a separate process using NumPy arrays."""
     s_name, category = pheno_data["name"], pheno_data["category"]
-    case_ids = io.load_pheno_cases_from_cache(s_name, CTX["CACHE_DIR"], CTX["cdr_codename"])
-    idx = worker_core_df_index.get_indexer(case_ids)
-    case_idx_global = idx[idx >= 0].astype(np.int32)
+    case_idx_global = pheno_data.get("case_idx")
+    if case_idx_global is None:
+        cdr_code = pheno_data.get("cdr_codename", CTX.get("cdr_codename"))
+        case_ids = io.load_pheno_cases_from_cache(s_name, CTX["CACHE_DIR"], cdr_code)
+        idx = worker_core_df_index.get_indexer(case_ids)
+        case_idx_global = idx[idx >= 0].astype(np.int32)
+        case_ids_for_fp = case_ids
+    else:
+        case_idx_global = np.asarray(case_idx_global, dtype=np.int32)
+        case_ids_for_fp = worker_core_df_index[case_idx_global] if case_idx_global.size > 0 else pd.Index([])
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(results_cache_dir, f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
 
     try:
-        case_ids_for_fp = worker_core_df_index[case_idx_global] if case_idx_global.size > 0 else pd.Index([])
         case_idx_fp = _index_fingerprint(case_ids_for_fp)
 
         # Fingerprint the controls for this category for skipping

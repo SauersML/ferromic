@@ -466,7 +466,7 @@ def load_pheno_cases_from_cache(name, cache_dir, cdr_codename):
     path = os.path.join(cache_dir, f"pheno_{name}_{cdr_codename}.parquet")
     if not os.path.exists(path):
         return pd.Index([], dtype=str)
-    df = pd.read_parquet(path)
+    df = pd.read_parquet(path, columns=['is_case'])
     if df.index.name != 'person_id':
         if 'person_id' in df.columns:
             df = df.set_index('person_id')
