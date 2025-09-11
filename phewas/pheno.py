@@ -7,6 +7,7 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import iox as io
+from . import pipes
 
 LOCK_MAX_AGE_SEC = 360000 # 100h
 
@@ -184,17 +185,15 @@ def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
         return None
 
 def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename):
-    """THREAD WORKER: Queries one phenotype from BigQuery, caches it, and returns integer case indices."""
+    """THREAD WORKER: Queries one phenotype from BigQuery, caches it, and returns a descriptor."""
     from google.cloud import bigquery
-    bq_client = bigquery.Client() # Create a client per thread for safety
+    bq_client = bigquery.Client()  # Create a client per thread for safety
     s_name, category, all_codes = pheno_info['sanitized_name'], pheno_info['disease_category'], pheno_info['all_codes']
     print(f"[Fetcher]  - [BQ] Querying '{s_name}'...", flush=True)
 
     codes_upper = sorted({str(c).upper() for c in (all_codes or set()) if str(c).strip()})
-    if not codes_upper:
-        case_idx = np.empty(0, dtype=np.int32)
-        pids = []
-    else:
+    pids = []
+    if codes_upper:
         sql = f"""
           SELECT DISTINCT CAST(person_id AS STRING) AS person_id
           FROM `{cdr_id}.condition_occurrence`
@@ -207,11 +206,8 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
             )
             df_ids = bq_client.query(sql, job_config=job_cfg).to_dataframe()
             pids = df_ids["person_id"].astype(str)
-            idx = core_index.get_indexer(pids)
-            case_idx = idx[idx >= 0].astype(np.int32)
         except Exception as e:
             print(f"[Fetcher]  - [FAIL] BQ query failed for {s_name}. Error: {str(e)[:150]}", flush=True)
-            case_idx = np.empty(0, dtype=np.int32)
             pids = []
 
     pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
@@ -220,7 +216,7 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
     io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
     print(f"[Fetcher]  - Cached {len(pids_for_cache):,} new cases for '{s_name}'", flush=True)
 
-    return {"name": s_name, "category": category, "case_idx": case_idx}
+    return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
 
 def _batch_pheno_defs(phenos_to_query_from_bq, max_phenos, max_codes):
     """
@@ -245,7 +241,7 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
     THREAD WORKER: Queries MANY phenotypes in one scan using an Array<STRUCT<code STRING, pheno STRING>> parameter.
     Streams results page-by-page and shards by person_id buckets when needed to bound output size.
 
-    Returns: list of {"name": sanitized_name, "category": disease_category, "case_idx": np.ndarray[int32]}
+    Returns: list of {"name": sanitized_name, "category": disease_category, "codes_n": int}
     and writes per-phenotype parquet caches (is_case=1).
     """
     from google.cloud import bigquery  # local import to not affect unit tests that bypass BQ
@@ -266,7 +262,6 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
             phenos_list.append(s_name)
 
     if not codes_list:
-        # nothing to fetch; emit empty caches
         out = []
         for s_name, m in meta.items():
             pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
@@ -275,7 +270,7 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
                 pd.DataFrame({'is_case': []}, index=pd.Index([], name='person_id'), dtype=np.int8),
                 compression="snappy"
             )
-            out.append({"name": s_name, "category": m["category"], "case_idx": np.empty(0, dtype=np.int32)})
+            out.append({"name": s_name, "category": m["category"], "codes_n": len(m["codes"])})
         return out
 
 
@@ -333,7 +328,7 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
                 results.append(_query_single_pheno_bq(row, cdr_id, core_index, cache_dir, cdr_codename))
             except Exception as e:
                 print(f"[Fetcher]  - [FAIL] Fallback single query failed for {row['sanitized_name']}: {str(e)[:200]}", flush=True)
-                results.append({"name": row["sanitized_name"], "category": row["disease_category"], "case_idx": np.empty(0, dtype=np.int32)})
+                results.append({"name": row["sanitized_name"], "category": row["disease_category"], "codes_n": len(row.get("all_codes") or [])})
         return results
 
     # 4) Write caches + build outputs
@@ -344,13 +339,8 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         idx_for_cache = pd.Index(sorted(list(pids)), name='person_id')
         df_to_cache = pd.DataFrame({'is_case': 1}, index=idx_for_cache, dtype=np.int8)
         io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
-        if succeeded:
-            idx = core_index.get_indexer(df_to_cache.index)
-            case_idx = idx[idx >= 0].astype(np.int32)
-        else:
-            case_idx = np.empty(0, dtype=np.int32)
         print(f"[Fetcher]  - Cached {len(df_to_cache):,} cases for '{s_name}' (batched)", flush=True)
-        results.append({"name": s_name, "category": m["category"], "case_idx": case_idx})
+        results.append({"name": s_name, "category": m["category"], "codes_n": len(m["codes"])})
 
     return results
 
@@ -362,24 +352,8 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_cod
     print(f"[Fetcher]  - Found {len(phenos_to_load_from_cache)} cached phenotypes to fast-load.")
     print(f"[Fetcher]  - Found {len(phenos_to_query_from_bq)} uncached phenotypes to queue.")
 
-    # ---  STAGE 1 - PACED PARALLEL CACHE LOADING IN CHUNKS ---
-    num_chunks = (len(phenos_to_load_from_cache) + loader_chunk_size - 1) // loader_chunk_size
-    failed_cache_loads = []
-    for i in range(0, len(phenos_to_load_from_cache), loader_chunk_size):
-        chunk = phenos_to_load_from_cache[i:i + loader_chunk_size]
-        chunk_num = (i // loader_chunk_size) + 1
-        print(f"[Fetcher]  - Processing chunk {chunk_num} of {num_chunks} ({len(chunk)} phenotypes)...", flush=True)
-        with ThreadPoolExecutor(max_workers=loader_threads) as executor:
-            future_to_pheno = {executor.submit(_load_single_pheno_cache, p_info, core_index, cdr_codename, cache_dir): p_info for p_info in chunk}
-            for future in as_completed(future_to_pheno):
-                result = future.result()
-                if result:
-                    pheno_queue.put(result)
-                else:
-                    failed_cache_loads.append(future_to_pheno[future])
-        print(f"[Mem] RSS after chunk {chunk_num}/{num_chunks}: {io.rss_gb():.2f} GB", flush=True)
-    print("[Fetcher]  - Finished all parallel cache loading chunks.")
-    phenos_to_query_from_bq.extend(failed_cache_loads)
+    for row in phenos_to_load_from_cache:
+        pheno_queue.put({"name": row['sanitized_name'], "category": row['disease_category'], "codes_n": len(row.get('all_codes') or [])})
 
     # STAGE 2: CONCURRENT BIGQUERY QUERIES (BATCHED)
     if phenos_to_query_from_bq:
@@ -394,10 +368,11 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_cod
 
             # Use conservative concurrency because each batch scans the table once
             with ThreadPoolExecutor(max_workers=min(BQ_BATCH_WORKERS, len(batches))) as executor:
-                futures = [
-                    executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
-                    for batch in batches
-                ]
+                futures = []
+                for batch in batches:
+                    while pipes.BUDGET.remaining_gb() < pipes.BUDGET.floor_gb():
+                        time.sleep(0.5)
+                    futures.append(executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename))
                 for fut in as_completed(futures):
                     try:
                         results = fut.result()
