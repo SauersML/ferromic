@@ -18,6 +18,80 @@ BQ_BATCH_PHENOS = int(os.getenv("BQ_BATCH_PHENOS", "80"))  # max phenotypes per 
 BQ_BATCH_MAX_CODES = int(os.getenv("BQ_BATCH_MAX_CODES", "8000"))  # cap total codes per batch
 BQ_BATCH_WORKERS = int(os.getenv("BQ_BATCH_WORKERS", "2"))  # concurrent batch queries
 
+def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
+                         min_cases, min_ctrls, sex_mode="majority", sex_prop=0.99, max_other=0, min_neff=None):
+    """
+    Decide, without loading X, whether this phenotype should be queued.
+    Uses cached case indices, allowed control mask, and sex restriction rule.
+    Returns True if min cases/controls (and optional Neff) are satisfiable after restriction.
+    """
+    category = pheno_info['disease_category']
+
+    # 1) get case indices in core index (fast parquet read of 'is_case')
+    case_idx = _load_single_pheno_cache(pheno_info, core_index,
+                                        pheno_info.get('cdr_codename', ''),
+                                        pheno_info.get('cache_dir', ''))  # may return None
+    if not case_idx or (case_idx.get("case_idx") is None):
+        return False
+    case_ix_raw = case_idx["case_idx"]
+    case_ix_arr = np.asarray(case_ix_raw)
+    if not np.issubdtype(case_ix_arr.dtype, np.integer):
+        pos = core_index.get_indexer(case_ix_arr)
+        case_ix = pos[pos >= 0]
+    else:
+        case_ix = case_ix_arr
+    if case_ix.size == 0:
+        return False
+
+    # 2) allowed control indices for this category (fallback: all allowed)
+    allowed_mask = allowed_mask_by_cat.get(category, None)
+    if allowed_mask is None:
+        allowed_mask = np.ones(core_index.size, dtype=bool)
+    ctrl_base_ix = np.flatnonzero(allowed_mask)
+    if ctrl_base_ix.size == 0:
+        return False
+
+    # 3) apply sex restriction logically
+    sex_cases = sex_vec[case_ix]
+    n_f_case = int(np.sum(sex_cases == 0.0))
+    n_m_case = int(np.sum(sex_cases == 1.0))
+    total_cases = n_f_case + n_m_case
+    if total_cases == 0:
+        return False
+
+    if sex_mode == "strict":
+        if n_f_case > 0 and n_m_case == 0:
+            dom = 0.0
+        elif n_m_case > 0 and n_f_case == 0:
+            dom = 1.0
+        else:
+            dom = None
+    else:
+        if n_f_case >= n_m_case:
+            dom, prop, other = 0.0, n_f_case / total_cases, n_m_case
+        else:
+            dom, prop, other = 1.0, n_m_case / total_cases, n_f_case
+        if not (prop >= sex_prop or other <= max_other):
+            dom = None
+
+    ctrl_ix = np.setdiff1d(ctrl_base_ix, case_ix, assume_unique=False)
+    if dom is None:
+        eff_cases = total_cases
+        eff_ctrls = ctrl_ix.size
+    else:
+        eff_cases = n_f_case if dom == 0.0 else n_m_case
+        eff_ctrls = int(np.sum(sex_vec[ctrl_ix] == dom))
+
+    if (eff_cases < min_cases) or (eff_ctrls < min_ctrls):
+        return False
+
+    if min_neff is not None:
+        neff_ub = 1.0 / (1.0/eff_cases + 1.0/eff_ctrls)
+        if neff_ub < float(min_neff):
+            return False
+
+    return True
+
 def sanitize_name(name):
     """Cleans a disease name to be a valid identifier."""
     name = re.sub(r'[\*\(\)\[\]\/\']', '', name)
@@ -381,7 +455,11 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         for lock_path in locks.values():
             io.release_lock(lock_path)
 
-def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_codename, core_index, cache_dir, loader_chunk_size, loader_threads, allow_bq=True):
+def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_codename,
+                             core_index, cache_dir, loader_chunk_size, loader_threads, allow_bq=True,
+                             allowed_mask_by_cat=None, sex_vec=None,
+                             min_cases=1000, min_ctrls=1000,
+                             sex_mode="majority", sex_prop=0.99, max_other=0, min_neff=None):
     """PRODUCER: High-performance, memory-stable data loader that works in chunks without constructing per-phenotype controls."""
     print("[Fetcher]  - Categorizing phenotypes into cached vs. uncached...")
     phenos_to_load_from_cache = [row.to_dict() for _, row in pheno_defs.iterrows() if os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))]
@@ -390,6 +468,12 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_cod
     print(f"[Fetcher]  - Found {len(phenos_to_query_from_bq)} uncached phenotypes to queue.")
 
     for row in phenos_to_load_from_cache:
+        row['cdr_codename'] = cdr_codename
+        row['cache_dir'] = cache_dir
+        if (allowed_mask_by_cat is not None) and (sex_vec is not None):
+            if not _prequeue_should_run(row, core_index, allowed_mask_by_cat, sex_vec,
+                                        min_cases, min_ctrls, sex_mode, sex_prop, max_other, min_neff):
+                continue
         pheno_queue.put({"name": row['sanitized_name'], "category": row['disease_category'], "codes_n": len(row.get('all_codes') or []), "cdr_codename": cdr_codename})
 
     # STAGE 2: CONCURRENT BIGQUERY QUERIES (BATCHED)
@@ -415,6 +499,16 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_cod
                             try:
                                 results = f.result()
                                 for r in results:
+                                    info = {
+                                        'sanitized_name': r['name'],
+                                        'disease_category': r['category'],
+                                        'cdr_codename': cdr_codename,
+                                        'cache_dir': cache_dir,
+                                    }
+                                    if (allowed_mask_by_cat is not None) and (sex_vec is not None):
+                                        if not _prequeue_should_run(info, core_index, allowed_mask_by_cat, sex_vec,
+                                                                    min_cases, min_ctrls, sex_mode, sex_prop, max_other, min_neff):
+                                            continue
                                     r["cdr_codename"] = cdr_codename
                                     pheno_queue.put(r)
                             except Exception as e:
@@ -426,6 +520,16 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_cod
                     try:
                         results = fut.result()
                         for r in results:
+                            info = {
+                                'sanitized_name': r['name'],
+                                'disease_category': r['category'],
+                                'cdr_codename': cdr_codename,
+                                'cache_dir': cache_dir,
+                            }
+                            if (allowed_mask_by_cat is not None) and (sex_vec is not None):
+                                if not _prequeue_should_run(info, core_index, allowed_mask_by_cat, sex_vec,
+                                                            min_cases, min_ctrls, sex_mode, sex_prop, max_other, min_neff):
+                                    continue
                             r["cdr_codename"] = cdr_codename
                             pheno_queue.put(r)
                     except Exception as e:
