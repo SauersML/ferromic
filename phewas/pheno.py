@@ -211,11 +211,14 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
             pids = []
 
     pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
+    if os.path.exists(pheno_cache_path):
+        return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
+
     pids_for_cache = pd.Index(sorted(pids), dtype=str, name='person_id')
     df_to_cache = pd.DataFrame({'is_case': 1}, index=pids_for_cache, dtype=np.int8)
     io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
     print(f"[Fetcher]  - Cached {len(pids_for_cache):,} new cases for '{s_name}'", flush=True)
-
+    
     return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
 
 def _batch_pheno_defs(phenos_to_query_from_bq, max_phenos, max_codes):
@@ -336,6 +339,9 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
     for s_name, m in meta.items():
         pids = pheno_to_pids[s_name] if succeeded else set()
         pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
+        if os.path.exists(pheno_cache_path):
+            results.append({"name": s_name, "category": m["category"], "codes_n": len(m["codes"])})
+            continue
         idx_for_cache = pd.Index(sorted(list(pids)), name='person_id')
         df_to_cache = pd.DataFrame({'is_case': 1}, index=idx_for_cache, dtype=np.int8)
         io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
@@ -353,7 +359,7 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_cod
     print(f"[Fetcher]  - Found {len(phenos_to_query_from_bq)} uncached phenotypes to queue.")
 
     for row in phenos_to_load_from_cache:
-        pheno_queue.put({"name": row['sanitized_name'], "category": row['disease_category'], "codes_n": len(row.get('all_codes') or [])})
+        pheno_queue.put({"name": row['sanitized_name'], "category": row['disease_category'], "codes_n": len(row.get('all_codes') or []), "cdr_codename": cdr_codename})
 
     # STAGE 2: CONCURRENT BIGQUERY QUERIES (BATCHED)
     if phenos_to_query_from_bq:
@@ -368,15 +374,27 @@ def phenotype_fetcher_worker(pheno_queue, pheno_defs, bq_client, cdr_id, cdr_cod
 
             # Use conservative concurrency because each batch scans the table once
             with ThreadPoolExecutor(max_workers=min(BQ_BATCH_WORKERS, len(batches))) as executor:
-                futures = []
+                inflight = set()
                 for batch in batches:
-                    while pipes.BUDGET.remaining_gb() < pipes.BUDGET.floor_gb():
-                        time.sleep(0.5)
-                    futures.append(executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename))
-                for fut in as_completed(futures):
+                    while (pipes.BUDGET.remaining_gb() < pipes.BUDGET.floor_gb()) or (len(inflight) >= 2 * BQ_BATCH_WORKERS):
+                        done = {f for f in inflight if f.done()}
+                        for f in list(done):
+                            inflight.remove(f)
+                            try:
+                                results = f.result()
+                                for r in results:
+                                    r["cdr_codename"] = cdr_codename
+                                    pheno_queue.put(r)
+                            except Exception as e:
+                                print(f"[Fetcher]  - [FAIL] Batch query failed: {str(e)[:200]}", flush=True)
+                        time.sleep(0.2)
+                    fut = executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
+                    inflight.add(fut)
+                for fut in as_completed(inflight):
                     try:
                         results = fut.result()
                         for r in results:
+                            r["cdr_codename"] = cdr_codename
                             pheno_queue.put(r)
                     except Exception as e:
                         print(f"[Fetcher]  - [FAIL] Batch query failed: {str(e)[:200]}", flush=True)
