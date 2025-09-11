@@ -1,6 +1,7 @@
 import os
 import re
 import hashlib
+from functools import lru_cache
 import time
 import numpy as np
 import pandas as pd
@@ -244,23 +245,37 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
 
     print("[Prepass]  - Phenotype cache prepass complete.", flush=True)
 
-def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
-    """THREAD WORKER: Loads one cached phenotype file from disk and returns integer case indices."""
-    s_name, category = pheno_info['sanitized_name'], pheno_info['disease_category']
+@lru_cache(maxsize=4096)
+def _case_ids_cached(s_name: str, cdr_codename: str, cache_dir: str) -> tuple:
+    """
+    Read the per-phenotype parquet ONCE per process and return the case person_ids as a tuple of str.
+    Pure read-only; never writes or deletes any on-disk cache.
+    """
     pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
-    for attempt in range(3):
-        try:
-            ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
-            case_ids = ph.index[ph['is_case'] == 1].astype(str)
-            case_idx = core_index.get_indexer(case_ids)
-            case_idx = case_idx[case_idx >= 0].astype(np.int32)
-            return {"name": s_name, "category": category, "case_idx": case_idx}
-        except Exception as e:
-            if attempt < 2:
-                time.sleep(0.5)
-            else:
-                print(f"[CacheLoader] - [FAIL] Failed to load '{s_name}': {e}", flush=True)
-                return None
+    ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
+    case_ids = ph.index[ph['is_case'] == 1].astype(str)
+    return tuple(case_ids)
+
+def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
+    """THREAD WORKER: Loads one cached phenotype (via memoized IDs) and returns integer case indices."""
+    s_name = pheno_info['sanitized_name']
+    category = pheno_info['disease_category']
+    try:
+        # 1) Fast path: memoized person_id strings (no repeat disk I/O on cache hit)
+        case_ids = _case_ids_cached(s_name, cdr_codename, cache_dir)
+
+        # 2) Map those person_ids to positions in THIS inversion's core_index
+        if not case_ids:
+            return None
+        pos = core_index.get_indexer(pd.Index(case_ids))
+        case_idx = pos[pos >= 0].astype(np.int32)
+
+        if case_idx.size == 0:
+            return None
+        return {"name": s_name, "category": category, "case_idx": case_idx}
+    except Exception as e:
+        print(f"[CacheLoader] - [FAIL] Failed to load '{s_name}': {e}", flush=True)
+        return None
 
 def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename, bq_client=None):
     """THREAD WORKER: Queries one phenotype from BigQuery, caches it, and returns a descriptor."""
