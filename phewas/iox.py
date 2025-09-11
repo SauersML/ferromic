@@ -19,6 +19,29 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
 
+def _best_effort_fsync(fobj):
+    try:
+        fobj.flush()
+    except Exception:
+        pass
+    try:
+        os.fsync(fobj.fileno())
+    except Exception:
+        pass
+
+
+def _fsync_dir(path):
+    d = os.path.dirname(os.path.abspath(path)) or "."
+    try:
+        dir_fd = os.open(d, os.O_DIRECTORY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except Exception:
+        pass
+
+
 def get_cached_or_generate(cache_path, generation_func, *args, validate_target=None, validate_num_pcs=None, **kwargs):
     """
     Generic caching wrapper with validation. Compatible with pre-existing caches.
@@ -153,7 +176,9 @@ def atomic_write_json(path, data_obj):
 
         with open(tmp_path, 'w') as f:
             json.dump(data_obj, f, cls=NpEncoder)
+            _best_effort_fsync(f)
         os.replace(tmp_path, path)
+        _fsync_dir(path)
     finally:
         try:
             if os.path.exists(tmp_path):
@@ -172,7 +197,10 @@ def atomic_write_parquet(path, df, **to_parquet_kwargs):
     os.close(fd)
     try:
         df.to_parquet(tmp_path, **to_parquet_kwargs)
+        with open(tmp_path, 'rb') as f:
+            _best_effort_fsync(f)
         os.replace(tmp_path, path)
+        _fsync_dir(path)
     finally:
         try:
             if os.path.exists(tmp_path):
@@ -191,7 +219,10 @@ def atomic_write_pickle(path, obj):
     os.close(fd)
     try:
         pd.to_pickle(obj, tmp_path)
+        with open(tmp_path, 'rb') as f:
+            _best_effort_fsync(f)
         os.replace(tmp_path, path)
+        _fsync_dir(path)
     finally:
         try:
             if os.path.exists(tmp_path):
