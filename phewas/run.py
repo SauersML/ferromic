@@ -411,11 +411,31 @@ def main():
             ancestry = io.get_cached_or_generate(os.path.join(CACHE_DIR, "ancestry_labels.parquet"), io.load_ancestry_labels, gcp_project, LABELS_URI=LABELS_URI)
             anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"].str.lower()
         print(f"\n--- Shared Setup Time: {t_setup.duration:.2f}s ---")
-
+        
+        # --- Filter TARGET_INVERSIONS to only those present in the dosages TSV ---
+        dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
+        try:
+            hdr = pd.read_csv(dosages_path, sep="\t", nrows=0).columns.tolist()
+            id_candidates = {"SampleID", "sample_id", "person_id", "research_id", "participant_id", "ID"}
+            id_col = next((c for c in hdr if c in id_candidates), None)
+            available_inversions = set(hdr) - ({id_col} if id_col else set())
+        
+            missing = sorted(run.TARGET_INVERSIONS - available_inversions)
+            if missing:
+                print(f"[Config] Skipping {len(missing)} inversions not present in dosages file. "
+                      f"Examples: {', '.join(missing[:5])}")
+        
+            run.TARGET_INVERSIONS = run.TARGET_INVERSIONS & available_inversions
+            if not run.TARGET_INVERSIONS:
+                raise RuntimeError("No target inversions remain after filtering; check your dosages file and configuration.")
+        except Exception as e:
+            print(f"[Config WARN] Could not inspect dosages header at '{dosages_path}': {e}")
+        
         try:
             pheno.populate_caches_prepass(pheno_defs_df, bq_client, cdr_dataset_id, shared_covariates_df.index, CACHE_DIR, cdr_codename)
         except Exception as e:
             print(f"[Prepass WARN] Cache prepass failed: {e}", flush=True)
+
 
         governor = MultiTenantGovernor(monitor_thread)
         
