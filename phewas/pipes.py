@@ -14,6 +14,99 @@ import time
 import random
 import queue
 
+# ---- Global Budget Manager (no new files) ----
+
+class BudgetManager:
+    """
+    Global memory token manager (GB). Respects container cgroup limit.
+    Thread-safe; suitable for orchestrator + pool workers.
+    """
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._cond = threading.Condition(self._lock)
+        self._total_gb = self._detect_container_limit_gb()
+        self._guard_gb = 2.0  # minimum headroom to avoid OOM killer (kept small; we rely on real reservations)
+        self._reserved_by_inv = {}   # inv_id -> {component -> gb}
+        self._total_reserved = 0.0
+
+    def _detect_container_limit_gb(self):
+        # cgroups v2 then v1; fallback to psutil
+        try:
+            # v2
+            path = "/sys/fs/cgroup/memory.max"
+            if os.path.exists(path):
+                val = open(path).read().strip()
+                if val.isdigit():
+                    return max(1.0, int(val) / (1024**3))
+            # v1
+            path = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+            if os.path.exists(path):
+                lim = int(open(path).read().strip())
+                if lim > 0 and lim < (1<<60):
+                    return max(1.0, lim / (1024**3))
+        except Exception:
+            pass
+        try:
+            import psutil
+            return psutil.virtual_memory().total / (1024**3)
+        except Exception:
+            return 16.0  # conservative fallback
+
+    def init_total(self, fraction=0.92):
+        # Reserve a fraction for ourselves (avoid kernel/OOM headroom)
+        with self._lock:
+            if not getattr(self, "_init_done", False):
+                self._total_gb *= float(fraction)
+                self._init_done = True
+
+    def remaining_gb(self):
+        with self._lock:
+            return max(0.0, self._total_gb - self._total_reserved)
+
+    def floor_gb(self):
+        with self._lock:
+            return max(self._guard_gb, 0.05 * self._total_gb)
+
+    def reserve(self, inv_id: str, component: str, gb: float, block=True):
+        gb = max(0.0, float(gb))
+        with self._cond:
+            while block and (self._total_reserved + gb + self._guard_gb) > self._total_gb:
+                self._cond.wait(timeout=0.5)
+            if (self._total_reserved + gb + self._guard_gb) > self._total_gb:
+                return False  # non-blocking and can't reserve
+            self._reserved_by_inv.setdefault(inv_id, {})
+            self._reserved_by_inv[inv_id][component] = self._reserved_by_inv[inv_id].get(component, 0.0) + gb
+            self._total_reserved += gb
+            return True
+
+    def revise(self, inv_id: str, component: str, new_gb: float):
+        new_gb = max(0.0, float(new_gb))
+        with self._cond:
+            cur = self._reserved_by_inv.get(inv_id, {}).get(component, 0.0)
+            delta = new_gb - cur
+            if delta <= 0:
+                self._reserved_by_inv[inv_id][component] = new_gb
+                self._total_reserved += delta
+                self._cond.notify_all()
+                return True
+            while (self._total_reserved + delta + self._guard_gb) > self._total_gb:
+                self._cond.wait(timeout=0.5)
+            self._reserved_by_inv[inv_id][component] = new_gb
+            self._total_reserved += delta
+            return True
+
+    def release(self, inv_id: str, component: str):
+        with self._cond:
+            cur = self._reserved_by_inv.get(inv_id, {}).pop(component, 0.0)
+            if not self._reserved_by_inv.get(inv_id):
+                self._reserved_by_inv.pop(inv_id, None)
+            self._total_reserved -= cur
+            self._total_reserved = max(0.0, self._total_reserved)
+            self._cond.notify_all()
+
+# module-global singleton
+BUDGET = BudgetManager()
+
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -21,6 +114,12 @@ except ImportError:
     PSUTIL_AVAILABLE = False
 
 MP_CONTEXT = 'forkserver' if sys.platform.startswith('linux') else 'spawn'
+
+def mem_ok_for_submission(min_free_gb: float = None):
+    from math import isfinite
+    rem = BUDGET.remaining_gb()
+    floor = BUDGET.floor_gb() if min_free_gb is None else float(min_free_gb)
+    return isfinite(rem) and rem >= floor
 
 def _resolve_floor(v):
     """
@@ -70,13 +169,19 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
     monitor = MemoryMonitor()
     monitor.start()
     try:
+        bytes_needed = int(core_df_with_const.index.size) * int(len(core_df_with_const.columns)) * 4
+        shm_gb = bytes_needed / (1024**3)
+        BUDGET.revise(target_inversion, "core_shm", shm_gb)
+        print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
+
         C = cpu_count()
         usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
-        n_procs = idle_cores
+        W_gb = 0.5
+        max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
+        n_procs = max(1, min(idle_cores, max_by_budget))
         print(f"\n--- Starting parallel model fitting with {n_procs} worker processes ({MP_CONTEXT} context) ---")
 
-        # Prepare shared memory for the core design matrix
         X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
         base_meta, base_shm = io.create_shared_from_ndarray(X_base, readonly=True)
         core_cols = list(core_df_with_const.columns)
@@ -84,6 +189,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         del X_base, core_df_with_const
         gc.collect()
 
+        BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
         try:
             with get_context(MP_CONTEXT).Pool(
                 processes=n_procs,
@@ -111,7 +217,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                     pct = int((d * 100) / q) if q else 0
                     filled = int(bar_len * (d / q)) if q else 0
                     bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-                    mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB" if PSUTIL_AVAILABLE else ""
+                    mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {BUDGET.remaining_gb():.2f}GB"
                     print(f"\r[Fit] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
                 def _cb(_):
@@ -132,10 +238,9 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                     if item is None:
                         break  # producer finished
                     floor = _resolve_floor(min_available_memory_gb)
-                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                            time.sleep(2)
+                    while BUDGET.remaining_gb() < floor:
+                        print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                        time.sleep(2)
                     # Cache policy: if a previous result exists but has an invalid or NA P_Value and the
                     # association was attempted (no Skip_Reason), evict the meta to force a fresh run.
                     try:
@@ -170,6 +275,8 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         finally:
             base_shm.close()
             base_shm.unlink()
+            BUDGET.release(target_inversion, "pool_steady")
+            BUDGET.release(target_inversion, "core_shm")
         _print_bar(queued, done)  # ensure 100% line
         print("")  # newline after the bar
     finally:
@@ -186,10 +293,17 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
     monitor = MemoryMonitor()
     monitor.start()
     try:
+        bytes_needed = int(core_df_with_const.index.size) * int(len(core_df_with_const.columns)) * 4
+        shm_gb = bytes_needed / (1024**3)
+        BUDGET.revise(target_inversion, "core_shm", shm_gb)
+        print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
+
         C = cpu_count()
         usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
-        n_procs = idle_cores
+        W_gb = 0.5
+        max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
+        n_procs = max(1, min(idle_cores, max_by_budget))
         print(f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching ({n_procs} workers).", flush=True)
         bar_len = 40
         queued = 0
@@ -202,7 +316,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
             pct = int((d * 100) / q) if q else 0
             filled = int(bar_len * (d / q)) if q else 0
             bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-            mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB" if PSUTIL_AVAILABLE else ""
+            mem_info = f"| Mem RSS: {monitor.rss_gb:.2f}GB Avail: {BUDGET.remaining_gb():.2f}GB"
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
         X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
@@ -212,6 +326,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         del X_base, core_df_with_const
         gc.collect()
 
+        BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
         try:
             with get_context(MP_CONTEXT).Pool(
                 processes=n_procs,
@@ -243,10 +358,9 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
 
                 for task in tasks:
                     floor = _resolve_floor(min_available_memory_gb)
-                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                            time.sleep(2)
+                    while BUDGET.remaining_gb() < floor:
+                        print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                        time.sleep(2)
 
                     # Cache policy: if a previous Stage-1 LRT result exists but has an invalid or NA P_LRT_Overall,
                     # evict the meta to force a fresh run. LRT tasks are only scheduled for non-skipped models.
@@ -281,6 +395,8 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         finally:
             base_shm.close()
             base_shm.unlink()
+            BUDGET.release(target_inversion, "pool_steady")
+            BUDGET.release(target_inversion, "core_shm")
             _print_bar(queued, done, "LRT-Stage1")
             print("")
     finally:
@@ -294,10 +410,17 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
 
         monitor = MemoryMonitor()
         monitor.start()
+        bytes_needed = int(core_df_with_const.index.size) * int(len(core_df_with_const.columns)) * 4
+        shm_gb = bytes_needed / (1024**3)
+        BUDGET.revise(target_inversion, "core_shm", shm_gb)
+        print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
+
         C = cpu_count()
         usage = monitor.sys_cpu_percent if hasattr(monitor, "sys_cpu_percent") else 0.0
         idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
-        n_procs = idle_cores
+        W_gb = 0.5
+        max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
+        n_procs = max(1, min(idle_cores, max_by_budget))
         print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).", flush=True)
         bar_len = 40
         queued = 0
@@ -309,9 +432,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
             pct = int((d * 100) / q) if q else 0
             filled = int(bar_len * (d / q)) if q else 0
             bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-            mem_info = ""
-            if PSUTIL_AVAILABLE:
-                mem_info = f" | Mem RSS: {monitor.rss_gb:.2f}GB Avail: {monitor.available_memory_gb:.2f}GB"
+            mem_info = f" | Mem RSS: {monitor.rss_gb:.2f}GB Avail: {BUDGET.remaining_gb():.2f}GB"
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%)" + mem_info, end="", flush=True)
 
         X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
@@ -320,6 +441,7 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         core_index = core_df_with_const.index.astype(str)
         del X_base, core_df_with_const
         gc.collect()
+        BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
         try:
             with get_context(MP_CONTEXT).Pool(
                 processes=n_procs,
@@ -352,10 +474,9 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
 
                 for task in tasks_follow:
                     floor = _resolve_floor(min_available_memory_gb)
-                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                            time.sleep(2)
+                    while BUDGET.remaining_gb() < floor:
+                        print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                        time.sleep(2)
 
                     queued += 1
                     pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
@@ -368,4 +489,6 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         finally:
             base_shm.close()
             base_shm.unlink()
+            BUDGET.release(target_inversion, "pool_steady")
+            BUDGET.release(target_inversion, "core_shm")
             monitor.stop()

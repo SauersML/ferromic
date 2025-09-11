@@ -460,3 +460,19 @@ def parquet_n_rows(path: str) -> int | None:
         return pq.read_metadata(path).num_rows
     except Exception:
         return None
+
+
+def load_pheno_cases_from_cache(name, cache_dir, cdr_codename):
+    path = os.path.join(cache_dir, f"pheno_{name}_{cdr_codename}.parquet")
+    if not os.path.exists(path):
+        return pd.Index([], dtype=str)
+    df = pd.read_parquet(path)
+    if df.index.name != 'person_id':
+        if 'person_id' in df.columns:
+            df = df.set_index('person_id')
+        else:
+            return pd.Index([], dtype=str)
+    if 'is_case' not in df.columns:
+        return pd.Index([], dtype=str)
+    case_ids = df.index[df['is_case'].astype('int8') == 1].astype(str)
+    return case_ids

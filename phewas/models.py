@@ -733,7 +733,10 @@ def _pos_in_current(orig_ix, current_ix_array):
 
 def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
     """CONSUMER: Runs a single model. Executed in a separate process using NumPy arrays."""
-    s_name, category, case_idx_global = pheno_data["name"], pheno_data["category"], pheno_data["case_idx"]
+    s_name, category = pheno_data["name"], pheno_data["category"]
+    case_ids = io.load_pheno_cases_from_cache(s_name, CTX["CACHE_DIR"], CTX["cdr_codename"])
+    idx = worker_core_df_index.get_indexer(case_ids)
+    case_idx_global = idx[idx >= 0].astype(np.int32)
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(results_cache_dir, f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
