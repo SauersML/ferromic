@@ -231,17 +231,47 @@ class MultiTenantGovernor(ResourceGovernor):
         self.inv_rss_gb.pop(inv_id, None)
 
     def measure_inv(self, inv_id):
-        total = 0
+        """
+        Returns the proportional working set of the pool keyed by inv_id in GB.
+        Uses PSS from /proc/<pid>/smaps_rollup to avoid double-counting shared pages.
+        Falls back to USS via psutil if PSS is unavailable. As a last resort uses RSS.
+        """
+        def _pss_kb(pid: int) -> int:
+            path = f"/proc/{pid}/smaps_rollup"
+            try:
+                with open(path, "r") as fh:
+                    for line in fh:
+                        if line.startswith("Pss:"):
+                            parts = line.split()
+                            return int(parts[1])
+            except FileNotFoundError:
+                return -1
+            except PermissionError:
+                return -1
+            except Exception:
+                return -1
+            return -1
+
+        total_bytes = 0
         pids = self.inv_pools.get(inv_id, [])
         if not pids:
-            self.inv_rss_gb[inv_id] = 0
-            return 0
+            self.inv_rss_gb[inv_id] = 0.0
+            return 0.0
 
         valid_pids = []
         for pid in pids:
             try:
                 proc = psutil.Process(pid)
-                total += proc.memory_info().rss
+                pss_kb = _pss_kb(pid)
+                if pss_kb >= 0:
+                    total_bytes += pss_kb * 1024
+                else:
+                    try:
+                        finfo = proc.memory_full_info()
+                        # USS is private bytes; avoids counting shared pages multiple times.
+                        total_bytes += getattr(finfo, "uss", 0)
+                    except Exception:
+                        total_bytes += proc.memory_info().rss
                 valid_pids.append(pid)
             except psutil.NoSuchProcess:
                 pass
@@ -251,7 +281,7 @@ class MultiTenantGovernor(ResourceGovernor):
         if len(valid_pids) < len(pids):
             self.inv_pools[inv_id] = valid_pids
 
-        measured_gb = total / (1024**3)
+        measured_gb = total_bytes / (1024**3)
         self.inv_rss_gb[inv_id] = measured_gb
         return measured_gb
 
@@ -537,11 +567,14 @@ def _pipeline_once():
                     governor.register_pool(inv_safe_name, worker_pids)
                     time.sleep(10)
                     measured_gb = governor.measure_inv(inv_safe_name)
-                    governor.update_steady_state(inv_safe_name, measured_gb)
-                    pipes.BUDGET.revise(inv_safe_name, "pool_steady", measured_gb)
-                    per_worker = max(0.25, measured_gb / max(1, num_procs))
+                    core_shm_gb = float(pipes.BUDGET._reserved_by_inv.get(inv_safe_name, {}).get("core_shm", 0.0))
+                    # Do not double-charge the shared design matrix: reserve only the pool's incremental footprint.
+                    pool_steady_gb = max(0.0, measured_gb - core_shm_gb)
+                    governor.update_steady_state(inv_safe_name, pool_steady_gb)
+                    pipes.BUDGET.revise(inv_safe_name, "pool_steady", pool_steady_gb)
+                    per_worker = max(0.25, pool_steady_gb / max(1, num_procs))
                     pipes._WORKER_GB_EST = 0.5 * pipes._WORKER_GB_EST + 0.5 * per_worker
-                    print(f"[Budget] {inv_safe_name}.pool_steady: set {measured_gb:.2f}GB | remaining {pipes.BUDGET.remaining_gb():.2f}GB", flush=True)
+                    print(f"[Budget] {inv_safe_name}.pool_steady: set {pool_steady_gb:.2f}GB | remaining {pipes.BUDGET.remaining_gb():.2f}GB", flush=True)
 
                 pipes.run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, mem_floor_callable, on_pool_started=on_pool_started_callback)
                 fetcher_thread.join()
