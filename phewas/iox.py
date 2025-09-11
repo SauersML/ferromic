@@ -2,6 +2,7 @@ import os
 import time
 import json
 import tempfile
+import uuid
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -211,25 +212,56 @@ def create_shared_from_ndarray(arr: np.ndarray, readonly: bool = True):
     instance which must be kept alive by the parent and later closed/unlinked
     when no longer needed.
     """
-    shm = shared_memory.SharedMemory(create=True, size=arr.nbytes)
-    view = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm.buf)
-    view[:] = arr
-    if readonly:
-        try:
-            view.setflags(write=False)
-        except Exception:
-            pass
-    meta = {"name": shm.name, "shape": arr.shape, "dtype": str(arr.dtype)}
-    return meta, shm
+    try:
+        shm = shared_memory.SharedMemory(create=True, size=arr.nbytes)
+        view = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm.buf)
+        view[:] = arr
+        if readonly:
+            try:
+                view.setflags(write=False)
+            except Exception:
+                pass
+        meta = {"kind": "shm", "name": shm.name, "shape": arr.shape, "dtype": str(arr.dtype)}
+        return meta, shm
+    except Exception:
+        # Fallback: disk-backed memmap when /dev/shm is insufficient
+        tmpdir = tempfile.gettempdir()
+        fname = os.path.join(tmpdir, f"mm_{uuid.uuid4().hex}.dat")
+        mm = np.memmap(fname, mode="w+", dtype=arr.dtype, shape=arr.shape)
+        mm[:] = arr
+        del mm
+        meta = {"kind": "memmap", "path": fname, "shape": arr.shape, "dtype": str(arr.dtype)}
+        class _Handle:
+            def close(self):
+                pass
+            def unlink(self):
+                try:
+                    os.remove(fname)
+                except FileNotFoundError:
+                    pass
+        return meta, _Handle()
 
 
 def attach_shared_ndarray(meta: dict):
     """Attach to a shared memory block created by ``create_shared_from_ndarray``.
 
     Returns a tuple ``(array, handle)`` where ``array`` is a NumPy view of the
-    shared memory and ``handle`` is the ``SharedMemory`` object which the caller
-    is responsible for closing (but not unlinking).
+    shared memory and ``handle`` is an object which the caller is responsible for
+    closing (but not unlinking).
     """
+    if meta.get("kind") == "memmap":
+        arr = np.memmap(meta["path"], mode="r", dtype=np.dtype(meta["dtype"]), shape=tuple(meta["shape"]))
+        try:
+            arr.setflags(write=False)
+        except Exception:
+            pass
+        class _Handle:
+            def close(self):
+                pass
+            def unlink(self):
+                pass  # parent removes the file
+        return arr, _Handle()
+
     shm = shared_memory.SharedMemory(name=meta["name"])
     arr = np.ndarray(tuple(meta["shape"]), dtype=np.dtype(meta["dtype"]), buffer=shm.buf)
     try:

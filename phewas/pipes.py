@@ -344,19 +344,20 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                         _print_bar(queued, done, "Ancestry")
 
                 failed_tasks = []
+
                 def _err_cb(e):
                     nonlocal failed_tasks
                     print(f"[pool ERR] Worker failed: {e}", flush=True)
                     failed_tasks.append(e)
 
-                    for task in tasks_follow:
-                        floor = _resolve_floor(min_available_memory_gb)
-                        if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                            print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
-                            while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
-                                time.sleep(2)
+                for task in tasks_follow:
+                    floor = _resolve_floor(min_available_memory_gb)
+                    if PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                        print(f"\n[gov WARN] Low memory detected (avail: {monitor.available_memory_gb:.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                        while PSUTIL_AVAILABLE and 0 < monitor.available_memory_gb < floor:
+                            time.sleep(2)
 
-                        queued += 1
+                    queued += 1
                     pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
                     _print_bar(queued, done, "Ancestry")
 
