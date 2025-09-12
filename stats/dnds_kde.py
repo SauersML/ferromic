@@ -20,7 +20,7 @@ logger = logging.getLogger('median_omega_analysis_standalone')
 
 # File paths
 PAIRWISE_FILE = Path('all_pairwise_results.csv')
-INVERSION_FILE = Path('inv_info.csv')
+INVERSION_FILE = Path('inv_info.tsv')
 OUTPUT_PLOT_PATH = Path('median_omega_distribution_standalone.png')
 
 # Plotting Style Adjustments
@@ -63,7 +63,7 @@ def load_input_files():
             logger.error(f"Inversion info file not found: {INVERSION_FILE}")
             return None, None
         logger.info(f"Loading inversion info from {INVERSION_FILE}")
-        inversion_df = pd.read_csv(INVERSION_FILE)
+        inversion_df = pd.read_csv(INVERSION_FILE, sep='\t')
 
         logger.info(f"Pairwise results: {pairwise_df.shape[0]} rows, {pairwise_df.shape[1]} columns")
         logger.info(f"Inversion info: {inversion_df.shape[0]} rows, {inversion_df.shape[1]} columns")

@@ -8,7 +8,7 @@ warnings.filterwarnings('ignore')
 
 # Load both data files
 output_path = 'output.csv'
-inv_info_path = 'inv_info.csv'
+inv_info_path = 'inv_info.tsv'
 
 # Load output.csv
 output_data = pd.read_csv(output_path)
@@ -16,9 +16,9 @@ print(f"Loaded {len(output_data)} rows from output.csv")
 print("Output data chromosome format examples:")
 print(output_data['chr'].head().tolist())
 
-# Load inv_info.csv
-inv_info = pd.read_csv(inv_info_path)
-print(f"Loaded {len(inv_info)} rows from inv_info.csv")
+# Load inv_info.tsv
+inv_info = pd.read_csv(inv_info_path, sep='\t')
+print(f"Loaded {len(inv_info)} rows from inv_info.tsv")
 
 # Rename columns to match expected format
 inv_info = inv_info.rename(columns={

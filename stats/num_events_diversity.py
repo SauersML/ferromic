@@ -19,7 +19,7 @@ framework under these specific N=1 conditions can be hard to interpret.
 
 # --- Configuration ---
 PI_DATA_PATH = 'output.csv'        # Pi values per orientation (0_pi_filtered, 1_pi_filtered)
-INV_INFO_PATH = 'inv_info.csv'     # Inversion info (Recurrence, Num events string, coords)
+INV_INFO_PATH = 'inv_info.tsv'     # Inversion info (Recurrence, Num events string, coords)
 OUTPUT_DIR = 'recurrent_events_analysis_separate_v2' # Directory for analysis results
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -62,7 +62,7 @@ def main():
     print(f"Loading data from {PI_DATA_PATH} and {INV_INFO_PATH}...")
     try:
         pi_data = pd.read_csv(PI_DATA_PATH)
-        inv_info = pd.read_csv(INV_INFO_PATH)
+        inv_info = pd.read_csv(INV_INFO_PATH, sep='\t')
     except FileNotFoundError as e:
         print(f"ERROR: Input file not found: {e}. Exiting.")
         exit(1)

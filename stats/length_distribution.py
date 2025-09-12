@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 def main():
     # Load the CSV data and compute the length of each region.
-    df = pd.read_csv("inv_info.csv")
+    df = pd.read_csv("inv_info.tsv", sep='\t')
     df['length'] = df['region_end'] - df['region_start']
     
     # Sort by region length and print the chromosome and coordinates of the 10 smallest regions.

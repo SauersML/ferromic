@@ -25,7 +25,7 @@ warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
 RESULTS_DIR = Path("results")
 PLOTS_DIR = Path("plots")
 RAW_DATA_FILE = 'all_pairwise_results.csv'
-INV_INFO_FILE = 'inv_info.csv'
+INV_INFO_FILE = 'inv_info.tsv'
 
 # Analysis Parameters
 MIN_SAMPLES_FOR_TEST = 5  # Minimum data points per group for statistical tests
@@ -127,7 +127,7 @@ def load_and_prepare_data() -> Optional[pd.DataFrame]:
     print("--- 1. Loading and Preparing Data ---")
     try:
         # Load and process inversion info
-        inv_df = pd.read_csv(INV_INFO_FILE)
+        inv_df = pd.read_csv(INV_INFO_FILE, sep='\t')
         inv_df.rename(columns={'Chromosome': 'chr', 'Start': 'inv_start', 'End': 'inv_end'}, inplace=True)
         inv_df['chr'] = inv_df['chr'].astype(str).apply(lambda x: x if x.startswith('chr') else 'chr' + x)
         inv_df.dropna(subset=['chr', 'inv_start', 'inv_end'], inplace=True)
