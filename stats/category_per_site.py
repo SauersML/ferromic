@@ -634,9 +634,11 @@ def _plot_multi(x_centers: np.ndarray,
 
     fig.tight_layout()
     out_png.parent.mkdir(parents=True, exist_ok=True)
+    out_svg = out_png.with_suffix(".svg")
     plt.savefig(out_png, dpi=300, bbox_inches="tight")
+    plt.savefig(out_svg, bbox_inches="tight")
     plt.close(fig)
-    log.info(f"Saved plot → {out_png}")
+    log.info(f"Saved plot → {out_png} and {out_svg}")
     _maybe_open_png(out_png)
 
 # --------------------- END-TO-END RUN -----------------------
