@@ -119,7 +119,7 @@ def _load_inv_mapping(INV_TSV: Path) -> pd.DataFrame:
         log.warning(f"INV tsv not found: {INV_TSV} → all sequences will be uncategorized.")
         return pd.DataFrame(columns=["chrom", "start", "end", "group"])
 
-    df = pd.read_csv(INV_TSV, engine="python")
+    df = pd.read_csv(INV_TSV, sep="\t")
     cols = {c: c.strip() for c in df.columns}
     df.rename(columns=cols, inplace=True)
 
@@ -798,11 +798,11 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                 "metric": which,
             })
 
-    # Save tsv (combined)
+    # Save csv (combined)
     df = pd.DataFrame(all_rows)
-    out_tsv.parent.mkdir(parents=True, exist_ok=True)
-    df.to_tsv(out_tsv, index=False, float_format="%.6g")
-    log.info(f"Saved tsv → {out_tsv}")
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_csv, index=False, float_format="%.6g")
+    log.info(f"Saved csv → {csv}")
 
     # Plot (grouped)
     _plot_multi(x_centers, group_stats, y_label, out_png, x_label, metric=which)
