@@ -85,15 +85,18 @@ class SystemMonitor(threading.Thread):
         self.sys_cpu_percent = 0.0
         self.sys_available_gb = 0.0
         self.app_rss_gb = 0.0
+        self.app_cpu_percent = 0.0
+        self._sample_ts = 0.0
 
     def snapshot(self) -> 'ResourceSnapshot':
         """Returns a thread-safe snapshot of the current stats."""
         with self._lock:
             return ResourceSnapshot(
-                ts=time.time(),
+                ts=self._sample_ts,
                 sys_cpu_percent=self.sys_cpu_percent,
                 sys_available_gb=self.sys_available_gb,
                 app_rss_gb=self.app_rss_gb,
+                app_cpu_percent=self.app_cpu_percent,
             )
 
     def run(self):
@@ -102,9 +105,20 @@ class SystemMonitor(threading.Thread):
             print("[SysMonitor] Could not find main process to monitor.", flush=True)
             return
 
+        # Prime per-process cpu_percent baselines
+        try:
+            self._main_process.cpu_percent(interval=None)
+            for p in self._main_process.children(recursive=True):
+                try:
+                    p.cpu_percent(interval=None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         while True:
             try:
-                cpu = psutil.cpu_percent(interval=1.0)
+                cpu = psutil.cpu_percent(interval=self.interval)
                 mem = psutil.virtual_memory()
                 ram_percent = mem.percent
                 available_gb = mem.available / (1024**3)
@@ -113,15 +127,33 @@ class SystemMonitor(threading.Thread):
                 child_mem = sum(p.memory_info().rss for p in child_processes)
                 total_rss_gb = (main_mem.rss + child_mem) / (1024**3)
                 n_cpus = psutil.cpu_count(logical=True) or os.cpu_count() or 1
-                app_cpu_raw = sum(c.cpu_percent(interval=None) for c in child_processes)
+
+                app_cpu_raw = 0.0
+                try:
+                    app_cpu_raw += self._main_process.cpu_percent(interval=None)
+                except Exception:
+                    pass
+                for c in child_processes:
+                    try:
+                        app_cpu_raw += c.cpu_percent(interval=None)
+                    except Exception:
+                        pass
                 app_cpu = min(100.0, app_cpu_raw / n_cpus)
 
                 with self._lock:
                     self.sys_cpu_percent = cpu
                     self.sys_available_gb = available_gb
                     self.app_rss_gb = total_rss_gb
+                    self.app_cpu_percent = app_cpu
+                    self._sample_ts = time.time()
 
-                print(f"[SysMonitor] CPU: {cpu:5.1f}% | AppCPU: {app_cpu:5.1f}% | RAM: {ram_percent:5.1f}% (avail: {available_gb:.2f}GB) | App RSS: {total_rss_gb:.2f}GB | Budget: {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB", flush=True)
+                print(
+                    f"[SysMonitor] CPU: {cpu:5.1f}% | AppCPU: {app_cpu:5.1f}% | RAM: {ram_percent:5.1f}% "
+                    f"(avail: {available_gb:.2f}GB) | App RSS: {total_rss_gb:.2f}GB | "
+                    f"Budget: {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB",
+                    flush=True,
+                )
+
                 try:
                     prog = pipes.PROGRESS.snapshot()
                     by_inv = {}
@@ -131,7 +163,9 @@ class SystemMonitor(threading.Thread):
                             pct = int((100*d/q)) if q else 0
                             by_inv[inv] = (stage, d, q, pct, ts)
                     if by_inv:
-                        parts = [f"{inv}:{stage} {pct}%" for inv,(stage,_,_,pct,_) in sorted(by_inv.items())]
+                        parts = [
+                            f"{inv}:{stage} {pct}%" for inv, (stage, _, _, pct, _) in sorted(by_inv.items())
+                        ]
                         print("[Progress] " + " | ".join(parts), flush=True)
                 except Exception:
                     pass
@@ -139,11 +173,9 @@ class SystemMonitor(threading.Thread):
                 break
             except Exception as e:
                 print(f"[SysMonitor] Error: {e}", flush=True)
-            time.sleep(self.interval)
 
 from collections import deque
 from dataclasses import dataclass
-import statistics
 
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -157,6 +189,7 @@ class ResourceSnapshot:
     sys_cpu_percent: float
     sys_available_gb: float
     app_rss_gb: float
+    app_cpu_percent: float
 
 class ResourceGovernor:
     def __init__(self, monitor: SystemMonitor, history_sec: int = 30):
@@ -166,25 +199,28 @@ class ResourceGovernor:
         self.observed_core_df_gb = []
         self.observed_steady_state_gb = []
         self.mem_guard_gb = 4.0
-        self.min_cpu_idle_frac = 0.20
 
     def _update_history(self):
-        self._history.append(self._monitor.snapshot())
+        snap = self._monitor.snapshot()
+        if snap.ts <= 0:
+            return
+        if not self._history or self._history[-1].ts != snap.ts:
+            self._history.append(snap)
 
     def can_admit_next(self, predicted_extra_gb: float) -> bool:
         self._update_history()
-        if not self._history: return False
+        if not self._history:
+            return True
 
         with self._lock:
-            cpu_hist = [s.sys_cpu_percent for s in self._history]
-            avg_cpu_usage = statistics.mean(cpu_hist) if cpu_hist else 100.0
-            avg_idle = 1.0 - (avg_cpu_usage / 100.0)
-            cpu_ok = avg_idle >= self.min_cpu_idle_frac
             latest_mem_gb = self._history[-1].sys_available_gb
             mem_ok = (latest_mem_gb - predicted_extra_gb) >= self.mem_guard_gb
-            if not (cpu_ok and mem_ok):
-                print(f"[Governor] Hold: cpu_idle={avg_idle:.2f}, mem_avail={latest_mem_gb:.2f}GB, pred_cost={predicted_extra_gb:.2f}GB")
-            return cpu_ok and mem_ok
+            if not mem_ok:
+                print(
+                    f"[Governor] Hold: mem_avail={latest_mem_gb:.2f}GB, pred_cost={predicted_extra_gb:.2f}GB",
+                    flush=True,
+                )
+            return mem_ok
 
     def predict_extra_gb_before_pool(self, N: int, C: int) -> float:
         base_estimate = (N * C * 8 / 1024**3) * 1.6
@@ -302,17 +338,19 @@ class MultiTenantGovernor(ResourceGovernor):
 
     def can_admit_next_inv(self, predicted_gb):
         self._update_history()
-        if not self._history: return False
+        if not self._history:
+            return True
         latest_avail = self._history[-1].sys_available_gb
         active = self.total_active_footprint()
         mem_ok = (latest_avail - predicted_gb) >= self.mem_guard_gb
-        cpu_hist = [s.sys_cpu_percent for s in self._history]
-        avg_idle = 1.0 - (sum(cpu_hist) / len(cpu_hist)) / 100.0 if cpu_hist else 0.0
-        cpu_ok = avg_idle >= self.min_cpu_idle_frac
-        if not (cpu_ok and mem_ok):
-            print(f"[Governor] Hold: cpu_idle={avg_idle:.2f}, mem_avail={latest_avail:.2f}GB,"
-                  f" active={active:.2f}GB, next_pred={predicted_gb:.2f}GB")
-        return cpu_ok and mem_ok
+        if active == 0 and mem_ok:
+            return True
+        if not mem_ok:
+            print(
+                f"[Governor] Hold: mem_avail={latest_avail:.2f}GB, active={active:.2f}GB, next_pred={predicted_gb:.2f}GB",
+                flush=True,
+            )
+        return mem_ok
 
 # --- Configuration ---
 TARGET_INVERSIONS = {
