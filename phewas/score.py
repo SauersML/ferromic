@@ -51,10 +51,10 @@ PHENOLIST = [
 TEST_SIZE = 0.20
 SEED = 42
 ALPHA = 0.50        # elastic-net mixing (0=L2, 1=L1)
-N_LAM = 100         # lambda path length
-LAMBDA_MIN_RATIO = 1e-3
+N_LAM = 2         # lambda path length
+LAMBDA_MIN_RATIO = 1e-2
 NEAR_CONST_SD = 1e-6
-MAX_ITER = 2000
+MAX_ITER = 200
 CLASS_WEIGHT = "balanced"
 
 # Parallelization
