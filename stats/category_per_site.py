@@ -1,915 +1,670 @@
-from __future__ import annotations
-import logging, re, sys, time, subprocess, shutil
-from pathlib import Path
-from typing import Optional, Tuple, List, Dict
-from collections import defaultdict, Counter
+import os, sys, re
+from collections import Counter, defaultdict
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
-import multiprocessing as mp
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.legend_handler import HandlerBase
-from scipy.stats import spearmanr, sem
-from statsmodels.nonparametric.smoothers_lowess import lowess
 
-# ------------------------- CONFIG -------------------------
+# ------------------ Filenames -------------------
 
-INV_CSV        = Path("inv_info.csv")  # recurrence mapping input
+INVINFO_TSV  = "inv_info.tsv"
+OUTPUT_CSV   = "output.csv"
+PI_FALSTA    = "per_site_diversity_output.falsta"
+FST_FALSTA   = "per_site_fst_output.falsta"
+MAP_TSV      = "map.tsv"  # optional
 
-DIVERSITY_FILE = Path("per_site_diversity_output.falsta")
-FST_FILE       = Path("per_site_fst_output.falsta")
+# ------------------ map.tsv required columns ----
 
-OUTDIR         = Path("length_norm_trend_fast")
+MAP_FILE_COLUMNS = ['Original_Chr', 'Original_Start', 'Original_End',
+                    'New_Chr', 'New_Start', 'New_End']
 
-MIN_LEN_PI     = 150_000
-MIN_LEN_FST    = 150_000
+# ------------------ Parameters ------------------
 
-# Proportion mode
-NUM_BINS_PROP  = 250
+FLANK_BP = 10_000                   # flanks = first/last 10kb within region
+MIN_PSITE_BASES_ACCEPT = 200        # min finite sites to accept a per-site mean
+MIN_REGION_FST_COVER_FRAC = 0.05    # ≥5% per-site coverage → allow using per-site FST for region
+USE_PERSITE_FST_WHEN_COVERED = True # set False to always use CSV region FST (still cross-check)
 
-# Base-pair mode 
-MAX_BP         = 2_000_000          # cap distance from inversion edge at 2 Mbp
-NUM_BINS_BP    = 250                # number of bins between 0..MAX_BP
+# ------------------ Regex for FALSTA ------------
 
-# Plotting/analysis rules
-LOWESS_FRAC     = 0.4
-MIN_INV_PER_BIN = 5                 # if <5 inversions in a bin → don't plot that bin
-
-# Visual
-SCATTER_SIZE   = 34
-SCATTER_ALPHA  = 0.10   # transparent dots
-LINE_WIDTH     = 2.8
-BAND_ALPHA     = 0.1
-
-# ----------- Color scheme & formatting (match example) ------------
-# Orientation colors
-COLOR_DIRECT   = "#1f3b78"   # dark blue
-COLOR_INVERTED = "#8c2d7e"   # reddish purple
-
-# Overlays for recurrence coding
-OVERLAY_SINGLE = "#d9d9d9"   # very light gray (circles)
-OVERLAY_RECUR  = "#4a4a4a"   # dark gray (small dashes)
-
-# Overall aggregate color (black per instruction)
-COLOR_OVERALL  = "#000000"
-
-AX_TEXT        = "#333333"   # labels/ticks
-
-# Matplotlib rcParams for a professional look
-mpl.rcParams.update({
-    "font.family": "sans-serif",
-    "font.sans-serif": ["DejaVu Sans", "Noto Sans", "Liberation Sans", "Ubuntu", "Arial"],
-    "mathtext.fontset": "dejavusans",
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.labelcolor": AX_TEXT,
-    "xtick.color": AX_TEXT,
-    "ytick.color": AX_TEXT,
-    "axes.labelsize": 13,
-    "xtick.labelsize": 12,
-    "ytick.labelsize": 12,
-    "legend.borderaxespad": 0.3,
-})
-
-N_CORES        = max(1, mp.cpu_count() - 1)
-OPEN_PLOTS_ON_LINUX = True  # auto open PNGs using `xdg-open` if available
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
-log = logging.getLogger("len_norm_fast_grouped")
-
-# ---------------------- REGEX & PARSING --------------------
-
-# IMPORTANT: use only FILTERED π and capture orientation group (_0 = direct, _1 = inverted)
-_RE_PI = re.compile(
-    r">.*?filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)(?:_group_([01]))?",
+RE_PI = re.compile(
+    r"^>.*?filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+).*?_group_([01])\b",
     re.IGNORECASE,
 )
-_RE_HUD = re.compile(
-    r">.*?hudson_pairwise_fst.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)",
+RE_HUDSON_ANY = re.compile(
+    r"^>.*?hudson.*?pairwise.*?fst.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)",
     re.IGNORECASE,
 )
 
-def _norm_chr(s: str) -> str:
-    s = str(s).strip().lower()
+# ------------------ Logging helpers -------------
+
+def debug(msg: str):
+    print(f"[DEBUG] {msg}", file=sys.stderr, flush=True)
+
+def warn(msg: str):
+    print(f"[WARN]  {msg}", file=sys.stderr, flush=True)
+
+def err(msg: str):
+    print(f"[ERROR] {msg}", file=sys.stderr, flush=True)
+
+# ------------------ Utilities -------------------
+
+def norm_chr(x) -> str:
+    s = str(x).strip().lower()
     if s.startswith("chr_"): s = s[4:]
     elif s.startswith("chr"): s = s[3:]
-    return f"chr{s}"
+    if not s.startswith("chr"):
+        s = f"chr{s}"
+    return s
 
-def _parse_values_fast(line: str) -> np.ndarray:
-    """Fast parser: replace 'NA' with 'nan' and use np.fromstring with sep=','."""
-    return np.fromstring(line.strip().replace("NA", "nan"), sep=",", dtype=np.float32)
+def to_num(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce")
 
-# -------------------- INVERSION MAPPING --------------
+def sample_sd(arr: np.ndarray) -> float:
+    n = arr.size
+    if n <= 1: return np.nan
+    return float(np.std(arr, ddof=1))
 
-def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
-    """
-    Load inv_info.csv robustly; pull Chromosome/Start/End and recurrence flag.
+def fmt_stat(median, mean, sd, n, kind: str) -> str:
+    if n == 0 or (median is None and mean is None):
+        return "NA, NA (NA), N=0"
+    if kind == "size":
+        med = "NA" if median is None or np.isnan(median) else f"{int(round(median))}"
+        mea = "NA" if mean   is None or np.isnan(mean)   else f"{mean:.1f}"
+        sdd = "NA" if sd     is None or np.isnan(sd)     else f"{sd:.1f}"
+    else:
+        med = "NA" if median is None or np.isnan(median) else f"{median:.6f}"
+        mea = "NA" if mean   is None or np.isnan(mean)   else f"{mean:.6f}"
+        sdd = "NA" if sd     is None or np.isnan(sd)     else f"{sd:.6f}"
+    return f"{med}, {mea} ({sdd}), N={n}"
 
-    Recurrence logic:
-      - If column '0_single_1_recur_consensus' exists and equals 1 → recurrent; 0 → single-event
-      - If missing or NA → uncategorized
-    """
-    if not inv_csv.is_file():
-        log.warning(f"INV CSV not found: {inv_csv} → all sequences will be uncategorized.")
-        return pd.DataFrame(columns=["chrom", "start", "end", "group"])
+def describe(values: List[float], kind: str, n_override: Optional[int]=None) -> str:
+    arr = np.array(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return f"NA, NA (NA), N={0 if n_override is None else int(n_override)}"
+    med  = float(np.median(arr))
+    mean = float(np.mean(arr))
+    sd   = sample_sd(arr)
+    n    = int(arr.size if n_override is None else n_override)
+    return fmt_stat(med, mean, sd, n, kind)
 
-    df = pd.read_csv(inv_csv, engine="python")
-    cols = {c: c.strip() for c in df.columns}
-    df.rename(columns=cols, inplace=True)
+# ------------------ Optional map.tsv ------------
+
+def maybe_load_map() -> Optional[pd.DataFrame]:
+    if not os.path.exists(MAP_TSV):
+        debug("No map.tsv found; will use inversion coordinates as-is.")
+        return None
+    df = pd.read_csv(MAP_TSV, sep="\t", dtype=str)
+    if not all(col in df.columns for col in MAP_FILE_COLUMNS):
+        warn("map.tsv present but missing required columns; ignoring mapping.")
+        return None
+    df = df[MAP_FILE_COLUMNS].copy()
+    df["Original_Chr"] = df["Original_Chr"].map(norm_chr)
+    df["New_Chr"]      = df["New_Chr"].map(norm_chr)
+    for c in ["Original_Start","Original_End","New_Start","New_End"]:
+        df[c] = to_num(df[c]).astype("Int64")
+    df = df.dropna().copy()
+    for c in ["Original_Start","Original_End","New_Start","New_End"]:
+        df[c] = df[c].astype(int)
+    debug(f"Loaded coordinate mapping with {len(df)} rows.")
+    return df
+
+def build_map_lookup(map_df: Optional[pd.DataFrame]) -> Dict[Tuple[str,int,int], Tuple[str,int,int]]:
+    if map_df is None: return {}
+    lut = {}
+    for _, r in map_df.iterrows():
+        oc, os_, oe = r["Original_Chr"], int(r["Original_Start"]), int(r["Original_End"])
+        nc, ns, ne  = r["New_Chr"], int(r["New_Start"]), int(r["New_End"])
+        lut[(oc, os_, oe)] = (nc, ns, ne)
+    return lut
+
+# ------------------ Load inversion info ---------
+
+def load_invinfo(lut: Dict[Tuple[str,int,int], Tuple[str,int,int]]) -> pd.DataFrame:
+    debug(f"Loading inversion mapping from {INVINFO_TSV} ...")
+    inv = pd.read_csv(INVINFO_TSV, sep="\t", engine="python", dtype=str)
+    inv.columns = [c.strip() for c in inv.columns]
+    debug(f"{INVINFO_TSV} columns: {list(inv.columns)}")
+
+    needed = {"Chromosome","Start","End"}
+    if not needed.issubset(inv.columns):
+        raise RuntimeError(f"{INVINFO_TSV} must contain {sorted(needed)}")
 
     recur_col = None
-    for candidate in ["0_single_1_recur_consensus"]:
-        if candidate in df.columns:
-            recur_col = candidate
+    for cand in ["0_single_1_recur_consensus", "0_single_1_recur"]:
+        if cand in inv.columns:
+            recur_col = cand
             break
+    if recur_col is None:
+        raise RuntimeError("Missing recurrence column (need '0_single_1_recur_consensus' or '0_single_1_recur').")
 
-    if "Chromosome" not in df.columns or "Start" not in df.columns or "End" not in df.columns:
-        raise ValueError("inv_info.csv must contain 'Chromosome', 'Start', 'End' columns.")
+    df = pd.DataFrame({
+        "chr0":   inv["Chromosome"].map(norm_chr),
+        "start0": to_num(inv["Start"]),
+        "end0":   to_num(inv["End"]),
+        "flag":   to_num(inv[recur_col])
+    }).dropna()
+    df["start0"] = df["start0"].astype(int)
+    df["end0"]   = df["end0"].astype(int)
+    df["Recurrence"] = df["flag"].map({0:"Single-event", 1:"Recurrent"})
+    df = df.dropna(subset=["Recurrence"])
 
-    df["_chrom"] = df["Chromosome"].map(_norm_chr)
-    df["_start"] = pd.to_numeric(df["Start"], errors="coerce").astype("Int64")
-    df["_end"]   = pd.to_numeric(df["End"],   errors="coerce").astype("Int64")
-
-    if recur_col is not None:
-        rc = pd.to_numeric(df[recur_col], errors="coerce")
-        group = pd.Series(
-            np.where(rc == 1, "recurrent", np.where(rc == 0, "single-event", "uncategorized")),
-            index=df.index,
-        )
-    else:
-        group = pd.Series("uncategorized", index=df.index)
-
-    mask = df["_chrom"].notna() & df["_start"].notna() & df["_end"].notna()
-    out = df.loc[mask, ["_chrom", "_start", "_end"]].copy()
-    out.rename(columns={"_chrom": "chrom", "_start": "start", "_end": "end"}, inplace=True)
-    out["group"] = group.loc[out.index].values
-    out["start"] = out["start"].astype(int)
-    out["end"]   = out["end"].astype(int)
-
-    n_groups = Counter(out["group"])
-    log.info(f"Loaded inversion mapping: recurrent={n_groups.get('recurrent',0)}, "
-             f"single-event={n_groups.get('single-event',0)}, "
-             f"uncategorized(by CSV)={n_groups.get('uncategorized',0)}")
-
+    rows = []
+    for _, r in df.iterrows():
+        oc, os, oe = r["chr0"], int(r["start0"]), int(r["end0"])
+        key = (oc, os, oe)
+        if key in lut:
+            nc, ns, ne = lut[key]
+        else:
+            nc, ns, ne = oc, os, oe
+        if ns > ne: ns, ne = ne, ns
+        rows.append((nc, ns, ne, r["Recurrence"]))
+    out = pd.DataFrame(rows, columns=["chr","start","end","Recurrence"])
+    out = out.drop_duplicates(subset=["chr","start","end"]).reset_index(drop=True)
+    counts = Counter(out["Recurrence"])
+    debug(f"Inversions loaded (valid rows): {len(out)}; Recurrent={counts.get('Recurrent',0)}, Single-event={counts.get('Single-event',0)}")
     return out
 
-def _build_fuzzy_lookup(inv_df: pd.DataFrame) -> Dict[Tuple[str,int,int], str]:
-    """
-    Build a fuzzy (±1 bp) lookup: for each (chrom, start, end),
-    create keys for all combinations of start±{0,1} and end±{0,1}.
-    Resolve collisions by priority: recurrent > single-event > uncategorized.
-    """
-    prio = {"recurrent": 2, "single-event": 1, "uncategorized": 0}
-    lut: Dict[Tuple[str,int,int], Tuple[str,int]] = {}
+# ------------------ Load output.csv --------------
 
-    for chrom, s, e, g in inv_df[["chrom","start","end","group"]].itertuples(index=False):
-        for ds in (-1, 0, 1):
-            for de in (-1, 0, 1):
-                key = (chrom, s + ds, e + de)
-                if key in lut:
-                    if prio[g] > lut[key][1]:
-                        lut[key] = (g, prio[g])
-                else:
-                    lut[key] = (g, prio[g])
+def load_output() -> pd.DataFrame:
+    debug(f"Loading per-region summary from {OUTPUT_CSV} ...")
+    df = pd.read_csv(OUTPUT_CSV, dtype=str)
+    df.columns = [c.strip() for c in df.columns]
+    debug(f"{OUTPUT_CSV} columns: {list(df.columns)}")
 
-    return {k: v[0] for k, v in lut.items()}
+    need = {"chr","region_start","region_end"}
+    if not need.issubset(df.columns):
+        raise RuntimeError(f"{OUTPUT_CSV} is missing required columns {sorted(need)}")
 
-# -------------------- FALSTA ITERATION ----------------------
+    keep = {
+        "chr","region_start","region_end",
+        "0_pi_filtered","1_pi_filtered","0_pi","1_pi",
+        "0_num_hap_filter","1_num_hap_filter",
+        "0_num_hap_no_filter","1_num_hap_no_filter",
+        "hudson_fst_hap_group_0v1"
+    }
+    present = [c for c in df.columns if c in keep]
+    missing = sorted(list(keep - set(present)))
+    if missing:
+        debug(f"Note: output.csv missing optional columns (OK): {missing}")
 
-def _iter_falsta(file_path: Path, which: str, min_len: int):
-    """
-    Yields dicts:
-        {
-          "header": str,
-          "coords": {"chrom": str, "start": int, "end": int},
-          "data": np.ndarray,
-          "length": int,
-          "orient": 'direct'|'inverted'|None
-        }
-    which ∈ {'pi','hudson'}
-    """
-    if which not in ("pi","hudson"):
-        raise ValueError("which must be 'pi' or 'hudson'")
-    if not file_path.is_file():
-        log.error(f"File not found: {file_path}")
-        return
+    df = df[present].copy()
+    df["chr"] = df["chr"].map(norm_chr)
+    df["region_start"] = to_num(df["region_start"]).astype("Int64")
+    df["region_end"]   = to_num(df["region_end"]).astype("Int64")
+    for c in present:
+        if c not in {"chr","region_start","region_end"}:
+            df[c] = to_num(df[c])
+    before = len(df)
+    df = df.dropna(subset=["chr","region_start","region_end"]).copy()
+    df["region_start"] = df["region_start"].astype(int)
+    df["region_end"]   = df["region_end"].astype(int)
+    debug(f"{OUTPUT_CSV} rows retained: {len(df)} (dropped {before-len(df)} with missing keys)")
+    debug("First 3 normalized rows from output.csv:")
+    debug(df[["chr","region_start","region_end"]].head(3).to_string(index=False))
+    return df.reset_index(drop=True)
 
-    rx = _RE_PI if which=="pi" else _RE_HUD
-    total, loaded, skip_len = 0, 0, 0
+# ------------------ Matching (±1 bp) ------------
 
-    with file_path.open("r", encoding="utf-8", errors="ignore") as fh:
+def match_regions(out_df: pd.DataFrame, inv_df: pd.DataFrame) -> pd.DataFrame:
+    debug("Building ±1 bp candidate keys and performing strict match ...")
+    base = out_df[["chr","region_start","region_end"]].copy()
+    cands = []
+    for ds in (-1,0,1):
+        for de in (-1,0,1):
+            t = base.copy()
+            t["start"] = t["region_start"] + ds
+            t["end"]   = t["region_end"]   + de
+            t["mp"]    = abs(ds) + abs(de)
+            cands.append(t)
+    cand = pd.concat(cands, ignore_index=True)
+    debug(f"Candidate rows created: {len(cand)} for {len(base)} regions")
+
+    m = cand.merge(inv_df, on=["chr","start","end"], how="inner")
+    debug(f"Candidate matches against inv_info: {len(m)}")
+    if m.empty:
+        raise RuntimeError("No regions matched inv_info under ±1 bp tolerance.")
+
+    key = ["chr","region_start","region_end"]
+    mm = m.merge(
+        m.groupby(key)["mp"].min().reset_index().rename(columns={"mp":"min_mp"}),
+        on=key, how="inner"
+    )
+    mm = mm[mm["mp"] == mm["min_mp"]].copy()
+
+    counts = mm.groupby(key).size().reset_index(name="n")
+    n_ambig = int((counts["n"] != 1).sum())
+    if n_ambig:
+        warn(f"Ambiguous best matches: {n_ambig} → dropping ambiguous keys")
+    mm = mm.merge(counts, on=key, how="left")
+    mm = mm[mm["n"] == 1].drop(columns=["n","min_mp"]).copy()
+
+    out = mm.merge(out_df, on=["chr","region_start","region_end"], how="left")
+    out["region_id"] = out["chr"].astype(str) + ":" + out["region_start"].astype(str) + "-" + out["region_end"].astype(str)
+
+    n_rec = int((out["Recurrence"] == "Recurrent").sum())
+    n_sgl = int((out["Recurrence"] == "Single-event").sum())
+    debug(f"Matched unique regions: {len(out)}")
+    debug(f"Matched recurrence counts → Recurrent={n_rec}, Single-event={n_sgl}")
+    debug("First 5 matched region_ids:")
+    debug(out[["region_id","Recurrence"]].head(5).to_string(index=False))
+    return out.reset_index(drop=True)
+
+# ------------------ Per-site parsers ------------
+
+class Interval:
+    __slots__ = ("start","end","data","header")
+    def __init__(self, start: int, end: int, data: np.ndarray, header: str):
+        self.start = int(start); self.end = int(end)
+        self.data = data; self.header = header
+
+def parse_pi_falsta() -> Dict[str, Dict[str, List[Interval]]]:
+    debug(f"Parsing filtered per-site π with explicit group from {PI_FALSTA} ...")
+    store: Dict[str, Dict[str, List[Interval]]] = {}
+    n_head = n_match = n_bad = 0
+    headers_sample = []
+    by_orient = Counter()
+
+    with open(PI_FALSTA, "r", encoding="utf-8", errors="ignore") as fh:
         header = None
         for raw in fh:
             line = raw.rstrip("\n")
             if not line: continue
             if line[0] == ">":
-                header = line
-                total += 1
+                header = line; n_head += 1
+                if len(headers_sample) < 8:
+                    headers_sample.append(header.strip())
                 continue
             if header is None: continue
-            m = rx.search(header)
+            m = RE_PI.search(header)
             if not m:
-                header = None
-                continue
-
-            chrom, s, e = _norm_chr(m.group(1)), int(m.group(2)), int(m.group(3))
-            orient = None
-            if which == "pi":
-                gid = m.group(4)
-                if gid is not None:
-                    orient = "direct" if gid == "0" else "inverted"
-
-            data = _parse_values_fast(line)
-            exp_len = e - s + 1
-            if data.size != exp_len:
-                raise RuntimeError(
-                    f"Parsed values length {data.size} does not match header bounds {exp_len} "
-                    f"for metric '{which}' in {file_path} with header: {header}"
-                )
-            if data.size < min_len or np.all(np.isnan(data)):
-                skip_len += 1
-                header = None
-                continue
-
-            yield {
-                "header": header,
-                "coords": {"chrom": chrom, "start": s, "end": e},
-                "data": data,
-                "length": int(data.size),
-                "orient": orient
-            }
-            loaded += 1
+                header = None; continue
+            chrom = norm_chr(m.group(1)); s = int(m.group(2)); e = int(m.group(3)); gid = m.group(4)
+            orient = "direct" if gid == "0" else "inverted"
+            arr = np.fromstring(line.strip().replace("NA","nan"), sep=",", dtype=np.float64)
+            exp = e - s + 1
+            if arr.size != exp:
+                n_bad += 1; header = None; continue
+            store.setdefault(chrom, {"direct":[], "inverted":[]})
+            store[chrom][orient].append(Interval(s, e, arr, header))
+            n_match += 1; by_orient[orient] += 1
             header = None
 
-    log.info(f"[{which}] headers={total}, loaded={loaded}, skipped_len={skip_len}")
+    for c in store:
+        for o in ("direct","inverted"):
+            store[c][o].sort(key=lambda r: r.start)
 
-# --------------- BIN EDGES (shared in workers) --------------
+    debug(f"π headers seen: {n_head}, matched(filtered+grouped): {n_match}, bad-length: {n_bad}")
+    debug(f"π intervals by orientation: {dict(by_orient)}")
+    if headers_sample:
+        debug("Sample π headers:")
+        for h in headers_sample:
+            debug(f"  {h}")
+    debug(f"π chromosomes loaded: {len(store)}; example: {list(store.keys())[:5]}")
+    return store
 
-_BIN_EDGES: Optional[np.ndarray] = None
-_NUM_BINS: Optional[int] = None
-_MODE: Optional[str] = None   # 'proportion' or 'bp'
-_MAX_BP: Optional[int] = None
+def parse_fst_falsta() -> Dict[str, List[Interval]]:
+    debug(f"Scanning Hudson per-site FST from {FST_FALSTA} ...")
+    store: Dict[str, List[Interval]] = defaultdict(list)
+    n_head = n_hud = n_bad = 0
+    token_tally = Counter()
+    sample_headers = []
 
-def _pool_init(mode: str, num_bins: int, max_bp: Optional[int]):
+    with open(FST_FALSTA, "r", encoding="utf-8", errors="ignore") as fh:
+        header = None
+        for raw in fh:
+            line = raw.rstrip("\n")
+            if not line: continue
+            if line[0] == ">":
+                header = line; n_head += 1; continue
+            if header is None: continue
+
+            m = RE_HUDSON_ANY.search(header)
+            if not m:
+                header = None; continue
+
+            hlow = header.lower()
+            for tok, present in [
+                ("hudson", True),
+                ("pairwise", "pairwise" in hlow),
+                ("filtered", "filtered" in hlow or "mask_filtered" in hlow or "filtered_mask" in hlow),
+                ("wc", ("weir" in hlow and "cockerham" in hlow) or ("wc" in hlow)),
+                ("hap_group", "hap_group" in hlow),
+            ]:
+                if present:
+                    token_tally[tok] += 1
+
+            chrom = norm_chr(m.group(1)); s = int(m.group(2)); e = int(m.group(3))
+            arr = np.fromstring(line.strip().replace("NA","nan"), sep=",", dtype=np.float64)
+            exp = e - s + 1
+            if arr.size != exp:
+                n_bad += 1; header = None; continue
+
+            store[chrom].append(Interval(s, e, arr, header))
+            n_hud += 1
+            if len(sample_headers) < 12:
+                sample_headers.append(header.lower())
+            header = None
+
+    for c in store:
+        store[c].sort(key=lambda r: r.start)
+
+    debug(f"Total headers seen in FST file: {n_head}")
+    debug(f"Hudson-like headers captured: {n_hud}, bad-length: {n_bad}")
+    debug(f"Token tallies among Hudson headers: {dict(token_tally)}")
+    if sample_headers:
+        debug("Sample Hudson headers (lowercased):")
+        for h in sample_headers[:10]:
+            debug(f"  {h}")
+    debug(f"FST chromosomes loaded: {len(store)}; example: {list(store.keys())[:5]}")
+    return store
+
+# ------------------ Windowing helpers -----------
+
+def window_sum_count(wstart: int, wend: int, intervals: List[Interval]) -> Tuple[float,int]:
+    if wend < wstart: return (0.0, 0)
+    total = 0.0; n = 0
+    for rec in intervals:
+        if rec.end < wstart: continue
+        if rec.start > wend: break
+        s = max(wstart, rec.start); e = min(wend, rec.end)
+        if s > e: continue
+        a = rec.data[(s - rec.start):(e - rec.start + 1)]
+        if a.size == 0: continue
+        mask = np.isfinite(a)
+        if not np.any(mask): continue
+        vals = a[mask]
+        total += float(np.sum(vals)); n += int(vals.size)
+    return (total, n)
+
+def window_mean(wstart: int, wend: int, intervals: List[Interval]) -> Tuple[float,int]:
+    s, n = window_sum_count(wstart, wend, intervals)
+    return (np.nan if n == 0 else (s / n), n)
+
+def flank_union_windows(rs: int, re_: int, flank_bp: int) -> Tuple[Tuple[int,int], Tuple[int,int], Tuple[int,int], int]:
     """
-    Initializer for workers: set global bin edges and mode.
-    - proportion: bins across [0, 1]
-    - bp:         bins across [0, MAX_BP]
+    Returns (left, right, union, overlap_bp) for flanks INSIDE [rs,re_].
+    left  = [rs, min(rs+flank_bp-1, re_)]
+    right = [max(rs, re_-flank_bp+1), re_]
+    union = left ∪ right (single interval if they overlap, otherwise we return the bounding interval)
+    overlap_bp = size of overlap (>=0)
+    NOTE: when there is overlap, union == [rs, re_] if region_len <= 2*flank_bp.
     """
-    global _BIN_EDGES, _NUM_BINS, _MODE, _MAX_BP
-    _MODE = mode
-    _NUM_BINS = int(num_bins)
-    _MAX_BP = int(max_bp) if max_bp is not None else None
+    Ls, Le = rs, min(rs + flank_bp - 1, re_)
+    Rs, Re = max(rs, re_ - flank_bp + 1), re_
+    # normalize invalid
+    if Le < Ls: Le = Ls - 1
+    if Re < Rs: Rs = Re + 1
+    # overlap
+    ovl = max(0, min(Le, Re) - max(Ls, Rs) + 1)
+    U_s = min(Ls, Rs)
+    U_e = max(Le, Re)
+    return ( (Ls,Le), (Rs,Re), (U_s,U_e), ovl )
 
-    if mode == "proportion":
-        _BIN_EDGES = np.linspace(0.0, 1.0, _NUM_BINS + 1, dtype=np.float64)
-        _BIN_EDGES[-1] = _BIN_EDGES[-1] + 1e-9
-    elif mode == "bp":
-        if _MAX_BP is None or _MAX_BP <= 0:
-            raise ValueError("MAX_BP must be positive for bp mode.")
-        _BIN_EDGES = np.linspace(0.0, float(_MAX_BP), _NUM_BINS + 1, dtype=np.float64)
-        _BIN_EDGES[-1] = _BIN_EDGES[-1] + 1e-9
+def flank_union_sum_count(rs: int, re_: int, flank_bp: int, intervals: List[Interval]) -> Tuple[float,int,Tuple[int,int],Tuple[int,int],Tuple[int,int],int]:
+    (Ls,Le), (Rs,Re), (Us,Ue), ovl = flank_union_windows(rs, re_, flank_bp)
+    total = 0.0; count = 0
+    # disjoint: sum left + right
+    if ovl == 0:
+        s1, n1 = window_sum_count(Ls, Le, intervals)
+        s2, n2 = window_sum_count(Rs, Re, intervals)
+        total, count = (s1 + s2, n1 + n2)
     else:
-        raise ValueError("mode must be 'proportion' or 'bp'")
-
-def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
-    """
-    Map one sequence to distance-from-inversion-edge based on global _MODE, then bin.
-    Returns per-bin MEANS (length _NUM_BINS_, NaN where empty).
-    """
-    global _BIN_EDGES, _NUM_BINS, _MODE, _MAX_BP
-    if _BIN_EDGES is None or _NUM_BINS is None or _MODE is None:
-        raise RuntimeError("Worker not initialized with _pool_init.")
-    L = int(seq.shape[0])
-    if L < 2:
-        return None
-
-    idx = np.arange(L, dtype=np.float64)
-    valid = ~np.isnan(seq)
-    if not np.any(valid):
-        return None
-
-    vv = seq[valid].astype(np.float64)
-
-    if _MODE == "proportion":
-        # 0=center → 1=edge (internal)
-        dc_center = np.minimum(1.0, np.abs(idx - (L-1)/2.0) / (L/2.0))
-        xvals = dc_center[valid]
-    elif _MODE == "bp":
-        # distance in bp to nearest inversion edge
-        dist_bp = np.minimum(idx, (L - 1) - idx)  # 0 at edges, ~L/2 at center
-        dist_bp = dist_bp[valid]
-        keep = dist_bp <= float(_MAX_BP)
-        if not np.any(keep):
-            return None
-        xvals = dist_bp[keep]
-        vv = vv[keep]
-    else:
-        raise RuntimeError("Unknown mode in _bin_one_sequence")
-
-    bi = np.digitize(xvals, _BIN_EDGES[1:], right=False)
-
-    sums   = np.bincount(bi, weights=vv, minlength=_NUM_BINS).astype(np.float64)
-    counts = np.bincount(bi, minlength=_NUM_BINS).astype(np.int32)
-
-    means = np.full(_NUM_BINS, np.nan, dtype=np.float64)
-    nz = counts > 0
-    means[nz] = sums[nz] / counts[nz]
-    return means
-
-# --------------------- AGGREGATION --------------------------
-
-def _aggregate_unweighted(per_seq_means: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Mean across sequences per bin; SEM across sequences; n_seq per bin.
-    """
-    M = np.vstack(per_seq_means)  # [n_seq, num_bins]
-    n_seq_per = np.sum(~np.isnan(M), axis=0)
-    with np.errstate(invalid="ignore"):
-        mean_per = np.nanmean(M, axis=0)
-        se_per   = np.full(M.shape[1], np.nan, dtype=np.float64)
-        mask = n_seq_per > 1
-        if np.any(mask):
-            se_per[mask] = sem(M[:, mask], axis=0, nan_policy="omit")
-    return mean_per, se_per, n_seq_per
-
-def _spearman(x: np.ndarray, y: np.ndarray) -> Tuple[Optional[float], Optional[float]]:
-    ok = ~np.isnan(x) & ~np.isnan(y)
-    xx, yy = x[ok], y[ok]
-    if xx.size < 5:
-        return (None, None)
-    rho, p = spearmanr(xx, yy)
-    if np.isnan(rho) or np.isnan(p):
-        return (None, None)
-    return float(rho), float(p)
-
-# -------------------- UTILS --------------------
-
-def _maybe_open_png(path: Path):
-    if not OPEN_PLOTS_ON_LINUX:
-        return
-    try:
-        if sys.platform.startswith("linux") and shutil.which("xdg-open"):
-            subprocess.Popen(
-                ["xdg-open", str(path)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-    except Exception as e:
-        log.warning(f"Could not auto-open {path}: {e}")
-
-def _smooth_series(x: np.ndarray, y: np.ndarray, frac: float = LOWESS_FRAC) -> Tuple[np.ndarray, np.ndarray]:
-    """LOWESS smoothing that returns sorted x and smoothed y on the same grid."""
-    ok = ~np.isnan(x) & ~np.isnan(y)
-    xs, ys = x[ok], y[ok]
-    if xs.size < 5:
-        return x[ok], y[ok]
-    sm = lowess(ys, xs, frac=frac, it=1, return_sorted=True)
-    return sm[:, 0], sm[:, 1]
-
-def _smooth_sem_to(xs_target: np.ndarray, x_raw: np.ndarray, e_raw: np.ndarray, frac: float = LOWESS_FRAC*0.8) -> np.ndarray:
-    """
-    Smooth the SEM across bins in a scientifically valid way:
-    LOWESS on SEM vs x (only where defined), then interpolate to xs_target; clip to ≥0.
-    """
-    ok = ~np.isnan(x_raw) & ~np.isnan(e_raw)
-    if ok.sum() < 5:
-        es = np.interp(xs_target, x_raw[ok], e_raw[ok], left=np.nan, right=np.nan)
-    else:
-        sm = lowess(e_raw[ok], x_raw[ok], frac=frac, it=1, return_sorted=True)
-        es = np.interp(xs_target, sm[:, 0], sm[:, 1], left=np.nan, right=np.nan)
-    if es.size:
-        es = np.where(es < 0, 0, es)
-    return es
-
-# ----------------------- LEGEND PROXIES ---------------------
-
-class PatternProxy:
-    """Proxy for a single-color patterned line with a small gap and a marker in the gap."""
-    def __init__(self, color: str, overlay: Optional[str] = None):
-        self.color = color
-        self.overlay = overlay  # 'single' or 'recurrent' or None
-
-class AltPatternProxy:
-    """Proxy for an alternating-color patterned line (blue/purple) with a marker in the gap."""
-    def __init__(self, colors: Tuple[str, str], overlay: Optional[str] = None):
-        self.colors = colors
-        self.overlay = overlay
-
-class PatternHandler(HandlerBase):
-    """Draw: line — small gap — tiny marker — small gap — line (scaled to legend box)."""
-    def create_artists(self, legend, orig_handle, x0, y0, width, height, fontsize, trans):
-        y = y0 + height / 2.0
-        lw = max(1.5, LINE_WIDTH * 0.65)
-        gap = width * 0.10
-        seg = (width - 2*gap) / 2.0
-        artists = []
-        # left segment
-        artists.append(Line2D([x0, x0 + seg], [y, y],
-                              color=getattr(orig_handle, "color", COLOR_OVERALL),
-                              lw=lw, solid_capstyle="round", transform=trans))
-        # marker in the central gap
-        xm = x0 + seg + gap/2.0
-        overlay = getattr(orig_handle, "overlay", None)
-        if overlay == "single":
-            artists.append(Line2D([xm], [y], linestyle="None", marker="o",
-                                  markersize=3.5, markerfacecolor=OVERLAY_SINGLE,
-                                  markeredgecolor=getattr(orig_handle, "color", COLOR_OVERALL), markeredgewidth=0.9, transform=trans))
-
-        elif overlay == "recurrent":
-            artists.append(Line2D([xm], [y], linestyle="None", marker="_",
-                                  markersize=6.0, color=OVERLAY_RECUR, transform=trans))
-        # right segment
-        x1 = x0 + seg + gap
-        artists.append(Line2D([x1, x1 + seg], [y, y],
-                              color=getattr(orig_handle, "color", COLOR_OVERALL),
-                              lw=lw, solid_capstyle="round", transform=trans))
-        return artists
-
-class AltPatternHandler(HandlerBase):
-    """Like PatternHandler but left/right segments alternate blue/purple."""
-    def create_artists(self, legend, orig_handle, x0, y0, width, height, fontsize, trans):
-        y = y0 + height / 2.0
-        lw = max(1.5, LINE_WIDTH * 0.65)
-        gap = width * 0.10
-        seg = (width - 2*gap) / 2.0
-        artists = []
-        c0, c1 = getattr(orig_handle, "colors", (COLOR_DIRECT, COLOR_INVERTED))
-        artists.append(Line2D([x0, x0 + seg], [y, y], color=c0, lw=lw, solid_capstyle="round", transform=trans))
-        xm = x0 + seg + gap/2.0
-        overlay = getattr(orig_handle, "overlay", None)
-        if overlay == "single":
-            artists.append(Line2D([xm], [y], linestyle="None", marker="o",
-                                  markersize=3.5, markerfacecolor=OVERLAY_SINGLE,
-                                  markeredgecolor=c0, markeredgewidth=0.9, transform=trans))
-
-        elif overlay == "recurrent":
-            artists.append(Line2D([xm], [y], linestyle="None", marker="_",
-                                  markersize=6.0, color=OVERLAY_RECUR, transform=trans))
-        x1 = x0 + seg + gap
-        artists.append(Line2D([x1, x1 + seg], [y, y], color=c1, lw=lw, solid_capstyle="round", transform=trans))
-        return artists
-
-def _legend_label_for(group_key: str, N: int, rho: Optional[float], p: Optional[float]) -> str:
-    def ptxt(p):
-        if p is None or np.isnan(p): return "N/A"
-        return "<0.001" if p < 1e-3 else f"{p:.3g}"
-    def rtxt(r):
-        if r is None or np.isnan(r): return "N/A"
-        return f"{r:.3f}"
-    name_map = {
-        "direct-single-event":   "Direct — single-event",
-        "direct-recurrent":      "Direct — recurrent",
-        "inverted-single-event": "Inverted — single-event",
-        "inverted-recurrent":    "Inverted — recurrent",
-        "single-event":          "FST — single-event",
-        "recurrent":             "FST — recurrent",
-        "overall":               "Overall",
-    }
-    base = name_map.get(group_key, group_key)
-    return f"{base} (N={N}, ρ={rtxt(rho)} p={ptxt(p)})"
-
-# ----------------------- PATTERNED LINES --------------------
-
-def _draw_patterned_line(ax,
-                         xs: np.ndarray,
-                         ys: np.ndarray,
-                         base_color: Optional[str] = None,
-                         alt_colors: Optional[Tuple[str, str]] = None,
-                         overlay: Optional[str] = None):
-    """
-    Draw a TRUE patterned line with real gaps:
-      line — small gap (with tiny overlay marker) — line — ...
-    - If alt_colors is provided, segments alternate between those two colors.
-    - overlay: 'single' → light gray circle in gap; 'recurrent' → dark gray small dash in gap.
-    """
-    n = xs.size
-    if n < 2:
-        return
-
-    # Choose number of pattern cycles based on resolution (aim ~20 markers)
-    n_cycles = max(6, min(24, n // 20))
-    # Points per cycle
-    pts_per = max(4, n // n_cycles)
-    on_len  = max(2, int(round(pts_per * 0.70)))   # visible line portion
-    gap_len = max(1, pts_per - on_len)             # true gap
-
-    idx = 0
-    seg_idx = 0
-    while idx < n - 1:
-        j = min(n - 1, idx + on_len)
-        if j - idx >= 1:
-            xseg = xs[idx:j+1]
-            yseg = ys[idx:j+1]
-            color = (alt_colors[seg_idx % 2] if alt_colors is not None else base_color)
-            ax.plot(xseg, yseg, color=color, lw=LINE_WIDTH, solid_capstyle="round", zorder=5)
-            seg_idx += 1
-        # gap with marker
-        g0 = j + 1
-        g1 = min(n - 1, g0 + gap_len - 1)
-        if g0 <= g1:
-            mid = (g0 + g1) // 2
-            if overlay == "single":
-                ax.plot(xs[mid:mid+1], ys[mid:mid+1], linestyle="None", marker="o",
-                        markersize=3.6, markerfacecolor=OVERLAY_SINGLE, markeredgecolor=(base_color if base_color is not None else (alt_colors[0] if alt_colors is not None else COLOR_OVERALL)), markeredgewidth=0.9, zorder=6)
-
-            elif overlay == "recurrent":
-                ax.plot(xs[mid:mid+1], ys[mid:mid+1], linestyle="None", marker="_",
-                        markersize=6.2, color=OVERLAY_RECUR, zorder=6)
-        idx = g1 + 1
-
-# ----------------------- PLOTTING CORE ----------------------
-
-def _plot_multi(x_centers: np.ndarray,
-                group_stats: Dict[str, dict],
-                y_label: str,
-                out_png: Path,
-                x_label: str,
-                metric: str):
-    """
-    Plot multiple groups on the same axes. group_stats[group] contains:
-       { 'mean': np.ndarray, 'se': np.ndarray, 'n_per_bin': np.ndarray,
-         'N_total': int, 'rho': float|None, 'p': float|None,
-         'color': str, 'plot_mask': np.ndarray[bool] }
-    """
-    fig, ax = plt.subplots(figsize=(11.8, 6.6))
-    fig.subplots_adjust(right=0.76)  # reserve space for legend so it never overlaps
-
-    # Axis formatting
-    ax.grid(axis="y", color="#e7e7e7", linewidth=0.8)
-    ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-
-    # Drawing order ensures overlays sit nicely
-    if metric == "pi":
-        draw_order = ["direct-recurrent", "direct-single-event",
-                      "inverted-recurrent", "inverted-single-event", "overall"]
-    else:
-        draw_order = ["recurrent", "single-event", "overall"]
-
-    legend_handles: List[object] = []
-    legend_labels: List[str] = []
-    handler_map: Dict[object, HandlerBase] = {}
-
-    for grp in draw_order:
-        if grp not in group_stats:
-            continue
-        st  = group_stats[grp]
-        col = st["color"]
-        mean_y = st["mean"].copy()
-        se_y   = st["se"].copy()
-        mask_allowed = st["plot_mask"].astype(bool)
-
-        mean_y[~mask_allowed] = np.nan
-        se_y[~mask_allowed]   = np.nan
-
-        ok = ~np.isnan(x_centers) & ~np.isnan(mean_y)
-        if ok.sum() < 5:
-            log.warning(f"[plot] Not enough bins with data to plot for group '{grp}': {ok.sum()}")
-            continue
-
-        x = x_centers[ok]
-        y = mean_y[ok]
-        e = se_y[ok]
-
-        # Smooth mean (LOWESS)
-        xs, ys = _smooth_series(x, y, frac=LOWESS_FRAC)
-
-        # Smooth SEM (LOWESS over e vs x), clamp to ≥0 and interpolate to xs
-        es = _smooth_sem_to(xs, x, e, frac=LOWESS_FRAC*0.8)
-
-        # Scatter of binned means (light alpha, tinted by base color)
-        ax.scatter(x, y, s=SCATTER_SIZE, alpha=SCATTER_ALPHA, color=col, edgecolors="none", zorder=3)
-
-        # Patterned line drawing (REAL gaps + tiny markers)
-        if metric == "hudson" and grp in ("single-event", "recurrent"):
-            _draw_patterned_line(ax, xs, ys,
-                                 base_color=None,
-                                 alt_colors=(COLOR_DIRECT, COLOR_INVERTED),
-                                 overlay=("single" if grp == "single-event" else "recurrent"))
-            # Legend proxy (alternating colors)
-            proxy = AltPatternProxy(colors=(COLOR_DIRECT, COLOR_INVERTED),
-                                    overlay=("single" if grp == "single-event" else "recurrent"))
-            handler = AltPatternHandler()
-        elif grp == "overall":
-            # Overall: solid black
-            ax.plot(xs, ys, lw=LINE_WIDTH, color=COLOR_OVERALL, zorder=5)
-            proxy  = PatternProxy(color=COLOR_OVERALL, overlay=None)
-            handler = PatternHandler()
-        else:
-            # π by orientation (blue or purple) with recurrence-coded gap markers
-            overlay = "single" if grp.endswith("single-event") else "recurrent"
-            base_c  = col  # orientation color
-            _draw_patterned_line(ax, xs, ys, base_color=base_c, alt_colors=None, overlay=overlay)
-            proxy  = PatternProxy(color=base_c, overlay=overlay)
-            handler = PatternHandler()
-
-        # Smoothed uncertainty band (tinted by col)
-        if np.any(~np.isnan(es)):
-            m = ~np.isnan(es)
-            ax.fill_between(xs[m], ys[m]-es[m], ys[m]+es[m],
-                            color=col, alpha=BAND_ALPHA, edgecolor="none", zorder=2)
-
-        legend_handles.append(proxy)
-        legend_labels.append(_legend_label_for(grp, st['N_total'], st.get('rho'), st.get('p')))
-        handler_map[proxy] = handler
-
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    # No title by request
-
-    # Legend OUTSIDE the axes (never overlaps data), with tiny markers
-    if legend_handles:
-        ax.legend(legend_handles, legend_labels,
-                  handler_map=handler_map,
-                  loc="upper left", bbox_to_anchor=(1.005, 1.0),
-                  frameon=True, framealpha=0.92,
-                  borderpad=0.5, labelspacing=0.8, handlelength=2.8, handletextpad=0.8)
-
-    fig.tight_layout()
-    out_png.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_png, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    log.info(f"Saved plot → {out_png}")
-    _maybe_open_png(out_png)
-
-# --------------------- END-TO-END RUN -----------------------
-
-def _collect_grouped_means(which: str,
-                           falsta: Path,
-                           min_len: int,
-                           fuzzy_map: Dict[Tuple[str,int,int], str],
-                           mode: str,
-                           num_bins: int,
-                           max_bp: Optional[int]) -> Tuple[Dict[str, List[np.ndarray]], Dict[str,int]]:
-    """
-    Iterate falsta, assign each record to a group using fuzzy_map (±1 bp),
-    and compute per-sequence binned means for the requested mode ('proportion' or 'bp').
-
-    Returns:
-       per_group_means: group -> list of per-seq means
-       per_group_counts: group -> number of sequences contributing
-    """
-    per_group_means = defaultdict(list)
-    per_group_counts = Counter()
-
-    log.info(f"[{which}/{mode}] scanning sequences and assigning groups...")
-    seqs_with_meta: List[Tuple[str, Optional[str], np.ndarray]] = []
-
-    for rec in _iter_falsta(falsta, which=which, min_len=min_len):
-        c = rec["coords"]
-        key = (c["chrom"], c["start"], c["end"])
-        recur = fuzzy_map.get(key, "uncategorized")
-        orient = rec.get("orient", None)  # 'direct'/'inverted' for pi; None for hudson
-        seqs_with_meta.append((recur, orient, rec["data"]))
-
-    if not seqs_with_meta:
-        log.warning(f"[{which}/{mode}] No sequences to bin.")
-        return per_group_means, per_group_counts
-
-    with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(mode, num_bins, max_bp)) as pool:
-        per_means = pool.map(
-            _bin_one_sequence,
-            [x[2] for x in seqs_with_meta],
-            chunksize=max(1, len(seqs_with_meta)//(N_CORES*4) if seqs_with_meta else 1)
-        )
-
-    for (recur, orient, _), m in zip(seqs_with_meta, per_means):
-        if m is None:
-            continue
-
-        if which == "pi":
-            if orient in ("direct", "inverted") and recur in ("single-event", "recurrent"):
-                gkey = f"{orient}-{recur}"
-            else:
-                gkey = "uncategorized"
-        else:
-            gkey = recur if recur in ("single-event", "recurrent") else "uncategorized"
-
-        per_group_means[gkey].append(m)
-        per_group_counts[gkey] += 1
-        per_group_means["overall"].append(m)
-        per_group_counts["overall"] += 1
-
-    log_groups = (["direct-recurrent","direct-single-event",
-                   "inverted-recurrent","inverted-single-event"]
-                  if which == "pi" else ["recurrent","single-event"])
-    log_groups += ["uncategorized","overall"]
-    for g in log_groups:
-        if per_group_counts.get(g, 0):
-            log.info(f"[{which}/{mode}] N {g:>22} = {per_group_counts[g]}")
-
-    return per_group_means, per_group_counts
-
-def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
-                      per_group_counts: Dict[str,int],
-                      which: str,
-                      mode: str,
-                      num_bins: int,
-                      max_bp: Optional[int],
-                      y_label: str,
-                      out_png: Path,
-                      out_csv: Path):
-    """
-    Build tables, compute stats, and plot for given mode.
-    """
-    # Build x-axis centers for this mode
-    if mode == "proportion":
-        edges = np.linspace(0.0, 1.0, num_bins + 1, dtype=np.float64)
-        centers_dc = (edges[:-1] + edges[1:]) / 2.0  # distance-from-center (0=center,1=edge)
-        dist_edge = 1.0 - centers_dc                  # 0=edge → 1=center (as label)
-        x_centers = dist_edge
-        x_label   = "Normalized distance from inversion edge (0 = edge, 1 = center)"
-    elif mode == "bp":
-        assert max_bp is not None and max_bp > 0
-        edges = np.linspace(0.0, float(max_bp), num_bins + 1, dtype=np.float64)
-        x_centers = (edges[:-1] + edges[1:]) / 2.0  # bp from inversion edge
-        x_label   = f"Distance from inversion edge (bp; capped at {max_bp:,})"
-    else:
-        raise ValueError("mode must be 'proportion' or 'bp'")
-
-    # Aggregate per group
-    if which == "pi":
-        color_map = {
-            "direct-recurrent":      COLOR_DIRECT,
-            "direct-single-event":   COLOR_DIRECT,
-            "inverted-recurrent":    COLOR_INVERTED,
-            "inverted-single-event": COLOR_INVERTED,
-            "overall":               COLOR_OVERALL,
-        }
-        group_iter = ["direct-recurrent","direct-single-event",
-                      "inverted-recurrent","inverted-single-event","overall"]
-    else:
-        # FST: alternate colors in the line itself; the 'color' below tints scatter/band only
-        color_map = {
-            "recurrent": COLOR_DIRECT,     # band/scatter tint
-            "single-event": COLOR_INVERTED,
-            "overall": COLOR_OVERALL,
-        }
-        group_iter = ["recurrent","single-event","overall"]
-
-    group_stats: Dict[str, dict] = {}
-    all_rows = []
-
-    for grp in group_iter:
-        seqs = per_group_means.get(grp, [])
-        if not seqs:
-            continue
-        mean_per, se_per, nseq_per = _aggregate_unweighted(seqs)
-
-        plot_mask = (nseq_per >= MIN_INV_PER_BIN)
-
-        mean_for_corr = mean_per.copy()
-        mean_for_corr[~plot_mask] = np.nan
-        x_for_corr = x_centers.copy()
-        x_for_corr[~plot_mask] = np.nan
-        rho, p = _spearman(x_for_corr, mean_for_corr)
-
-        group_stats[grp] = {
-            "mean": mean_per,
-            "se": se_per,
-            "n_per_bin": nseq_per.astype(int),
-            "N_total": per_group_counts.get(grp, 0),
-            "rho": (np.nan if rho is None else rho),
-            "p": (np.nan if p is None else p),
-            "color": color_map[grp],
-            "plot_mask": plot_mask,
-        }
-
-        for bi in range(num_bins):
-            all_rows.append({
-                "group": grp,
-                "bin_index": bi,
-                "x_center": x_centers[bi],
-                "mean_value": mean_per[bi],
-                "stderr_value": se_per[bi],
-                "n_sequences_in_bin": int(nseq_per[bi]),
-                "plotting_allowed": bool(plot_mask[bi]),
-                "N_total_sequences_in_group": per_group_counts.get(grp, 0),
-                "spearman_rho_over_allowed_bins": group_stats[grp]["rho"],
-                "spearman_p_over_allowed_bins": group_stats[grp]["p"],
-                "mode": mode,
-                "metric": which,
-            })
-
-    # Save CSV (combined)
-    df = pd.DataFrame(all_rows)
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out_csv, index=False, float_format="%.6g")
-    log.info(f"Saved CSV → {out_csv}")
-
-    # Plot (grouped)
-    _plot_multi(x_centers, group_stats, y_label, out_png, x_label, metric=which)
-
-    # Plot (overall only)
-    overall_only_png = out_png.with_name(f"{out_png.stem}_overall_only.png")
-    overall_stats = {"overall": group_stats["overall"]} if "overall" in group_stats else {}
-    _plot_multi(x_centers, overall_stats, y_label, overall_only_png, x_label, metric=which)
-
-def run_metric(which: str,
-               falsta: Path,
-               min_len: int,
-               fuzzy_map: Dict[Tuple[str,int,int], str],
-               y_label: str,
-               # proportion mode outputs
-               out_png_prop: Path,
-               out_csv_prop: Path,
-               # bp mode outputs
-               out_png_bp: Path,
-               out_csv_bp: Path):
-    t0 = time.time()
-
-    # ---------- PROPORTION MODE ----------
-    per_group_means_prop, per_group_counts_prop = _collect_grouped_means(
-        which=which,
-        falsta=falsta,
-        min_len=min_len,
-        fuzzy_map=fuzzy_map,
-        mode="proportion",
-        num_bins=NUM_BINS_PROP,
-        max_bp=None,
-    )
-    total_loaded_prop = sum(per_group_counts_prop.values())
-    if total_loaded_prop == 0:
-        log.error(f"[{which}/proportion] No sequences loaded from {falsta}.")
-    else:
-        _assemble_outputs(
-            per_group_means_prop, per_group_counts_prop,
-            which=which, mode="proportion", num_bins=NUM_BINS_PROP, max_bp=None,
-            y_label=y_label,
-            out_png=out_png_prop,
-            out_csv=out_csv_prop,
-        )
-
-    # ---------- BASE-PAIR MODE  ----------
-    per_group_means_bp, per_group_counts_bp = _collect_grouped_means(
-        which=which,
-        falsta=falsta,
-        min_len=min_len,
-        fuzzy_map=fuzzy_map,
-        mode="bp",
-        num_bins=NUM_BINS_BP,
-        max_bp=MAX_BP,
-    )
-    total_loaded_bp = sum(per_group_counts_bp.values())
-    if total_loaded_bp == 0:
-        log.error(f"[{which}/bp] No sequences loaded from {falsta}.")
-    else:
-        _assemble_outputs(
-            per_group_means_bp, per_group_counts_bp,
-            which=which, mode="bp", num_bins=NUM_BINS_BP, max_bp=MAX_BP,
-            y_label=y_label,
-            out_png=out_png_bp,
-            out_csv=out_csv_bp,
-        )
-
-    log.info(f"[{which}] done in {time.time() - t0:.2f}s\n")
-
-# --------------------------- MAIN --------------------------
+        # overlapping: use union once (avoid double-count)
+        total, count = window_sum_count(Us, Ue, intervals)
+    return (total, count, (Ls,Le), (Rs,Re), (Us,Ue), ovl)
+
+# ------------------ Main ------------------------
 
 def main():
-    OUTDIR.mkdir(parents=True, exist_ok=True)
+    # map
+    map_df = maybe_load_map()
+    lut = build_map_lookup(map_df)
 
-    # Load inversion mapping and build fuzzy (±1bp) lookup
-    inv_df = _load_inv_mapping(INV_CSV)
-    fuzzy_map = _build_fuzzy_lookup(inv_df) if not inv_df.empty else {}
+    # loads
+    inv = load_invinfo(lut)
+    out = load_output()
+    matched = match_regions(out, inv)
 
-    # π (diversity) — Direct (blue) / Inverted (purple), with REAL gaps + tiny markers for recurrence
-    run_metric(
-        which="pi",
-        falsta=DIVERSITY_FILE,
-        min_len=MIN_LEN_PI,
-        fuzzy_map=fuzzy_map,
-        y_label="Mean nucleotide diversity (π per site)",
-        # proportion mode outputs
-        out_png_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.png",
-        out_csv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.csv",
-        # bp mode outputs 
-        out_png_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.png",
-        out_csv_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.csv",
-    )
+    # per-site stores
+    pi_store  = parse_pi_falsta()
+    fst_store = parse_fst_falsta()
 
-    # Hudson FST — lines alternate blue/purple with REAL gaps + tiny markers for recurrence
-    run_metric(
-        which="hudson",
-        falsta=FST_FILE,
-        min_len=MIN_LEN_FST,
-        fuzzy_map=fuzzy_map,
-        y_label="Mean Hudson FST (per site)",
-        # proportion mode outputs
-        out_png_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.png",
-        out_csv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.csv",
-        # bp mode outputs
-        out_png_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.png",
-        out_csv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.csv",
-    )
+    # sample sizes: use max(filtered, no_filter) per orientation (more realistic)
+    def pick_size(r, col_f, col_nf):
+        v_f  = r.get(col_f, np.nan)
+        v_nf = r.get(col_nf, np.nan)
+        if pd.notna(v_f) and pd.notna(v_nf):
+            return float(max(v_f, v_nf))
+        if pd.notna(v_f):  return float(v_f)
+        if pd.notna(v_nf): return float(v_nf)
+        return np.nan
+
+    matched["size_dir"] = matched.apply(lambda r: pick_size(r, "0_num_hap_filter", "0_num_hap_no_filter"), axis=1)
+    matched["size_inv"] = matched.apply(lambda r: pick_size(r, "1_num_hap_filter", "1_num_hap_no_filter"), axis=1)
+
+    # prefer filtered π from output.csv
+    matched["pi_dir"] = matched["0_pi_filtered"].where(matched["0_pi_filtered"].notna(), matched.get("0_pi"))
+    matched["pi_inv"] = matched["1_pi_filtered"].where(matched["1_pi_filtered"].notna(), matched.get("1_pi"))
+
+    matched["region_len"] = (matched["region_end"] - matched["region_start"] + 1).astype(int)
+
+    # DEBUG: sample-size distributions
+    for k, col in [("direct","size_dir"), ("inverted","size_inv")]:
+        arr = pd.to_numeric(matched[col], errors="coerce")
+        ok = arr.dropna()
+        debug(f"[N-size] {k:7s}: N={ok.size}, median={ok.median() if ok.size else 'NA'}, "
+              f"mean={ok.mean() if ok.size else 'NA'}, min={ok.min() if ok.size else 'NA'}, max={ok.max() if ok.size else 'NA'}; "
+              f"missing={arr.isna().sum()}")
+
+    # containers
+    region_fst_psite = []
+    region_fst_psite_n = []
+    region_fst_csv = []
+
+    flank_pi_dir_vals = []
+    flank_pi_inv_vals = []
+    flank_pi_dir_n    = []
+    flank_pi_inv_n    = []
+
+    flank_fst_vals = []
+    flank_fst_n    = []
+
+    cov = {
+        "region_fst_psite_have": Counter(),
+        "region_fst_csv_have": Counter(),
+        "flank_pi_dir_have": Counter(),
+        "flank_pi_inv_have": Counter(),
+        "flank_fst_have": Counter(),
+        "miss_chr_fst": Counter(),
+        "miss_chr_pi": Counter(),
+    }
+
+    # region spot-check capture
+    xcheck_rows = []
+
+    # iterate regions
+    for i, r in matched.iterrows():
+        chrom = r["chr"]; rs = int(r["region_start"]); re_ = int(r["region_end"])
+        rec_label = "recurrent" if r["Recurrence"] == "Recurrent" else "single"
+        L = int(r["region_len"])
+
+        # region per-site FST
+        fst_psite_val = np.nan; fst_psite_n = 0
+        if chrom in fst_store:
+            fst_psite_val, fst_psite_n = window_mean(rs, re_, fst_store[chrom])
+            if fst_psite_n >= MIN_PSITE_BASES_ACCEPT:
+                cov["region_fst_psite_have"][rec_label] += 1
+        else:
+            cov["miss_chr_fst"][rec_label] += 1
+
+        region_fst_psite.append(fst_psite_val)
+        region_fst_psite_n.append(fst_psite_n)
+
+        # CSV FST (example source)
+        csv_fst = r.get("hudson_fst_hap_group_0v1", np.nan)
+        if pd.notna(csv_fst):
+            cov["region_fst_csv_have"][rec_label] += 1
+        region_fst_csv.append(csv_fst)
+
+        # flank windows (INSIDE region)
+        (Ls,Le), (Rs,Re), (Us,Ue), ovl = flank_union_windows(rs, re_, FLANK_BP)
+        # π direct flank
+        v = np.nan; n_used = 0
+        if chrom in pi_store:
+            s, n, _, _, _, _ = flank_union_sum_count(rs, re_, FLANK_BP, pi_store[chrom]["direct"])
+            if n >= MIN_PSITE_BASES_ACCEPT:
+                v = s / n; n_used = n; cov["flank_pi_dir_have"][rec_label] += 1
+        else:
+            cov["miss_chr_pi"][rec_label] += 1
+        flank_pi_dir_vals.append(v); flank_pi_dir_n.append(n_used)
+
+        # π inverted flank
+        v = np.nan; n_used = 0
+        if chrom in pi_store:
+            s, n, _, _, _, _ = flank_union_sum_count(rs, re_, FLANK_BP, pi_store[chrom]["inverted"])
+            if n >= MIN_PSITE_BASES_ACCEPT:
+                v = s / n; n_used = n; cov["flank_pi_inv_have"][rec_label] += 1
+        flank_pi_inv_vals.append(v); flank_pi_inv_n.append(n_used)
+
+        # FST flank (per-site, inside region)
+        v = np.nan; n_used = 0
+        if chrom in fst_store:
+            s, n, LL, RR, UU, ov = flank_union_sum_count(rs, re_, FLANK_BP, fst_store[chrom])
+            if n >= MIN_PSITE_BASES_ACCEPT:
+                v = s / n; n_used = n; cov["flank_fst_have"][rec_label] += 1
+        flank_fst_vals.append(v); flank_fst_n.append(n_used)
+
+        # capture spot-check (first 12)
+        if len(xcheck_rows) < 12:
+            xcheck_rows.append({
+                "region_id": r["region_id"],
+                "rec": rec_label,
+                "region_len": L,
+                "flank_left": f"{Ls}-{Le}",
+                "flank_right": f"{Rs}-{Re}",
+                "flank_union": f"{Us}-{Ue}",
+                "flank_overlap_bp": ovl,
+                "csv_fst": csv_fst,
+                "psite_fst": fst_psite_val,
+                "psite_cov_frac": (fst_psite_n / L) if L > 0 else np.nan,
+                "flank_fst_n": n_used
+            })
+
+    # attach
+    matched["fst_psite"] = region_fst_psite
+    matched["fst_psite_n"] = region_fst_psite_n
+    matched["fst_csv"] = region_fst_csv
+    matched["flank_pi_dir"] = flank_pi_dir_vals
+    matched["flank_pi_inv"] = flank_pi_inv_vals
+    matched["flank_pi_dir_n"] = flank_pi_dir_n
+    matched["flank_pi_inv_n"] = flank_pi_inv_n
+    matched["flank_fst"] = flank_fst_vals
+    matched["flank_fst_n"] = flank_fst_n
+
+    # ---------------- COVERAGE DIAGNOSTICS -------------------------
+    n_rec  = int((matched["Recurrence"] == "Recurrent").sum())
+    n_sing = int((matched["Recurrence"] == "Single-event").sum())
+    debug("=== COVERAGE DIAGNOSTICS (INSIDE-REGION FLANKS) ===")
+    debug(f"Total matched regions → Recurrent={n_rec}, Single-event={n_sing}")
+    for k, v in cov.items():
+        debug(f"{k}: {dict(v)}")
+
+    cov_frac = matched["fst_psite_n"] / matched["region_len"]
+    debug(f"[per-site FST] region coverage fraction: "
+          f"N={cov_frac.notna().sum()}, "
+          f"median={cov_frac.median(skipna=True):.4f}, "
+          f"mean={cov_frac.mean(skipna=True):.4f}, "
+          f"q10={cov_frac.quantile(0.10):.4f}, q90={cov_frac.quantile(0.90):.4f}")
+
+    debug("Spot-check (~12) of regions (flank windows are INSIDE region):")
+    for row in xcheck_rows:
+        debug(f"  {row['region_id']:>28s} rec={row['rec']:<9s} L={row['region_len']:<7d} "
+              f"Lflank={row['flank_left']:<18s} Rflank={row['flank_right']:<18s} "
+              f"U={row['flank_union']:<18s} ovlp={row['flank_overlap_bp']:<6d} "
+              f"CSV={row['csv_fst']!s:<10s} psite={row['psite_fst']!s:<12s} "
+              f"cov={row['psite_cov_frac']:.3f} flankFSTn={row['flank_fst_n']}")
+
+    # ---------------- Aggregation helpers --------------------------
+
+    def agg_by(rec_key: str, col: str) -> List[float]:
+        return pd.to_numeric(
+            matched.loc[matched["Recurrence"].eq(rec_key), col], errors="coerce"
+        ).dropna().tolist()
+
+    def choose_region_fst_series(rec_key: str) -> List[float]:
+        sub = matched.loc[matched["Recurrence"].eq(rec_key)].copy()
+        chosen = []
+        used_psite = used_csv = 0
+        for _, r in sub.iterrows():
+            v = np.nan
+            if USE_PERSITE_FST_WHEN_COVERED and pd.notna(r["fst_psite"]):
+                frac = (r["fst_psite_n"] / r["region_len"]) if r["region_len"] > 0 else 0.0
+                if frac >= MIN_REGION_FST_COVER_FRAC and r["fst_psite_n"] >= MIN_PSITE_BASES_ACCEPT:
+                    v = float(r["fst_psite"]); used_psite += 1
+                elif pd.notna(r["fst_csv"]):
+                    v = float(r["fst_csv"]); used_csv += 1
+            elif pd.notna(r["fst_csv"]):
+                v = float(r["fst_csv"]); used_csv += 1
+            chosen.append(v)
+        debug(f"[FST choose] {rec_key:11s} → used_per-site={used_psite}, used_csv={used_csv}, "
+              f"total_non-NA={np.isfinite(np.array(chosen)).sum()}")
+        return [x for x in chosen if np.isfinite(x)]
+
+    # ---------------- PRINT SUMMARIES -------------------------------
+
+    # direct/inverted π (region) + flanking π
+    def print_block(title: str, sizes: List[float], pis: List[float], flank_pis: List[float], total_in_cat: int):
+        print(title)
+        print(f"- Sample size: {describe(sizes, kind='size', n_override=total_in_cat)}")
+        print(f"- Nucleotide diversity (π): {describe(pis, kind='pi')}")
+        print(f"- 10 kb flanking π (inside region): {describe(flank_pis, kind='pi')}")
+        print()
+
+    print_block("Direct haplotypes (recurrent region)",
+                agg_by("Recurrent","size_dir"),
+                agg_by("Recurrent","pi_dir"),
+                agg_by("Recurrent","flank_pi_dir"),
+                total_in_cat=n_rec)
+
+    print_block("Inverted haplotypes (recurrent region)",
+                agg_by("Recurrent","size_inv"),
+                agg_by("Recurrent","pi_inv"),
+                agg_by("Recurrent","flank_pi_inv"),
+                total_in_cat=n_rec)
+
+    print_block("Direct haplotypes (single-event region)",
+                agg_by("Single-event","size_dir"),
+                agg_by("Single-event","pi_dir"),
+                agg_by("Single-event","flank_pi_dir"),
+                total_in_cat=n_sing)
+
+    print_block("Inverted haplotypes (single-event region)",
+                agg_by("Single-event","size_inv"),
+                agg_by("Single-event","pi_inv"),
+                agg_by("Single-event","flank_pi_inv"),
+                total_in_cat=n_sing)
+
+    # FST region (CSV-backed; optional per-site override with coverage)
+    fst_recur = choose_region_fst_series("Recurrent")
+    fst_single= choose_region_fst_series("Single-event")
+    print("FST (Hudson; region means; CSV-backed like example)")
+    print(f"- Recurrent regions: {describe(fst_recur, kind='fst')}")
+    print(f"- Single-event regions: {describe(fst_single, kind='fst')}")
+    print()
+
+    # FST flanks (per-site INSIDE region)
+    flank_recur = agg_by("Recurrent","flank_fst")
+    flank_single= agg_by("Single-event","flank_fst")
+    print("10 kb flanking FST (Hudson; per-site inside region)")
+    print(f"- Recurrent regions: {describe(flank_recur, kind='fst')}")
+    print(f"- Single-event regions: {describe(flank_single, kind='fst')}")
 
 if __name__ == "__main__":
-    mp.freeze_support()
-    main()
+    try:
+        main()
+    except Exception as e:
+        err(str(e))
+        sys.exit(1)
