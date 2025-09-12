@@ -38,10 +38,14 @@ LOWESS_FRAC     = 0.4
 MIN_INV_PER_BIN = 5                 # if <5 inversions in a bin → don't plot that bin
 
 # Visual
+# Visual
 SCATTER_SIZE   = 34
 SCATTER_ALPHA  = 0.10   # transparent dots
 LINE_WIDTH     = 2.8
 BAND_ALPHA     = 0.1
+
+# Y-axis padding as a fraction of the smoothed-line span
+Y_PAD_FRAC     = 0.1
 
 # ----------- Color scheme & formatting (match example) ------------
 # Orientation colors
@@ -562,6 +566,9 @@ def _plot_multi(x_centers: np.ndarray,
     legend_labels: List[str] = []
     handler_map: Dict[object, HandlerBase] = {}
 
+    # Track y extents of *smoothed* lines only
+    y_min, y_max = np.inf, -np.inf
+
     for grp in draw_order:
         if grp not in group_stats:
             continue
@@ -585,6 +592,11 @@ def _plot_multi(x_centers: np.ndarray,
 
         # Smooth mean (LOWESS)
         xs, ys = _smooth_series(x, y, frac=LOWESS_FRAC)
+
+        # Track y-range from smoothed lines (ignore scatter/bands)
+        if ys.size:
+            y_min = min(y_min, np.nanmin(ys))
+            y_max = max(y_max, np.nanmax(ys))
 
         # Smooth SEM (LOWESS over e vs x), clamp to ≥0 and interpolate to xs
         es = _smooth_sem_to(xs, x, e, frac=LOWESS_FRAC*0.8)
@@ -625,9 +637,18 @@ def _plot_multi(x_centers: np.ndarray,
         legend_labels.append(_legend_label_for(grp, st['N_total'], st.get('rho'), st.get('p')))
         handler_map[proxy] = handler
 
+    # Lock y-limits to smoothed lines (+ margin), ignoring scatter/bands
+    if np.isfinite(y_min) and np.isfinite(y_max):
+        span = y_max - y_min
+        if span <= 0:  # flat-line edge case
+            base = abs(y_max) if y_max != 0 else 1.0
+            pad = Y_PAD_FRAC * base
+        else:
+            pad = Y_PAD_FRAC * span
+        ax.set_ylim(y_min - pad, y_max + pad)
+
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    # No title by request
 
     # Legend OUTSIDE the axes (never overlaps data), with tiny markers
     if legend_handles:
