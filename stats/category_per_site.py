@@ -696,8 +696,10 @@ def _collect_grouped_means(which: str,
 
         per_group_means[gkey].append(m)
         per_group_counts[gkey] += 1
-        per_group_means["overall"].append(m)
-        per_group_counts["overall"] += 1
+        # Only include categorized sequences in 'overall' (exclude uncategorized)
+        if gkey != "uncategorized":
+            per_group_means["overall"].append(m)
+            per_group_counts["overall"] += 1
 
     log_groups = (["direct-recurrent","direct-single-event",
                    "inverted-recurrent","inverted-single-event"]
