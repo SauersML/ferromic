@@ -299,8 +299,9 @@ def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
 
     if _MODE == "proportion":
         # 0=center → 1=edge (internal)
-        dc_center = np.minimum(1.0, np.abs(idx - (L-1)/2.0) / (L/2.0))
-        xvals = dc_center[valid]
+        halfspan = (L - 1) / 2.0            # true max distance from center
+        dc_center = np.abs(idx - halfspan) / halfspan
+        dc_center = np.clip(dc_center, 0.0, 1.0)
     elif _MODE == "bp":
         # distance in bp to nearest inversion edge
         dist_bp = np.minimum(idx, (L - 1) - idx)  # 0 at edges, ~L/2 at center
