@@ -250,11 +250,9 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
 
         C = cpu_count()
-        usage = getattr(monitor, "app_cpu_percent", 0.0)
-        idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
-        n_procs = max(1, min(idle_cores, max_by_budget, POOL_PROCS_PER_INV))
+        n_procs = max(1, min(C, max_by_budget, POOL_PROCS_PER_INV))
         print(f"\n--- Starting parallel model fitting with {n_procs} worker processes ({MP_CONTEXT} context) ---")
 
         X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
@@ -383,11 +381,9 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
 
         C = cpu_count()
-        usage = getattr(monitor, "app_cpu_percent", 0.0)
-        idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
-        n_procs = max(1, min(idle_cores, max_by_budget, POOL_PROCS_PER_INV))
+        n_procs = max(1, min(C, max_by_budget, POOL_PROCS_PER_INV))
         print(f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching ({n_procs} workers).", flush=True)
         bar_len = 40
         queued = 0
@@ -510,11 +506,9 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
 
         C = cpu_count()
-        usage = getattr(monitor, "app_cpu_percent", 0.0)
-        idle_cores = max(1, int(round((1.0 - usage/100.0) * C)))
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
-        n_procs = max(1, min(idle_cores, max_by_budget, POOL_PROCS_PER_INV))
+        n_procs = max(1, min(C, max_by_budget, POOL_PROCS_PER_INV))
         print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).", flush=True)
         bar_len = 40
         queued = 0
