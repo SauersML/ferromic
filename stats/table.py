@@ -1,693 +1,474 @@
-import sys
-import re
-from typing import Dict, List, Tuple, Optional
+from __future__ import annotations
+import sys, os, re, math, statistics as stats
+from pathlib import Path
+from collections import defaultdict, Counter
+from typing import Dict, Tuple, List, Optional
+
 import numpy as np
 import pandas as pd
-from collections import Counter, defaultdict
 
-# --------------------------- CONSTANTS ----------------------------
+# ---------- Files ----------
+INV_FILE   = Path("inv_info.tsv")                 # required
+SUMMARY    = Path("output.csv")                   # required
+PI_FALSTA  = Path("per_site_diversity_output.falsta")
+FST_FALSTA = Path("per_site_fst_output.falsta")
 
-INVINFO_TSV = "inv_info.tsv"
-OUTPUT_CSV = "output.csv"
-DIVERSITY_FALSTA = "per_site_diversity_output.falsta"
-FST_FALSTA = "per_site_fst_output.falsta"
+# ---------- Debug printing ----------
+def dbg(msg: str): print(f"[DEBUG] {msg}", file=sys.stdout, flush=True)
+def warn(msg: str): print(f"[WARN]  {msg}", file=sys.stdout, flush=True)
+def err(msg: str): print(f"[ERROR] {msg}", file=sys.stderr, flush=True)
 
-FLANK_BP = 10_000  # 10 kb on each side
-
-# Regexes (case-insensitive)
-RE_PI = re.compile(
-    r"^>.*?filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+).*?_group_([01])\b",
-    re.IGNORECASE,
-)
-# Broad Hudson header catcher (we'll classify tokens afterwards)
-RE_HUDSON_ANY = re.compile(
-    r"^>.*?hudson.*?pairwise.*?fst.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)",
-    re.IGNORECASE,
-)
-
-# --------------------------- HELPERS ------------------------------
-
-def debug(msg: str):
-    print(f"[DEBUG] {msg}", file=sys.stderr, flush=True)
-
-def warn(msg: str):
-    print(f"[WARN] {msg}", file=sys.stderr, flush=True)
-
-def err(msg: str):
-    print(f"[ERROR] {msg}", file=sys.stderr, flush=True)
-
-def norm_chr(val: str) -> str:
-    s = str(val).strip()
-    s_low = s.lower()
-    if s_low.startswith("chr_"):
-        s = s[4:]
-    elif s_low.startswith("chr"):
-        s = s[3:]
+# ---------- Basic helpers ----------
+def norm_chr(s: str) -> str:
+    s = str(s).strip().lower()
+    if s.startswith("chr_"): s = s[4:]
+    elif s.startswith("chr"): s = s[3:]
     return f"chr{s}"
 
-def to_num(s: pd.Series) -> pd.Series:
-    return pd.to_numeric(s, errors="coerce")
+def region_id(chr_: str, start: int, end: int) -> str:
+    return f"{chr_}:{start}-{end}"
 
-def sample_sd(a: np.ndarray) -> float:
-    if a.size <= 1:
-        return np.nan
-    return float(np.std(a, ddof=1))
+def parse_int(x) -> Optional[int]:
+    try:
+        return int(x)
+    except Exception:
+        return None
 
-def fmt_stat(median: Optional[float], mean: Optional[float], sd: Optional[float],
-             n: int, kind: str) -> str:
-    if n == 0 or median is None or mean is None or (np.isnan(median) and np.isnan(mean)):
-        return "NA, NA (NA), N=0"
-    if kind == "size":
-        med_txt  = "NA" if median is None or np.isnan(median) else f"{int(round(median))}"
-        mean_txt = "NA" if mean   is None or np.isnan(mean)   else f"{mean:.1f}"
-        sd_txt   = "NA" if sd     is None or np.isnan(sd)     else f"{sd:.1f}"
-    else:
-        med_txt  = "NA" if median is None or np.isnan(median) else f"{median:.6f}"
-        mean_txt = "NA" if mean   is None or np.isnan(mean)   else f"{mean:.6f}"
-        sd_txt   = "NA" if sd     is None or np.isnan(sd)     else f"{sd:.6f}"
-    return f"{med_txt}, {mean_txt} ({sd_txt}), N={n}"
+def mean_median_sd(xs: List[float]) -> Tuple[Optional[float], Optional[float], Optional[float], int]:
+    vals = [float(v) for v in xs if pd.notna(v)]
+    if not vals:
+        return (math.nan, math.nan, math.nan, 0)
+    mu = float(np.mean(vals))
+    med = float(np.median(vals))
+    sd = float(np.std(vals, ddof=0)) if len(vals) > 1 else 0.0
+    return (mu, med, sd, len(vals))
 
-def describe_vector(values: List[float], kind: str, n_override: Optional[int] = None) -> str:
-    arr = np.array(values, dtype=float)
-    arr = arr[np.isfinite(arr)]
-    if arr.size == 0:
-        n = 0 if n_override is None else int(n_override)
-        return f"NA, NA (NA), N={n}"
-    med  = float(np.median(arr))
-    mean = float(np.mean(arr))
-    sd   = sample_sd(arr)
-    n    = int(arr.size if n_override is None else n_override)
-    return fmt_stat(med, mean, sd, n, kind)
+# ---------- 1) Load inversion mapping (STRICT, crash on duplicates) ----------
+def load_inversions(inv_path: Path) -> pd.DataFrame:
+    if not inv_path.is_file():
+        raise FileNotFoundError(f"Required inversion file not found: {inv_path}")
+    dbg("Loading inversion mapping from inv_info.tsv ...")
+    df = pd.read_csv(inv_path, sep=None, engine="python", dtype=str)
+    dbg(f"inv_info.tsv columns: {list(df.columns)}")
 
-# --------------------- LOADING & MATCHING -------------------------
+    need = ["Chromosome", "Start", "End", "0_single_1_recur_consensus"]
+    miss = [c for c in need if c not in df.columns]
+    if miss:
+        raise RuntimeError(f"inv_info.tsv missing required columns: {miss}")
 
-def load_invinfo() -> pd.DataFrame:
-    debug(f"Loading inversion mapping from {INVINFO_TSV} ...")
-    inv = pd.read_csv(INVINFO_TSV, sep="\t", engine="python", dtype=str)
-    inv.columns = [c.strip() for c in inv.columns]
-    debug(f"{INVINFO_TSV} columns: {list(inv.columns)}")
+    # Normalize
+    df["_chr"]   = df["Chromosome"].map(norm_chr)
+    df["_start"] = df["Start"].map(parse_int)
+    df["_end"]   = df["End"].map(parse_int)
+    df["_cat"]   = pd.to_numeric(df["0_single_1_recur_consensus"], errors="coerce")
 
-    need_cols = {"Chromosome", "Start", "End"}
-    if not need_cols.issubset(inv.columns):
-        raise RuntimeError(f"{INVINFO_TSV} must contain columns: {sorted(need_cols)}")
+    # Drop rows with invalid coords
+    before = len(df)
+    df = df[df["_chr"].notna() & df["_start"].notna() & df["_end"].notna()]
+    df["_start"] = df["_start"].astype(int)
+    df["_end"]   = df["_end"].astype(int)
+    dropped = before - len(df)
 
-    recur_col = None
-    for c in ["0_single_1_recur_consensus", "0_single_1_recur"]:
-        if c in inv.columns:
-            recur_col = c
-            break
-    if recur_col is None:
-        raise RuntimeError("Missing recurrence column: need '0_single_1_recur_consensus' or '0_single_1_recur'")
+    # Category to label
+    def lab(v):
+        if pd.isna(v): return "uncategorized"
+        return "recurrent" if int(v) == 1 else ("single-event" if int(v) == 0 else "uncategorized")
+    df["_grp"] = df["_cat"].map(lab)
 
-    out = pd.DataFrame({
-        "chr_std": inv["Chromosome"].map(norm_chr),
-        "Start":   to_num(inv["Start"]),
-        "End":     to_num(inv["End"]),
-        "rec_flag": to_num(inv[recur_col]),
-    })
-    before = out.shape[0]
-    out = out.dropna(subset=["chr_std","Start","End","rec_flag"]).copy()
-    out["Start"] = out["Start"].astype(int)
-    out["End"]   = out["End"].astype(int)
-    out["Recurrence"] = out["rec_flag"].map({0:"Single-event", 1:"Recurrent"})
-    out = out.dropna(subset=["Recurrence"]).drop_duplicates(subset=["chr_std","Start","End"])
-    after = out.shape[0]
-    counts = Counter(out["Recurrence"])
-    debug(f"Inversions loaded (valid rows): {after} (dropped {before-after}); Recurrent={counts.get('Recurrent',0)}, Single-event={counts.get('Single-event',0)}")
-    return out[["chr_std","Start","End","Recurrence"]].reset_index(drop=True)
+    # Strict duplicate detection on exact coordinates
+    dup_counts = df.groupby(["_chr","_start","_end"]).size()
+    dups = dup_counts[dup_counts > 1]
+    if len(dups) > 0:
+        # Show a few offending rows to make diagnosis easy.
+        examples = df.merge(dups.rename("n"), on=["_chr","_start","_end"])
+        err("Duplicate exact inversion coordinates detected in inv_info.tsv (this is a hard error).")
+        err("Examples of duplicates:\n" + str(examples.head(10)))
+        raise RuntimeError("Duplicate exact inversion coordinates in inversion table.")
 
-def load_output() -> pd.DataFrame:
-    debug(f"Loading per-region summary from {OUTPUT_CSV} ...")
-    df = pd.read_csv(OUTPUT_CSV, dtype=str)
-    df.columns = [c.strip() for c in df.columns]
-    debug(f"{OUTPUT_CSV} columns: {list(df.columns)}")
+    # Drop uncategorized rows prior to downstream analyses
+    cts_all = Counter(df["_grp"])
+    df = df[df["_grp"].isin(["recurrent", "single-event"])]
+    dropped_uncat = cts_all.get("uncategorized", 0)
 
-    need = {"chr","region_start","region_end"}
-    if not need.issubset(df.columns):
-        raise RuntimeError(f"{OUTPUT_CSV} must contain columns: {sorted(need)}")
-
-    keep_cols = {
-        "chr","region_start","region_end",
-        "0_pi_filtered","1_pi_filtered","0_pi","1_pi",
-        "0_num_hap_filter","1_num_hap_filter","0_num_hap_no_filter","1_num_hap_no_filter",
-        "hudson_fst_hap_group_0v1"  # for sanity cross-check only
-    }
-    cols_present = [c for c in df.columns if c in keep_cols]
-    missing = sorted(list(keep_cols.difference(set(cols_present))))
-    if missing:
-        debug(f"Note: output.csv missing optional cols (OK): {missing}")
-
-    df = df[cols_present].copy()
-    df["chr_std"] = df["chr"].map(norm_chr)
-    df["region_start"] = to_num(df["region_start"]).astype("Int64")
-    df["region_end"]   = to_num(df["region_end"]).astype("Int64")
-    before = df.shape[0]
-    df = df.dropna(subset=["chr_std","region_start","region_end"]).copy()
-    df["region_start"] = df["region_start"].astype(int)
-    df["region_end"]   = df["region_end"].astype(int)
-
-    for c in ["0_pi_filtered","1_pi_filtered","0_pi","1_pi",
-              "0_num_hap_filter","1_num_hap_filter","0_num_hap_no_filter","1_num_hap_no_filter",
-              "hudson_fst_hap_group_0v1"]:
-        if c in df.columns:
-            df[c] = to_num(df[c])
-
-    after = df.shape[0]
-    debug(f"{OUTPUT_CSV} rows retained: {after} (dropped {before-after} with missing keys)")
-    debug("First 3 normalized rows from output.csv:")
-    debug(df[["chr_std","region_start","region_end"]].head(3).to_string(index=False))
-    return df.reset_index(drop=True)
-
-def strict_match(df_out: pd.DataFrame, inv: pd.DataFrame) -> pd.DataFrame:
-    debug("Building ±1 bp candidate keys and performing strict match ...")
-    df_small = df_out[["chr_std","region_start","region_end"]].copy()
-
-    cands = []
-    for ds in (-1, 0, 1):
-        for de in (-1, 0, 1):
-            tmp = df_small.copy()
-            tmp["Start"] = tmp["region_start"] + ds
-            tmp["End"]   = tmp["region_end"]   + de
-            tmp["match_priority"] = abs(ds) + abs(de)  # 0 (exact), 1, 2
-            cands.append(tmp)
-    cand = pd.concat(cands, ignore_index=True)
-    debug(f"Candidate rows created: {cand.shape[0]} for {df_small.shape[0]} regions")
-
-    merged = cand.merge(inv, on=["chr_std","Start","End"], how="inner")  # keep only real overlaps
-    debug(f"Candidate matches against inv_info: {merged.shape[0]}")
-
-    if merged.empty:
-        raise RuntimeError("No regions matched inv_info under ±1 bp tolerance.")
-
-    key = ["chr_std","region_start","region_end"]
-
-    # Step 1: keep rows at minimal match_priority per key
-    min_mp = (merged.groupby(key)["match_priority"].min().reset_index().rename(columns={"match_priority":"min_mp"}))
-    best = merged.merge(min_mp, on=key, how="inner")
-    best = best[best["match_priority"] == best["min_mp"]].copy()
-
-    # Step 2: enforce single best row per key
-    counts = best.groupby(key).size().reset_index(name="n_best")
-    n_ambig = int((counts["n_best"] != 1).sum())
-    if n_ambig > 0:
-        debug(f"Ambiguous-at-best-priority regions: {n_ambig} → dropping them")
-    best = best.merge(counts, on=key, how="left")
-    best = best[best["n_best"] == 1].copy()
-    best.drop(columns=["n_best","min_mp"], inplace=True)
-
-    if best.empty:
-        raise RuntimeError("After strict selection, no regions remained.")
-
-    debug(f"Matched unique regions: {best.shape[0]}")
-
-    out = best.merge(df_out, on=["chr_std","region_start","region_end"], how="left", suffixes=("",""))
-    if not {"chr_std","region_start","region_end","Recurrence"}.issubset(out.columns):
-        missing = {"chr_std","region_start","region_end","Recurrence"} - set(out.columns)
-        raise RuntimeError(f"Strict match lost key columns unexpectedly: {sorted(missing)}")
-
-    out["region_id"] = (
-        out["chr_std"].astype(str) + ":" +
-        out["region_start"].astype(int).astype(str) + "-" +
-        out["region_end"].astype(int).astype(str)
+    # Summaries
+    cts = Counter(df["_grp"])
+    dbg(
+        f"Inversions loaded (valid rows): {len(df)} (dropped {dropped}; excluded {dropped_uncat} uncategorized); "
+        f"Recurrent={cts.get('recurrent',0)}, Single-event={cts.get('single-event',0)}"
     )
 
-    n_rec   = int((out["Recurrence"] == "Recurrent").sum())
-    n_single= int((out["Recurrence"] == "Single-event").sum())
-    debug(f"Matched recurrence counts → Recurrent={n_rec}, Single-event={n_single}")
-    debug("First 5 matched region_ids:")
-    debug(out[["region_id","Recurrence"]].head(5).to_string(index=False))
+    return df[["_chr","_start","_end","_grp"]].rename(columns={"_chr":"chr","_start":"start","_end":"end","_grp":"grp"})
+
+# ---------- 2) Load summary table (region-level metrics) ----------
+def load_summary(sum_path: Path) -> pd.DataFrame:
+    if not sum_path.is_file():
+        raise FileNotFoundError(f"Required summary file not found: {sum_path}")
+    dbg("Loading per-region summary from output.csv ...")
+    df = pd.read_csv(sum_path, dtype=str)
+    dbg(f"output.csv columns: {list(df.columns)}")
+
+    need = ["chr","region_start","region_end",
+            "0_pi_filtered","1_pi_filtered",
+            "0_num_hap_filter","1_num_hap_filter",
+            "hudson_fst_hap_group_0v1"]
+    miss = [c for c in need if c not in df.columns]
+    if miss:
+        raise RuntimeError(f"output.csv missing required columns: {miss}")
+
+    out = pd.DataFrame({
+        "chr": df["chr"].map(norm_chr),
+        "start": pd.to_numeric(df["region_start"], errors="coerce"),
+        "end": pd.to_numeric(df["region_end"], errors="coerce"),
+        "pi0_f": pd.to_numeric(df["0_pi_filtered"], errors="coerce"),
+        "pi1_f": pd.to_numeric(df["1_pi_filtered"], errors="coerce"),
+        "n0": pd.to_numeric(df["0_num_hap_filter"], errors="coerce"),
+        "n1": pd.to_numeric(df["1_num_hap_filter"], errors="coerce"),
+        "fst_region_csv": pd.to_numeric(df["hudson_fst_hap_group_0v1"], errors="coerce"),
+    })
+    before = len(out)
+    out = out[out["chr"].notna() & out["start"].notna() & out["end"].notna()]
+    out["start"] = out["start"].astype(int)
+    out["end"]   = out["end"].astype(int)
+    kept = len(out)
+    dbg(f"output.csv rows retained: {kept} (dropped {before-kept} with missing keys)")
+    dbg("First 3 normalized rows from output.csv:\n" + str(out[["chr","start","end"]].head(3).to_string(index=False)))
     return out
 
-# ------------------------ FALSTA PARSING ---------------------------
+# ---------- 3) Strict region↔inversion matching (±1 on region side; crash on >1 match) ----------
+def match_regions(summary_df: pd.DataFrame, inv_df: pd.DataFrame) -> pd.DataFrame:
+    dbg("Building ±1 bp candidate keys and performing strict match ...")
+    # Build map of exact inversion coords -> group (no duplicates by construction)
+    inv_index: Dict[Tuple[str,int,int], str] = {(r.chr, int(r.start), int(r.end)): r.grp for r in inv_df.itertuples(index=False)}
 
-class IntervalRec:
-    __slots__ = ("start","end","data","header")
-    def __init__(self, start: int, end: int, data: np.ndarray, header: str):
-        self.start = int(start)
-        self.end   = int(end)
-        self.data  = data  # np.ndarray length == end-start+1
-        self.header= header
+    # For debug: a quick hash of index size
+    dbg(f"Inversion exact-key index size: {len(inv_index)}")
 
-def parse_falsta_pi() -> Dict[str, Dict[str, List[IntervalRec]]]:
-    debug(f"Parsing filtered per-site π with explicit group from {DIVERSITY_FALSTA} ...")
-    store: Dict[str, Dict[str, List[IntervalRec]]] = {}
-    n_headers = n_matched = n_badlen = 0
-    n_by_orient = Counter()
+    # For each region create 9 candidate keys, look up in exact inv_index
+    matches = []
+    cand_total = 0
+    for r in summary_df.itertuples(index=False):
+        c, s, e = r.chr, int(r.start), int(r.end)
+        region_key = (c, s, e)
+        candidates = []
+        for ds in (-1, 0, 1):
+            for de in (-1, 0, 1):
+                cand_total += 1
+                key = (c, s + ds, e + de)
+                if key in inv_index:
+                    candidates.append((key, inv_index[key]))
+        if len(candidates) == 0:
+            # not matched → drop silently
+            continue
+        # STRICT: if more than one match (even if same group), crash.
+        if len(candidates) > 1:
+            msg = [f"{region_id(c,s,e)} matched multiple inversion rows (this is a hard error):"]
+            for (kc, kg) in candidates[:10]:
+                msg.append(f"  - inv={kc[0]}:{kc[1]}-{kc[2]}  group={kg}")
+            err("\n".join(msg))
+            raise RuntimeError("Ambiguous region→inversion match (>1 candidate).")
+        (ikey, grp) = candidates[0]
+        matches.append((c, s, e, grp))
+
+    dbg(f"Candidate rows created: {cand_total} for {len(summary_df)} regions")
+    dbg(f"Matched unique regions: {len(matches)}")
+    if not matches:
+        raise RuntimeError("No regions matched inversions under strict rule.")
+
+    out = pd.DataFrame(matches, columns=["chr","start","end","recurrence"])
+    cts = Counter(out["recurrence"])
+    dbg(f"Matched recurrence counts → Recurrent={cts.get('recurrent',0)}, Single-event={cts.get('single-event',0)}")
+
+    # Join back onto summary metrics
+    merged = (summary_df
+              .merge(out, on=["chr","start","end"], how="inner", validate="one_to_one"))
+    dbg("First 5 matched region_ids:\n" + str(pd.DataFrame({
+        "region_id": [region_id(r.chr, r.start, r.end) for r in merged.itertuples(index=False)],
+        "Recurrence": merged["recurrence"]
+    }).head(5).to_string(index=False)))
+    return merged
+
+# ---------- 4) Parse per-site arrays ----------
+_RE_PI = re.compile(r">.*?filtered_pi.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)_group_(0|1)", re.IGNORECASE)
+_RE_FH = re.compile(r">.*?hudson_pairwise_fst.*?_chr_?([\w.\-]+)_start_(\d+)_end_(\d+)", re.IGNORECASE)
+
+def parse_pi_falsta(pi_path: Path) -> Dict[Tuple[str,int,int,str], np.ndarray]:
+    if not pi_path.is_file():
+        warn(f"π FALSTA not found: {pi_path} → flank π will be NA")
+        return {}
+    dbg("Parsing filtered per-site π with explicit group from per_site_diversity_output.falsta ...")
+    pi_map: Dict[Tuple[str,int,int,str], np.ndarray] = {}
+    headers = 0
+    matched = 0
+    badlen = 0
+    got_chr = set()
     sample_headers = []
-
-    with open(DIVERSITY_FALSTA, "r", encoding="utf-8", errors="ignore") as fh:
+    with pi_path.open("r", encoding="utf-8", errors="ignore") as fh:
         header = None
-        for raw in fh:
-            line = raw.rstrip("\n")
-            if not line:
-                continue
+        for line in fh:
+            line=line.rstrip("\n")
+            if not line: continue
             if line[0] == ">":
-                n_headers += 1
+                headers += 1
                 header = line
                 if len(sample_headers) < 8:
-                    sample_headers.append(header.strip()[:260])
+                    sample_headers.append(line)
                 continue
-            if header is None:
-                continue
-            m = RE_PI.search(header)
+            if header is None: continue
+            m = _RE_PI.search(header)
             if not m:
                 header = None
                 continue
-            chrom = norm_chr(m.group(1))
-            start = int(m.group(2))
-            end   = int(m.group(3))
-            gid   = m.group(4)  # '0' or '1'
-            orient = "direct" if gid == "0" else "inverted"
-
-            arr = np.fromstring(line.strip().replace("NA","nan"), sep=",", dtype=np.float64)
-            exp = end - start + 1
-            if arr.size != exp:
-                n_badlen += 1
+            chr_ = norm_chr(m.group(1)); s = int(m.group(2)); e = int(m.group(3))
+            grp = "direct" if m.group(4) == "0" else "inverted"
+            vals = np.fromstring(line.strip().replace("NA","nan"), sep=",", dtype=float)
+            exp = e - s + 1
+            if vals.size != exp:
+                badlen += 1
                 header = None
                 continue
-            store.setdefault(chrom, {"direct":[],"inverted":[]})
-            store[chrom][orient].append(IntervalRec(start, end, arr, header))
-            n_matched += 1
-            n_by_orient[orient] += 1
+            pi_map[(chr_, s, e, grp)] = vals
+            matched += 1
+            got_chr.add(chr_)
             header = None
+    dbg(f"π headers seen: {headers}, matched(filtered+grouped): {matched}, bad-length: {badlen}")
+    dbg(f"π intervals by orientation: {Counter([k[3] for k in pi_map.keys()])}")
+    dbg("Sample π headers:\n  " + "\n  ".join(sample_headers[:8]) if sample_headers else "  (none)")
+    dbg(f"π chromosomes loaded: {len(got_chr)}; example: {list(got_chr)[:5]}")
+    return pi_map
 
-    for chrom in store:
-        for orient in ("direct","inverted"):
-            store[chrom][orient].sort(key=lambda r: r.start)
-
-    debug(f"π headers seen: {n_headers}, matched(filtered+grouped): {n_matched}, bad-length: {n_badlen}")
-    debug(f"π intervals by orientation: {dict(n_by_orient)}")
-    if sample_headers:
-        debug("Sample π headers:")
-        for h in sample_headers:
-            debug(f"  {h}")
-    debug(f"π chromosomes loaded: {len(store)}; example: {list(store.keys())[:5]}")
-    return store
-
-def parse_falsta_fst_filtered_intent() -> Tuple[Dict[str, List[IntervalRec]], Dict[str, int], Dict[str, int], bool]:
-    """
-    Parse Hudson pairwise FST per-site series and **prefer filtered**.
-    If no header contains 'filtered', assume the only Hudson series is already filtered (logged).
-    Returns:
-      - store: dict chr -> [IntervalRec]
-      - counts_all_chr: per-chrom counts (all Hudson)
-      - counts_filtered_chr: per-chrom counts (filtered-only subset actually used)
-      - assumed_filtered: True iff no explicit 'filtered' token was found and we used all Hudson anyway
-    """
-    debug(f"Scanning Hudson per-site FST from {FST_FALSTA} ...")
-    all_store: Dict[str, List[IntervalRec]] = defaultdict(list)
-    filtered_store: Dict[str, List[IntervalRec]] = defaultdict(list)
-
-    n_headers = 0
-    n_hudson  = 0
-    n_badlen  = 0
+def parse_fst_falsta(fst_path: Path) -> Dict[Tuple[str,int,int], np.ndarray]:
+    if not fst_path.is_file():
+        warn(f"FST FALSTA not found: {fst_path} → flank FST will be NA")
+        return {}
+    dbg("Scanning Hudson per-site FST from per_site_fst_output.falsta ...")
+    fst_map: Dict[Tuple[str,int,int], np.ndarray] = {}
+    headers = 0
+    hudson_like = 0
+    badlen = 0
+    got_chr = set()
+    sample_headers = []
     token_tally = Counter()
-    sample_hudson_headers = []
-
-    with open(FST_FALSTA, "r", encoding="utf-8", errors="ignore") as fh:
+    with fst_path.open("r", encoding="utf-8", errors="ignore") as fh:
         header = None
-        for raw in fh:
-            line = raw.rstrip("\n")
-            if not line:
-                continue
-            if line.startswith(">"):
-                n_headers += 1
+        for line in fh:
+            line=line.rstrip("\n")
+            if not line: continue
+            if line[0] == ">":
+                headers += 1
                 header = line
+                if len(sample_headers) < 10:
+                    sample_headers.append(line)
                 continue
-            if header is None:
-                continue
-
-            m = RE_HUDSON_ANY.search(header)
+            if header is None: continue
+            m = _RE_FH.search(header)
             if not m:
                 header = None
                 continue
-
-            # Token classification (for debugging)
-            hlow = header.lower()
-            has_filtered = ("filtered" in hlow) or ("mask_filtered" in hlow) or ("filtered_mask" in hlow)
-            has_wc = ("weir" in hlow and "cockerham" in hlow) or ("wc" in hlow)
-            has_hap = ("hap_group" in hlow)
-            has_pair = ("pairwise" in hlow)
-            for tok, present in [
-                ("hudson", True),
-                ("pairwise", has_pair),
-                ("filtered", has_filtered),
-                ("wc", has_wc),
-                ("hap_group", has_hap),
-            ]:
-                if present:
-                    token_tally[tok] += 1
-
-            # It's a Hudson pairwise FST series
-            chrom = norm_chr(m.group(1))
-            start = int(m.group(2))
-            end   = int(m.group(3))
-            arr = np.fromstring(line.strip().replace("NA","nan"), sep=",", dtype=np.float64)
-            exp = end - start + 1
-            if arr.size != exp:
-                n_badlen += 1
+            # Just accept; do NOT try to detect "filtered" tokens
+            hudson_like += 1
+            if "hudson" in header.lower(): token_tally["hudson"] += 1
+            if "pairwise" in header.lower(): token_tally["pairwise"] += 1
+            chr_ = norm_chr(m.group(1)); s = int(m.group(2)); e = int(m.group(3))
+            vals = np.fromstring(line.strip().replace("NA","nan"), sep=",", dtype=float)
+            exp = e - s + 1
+            if vals.size != exp:
+                badlen += 1
                 header = None
                 continue
-
-            rec = IntervalRec(start, end, arr, header)
-            all_store[chrom].append(rec)
-            n_hudson += 1
-            if has_filtered:
-                filtered_store[chrom].append(rec)
-
-            if len(sample_hudson_headers) < 12:
-                sample_hudson_headers.append((hlow[:280], has_filtered))
+            fst_map[(chr_, s, e)] = vals
+            got_chr.add(chr_)
             header = None
+    dbg(f"Total headers seen in FST file: {headers}")
+    dbg(f"Hudson-like headers captured: {hudson_like}, bad-length: {badlen}")
+    dbg(f"Token tallies among Hudson headers: {dict(token_tally)}")
+    dbg("Sample Hudson headers (lowercased):\n  " + "\n  ".join([h.lower() for h in sample_headers[:10]]) if sample_headers else "  (none)")
+    dbg(f"FST chromosomes loaded: {len(got_chr)}; example: {list(got_chr)[:5]}")
+    return fst_map
 
-    counts_all_chr = {c: len(v) for c, v in all_store.items()}
-    counts_filt_chr = {c: len(v) for c, v in filtered_store.items()}
+# ---------- 5) Flank windows (inside region) ----------
+def flank_union(start: int, end: int, flank_bp: int = 10_000) -> Tuple[int,int,int,int,Tuple[int,int]]:
+    L = end - start + 1
+    # Left: [start, start+flank-1], Right: [end-flank+1, end]
+    Ls, Le = start, min(end, start + flank_bp - 1)
+    Rs, Re = max(start, end - flank_bp + 1), end
+    # Union
+    Us, Ue = min(Ls, Rs), max(Le, Re)
+    # If L < 2*flank, the union may be the whole region; that's fine.
+    return Ls, Le, Rs, Re, (Us, Ue)
 
-    for chrom in all_store:
-        all_store[chrom].sort(key=lambda r: r.start)
-    for chrom in filtered_store:
-        filtered_store[chrom].sort(key=lambda r: r.start)
+def slice_per_site(vals: np.ndarray, start: int, end: int, ws: int, we: int) -> np.ndarray:
+    # vals corresponds to [start..end] inclusive
+    off0 = ws - start
+    off1 = we - start
+    if off0 < 0 or off1 >= vals.size:
+        # Out-of-bounds means no overlap
+        return np.array([], dtype=float)
+    return vals[off0:off1+1]
 
-    debug(f"Total headers seen in FST file: {n_headers}")
-    debug(f"Hudson-like headers captured: {n_hudson}, bad-length: {n_badlen}")
-    debug(f"Token tallies among Hudson headers: {dict(token_tally)}")
-    if sample_hudson_headers:
-        debug("Sample Hudson headers (lowercased) with filtered-flag:")
-        for h, fl in sample_hudson_headers[:10]:
-            debug(f"  filtered={fl} :: {h}")
-
-    explicit_filtered_found = sum(counts_filt_chr.values()) > 0
-    if explicit_filtered_found:
-        debug(f"Using EXPLICIT filtered Hudson series; chromosomes with filtered intervals: {len(counts_filt_chr)}")
-        # summarize first few chromosomes
-        for c in list(counts_filt_chr.keys())[:6]:
-            debug(f"  chr {c}: {counts_filt_chr[c]} filtered intervals (all={counts_all_chr.get(c,0)})")
-        return filtered_store, counts_all_chr, counts_filt_chr, False
-
-    # No filtered token anywhere — fallback assumption:
-    if n_hudson == 0:
-        warn("No Hudson pairwise FST headers matched at all. All FST stats will be NA.")
-        return {}, counts_all_chr, counts_filt_chr, False
-
-    warn("No 'filtered' token found in any Hudson FST headers. "
-         "Assuming the *only* Hudson series present is ALREADY filtered. "
-         "Proceeding with ALL Hudson intervals (documented below).")
-    debug(f"Chromosomes with Hudson intervals (assumed filtered): {len(counts_all_chr)}")
-    for c in list(counts_all_chr.keys())[:10]:
-        debug(f"  chr {c}: {counts_all_chr[c]} intervals")
-    return all_store, counts_all_chr, counts_filt_chr, True
-
-def window_sum_count(wstart: int, wend: int, intervals: List[IntervalRec]) -> Tuple[float, int]:
-    if wend < wstart:
-        return 0.0, 0
-    total_sum = 0.0
-    total_n   = 0
-    for rec in intervals:
-        if rec.end < wstart:
-            continue
-        if rec.start > wend:
-            break
-        s = max(wstart, rec.start)
-        e = min(wend, rec.end)
-        if s > e:
-            continue
-        i0 = s - rec.start
-        i1 = e - rec.start + 1
-        seg = rec.data[i0:i1]
-        if seg.size == 0:
-            continue
-        mask = np.isfinite(seg)
-        if not np.any(mask):
-            continue
-        vals = seg[mask]
-        total_sum += float(np.sum(vals))
-        total_n   += int(vals.size)
-    return total_sum, total_n
-
-def window_mean(wstart: int, wend: int, intervals: List[IntervalRec]) -> float:
-    s, n = window_sum_count(wstart, wend, intervals)
-    return np.nan if n == 0 else (s / n)
-
-# ------------------------- MAIN PIPELINE ---------------------------
-
+# ---------- 6) Main ----------
 def main():
-    # 1) Load + strict match
-    inv = load_invinfo()
-    out = load_output()
-    matched = strict_match(out, inv)
+    # 1) Load inputs
+    inv = load_inversions(INV_FILE)
+    summ = load_summary(SUMMARY)
 
-    # 2) Parse per-site series
-    pi_intervals  = parse_falsta_pi()
-    fst_intervals, fst_counts_all_chr, fst_counts_filt_chr, assumed_filtered = parse_falsta_fst_filtered_intent()
+    # 2) Strict match
+    matched = match_regions(summ, inv)
+    matched = matched[matched["recurrence"].isin(["recurrent","single-event"])].copy()
 
-    debug("Availability snapshot after parsing:")
-    debug(f"  π chroms: {len(pi_intervals)}; FST chroms (used): {len(fst_intervals)}; assumed_filtered={assumed_filtered}")
+    # 3) Parse per-site arrays (π + FST)
+    pi_map  = parse_pi_falsta(PI_FALSTA)
+    fst_map = parse_fst_falsta(FST_FALSTA)
 
-    # 2b) QUICK SANITY: if we have any region-level FST in CSV, compare with per-site-derived means
-    if "hudson_fst_hap_group_0v1" in matched.columns and len(fst_intervals) > 0:
-        # compute per-region per-site FST means for first ~10 matched regions to compare
-        debug("Sanity cross-check: per-site FST mean vs output.csv hudson_fst_hap_group_0v1 (first 10 regions)")
-        check_rows = matched.head(10)
-        for _, r in check_rows.iterrows():
-            chrom = str(r["chr_std"])
-            rs = int(r["region_start"]); re_ = int(r["region_end"])
-            csv_val = r.get("hudson_fst_hap_group_0v1", np.nan)
-            psite_val = np.nan
-            if chrom in fst_intervals:
-                psite_val = window_mean(rs, re_, fst_intervals[chrom])
-            debug(f"  {chrom}:{rs}-{re_}  CSV={csv_val}  per-site={psite_val}")
-
-    # 3) Aggregation containers
-    cat = {
-        "direct_recurrent":   {"size": [], "pi": [], "flank_pi": []},
-        "inverted_recurrent": {"size": [], "pi": [], "flank_pi": []},
-        "direct_single":      {"size": [], "pi": [], "flank_pi": []},
-        "inverted_single":    {"size": [], "pi": [], "flank_pi": []},
-    }
-    fst_cat       = {"recurrent": [], "single": []}
-    fst_flank_cat = {"recurrent": [], "single": []}
-    total_count   = {"recurrent": 0, "single": 0}
-
-    coverage = {
-        "have_pi_dir": Counter(), "have_pi_inv": Counter(),
-        "have_size_dir": Counter(), "have_size_inv": Counter(),
-        "have_flank_pi_dir": Counter(), "have_flank_pi_inv": Counter(),
-        "have_region_fst": Counter(), "have_flank_fst": Counter(),
-        "miss_chr_fst": Counter(), "miss_chr_pi": Counter(),
-        "zero_overlap_region_fst": Counter(), "zero_overlap_flank_fst": Counter(),
+    # 4) Compute per-region flank means (no thresholds)
+    dbg("=== COVERAGE DIAGNOSTICS (INSIDE-REGION FLANKS; NO FILTER THRESHOLDS) ===")
+    rows = []
+    # Track Ns
+    have = {
+        "flank_pi_dir": Counter(),
+        "flank_pi_inv": Counter(),
+        "flank_fst": Counter(),
+        "region_fst_csv": Counter(),
     }
 
-    has_0_size_f  = "0_num_hap_filter" in matched.columns
-    has_1_size_f  = "1_num_hap_filter" in matched.columns
-    has_0_size_nf = "0_num_hap_no_filter" in matched.columns
-    has_1_size_nf = "1_num_hap_no_filter" in matched.columns
-    has_0_pi_f    = "0_pi_filtered" in matched.columns
-    has_1_pi_f    = "1_pi_filtered" in matched.columns
-    has_0_pi_un   = "0_pi" in matched.columns
-    has_1_pi_un   = "1_pi" in matched.columns
+    # Optional quick N-size debug from CSV
+    n0_series = matched["n0"].fillna(np.nan).astype(float).tolist()
+    n1_series = matched["n1"].fillna(np.nan).astype(float).tolist()
+    def nstats(vs):
+        vs2 = [x for x in vs if not math.isnan(x)]
+        if not vs2: return (0, math.nan, math.nan, math.nan, 0)
+        return (len(vs2), float(np.median(vs2)), float(np.mean(vs2)), float(np.min(vs2)), float(np.max(vs2)))
+    n0N, n0med, n0mean, n0min, n0max = nstats(n0_series)
+    n1N, n1med, n1mean, n1min, n1max = nstats(n1_series)
+    dbg(f"[N-size] direct : N={n0N}, median={n0med}, mean={n0mean}, min={n0min}, max={n0max}; missing={len(n0_series)-n0N}")
+    dbg(f"[N-size] inverted: N={n1N}, median={n1med}, mean={n1mean}, min={n1min}, max={n1max}; missing={len(n1_series)-n1N}")
 
-    debug("Column availability in matched table:")
-    debug(f"  size cols: 0_f={has_0_size_f}, 1_f={has_1_size_f}, 0_nf={has_0_size_nf}, 1_nf={has_1_size_nf}")
-    debug(f"  π cols:    0_pi_f={has_0_pi_f}, 1_pi_f={has_1_pi_f}, 0_pi={has_0_pi_un}, 1_pi={has_1_pi_un}")
+    spot = 0
+    for r in matched.itertuples(index=False):
+        chr_, s, e = r.chr, int(r.start), int(r.end)
+        L = e - s + 1
+        rid = region_id(chr_, s, e)
+        rec = r.recurrence
 
-    # 4) Iterate regions
-    spot_examples = []  # collect a few for print-out
-    fst_overlap_counter = Counter()
-    fst_flank_overlap_counter = Counter()
+        # region FST from CSV ONLY (no fallback!)
+        fst_csv = r.fst_region_csv if pd.notna(r.fst_region_csv) else math.nan
+        if pd.notna(fst_csv):
+            have["region_fst_csv"][rec] += 1
 
-    for i, r in matched.iterrows():
-        chrom = str(r["chr_std"])
-        rs = int(r["region_start"]); re_ = int(r["region_end"])
-        if rs > re_: rs, re_ = re_, rs
-        rec_label = "recurrent" if str(r["Recurrence"]) == "Recurrent" else "single"
-        total_count[rec_label] += 1
+        # flank geometry
+        Ls, Le, Rs, Re, (Us, Ue) = flank_union(s, e, flank_bp=10_000)
+        # π flanks (direct/inverted)
+        def flank_pi(grp: str) -> float:
+            arr = pi_map.get((chr_, s, e, grp), None)
+            if arr is None: return math.nan
+            segL = slice_per_site(arr, s, e, Ls, Le)
+            segR = slice_per_site(arr, s, e, Rs, Re)
+            # union via simple concat then unique indices is overkill; the L/R can overlap, but
+            # using both slices and concatenating will double-count the overlap. Instead, slice union directly:
+            segU = slice_per_site(arr, s, e, Us, Ue)
+            if segU.size == 0: return math.nan
+            finite = segU[np.isfinite(segU)]
+            if finite.size == 0: return math.nan
+            return float(np.mean(finite))
 
-        # --- Sample size
-        size_dir = np.nan
-        size_inv = np.nan
-        if has_0_size_f and pd.notna(r.get("0_num_hap_filter", np.nan)):
-            size_dir = float(r["0_num_hap_filter"])
-        elif has_0_size_nf and pd.notna(r.get("0_num_hap_no_filter", np.nan)):
-            size_dir = float(r["0_num_hap_no_filter"])
-        if has_1_size_f and pd.notna(r.get("1_num_hap_filter", np.nan)):
-            size_inv = float(r["1_num_hap_filter"])
-        elif has_1_size_nf and pd.notna(r.get("1_num_hap_no_filter", np.nan)):
-            size_inv = float(r["1_num_hap_no_filter"])
-        if np.isfinite(size_dir): coverage["have_size_dir"][rec_label] += 1
-        if np.isfinite(size_inv): coverage["have_size_inv"][rec_label] += 1
+        pi_dir = flank_pi("direct")
+        pi_inv = flank_pi("inverted")
+        if pd.notna(pi_dir): have["flank_pi_dir"][rec] += 1
+        if pd.notna(pi_inv): have["flank_pi_inv"][rec] += 1
 
-        # --- π (prefer filtered)
-        pi_dir = np.nan
-        pi_inv = np.nan
-        if has_0_pi_f and pd.notna(r.get("0_pi_filtered", np.nan)):
-            pi_dir = float(r["0_pi_filtered"])
-        elif has_0_pi_un and pd.notna(r.get("0_pi", np.nan)):
-            pi_dir = float(r["0_pi"])
-        if has_1_pi_f and pd.notna(r.get("1_pi_filtered", np.nan)):
-            pi_inv = float(r["1_pi_filtered"])
-        elif has_1_pi_un and pd.notna(r.get("1_pi", np.nan)):
-            pi_inv = float(r["1_pi"])
-        if np.isfinite(pi_dir): coverage["have_pi_dir"][rec_label] += 1
-        if np.isfinite(pi_inv): coverage["have_pi_inv"][rec_label] += 1
+        # FST flank (per-site, no thresholds)
+        def flank_fst_mean() -> float:
+            arr = fst_map.get((chr_, s, e), None)
+            if arr is None: return math.nan
+            segU = slice_per_site(arr, s, e, Us, Ue)
+            if segU.size == 0: return math.nan
+            finite = segU[np.isfinite(segU)]
+            if finite.size == 0: return math.nan
+            return float(np.mean(finite))
+        fst_flank = flank_fst_mean()
+        if pd.notna(fst_flank): have["flank_fst"][rec] += 1
 
-        # --- Region-level Hudson FST (per-site)
-        region_fst = np.nan
-        if chrom in fst_intervals:
-            s, n = window_sum_count(rs, re_, fst_intervals[chrom])
-            if n > 0:
-                region_fst = s / n
-                coverage["have_region_fst"][rec_label] += 1
-                fst_overlap_counter[rec_label] += n
-            else:
-                coverage["zero_overlap_region_fst"][rec_label] += 1
-        else:
-            coverage["miss_chr_fst"][rec_label] += 1
+        # Save row
+        rows.append({
+            "region_id": rid, "rec": rec, "L": L,
+            "pi_dir_region": r.pi0_f, "pi_inv_region": r.pi1_f,
+            "fst_region_csv": fst_csv,
+            "flank_pi_dir": pi_dir, "flank_pi_inv": pi_inv,
+            "flank_fst": fst_flank
+        })
 
-        # --- 10 kb flanking π (direct & inverted) from filtered per-site π
-        left_s, left_e = max(1, rs - FLANK_BP), rs - 1
-        right_s, right_e = re_ + 1, re_ + FLANK_BP
+        # Spot-check verbose for first ~12
+        if spot < 12:
+            cov_fst = "NA"
+            if (chr_, s, e) in fst_map:
+                # simple fraction finite in union
+                arr = fst_map[(chr_, s, e)]
+                segU = slice_per_site(arr, s, e, Us, Ue)
+                cov_fst = f"{np.isfinite(segU).sum()}/{segU.size}" if segU.size else "0/0"
+            dbg(f"  {rid:>23} rec={rec:<10} L={L:<7} "
+                f"Lflank={Ls}-{Le}  Rflank={Rs}-{Re}  U={Us}-{Ue}  "
+                f"CSV={fst_csv if pd.notna(fst_csv) else 'nan':<10}  flankFSTfinite={cov_fst}")
+            spot += 1
 
-        flank_pi_dir = np.nan
-        flank_pi_inv = np.nan
-        if chrom in pi_intervals:
-            # direct
-            sumv, cnt = 0.0, 0
-            if left_e >= left_s:
-                s, n = window_sum_count(left_s, left_e, pi_intervals[chrom]["direct"])
-                sumv += s; cnt += n
-            if right_e >= right_s:
-                s, n = window_sum_count(right_s, right_e, pi_intervals[chrom]["direct"])
-                sumv += s; cnt += n
-            if cnt > 0:
-                flank_pi_dir = sumv / cnt
-                coverage["have_flank_pi_dir"][rec_label] += 1
+    # 5) Aggregate by category
+    tab = pd.DataFrame(rows)
 
-            # inverted
-            sumv, cnt = 0.0, 0
-            if left_e >= left_s:
-                s, n = window_sum_count(left_s, left_e, pi_intervals[chrom]["inverted"])
-                sumv += s; cnt += n
-            if right_e >= right_s:
-                s, n = window_sum_count(right_s, right_e, pi_intervals[chrom]["inverted"])
-                sumv += s; cnt += n
-            if cnt > 0:
-                flank_pi_inv = sumv / cnt
-                coverage["have_flank_pi_inv"][rec_label] += 1
-        else:
-            coverage["miss_chr_pi"][rec_label] += 1
+    def agg_print(label: str, values: List[float], extraN: Optional[int]=None):
+        mu, med, sd, N = mean_median_sd(values)
+        N_print = N if extraN is None else extraN
+        print(f"- {label}: {mu:.6f}, {med:.6f} ({sd if not math.isnan(sd) else float('nan'):.6f}), N={N_print}")
 
-        # --- 10 kb flanking FILTERED-INTENT Hudson FST
-        flank_fst = np.nan
-        if chrom in fst_intervals:
-            sumv, cnt = 0.0, 0
-            if left_e >= left_s:
-                s, n = window_sum_count(left_s, left_e, fst_intervals[chrom])
-                sumv += s; cnt += n
-            if right_e >= right_s:
-                s, n = window_sum_count(right_s, right_e, fst_intervals[chrom])
-                sumv += s; cnt += n
-            if cnt > 0:
-                flank_fst = sumv / cnt
-                coverage["have_flank_fst"][rec_label] += 1
-                fst_flank_overlap_counter[rec_label] += cnt
-            else:
-                coverage["zero_overlap_flank_fst"][rec_label] += 1
-        else:
-            coverage["miss_chr_fst"][rec_label] += 1
+    # π region (already filtered in CSV)
+    by = tab.groupby("rec", dropna=False)
+    # Sample sizes (from CSV)
+    for rec in ["recurrent", "single-event"]:
+        grp = matched[matched["recurrence"] == rec]
+        n0 = grp["n0"].astype(float).tolist()
+        n1 = grp["n1"].astype(float).tolist()
+        print(f"\nDirect haplotypes ({rec} region)")
+        mu, med, sd, N = mean_median_sd(n0)
+        print(f"- Sample size: {int(np.nansum(n0)) if N else 0}, {med:.1f} ({sd:.1f}), N={N}")
+        agg_print("Nucleotide diversity (π)", grp["pi0_f"].astype(float).tolist(), extraN=len(grp))
 
-        # --- Assign
-        if rec_label == "recurrent":
-            cat["direct_recurrent"]["size"].append(size_dir)
-            cat["direct_recurrent"]["pi"].append(pi_dir)
-            cat["direct_recurrent"]["flank_pi"].append(flank_pi_dir)
-            cat["inverted_recurrent"]["size"].append(size_inv)
-            cat["inverted_recurrent"]["pi"].append(pi_inv)
-            cat["inverted_recurrent"]["flank_pi"].append(flank_pi_inv)
-            fst_cat["recurrent"].append(region_fst)
-            fst_flank_cat["recurrent"].append(flank_fst)
-        else:
-            cat["direct_single"]["size"].append(size_dir)
-            cat["direct_single"]["pi"].append(pi_dir)
-            cat["direct_single"]["flank_pi"].append(flank_pi_dir)
-            cat["inverted_single"]["size"].append(size_inv)
-            cat["inverted_single"]["pi"].append(pi_inv)
-            cat["inverted_single"]["flank_pi"].append(flank_pi_inv)
-            fst_cat["single"].append(region_fst)
-            fst_flank_cat["single"].append(flank_fst)
+        # flanks π (direct)
+        dtab = tab[tab["rec"] == rec]
+        agg_print("10 kb flanking π (inside region, direct)", dtab["flank_pi_dir"].tolist())
 
-        # Collect a few examples for sanity print
-        if len(spot_examples) < 10:
-            spot_examples.append({
-                "region_id": f"{chrom}:{rs}-{re_}",
-                "rec": rec_label,
-                "pi_dir": pi_dir, "pi_inv": pi_inv,
-                "fst_region": region_fst,
-                "flank_pi_dir": flank_pi_dir, "flank_pi_inv": flank_pi_inv,
-                "flank_fst": flank_fst
-            })
+        print(f"\nInverted haplotypes ({rec} region)")
+        mu, med, sd, N = mean_median_sd(n1)
+        print(f"- Sample size: {int(np.nansum(n1)) if N else 0}, {med:.1f} ({sd:.1f}), N={N}")
+        agg_print("Nucleotide diversity (π)", grp["pi1_f"].astype(float).tolist(), extraN=len(grp))
+        agg_print("10 kb flanking π (inside region, inverted)", dtab["flank_pi_inv"].tolist())
 
-    # 5) Coverage diagnostics
-    debug("=== COVERAGE DIAGNOSTICS (counts of regions with metric available) ===")
-    debug(f"Total matched regions → Recurrent={total_count['recurrent']}, Single-event={total_count['single']}")
-    for k, v in coverage.items():
-        debug(f"{k}: {dict(v)}")
-    if len(fst_intervals) > 0:
-        debug("Per-class summed per-site counts contributing to FST means (region windows): "
-              f"{dict(fst_overlap_overlap := fst_overlap_counter)}")
-        debug("Per-class summed per-site counts contributing to FST means (flank windows): "
-              f"{dict(fst_flank_overlap_counter)}")
+    # Region FST (CSV ONLY)
+    print("\nFST (Hudson; region means; CSV-only, strict like example)")
+    for rec in ["recurrent", "single-event"]:
+        vals = tab.loc[tab["rec"] == rec, "fst_region_csv"].tolist()
+        mu, med, sd, N = mean_median_sd(vals)
+        print(f"- {rec.capitalize()} regions: {mu:.6f}, {med:.6f} ({sd if not math.isnan(sd) else float('nan'):.6f}), N={N}")
 
-    debug("Spot-check of first few regions (values shown may include NaN if not available):")
-    for ex in spot_examples:
-        debug(str(ex))
+    # Flank FST (per-site, no thresholds)
+    print("\n10 kb flanking FST (Hudson; per-site inside region; NO thresholds)")
+    for rec in ["recurrent", "single-event"]:
+        vals = tab.loc[tab["rec"] == rec, "flank_fst"].tolist()
+        mu, med, sd, N = mean_median_sd(vals)
+        print(f"- {rec.capitalize()} regions: {mu:.6f}, {med:.6f} ({sd if not math.isnan(sd) else float('nan'):.6f}), N={N}")
 
-    # 6) Print summaries
-    def print_block(title: str, sizes: List[float], pis: List[float], flank_pis: List[float],
-                    total_in_category: int):
-        print(title)
-        print(f"- Sample size: {describe_vector(sizes, kind='size', n_override=total_in_category)}")
-        print(f"- Nucleotide diversity (π): {describe_vector(pis, kind='pi')}")
-        print(f"- 10 kb flanking π: {describe_vector(flank_pis, kind='pi')}")
-        print()
-
-    n_recur  = total_count["recurrent"]
-    n_single = total_count["single"]
-
-    print_block("Direct haplotypes (recurrent region)",
-                cat["direct_recurrent"]["size"],
-                cat["direct_recurrent"]["pi"],
-                cat["direct_recurrent"]["flank_pi"],
-                total_in_category=n_recur)
-
-    print_block("Inverted haplotypes (recurrent region)",
-                cat["inverted_recurrent"]["size"],
-                cat["inverted_recurrent"]["pi"],
-                cat["inverted_recurrent"]["flank_pi"],
-                total_in_category=n_recur)
-
-    print_block("Direct haplotypes (single-event region)",
-                cat["direct_single"]["size"],
-                cat["direct_single"]["pi"],
-                cat["direct_single"]["flank_pi"],
-                total_in_category=n_single)
-
-    print_block("Inverted haplotypes (single-event region)",
-                cat["inverted_single"]["size"],
-                cat["inverted_single"]["pi"],
-                cat["inverted_single"]["flank_pi"],
-                total_in_category=n_single)
-
-    print("FST (Hudson, filtered-intent; two categories)")
-    print(f"- Recurrent regions: {describe_vector(fst_cat['recurrent'], kind='fst')}")
-    print(f"- Single-event regions: {describe_vector(fst_cat['single'], kind='fst')}")
-    print()
-
-    print("10 kb flanking FST (Hudson, filtered-intent; two categories)")
-    print(f"- Recurrent regions: {describe_vector(fst_flank_cat['recurrent'], kind='fst')}")
-    print(f"- Single-event regions: {describe_vector(fst_flank_cat['single'], kind='fst')}")
+    # Final availability snapshot
+    dbg("Availability snapshot after parsing & aggregation (strict, no thresholds):")
+    dbg(f"  π chroms: {len(set([k[0] for k in pi_map.keys()])) if pi_map else 0}; "
+        f"FST chroms: {len(set([k[0] for k in fst_map.keys()])) if fst_map else 0}")
+    dbg("Column availability in matched table:")
+    dbg(f"  size cols present: n0={matched['n0'].notna().sum()>0}, n1={matched['n1'].notna().sum()>0}")
+    dbg(f"  π cols present: pi0_f={matched['pi0_f'].notna().sum()>0}, pi1_f={matched['pi1_f'].notna().sum()>0}")
+    dbg("=== COVERAGE COUNTS (no filters applied) ===")
+    dbg(f"  flank_pi_dir_have: {dict(have['flank_pi_dir'])}")
+    dbg(f"  flank_pi_inv_have: {dict(have['flank_pi_inv'])}")
+    dbg(f"  flank_fst_have:    {dict(have['flank_fst'])}")
+    dbg(f"  region_fst_csv_have: {dict(have['region_fst_csv'])}")
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
         err(str(e))
-        sys.exit(1)
+        sys.exit(2)
