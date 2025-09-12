@@ -1,3 +1,9 @@
+import os as _os
+for _k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    if _os.environ.get(_k) is None:
+        _os.environ[_k] = "1"
+
+# -------------------- Imports --------------------
 import os, sys, json, hashlib, glob, warnings, time, math, threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -53,28 +59,29 @@ TEST_SIZE = 0.20
 SEED = 42
 
 # Elastic-net for PGS (inversions only, trained on TRAIN)
-ALPHA = 0.50                 # elastic-net mixing (0=L2, 1=L1)
-N_LAM = 100                  # maximum lambda path length
-LAMBDA_MIN_RATIO = 1e-3
+ALPHA = 0.50                 # elastic-net mixing (0=L2, 1=L1) — keep as-is (no extra sparsity pressure)
+N_LAM = 30                   # reduced lambda path length (was 100)
+LAMBDA_MIN_RATIO = 1e-2      # tightened grid tail (was 1e-3)
 MAX_ITER = 2000
-CLASS_WEIGHT = "balanced"
+CLASS_WEIGHT = None          # FIX BIC/weights mismatch: use UNWEIGHTED fit for PGS/BIC consistency
 NEAR_CONST_SD = 1e-6
-BIC_EARLY_STOP = 5           # stop path after this many consecutive BIC increases
+BIC_EARLY_STOP = 3           # more aggressive early stop (was 5)
 DEBIAS_REFIT = True          # unpenalized refit on selected support (slopes-only used for PGS)
 
 # Test-time paired bootstrap for ΔAUC (Model1 - Model0)
 BOOT_B = int(os.environ.get("SCORE_BOOT_B", "1000"))
 BOOT_SEED = SEED
 
-# Parallelization
-N_WORKERS = int(os.environ.get("SCORE_N_JOBS", str(max(1, (os.cpu_count() or 4)))))
+# Parallelization (default: cap to avoid oversubscription)
+_default_workers = min(8, max(1, (os.cpu_count() or 4)))
+N_WORKERS = int(os.environ.get("SCORE_N_JOBS", str(_default_workers)))
 PRINT_LOCK = threading.Lock()
 
 OUT_ROOT = os.path.join(CACHE_DIR, "scores_nested_pgs")
 
 # ===================== PROGRESS & UTILS =====================
 
-_ID_CANDIDATES = ("person_id","SampleID","sample_id","research_id","participant_id","ID")
+_ID_CANDIDATES = ("person_id", "SampleID", "sample_id", "research_id", "participant_id", "ID")
 
 def _now(): return time.strftime("%H:%M:%S")
 
@@ -100,7 +107,14 @@ def _find_upwards(pathname: str) -> str:
 
 def _summ(v, name):
     v = np.asarray(v, dtype=float)
-    return f"{name}[n={v.size}] mean={np.nanmean(v):.6g} sd={np.nanstd(v):.6g} min={np.nanmin(v):.6g} max={np.nanmax(v):.6g} uniq~{len(np.unique(v))}"
+    return (f"{name}[n={v.size}] mean={np.nanmean(v):.6g} sd={np.nanstd(v):.6g} "
+            f"min={np.nanmin(v):.6g} max={np.nanmax(v):.6g} uniq~{len(np.unique(v))}")
+
+def _bar(i: int, total: int, width: int = 24) -> str:
+    # textual progress bar (not in-place to avoid thread clashes)
+    frac = 0 if total <= 0 else max(0.0, min(1.0, i / total))
+    n_full = int(round(frac * width))
+    return "[" + ("#" * n_full).ljust(width, ".") + f"] {i}/{total} ({frac*100:5.1f}%)"
 
 # ===================== DATA LOADING =====================
 
@@ -124,13 +138,16 @@ def _load_dosages() -> pd.DataFrame:
     _p(f"[load/dosages] Raw: {df.shape[0]:,} samples x {df.shape[1]:,} inversions")
 
     # numeric coercion + drop constant/NA-only columns
+    _p("[load/dosages] Coercing to numeric + dropping constant/NA-only columns...")
+    t1 = time.time()
     for c in df.columns:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     nunique = df.nunique(dropna=True)
     keep = nunique > 1
     kept = df.loc[:, keep]
     dropped = int((~keep).sum())
-    _p(f"[load/dosages] Dropped {dropped:,} constant/all-NA inversion columns; kept {kept.shape[1]:,}.")
+    _p(f"[load/dosages] Dropped {dropped:,} constant/all-NA inversion columns; kept {kept.shape[1]:,}. "
+       f"(elapsed {time.time()-t1:.2f}s)")
     if kept.shape[1] == 0:
         raise RuntimeError("No variable inversion columns after filtering.")
     _p(f"[load/dosages] Final shape: {kept.shape[0]:,} x {kept.shape[1]:,} (elapsed {time.time()-t0:.2f}s)")
@@ -350,18 +367,33 @@ def _fit_pgs_bic(Ztr: pd.DataFrame, ytr: pd.Series, tag: str):
     y = ytr.values.astype(float)
     lam_grid = _lambda_path(X, y, ALPHA, N_LAM, LAMBDA_MIN_RATIO)
 
+    # Create a single estimator and warm-start along the path (large -> small lambda)
+    lr = LogisticRegression(
+        penalty="elasticnet", l1_ratio=ALPHA, solver="saga",
+        C=1.0 / lam_grid[0], max_iter=MAX_ITER, tol=1e-4, class_weight=CLASS_WEIGHT,
+        fit_intercept=True, n_jobs=1, warm_start=True
+    )
+
     best = None
     inc = 0
     t0 = time.time()
-    _p(f"[{tag}] [PGS] Lambda sweep: {len(lam_grid)} values, P={Ztr.shape[1]:,}, N={len(ytr):,}")
+    _p(f"[{tag}] [PGS] Lambda sweep (grid={len(lam_grid)}): P={Ztr.shape[1]:,}, N={len(ytr):,}")
     for i, lam in enumerate(lam_grid, 1):
-        C_inv = 1.0 / lam
-        lr = LogisticRegression(
-            penalty="elasticnet", l1_ratio=ALPHA, solver="saga",
-            C=C_inv, max_iter=MAX_ITER, tol=1e-4, class_weight=CLASS_WEIGHT,
-            fit_intercept=True, n_jobs=1
-        )
+        # warm-start by reusing previous coef_ / intercept_ if available
+        try:
+            lr.set_params(C=float(1.0 / lam))
+        except Exception:
+            lr = LogisticRegression(
+                penalty="elasticnet", l1_ratio=ALPHA, solver="saga",
+                C=float(1.0 / lam), max_iter=MAX_ITER, tol=1e-4, class_weight=CLASS_WEIGHT,
+                fit_intercept=True, n_jobs=1, warm_start=True
+            )
         lr.fit(X, ytr.values)
+
+        # Progress bar print for this grid step
+        _p(f"[{tag}] [PGS] {_bar(i, len(lam_grid))}")
+
+        # Unweighted log-likelihood for BIC (consistent with CLASS_WEIGHT=None)
         p = lr.predict_proba(X)[:, 1]
         eps = 1e-15
         ll = float(np.sum(ytr*np.log(p+eps) + (1-ytr)*np.log(1-p+eps)))
@@ -371,34 +403,34 @@ def _fit_pgs_bic(Ztr: pd.DataFrame, ytr: pd.Series, tag: str):
         if (best is None) or (bic < best["bic"]):
             best = {
                 "lambda": float(lam),
-                "C": float(C_inv),
+                "C": float(1.0 / lam),
                 "bic": float(bic),
                 "intercept": float(lr.intercept_[0]),
                 "coef": pd.Series(lr.coef_[0], index=Ztr.columns),
                 "nonzero": int((lr.coef_[0] != 0).sum()),
+                "grid_i": i
             }
             inc = 0
+            _p(f"[{tag}] [PGS] New BEST @step {i}: BIC={best['bic']:.3f} nnz={best['nonzero']} C={best['C']:.4g}")
         else:
             inc += 1
 
-        if (i % max(1, len(lam_grid)//10) == 0) or (i == len(lam_grid)):
-            _p(f"[{tag}] [PGS] {i}/{len(lam_grid)} ({i/len(lam_grid)*100:.1f}%) | "
-               f"best BIC={best['bic']:.2f} nnz={best['nonzero']}")
         if inc >= BIC_EARLY_STOP:
             _p(f"[{tag}] [PGS] Early stop: BIC rose {BIC_EARLY_STOP}x | elapsed {time.time()-t0:.1f}s")
             break
 
-    # Final sanity on best
     if best is None:
         raise RuntimeError(f"[{tag}] [PGS] No solution found on path.")
-    _p(f"[{tag}] [PGS] BEST: lambda={best['lambda']:.4g} C={best['C']:.4g} nnz={best['nonzero']} BIC={best['bic']:.2f}")
+
+    _p(f"[{tag}] [PGS] BEST: step={best['grid_i']}/{len(lam_grid)} lambda={best['lambda']:.4g} "
+       f"C={best['C']:.4g} nnz={best['nonzero']} BIC={best['bic']:.2f} | total {time.time()-t0:.1f}s")
     return best
 
 def _pgs_scores(Ztr: pd.DataFrame, Zte: pd.DataFrame, ytr: pd.Series, tag: str):
     best = _fit_pgs_bic(Ztr, ytr, tag)
     coef = best["coef"].copy()
 
-    # Create linear predictors **from slopes only** (never add intercept here)
+    # Build linear predictors from SLOPES ONLY (no intercept added to PGS)
     if DEBIAS_REFIT and best["nonzero"] > 0:
         sel = coef.index[coef != 0]
         _p(f"[{tag}] [PGS] Debias attempt with support={len(sel)} (slopes-only)")
@@ -407,12 +439,12 @@ def _pgs_scores(Ztr: pd.DataFrame, Zte: pd.DataFrame, ytr: pd.Series, tag: str):
         try:
             Xglm_tr = sm.add_constant(Xdeb_tr, has_constant='add')
             res = sm.GLM(ytr.values, Xglm_tr, family=sm.families.Binomial()).fit()
-            # Use **slopes-only** (exclude 'const') to form PGS; intercept never included
             beta = pd.Series(res.params, index=Xglm_tr.columns)
             beta_slopes = beta.drop(labels=["const"], errors="ignore")
             lin_tr = (Xdeb_tr.values @ beta_slopes.values)
             lin_te = (Xdeb_te.values @ beta_slopes.values)
-            _p(f"[{tag}] [PGS] Debiased refit OK. Slopes={len(beta_slopes)} L1={float(np.sum(np.abs(beta_slopes.values))):.6g}")
+            _p(f"[{tag}] [PGS] Debiased refit OK. slopes={len(beta_slopes)} "
+               f"L1={float(np.sum(np.abs(beta_slopes.values))):.6g}")
         except Exception as e:
             _p(f"[{tag}] [PGS WARN] Debias failed ({e}); using penalized slopes.")
             lin_tr = (Ztr.values @ coef.values)
@@ -421,14 +453,13 @@ def _pgs_scores(Ztr: pd.DataFrame, Zte: pd.DataFrame, ytr: pd.Series, tag: str):
         lin_tr = (Ztr.values @ coef.values)
         lin_te = (Zte.values @ coef.values)
 
-    # Sanity: summarize raw linear scores
     _p(f"[{tag}] [PGS/RAW] " + _summ(lin_tr, "lin_tr") + " | " + _summ(lin_te, "lin_te"))
 
-    # z-score PGS on TRAIN (interpretability & stable Wald/LRT); if sd≈0, flag and skip
+    # z-score on TRAIN
     mu = float(np.mean(lin_tr))
     sd = float(np.std(lin_tr))
     if not np.isfinite(sd) or sd < 1e-12:
-        _p(f"[{tag}] [PGS/CHK] Train linear predictor has ~zero variance (sd={sd:.3e}). No usable PGS.")
+        _p(f"[{tag}] [PGS/CHK] Train linear predictor ~zero variance (sd={sd:.3e}). No usable PGS.")
         return {
             "best": best,
             "pgs_tr": None,
@@ -443,7 +474,7 @@ def _pgs_scores(Ztr: pd.DataFrame, Zte: pd.DataFrame, ytr: pd.Series, tag: str):
     pgs_te = (lin_te - mu) / sd
     _p(f"[{tag}] [PGS/Z] " + _summ(pgs_tr, "pgs_tr") + " | " + _summ(pgs_te, "pgs_te"))
 
-    # Quick diagnostics: correlation & AUC of PGS-alone
+    # quick diagnostics
     try:
         r = float(np.corrcoef(pgs_tr, ytr.values)[0,1])
     except Exception:
@@ -452,7 +483,8 @@ def _pgs_scores(Ztr: pd.DataFrame, Zte: pd.DataFrame, ytr: pd.Series, tag: str):
         auc_tr = float(roc_auc_score(ytr.values, pgs_tr))
     except Exception:
         auc_tr = np.nan
-    _p(f"[{tag}] [PGS/DIAG] corr(pgs_tr,y_tr)={r if np.isfinite(r) else float('nan'):.4f} | AUC(PGS-only,TRAIN)={auc_tr if np.isfinite(auc_tr) else float('nan'):.4f}")
+    _p(f"[{tag}] [PGS/DIAG] corr(pgs_tr,y_tr)={r if np.isfinite(r) else float('nan'):.4f} | "
+       f"AUC(PGS-only,TRAIN)={auc_tr if np.isfinite(auc_tr) else float('nan'):.4f}")
 
     return {
         "best": best,
@@ -469,12 +501,12 @@ def _pgs_scores(Ztr: pd.DataFrame, Zte: pd.DataFrame, ytr: pd.Series, tag: str):
 def _fit_model0_model1_train(cov_tr: pd.DataFrame, ytr: pd.Series, pgs_tr: np.ndarray | None, tag: str):
     # Model 0: baseline covariates only (GLM Binomial for numerical stability)
     X0 = sm.add_constant(cov_tr, has_constant='add')
-    _p(f"[{tag}] [TRAIN/M0] X0 shape={X0.shape} cols={list(X0.columns)[:6]}... (+{len(X0.columns)-6 if len(X0.columns)>6 else 0})")
+    _p(f"[{tag}] [TRAIN/M0] X0 shape={X0.shape} cols={list(X0.columns)[:6]}..."
+       f" (+{len(X0.columns)-6 if len(X0.columns)>6 else 0})")
     m0 = sm.GLM(ytr.values, X0, family=sm.families.Binomial()).fit()
-    _p(f"[{tag}] [TRAIN/M0] Converged={m0.mle_retvals.get('converged', True) if hasattr(m0, 'mle_retvals') else True} "
-       f"| llf={getattr(m0, 'llf', float('nan')):.6g} dev={getattr(m0, 'deviance', float('nan')):.6g}")
+    _p(f"[{tag}] [TRAIN/M0] dev={getattr(m0, 'deviance', float('nan')):.6g} "
+       f"llf={getattr(m0, 'llf', float('nan')):.6g}")
 
-    # If no PGS signal (None), bail gracefully
     if pgs_tr is None:
         _p(f"[{tag}] [TRAIN/M1] SKIP — PGS has no usable variance.")
         return {
@@ -484,25 +516,21 @@ def _fit_model0_model1_train(cov_tr: pd.DataFrame, ytr: pd.Series, pgs_tr: np.nd
             "m0_cols": list(X0.columns)
         }
 
-    # Model 1: baseline + PGS (align by index as Series!)
+    # Model 1: baseline + PGS (aligned)
     X1 = X0.copy()
-    X1["PGS"] = pd.Series(pgs_tr, index=X1.index)  # index-aligned insertion
-    assert X1.index.equals(X0.index)
-    assert X1.shape[1] == X0.shape[1] + 1
+    X1["PGS"] = pd.Series(pgs_tr, index=X1.index)
     _p(f"[{tag}] [TRAIN/M1] X1 shape={X1.shape} (added PGS). " + _summ(X1['PGS'].values, "PGS_tr"))
-
     m1 = sm.GLM(ytr.values, X1, family=sm.families.Binomial()).fit()
-    _p(f"[{tag}] [TRAIN/M1] Converged={m1.mle_retvals.get('converged', True) if hasattr(m1, 'mle_retvals') else True} "
-       f"| llf={getattr(m1, 'llf', float('nan')):.6g} dev={getattr(m1, 'deviance', float('nan')):.6g}")
+    _p(f"[{tag}] [TRAIN/M1] dev={getattr(m1, 'deviance', float('nan')):.6g} "
+       f"llf={getattr(m1, 'llf', float('nan')):.6g}")
 
-    # LRT via deviance difference (df=1; only added PGS)
+    # LRT via deviance difference (df=1)
     dev0 = getattr(m0, "deviance", None)
     dev1 = getattr(m1, "deviance", None)
     if dev0 is not None and dev1 is not None:
         lrt = float(dev0 - dev1)
         p_lrt = float(1.0 - chi2.cdf(lrt, df=1))
     else:
-        # Fallback to log-likelihood if available
         ll0 = getattr(m0, "llf", None)
         ll1 = getattr(m1, "llf", None)
         if ll0 is not None and ll1 is not None:
@@ -511,7 +539,7 @@ def _fit_model0_model1_train(cov_tr: pd.DataFrame, ytr: pd.Series, pgs_tr: np.nd
         else:
             lrt, p_lrt = np.nan, np.nan
 
-    # Wald z for PGS coefficient (two-sided)
+    # Wald for PGS
     try:
         pgsi = list(X1.columns).index("PGS")
         beta_pgs = float(m1.params[pgsi])
@@ -521,8 +549,10 @@ def _fit_model0_model1_train(cov_tr: pd.DataFrame, ytr: pd.Series, pgs_tr: np.nd
     except Exception:
         beta_pgs = np.nan; se_pgs = np.nan; z = np.nan; p_wald_two = np.nan
 
-    _p(f"[{tag}] [TRAIN/TESTS] LRT stat={lrt if np.isfinite(lrt) else float('nan'):.6g} p={p_lrt if np.isfinite(p_lrt) else float('nan'):.3e} "
-       f"| Wald z={z if np.isfinite(z) else float('nan'):.3f} p={p_wald_two if np.isfinite(p_wald_two) else float('nan'):.3e}")
+    _p(f"[{tag}] [TRAIN/TESTS] LRT stat={lrt if np.isfinite(lrt) else float('nan'):.6g} "
+       f"p={p_lrt if np.isfinite(p_lrt) else float('nan'):.3e} | "
+       f"Wald z={z if np.isfinite(z) else float('nan'):.3f} "
+       f"p={p_wald_two if np.isfinite(p_wald_two) else float('nan'):.3e}")
 
     return {
         "m0": m0, "m1": m1,
@@ -603,6 +633,7 @@ def _paired_bootstrap_auc(y, s0, s1, B=1000, seed=SEED, tag=""):
     deltas = np.empty(B, dtype=float)
     count_gt = 0
     t0 = time.time()
+    step_print = max(1, B // 20)  # print ~5% steps
     for b in range(B):
         rp = rng.choice(idx_pos, size=m, replace=True)
         rn = rng.choice(idx_neg, size=n, replace=True)
@@ -613,11 +644,11 @@ def _paired_bootstrap_auc(y, s0, s1, B=1000, seed=SEED, tag=""):
         d = d1 - d0
         deltas[b] = d
         if d > 0: count_gt += 1
-        if (b+1) % max(1, B//10) == 0 or (b+1) == B:
+        if (b+1) % step_print == 0 or (b+1) == B:
             elapsed = time.time() - t0
             pct = (b+1)/B*100
             eta = elapsed/(b+1)*(B-(b+1))
-            _p(f"[{tag}] [TEST/bootstrap] {b+1}/{B} ({pct:.1f}%) | elapsed {elapsed:.1f}s | ETA {eta:.1f}s")
+            _p(f"[{tag}] [TEST/bootstrap] {_bar(b+1, B)} | elapsed {elapsed:.1f}s | ETA {eta:.1f}s")
     prob = float(count_gt / B)
     lo, hi = float(np.percentile(deltas, 2.5)), float(np.percentile(deltas, 97.5))
     return prob, (lo, hi), float(np.mean(deltas))
@@ -650,7 +681,6 @@ def _evaluate_test(m0, m1, cov_te: pd.DataFrame, pgs_te: np.ndarray | None, yte:
     # Predict with Model 1 (insert aligned PGS)
     X1_te = X0_te.copy()
     X1_te["PGS"] = pd.Series(pgs_te, index=X1_te.index)
-    assert X1_te.index.equals(X0_te.index)
     p1 = m1.predict(X1_te)
     _p(f"[{tag}] [TEST] p1 summary: " + _summ(p1, "p1"))
 
@@ -782,6 +812,12 @@ def main():
     t_all = time.time()
     os.makedirs(OUT_ROOT, exist_ok=True)
     _p(f"[init] N_WORKERS={N_WORKERS}  ALPHA={ALPHA}  N_LAM={N_LAM}  TEST_SIZE={TEST_SIZE}  BOOT_B={BOOT_B}")
+    _p("[init] Threading guards: "
+       f"OMP={os.environ.get('OMP_NUM_THREADS')} "
+       f"OPENBLAS={os.environ.get('OPENBLAS_NUM_THREADS')} "
+       f"MKL={os.environ.get('MKL_NUM_THREADS')} "
+       f"VECLIB={os.environ.get('VECLIB_MAXIMUM_THREADS')} "
+       f"NUMEXPR={os.environ.get('NUMEXPR_NUM_THREADS')}")
 
     # 1) Load inversions
     X = _load_dosages()
@@ -829,7 +865,7 @@ def main():
                     pct = done / total * 100.0
                     elapsed = time.time() - start
                     rem = elapsed/done*(total-done) if done > 0 else float('nan')
-                    _p(f"[progress] {done}/{total} ({pct:.1f}%) | elapsed {elapsed:.1f}s | ETA ~{rem:.1f}s")
+                    _p(f"[progress] {_bar(done, total)} | elapsed {elapsed:.1f}s | ETA ~{rem:.1f}s")
 
     # 7) Summary
     if results:
