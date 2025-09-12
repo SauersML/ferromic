@@ -11,7 +11,7 @@ import seaborn as sns
 
 # Input Files
 SUMMARY_STATS_FILE = 'output.csv'
-INVERSION_FILE = 'inv_info.csv'
+INVERSION_FILE = 'inv_info.tsv'
 
 # Output Files
 FST_SCATTER_PLOT_FILENAME = 'fst_wc_vs_hudson_colored_by_inversion_type.png'
@@ -289,7 +289,7 @@ def main():
     ))
 
     try:
-        inv_df = pd.read_csv(INVERSION_FILE, usecols=INVERSION_FILE_COLUMNS)
+        inv_df = pd.read_csv(INVERSION_FILE, sep='\t', usecols=INVERSION_FILE_COLUMNS)
         sum_df_raw = pd.read_csv(SUMMARY_STATS_FILE)
         missing_cols = [col for col in summary_cols_to_load if col not in sum_df_raw.columns]
         if missing_cols:

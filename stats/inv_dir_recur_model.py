@@ -17,7 +17,7 @@ from scipy.stats import wilcoxon
 # ------------------------- FILE PATHS -------------------------
 
 OUTPUT_CSV  = "./output.csv"
-INVINFO_CSV = "./inv_info.csv"
+INVINFO_TSV = "./inv_info.tsv"
 
 # Save outputs
 SAVE_TABLES = True
@@ -112,10 +112,10 @@ def choose_floor_from_quantile(pi_all: np.ndarray, q: float, min_floor: float) -
 
 # ------------------------- LOADING & STRICT MATCHING --------
 
-def load_and_match(output_csv: str, invinfo_csv: str) -> pd.DataFrame:
+def load_and_match(output_csv: str, invinfo_tsv: str) -> pd.DataFrame:
     """
     STRICT loader:
-      - Requires inv_info.csv has columns: Chromosome, Start, End, 0_single_1_recur_consensus
+      - Requires inv_info.tsv has columns: Chromosome, Start, End, 0_single_1_recur_consensus
       - Crashes if inv_info has duplicate keys (chr_std, Start, End)
       - Builds 9 candidate (Start,End) per region with ±1 bp tolerance
       - Keeps only true matches; for each region, picks the minimal match_priority
@@ -123,7 +123,7 @@ def load_and_match(output_csv: str, invinfo_csv: str) -> pd.DataFrame:
       - Returns matched table with both π values present and finite.
     """
     df  = pd.read_csv(output_csv)
-    inv = pd.read_csv(invinfo_csv)
+    inv = pd.read_csv(invinfo_tsv, sep='\t')
 
     # enforce required columns
     need_df = ["chr", "region_start", "region_end", "0_pi_filtered", "1_pi_filtered"]
@@ -134,7 +134,7 @@ def load_and_match(output_csv: str, invinfo_csv: str) -> pd.DataFrame:
     need_inv = ["Chromosome", "Start", "End", "0_single_1_recur_consensus"]
     miss_inv = [c for c in need_inv if c not in inv.columns]
     if miss_inv:
-        raise KeyError(f"{invinfo_csv} missing columns: {miss_inv}")
+        raise KeyError(f"{invinfo_tsv} missing columns: {miss_inv}")
 
     # standardize chromosomes
     df["chr_std"]  = df["chr"].apply(_standardize_chr)
@@ -144,7 +144,7 @@ def load_and_match(output_csv: str, invinfo_csv: str) -> pd.DataFrame:
     dup_keys = inv.duplicated(subset=["chr_std", "Start", "End"], keep=False)
     if dup_keys.any():
         bad = inv.loc[dup_keys, ["chr_std", "Start", "End"]].drop_duplicates()
-        raise ValueError(f"inv_info.csv contains duplicate (chr,Start,End) keys. Offending keys:\n{bad.to_string(index=False)}")
+        raise ValueError(f"inv_info.tsv contains duplicate (chr,Start,End) keys. Offending keys:\n{bad.to_string(index=False)}")
 
     # compact df
     df_small = df[["chr_std", "region_start", "region_end", "0_pi_filtered", "1_pi_filtered"]].rename(
@@ -504,7 +504,7 @@ def main():
     pd.set_option("display.max_columns", 120)
 
     # 1) Load & STRICT match
-    matched = load_and_match(OUTPUT_CSV, INVINFO_CSV)
+    matched = load_and_match(OUTPUT_CSV, INVINFO_TSV)
     n_single = (matched['Recurrence']=='Single-event').sum()
     n_recur  = (matched['Recurrence']=='Recurrent').sum()
     print(f"Matched paired regions (STRICT): {matched.shape[0]}  (Single-event: {n_single}, Recurrent: {n_recur})")
