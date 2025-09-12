@@ -4,11 +4,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit as sigmoid
 from scipy.stats import chi2, norm
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss
+from sklearn.metrics import roc_auc_score
 
 import statsmodels.api as sm
 
@@ -61,14 +60,14 @@ MAX_ITER = 2000
 CLASS_WEIGHT = "balanced"
 NEAR_CONST_SD = 1e-6
 BIC_EARLY_STOP = 5           # stop path after this many consecutive BIC increases
-DEBIAS_REFIT = True          # optional unpenalized refit on selected support
+DEBIAS_REFIT = True          # unpenalized refit on selected support (slopes-only used for PGS)
 
 # Test-time paired bootstrap for ΔAUC (Model1 - Model0)
 BOOT_B = int(os.environ.get("SCORE_BOOT_B", "1000"))
 BOOT_SEED = SEED
 
 # Parallelization
-N_WORKERS = int(os.environ.get("SCORE_N_JOBS", str(max(1, (os.cpu_count() or 4) - 0))))
+N_WORKERS = int(os.environ.get("SCORE_N_JOBS", str(max(1, (os.cpu_count() or 4)))))
 PRINT_LOCK = threading.Lock()
 
 OUT_ROOT = os.path.join(CACHE_DIR, "scores_nested_pgs")
@@ -99,9 +98,14 @@ def _find_upwards(pathname: str) -> str:
         cur = parent
     return pathname
 
+def _summ(v, name):
+    v = np.asarray(v, dtype=float)
+    return f"{name}[n={v.size}] mean={np.nanmean(v):.6g} sd={np.nanstd(v):.6g} min={np.nanmin(v):.6g} max={np.nanmax(v):.6g} uniq~{len(np.unique(v))}"
+
 # ===================== DATA LOADING =====================
 
 def _read_wide_tsv(path: str) -> pd.DataFrame:
+    _p(f"[load/dosages] Reading TSV: {path}")
     df = pd.read_csv(path, sep="\t")
     id_col = next((c for c in df.columns if c in _ID_CANDIDATES), None)
     if id_col is None:
@@ -205,6 +209,7 @@ def _load_pipeline_covars() -> tuple[pd.DataFrame, pd.DataFrame]:
         _, _, gcp_project = _resolve_env()
         if not gcp_project:
             raise RuntimeError("GOOGLE_PROJECT must be set to remove related individuals.")
+        _p("    -> Loading list of related individuals to exclude...")
         related_ids = iox.load_related_to_remove(gcp_project=gcp_project, RELATEDNESS_URI=RELATEDNESS_URI)
         n_before = len(base_df)
         base_df = base_df[~base_df.index.isin(related_ids)]
@@ -347,6 +352,7 @@ def _fit_pgs_bic(Ztr: pd.DataFrame, ytr: pd.Series, tag: str):
 
     best = None
     inc = 0
+    t0 = time.time()
     _p(f"[{tag}] [PGS] Lambda sweep: {len(lam_grid)} values, P={Ztr.shape[1]:,}, N={len(ytr):,}")
     for i, lam in enumerate(lam_grid, 1):
         C_inv = 1.0 / lam
@@ -378,41 +384,75 @@ def _fit_pgs_bic(Ztr: pd.DataFrame, ytr: pd.Series, tag: str):
         if (i % max(1, len(lam_grid)//10) == 0) or (i == len(lam_grid)):
             _p(f"[{tag}] [PGS] {i}/{len(lam_grid)} ({i/len(lam_grid)*100:.1f}%) | "
                f"best BIC={best['bic']:.2f} nnz={best['nonzero']}")
-
         if inc >= BIC_EARLY_STOP:
-            _p(f"[{tag}] [PGS] Early stop: BIC rose {BIC_EARLY_STOP}x")
+            _p(f"[{tag}] [PGS] Early stop: BIC rose {BIC_EARLY_STOP}x | elapsed {time.time()-t0:.1f}s")
             break
 
+    # Final sanity on best
+    if best is None:
+        raise RuntimeError(f"[{tag}] [PGS] No solution found on path.")
+    _p(f"[{tag}] [PGS] BEST: lambda={best['lambda']:.4g} C={best['C']:.4g} nnz={best['nonzero']} BIC={best['bic']:.2f}")
     return best
 
 def _pgs_scores(Ztr: pd.DataFrame, Zte: pd.DataFrame, ytr: pd.Series, tag: str):
     best = _fit_pgs_bic(Ztr, ytr, tag)
     coef = best["coef"].copy()
 
+    # Create linear predictors **from slopes only** (never add intercept here)
     if DEBIAS_REFIT and best["nonzero"] > 0:
         sel = coef.index[coef != 0]
-        Xdeb = sm.add_constant(Ztr[sel], has_constant='add')
+        _p(f"[{tag}] [PGS] Debias attempt with support={len(sel)} (slopes-only)")
+        Xdeb_tr = Ztr[sel]
+        Xdeb_te = Zte[sel]
         try:
-            res = sm.Logit(ytr.values, Xdeb).fit(disp=0, method="lbfgs")
-            beta = pd.Series(res.params, index=Xdeb.columns)
-            # linear predictors (no sigmoid) as raw PGS
-            lin_tr = (Xdeb.values @ beta.values)
-            Xdeb_te = sm.add_constant(Zte[sel], has_constant='add')
-            lin_te = (Xdeb_te.values @ beta.values)
-            _p(f"[{tag}] [PGS] Debiased refit ok. Support={len(sel)}")
+            Xglm_tr = sm.add_constant(Xdeb_tr, has_constant='add')
+            res = sm.GLM(ytr.values, Xglm_tr, family=sm.families.Binomial()).fit()
+            # Use **slopes-only** (exclude 'const') to form PGS; intercept never included
+            beta = pd.Series(res.params, index=Xglm_tr.columns)
+            beta_slopes = beta.drop(labels=["const"], errors="ignore")
+            lin_tr = (Xdeb_tr.values @ beta_slopes.values)
+            lin_te = (Xdeb_te.values @ beta_slopes.values)
+            _p(f"[{tag}] [PGS] Debiased refit OK. Slopes={len(beta_slopes)} L1={float(np.sum(np.abs(beta_slopes.values))):.6g}")
         except Exception as e:
-            _p(f"[{tag}] [PGS WARN] Debias failed ({e}); using penalized coef.")
-            lin_tr = best["intercept"] + (Ztr.values @ coef.values)
-            lin_te = best["intercept"] + (Zte.values @ coef.values)
+            _p(f"[{tag}] [PGS WARN] Debias failed ({e}); using penalized slopes.")
+            lin_tr = (Ztr.values @ coef.values)
+            lin_te = (Zte.values @ coef.values)
     else:
-        lin_tr = best["intercept"] + (Ztr.values @ coef.values)
-        lin_te = best["intercept"] + (Zte.values @ coef.values)
+        lin_tr = (Ztr.values @ coef.values)
+        lin_te = (Zte.values @ coef.values)
 
-    # z-score PGS on TRAIN (for interpretability & stable Wald/LRT)
+    # Sanity: summarize raw linear scores
+    _p(f"[{tag}] [PGS/RAW] " + _summ(lin_tr, "lin_tr") + " | " + _summ(lin_te, "lin_te"))
+
+    # z-score PGS on TRAIN (interpretability & stable Wald/LRT); if sd≈0, flag and skip
     mu = float(np.mean(lin_tr))
-    sd = float(np.std(lin_tr)) if float(np.std(lin_tr)) > 0 else 1.0
+    sd = float(np.std(lin_tr))
+    if not np.isfinite(sd) or sd < 1e-12:
+        _p(f"[{tag}] [PGS/CHK] Train linear predictor has ~zero variance (sd={sd:.3e}). No usable PGS.")
+        return {
+            "best": best,
+            "pgs_tr": None,
+            "pgs_te": None,
+            "pgs_mu": mu,
+            "pgs_sd": sd,
+            "pgs_has_signal": False,
+            "support_nonzero": int(best["nonzero"]),
+        }
+
     pgs_tr = (lin_tr - mu) / sd
     pgs_te = (lin_te - mu) / sd
+    _p(f"[{tag}] [PGS/Z] " + _summ(pgs_tr, "pgs_tr") + " | " + _summ(pgs_te, "pgs_te"))
+
+    # Quick diagnostics: correlation & AUC of PGS-alone
+    try:
+        r = float(np.corrcoef(pgs_tr, ytr.values)[0,1])
+    except Exception:
+        r = np.nan
+    try:
+        auc_tr = float(roc_auc_score(ytr.values, pgs_tr))
+    except Exception:
+        auc_tr = np.nan
+    _p(f"[{tag}] [PGS/DIAG] corr(pgs_tr,y_tr)={r if np.isfinite(r) else float('nan'):.4f} | AUC(PGS-only,TRAIN)={auc_tr if np.isfinite(auc_tr) else float('nan'):.4f}")
 
     return {
         "best": best,
@@ -420,23 +460,56 @@ def _pgs_scores(Ztr: pd.DataFrame, Zte: pd.DataFrame, ytr: pd.Series, tag: str):
         "pgs_te": pgs_te,
         "pgs_mu": mu,
         "pgs_sd": sd,
+        "pgs_has_signal": True,
+        "support_nonzero": int(best["nonzero"]),
     }
 
 # ===================== NESTED MODEL TESTS =====================
 
-def _fit_model0_model1_train(cov_tr: pd.DataFrame, ytr: pd.Series, pgs_tr: np.ndarray, tag: str):
-    # Model 0: baseline covariates only
+def _fit_model0_model1_train(cov_tr: pd.DataFrame, ytr: pd.Series, pgs_tr: np.ndarray | None, tag: str):
+    # Model 0: baseline covariates only (GLM Binomial for numerical stability)
     X0 = sm.add_constant(cov_tr, has_constant='add')
-    m0 = sm.Logit(ytr.values, X0).fit(disp=0, method="lbfgs")
+    _p(f"[{tag}] [TRAIN/M0] X0 shape={X0.shape} cols={list(X0.columns)[:6]}... (+{len(X0.columns)-6 if len(X0.columns)>6 else 0})")
+    m0 = sm.GLM(ytr.values, X0, family=sm.families.Binomial()).fit()
+    _p(f"[{tag}] [TRAIN/M0] Converged={m0.mle_retvals.get('converged', True) if hasattr(m0, 'mle_retvals') else True} "
+       f"| llf={getattr(m0, 'llf', float('nan')):.6g} dev={getattr(m0, 'deviance', float('nan')):.6g}")
 
-    # Model 1: baseline + PGS
+    # If no PGS signal (None), bail gracefully
+    if pgs_tr is None:
+        _p(f"[{tag}] [TRAIN/M1] SKIP — PGS has no usable variance.")
+        return {
+            "m0": m0, "m1": None,
+            "p_lrt": np.nan, "lrt_stat": np.nan,
+            "beta_pgs": np.nan, "se_pgs": np.nan, "wald_z": np.nan, "p_wald_two": np.nan,
+            "m0_cols": list(X0.columns)
+        }
+
+    # Model 1: baseline + PGS (align by index as Series!)
     X1 = X0.copy()
-    X1 = X1.assign(PGS=pgs_tr)
-    m1 = sm.Logit(ytr.values, X1).fit(disp=0, method="lbfgs")
+    X1["PGS"] = pd.Series(pgs_tr, index=X1.index)  # index-aligned insertion
+    assert X1.index.equals(X0.index)
+    assert X1.shape[1] == X0.shape[1] + 1
+    _p(f"[{tag}] [TRAIN/M1] X1 shape={X1.shape} (added PGS). " + _summ(X1['PGS'].values, "PGS_tr"))
 
-    # LRT (df=1; only added PGS)
-    lrt = 2.0 * (m1.llf - m0.llf)
-    p_lrt = float(1.0 - chi2.cdf(lrt, df=1))
+    m1 = sm.GLM(ytr.values, X1, family=sm.families.Binomial()).fit()
+    _p(f"[{tag}] [TRAIN/M1] Converged={m1.mle_retvals.get('converged', True) if hasattr(m1, 'mle_retvals') else True} "
+       f"| llf={getattr(m1, 'llf', float('nan')):.6g} dev={getattr(m1, 'deviance', float('nan')):.6g}")
+
+    # LRT via deviance difference (df=1; only added PGS)
+    dev0 = getattr(m0, "deviance", None)
+    dev1 = getattr(m1, "deviance", None)
+    if dev0 is not None and dev1 is not None:
+        lrt = float(dev0 - dev1)
+        p_lrt = float(1.0 - chi2.cdf(lrt, df=1))
+    else:
+        # Fallback to log-likelihood if available
+        ll0 = getattr(m0, "llf", None)
+        ll1 = getattr(m1, "llf", None)
+        if ll0 is not None and ll1 is not None:
+            lrt = float(2.0 * (ll1 - ll0))
+            p_lrt = float(1.0 - chi2.cdf(lrt, df=1))
+        else:
+            lrt, p_lrt = np.nan, np.nan
 
     # Wald z for PGS coefficient (two-sided)
     try:
@@ -448,11 +521,14 @@ def _fit_model0_model1_train(cov_tr: pd.DataFrame, ytr: pd.Series, pgs_tr: np.nd
     except Exception:
         beta_pgs = np.nan; se_pgs = np.nan; z = np.nan; p_wald_two = np.nan
 
-    _p(f"[{tag}] [TRAIN] LRT p={p_lrt:.3e} | Wald z={z if np.isfinite(z) else float('nan'):.3f} p={p_wald_two:.3e}")
+    _p(f"[{tag}] [TRAIN/TESTS] LRT stat={lrt if np.isfinite(lrt) else float('nan'):.6g} p={p_lrt if np.isfinite(p_lrt) else float('nan'):.3e} "
+       f"| Wald z={z if np.isfinite(z) else float('nan'):.3f} p={p_wald_two if np.isfinite(p_wald_two) else float('nan'):.3e}")
+
     return {
         "m0": m0, "m1": m1,
-        "p_lrt": p_lrt, "lrt_stat": float(lrt),
-        "beta_pgs": beta_pgs, "se_pgs": se_pgs, "wald_z": z, "p_wald_two": p_wald_two
+        "p_lrt": p_lrt, "lrt_stat": lrt,
+        "beta_pgs": beta_pgs, "se_pgs": se_pgs, "wald_z": z, "p_wald_two": p_wald_two,
+        "m0_cols": list(X0.columns)
     }
 
 # ---- DeLong for paired AUCs (one-sided) ----
@@ -466,8 +542,7 @@ def _midrank(x: np.ndarray) -> np.ndarray:
         j = i
         while j < n and x_sorted[j] == x_sorted[i]:
             j += 1
-        # midrank for ties
-        mid = 0.5 * (i + j - 1) + 1  # +1 for 1-based ranks
+        mid = 0.5 * (i + j - 1) + 1
         ranks[i:j] = mid
         i = j
     out = np.empty(n, dtype=float)
@@ -475,7 +550,6 @@ def _midrank(x: np.ndarray) -> np.ndarray:
     return out
 
 def _fast_delong(y_true: np.ndarray, pred: np.ndarray):
-    # One predictor variant: return AUC, V10, V01 vectors per DeLong
     y_true = np.asarray(y_true).astype(int)
     pred = np.asarray(pred).astype(float)
     assert set(np.unique(y_true)) <= {0,1}
@@ -494,27 +568,25 @@ def _fast_delong(y_true: np.ndarray, pred: np.ndarray):
     return float(auc), v10, v01
 
 def _delong_test_paired(y_true: np.ndarray, s0: np.ndarray, s1: np.ndarray, alternative="greater") -> float:
-    # Paired DeLong for two correlated scores on same individuals; one-sided p for AUC1 > AUC0
     a0, v10_0, v01_0 = _fast_delong(y_true, s0)
     a1, v10_1, v01_1 = _fast_delong(y_true, s1)
     if any(v is None for v in (v10_0, v01_0, v10_1, v01_1)) or np.isnan(a0) or np.isnan(a1):
         return np.nan
     m, n = len(v10_0), len(v01_0)
-    # cov(AUCa, AUCb) = cov(V10a, V10b)/m + cov(V01a, V01b)/n
     cov_v10 = np.cov(np.vstack([v10_0, v10_1]), bias=False)
     cov_v01 = np.cov(np.vstack([v01_0, v01_1]), bias=False)
     s_00 = cov_v10[0,0]/m + cov_v01[0,0]/n
     s_11 = cov_v10[1,1]/m + cov_v01[1,1]/n
     s_01 = cov_v10[0,1]/m + cov_v01[0,1]/n
     var_diff = s_00 + s_11 - 2*s_01
-    if var_diff <= 0:
+    if var_diff <= 0 or not np.isfinite(var_diff):
         return np.nan
     z = (a1 - a0) / math.sqrt(var_diff)
     if alternative == "greater":
         p = float(1.0 - norm.cdf(z))
     elif alternative == "less":
         p = float(norm.cdf(z))
-    else:  # two-sided
+    else:
         p = float(2.0 * (1.0 - norm.cdf(abs(z))))
     return p
 
@@ -530,8 +602,8 @@ def _paired_bootstrap_auc(y, s0, s1, B=1000, seed=SEED, tag=""):
         return np.nan, (np.nan, np.nan), np.nan
     deltas = np.empty(B, dtype=float)
     count_gt = 0
+    t0 = time.time()
     for b in range(B):
-        # stratified resample
         rp = rng.choice(idx_pos, size=m, replace=True)
         rn = rng.choice(idx_neg, size=n, replace=True)
         sel = np.concatenate([rp, rn])
@@ -542,20 +614,48 @@ def _paired_bootstrap_auc(y, s0, s1, B=1000, seed=SEED, tag=""):
         deltas[b] = d
         if d > 0: count_gt += 1
         if (b+1) % max(1, B//10) == 0 or (b+1) == B:
-            _p(f"[{tag}] [TEST/bootstrap] {b+1}/{B} ({(b+1)/B*100:.1f}%)")
+            elapsed = time.time() - t0
+            pct = (b+1)/B*100
+            eta = elapsed/(b+1)*(B-(b+1))
+            _p(f"[{tag}] [TEST/bootstrap] {b+1}/{B} ({pct:.1f}%) | elapsed {elapsed:.1f}s | ETA {eta:.1f}s")
     prob = float(count_gt / B)
     lo, hi = float(np.percentile(deltas, 2.5)), float(np.percentile(deltas, 97.5))
     return prob, (lo, hi), float(np.mean(deltas))
 
 # ===================== EVALUATION (TEST) =====================
 
-def _evaluate_test(m0, m1, cov_te: pd.DataFrame, pgs_te: np.ndarray, yte: pd.Series, tag: str):
+def _evaluate_test(m0, m1, cov_te: pd.DataFrame, pgs_te: np.ndarray | None, yte: pd.Series, tag: str):
     X0_te = sm.add_constant(cov_te, has_constant='add')
-    X1_te = X0_te.assign(PGS=pgs_te)
+    _p(f"[{tag}] [TEST] X0_te shape={X0_te.shape}")
 
-    # Predicted probabilities (GLM)
+    # Predict with Model 0
     p0 = m0.predict(X0_te)
+    _p(f"[{tag}] [TEST] p0 summary: " + _summ(p0, "p0"))
+
+    # If Model 1 was skipped
+    if (m1 is None) or (pgs_te is None):
+        auc0 = float(roc_auc_score(yte.values, p0))
+        _p(f"[{tag}] [TEST] Model 1 skipped (no PGS). AUC_M0={auc0:.4f}")
+        return {
+            "AUC_M0": auc0,
+            "AUC_M1": np.nan,
+            "DeltaAUC": np.nan,
+            "p_DeLong_one_sided": np.nan,
+            "Prob_DeltaAUC_gt0_boot": np.nan,
+            "DeltaAUC_CI95_lo": np.nan,
+            "DeltaAUC_CI95_hi": np.nan,
+            "DeltaAUC_boot_mean": np.nan
+        }
+
+    # Predict with Model 1 (insert aligned PGS)
+    X1_te = X0_te.copy()
+    X1_te["PGS"] = pd.Series(pgs_te, index=X1_te.index)
+    assert X1_te.index.equals(X0_te.index)
     p1 = m1.predict(X1_te)
+    _p(f"[{tag}] [TEST] p1 summary: " + _summ(p1, "p1"))
+
+    same = np.allclose(p0, p1)
+    _p(f"[{tag}] [TEST] p0==p1 allclose? {bool(same)}")
 
     auc0 = float(roc_auc_score(yte.values, p0))
     auc1 = float(roc_auc_score(yte.values, p1))
@@ -570,8 +670,11 @@ def _evaluate_test(m0, m1, cov_te: pd.DataFrame, pgs_te: np.ndarray, yte: pd.Ser
     )
 
     _p(f"[{tag}] [TEST] AUC_M0={auc0:.4f}  AUC_M1={auc1:.4f}  ΔAUC={d_auc:+.4f}  "
-       f"p_DeLong={p_delong if not np.isnan(p_delong) else float('nan'):.3e}  "
-       f"P(ΔAUC>0)={prob_gt:.3f}  CI_95%=[{ci_lo:+.4f},{ci_hi:+.4f}]")
+       f"p_DeLong={(p_delong if np.isfinite(p_delong) else float('nan')):.3e}  "
+       f"P(ΔAUC>0)={prob_gt if np.isfinite(prob_gt) else float('nan'):.3f}  "
+       f"CI_95%=[{ci_lo if np.isfinite(ci_lo) else float('nan'):+.4f},"
+       f"{ci_hi if np.isfinite(ci_hi) else float('nan'):+.4f}]")
+
     return {
         "AUC_M0": auc0,
         "AUC_M1": auc1,
@@ -586,6 +689,7 @@ def _evaluate_test(m0, m1, cov_te: pd.DataFrame, pgs_te: np.ndarray, yte: pd.Ser
 # ===================== PER-PHENOTYPE PIPE =====================
 
 def _run_one(ph: str, X: pd.DataFrame, Y: pd.DataFrame, C_base: pd.DataFrame, ancestry_df: pd.DataFrame | None):
+    t0 = time.time()
     y = Y[ph].astype(int)
     pos = int(y.sum()); neg = int((1 - y).sum())
     _p(f"[{ph}] [start] N={len(y):,} | Cases={pos:,} Controls={neg:,}")
@@ -621,18 +725,18 @@ def _run_one(ph: str, X: pd.DataFrame, Y: pd.DataFrame, C_base: pd.DataFrame, an
     # Standardize inversions (PGS design)
     Ztr, Zte = _prep_X_standardize(X, train_ids, test_ids, ph)
 
-    # Build covariates (Model 0/1)
+    # Build covariates (Model 0/1 bases)
     cov_tr, cov_te = _build_covariates_splits(C_base, ancestry_df, train_ids, test_ids, ph)
 
     # Train PGS on TRAIN (inversions only), produce TRAIN/TEST PGS (z-scored on TRAIN)
     pgs = _pgs_scores(Ztr, Zte, y.loc[train_ids], ph)
 
     # Fit nested models on TRAIN
-    fit = _fit_model0_model1_train(cov_tr, y.loc[train_ids], pgs["pgs_tr"], ph)
+    fit = _fit_model0_model1_train(cov_tr, y.loc[train_ids], pgs["pgs_tr"] if pgs["pgs_has_signal"] else None, ph)
 
     # Evaluate discrimination on TEST (ΔAUC, DeLong, bootstrap)
     mets_test = _evaluate_test(
-        fit["m0"], fit["m1"], cov_te, pgs["pgs_te"], y.loc[test_ids], ph
+        fit["m0"], fit["m1"], cov_te, pgs["pgs_te"] if pgs["pgs_has_signal"] else None, y.loc[test_ids], ph
     )
 
     # Save artifacts
@@ -641,13 +745,17 @@ def _run_one(ph: str, X: pd.DataFrame, Y: pd.DataFrame, C_base: pd.DataFrame, an
     iox.atomic_write_parquet(weights_pq, weights_df)
     iox.atomic_write_json(os.path.join(outdir, "pgs_model.json"), {
         "alpha": ALPHA, "lambda": pgs["best"]["lambda"], "C": pgs["best"]["C"],
-        "intercept": pgs["best"]["intercept"], "nonzero": pgs["best"]["nonzero"],
-        "bic": pgs["best"]["bic"], "pgs_mu_train": pgs["pgs_mu"], "pgs_sd_train": pgs["pgs_sd"]
+        "intercept_penalized": pgs["best"]["intercept"],  # for record; not used in PGS
+        "nonzero": pgs["best"]["nonzero"], "bic": pgs["best"]["bic"],
+        "pgs_mu_train": pgs["pgs_mu"], "pgs_sd_train": pgs["pgs_sd"],
+        "pgs_has_signal": bool(pgs["pgs_has_signal"])
     })
-    test_scores = pd.DataFrame(
-        {"person_id": test_ids, "PGS": pgs["pgs_te"], "Y": y.loc[test_ids].values}
-    ).set_index("person_id")
-    iox.atomic_write_parquet(os.path.join(outdir, "test_pgs.parquet"), test_scores)
+
+    if pgs["pgs_has_signal"]:
+        test_scores = pd.DataFrame(
+            {"person_id": test_ids, "PGS": pgs["pgs_te"], "Y": y.loc[test_ids].values}
+        ).set_index("person_id")
+        iox.atomic_write_parquet(os.path.join(outdir, "test_pgs.parquet"), test_scores)
 
     # Consolidate metrics
     out = {
@@ -656,12 +764,15 @@ def _run_one(ph: str, X: pd.DataFrame, Y: pd.DataFrame, C_base: pd.DataFrame, an
         "TRAIN_Wald_beta_PGS": fit["beta_pgs"], "TRAIN_Wald_se_PGS": fit["se_pgs"],
         "TRAIN_Wald_z": fit["wald_z"], "TRAIN_Wald_p_two_sided": fit["p_wald_two"],
         **mets_test,
-        "PGS_nonzero": pgs["best"]["nonzero"]
+        "PGS_nonzero": pgs["best"]["nonzero"],
+        "PGS_support_signal": bool(pgs["pgs_has_signal"])
     }
     iox.atomic_write_json(metrics_js, out)
     _p(f"[{ph}] [done] nnz={pgs['best']['nonzero']} | "
-       f"LRT p={fit['p_lrt']:.3e} | ΔAUC={out['DeltaAUC']:+.4f} | "
-       f"p_DeLong={out['p_DeLong_one_sided'] if not np.isnan(out['p_DeLong_one_sided']) else float('nan'):.3e}")
+       f"LRT p={fit['p_lrt'] if np.isfinite(fit['p_lrt']) else float('nan'):.3e} | "
+       f"ΔAUC={out['DeltaAUC'] if np.isfinite(out['DeltaAUC']) else float('nan'):+.4f} | "
+       f"p_DeLong={out['p_DeLong_one_sided'] if np.isfinite(out['p_DeLong_one_sided']) else float('nan'):.3e} | "
+       f"wall {time.time()-t0:.1f}s")
 
     return out
 
