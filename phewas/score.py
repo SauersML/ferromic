@@ -68,7 +68,7 @@ BOOT_B = int(os.environ.get("SCORE_BOOT_B", "1000"))
 BOOT_SEED = SEED
 
 # Parallelization
-N_WORKERS = int(os.environ.get("SCORE_N_JOBS", str(max(1, (os.cpu_count() or 4) - 0)))))
+N_WORKERS = int(os.environ.get("SCORE_N_JOBS", str(max(1, (os.cpu_count() or 4) - 0))))
 PRINT_LOCK = threading.Lock()
 
 OUT_ROOT = os.path.join(CACHE_DIR, "scores_nested_pgs")
