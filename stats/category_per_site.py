@@ -16,7 +16,7 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 
 # ------------------------- CONFIG -------------------------
 
-INV_CSV        = Path("inv_info.tsv")  # recurrence mapping input
+INV_TSV        = Path("inv_info.tsv")  # recurrence mapping input
 
 DIVERSITY_FILE = Path("per_site_diversity_output.falsta")
 FST_FILE       = Path("per_site_fst_output.falsta")
@@ -107,19 +107,19 @@ def _parse_values_fast(line: str) -> np.ndarray:
 
 # -------------------- INVERSION MAPPING --------------
 
-def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
+def _load_inv_mapping(INV_TSV: Path) -> pd.DataFrame:
     """
-    Load inv_info.csv robustly; pull Chromosome/Start/End and recurrence flag.
+    Load inv_info.tsv robustly; pull Chromosome/Start/End and recurrence flag.
 
     Recurrence logic:
       - If column '0_single_1_recur_consensus' exists and equals 1 → recurrent; 0 → single-event
       - If missing or NA → uncategorized
     """
-    if not inv_csv.is_file():
-        log.warning(f"INV CSV not found: {inv_csv} → all sequences will be uncategorized.")
+    if not INV_TSV.is_file():
+        log.warning(f"INV tsv not found: {INV_TSV} → all sequences will be uncategorized.")
         return pd.DataFrame(columns=["chrom", "start", "end", "group"])
 
-    df = pd.read_csv(inv_csv, engine="python")
+    df = pd.read_tsv(INV_TSV, engine="python")
     cols = {c: c.strip() for c in df.columns}
     df.rename(columns=cols, inplace=True)
 
@@ -130,7 +130,7 @@ def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
             break
 
     if "Chromosome" not in df.columns or "Start" not in df.columns or "End" not in df.columns:
-        raise ValueError("inv_info.csv must contain 'Chromosome', 'Start', 'End' columns.")
+        raise ValueError("inv_info.tsv must contain 'Chromosome', 'Start', 'End' columns.")
 
     df["_chrom"] = df["Chromosome"].map(_norm_chr)
     df["_start"] = pd.to_numeric(df["Start"], errors="coerce").astype("Int64")
@@ -155,7 +155,7 @@ def _load_inv_mapping(inv_csv: Path) -> pd.DataFrame:
     n_groups = Counter(out["group"])
     log.info(f"Loaded inversion mapping: recurrent={n_groups.get('recurrent',0)}, "
              f"single-event={n_groups.get('single-event',0)}, "
-             f"uncategorized(by CSV)={n_groups.get('uncategorized',0)}")
+             f"uncategorized(by tsv)={n_groups.get('uncategorized',0)}")
 
     return out
 
@@ -715,7 +715,7 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       max_bp: Optional[int],
                       y_label: str,
                       out_png: Path,
-                      out_csv: Path):
+                      out_tsv: Path):
     """
     Build tables, compute stats, and plot for given mode.
     """
@@ -798,11 +798,11 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                 "metric": which,
             })
 
-    # Save CSV (combined)
+    # Save tsv (combined)
     df = pd.DataFrame(all_rows)
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out_csv, index=False, float_format="%.6g")
-    log.info(f"Saved CSV → {out_csv}")
+    out_tsv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_tsv(out_tsv, index=False, float_format="%.6g")
+    log.info(f"Saved tsv → {out_tsv}")
 
     # Plot (grouped)
     _plot_multi(x_centers, group_stats, y_label, out_png, x_label, metric=which)
@@ -819,10 +819,10 @@ def run_metric(which: str,
                y_label: str,
                # proportion mode outputs
                out_png_prop: Path,
-               out_csv_prop: Path,
+               out_tsv_prop: Path,
                # bp mode outputs
                out_png_bp: Path,
-               out_csv_bp: Path):
+               out_tsv_bp: Path):
     t0 = time.time()
 
     # ---------- PROPORTION MODE ----------
@@ -844,7 +844,7 @@ def run_metric(which: str,
             which=which, mode="proportion", num_bins=NUM_BINS_PROP, max_bp=None,
             y_label=y_label,
             out_png=out_png_prop,
-            out_csv=out_csv_prop,
+            out_tsv=out_tsv_prop,
         )
 
     # ---------- BASE-PAIR MODE  ----------
@@ -866,7 +866,7 @@ def run_metric(which: str,
             which=which, mode="bp", num_bins=NUM_BINS_BP, max_bp=MAX_BP,
             y_label=y_label,
             out_png=out_png_bp,
-            out_csv=out_csv_bp,
+            out_tsv=out_tsv_bp,
         )
 
     log.info(f"[{which}] done in {time.time() - t0:.2f}s\n")
@@ -877,7 +877,7 @@ def main():
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
     # Load inversion mapping and build fuzzy (±1bp) lookup
-    inv_df = _load_inv_mapping(INV_CSV)
+    inv_df = _load_inv_mapping(INV_TSV)
     fuzzy_map = _build_fuzzy_lookup(inv_df) if not inv_df.empty else {}
 
     # π (diversity) — Direct (blue) / Inverted (purple), with REAL gaps + tiny markers for recurrence
@@ -889,10 +889,10 @@ def main():
         y_label="Mean nucleotide diversity (π per site)",
         # proportion mode outputs
         out_png_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.png",
-        out_csv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.csv",
+        out_tsv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.tsv",
         # bp mode outputs 
         out_png_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.png",
-        out_csv_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.csv",
+        out_tsv_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.tsv",
     )
 
     # Hudson FST — lines alternate blue/purple with REAL gaps + tiny markers for recurrence
@@ -904,10 +904,10 @@ def main():
         y_label="Mean Hudson FST (per site)",
         # proportion mode outputs
         out_png_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.png",
-        out_csv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.csv",
+        out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.tsv",
         # bp mode outputs
         out_png_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.png",
-        out_csv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.csv",
+        out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.tsv",
     )
 
 if __name__ == "__main__":
