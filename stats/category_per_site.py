@@ -9,7 +9,7 @@ import pandas as pd
 
 # ---------- Files ----------
 INV_FILE   = Path("inv_info.tsv")                 # required
-SUMMARY    = Path("output.tsv")                   # required
+SUMMARY    = Path("output.csv")                   # required
 PI_FALSTA  = Path("per_site_diversity_output.falsta")
 FST_FALSTA = Path("per_site_fst_output.falsta")
 
@@ -103,9 +103,9 @@ def load_inversions(inv_path: Path) -> pd.DataFrame:
 def load_summary(sum_path: Path) -> pd.DataFrame:
     if not sum_path.is_file():
         raise FileNotFoundError(f"Required summary file not found: {sum_path}")
-    dbg("Loading per-region summary from output.tsv ...")
-    df = pd.read_csv(sum_path, sep="\t", dtype=str)
-    dbg(f"output.tsv columns: {list(df.columns)}")
+    dbg("Loading per-region summary from output.csv ...")
+    df = pd.read_csv(sum_path, dtype=str)
+    dbg(f"output.csv columns: {list(df.columns)}")
 
     need = ["chr","region_start","region_end",
             "0_pi_filtered","1_pi_filtered",
@@ -113,7 +113,7 @@ def load_summary(sum_path: Path) -> pd.DataFrame:
             "hudson_fst_hap_group_0v1"]
     miss = [c for c in need if c not in df.columns]
     if miss:
-        raise RuntimeError(f"output.tsv missing required columns: {miss}")
+        raise RuntimeError(f"output.csv missing required columns: {miss}")
 
     out = pd.DataFrame({
         "chr": df["chr"].map(norm_chr),
@@ -130,8 +130,8 @@ def load_summary(sum_path: Path) -> pd.DataFrame:
     out["start"] = out["start"].astype(int)
     out["end"]   = out["end"].astype(int)
     kept = len(out)
-    dbg(f"output.tsv rows retained: {kept} (dropped {before-kept} with missing keys)")
-    dbg("First 3 normalized rows from output.tsv:\n" + str(out[["chr","start","end"]].head(3).to_string(index=False)))
+    dbg(f"output.csv rows retained: {kept} (dropped {before-kept} with missing keys)")
+    dbg("First 3 normalized rows from output.csv:\n" + str(out[["chr","start","end"]].head(3).to_string(index=False)))
     return out
 
 # ---------- 3) Strict region↔inversion matching (±1 on region side; crash on >1 match) ----------

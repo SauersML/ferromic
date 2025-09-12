@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # --- Configuration ---
-INV_INFO_FILE = "inv_info.csv"
+INV_INFO_FILE = "inv_info.tsv"
 STATS_FILE = "output.csv"
 
 # Columns to use (Reduced)
@@ -169,11 +169,11 @@ def main():
             with open(INV_INFO_FILE, 'r', encoding='utf-8') as f:
                 content = f.read()
                 if content.startswith('\ufeff'): content = content[1:]
-            df_inv = pd.read_csv(io.StringIO(content), usecols=INV_COLS)
+            df_inv = pd.read_csv(io.StringIO(content), sep='\t', usecols=INV_COLS)
         except UnicodeDecodeError:
              logger.warning(f"UTF-8 decoding failed for {INV_INFO_FILE}. Trying latin-1.")
              with open(INV_INFO_FILE, 'r', encoding='latin-1') as f: content = f.read()
-             df_inv = pd.read_csv(io.StringIO(content), usecols=INV_COLS)
+             df_inv = pd.read_csv(io.StringIO(content), sep='\t', usecols=INV_COLS)
 
         logger.info(f"Loaded {len(df_inv)} rows from {INV_INFO_FILE}")
         df_inv = df_inv.rename(columns=INV_RENAME)

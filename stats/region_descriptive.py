@@ -3,16 +3,16 @@ import numpy as np
 import io
 import os
 
-def calculate_inversion_stats(input_filename="inv_info.csv", output_filename="inversion_stats.csv"):
+def calculate_inversion_stats(input_filename="inv_info.tsv", output_filename="inversion_stats.csv"):
     """
-    Reads inversion data from the input CSV file, calculates descriptive
+    Reads inversion data from the input TSV file, calculates descriptive
     statistics (mean and standard deviation) for frequency, size, and
     flanking repeat identity, grouped by recurrence status (excluding Y
     chromosome), and saves the results to the specified output CSV file
     with human-readable headers (using spaces).
 
     Args:
-        input_filename (str): The path to the input CSV file (e.g., "inv_info.csv").
+        input_filename (str): The path to the input TSV file (e.g., "inv_info.tsv").
         output_filename (str): The path to save the output CSV file (e.g., "inversion_stats.csv").
 
     Returns:
@@ -30,7 +30,7 @@ def calculate_inversion_stats(input_filename="inv_info.csv", output_filename="in
             first_line = csvfile.readline()
             if first_line.startswith('\ufeff'): # Handle BOM
                 first_line = first_line[1:]
-            header = [h.strip() for h in first_line.strip().split(',')]
+            header = [h.strip() for h in first_line.strip().split('\t')]
 
             # --- Identify column indices robustly ---
             column_mapping = {
@@ -58,9 +58,9 @@ def calculate_inversion_stats(input_filename="inv_info.csv", output_filename="in
 
 
             if missing_cols:
-                return f"Error: Missing expected column(s) in CSV header: {', '.join(missing_cols)}"
+                return f"Error: Missing expected column(s) in TSV header: {', '.join(missing_cols)}"
 
-            reader = csv.reader(csvfile)
+            reader = csv.reader(csvfile, delimiter='\t')
 
             for row in reader:
                 if not row: continue
@@ -184,5 +184,5 @@ def calculate_inversion_stats(input_filename="inv_info.csv", output_filename="in
 
 # --- Main execution block ---
 if __name__ == "__main__":
-    result_message = calculate_inversion_stats("inv_info.csv", "inversion_stats.csv")
+    result_message = calculate_inversion_stats("inv_info.tsv", "inversion_stats.csv")
     print(result_message)

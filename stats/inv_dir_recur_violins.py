@@ -16,7 +16,7 @@ SCIPY_OK = True
 # -----------------------------------------------------------------------------
 # Configuration / aesthetics
 # -----------------------------------------------------------------------------
-OUTPUT_TSV = Path("./output.tsv")
+OUTPUT_CSV = Path("./output.csv")
 INVINFO_TSV = Path("./inv_info.tsv")
 
 rng = np.random.default_rng(2025)  # reproducible jitter
@@ -93,14 +93,14 @@ def _sci_notation_tex(p):
     exp_sup = str(exp).translate(superscripts)
     return f"{mant_str}×10{exp_sup}"
 
-def _load_and_match(output_tsv: Path, invinfo_tsv: Path) -> pd.DataFrame:
-    """Load TSV/CSV files and match regions with ±1 bp tolerance on start/end."""
-    if not output_tsv.exists():
-        raise FileNotFoundError(f"Cannot find {output_tsv.resolve()}")
+def _load_and_match(output_csv: Path, invinfo_tsv: Path) -> pd.DataFrame:
+    """Load CSV/TSV files and match regions with ±1 bp tolerance on start/end."""
+    if not output_csv.exists():
+        raise FileNotFoundError(f"Cannot find {output_csv.resolve()}")
     if not invinfo_tsv.exists():
         raise FileNotFoundError(f"Cannot find {invinfo_tsv.resolve()}")
 
-    df  = pd.read_csv(output_tsv, sep="\t")
+    df  = pd.read_csv(output_csv)
     inv = pd.read_csv(invinfo_tsv, sep="\t")
 
     # Standardize chromosomes
@@ -128,7 +128,7 @@ def _load_and_match(output_tsv: Path, invinfo_tsv: Path) -> pd.DataFrame:
             recur_col = c
             break
     if recur_col is None:
-        raise KeyError("inv_info.csv lacks '0_single_1_recur_consensus' and '0_single_1_recur'.")
+        raise KeyError("inv_info.tsv lacks '0_single_1_recur_consensus' and '0_single_1_recur'.")
 
     inv_small = inv[["chr_std", "Start", "End", recur_col]].copy()
     merged = df_cand.merge(inv_small, on=["chr_std", "Start", "End"], how="left")
@@ -348,7 +348,7 @@ def main():
     })
 
     # Load & match
-    matched = _load_and_match(OUTPUT_TSV, INVINFO_TSV)
+    matched = _load_and_match(OUTPUT_CSV, INVINFO_TSV)
     if matched.empty:
         raise SystemExit("No matched regions found with ±1 bp tolerance.")
 

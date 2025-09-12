@@ -23,7 +23,7 @@ from scipy.stats import wilcoxon, mannwhitneyu
 # Contains pi values per orientation (e.g., 0_pi_filtered, 1_pi_filtered)
 OUTPUT_PI_PATH = 'output.csv'
 # Contains recurrence info per region (e.g., 0_single_1_recur)
-INV_INFO_PATH = 'inv_info.csv'
+INV_INFO_PATH = 'inv_info.tsv'
 # Contains phased genotypes (e.g., 0|1) for inversions per sample
 GENOTYPE_FILE = 'variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv'
 # Folder containing PCA results per chromosome
@@ -182,7 +182,7 @@ try:
     output_df = pd.read_csv(OUTPUT_PI_PATH)
     logger.info(f"Loaded {len(output_df)} rows from Pi data: {OUTPUT_PI_PATH}")
 
-    inv_info_df = pd.read_csv(INV_INFO_PATH)
+    inv_info_df = pd.read_csv(INV_INFO_PATH, sep='\t')
     logger.info(f"Loaded {len(inv_info_df)} rows from Inversion Info: {INV_INFO_PATH}")
 
     geno_df = pd.read_csv(GENOTYPE_FILE, sep='\t')
@@ -240,7 +240,7 @@ output_df['region_end'] = pd.to_numeric(output_df['region_end'], errors='coerce'
 output_df.dropna(subset=['chr', 'region_start', 'region_end'], inplace=True)
 
 
-# B. Standardize Inversion Info Data ('inv_info.csv')
+# B. Standardize Inversion Info Data ('inv_info.tsv')
 recur_col = None
 coord_cols_inv = []
 chr_col_inv = None
