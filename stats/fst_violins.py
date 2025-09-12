@@ -9,7 +9,7 @@ from matplotlib.patches import PathPatch
 from scipy.stats import mannwhitneyu
 
 SUMMARY_STATS_FILE = 'output.csv'
-INVERSION_FILE = 'inv_info.csv'
+INVERSION_FILE = 'inv_info.tsv'
 COORDINATE_MAP_FILE = 'map.tsv'
 
 SUMMARY_STATS_COORDINATE_COLUMNS = {'chr': 'chr', 'start': 'region_start', 'end': 'region_end'}
@@ -67,7 +67,7 @@ def load_required_inputs():
     if not os.path.exists(SUMMARY_STATS_FILE):
         log.critical(f"Required summary file '{SUMMARY_STATS_FILE}' not found.")
         sys.exit(1)
-    inv_df = pd.read_csv(INVERSION_FILE, usecols=lambda c: c in INVERSION_FILE_COLUMNS)
+    inv_df = pd.read_csv(INVERSION_FILE, sep='\t', usecols=lambda c: c in INVERSION_FILE_COLUMNS)
     sum_cols = list(SUMMARY_STATS_COORDINATE_COLUMNS.values()) + [HUDSON_FST_COL]
     sum_df = pd.read_csv(SUMMARY_STATS_FILE, usecols=lambda c: c in sum_cols)
     miss = [c for c in SUMMARY_STATS_COORDINATE_COLUMNS.values() if c not in sum_df.columns]

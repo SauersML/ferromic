@@ -17,7 +17,7 @@ logger = logging.getLogger('inversion_omega_analysis')
 
 # --- File Paths & Constants ---
 PAIRWISE_FILE = Path('all_pairwise_results.csv')
-INVERSION_FILE = Path('inv_info.csv')
+INVERSION_FILE = Path('inv_info.tsv')
 OUTPUT_PLOT_PATH = Path('inversion_omega_analysis_plot_median_only.png')
 
 # --- Plotting Style ---
@@ -49,7 +49,7 @@ def load_and_prepare_data():
 
     try:
         pairwise_df = pd.read_csv(PAIRWISE_FILE)
-        inversion_df = pd.read_csv(INVERSION_FILE)
+        inversion_df = pd.read_csv(INVERSION_FILE, sep='\t')
         logger.info(f"Loaded {len(pairwise_df)} pairwise results and {len(inversion_df)} inversion records.")
     except FileNotFoundError:
         logger.error(f"Input file not found. Ensure '{PAIRWISE_FILE}' and '{INVERSION_FILE}' exist.")

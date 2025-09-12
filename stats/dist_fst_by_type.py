@@ -34,7 +34,7 @@ FLANK_SIZE = 100_000
 
 # File paths
 FST_DATA_FILE = 'per_site_fst_output.falsta'
-INVERSION_FILE = 'inv_info.csv'
+INVERSION_FILE = 'inv_info.tsv'
 OUTPUT_PLOT = 'fst_flanking_regions_bar_plot.png'
 
 # Adjusted category mapping to only include relevant categories
@@ -246,7 +246,7 @@ def create_bar_plot(categories):
 def main():
     start_time = time.time()
     logger.info("Starting fst flanking regions analysis...")
-    inversion_df = pd.read_csv(INVERSION_FILE)
+    inversion_df = pd.read_csv(INVERSION_FILE, sep='\t')
     recurrent_regions, single_event_regions = map_regions_to_inversions(inversion_df)
     fst_sequences = load_fst_data(FST_DATA_FILE)
     flanking_means = calculate_flanking_means(fst_sequences)

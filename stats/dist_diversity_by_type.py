@@ -40,7 +40,7 @@ BAR_ALPHA = 0.3      # Transparency for plot bars (Used previously, kept for ref
 
 # File paths (Update these paths if necessary)
 PI_DATA_FILE = 'per_site_output.falsta'
-INVERSION_FILE = 'inv_info.csv'
+INVERSION_FILE = 'inv_info.tsv'
 OUTPUT_DIR = Path('pi_analysis_results_filtered_pi_length') #  output directory name
 
 # Create output directory if it doesn't exist
@@ -1212,7 +1212,7 @@ def main():
         return
     logger.info(f"Loading inversion info from {inv_file_path}")
     try:
-        inversion_df = pd.read_csv(inv_file_path)
+        inversion_df = pd.read_csv(inv_file_path, sep='\t')
         logger.info(f"Loaded {inversion_df.shape[0]} rows from inversion file.")
         recurrent_regions, single_event_regions = map_regions_to_inversions(inversion_df)
     except Exception as e:

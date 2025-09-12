@@ -60,7 +60,7 @@ def fuzzy_overlaps(data_start, data_end, inv_start, inv_end, tolerance=1):
     return overlap
 
 # --- Main Plotting Function ---
-def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
+def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
     """Generates the multi-panel Manhattan-like plot."""
     print(f"\n--- Starting Plot Generation ---")
     print(f"Reading main data from: {data_file}")
@@ -167,7 +167,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
     inv_df = pd.DataFrame(columns=inv_internal_cols + [inv_recur_col_internal])
 
     try:
-        inv_df_raw = pd.read_csv(inv_file)
+        inv_df_raw = pd.read_csv(inv_file, sep='\t')
         print(f"Read inversion file {inv_file}, shape: {inv_df_raw.shape}")
 
         if all(col in inv_df_raw.columns for col in inv_raw_cols):
@@ -495,7 +495,7 @@ def create_manhattan_plot(data_file, inv_file='inv_info.csv'):
 def main():
     """Sets up file paths and calls the plotting function."""
     data_file = RESULTS_DIR / 'final_results.csv'
-    inv_file = 'inv_info.csv'
+    inv_file = 'inv_info.tsv'
 
     if not data_file.exists():
         print(f"ERROR: Main data file not found: {data_file}")

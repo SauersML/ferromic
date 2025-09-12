@@ -31,7 +31,7 @@ logger.info("--- Starting New Script Run (Node Avg Color, Blue-Red CMap 0-1, Sep
 
 # File paths
 PAIRWISE_FILE = 'all_pairwise_results.csv'
-INVERSION_FILE = 'inv_info.csv'
+INVERSION_FILE = 'inv_info.tsv'
 timestamp = time.strftime("%Y%m%d-%H%M%S")
 OUTPUT_DIR = f'chord_plots_node_avg_color_{timestamp}'
 RECURRENT_CHORD_PLOT_FILE = os.path.join(OUTPUT_DIR, 'recurrent_chord_node_avg.html')
@@ -640,7 +640,7 @@ def main():
         logger.info(f"Loading pairwise data from: {PAIRWISE_FILE}")
         pairwise_df = pd.read_csv(PAIRWISE_FILE); logger.info(f"Loaded {len(pairwise_df):,} rows.")
         logger.info(f"Loading inversion info from: {INVERSION_FILE}")
-        inversion_df = pd.read_csv(INVERSION_FILE); logger.info(f"Loaded {len(inversion_df):,} rows.")
+        inversion_df = pd.read_csv(INVERSION_FILE, sep='\t'); logger.info(f"Loaded {len(inversion_df):,} rows.")
     except FileNotFoundError as e:
         logger.error(f"Error loading input file: {e}. ABORTING."); return
     except Exception as e:

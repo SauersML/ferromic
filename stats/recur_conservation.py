@@ -22,7 +22,7 @@ logger = logging.getLogger('conservation_analysis_detailed')
 
 # File paths
 PAIRWISE_FILE = 'all_pairwise_results.csv'
-INVERSION_FILE = 'inv_info.csv'
+INVERSION_FILE = 'inv_info.tsv'
 OUTPUT_RESULTS_LOO_GENE_PROPORTION = 'leave_one_out_gene_proportion_results.csv' # Output name
 
 # --- Helper Functions ---
@@ -918,7 +918,7 @@ def main():
         logger.info(f"  Loaded {len(pairwise_df):,} rows from {PAIRWISE_FILE}.")
 
         logger.info(f"Loading inversion info from: {INVERSION_FILE}")
-        inversion_df = pd.read_csv(INVERSION_FILE)
+        inversion_df = pd.read_csv(INVERSION_FILE, sep='\t')
         logger.info(f"  Loaded {len(inversion_df):,} rows (inversions) from {INVERSION_FILE}.")
         # Display head of inversion data for context
         logger.info(f"  Inversion data columns: {inversion_df.columns.tolist()}")

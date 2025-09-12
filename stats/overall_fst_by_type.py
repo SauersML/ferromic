@@ -13,7 +13,7 @@ import os
 
 # Input Files
 SUMMARY_STATS_FILE = 'output.csv'
-INVERSION_FILE = 'inv_info.csv'
+INVERSION_FILE = 'inv_info.tsv'
 COORDINATE_MAP_FILE = 'map.tsv' # New configuration for the map file
 
 # Output File Templates
@@ -728,7 +728,7 @@ def main():
         logger.critical(f"CRITICAL: Summary stats file '{SUMMARY_STATS_FILE}' not found. Exiting.")
         sys.exit(1)
 
-    inv_df = pd.read_csv(INVERSION_FILE, usecols=lambda c: c in INVERSION_FILE_COLUMNS)
+    inv_df = pd.read_csv(INVERSION_FILE, sep='\t', usecols=lambda c: c in INVERSION_FILE_COLUMNS)
     sum_df = pd.read_csv(SUMMARY_STATS_FILE, usecols=lambda c: c in sum_cols_load)
     
     logger.info(f"Loaded data. Summary ('{SUMMARY_STATS_FILE}'): {len(sum_df)} rows. Inversion ('{INVERSION_FILE}'): {len(inv_df)} rows.")
