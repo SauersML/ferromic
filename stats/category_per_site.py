@@ -9,7 +9,7 @@ import pandas as pd
 
 # ---------- Files ----------
 INV_FILE   = Path("inv_info.tsv")                 # required
-SUMMARY    = Path("output.csv")                   # required
+SUMMARY    = Path("output.tsv")                   # required
 PI_FALSTA  = Path("per_site_diversity_output.falsta")
 FST_FALSTA = Path("per_site_fst_output.falsta")
 
@@ -85,11 +85,17 @@ def load_inversions(inv_path: Path) -> pd.DataFrame:
         err("Examples of duplicates:\n" + str(examples.head(10)))
         raise RuntimeError("Duplicate exact inversion coordinates in inversion table.")
 
+    # Drop uncategorized rows prior to downstream analyses
+    cts_all = Counter(df["_grp"])
+    df = df[df["_grp"].isin(["recurrent", "single-event"])]
+    dropped_uncat = cts_all.get("uncategorized", 0)
+
     # Summaries
     cts = Counter(df["_grp"])
-    dbg(f"Inversions loaded (valid rows): {len(df)} (dropped {dropped}); "
-        f"Recurrent={cts.get('recurrent',0)}, Single-event={cts.get('single-event',0)}, "
-        f"Uncategorized={cts.get('uncategorized',0)}")
+    dbg(
+        f"Inversions loaded (valid rows): {len(df)} (dropped {dropped}; excluded {dropped_uncat} uncategorized); "
+        f"Recurrent={cts.get('recurrent',0)}, Single-event={cts.get('single-event',0)}"
+    )
 
     return df[["_chr","_start","_end","_grp"]].rename(columns={"_chr":"chr","_start":"start","_end":"end","_grp":"grp"})
 
@@ -97,9 +103,9 @@ def load_inversions(inv_path: Path) -> pd.DataFrame:
 def load_summary(sum_path: Path) -> pd.DataFrame:
     if not sum_path.is_file():
         raise FileNotFoundError(f"Required summary file not found: {sum_path}")
-    dbg("Loading per-region summary from output.csv ...")
-    df = pd.read_csv(sum_path, dtype=str)
-    dbg(f"output.csv columns: {list(df.columns)}")
+    dbg("Loading per-region summary from output.tsv ...")
+    df = pd.read_csv(sum_path, sep="\t", dtype=str)
+    dbg(f"output.tsv columns: {list(df.columns)}")
 
     need = ["chr","region_start","region_end",
             "0_pi_filtered","1_pi_filtered",
@@ -107,7 +113,7 @@ def load_summary(sum_path: Path) -> pd.DataFrame:
             "hudson_fst_hap_group_0v1"]
     miss = [c for c in need if c not in df.columns]
     if miss:
-        raise RuntimeError(f"output.csv missing required columns: {miss}")
+        raise RuntimeError(f"output.tsv missing required columns: {miss}")
 
     out = pd.DataFrame({
         "chr": df["chr"].map(norm_chr),
@@ -124,8 +130,8 @@ def load_summary(sum_path: Path) -> pd.DataFrame:
     out["start"] = out["start"].astype(int)
     out["end"]   = out["end"].astype(int)
     kept = len(out)
-    dbg(f"output.csv rows retained: {kept} (dropped {before-kept} with missing keys)")
-    dbg("First 3 normalized rows from output.csv:\n" + str(out[["chr","start","end"]].head(3).to_string(index=False)))
+    dbg(f"output.tsv rows retained: {kept} (dropped {before-kept} with missing keys)")
+    dbg("First 3 normalized rows from output.tsv:\n" + str(out[["chr","start","end"]].head(3).to_string(index=False)))
     return out
 
 # ---------- 3) Strict region↔inversion matching (±1 on region side; crash on >1 match) ----------
@@ -170,7 +176,7 @@ def match_regions(summary_df: pd.DataFrame, inv_df: pd.DataFrame) -> pd.DataFram
 
     out = pd.DataFrame(matches, columns=["chr","start","end","recurrence"])
     cts = Counter(out["recurrence"])
-    dbg(f"Matched recurrence counts → Recurrent={cts.get('recurrent',0)}, Single-event={cts.get('single-event',0)}, Uncategorized={cts.get('uncategorized',0)}")
+    dbg(f"Matched recurrence counts → Recurrent={cts.get('recurrent',0)}, Single-event={cts.get('single-event',0)}")
 
     # Join back onto summary metrics
     merged = (summary_df
@@ -307,6 +313,7 @@ def main():
 
     # 2) Strict match
     matched = match_regions(summ, inv)
+    matched = matched[matched["recurrence"].isin(["recurrent","single-event"])].copy()
 
     # 3) Parse per-site arrays (π + FST)
     pi_map  = parse_pi_falsta(PI_FALSTA)

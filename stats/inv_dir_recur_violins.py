@@ -21,8 +21,8 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Configuration / aesthetics
 # -----------------------------------------------------------------------------
-OUTPUT_CSV = Path("./output.csv")
-INVINFO_CSV = Path("./inv_info.csv")
+OUTPUT_TSV = Path("./output.tsv")
+INVINFO_TSV = Path("./inv_info.tsv")
 
 rng = np.random.default_rng(2025)  # reproducible jitter
 
@@ -98,15 +98,15 @@ def _sci_notation_tex(p):
     exp_sup = str(exp).translate(superscripts)
     return f"{mant_str}×10{exp_sup}"
 
-def _load_and_match(output_csv: Path, invinfo_csv: Path) -> pd.DataFrame:
-    """Load CSVs and match regions with ±1 bp tolerance on start/end."""
-    if not output_csv.exists():
-        raise FileNotFoundError(f"Cannot find {output_csv.resolve()}")
-    if not invinfo_csv.exists():
-        raise FileNotFoundError(f"Cannot find {invinfo_csv.resolve()}")
+def _load_and_match(output_tsv: Path, invinfo_tsv: Path) -> pd.DataFrame:
+    """Load TSV/CSV files and match regions with ±1 bp tolerance on start/end."""
+    if not output_tsv.exists():
+        raise FileNotFoundError(f"Cannot find {output_tsv.resolve()}")
+    if not invinfo_tsv.exists():
+        raise FileNotFoundError(f"Cannot find {invinfo_tsv.resolve()}")
 
-    df  = pd.read_csv(output_csv)
-    inv = pd.read_csv(invinfo_csv)
+    df  = pd.read_csv(output_tsv, sep="\t")
+    inv = pd.read_csv(invinfo_tsv, sep="\t")
 
     # Standardize chromosomes
     df["chr_std"]  = df["chr"].apply(_standardize_chr)
@@ -353,7 +353,7 @@ def main():
     })
 
     # Load & match
-    matched = _load_and_match(OUTPUT_CSV, INVINFO_CSV)
+    matched = _load_and_match(OUTPUT_TSV, INVINFO_TSV)
     if matched.empty:
         raise SystemExit("No matched regions found with ±1 bp tolerance.")
 
@@ -453,8 +453,8 @@ def main():
     cax.set_position([new_x, new_y, new_w, new_height])
 
     # Save
-    fig.savefig("pi_comparison_violins.png", dpi=300, bbox_inches="tight")
-    fig.savefig("pi_comparison_violins.svg",               bbox_inches="tight")
+    fig.savefig("pi_comparison_violins.svg", bbox_inches="tight")
+    fig.savefig("pi_comparison_violins.pdf", bbox_inches="tight")
 
     # (Optional) show if interactive backend is available
     try:
