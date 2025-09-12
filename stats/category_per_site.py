@@ -119,7 +119,7 @@ def _load_inv_mapping(INV_TSV: Path) -> pd.DataFrame:
         log.warning(f"INV tsv not found: {INV_TSV} → all sequences will be uncategorized.")
         return pd.DataFrame(columns=["chrom", "start", "end", "group"])
 
-    df = pd.read_tsv(INV_TSV, engine="python")
+    df = pd.read_csv(INV_TSV, engine="python")
     cols = {c: c.strip() for c in df.columns}
     df.rename(columns=cols, inplace=True)
 
