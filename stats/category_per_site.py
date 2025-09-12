@@ -798,11 +798,12 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                 "metric": which,
             })
 
-    # Save csv (combined)
+    # Save table (combined)
     df = pd.DataFrame(all_rows)
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out_csv, index=False, float_format="%.6g")
-    log.info(f"Saved csv → {csv}")
+    out_tsv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_tsv, sep="\t", index=False, float_format="%.6g")
+    log.info(f"Saved table → {out_tsv}")
+
 
     # Plot (grouped)
     _plot_multi(x_centers, group_stats, y_label, out_png, x_label, metric=which)
