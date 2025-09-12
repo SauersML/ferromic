@@ -13,7 +13,7 @@ from . import iox  # atomic writers, cache utils
 # ------------------ HARD-CODED CONFIG (consistent with run.py where applicable) ------------------
 
 CACHE_DIR = "./phewas_cache"
-DOSAGES_TSV = "imputed_inversion_dosages.tsv"
+DOSAGES_TSV = "../imputed_inversion_dosages.tsv"
 
 # Covariates from pipeline caches (no external TSV required)
 USE_PIPELINE_COVARS = True
