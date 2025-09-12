@@ -10,13 +10,8 @@ from matplotlib.colors import TwoSlopeNorm
 from matplotlib.patches import Patch, Rectangle
 from matplotlib.legend_handler import HandlerPatch
 
-# Optional dependency for Wilcoxon; if missing, p-values will be annotated as “NA”.
-try:
-    from scipy.stats import wilcoxon
-    SCIPY_OK = True
-except Exception:
-    SCIPY_OK = False
-    warnings.warn("scipy is not installed; Wilcoxon tests will be skipped.", RuntimeWarning)
+from scipy.stats import wilcoxon
+SCIPY_OK = True
 
 # -----------------------------------------------------------------------------
 # Configuration / aesthetics
@@ -368,7 +363,7 @@ def main():
         ymax = ymin + 1.0
 
     # Figure with a right-side column for key (top) and color bar (under it)
-    fig = plt.figure(figsize=(11.6, 6.6))
+    fig = plt.figure(figsize=(14.6, 6.6))
     gs  = fig.add_gridspec(nrows=1, ncols=2, width_ratios=[1.0, 0.42], wspace=0.04)
     ax  = fig.add_subplot(gs[0, 0])
 
