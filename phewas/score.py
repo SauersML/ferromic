@@ -1,5 +1,6 @@
-import os, json, hashlib, glob, warnings
+import os, sys, json, hashlib, glob, warnings, time, math, threading
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -56,18 +57,29 @@ NEAR_CONST_SD = 1e-6
 MAX_ITER = 2000
 CLASS_WEIGHT = "balanced"
 
+# Parallelization
+N_WORKERS = int(os.environ.get("SCORE_N_JOBS", str(max(1, (os.cpu_count() or 4) - 0))))  # default: all cores
+PRINT_EVERY_LAMBDA = max(1, N_LAM // 20)  # ~5% granularity
+PRINT_LOCK = threading.Lock()
+
 OUT_ROOT = os.path.join(CACHE_DIR, "scores_elasticnet")
 
-# ===================== HELPERS =====================
+# ===================== UTILS & PROGRESS =====================
 
 _ID_CANDIDATES = ("person_id","SampleID","sample_id","research_id","participant_id","ID")
+
+def _now():
+    return time.strftime("%H:%M:%S")
+
+def _p(msg: str):
+    with PRINT_LOCK:
+        print(f"[{_now()}] {msg}", flush=True)
 
 def _hash_cfg(d: dict) -> str:
     blob = json.dumps(d, sort_keys=True, ensure_ascii=True).encode()
     return hashlib.sha256(blob).hexdigest()[:12]
 
 def _find_upwards(pathname: str) -> str:
-    """Resolve a filename by searching CWD and walking up parents (same behavior as run.py)."""
     if os.path.isabs(pathname):
         return pathname
     name = os.path.basename(pathname)
@@ -83,6 +95,7 @@ def _find_upwards(pathname: str) -> str:
     return pathname  # fallback (will error later if missing)
 
 def _read_wide_tsv(path: str) -> pd.DataFrame:
+    _p(f"[load/dosages] Reading TSV header: {path}")
     df = pd.read_csv(path, sep="\t")
     id_col = next((c for c in df.columns if c in _ID_CANDIDATES), None)
     if id_col is None:
@@ -92,17 +105,30 @@ def _read_wide_tsv(path: str) -> pd.DataFrame:
     return df.set_index("person_id")
 
 def _load_dosages() -> pd.DataFrame:
+    t0 = time.time()
     path = _find_upwards(DOSAGES_TSV)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Cannot find '{DOSAGES_TSV}' from CWD or any parent.")
+    _p(f"[load/dosages] Resolved path: {path}")
     df = _read_wide_tsv(path)
+    _p(f"[load/dosages] Raw shape: {df.shape[0]:,} samples x {df.shape[1]:,} inversions (pre-numeric)")
+
     # coerce everything except index to numeric
-    for c in df.columns:
+    cols = list(df.columns)
+    n = len(cols)
+    for i, c in enumerate(cols, 1):
+        if i % max(1, n // 10) == 0 or i == n:
+            _p(f"[load/dosages] Coercing numerics: {i}/{n} ({i/n*100:.1f}%)")
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    # drop columns all-NA or constant
+
     nunique = df.nunique(dropna=True)
     keep = nunique > 1
     kept = df.loc[:, keep]
+    dropped = int((~keep).sum())
+    _p(f"[load/dosages] Dropped {dropped:,} constant/all-NA inversion columns. Kept {kept.shape[1]:,}.")
     if kept.shape[1] == 0:
         raise RuntimeError("No variable inversion columns after filtering (all were NA/constant).")
+    _p(f"[load/dosages] Final dosages shape: {kept.shape[0]:,} x {kept.shape[1]:,} (elapsed {time.time()-t0:.2f}s)")
     return kept
 
 def _resolve_env():
@@ -112,13 +138,11 @@ def _resolve_env():
     return cdr_dataset_id, cdr_codename, gcp_project
 
 def _autodetect_cdr_codename() -> str | None:
-    """If WORKSPACE_CDR is unset or wrong, pick newest demographics_*.parquet."""
     pats = sorted(glob.glob(os.path.join(CACHE_DIR, "demographics_*.parquet")))
     if not pats:
         return None
     pats.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     fn = os.path.basename(pats[0])
-    # filename: demographics_{cdr}.parquet
     try:
         stem = Path(fn).stem  # demographics_{cdr}
         return stem.split("demographics_")[-1]
@@ -126,51 +150,33 @@ def _autodetect_cdr_codename() -> str | None:
         return None
 
 def _maybe_materialize_covars(cdr_dataset_id, cdr_codename, gcp_project):
-    """
-    Ensure parquet caches exist, exactly like run.py does, using iox.get_cached_or_generate.
-    Only invoked if caches are missing.
-    """
-    try:
-        from google.cloud import bigquery
-    except Exception as e:
-        raise RuntimeError("google-cloud-bigquery is required to materialize missing caches") from e
-
+    from google.cloud import bigquery
+    _p("[covars] Materializing missing caches via BigQuery (run.py-compatible)")
     bq_client = bigquery.Client(project=gcp_project)
 
-    # demographics (AGE/AGE_sq) — CDR dependent
     _ = iox.get_cached_or_generate(
         os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"),
         iox.load_demographics_with_stable_age, bq_client=bq_client, cdr_id=cdr_dataset_id
     )
-
-    # PCs — NUM_PCS dependent
     _ = iox.get_cached_or_generate(
         os.path.join(CACHE_DIR, f"pcs_{NUM_PCS}.parquet"),
         iox.load_pcs, gcp_project, PCS_URI, NUM_PCS, validate_num_pcs=NUM_PCS
     )
-
-    # genetic sex
     _ = iox.get_cached_or_generate(
         os.path.join(CACHE_DIR, "genetic_sex.parquet"),
         iox.load_genetic_sex, gcp_project, SEX_URI
     )
-
-    # ancestry labels (labels and PCs share the same source in run.py)
     _ = iox.get_cached_or_generate(
         os.path.join(CACHE_DIR, "ancestry_labels.parquet"),
         iox.load_ancestry_labels, gcp_project, LABELS_URI=PCS_URI
     )
 
 def _load_pipeline_covars() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Returns:
-      base_df: index=person_id, columns: AGE, AGE_sq, sex, PC1..PC{NUM_PCS}
-      ancestry_df: DataFrame with one column 'ANCESTRY', index=person_id (raw labels; dummies created after alignment)
-    """
+    t0 = time.time()
     cdr_dataset_id, cdr_codename, gcp_project = _resolve_env()
-
     if not cdr_codename:
         cdr_codename = _autodetect_cdr_codename()
+        _p(f"[covars] Autodetected CDR codename: {cdr_codename}")
 
     demo_path = os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet") if cdr_codename else None
     pcs_path  = os.path.join(CACHE_DIR, f"pcs_{NUM_PCS}.parquet")
@@ -179,49 +185,52 @@ def _load_pipeline_covars() -> tuple[pd.DataFrame, pd.DataFrame]:
 
     needed = [demo_path, pcs_path, sex_path, anc_path]
     missing = [p for p in needed if (p is None or not os.path.exists(p))]
-
     if missing:
+        _p(f"[covars] Missing cache(s): {missing}")
         if not all([cdr_dataset_id, cdr_codename, gcp_project]):
-            raise RuntimeError(
-                "Covariate caches are missing and WORKSPACE_CDR/GOOGLE_PROJECT are not set. "
-                "Either set env vars so we can materialize caches, or precreate the parquet files."
-            )
+            raise RuntimeError("Covariate caches missing and WORKSPACE_CDR/GOOGLE_PROJECT not set to materialize.")
         _maybe_materialize_covars(cdr_dataset_id, cdr_codename, gcp_project)
 
+    _p("[covars] Loading cached demographics/PCs/sex/ancestry...")
     demographics_df = pd.read_parquet(os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"))[["AGE","AGE_sq"]]
     pc_df          = pd.read_parquet(os.path.join(CACHE_DIR, f"pcs_{NUM_PCS}.parquet"))[[f"PC{i}" for i in range(1, NUM_PCS+1)]]
     sex_df         = pd.read_parquet(os.path.join(CACHE_DIR, "genetic_sex.parquet"))[["sex"]]
     ancestry_df    = pd.read_parquet(os.path.join(CACHE_DIR, "ancestry_labels.parquet"))[["ANCESTRY"]]
 
-    # Make sure indices are strings for robust alignment
     for df in (demographics_df, pc_df, sex_df, ancestry_df):
         df.index = df.index.astype(str)
 
     base_df = demographics_df.join(pc_df, how="inner").join(sex_df, how="inner")
+    _p(f"[covars] Base covariates shape before related removal: {base_df.shape}")
 
     if REMOVE_RELATED:
         _, _, gcp_project = _resolve_env()
         if not gcp_project:
             raise RuntimeError("GOOGLE_PROJECT must be set to remove related individuals.")
         related_ids = iox.load_related_to_remove(gcp_project=gcp_project, RELATEDNESS_URI=RELATEDNESS_URI)
+        n_before = len(base_df)
         base_df = base_df[~base_df.index.isin(related_ids)]
+        _p(f"[covars] Removed related: {n_before - len(base_df):,} | Remaining: {len(base_df):,}")
 
+    _p(f"[covars] Final base covariates shape: {base_df.shape} (elapsed {time.time()-t0:.2f}s)")
     return base_df, ancestry_df
 
 def _find_pheno_cache(sanitized_name: str) -> str | None:
-    # pattern: CACHE_DIR/pheno_{name}_{cdr}.parquet
     pat = os.path.join(CACHE_DIR, f"pheno_{sanitized_name}_*.parquet")
     hits = sorted(glob.glob(pat))
     if not hits:
         return None
-    hits.sort(key=lambda p: os.path.getmtime(p), reverse=True)  # newest
+    hits.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return hits[0]
 
 def _build_phenotype_matrix(sample_index: pd.Index, phenos: list[str]) -> pd.DataFrame:
+    _p(f"[labels] Building phenotype matrix for {len(phenos)} phenotypes against {len(sample_index):,} samples...")
     Y = pd.DataFrame(index=sample_index.copy())
     Y.index.name = "person_id"
     missing = []
-    for name in phenos:
+    for i, name in enumerate(phenos, 1):
+        if i % max(1, len(phenos)//10) == 0 or i == len(phenos):
+            _p(f"[labels] Progress: {i}/{len(phenos)} ({i/len(phenos)*100:.1f}%)")
         f = _find_pheno_cache(name)
         if f is None:
             missing.append(name)
@@ -242,11 +251,11 @@ def _build_phenotype_matrix(sample_index: pd.Index, phenos: list[str]) -> pd.Dat
         y.loc[y.index.intersection(case_ids)] = 1
         Y[name] = y
     if missing:
-        print(f"[warn] missing phenotype caches for: {', '.join(missing)}")
+        _p(f"[labels/warn] Missing phenotype caches for: {', '.join(missing)}")
+    _p(f"[labels] Done. Label matrix shape: {Y.shape}")
     return Y
 
 def _lambda_path(X: np.ndarray, y: np.ndarray, alpha: float, n: int, lmin_ratio: float) -> np.ndarray:
-    # simple strong-rule-ish upper bound; robustified
     p0 = y.mean()
     r0 = (y - p0)
     lam_max = np.abs(X.T @ r0).max() / (len(y) * max(alpha, 1e-6))
@@ -259,31 +268,29 @@ def _train_test_split_stratified(y: pd.Series):
     train_idx, test_idx = next(sss.split(np.zeros(len(y)), y.values))
     return y.index[train_idx], y.index[test_idx]
 
-def _prep_X(X: pd.DataFrame, train_ids, test_ids):
+def _prep_X(X: pd.DataFrame, train_ids, test_ids, ph_name: str):
+    _p(f"[{ph_name}] [prep/X] Train/Test split sizes: {len(train_ids):,}/{len(test_ids):,}")
     Xtr, Xte = X.loc[train_ids].copy(), X.loc[test_ids].copy()
     mu = Xtr.mean(axis=0)
     Xtr = Xtr.fillna(mu); Xte = Xte.fillna(mu)
     sd = Xtr.std(axis=0, ddof=0)
     keep = sd > NEAR_CONST_SD
+    n_drop = int((~keep).sum())
+    if n_drop:
+        _p(f"[{ph_name}] [prep/X] Dropping {n_drop:,} near-constant features from TRAIN")
     Xtr = Xtr.loc[:, keep]; Xte = Xte.loc[:, keep]
     if Xtr.shape[1] == 0:
-        raise RuntimeError("All inversion features were near-constant in training set.")
+        raise RuntimeError(f"[{ph_name}] All inversion features were near-constant in training set.")
     mu = Xtr.mean(axis=0); sd = Xtr.std(axis=0, ddof=0)
     eps = 1e-6
     Ztr = (Xtr - mu) / (sd + eps)
     Zte = (Xte - mu) / (sd + eps)
+    _p(f"[{ph_name}] [prep/X] Z-scored features: {Ztr.shape[1]:,}")
     return Ztr, Zte, list(Ztr.columns), {"mu": mu.to_dict(), "sd": sd.to_dict()}
 
-def _prep_covars(base_df: pd.DataFrame, ancestry_df: pd.DataFrame | None, core_ids):
-    """Create covariate matrices aligned to core_ids; build ancestry dummies AFTER alignment."""
-    cov = base_df.reindex(core_ids).copy()
-    # center age on TRAIN later (we only have core_ids here; centering happens in _split_covars)
-    return cov, ancestry_df  # ancestry handled after split
-
-def _split_covars(cov: pd.DataFrame, anc_df: pd.DataFrame | None, train_ids, test_ids):
-    """Center age on TRAIN; derive AGE_c_sq; append ancestry dummies; return (Ctr, Cte)."""
-    cov_tr = cov.loc[train_ids].copy()
-    cov_te = cov.loc[test_ids].copy()
+def _split_covars(C_base: pd.DataFrame, anc_df: pd.DataFrame | None, train_ids, test_ids, ph_name: str):
+    cov_tr = C_base.loc[train_ids].copy()
+    cov_te = C_base.loc[test_ids].copy()
 
     age_mean = cov_tr['AGE'].mean()
     cov_tr['AGE_c'] = cov_tr['AGE'] - age_mean
@@ -297,7 +304,7 @@ def _split_covars(cov: pd.DataFrame, anc_df: pd.DataFrame | None, train_ids, tes
     cov_te = cov_te[base_cols]
 
     if INCLUDE_ANCESTRY and (anc_df is not None) and (not anc_df.empty):
-        anc_core = anc_df.reindex(cov.index).copy()
+        anc_core = anc_df.reindex(C_base.index).copy()
         anc_core['ANCESTRY'] = anc_core['ANCESTRY'].astype(str).str.lower()
         anc_cat = pd.Categorical(anc_core['ANCESTRY'])
         A_all = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True, dtype=np.float32)
@@ -306,20 +313,25 @@ def _split_covars(cov: pd.DataFrame, anc_df: pd.DataFrame | None, train_ids, tes
         Ate = A_all.reindex(test_ids).fillna(0.0)
         cov_tr = pd.concat([cov_tr, Atr], axis=1)
         cov_te = pd.concat([cov_te, Ate], axis=1)
+        _p(f"[{ph_name}] [prep/covars] Added ancestry dummies: +{Atr.shape[1]} cols")
 
-    # drop any columns that became constant (rare but possible)
     keep = cov_tr.nunique(dropna=True) > 1
+    dropped = int((~keep).sum())
+    if dropped:
+        _p(f"[{ph_name}] [prep/covars] Dropped {dropped} constant covariate columns post-split")
     cov_tr = cov_tr.loc[:, keep]
     cov_te = cov_te.loc[:, keep]
-
+    _p(f"[{ph_name}] [prep/covars] Final covars: train {cov_tr.shape[1]} cols, test {cov_te.shape[1]} cols")
     return cov_tr, cov_te
 
-def _fit_min_bic(Ztr: pd.DataFrame, ytr: pd.Series, Ctr: pd.DataFrame | None):
+def _fit_min_bic(Ztr: pd.DataFrame, ytr: pd.Series, Ctr: pd.DataFrame | None, ph_name: str):
     X = Ztr if (Ctr is None or Ctr.empty) else pd.concat([Ztr, Ctr], axis=1)
     lam_grid = _lambda_path(X.values, ytr.values.astype(float), ALPHA, N_LAM, LAMBDA_MIN_RATIO)
     feats = X.columns.tolist()
     best = None
-    for lam in lam_grid:
+    _p(f"[{ph_name}] [fit] Starting lambda sweep: {len(lam_grid)} values, features={len(feats):,}, n={len(ytr):,}")
+    t0 = time.time()
+    for i, lam in enumerate(lam_grid, 1):
         C_inv = 1.0 / lam
         lr = LogisticRegression(
             penalty="elasticnet", l1_ratio=ALPHA, solver="saga",
@@ -329,9 +341,9 @@ def _fit_min_bic(Ztr: pd.DataFrame, ytr: pd.Series, Ctr: pd.DataFrame | None):
         lr.fit(X.values, ytr.values)
         p = lr.predict_proba(X.values)[:, 1]
         eps = 1e-15
-        ll = np.sum(ytr*np.log(p+eps) + (1-ytr)*np.log(1-p+eps))
+        ll = float(np.sum(ytr*np.log(p+eps) + (1-ytr)*np.log(1-p+eps)))
         k = int(np.count_nonzero(lr.coef_[0])) + 1  # + intercept
-        bic = -2*ll + k*np.log(len(ytr))
+        bic = -2.0*ll + k*np.log(len(ytr))
         if (best is None) or (bic < best["bic"]):
             best = {
                 "lambda": float(lam),
@@ -341,9 +353,13 @@ def _fit_min_bic(Ztr: pd.DataFrame, ytr: pd.Series, Ctr: pd.DataFrame | None):
                 "coef": pd.Series(lr.coef_[0], index=feats),
                 "nonzero": int((lr.coef_[0] != 0).sum()),
             }
+        if (i % PRINT_EVERY_LAMBDA == 0) or (i == len(lam_grid)):
+            pct = i / len(lam_grid) * 100.0
+            _p(f"[{ph_name}] [fit] Progress {i}/{len(lam_grid)} ({pct:4.1f}%) | best BIC={best['bic']:.2f} | nnz={best['nonzero']}")
+    _p(f"[{ph_name}] [fit] Done lambda sweep in {time.time()-t0:.2f}s | best nnz={best['nonzero']} | best C={best['C']:.3g}")
     return best
 
-def _eval_test(intercept, coef: pd.Series, Zte: pd.DataFrame, yte: pd.Series, Cte: pd.DataFrame | None):
+def _eval_test(intercept, coef: pd.Series, Zte: pd.DataFrame, yte: pd.Series, Cte: pd.DataFrame | None, ph_name: str):
     X = Zte if (Cte is None or Cte.empty) else pd.concat([Zte, Cte], axis=1)
     beta = coef[X.columns]
     lin = intercept + X.values @ beta.values
@@ -362,6 +378,7 @@ def _eval_test(intercept, coef: pd.Series, Zte: pd.DataFrame, yte: pd.Series, Ct
     except Exception:
         cal_intercept, cal_slope = np.nan, np.nan
 
+    _p(f"[{ph_name}] [eval] AUC={auc:.4f}  PR_AUC={pr_auc:.4f}  Brier={brier:.5f}  CalSlope={cal_slope if not np.isnan(cal_slope) else 'NaN'}")
     return {
         "AUC": auc, "PR_AUC": pr_auc, "Brier": brier,
         "Cal_intercept": cal_intercept, "Cal_slope": cal_slope
@@ -370,40 +387,41 @@ def _eval_test(intercept, coef: pd.Series, Zte: pd.DataFrame, yte: pd.Series, Ct
 # ===================== MAIN WORKFLOW =====================
 
 def _align_core(X: pd.DataFrame, base_cov: pd.DataFrame, Y: pd.DataFrame):
-    """
-    Align dosages (X), base covariates, and labels on the common person_id set.
-    DO NOT intersect on ancestry; build ancestry dummies AFTER alignment (like run.py).
-    """
     X.index = X.index.astype(str)
     base_cov.index = base_cov.index.astype(str)
     Y.index = Y.index.astype(str)
 
+    _p(f"[align] X samples={len(X):,}, cov samples={len(base_cov):,}, label samples={len(Y):,}")
     common = X.index.intersection(base_cov.index)
+    _p(f"[align] |X ∩ cov| = {len(common):,}")
     common = common.intersection(Y.index)
+    _p(f"[align] |(X ∩ cov) ∩ Y| = {len(common):,}")
     if len(common) == 0:
-        # Emit diagnostics before failing
-        print("[align DEBUG] sizes: X=", len(X), "base_cov=", len(base_cov), "Y=", len(Y))
-        print("[align DEBUG] |X ∩ base_cov| =", len(X.index.intersection(base_cov.index)))
-        print("[align DEBUG] |X ∩ Y|        =", len(X.index.intersection(Y.index)))
-        print("[align DEBUG] |base_cov ∩ Y| =", len(base_cov.index.intersection(Y.index)))
+        _p("[align DEBUG] Sizes: X={:,} cov={:,} Y={:,}".format(len(X), len(base_cov), len(Y)))
+        _p("[align DEBUG] |X ∩ Y|        = {:,}".format(len(X.index.intersection(Y.index))))
+        _p("[align DEBUG] |cov ∩ Y|      = {:,}".format(len(base_cov.index.intersection(Y.index))))
         raise RuntimeError("Empty intersection between dosages, covariates, and phenotype labels.")
 
+    _p(f"[align] Final aligned core N = {len(common):,}")
     return X.reindex(common), base_cov.reindex(common), Y.reindex(common), common
 
 def _run_one(ph: str, X: pd.DataFrame, Y: pd.DataFrame, C_base: pd.DataFrame | None, anc_df: pd.DataFrame | None):
     y = Y[ph].astype(int)
+    pos = int(y.sum()); neg = int((1 - y).sum())
+    _p(f"[{ph}] [start] Cases={pos:,} Controls={neg:,}")
     if y.nunique() < 2:
-        print(f"[skip] {ph}: only one class label present.")
+        _p(f"[{ph}] [skip] Only one class label present.")
         return None
 
     train_ids, test_ids = _train_test_split_stratified(y)
+    _p(f"[{ph}] [split] Train={len(train_ids):,} Test={len(test_ids):,}")
 
     cfg = {
         "phenotype": ph,
         "alpha": ALPHA,
         "seed": SEED,
         "test_size": TEST_SIZE,
-        "X_cols": list(X.columns),
+        "X_cols": len(X.columns),
         "use_covars": bool(USE_PIPELINE_COVARS),
         "include_ancestry": bool(INCLUDE_ANCESTRY),
         "remove_related": bool(REMOVE_RELATED),
@@ -412,28 +430,24 @@ def _run_one(ph: str, X: pd.DataFrame, Y: pd.DataFrame, C_base: pd.DataFrame | N
     outdir = os.path.join(OUT_ROOT, f"score_{ph}_{key}")
     os.makedirs(outdir, exist_ok=True)
 
-    # cache short-circuit
     weights_pq = os.path.join(outdir, "weights.parquet")
     metrics_js = os.path.join(outdir, "metrics.json")
     if os.path.exists(weights_pq) and os.path.exists(metrics_js):
         try:
             mets = iox.read_meta_json(metrics_js)
-            print(f"[cache] {ph}: {mets}")
+            _p(f"[{ph}] [cache] Using cached results.")
             return {"phenotype": ph, **(mets or {})}
         except Exception:
             pass
 
-    # prepare X
-    Ztr, Zte, kept_feats, scalers = _prep_X(X, train_ids, test_ids)
+    Ztr, Zte, kept_feats, scalers = _prep_X(X, train_ids, test_ids, ph)
 
-    # prepare covariates (if enabled) — build ancestry dummies AFTER alignment and split
     Ctr = Cte = None
     if USE_PIPELINE_COVARS and (C_base is not None) and (not C_base.empty):
-        Ctr, Cte = _split_covars(C_base, anc_df, train_ids, test_ids)
+        Ctr, Cte = _split_covars(C_base, anc_df, train_ids, test_ids, ph)
 
-    # fit + evaluate
-    best = _fit_min_bic(Ztr, y.loc[train_ids], Ctr)
-    mets, lin, prob = _eval_test(best["intercept"], best["coef"], Zte, y.loc[test_ids], Cte)
+    best = _fit_min_bic(Ztr, y.loc[train_ids], Ctr, ph)
+    mets, lin, prob = _eval_test(best["intercept"], best["coef"], Zte, y.loc[test_ids], Cte, ph)
 
     # save artifacts
     weights = pd.DataFrame({"feature": best["coef"].index, "beta": best["coef"].values})
@@ -449,11 +463,13 @@ def _run_one(ph: str, X: pd.DataFrame, Y: pd.DataFrame, C_base: pd.DataFrame | N
     iox.atomic_write_parquet(os.path.join(outdir, "test_scores.parquet"), test_scores)
     iox.atomic_write_json(metrics_js, mets)
 
-    print(f"[done] {ph}: {mets} | nonzero={best['nonzero']}")
+    _p(f"[{ph}] [done] {mets} | nonzero={best['nonzero']}")
     return {"phenotype": ph, **mets, "nonzero": best["nonzero"]}
 
 def main():
+    t_all = time.time()
     os.makedirs(OUT_ROOT, exist_ok=True)
+    _p(f"[init] N_WORKERS={N_WORKERS}  ALPHA={ALPHA}  N_LAM={N_LAM}  TEST_SIZE={TEST_SIZE}")
 
     # 1) load inversions
     X = _load_dosages()
@@ -463,26 +479,63 @@ def main():
     if USE_PIPELINE_COVARS:
         base_cov, ancestry_df = _load_pipeline_covars()
 
-    # 3) build labels (uses same index domain as X; caches for phenos already exist)
+    # 3) build labels (uses index domain as X; phenotypes from caches)
     Y = _build_phenotype_matrix(X.index, PHENOLIST)
 
     # 4) align core matrices on common person_id (DO NOT intersect on ancestry)
-    X, base_cov, Y, core_ids = _align_core(X, base_cov if USE_PIPELINE_COVARS else pd.DataFrame(index=X.index), Y)
+    X, base_cov, Y, core_ids = _align_core(
+        X,
+        base_cov if USE_PIPELINE_COVARS else pd.DataFrame(index=X.index),
+        Y
+    )
 
-    # 5) prepare covariates aligned to the core set; ancestry dummies are created after split
+    # 5) prepare covariates aligned to the core set; ancestry dummies will be made after split
     C_base = None
     anc_df = None
     if USE_PIPELINE_COVARS and (base_cov is not None) and (not base_cov.empty):
-        C_base, anc_df = _prep_covars(base_cov, ancestry_df if INCLUDE_ANCESTRY else None, core_ids)
+        C_base = base_cov
+        anc_df = ancestry_df if INCLUDE_ANCESTRY else None
 
-    # 6) run per phenotype
-    results = []
+    # 6) select runnable phenotypes (two classes)
+    run_list = []
     for ph in PHENOLIST:
-        res = _run_one(ph, X, Y, C_base, anc_df)
-        if res:
-            results.append(res)
+        y = Y[ph].astype(int)
+        if y.nunique() < 2:
+            _p(f"[plan] {ph}: SKIP (only one class).")
+            continue
+        run_list.append(ph)
+    _p(f"[plan] Runnable phenotypes: {len(run_list)}/{len(PHENOLIST)}")
 
-    # 7) write summary
+    # 7) run per phenotype in parallel
+    results = []
+    total = len(run_list)
+    if total == 0:
+        _p("[run] Nothing to do.")
+    else:
+        _p("[run] Starting parallel execution...")
+        done = 0
+        start = time.time()
+        # Threaded parallelism to avoid duplicating huge matrices in per-process memory
+        with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
+            fut_to_ph = {
+                ex.submit(_run_one, ph, X, Y, C_base, anc_df): ph
+                for ph in run_list
+            }
+            for fut in as_completed(fut_to_ph):
+                ph = fut_to_ph[fut]
+                try:
+                    res = fut.result()
+                    if res:
+                        results.append(res)
+                except Exception as e:
+                    _p(f"[{ph}] [FAIL] {e}")
+                finally:
+                    done += 1
+                    pct = done / total * 100.0
+                    elapsed = time.time() - start
+                    _p(f"[progress] Completed {done}/{total} ({pct:.1f}%) | elapsed {elapsed:.1f}s | remaining ~{elapsed/done*(total-done):.1f}s" if done > 0 else f"[progress] Completed {done}/{total}")
+
+    # 8) write summary
     if results:
         summary = pd.DataFrame(results)
         out_csv = os.path.join(OUT_ROOT, "summary_metrics.csv")
@@ -494,9 +547,11 @@ def main():
             except Exception:
                 pass
         summary.to_csv(out_csv, index=False)
-        print(f"[summary] wrote {out_csv}")
+        _p(f"[summary] Wrote {out_csv} ({summary.shape[0]} rows)")
     else:
-        print("[summary] no results to write.")
+        _p("[summary] No results to write.")
+
+    _p(f"[done] Total wall time {time.time()-t_all:.2f}s")
 
 if __name__ == "__main__":
     main()
