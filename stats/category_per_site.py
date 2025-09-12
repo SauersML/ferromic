@@ -30,7 +30,7 @@ MIN_LEN_FST    = 150_000
 NUM_BINS_PROP  = 250
 
 # Base-pair mode 
-MAX_BP         = 2_000_000          # cap distance from inversion edge at 2 Mbp
+MAX_BP         = 50_000          # cap distance from inversion edge at 2 Mbp
 NUM_BINS_BP    = 250                # number of bins between 0..MAX_BP
 
 # Plotting/analysis rules
