@@ -483,7 +483,7 @@ def main():
         manifest_postqc_set = set(h2_raw_df["phenocode"].dropna().astype(str).unique().tolist())
         missing_set = sorted(mapped_set - considered_set)
 
-        def summarize_issues_one(phenocode: string) -> dict:
+        def summarize_issues_one(phenocode: str) -> dict:
             pre = h2_pre_qc_df[h2_pre_qc_df["phenocode"].astype(str) == phenocode]
             post = h2_raw_df[h2_raw_df["phenocode"].astype(str) == phenocode]
 
