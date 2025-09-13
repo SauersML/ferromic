@@ -228,42 +228,53 @@ def build_global_grids(ax_x0: float,
                        ax_y0: float,
                        ax_w: float,
                        ax_h: float,
-                       label_rects_px: List[Tuple[float,float,float,float]],
+                       label_rects_px: List[Tuple[float, float, float, float]],
                        grid_px: float,
                        scale: float = 3.0,
-                       margin_px: float = 32.0) -> Tuple[float,float,int,int]:
+                       margin_px: float = 32.0) -> Tuple[float, float, int, int]:
     """
-    Build the global occupancy grid so that it FULLY contains the entire label region
-    plus extra depth. Top is the x-axis baseline (ax_y0). Bottom is the lower of:
-      - ax_y0 - scale * ax_h  (e.g., triple the axes height)
-      - min(label_bottom) - margin_px
-    Returns (gx0, gy0, gw, gh) where (gx0, gy0) is the bottom-left in display px.
-    """
-    # Horizontal origin unchanged: left of axes
-    gx0 = ax_x0
+    Build the global occupancy grid so it FULLY contains:
+      - the entire x-span of all labels (with margin),
+      - the entire y-span from the x-axis baseline down to either (a) 3× axes height
+        or (b) the deepest label bottom (whichever is deeper), plus margin.
 
-    # Compute deepest label bottom (if labels exist)
+    Returns (gx0, gy0, gw, gh), where (gx0, gy0) is the bottom-left of the grid
+    in display pixels; gw, gh are grid width/height in cells.
+
+    This fixes failures where label rectangles extend slightly left/right of the axes,
+    which previously put label corners outside the grid (negative/too-large columns).
+    """
+    # ----- Horizontal coverage (NEW): include full label span with margin -----
+    if label_rects_px:
+        x_min_labels = min(L for (L, R, T, B) in label_rects_px)
+        x_max_labels = max(R for (L, R, T, B) in label_rects_px)
+    else:
+        x_min_labels = ax_x0
+        x_max_labels = ax_x0 + ax_w
+
+    gx0 = min(ax_x0, x_min_labels - margin_px)
+    gx1 = max(ax_x0 + ax_w, x_max_labels + margin_px)
+    width_px = gx1 - gx0
+
+    # ----- Vertical coverage: top at baseline; bottom deep enough for labels or 3× height -----
     if label_rects_px:
         y_min_labels = min(B for (_, _, _, B) in label_rects_px)
     else:
-        y_min_labels = ax_y0 - ax_h  # default: one axes height
+        y_min_labels = ax_y0 - ax_h
 
-    # Scaled depth (triple height by default)
     y_min_scaled = ax_y0 - scale * ax_h
+    gy0 = min(y_min_scaled, y_min_labels - margin_px)   # bottom of grid (smaller screen y)
+    y_top = ax_y0                                       # top of grid at the axis baseline
+    height_px = y_top - gy0
 
-    # Bottom of grid (smaller y = lower on screen in display coords)
-    gy0 = min(y_min_scaled, y_min_labels - margin_px)
+    # ----- Grid size in cells -----
+    gw = int(math.ceil(width_px / grid_px)) + 1
+    gh = int(math.ceil(height_px / grid_px)) + 1
 
-    # Top of grid is the axis baseline (starts live here)
-    y_top = ax_y0
-
-    # Grid size in cells
-    gw = int(math.ceil(ax_w / grid_px)) + 1
-    gh = int(math.ceil((y_top - gy0) / grid_px)) + 1
-
-    # Debug
+    # ----- Debug -----
     print(f"[INFO] Grid builder: scale={scale:.2f}, margin={margin_px:.1f}px, GRID_PX={grid_px:.1f}px")
-    print(f"[INFO] Grid Y-range px: bottom gy0={gy0:.1f}, top={y_top:.1f}, depth={y_top-gy0:.1f}")
+    print(f"[INFO] Grid X-range px: left gx0={gx0:.1f}, right={gx1:.1f}, width={width_px:.1f}")
+    print(f"[INFO] Grid Y-range px: bottom gy0={gy0:.1f}, top={y_top:.1f}, depth={height_px:.1f}")
     print(f"[INFO] Grid size cells: gw×gh = {gw}×{gh}")
 
     return gx0, gy0, gw, gh
