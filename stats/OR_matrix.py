@@ -233,18 +233,18 @@ def build_global_grids(ax_x0: float,
                        scale: float = 3.0,
                        margin_px: float = 32.0) -> Tuple[float, float, int, int]:
     """
-    Build the global occupancy grid so it FULLY contains:
-      - the entire x-span of all labels (with margin),
-      - the entire y-span from the x-axis baseline down to either (a) 3× axes height
-        or (b) the deepest label bottom (whichever is deeper), plus margin.
+    Build the global occupancy grid so it FULLY contains the horizontal span of all labels
+    (with margin) and the vertical span from the x-axis baseline down to the deeper of:
+      - 'scale' × axes height, or
+      - the deepest label bottom,
+    again with margin. Snap the grid bounds to the GRID_PX lattice so label corners never
+    quantize outside due to float -> int rounding.
 
-    Returns (gx0, gy0, gw, gh), where (gx0, gy0) is the bottom-left of the grid
-    in display pixels; gw, gh are grid width/height in cells.
-
-    This fixes failures where label rectangles extend slightly left/right of the axes,
-    which previously put label corners outside the grid (negative/too-large columns).
+    Returns (gx0, gy0, gw, gh), where (gx0, gy0) is the bottom-left of the grid (in px).
     """
-    # ----- Horizontal coverage (NEW): include full label span with margin -----
+    # ----------------------------
+    # Compute required horizontal span (labels may extend left/right of axes)
+    # ----------------------------
     if label_rects_px:
         x_min_labels = min(L for (L, R, T, B) in label_rects_px)
         x_max_labels = max(R for (L, R, T, B) in label_rects_px)
@@ -252,29 +252,53 @@ def build_global_grids(ax_x0: float,
         x_min_labels = ax_x0
         x_max_labels = ax_x0 + ax_w
 
-    gx0 = min(ax_x0, x_min_labels - margin_px)
-    gx1 = max(ax_x0 + ax_w, x_max_labels + margin_px)
-    width_px = gx1 - gx0
+    # Desired (continuous) pixel bounds before snapping
+    x_left_desired  = min(ax_x0,            x_min_labels - margin_px)
+    x_right_desired = max(ax_x0 + ax_w,     x_max_labels + margin_px)
 
-    # ----- Vertical coverage: top at baseline; bottom deep enough for labels or 3× height -----
+    # ----------------------------
+    # Compute required vertical span (top at baseline)
+    # ----------------------------
     if label_rects_px:
-        y_min_labels = min(B for (_, _, _, B) in label_rects_px)
+        y_min_labels = min(B for (_, _, _, B) in label_rects_px)  # smallest y (deepest)
     else:
         y_min_labels = ax_y0 - ax_h
 
     y_min_scaled = ax_y0 - scale * ax_h
-    gy0 = min(y_min_scaled, y_min_labels - margin_px)   # bottom of grid (smaller screen y)
-    y_top = ax_y0                                       # top of grid at the axis baseline
-    height_px = y_top - gy0
+    y_bottom_desired = min(y_min_scaled, y_min_labels - margin_px)  # bottom (smaller y)
+    y_top_desired    = ax_y0                                        # top (baseline)
 
-    # ----- Grid size in cells -----
-    gw = int(math.ceil(width_px / grid_px)) + 1
+    # ----------------------------
+    # SNAP bounds to the grid to avoid off-by-one from int() truncation
+    # (Ensure labels/endpoints quantize INSIDE the grid)
+    # ----------------------------
+    def snap_down(v: float) -> float:
+        return math.floor(v / grid_px) * grid_px
+
+    def snap_up(v: float) -> float:
+        return math.ceil(v / grid_px) * grid_px
+
+    gx0 = snap_down(x_left_desired)
+    gx1 = snap_up(x_right_desired)
+    gy0 = snap_down(y_bottom_desired)
+    gy1 = snap_up(y_top_desired)
+
+    # Safety: ensure at least 1 cell span in each dimension
+    width_px  = max(grid_px, gx1 - gx0)
+    height_px = max(grid_px, gy1 - gy0)
+
+    # Grid size in cells (+1 so last index is addressable after center-offset)
+    gw = int(math.ceil(width_px  / grid_px)) + 1
     gh = int(math.ceil(height_px / grid_px)) + 1
 
-    # ----- Debug -----
+    # ----------------------------
+    # Debug prints
+    # ----------------------------
     print(f"[INFO] Grid builder: scale={scale:.2f}, margin={margin_px:.1f}px, GRID_PX={grid_px:.1f}px")
-    print(f"[INFO] Grid X-range px: left gx0={gx0:.1f}, right={gx1:.1f}, width={width_px:.1f}")
-    print(f"[INFO] Grid Y-range px: bottom gy0={gy0:.1f}, top={y_top:.1f}, depth={height_px:.1f}")
+    print(f"[INFO] Grid X-range px: left gx0={gx0:.1f}, right={gx1:.1f}, width={width_px:.1f}  "
+          f"(axes [{ax_x0:.1f},{ax_x0+ax_w:.1f}], labels [{x_min_labels:.1f},{x_max_labels:.1f}])")
+    print(f"[INFO] Grid Y-range px: bottom gy0={gy0:.1f}, top={gy1:.1f}, depth={height_px:.1f}  "
+          f"(baseline {ax_y0:.1f}, deepest label {y_min_labels:.1f})")
     print(f"[INFO] Grid size cells: gw×gh = {gw}×{gh}")
 
     return gx0, gy0, gw, gh
