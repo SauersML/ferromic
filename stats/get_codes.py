@@ -164,69 +164,6 @@ def _dl_tau2(theta, v):
     tau2 = max(0.0, (Q - df) / max(c, 1e-12))
     return tau2, Q, df, mu_fe, sum_w
 
-def re_meta_pop(theta_array, se_array, method="DL", kh=True):
-    """
-    Random-effects meta-analysis across populations for one disease.
-    Inputs:
-      - theta_array: per-pop IVW point estimates
-      - se_array:    per-pop IVW standard errors
-      - method:      "DL" (DerSimonian–Laird); REML not implemented here
-      - kh:          if True, use t-like critical value (we use normal fallback without SciPy)
-    Returns dict with:
-      mu (point), se_mu, ci95_l, ci95_u, tau2, I2, pred_int_l, pred_int_u, n_pops_used
-    """
-    theta = np.asarray(theta_array, dtype=float)
-    se = np.asarray(se_array, dtype=float)
-    mask = np.isfinite(theta) & np.isfinite(se) & (se > 0)
-    theta, se = theta[mask], se[mask]
-    k = theta.size
-    out = dict(mu=np.nan, se_mu=np.nan, ci95_l=np.nan, ci95_u=np.nan,
-               tau2=np.nan, I2=np.nan, pred_int_l=np.nan, pred_int_u=np.nan,
-               n_pops_used=int(k))
-    if k == 0:
-        return out
-    v = np.square(se)
-
-    # If only one population: return FE value
-    if k == 1:
-        out["mu"] = float(theta[0])
-        out["se_mu"] = float(se[0])
-        out["ci95_l"] = out["mu"] - 1.96 * out["se_mu"]
-        out["ci95_u"] = out["mu"] + 1.96 * out["se_mu"]
-        out["tau2"] = 0.0
-        out["I2"] = 0.0
-        # predictive interval undefined with one pop; leave NaNs
-        return out
-
-    # DL tau^2 (reverts to FE if Q<=df)
-    tau2, Q, df, mu_fe, sum_w = _dl_tau2(theta, v)
-    w_re = 1.0 / (v + tau2)
-    sum_w_re = np.sum(w_re)
-    mu_re = float(np.sum(w_re * theta) / sum_w_re)
-    se_mu = float(np.sqrt(1.0 / sum_w_re))
-
-    # I^2 across pops
-    I2 = 0.0
-    if Q > df:
-        I2 = max(0.0, (Q - df) / Q) * 100.0
-
-    # CIs (use normal 1.96; if you add SciPy, replace with t-crit for KH)
-    crit = 1.96
-    ci_l = mu_re - crit * se_mu
-    ci_u = mu_re + crit * se_mu
-
-    # Predictive interval for a new population (approx)
-    pred_sd = math.sqrt(tau2 + se_mu**2) if np.isfinite(tau2) else np.nan
-    pred_l = mu_re - crit * pred_sd if np.isfinite(pred_sd) else np.nan
-    pred_u = mu_re + crit * pred_sd if np.isfinite(pred_sd) else np.nan
-
-    out.update(dict(
-        mu=mu_re, se_mu=se_mu, ci95_l=ci_l, ci95_u=ci_u,
-        tau2=float(tau2), I2=float(I2),
-        pred_int_l=pred_l, pred_int_u=pred_u
-    ))
-    return out
-
 def flag_scale_mix(scale_used_series):
     """
     Returns 1 if any contributing row used observed-scale fallback; else 0.
