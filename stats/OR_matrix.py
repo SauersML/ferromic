@@ -224,15 +224,48 @@ def verify_no_label_overlap(
 # =========================
 # Grid utilities & pathfinding (FULL-AXES, NO CORRIDORS)
 # =========================
-def build_global_grids(ax_x0: float, ax_y0: float, ax_w: float, ax_h: float, grid_px: float):
+def build_global_grids(ax_x0: float,
+                       ax_y0: float,
+                       ax_w: float,
+                       ax_h: float,
+                       label_rects_px: List[Tuple[float,float,float,float]],
+                       grid_px: float,
+                       scale: float = 3.0,
+                       margin_px: float = 32.0) -> Tuple[float,float,int,int]:
     """
-    Build the global occupancy grid coordinates covering the axes window.
-    Origin (gx0, gy0) is the bottom-left of the axes window in display pixels.
+    Build the global occupancy grid so that it FULLY contains the entire label region
+    plus extra depth. Top is the x-axis baseline (ax_y0). Bottom is the lower of:
+      - ax_y0 - scale * ax_h  (e.g., triple the axes height)
+      - min(label_bottom) - margin_px
+    Returns (gx0, gy0, gw, gh) where (gx0, gy0) is the bottom-left in display px.
     """
+    # Horizontal origin unchanged: left of axes
     gx0 = ax_x0
-    gy0 = ax_y0 - ax_h
+
+    # Compute deepest label bottom (if labels exist)
+    if label_rects_px:
+        y_min_labels = min(B for (_, _, _, B) in label_rects_px)
+    else:
+        y_min_labels = ax_y0 - ax_h  # default: one axes height
+
+    # Scaled depth (triple height by default)
+    y_min_scaled = ax_y0 - scale * ax_h
+
+    # Bottom of grid (smaller y = lower on screen in display coords)
+    gy0 = min(y_min_scaled, y_min_labels - margin_px)
+
+    # Top of grid is the axis baseline (starts live here)
+    y_top = ax_y0
+
+    # Grid size in cells
     gw = int(math.ceil(ax_w / grid_px)) + 1
-    gh = int(math.ceil(ax_h / grid_px)) + 1
+    gh = int(math.ceil((y_top - gy0) / grid_px)) + 1
+
+    # Debug
+    print(f"[INFO] Grid builder: scale={scale:.2f}, margin={margin_px:.1f}px, GRID_PX={grid_px:.1f}px")
+    print(f"[INFO] Grid Y-range px: bottom gy0={gy0:.1f}, top={y_top:.1f}, depth={y_top-gy0:.1f}")
+    print(f"[INFO] Grid size cells: gw×gh = {gw}×{gh}")
+
     return gx0, gy0, gw, gh
 
 def rasterize_labels_into(occ: np.ndarray, gx0: float, gy0: float, grid_px: float,
@@ -397,8 +430,8 @@ def sample_catmull_rom(points: List[Tuple[float,float]], step_px: float) -> List
 def _route_one_candidate(args):
     """
     Top-level function for ProcessPool.
-    Compute candidate path on FULL occupancy using only labels + prior-batch lines.
-    We aggressively print for debug.
+    Compute a candidate path on FULL occupancy using labels + prior-batch lines.
+    STRICT endpoint handling: endpoints MUST be inside the grid (no clamping).
     """
     (label_id, start_px, goal_px, global_occ_labels, global_occ_lines_prev,
      gx0, gy0, gw, gh, grid_px, clear_r_cells) = args
@@ -406,24 +439,32 @@ def _route_one_candidate(args):
     # Build combined occupancy snapshot (labels + prior batches' lines), copy so we can carve
     occ = (global_occ_labels | global_occ_lines_prev).astype(np.uint8).copy()
 
-    # Clear small halo at start & goal (ensure reachable seeds)
-    def pxtog(xp, yp) -> Tuple[int,int]:
-        i = int((xp - gx0) / grid_px); j = int((yp - gy0) / grid_px)
-        i = clamp(i, 0, gw-1); j = clamp(j, 0, gh-1)
-        return (j, i)  # (row, col)
+    # Map display px -> grid (row, col). STRICT in-bounds (no clamping).
+    def pxtog_strict(xp: float, yp: float) -> Tuple[int, int]:
+        c = int((xp - gx0) / grid_px)
+        r = int((yp - gy0) / grid_px)
+        if not (0 <= r < gh and 0 <= c < gw):
+            raise RuntimeError(
+                f"Endpoint out of grid for label {label_id}: "
+                f"(x={xp:.1f}, y={yp:.1f}) -> (r={r}, c={c}), grid size {gh}×{gw}, "
+                f"gx0={gx0:.1f}, gy0={gy0:.1f}, GRID_PX={grid_px:.1f}"
+            )
+        return (r, c)
 
-    s_rc = pxtog(*start_px)
-    g_rc = pxtog(*goal_px)
+    s_rc = pxtog_strict(*start_px)
+    g_rc = pxtog_strict(*goal_px)
     sr, sc = s_rc; gr, gc = g_rc
+
+    # Clear small halos at start & goal to ensure connectivity to exact endpoints
     r = clear_r_cells
-    occ[max(0,sr-r):min(gh,sr+r+1), max(0,sc-r):min(gw,sc+r+1)] = 0
-    occ[max(0,gr-r):min(gh,gr+r+1), max(0,gc-r):min(gw,gc+r+1)] = 0
+    occ[max(0, sr - r):min(gh, sr + r + 1), max(0, sc - r):min(gw, sc + r + 1)] = 0
+    occ[max(0, gr - r):min(gh, gr + r + 1), max(0, gc - r):min(gw, gc + r + 1)] = 0
 
     # Cost array: 1.0 for free, +inf for blocked
     cost = np.ones_like(occ, dtype=np.float64)
     cost[occ != 0] = np.inf
 
-    # Route (fully_connected 8-neighborhood, geometric cost)
+    # Route (8-connected, Euclidean edge weights)
     path_rc, total_cost = skimage_route_through_array(
         cost, s_rc, g_rc, fully_connected=True, geometric=True
     )
@@ -433,9 +474,97 @@ def _route_one_candidate(args):
 
     return (label_id, poly, float(total_cost), occ.shape)
 
+def assert_grid_covers_labels_and_endpoints(label_rects_px: List[Tuple[float,float,float,float]],
+                                            starts_px: List[Tuple[float,float]],
+                                            goals_px: List[Tuple[float,float]],
+                                            gx0: float, gy0: float, gw: int, gh: int,
+                                            grid_px: float) -> None:
+    """
+    Fail fast if ANY label rectangle or ANY start/goal lies outside the grid.
+    """
+    def pxtog(xp: float, yp: float) -> Tuple[int, int]:
+        c = int((xp - gx0) / grid_px)
+        r = int((yp - gy0) / grid_px)
+        return r, c
+
+    # Check labels
+    for idx, (L, R, T, B) in enumerate(label_rects_px):
+        rL, cL = pxtog(L, T)     # top-left
+        rR, cR = pxtog(R, B)     # bottom-right (lower y)
+        # All four corners must map strictly inside
+        corners = [pxtog(L, T), pxtog(R, T), pxtog(L, B), pxtog(R, B)]
+        for (rr, cc) in corners:
+            if not (0 <= rr < gh and 0 <= cc < gw):
+                raise RuntimeError(
+                    f"Label {idx} out of grid: corner (r={rr}, c={cc}) outside 0..{gh-1} × 0..{gw-1}. "
+                    f"LRTB=({L:.1f},{R:.1f},{T:.1f},{B:.1f}), gx0={gx0:.1f}, gy0={gy0:.1f}, GRID_PX={grid_px:.1f}"
+                )
+
+    # Check endpoints
+    for k, (xp, yp) in enumerate(starts_px):
+        r, c = pxtog(xp, yp)
+        if not (0 <= r < gh and 0 <= c < gw):
+            raise RuntimeError(
+                f"Start {k} out of grid: (x={xp:.1f}, y={yp:.1f}) -> (r={r}, c={c}). "
+                f"Grid {gh}×{gw}, gy0={gy0:.1f}, gx0={gx0:.1f}, GRID_PX={grid_px:.1f}"
+            )
+    for k, (xp, yp) in enumerate(goals_px):
+        r, c = pxtog(xp, yp)
+        if not (0 <= r < gh and 0 <= c < gw):
+            raise RuntimeError(
+                f"Goal {k} out of grid: (x={xp:.1f}, y={yp:.1f}) -> (r={r}, c={c}). "
+                f"Grid {gh}×{gw}, gy0={gy0:.1f}, gx0={gx0:.1f}, GRID_PX={grid_px:.1f}"
+            )
+
+    print("[INFO] Grid coverage assertion passed: all labels and all endpoints are inside the routing grid.")
+
+
+def save_labels_only_plot(fig_ref: plt.Figure,
+                          ax_ref: plt.Axes,
+                          Xc_px: List[float],
+                          Ytop_abs_px: List[float],
+                          label_texts: List[str],
+                          fontsize: float,
+                          out_prefix: str,
+                          margins: Tuple[float,float,float,float]) -> None:
+    """
+    Save a separate figure that shows ONLY the labels (no lines, no heatmap).
+    Positions are taken from absolute pixel locations relative to ax_ref.
+    """
+    left, right, bottom, top = margins  # fractions
+    # New figure sized like the reference
+    w_in, h_in = fig_ref.get_size_inches()
+    fig2, ax2 = plt.subplots(figsize=(w_in, h_in), constrained_layout=False)
+    fig2.subplots_adjust(left=left, right=right, bottom=bottom, top=top)
+
+    # Compute axes window for transform to axes fraction
+    fig2.canvas.draw()
+    ax2.set_axis_off()  # hide spines/ticks; "just labels"
+
+    # Use the reference axes window for consistent normalization
+    x0, y0, w, h = ax_ref.get_window_extent(renderer=fig_ref.canvas.get_renderer()).bounds
+
+    def to_axes_frac(px: float, py: float) -> Tuple[float, float]:
+        return ((px - x0) / w, (py - y0) / h)
+
+    # Draw texts
+    for j, txt in enumerate(label_texts):
+        xf, yf = to_axes_frac(Xc_px[j], Ytop_abs_px[j])
+        ax2.text(xf, yf, txt, transform=ax2.transAxes, ha="center", va="top",
+                 fontsize=fontsize, clip_on=False)
+
+    out_svg = f"{out_prefix}_labels_only.svg"
+    out_pdf = f"{out_prefix}_labels_only.pdf"
+    fig2.savefig(out_svg)
+    fig2.savefig(out_pdf)
+    plt.close(fig2)
+    print(f"[SAVED] {out_svg}")
+    print(f"[SAVED] {out_pdf}")
+
 # =========================
 # Main
 # =========================
+
 def main():
     t_start = time.perf_counter()
 
@@ -536,10 +665,8 @@ def main():
     cbar.set_label("Normed OR (ln scale)\nnegative: decreased risk · positive: increased risk")
 
     # Significance outlines
-    # Significance outlines
     row_lookup = {inv: i for i, inv in enumerate(pv.index)}
     col_lookup = {jph: j for j, jph in enumerate(pv.columns)}
-
 
     def outline_cell(i, j, kind):
         xy = (j, i)
@@ -618,7 +745,7 @@ def main():
         B = top_y - heights_px[j]
         label_rects_px.append((L, R, T, B))
 
-    # Compute bottom margin
+    # Compute bottom margin to fully show labels
     deepest_bottom = min(B for (_, _, _, B) in label_rects_px) if label_rects_px else axis_baseline_y - BASE_OFFSET_PX
     needed_extra = (axis_baseline_y - deepest_bottom) + 14.0
     new_bottom = clamp(base_bottom + needed_extra / (fig.get_size_inches()[1] * fig.dpi), 0.16, 0.85)
@@ -626,13 +753,43 @@ def main():
     fig.canvas.draw()
     print(f"[INFO] Bottom margin set to {new_bottom:.3f} (needed extra: {needed_extra:.1f}px)")
 
-    # ---------- Global grids ----------
-    gx0, gy0, gw, gh = build_global_grids(ax_x0, ax_y0, ax_w, ax_h, GRID_PX)
+    # ---------- SAVE LABELS-ONLY PLOT (before any pathfinding) ----------
+    save_labels_only_plot(
+        fig_ref=fig,
+        ax_ref=ax,
+        Xc_px=Xc_px,
+        Ytop_abs_px=Ytop_abs_px,
+        label_texts=label_texts,
+        fontsize=X_LABEL_FONTSIZE,
+        out_prefix=OUT_PREFIX,
+        margins=(0.16, 0.86, new_bottom, 0.90)
+    )
+
+    # ---------- Global grids (TRIPLE depth & cover all labels) ----------
+    gx0, gy0, gw, gh = build_global_grids(
+        ax_x0=ax_x0, ax_y0=ax_y0, ax_w=ax_w, ax_h=ax_h,
+        label_rects_px=label_rects_px,
+        grid_px=GRID_PX, scale=3.0, margin_px=32.0
+    )
+
+    # Post-grid: assert that labels and endpoints are inside the grid
+    starts_all = [(anchors_px[j], axis_baseline_y) for j in range(n_cols)]
+    goals_all  = [(Xc_px[j], Ytop_abs_px[j] - SAFETY_GAP_PX) for j in range(n_cols)]
+    assert_grid_covers_labels_and_endpoints(
+        label_rects_px=label_rects_px,
+        starts_px=starts_all,
+        goals_px=goals_all,
+        gx0=gx0, gy0=gy0, gw=gw, gh=gh,
+        grid_px=GRID_PX
+    )
+
+    # Build global occupancies
     global_occ_labels = np.zeros((gh, gw), dtype=np.uint8)
     rasterize_labels_into(global_occ_labels, gx0, gy0, GRID_PX, label_rects_px)
     global_occ_lines = np.zeros_like(global_occ_labels, dtype=np.uint8)  # committed line tubes
 
-    print(f"[INFO] Global grid: {gw}×{gh} cells @ {GRID_PX}px; labels blocked cells: {int(global_occ_labels.sum())}")
+    print(f"[INFO] Routing window px: x[{ax_x0:.1f},{ax_x0+ax_w:.1f}]  y[{gy0:.1f},{ax_y0:.1f}]")
+    print(f"[INFO] Global grid: {gw}×{gh} cells @ {GRID_PX:.1f}px; labels blocked cells: {int(global_occ_labels.sum())}")
 
     # ---------- Route order: 4 batches by anchor quartiles ----------
     order = np.argsort(anchors_px)  # indices sorted by anchor x
@@ -643,14 +800,33 @@ def main():
         list(order[2*qsize:3*qsize]),
         list(order[3*qsize:]),
     ]
-    # Make sure all labels are included (in case n_cols < 4)
     batches = [b for b in batches if len(b) > 0]
 
     committed_paths: Dict[int, List[Tuple[float,float]]] = {}
 
-    def path_cells_blocked(poly: List[Tuple[float,float]]) -> bool:
-        """Check if any polyline cell hits blocked in combined occupancy."""
-        occ = (global_occ_labels | global_occ_lines).astype(np.uint8)
+    # Acceptance collision check WITH symmetric endpoint carve-outs
+    def path_cells_blocked(poly: List[Tuple[float,float]],
+                           carve_start: Optional[Tuple[float,float]] = None,
+                           carve_goal: Optional[Tuple[float,float]] = None,
+                           carve_r_cells: int = CLEAR_START_GOAL_RADIUS_CELLS) -> bool:
+        occ = (global_occ_labels | global_occ_lines).astype(np.uint8).copy()
+
+        def pxtog(xp: float, yp: float) -> Tuple[int,int]:
+            c = int((xp - gx0) / GRID_PX)
+            r = int((yp - gy0) / GRID_PX)
+            return r, c
+
+        if carve_start is not None:
+            sr, sc = pxtog(*carve_start)
+            if 0 <= sr < gh and 0 <= sc < gw:
+                r = carve_r_cells
+                occ[max(0,sr-r):min(gh,sr+r+1), max(0,sc-r):min(gw,sc+r+1)] = 0
+        if carve_goal is not None:
+            gr, gc = pxtog(*carve_goal)
+            if 0 <= gr < gh and 0 <= gc < gw:
+                r = carve_r_cells
+                occ[max(0,gr-r):min(gh,gr+r+1), max(0,gc-r):min(gw,gc+r+1)] = 0
+
         for p0, p1 in zip(poly, poly[1:]):
             for (ci, cj) in supercover_cells(p0, p1, gx0, gy0, GRID_PX):
                 if not (0 <= cj < gh and 0 <= ci < gw):
@@ -659,19 +835,12 @@ def main():
                     return True
         return False
 
-    def commit_poly(label_id: int, poly: List[Tuple[float,float]]):
-        """Commit a polyline: paint tube into global_occ_lines and record."""
-        rasterize_polyline_tube_into(global_occ_lines, poly, gx0, gy0, GRID_PX, LINE_TUBE_PX)
-        committed_paths[label_id] = poly
-
     # ---------- Process batches ----------
     for bi, batch in enumerate(batches, 1):
         print(f"\n[INFO] === Batch {bi}/{len(batches)}: {len(batch)} labels ===")
-        # Start point & goal for each label
         starts = {j: (anchors_px[j], axis_baseline_y) for j in batch}
         goals  = {j: (Xc_px[j], Ytop_abs_px[j] - SAFETY_GAP_PX) for j in batch}
 
-        # Round-based: parallel candidate computation over FULL grid using labels + prior-batch lines only
         remaining = batch.copy()
         round_id = 0
         while remaining:
@@ -679,22 +848,18 @@ def main():
             t_round = time.perf_counter()
             print(f"[INFO] Batch {bi} Round {round_id}: remaining {len(remaining)} | building candidates in parallel...")
 
-            # Build one snapshot of lines from PRIOR BATCHES ONLY (exclude current-batch lines)
-            # We already committed all previous batches lines into global_occ_lines; that's fine.
-            # For candidate generation we DO include global_occ_lines (prior accepted), but current-batch
-            # conflicts will be resolved during acceptance.
+            # Build snapshot of lines so far (prior batches + already accepted in earlier rounds)
             args_list = []
             for j in remaining:
                 args_list.append((
                     j,
                     starts[j], goals[j],
-                    global_occ_labels,        # labels only (shared read-only array)
-                    global_occ_lines,         # lines committed so far (prior batches + accepted in previous rounds)
+                    global_occ_labels,        # labels only
+                    global_occ_lines,         # committed lines so far
                     gx0, gy0, gw, gh, GRID_PX,
                     CLEAR_START_GOAL_RADIUS_CELLS
                 ))
 
-            # ProcessPool: compute candidate paths in parallel
             candidates: Dict[int, Tuple[List[Tuple[float,float]], float, Tuple[int,int]]] = {}
             with ProcessPoolExecutor(max_workers=min(8, max(1, len(remaining)//4))) as ex:
                 futs = {ex.submit(_route_one_candidate, a): a[0] for a in args_list}
@@ -705,12 +870,10 @@ def main():
                         candidates[label_id] = (poly, cost_val, shape)
                     except Exception as e:
                         print(f"[WARN] Candidate routing failed for label {jid}: {e}")
-                        # We'll retry this one sequentially during acceptance
                         candidates[label_id] = (None, float("inf"), (gh, gw))
 
             print(f"[INFO] Batch {bi} Round {round_id}: candidates built in {time.perf_counter()-t_round:.2f}s")
 
-            # Acceptance pass: commit non-conflicting candidates sequentially
             accepted = []
             rejected = []
             for j in remaining:
@@ -718,16 +881,12 @@ def main():
                 if cand is None:
                     rejected.append(j)
                     continue
-                # Check against labels + already committed lines (global_occ_lines)
-                if path_cells_blocked(cand):
+                if path_cells_blocked(cand, carve_start=starts[j], carve_goal=goals[j]):
                     rejected.append(j)
                 else:
-                    # Optional simplification/smoothing against ACTIVE occupancy (labels + lines)
-                    # Use a temp occupancy copy to validate smoothing stages
+                    # Validate simplified/smoothed variants against ACTIVE occupancy
                     occ_active = (global_occ_labels | global_occ_lines).astype(np.uint8).copy()
-                    # Shortcut
                     poly2 = greedy_shortcut(cand, occ_active, gx0, gy0, GRID_PX)
-                    # DP
                     simp = douglas_peucker(poly2, DP_EPS_PX)
                     ok = True
                     for p0, p1 in zip(simp, simp[1:]):
@@ -735,7 +894,6 @@ def main():
                             ok = False; break
                     if ok:
                         poly2 = simp
-                    # Smooth
                     if len(poly2) >= 3:
                         smooth = sample_catmull_rom(poly2, SMOOTH_STEP_PX)
                         ok2 = True
@@ -744,31 +902,27 @@ def main():
                                 ok2 = False; break
                         if ok2:
                             poly2 = smooth
-                    # Final collision check and commit
-                    if path_cells_blocked(poly2):
+                    if path_cells_blocked(poly2, carve_start=starts[j], carve_goal=goals[j]):
                         rejected.append(j)
                     else:
-                        commit_poly(j, poly2)
+                        rasterize_polyline_tube_into(global_occ_lines, poly2, gx0, gy0, GRID_PX, LINE_TUBE_PX)
+                        committed_paths[j] = poly2
                         accepted.append(j)
 
             print(f"[INFO] Batch {bi} Round {round_id}: accepted {len(accepted)}, rejected {len(rejected)}")
 
-            # Prepare next round: reroute the rejected sequentially against UPDATED occupancy
             if rejected:
                 next_remaining = []
                 for j in rejected:
-                    # Build current occupancy (labels + up-to-date lines)
                     occ = (global_occ_labels | global_occ_lines).astype(np.uint8).copy()
-                    # Clear start/goal halo
                     def pxtog(xp, yp) -> Tuple[int,int]:
-                        i = int((xp - gx0) / GRID_PX); jg = int((yp - gy0) / GRID_PX)
-                        i = clamp(i, 0, gw-1); jg = clamp(jg, 0, gh-1)
-                        return (jg, i)
+                        c = int((xp - gx0) / GRID_PX)
+                        r = int((yp - gy0) / GRID_PX)
+                        return (r, c)
                     sr, sc = pxtog(*starts[j]); gr, gc = pxtog(*goals[j])
                     r = CLEAR_START_GOAL_RADIUS_CELLS
                     occ[max(0,sr-r):min(gh,sr+r+1), max(0,sc-r):min(gw,sc+r+1)] = 0
                     occ[max(0,gr-r):min(gh,gr+r+1), max(0,gc-r):min(gw,gc+r+1)] = 0
-                    # Cost grid
                     cost = np.ones_like(occ, dtype=np.float64)
                     cost[occ != 0] = np.inf
                     try:
@@ -776,9 +930,7 @@ def main():
                             cost, (sr, sc), (gr, gc), fully_connected=True, geometric=True
                         )
                         poly = [(gx0 + (c + 0.5) * GRID_PX, gy0 + (r + 0.5) * GRID_PX) for (r, c) in path_rc]
-                        # Validate & commit
-                        if not path_cells_blocked(poly):
-                            # (Optional) same simplify/smooth checks
+                        if not path_cells_blocked(poly, carve_start=starts[j], carve_goal=goals[j]):
                             occ_active = (global_occ_labels | global_occ_lines).astype(np.uint8).copy()
                             poly2 = greedy_shortcut(poly, occ_active, gx0, gy0, GRID_PX)
                             simp = douglas_peucker(poly2, DP_EPS_PX)
@@ -794,8 +946,9 @@ def main():
                                     if not los_free(occ_active, p0, p1, gx0, gy0, GRID_PX):
                                         ok2 = False; break
                                 if ok2: poly2 = smooth
-                            if not path_cells_blocked(poly2):
-                                commit_poly(j, poly2)
+                            if not path_cells_blocked(poly2, carve_start=starts[j], carve_goal=goals[j]):
+                                rasterize_polyline_tube_into(global_occ_lines, poly2, gx0, gy0, GRID_PX, LINE_TUBE_PX)
+                                committed_paths[j] = poly2
                             else:
                                 next_remaining.append(j)
                         else:
@@ -817,7 +970,6 @@ def main():
     def to_axes_frac(p: Tuple[float,float]) -> Tuple[float,float]:
         return ((p[0] - ax_x0) / ax_w, (p[1] - ax_y0) / ax_h)
 
-    # Draw curves by anchor order for stable z-order
     for j in np.argsort(anchors_px):
         poly = committed_paths.get(j)
         if not poly:
@@ -826,14 +978,12 @@ def main():
         xs = [p[0] for p in pts_axes]; ys = [p[1] for p in pts_axes]
         ax.add_line(Line2D(xs, ys, transform=ax.transAxes, lw=LEADER_LW, color=LEADER_COLOR, clip_on=False))
 
-    # Draw labels
     for j, txt in enumerate(label_texts):
         xf = (Xc_px[j] - ax_x0) / ax_w
         yf = (Ytop_abs_px[j] - ax_y0) / ax_h
         ax.text(xf, yf, txt, transform=ax.transAxes, ha="center", va="top",
                 fontsize=X_LABEL_FONTSIZE, bbox=LABEL_BBOX, clip_on=False)
 
-    # Ensure vector output
     mesh.set_rasterized(False)
 
     out_svg = f"{OUT_PREFIX}.svg"
