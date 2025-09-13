@@ -538,6 +538,21 @@ def _pipeline_once():
         except Exception as e:
             print(f"[Prepass WARN] Cache prepass failed: {e}", flush=True)
 
+        # --- One-time, inversion-independent phenotype dedup manifest ---
+        try:
+            pheno.deduplicate_phenotypes(
+                pheno_defs_df=pheno_defs_df,
+                core_index=shared_covariates_df.index,
+                cdr_codename=cdr_codename,
+                cache_dir=CACHE_DIR,
+                min_cases=MIN_CASES_FILTER,
+                phi_threshold=float(os.getenv("PHENO_CORR_PHI", "0.90")),
+                share_threshold=float(os.getenv("PHENO_SHARE_THRESH", "0.80")),
+                protect=set(filter(None, os.getenv("PHENO_PROTECT", "").split(",")))
+            )
+            print("[Setup]    - Global phenotype dedup manifest ready.", flush=True)
+        except Exception as e:
+            print(f"[Dedup WARN] Global dedup pass failed: {e}", flush=True)
 
         governor = MultiTenantGovernor(monitor_thread)
         
