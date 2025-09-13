@@ -220,7 +220,11 @@ def main():
                 "pop_min_p": pop_min
             })
 
-        per_pheno = h2_rows.groupby("phenocode", as_index=False).apply(acat_group).reset_index(drop=True)
+        per_pheno = (
+            h2_rows.groupby("phenocode")
+            .apply(acat_group)
+            .reset_index()  # <-- keep 'phenocode' as a column
+        )
 
         # BH-FDR across phenocodes using ACAT p-values
         valid_mask = per_pheno["p_any_acat"].notna()
@@ -272,9 +276,9 @@ def main():
         })
 
     aggregated_df = (
-        base_df.groupby(grouping_cols, as_index=False)
+        base_df.groupby(grouping_cols)
         .apply(agg_disease)
-        .reset_index(drop=True)
+        .reset_index()  # <-- keep grouping keys as columns
     )
 
     # Explode phenocode list and join to phenocode-level heritability signals
@@ -309,6 +313,34 @@ def main():
     final_df["is_h2_significant_in_any_ancestry"] = (
         final_df["is_h2_significant_in_any_ancestry"].fillna(0).astype("int64")
     )
+
+    # --- Reporting: phenocode-level and disease-level summaries ---
+    # Phenocode-level (mapped to PheCodeX) coverage and significance
+    mapped_codes = aggregated_df["ukbb_phenocode"].explode().dropna().astype(str).unique()
+    considered_codes = per_pheno.loc[per_pheno["p_any_acat"].notna(), "phenocode"].astype(str).unique()
+    mapped_set = set(mapped_codes.tolist()) if hasattr(mapped_codes, "tolist") else set(mapped_codes)
+    considered_set = set(considered_codes.tolist()) if hasattr(considered_codes, "tolist") else set(considered_codes)
+    have_p_set = mapped_set & considered_set
+    n_mapped = len(mapped_set)
+    n_have_p = len(have_p_set)
+    n_sig = int(per_pheno.loc[per_pheno["phenocode"].astype(str).isin(have_p_set), "phenocode_is_gt5_fdr"].fillna(0).sum())
+    n_nonsig = n_have_p - n_sig
+    n_no_data = n_mapped - n_have_p
+
+    print("Phenocode-level summary (mapped to PheCodeX):")
+    print(f"  Total mapped PheCodes: {n_mapped}")
+    print(f"  With usable h2/SE (considered): {n_have_p}")
+    print(f"  BH–FDR ≤ {FDR_Q:.2f} significant (> {H2_THRESHOLD*100:.0f}% in any pop): {n_sig}")
+    print(f"  Not significant (among considered): {n_nonsig}")
+    print(f"  No significance data / not used: {n_no_data}")
+
+    # Disease-level summary
+    n_diseases = int(final_df.shape[0])
+    n_diseases_sig = int(final_df["is_h2_significant_in_any_ancestry"].sum())
+    print("Disease-level summary:")
+    print(f"  Total PheCodeX diseases: {n_diseases}")
+    print(f"  With > {H2_THRESHOLD*100:.0f}% any-pop signal (via mapped PheCodes, FDR): {n_diseases_sig}")
+    print(f"  Without: {n_diseases - n_diseases_sig}")
 
     # =========================================================================
     # PHASE 4: FINAL FORMATTING AND OUTPUT GENERATION
