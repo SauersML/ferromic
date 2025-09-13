@@ -16,6 +16,7 @@ import tempfile
 
 from . import iox as io
 from . import pipes
+from . import models
 
 LOCK_MAX_AGE_SEC = 360000 # 100h
 
@@ -523,38 +524,85 @@ def phenotype_fetcher_worker(pheno_queue,
     keep_set: Optional[Set[str]] = None
 
     if PHENO_DEDUP_ENABLE:
-        # Phase 0: ensure caches exist for all phenotypes so dedup has full visibility
+        # Phase 0: ensure caches exist for all phenotypes so dedup has full visibility (coarse lock to avoid duplicate scans)
         if phenos_to_query_from_bq:
             if allow_bq and (bq_client is not None) and (cdr_id is not None):
-                print(f"[Fetcher]  - [Dedup] Pre-caching {len(phenos_to_query_from_bq)} uncached phenotypes via BigQuery...", flush=True)
-                try:
-                    _precache_all_missing_phenos(pheno_defs, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
-                except Exception as e:
-                    print(f"[Fetcher]  - [WARN] Pre-cache failed: {str(e)[:200]}", flush=True)
+                prec_lock = os.path.join(cache_dir, f"dedup_precache_{cdr_codename}.lock")
+                if io.ensure_lock(prec_lock, LOCK_MAX_AGE_SEC):
+                    try:
+                        print(f"[Fetcher]  - [Dedup] Pre-caching {len(phenos_to_query_from_bq)} uncached phenotypes via BigQuery...", flush=True)
+                        _precache_all_missing_phenos(pheno_defs, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
+                    except Exception as e:
+                        print(f"[Fetcher]  - [WARN] Pre-cache failed: {str(e)[:200]}", flush=True)
+                    finally:
+                        io.release_lock(prec_lock)
+                else:
+                    print("[Fetcher]  - [Dedup] Another worker is pre-caching; proceeding with currently cached subset.", flush=True)
             else:
                 print("[Fetcher]  - [WARN] Dedup requested but BigQuery is disabled or unavailable; proceeding with cached subset only.", flush=True)
 
-        # Refresh cached list after precache pass
+        # Refresh cached list after any precache pass
         phenos_to_load_from_cache = [
             row.to_dict() for _, row in pheno_defs.iterrows()
             if os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))
         ]
         phenos_to_query_from_bq = []  # everything needed for dedup has been cached (or we proceed with cached-only)
 
-        # Phase 1: run dedup on the full definitions frame (now caches should exist for most/all)
+        # Phase 1: compute/use manifest once per cohort (fingerprinted by the cohort index)
         try:
-            ded = deduplicate_phenotypes(
-                pheno_defs_df=pheno_defs,
-                core_index=core_index,
-                cdr_codename=cdr_codename,
-                cache_dir=cache_dir,
-                min_cases=min_cases,
-                phi_threshold=PHI_THRESHOLD,
-                share_threshold=SHARE_THRESHOLD,
-                protect=PHENO_PROTECT
-            )
-            keep_set = set(ded.get("kept", set()))
-            print(f"[Dedup] kept {len(keep_set)} phenotypes; dropped {len(ded.get('dropped', []))}.", flush=True)
+            try:
+                cohort_fp = models._index_fingerprint(pd.Index(core_index.astype(str)))
+            except Exception:
+                cohort_fp = f"N{len(core_index)}"
+            manifest_path = os.path.join(cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json")
+            manifest_lock = manifest_path + ".lock"
+
+            keep_set = None
+            if os.path.exists(manifest_path):
+                try:
+                    with open(manifest_path, "r") as fh:
+                        manifest = json.load(fh)
+                    ks = manifest.get("kept", [])
+                    if isinstance(ks, list):
+                        keep_set = set(ks)
+                        print(f"[Dedup] using existing manifest: kept {len(keep_set)}, dropped {len(manifest.get('dropped', []))}.", flush=True)
+                except Exception:
+                    keep_set = None
+
+            if keep_set is None:
+                if io.ensure_lock(manifest_lock, LOCK_MAX_AGE_SEC):
+                    try:
+                        # Check again after acquiring the lock
+                        if os.path.exists(manifest_path):
+                            with open(manifest_path, "r") as fh:
+                                manifest = json.load(fh)
+                            ks = manifest.get("kept", [])
+                            keep_set = set(ks) if isinstance(ks, list) else None
+                        if keep_set is None:
+                            ded = deduplicate_phenotypes(
+                                pheno_defs_df=pheno_defs,
+                                core_index=core_index,
+                                cdr_codename=cdr_codename,
+                                cache_dir=cache_dir,
+                                min_cases=min_cases,
+                                phi_threshold=PHI_THRESHOLD,
+                                share_threshold=SHARE_THRESHOLD,
+                                protect=PHENO_PROTECT
+                            )
+                            keep_set = set(ded.get("kept", set()))
+                            print(f"[Dedup] kept {len(keep_set)} phenotypes; dropped {len(ded.get('dropped', []))}.", flush=True)
+                    finally:
+                        io.release_lock(manifest_lock)
+                else:
+                    # Another worker is computing; wait briefly then read
+                    time.sleep(3)
+                    try:
+                        with open(manifest_path, "r") as fh:
+                            manifest = json.load(fh)
+                        ks = manifest.get("kept", [])
+                        keep_set = set(ks) if isinstance(ks, list) else None
+                    except Exception:
+                        keep_set = None
         except Exception as e:
             print(f"[Dedup WARN] Falling back to no-dedup due to error: {e}", flush=True)
             keep_set = None
@@ -616,7 +664,7 @@ def phenotype_fetcher_worker(pheno_queue,
                             pheno_queue.put({
                                 "name": r['name'],
                                 "category": r['category'],
-                                "codes_n": len(r.get('codes', [])) if isinstance(r, dict) else len(row.get('all_codes') or []),
+                                "codes_n": int(r.get("codes_n") or 0),
                                 "cdr_codename": cdr_codename
                             })
                             enqueued += 1
@@ -698,13 +746,12 @@ def _tiebreak_drop(a_name: str, n1a: int, n_codes_a: int,
     return b_name if b_name > a_name else a_name
 
 
-def _write_dedup_manifest(cache_dir: str, cdr_codename: str, manifest: dict) -> None:
+def _write_dedup_manifest(path: str, manifest: dict) -> None:
     """
-    Atomically write dedup manifest JSON to cache_dir.
+    Atomically write dedup manifest JSON to the given path.
     """
-    os.makedirs(cache_dir, exist_ok=True)
-    path = os.path.join(cache_dir, f"pheno_dedup_manifest_{cdr_codename}.json")
-    fd, tmp_path = tempfile.mkstemp(dir=cache_dir, prefix="pheno_dedup_manifest.", suffix=".json")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix="pheno_dedup_manifest.", suffix=".json")
     try:
         with os.fdopen(fd, "w") as fh:
             json.dump(manifest, fh, separators=(",", ":"), ensure_ascii=False)
@@ -715,7 +762,6 @@ def _write_dedup_manifest(cache_dir: str, cdr_codename: str, manifest: dict) -> 
                 os.remove(tmp_path)
         except Exception:
             pass
-
 
 def _precache_all_missing_phenos(pheno_defs_df: pd.DataFrame,
                                  bq_client,
@@ -772,6 +818,13 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
     protect = protect or set()
     N = int(len(core_index))
 
+    # Cohort-specific manifest path
+    try:
+        cohort_fp = models._index_fingerprint(pd.Index(core_index.astype(str)))
+    except Exception:
+        cohort_fp = f"N{len(core_index)}"
+    manifest_path = os.path.join(cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json")
+
     # 1) Materialize case indices per phenotype from cache; filter by min_cases
     all_codes_map = pheno_defs_df.set_index("sanitized_name")["all_codes"].to_dict()
     cat_map = pheno_defs_df.set_index("sanitized_name")["disease_category"].to_dict()
@@ -802,7 +855,7 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
             "kept": [],
             "dropped": []
         }
-        _write_dedup_manifest(cache_dir, cdr_codename, manifest)
+        _write_dedup_manifest(manifest_path, manifest)
         return {"kept": set(), "dropped": []}
 
     # 2) Build sparse overlap counts only for co-occurring pairs
@@ -866,12 +919,10 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
                     if drop == name_a:
                         kept.discard(name_a)
                         dropped_now = True
-                # If protected, we skip dropping either and continue
             if dropped_now:
                 break  # A was dropped; stop scanning its neighbors
 
             # Rule 1: phi coefficient threshold
-            # Build 2x2 counts from (n1a, n1b, k, N)
             n10 = n1a - k
             n01 = n1b - k
             n00 = N - (k + n10 + n01)
@@ -905,5 +956,5 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
         "kept": sorted(list(kept)),
         "dropped": dropped_records
     }
-    _write_dedup_manifest(cache_dir, cdr_codename, manifest)
+    _write_dedup_manifest(manifest_path, manifest)
     return {"kept": kept, "dropped": dropped_records}
