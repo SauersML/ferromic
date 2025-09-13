@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from pathlib import Path
 import math
 import time
@@ -11,12 +12,15 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle as MplRectangle
 from matplotlib.lines import Line2D
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
-
-from skimage.graph import route_through_array as skimage_route_through_array
+# Optional: try to import skimage route. We also provide a deterministic fallback path.
+try:
+    from skimage.graph import route_through_array as skimage_route_through_array
+    HAVE_SKIMAGE = True
+except Exception:
+    HAVE_SKIMAGE = False
 
 # =========================
-# Global configuration
+# Global configuration (BREATHING ROOM MODE)
 # =========================
 INPUT_PATH = "phewas_results.tsv"
 OUT_PREFIX = "phewas_heatmap"
@@ -29,38 +33,44 @@ Q_THRESHOLD = 0.05
 COLORMAP = "RdBu_r"
 PERCENTILE_CAP = 99.5          # clip color range to this percentile of |ln(OR)|
 
-# Figure sizing (inches)
-CELL = 0.55
-EXTRA_W = 5.2
-EXTRA_H = 2.2
-MIN_W, MAX_W = 12.0, 80.0
-MIN_H, MAX_H = 7.0, 60.0
+# Figure sizing (inches) — allow VERY WIDE figures if needed
+CELL = 0.60
+EXTRA_W = 10.0
+EXTRA_H = 3.0
+MIN_W, MAX_W = 16.0, 120.0
+MIN_H, MAX_H = 8.0, 60.0
 
 # Y-axis label density
 MAX_YLABELS = 80
 
 # Label text
 X_LABEL_FONTSIZE = 9
-WRAP_CHARS = 22
+WRAP_CHARS = 24
 
-# Label packing (STRICT no-overlap; NO “windows” in pathfinding sense)
-GAP_PX = 8.0                    # min horizontal whitespace between labels (px)
-ROW_GAP_PX = 10.0               # extra vertical gap between tiers (px)
-BASE_OFFSET_PX = 18.0           # distance from axis baseline to first tier top (px)
-MAX_TIERS = 4000                # high cap for safety
+# Label packing (STRICT no-overlap)
+GAP_PX = 24.0                  # min horizontal whitespace between labels (px) — BIG
+ROW_GAP_PX = 24.0              # extra vertical gap between tiers (px) — BIG
+BASE_OFFSET_PX = 100.0         # distance from axis baseline to first tier top (px) — BIG
+MAX_TIERS = 8000               # safety
 
-# Routing grid (FULL AXES, NO CORRIDORS)
-GRID_PX = 2.0                   # cell size in pixels (small → finer; keep ≤ 2 for tight channels)
-SAFETY_GAP_PX = 1.0             # lines end this many px above label top
-LINE_TUBE_PX = 1.0              # raster tube radius for already-committed lines (exact “width”)
-CLEAR_START_GOAL_RADIUS_CELLS = 1  # carve free cells around start/goal (cell radius)
+# Global “free band” right under the x-axis to make routing trivial
+TOP_BAND_PX = 80.0             # tall, continuous, always free band under baseline
+GOAL_GAP_PX = 8.0              # how far above label top a goal sits (toward baseline)
+Y_JITTER_PX = 2.0              # small y jitter for labels (kept non-overlapping)
 
-# Smoothing (always apply; validated against occupancy)
-SMOOTH_STEP_PX = 2.0            # sampling step for smoothed curve
-DP_EPS_PX = 2.0                 # Douglas–Peucker epsilon for polyline simplification
+# Routing grid (FULL AXES)
+GRID_PX = 4.0                  # coarser cell to shrink memory/time (4 px)
+LINE_TUBE_PX = 1.0             # not used to block lines anymore (we allow line overlaps)
+CLEAR_START_GOAL_RADIUS_CELLS = 3  # carve bigger halos around endpoints
+MARGIN_PX = 128.0              # generous grid margin
+GRID_DEPTH_SCALE = 4.0         # grid vertical depth multiplier
+
+# Smoothing (optional — we keep light)
+SMOOTH_STEP_PX = 4.0
+DP_EPS_PX = 3.0
 
 # Rendering
-LEADER_LW = 0.6
+LEADER_LW = 0.8
 LEADER_COLOR = "black"
 DRAW_CELL_EDGES = True
 EDGE_LW = 0.7
@@ -91,6 +101,7 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 def compute_figsize(n_rows: int, n_cols: int) -> Tuple[float, float]:
+    # Allow very large width; we’ll also widen right/left room so axis grows
     w = clamp(n_cols * CELL + EXTRA_W, MIN_W, MAX_W)
     h = clamp(n_rows * CELL + EXTRA_H, MIN_H, MAX_H)
     return (w, h)
@@ -125,7 +136,7 @@ def axes_window_px(ax) -> Tuple[float,float,float,float]:
 # =========================
 def shelf_pack_tiers(anchors: List[float], widths: List[float], gap_px: float) -> List[int]:
     """
-    Greedy shelf packing by anchor x; tiers are just horizontal rows to ensure vertical separation.
+    Greedy shelf packing by anchor x; tiers are horizontal rows to ensure vertical separation.
     """
     n = len(anchors)
     order = sorted(range(n), key=lambda i: anchors[i])
@@ -159,91 +170,41 @@ def isotonic_with_spacing(
     gap_px: float
 ) -> List[float]:
     """
-    Order-preserving x-placement with HARD separation, but with *extra* spacing
-    to reduce shoulder-to-shoulder crowding. Keeps original signature.
-
-    Strategy:
-    - Inflate the required neighbor separation with a density-aware term.
-    - Run the standard forward/backward envelope to satisfy hard constraints.
-    - Distribute any remaining slack uniformly across gaps to gently "spread" labels.
+    Order-preserving x-placement with hard separation. With lots of width and big gap_px,
+    this stays very conservative to avoid shoulder-to-shoulder crowding.
     """
     if not idxs:
         return []
-
     A = [anchors[i] for i in idxs]
     W = [widths[i] for i in idxs]
     m = len(idxs)
+    LB = [x_lo + W[k]/2.0 for k in range(m)]
+    UB = [x_hi - W[k]/2.0 for k in range(m)]
+    s = [ (W[k] + W[k+1])/2.0 + gap_px for k in range(m-1) ]
 
-    # Baseline lower/upper bounds of centers (must keep label fully inside [x_lo, x_hi])
-    LB = [x_lo + W[k] / 2.0 for k in range(m)]
-    UB = [x_hi - W[k] / 2.0 for k in range(m)]
-
-    # Density-aware gap inflation:
-    # If anchors are locally dense, add more separation.
-    eff_gap = gap_px * 2.0  # global inflation (primary knob)
-    local = []
-    for k in range(m - 1):
-        # distance between anchor centers relative to sizes
-        raw = (W[k] + W[k + 1]) / 2.0 + gap_px
-        a_dist = max(1.0, A[k + 1] - A[k])
-        # Add a penalty when anchors are very close compared to widths
-        penalty = 0.25 * max(0.0, (W[k] + W[k + 1]) - a_dist)
-        local.append(raw + eff_gap + penalty)
-    s = local  # required separations between consecutive centers
-
-    # Forward envelope (lower feasible positions)
-    E = [0.0] * m
+    E = [0.0]*m
     E[0] = max(LB[0], A[0])
     for k in range(1, m):
-        E[k] = max(LB[k], E[k - 1] + s[k - 1], A[k])
+        E[k] = max(LB[k], E[k-1] + s[k-1], A[k])
 
-    # Backward envelope (upper feasible positions)
-    L = [0.0] * m
-    L[m - 1] = min(UB[m - 1], A[m - 1])
-    for k in range(m - 2, -1, -1):
-        L[k] = min(UB[k], L[k + 1] - s[k], A[k])
+    L = [0.0]*m
+    L[m-1] = min(UB[m-1], A[m-1])
+    for k in range(m-2, -1, -1):
+        L[k] = min(UB[k], L[k+1] - s[k], A[k])
 
-    # If envelopes cross, collapse to midpoint (feasible but tight)
     for k in range(m):
         if E[k] > L[k]:
-            mid = 0.5 * (E[k] + L[k])
-            E[k] = mid
-            L[k] = mid
+            mid = (E[k] + L[k]) / 2.0
+            E[k] = mid; L[k] = mid
 
-    # Start with anchors clamped to envelopes
     X = [clamp(A[k], E[k], L[k]) for k in range(m)]
-
-    # Enforce monotone separations exactly (forward then backward)
+    X[m-1] = clamp(X[m-1], E[m-1], L[m-1])
+    for k in range(m-2, -1, -1):
+        X[k] = min(X[k], X[k+1] - s[k])
+        X[k] = clamp(X[k], E[k], L[k])
     for k in range(1, m):
-        X[k] = max(X[k], X[k - 1] + s[k - 1], E[k])
-        X[k] = min(X[k], L[k])
-    for k in range(m - 2, -1, -1):
-        X[k] = min(X[k], X[k + 1] - s[k], L[k])
-        X[k] = max(X[k], E[k])
-
-    # Final gentle "spread": distribute any residual slack uniformly across gaps.
-    # Compute minimal packed span and theoretical max span within [LB[0], UB[-1]].
-    min_span_left = X[0]
-    min_span_right = X[-1]
-    min_span = min_span_right - min_span_left
-    max_span = (UB[-1] - LB[0])
-    slack = max(0.0, max_span - min_span)
-
-    if slack > 1e-6 and m > 1:
-        # Distribute slack proportionally to "room" in each gap (all equal here).
-        per_gap = slack / (m - 1)
-        for k in range(1, m):
-            desired = X[0] + k * per_gap
-            shift = max(0.0, desired - (X[k] - X[0]))
-            # Apply shift but do not violate upper envelope or neighbor separation
-            X[k] = min(L[k], X[k] + shift)
-            if k < m - 1:
-                X[k + 1] = max(X[k + 1], X[k] + s[k])
-
-        # One more backward pass to ensure feasibility after spreading
-        for k in range(m - 2, -1, -1):
-            X[k] = min(X[k], X[k + 1] - s[k])
-            X[k] = clamp(X[k], E[k], L[k])
+        X[k] = max(X[k], X[k-1] + s[k-1])
+        X[k] = clamp(X[k], E[k], L[k])
 
     return X
 
@@ -273,91 +234,66 @@ def verify_no_label_overlap(
                 raise RuntimeError("Label placement produced overlap — enlarge figure width or increase GAP_PX/ROW_GAP_PX.")
 
 # =========================
-# Grid utilities & pathfinding (FULL-AXES, NO CORRIDORS)
+# Grid utilities & routing helpers
 # =========================
-def build_global_grids(ax_x0: float,
-                       ax_y0: float,
-                       ax_w: float,
-                       ax_h: float,
-                       label_rects_px: List[Tuple[float, float, float, float]],
-                       grid_px: float,
-                       scale: float = 3.0,
-                       margin_px: float = 32.0) -> Tuple[float, float, int, int]:
-    """
-    Build the global occupancy grid so it FULLY contains the horizontal span of all labels
-    (with margin) and the vertical span from the x-axis baseline down to the deeper of:
-      - 'scale' × axes height, or
-      - the deepest label bottom,
-    again with margin. Snap the grid bounds to the GRID_PX lattice so label corners never
-    quantize outside due to float -> int rounding.
+def snap_down(v: float, grid_px: float) -> float:
+    return math.floor(v / grid_px) * grid_px
 
-    Returns (gx0, gy0, gw, gh), where (gx0, gy0) is the bottom-left of the grid (in px).
+def snap_up(v: float, grid_px: float) -> float:
+    return math.ceil(v / grid_px) * grid_px
+
+def build_global_grid(ax_x0: float,
+                      ax_y0: float,
+                      ax_w: float,
+                      ax_h: float,
+                      label_rects_px: List[Tuple[float, float, float, float]],
+                      grid_px: float,
+                      scale: float,
+                      margin_px: float) -> Tuple[float, float, int, int, float, float]:
     """
-    # ----------------------------
-    # Compute required horizontal span (labels may extend left/right of axes)
-    # ----------------------------
+    Build a global grid that fully covers:
+      * entire axes width (with margins) and entire x-span of labels
+      * vertical span from the x-axis baseline down to the deeper of (scale×axes height) or the deepest label bottom
+    Returns (gx0, gy0, gw, gh, gx1, gy1) where (gx0,gy0) bottom-left in px, (gx1,gy1) top-right in px.
+    """
     if label_rects_px:
         x_min_labels = min(L for (L, R, T, B) in label_rects_px)
         x_max_labels = max(R for (L, R, T, B) in label_rects_px)
+        y_min_labels = min(B for (_, _, _, B) in label_rects_px)
     else:
         x_min_labels = ax_x0
         x_max_labels = ax_x0 + ax_w
-
-    # Desired (continuous) pixel bounds before snapping
-    x_left_desired  = min(ax_x0,            x_min_labels - margin_px)
-    x_right_desired = max(ax_x0 + ax_w,     x_max_labels + margin_px)
-
-    # ----------------------------
-    # Compute required vertical span (top at baseline)
-    # ----------------------------
-    if label_rects_px:
-        y_min_labels = min(B for (_, _, _, B) in label_rects_px)  # smallest y (deepest)
-    else:
         y_min_labels = ax_y0 - ax_h
 
-    y_min_scaled = ax_y0 - scale * ax_h
-    y_bottom_desired = min(y_min_scaled, y_min_labels - margin_px)  # bottom (smaller y)
-    y_top_desired    = ax_y0                                        # top (baseline)
+    x_left_desired  = min(ax_x0,            x_min_labels) - margin_px
+    x_right_desired = max(ax_x0 + ax_w,     x_max_labels) + margin_px
 
-    # ----------------------------
-    # SNAP bounds to the grid to avoid off-by-one from int() truncation
-    # (Ensure labels/endpoints quantize INSIDE the grid)
-    # ----------------------------
-    def snap_down(v: float) -> float:
-        return math.floor(v / grid_px) * grid_px
+    y_bottom_desired = min(ax_y0 - scale * ax_h, y_min_labels - margin_px)
+    y_top_desired    = ax_y0  # baseline
 
-    def snap_up(v: float) -> float:
-        return math.ceil(v / grid_px) * grid_px
+    gx0 = snap_down(x_left_desired, grid_px)
+    gx1 = snap_up(x_right_desired, grid_px)
+    gy0 = snap_down(y_bottom_desired, grid_px)
+    gy1 = snap_up(y_top_desired, grid_px)
 
-    gx0 = snap_down(x_left_desired)
-    gx1 = snap_up(x_right_desired)
-    gy0 = snap_down(y_bottom_desired)
-    gy1 = snap_up(y_top_desired)
-
-    # Safety: ensure at least 1 cell span in each dimension
     width_px  = max(grid_px, gx1 - gx0)
     height_px = max(grid_px, gy1 - gy0)
 
-    # Grid size in cells (+1 so last index is addressable after center-offset)
     gw = int(math.ceil(width_px  / grid_px)) + 1
     gh = int(math.ceil(height_px / grid_px)) + 1
 
-    # ----------------------------
-    # Debug prints
-    # ----------------------------
     print(f"[INFO] Grid builder: scale={scale:.2f}, margin={margin_px:.1f}px, GRID_PX={grid_px:.1f}px")
     print(f"[INFO] Grid X-range px: left gx0={gx0:.1f}, right={gx1:.1f}, width={width_px:.1f}  "
           f"(axes [{ax_x0:.1f},{ax_x0+ax_w:.1f}], labels [{x_min_labels:.1f},{x_max_labels:.1f}])")
     print(f"[INFO] Grid Y-range px: bottom gy0={gy0:.1f}, top={gy1:.1f}, depth={height_px:.1f}  "
           f"(baseline {ax_y0:.1f}, deepest label {y_min_labels:.1f})")
     print(f"[INFO] Grid size cells: gw×gh = {gw}×{gh}")
-
-    return gx0, gy0, gw, gh
+    return gx0, gy0, gw, gh, gx1, gy1
 
 def rasterize_labels_into(occ: np.ndarray, gx0: float, gy0: float, grid_px: float,
                           label_rects_px: List[Tuple[float,float,float,float]]):
     """
-    Paint labels (rectangles) as BLOCKED cells (no inflation).
+    Paint labels (rectangles) as BLOCKED cells.
     """
     gh, gw = occ.shape
     for (L, R, T, B) in label_rects_px:
@@ -370,10 +306,48 @@ def rasterize_labels_into(occ: np.ndarray, gx0: float, gy0: float, grid_px: floa
         if il0 <= ir1 and jb0 <= jt1:
             occ[jb0:jt1+1, il0:ir1+1] = 1
 
+def carve_top_band_free(occ: np.ndarray, ax_y0: float, gx0: float, gy0: float, grid_px: float, band_px: float):
+    """
+    Carve a continuous FREE band just under the baseline across the full grid width.
+    """
+    gh, gw = occ.shape
+    band_top_y = ax_y0
+    band_bot_y = ax_y0 - band_px
+    j0 = int((band_bot_y - gy0) / grid_px)
+    j1 = int((band_top_y - gy0) / grid_px)
+    j0 = clamp(j0, 0, gh-1)
+    j1 = clamp(j1, 0, gh-1)
+    if j1 < j0:
+        j0, j1 = j1, j0
+    occ[j0:j1+1, :] = 0
+    print(f"[INFO] Carved FREE top band: y∈[{band_bot_y:.1f},{band_top_y:.1f}] (~{band_px:.1f}px) → rows {j0}..{j1}")
+
+def carve_vertical_slit_for_goal(occ: np.ndarray,
+                                 gx0: float, gy0: float, grid_px: float,
+                                 goal_px: Tuple[float,float],
+                                 up_to_y: float,
+                                 half_width_cells: int = 1):
+    """
+    Carve a thin vertical slit from 'up_to_y' down to the goal y to ensure connectivity.
+    """
+    gh, gw = occ.shape
+    xg, yg = goal_px
+    ci = int((xg - gx0) / grid_px)
+    jt = int((up_to_y - gy0) / grid_px)
+    jb = int((yg - gy0) / grid_px)
+    ci = clamp(ci, 0, gw-1)
+    jt = clamp(jt, 0, gh-1)
+    jb = clamp(jb, 0, gh-1)
+    if jb < jt:
+        jt, jb = jb, jt
+    il0 = clamp(ci - half_width_cells, 0, gw-1)
+    ir1 = clamp(ci + half_width_cells, 0, gw-1)
+    occ[jt:jb+1, il0:ir1+1] = 0
+
 def supercover_cells(p0: Tuple[float,float], p1: Tuple[float,float],
                      gx0: float, gy0: float, grid_px: float) -> List[Tuple[int,int]]:
     """
-    Amanatides & Woo 2D supercover traversal in grid coords.
+    Amanatides & Woo 2D grid traversal.
     """
     x0 = (p0[0] - gx0) / grid_px
     y0 = (p0[1] - gy0) / grid_px
@@ -415,34 +389,11 @@ def supercover_cells(p0: Tuple[float,float], p1: Tuple[float,float],
             cells.append((i, j))
     return cells
 
-def rasterize_polyline_tube_into(occ: np.ndarray, poly: List[Tuple[float,float]],
-                                 gx0: float, gy0: float, grid_px: float, tube_px: float):
-    """
-    Paint a polyline tube into occ (set to 1). Tube radius in pixels (>= 0).
-    """
-    gh, gw = occ.shape
-    r2 = (tube_px / grid_px) ** 2 + 0.25
-    Rint = max(0, int(math.ceil(tube_px / grid_px)))
-    disk_offsets = [(di, dj) for dj in range(-Rint-1, Rint+2)
-                    for di in range(-Rint-1, Rint+2) if (di*di + dj*dj) <= r2]
-    for p0, p1 in zip(poly, poly[1:]):
-        cells = supercover_cells(p0, p1, gx0, gy0, grid_px)
-        for (ci, cj) in cells:
-            if 0 <= cj < gh and 0 <= ci < gw:
-                if Rint == 0:
-                    occ[cj, ci] = 1
-                else:
-                    for di, dj in disk_offsets:
-                        ii = ci + di; jj = cj + dj
-                        if 0 <= jj < gh and 0 <= ii < gw:
-                            occ[jj, ii] = 1
-
 def los_free(occ: np.ndarray, p0: Tuple[float,float], p1: Tuple[float,float],
              gx0: float, gy0: float, grid_px: float) -> bool:
-    """Line-of-sight on grid: all supercover cells must be free."""
     gh, gw = occ.shape
     for (ci, cj) in supercover_cells(p0, p1, gx0, gy0, grid_px):
-        if not (0 <= cj < gh and 0 <= ci < gw):  # outside grid → treat as blocked
+        if not (0 <= cj < gh and 0 <= ci < gw):
             return False
         if occ[cj, ci]:
             return False
@@ -450,7 +401,6 @@ def los_free(occ: np.ndarray, p0: Tuple[float,float], p1: Tuple[float,float],
 
 def greedy_shortcut(poly: List[Tuple[float,float]],
                     occ: np.ndarray, gx0: float, gy0: float, grid_px: float) -> List[Tuple[float,float]]:
-    """Remove intermediate points when there is direct LOS."""
     if len(poly) <= 2:
         return poly
     out = [poly[0]]
@@ -464,7 +414,6 @@ def greedy_shortcut(poly: List[Tuple[float,float]],
     return out
 
 def douglas_peucker(points: List[Tuple[float,float]], eps: float) -> List[Tuple[float,float]]:
-    """Standard DP simplification (epsilon in pixels)."""
     if len(points) < 3:
         return points
     def point_seg_dist(p, a, b):
@@ -492,180 +441,23 @@ def douglas_peucker(points: List[Tuple[float,float]], eps: float) -> List[Tuple[
     recurse(points, 0, len(points) - 1, keep)
     return [points[i] for i in sorted(keep)]
 
-def sample_catmull_rom(points: List[Tuple[float,float]], step_px: float) -> List[Tuple[float,float]]:
-    """Catmull–Rom spline resampling with ~step_px spacing."""
-    if len(points) <= 2:
-        return points
-    P = [points[0]] + points + [points[-1]]
-    out = [points[0]]
-    def cr(p0,p1,p2,p3,t):
-        t2=t*t; t3=t2*t
-        x0,y0=p0; x1,y1=p1; x2,y2=p2; x3,y3=p3
-        x = 0.5*((-x0 + 3*x1 - 3*x2 + x3)*t3 + (2*x0 - 5*x1 + 4*x2 - x3)*t2 + (-x0 + x2)*t + 2*x1)
-        y = 0.5*((-y0 + 3*y1 - 3*y2 + y3)*t3 + (2*y0 - 5*y1 + 4*y2 - y3)*t2 + (-y0 + y2)*t + 2*y1)
-        return (x,y)
-    for i in range(1, len(points)):
-        p0 = P[i-1]; p1=P[i]; p2=P[i+1]; p3=P[i+2]
-        seg_len = math.hypot(p2[0]-p1[0], p2[1]-p1[1])
-        steps = max(2, int(seg_len / max(1.0, step_px)))
-        for s in range(1, steps+1):
-            out.append(cr(p0,p1,p2,p3,s/steps))
-    return out
-
-# ---------- Pathfinding with scikit-image (FULL GRID) ----------
-def _route_one_candidate(args):
+def simple_manhattan_fallback(start: Tuple[float,float],
+                              goal: Tuple[float,float],
+                              band_y: float) -> List[Tuple[float,float]]:
     """
-    Top-level function for ProcessPool.
-    Compute a candidate path on FULL occupancy using labels + prior-batch lines.
-    Robust endpoint handling:
-      - Larger start/goal carve radius to ensure connectivity to/from baseline.
-      - If no route, try lifting the GOAL upward (toward baseline) by a few cells.
-    NO label/line overlaps are permitted in acceptance; this function only proposes paths.
+    Deterministic fallback path: start (on axis) → down to band_y → horizontal to goal.x → down to goal.y.
+    Assumes band_y is above label tops (true by construction).
     """
-    (label_id, start_px, goal_px, global_occ_labels, global_occ_lines_prev,
-     gx0, gy0, gw, gh, grid_px, clear_r_cells) = args
-
-    occ = (global_occ_labels | global_occ_lines_prev).astype(np.uint8).copy()
-
-    # Strict px->grid (no clamping)
-    def pxtog_strict(xp: float, yp: float) -> Tuple[int, int]:
-        c = int((xp - gx0) / grid_px)
-        r = int((yp - gy0) / grid_px)
-        if not (0 <= r < gh and 0 <= c < gw):
-            raise RuntimeError(
-                f"Endpoint out of grid for label {label_id}: "
-                f"(x={xp:.1f}, y={yp:.1f}) -> (r={r}, c={c}), grid {gh}×{gw}, "
-                f"gx0={gx0:.1f}, gy0={gy0:.1f}, GRID_PX={grid_px:.1f}"
-            )
-        return (r, c)
-
-    # Map endpoints
-    s_rc = pxtog_strict(*start_px)
-    g_rc = pxtog_strict(*goal_px)
-    sr, sc = s_rc
-    gr, gc = g_rc
-
-    # Carve start/goal halos (bigger to avoid sealed pockets)
-    r0 = max(clear_r_cells, 3)
-    occ[max(0, sr - r0):min(gh, sr + r0 + 1), max(0, sc - r0):min(gw, sc + r0 + 1)] = 0
-    occ[max(0, gr - r0):min(gh, gr + r0 + 1), max(0, gc - r0):min(gw, gc + r0 + 1)] = 0
-
-    # Build cost grid
-    cost = np.ones_like(occ, dtype=np.float64)
-    cost[occ != 0] = np.inf
-
-    # Try direct route; if it fails (no path), iteratively lift the goal upward (toward baseline)
-    # by a few cells to escape slits right under the baseline or label roofs.
-    lift_trials = (0, 2, 4, 6, 8)
-    last_err = None
-    for lift in lift_trials:
-        try:
-            gr_try = min(gh - 1, gr + lift)  # higher screen y -> larger row index
-            path_rc, total_cost = skimage_route_through_array(
-                cost, (sr, sc), (gr_try, gc), fully_connected=True, geometric=True
-            )
-            # Success
-            poly = [(gx0 + (c + 0.5) * grid_px, gy0 + (r + 0.5) * grid_px) for (r, c) in path_rc]
-            return (label_id, poly, float(total_cost), occ.shape)
-        except Exception as e:
-            last_err = e
-            continue
-
-    # If we tried all lifts and still failed, raise the last error
-    raise RuntimeError(f"Routing failed for label {label_id} after goal-lift attempts: {last_err}")
-
-
-def assert_grid_covers_labels_and_endpoints(label_rects_px: List[Tuple[float,float,float,float]],
-                                            starts_px: List[Tuple[float,float]],
-                                            goals_px: List[Tuple[float,float]],
-                                            gx0: float, gy0: float, gw: int, gh: int,
-                                            grid_px: float) -> None:
-    """
-    Fail fast if ANY label rectangle or ANY start/goal lies outside the grid.
-    """
-    def pxtog(xp: float, yp: float) -> Tuple[int, int]:
-        c = int((xp - gx0) / grid_px)
-        r = int((yp - gy0) / grid_px)
-        return r, c
-
-    # Check labels
-    for idx, (L, R, T, B) in enumerate(label_rects_px):
-        rL, cL = pxtog(L, T)     # top-left
-        rR, cR = pxtog(R, B)     # bottom-right (lower y)
-        # All four corners must map strictly inside
-        corners = [pxtog(L, T), pxtog(R, T), pxtog(L, B), pxtog(R, B)]
-        for (rr, cc) in corners:
-            if not (0 <= rr < gh and 0 <= cc < gw):
-                raise RuntimeError(
-                    f"Label {idx} out of grid: corner (r={rr}, c={cc}) outside 0..{gh-1} × 0..{gw-1}. "
-                    f"LRTB=({L:.1f},{R:.1f},{T:.1f},{B:.1f}), gx0={gx0:.1f}, gy0={gy0:.1f}, GRID_PX={grid_px:.1f}"
-                )
-
-    # Check endpoints
-    for k, (xp, yp) in enumerate(starts_px):
-        r, c = pxtog(xp, yp)
-        if not (0 <= r < gh and 0 <= c < gw):
-            raise RuntimeError(
-                f"Start {k} out of grid: (x={xp:.1f}, y={yp:.1f}) -> (r={r}, c={c}). "
-                f"Grid {gh}×{gw}, gy0={gy0:.1f}, gx0={gx0:.1f}, GRID_PX={grid_px:.1f}"
-            )
-    for k, (xp, yp) in enumerate(goals_px):
-        r, c = pxtog(xp, yp)
-        if not (0 <= r < gh and 0 <= c < gw):
-            raise RuntimeError(
-                f"Goal {k} out of grid: (x={xp:.1f}, y={yp:.1f}) -> (r={r}, c={c}). "
-                f"Grid {gh}×{gw}, gy0={gy0:.1f}, gx0={gx0:.1f}, GRID_PX={grid_px:.1f}"
-            )
-
-    print("[INFO] Grid coverage assertion passed: all labels and all endpoints are inside the routing grid.")
-
-
-def save_labels_only_plot(fig_ref: plt.Figure,
-                          ax_ref: plt.Axes,
-                          Xc_px: List[float],
-                          Ytop_abs_px: List[float],
-                          label_texts: List[str],
-                          fontsize: float,
-                          out_prefix: str,
-                          margins: Tuple[float,float,float,float]) -> None:
-    """
-    Save a separate figure that shows ONLY the labels (no lines, no heatmap).
-    Positions are taken from absolute pixel locations relative to ax_ref.
-    """
-    left, right, bottom, top = margins  # fractions
-    # New figure sized like the reference
-    w_in, h_in = fig_ref.get_size_inches()
-    fig2, ax2 = plt.subplots(figsize=(w_in, h_in), constrained_layout=False)
-    fig2.subplots_adjust(left=left, right=right, bottom=bottom, top=top)
-
-    # Compute axes window for transform to axes fraction
-    fig2.canvas.draw()
-    ax2.set_axis_off()  # hide spines/ticks; "just labels"
-
-    # Use the reference axes window for consistent normalization
-    x0, y0, w, h = ax_ref.get_window_extent(renderer=fig_ref.canvas.get_renderer()).bounds
-
-    def to_axes_frac(px: float, py: float) -> Tuple[float, float]:
-        return ((px - x0) / w, (py - y0) / h)
-
-    # Draw texts
-    for j, txt in enumerate(label_texts):
-        xf, yf = to_axes_frac(Xc_px[j], Ytop_abs_px[j])
-        ax2.text(xf, yf, txt, transform=ax2.transAxes, ha="center", va="top",
-                 fontsize=fontsize, clip_on=False)
-
-    out_svg = f"{out_prefix}_labels_only.svg"
-    out_pdf = f"{out_prefix}_labels_only.pdf"
-    fig2.savefig(out_svg)
-    fig2.savefig(out_pdf)
-    plt.close(fig2)
-    print(f"[SAVED] {out_svg}")
-    print(f"[SAVED] {out_pdf}")
+    sx, sy = start
+    gx, gy = goal
+    return [(sx, sy),
+            (sx, band_y - 1.0),          # slightly inside the band
+            (gx, band_y - 1.0),
+            (gx, gy)]
 
 # =========================
 # Main
 # =========================
-
 def main():
     t_start = time.perf_counter()
 
@@ -677,12 +469,16 @@ def main():
     df = pd.read_csv(in_path, sep="\t", dtype=str)
     validate_columns(df, ["Inversion", "Phenotype", "OR", "P_Value", "BH_q"])
 
+    # Coerce numerics, clean
     for c in ["OR", "P_Value", "BH_q"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.dropna(subset=["Inversion", "Phenotype", "OR"])
     df = df[df["OR"] > 0]
 
+    # Normed OR
     df["normed_OR"] = np.log(df["OR"].values)
+
+    # Deduplicate per (Inversion, Phenotype)
     df["_abs_effect"] = df["normed_OR"].abs()
     df["_BH_q_sort"] = df["BH_q"].fillna(np.inf)
     df["_P_sort"] = df["P_Value"].fillna(np.inf)
@@ -691,14 +487,19 @@ def main():
         ascending=[True, True, False]
     ).drop_duplicates(subset=["Inversion", "Phenotype"], keep="first")
 
+    # Sort columns by mean absolute effect
     col_strength = df.groupby("Phenotype")["normed_OR"].apply(lambda s: np.nanmean(np.abs(s)))
     col_order = col_strength.sort_values(ascending=False).index.tolist()
+
+    # Row order
     row_order = pd.unique(df["Inversion"].values).tolist()
 
+    # Build matrices
     pv = df.pivot(index="Inversion", columns="Phenotype", values="normed_OR").reindex(index=row_order, columns=col_order)
     pmat = df.pivot(index="Inversion", columns="Phenotype", values="P_Value").reindex(index=row_order, columns=col_order)
     qmat = df.pivot(index="Inversion", columns="Phenotype", values="BH_q").reindex(index=row_order, columns=col_order)
 
+    # Labels (phenotypes)
     raw_col_labels = [str(c) for c in pv.columns]
     label_texts = [textwrap.fill(lbl.replace("_", " "), width=WRAP_CHARS) for lbl in raw_col_labels]
     row_labels = list(pv.index)
@@ -706,6 +507,7 @@ def main():
     data = pv.values
     n_rows, n_cols = data.shape
 
+    # Color scaling
     finite_abs = np.abs(data[np.isfinite(data)])
     vmax = np.nanpercentile(finite_abs, PERCENTILE_CAP) if finite_abs.size else 1.0
     if not np.isfinite(vmax) or vmax <= 0:
@@ -716,10 +518,18 @@ def main():
     plt.close("all")
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), constrained_layout=False)
 
+    # VERY generous left/right so axes width grows a lot; also leave big top to fit title/colorbar
+    left_frac, right_frac, top_frac = 0.12, 0.88, 0.92
+    base_bottom = 0.16
+    fig.subplots_adjust(left=left_frac, right=right_frac, bottom=base_bottom, top=top_frac)
+    fig.canvas.draw()
+
     x = np.arange(n_cols + 1)
     y = np.arange(n_rows + 1)
     masked = np.ma.masked_invalid(data)
+
     cmap = mpl.colormaps.get_cmap(COLORMAP).with_extremes(bad="#D9D9D9")
+
     edgecolors = EDGE_COLOR if DRAW_CELL_EDGES else "face"
     linewidth = EDGE_LW if DRAW_CELL_EDGES else 0.0
 
@@ -733,23 +543,30 @@ def main():
     ax.set_xlabel("Phenotype (phecode)")
     ax.set_ylabel("Inversion")
     ax.set_title("Inversion–Phenotype Associations (normed OR = ln(OR))", pad=12)
+
     ax.set_xlim(0, n_cols)
     ax.set_xticks(np.arange(n_cols) + 0.5)
     ax.set_yticks(np.arange(n_rows) + 0.5)
 
+    # Y tick labels sparse
     y_keep = sparse_y_ticks(n_rows, MAX_YLABELS)
     y_ticklabels = [row_labels[i] if i in set(y_keep) else "" for i in range(n_rows)]
     ax.set_yticklabels(y_ticklabels)
+
+    # Hide default x ticks
     ax.set_xticklabels([])
     ax.tick_params(axis="x", length=0)
+
     for spine in ax.spines.values():
         spine.set_visible(False)
 
     cbar = fig.colorbar(mesh, ax=ax, fraction=0.035, pad=0.02)
     cbar.set_label("Normed OR (ln scale)\nnegative: decreased risk · positive: increased risk")
 
+    # Significance outlines
     row_lookup = {inv: i for i, inv in enumerate(pv.index)}
     col_lookup = {jph: j for j, jph in enumerate(pv.columns)}
+
     def outline_cell(i, j, kind):
         xy = (j, i)
         if kind == "q":
@@ -759,6 +576,7 @@ def main():
         else:
             return
         ax.add_patch(rect)
+
     for inv, ph, pval, qval in zip(df["Inversion"], df["Phenotype"], df["P_Value"], df["BH_q"]):
         i = row_lookup.get(inv, None)
         j = col_lookup.get(ph, None)
@@ -769,32 +587,31 @@ def main():
         elif pd.notna(pval) and pval < P_THRESHOLD:
             outline_cell(i, j, "p")
 
-    # ---------- Prepare label geometry (MORE H-SPACING + Y-JITTER, STRICT NO-OVERLAP) ----------
-    base_bottom = 0.16
-    fig.subplots_adjust(left=0.16, right=0.86, bottom=base_bottom, top=0.90)
+    # ---------- Prepare label geometry (LOTS of spacing + small y-jitter, STRICT NO-OVERLAP) ----------
     fig.canvas.draw()
-
     ax_x0, ax_y0, ax_w, ax_h = axes_window_px(ax)
     axis_baseline_y = ax_y0
 
+    # Anchors (px) directly under each column center
     x_centers_data = np.arange(n_cols) + 0.5
     anchors_px = [data_x_to_px(ax, xc) for xc in x_centers_data]
+
     print(f"[INFO] Columns: {n_cols}, Rows: {n_rows}, Figure DPI: {fig.dpi}, Axes px: {ax_w:.1f}×{ax_h:.1f}")
 
+    # Measure label sizes in px
     label_sizes = [measure_text_bbox_px(fig, txt, X_LABEL_FONTSIZE) for txt in label_texts]
     widths_px = [w for (w, h) in label_sizes]
     heights_px = [h for (w, h) in label_sizes]
     max_h_px = max(heights_px) if heights_px else 0.0
 
-    # Increase horizontal spacing via larger effective gap → more tiers + breathing room
-    gap_layout_px = GAP_PX * 2.0
-
-    tiers = shelf_pack_tiers(anchors_px, widths_px, gap_layout_px)
+    # Assign to horizontal tiers to avoid overlap (by x, with big gaps)
+    tiers = shelf_pack_tiers(anchors_px, widths_px, GAP_PX)
     K = max(tiers) + 1 if tiers else 0
     tier_indices = [[] for _ in range(K)]
     for j, t in enumerate(tiers):
         tier_indices[t].append(j)
 
+    # Place centers within [ax_x0+4, ax_x0+ax_w-4]
     Xc_px = [0.0] * n_cols
     for t in range(K):
         idxs = tier_indices[t]
@@ -803,291 +620,153 @@ def main():
             anchors=anchors_px,
             widths=widths_px,
             x_lo=ax_x0 + 4.0, x_hi=ax_x0 + ax_w - 4.0,
-            gap_px=gap_layout_px
+            gap_px=GAP_PX
         )
         for k_local, j in enumerate(idxs):
             Xc_px[j] = X_t[k_local]
 
-    # Tier pitch and **Y-jitter** (tiny, bounded to keep STRICT no-overlap)
-    tier_pitch_px = max_h_px + ROW_GAP_PX
-    jitter_bound = max(0.0, min(3.0, 0.5 * max(0.0, ROW_GAP_PX - 2.0)))
+    # Vertical placement: big tier pitch + tiny jitter, but keep a guaranteed FREE TOP BAND above all labels
     rng = np.random.RandomState(123)
-    y_jitter = rng.uniform(-jitter_bound, jitter_bound, size=n_cols)
-
-    # Build label rectangles (px) with jitter
-    label_rects_px: List[Tuple[float, float, float, float]] = []
-    Ytop_abs_px = [0.0] * n_cols
+    tier_pitch_px = max_h_px + ROW_GAP_PX
+    label_rects_px: List[Tuple[float,float,float,float]] = []
+    Ytop_abs_px = [0.0]*n_cols
     for j in range(n_cols):
         t = tiers[j]
-        top_y = axis_baseline_y - (BASE_OFFSET_PX + t * tier_pitch_px) + float(y_jitter[j])
+        jitter = float(rng.uniform(-Y_JITTER_PX, Y_JITTER_PX))
+        top_y = axis_baseline_y - (BASE_OFFSET_PX + t * tier_pitch_px) + jitter
+        # Ensure label top is BELOW the guaranteed top band
+        top_y = min(top_y, axis_baseline_y - (TOP_BAND_PX + 6.0))
         Ytop_abs_px[j] = top_y
-        L = Xc_px[j] - widths_px[j] / 2.0
-        R = Xc_px[j] + widths_px[j] / 2.0
+        L = Xc_px[j] - widths_px[j]/2.0
+        R = Xc_px[j] + widths_px[j]/2.0
         T = top_y
         B = top_y - heights_px[j]
         label_rects_px.append((L, R, T, B))
 
-    # STRICT global overlap check (across all tiers with jitter)
-    eps = 1e-6
-    rects = [(L, R, min(B, T), max(B, T), idx) for idx, (L, R, T, B) in enumerate(label_rects_px)]
-    rects.sort(key=lambda r: r[0])  # by left
-    active = []  # (right, bottom, top, idx)
-    for L, R, B, T, idx in rects:
-        # pop inactive
-        active = [rec for rec in active if rec[0] + eps > L]
-        # check overlap with active
-        for R2, B2, T2, idx2 in active:
-            # horiz overlap guaranteed; check vertical
-            if not (T + eps <= B2 or T2 + eps <= B):  # intervals overlap
-                raise RuntimeError(
-                    f"Label overlap after jitter: {idx} and {idx2}. "
-                    f"Try increasing ROW_GAP_PX or reducing jitter_bound."
-                )
-        active.append((R, B, T, idx))
-
-    print(f"[INFO] Label tiers: {K}, tier pitch: {tier_pitch_px:.1f}px, GAP_L={gap_layout_px:.1f}px, jitter≤{jitter_bound:.1f}px")
+    # STRICT per-tier overlap check (tiers + big pitch makes cross-tier overlap impossible here)
+    verify_no_label_overlap(tiers, Xc_px, widths_px, heights_px, axis_baseline_y, tier_pitch_px)
+    print(f"[INFO] Label tiers: {K}, tier pitch: {tier_pitch_px:.1f}px, GAP_PX={GAP_PX:.1f}px, jitter≤{Y_JITTER_PX:.1f}px")
 
     # Compute bottom margin to fully show labels
     deepest_bottom = min(B for (_, _, _, B) in label_rects_px) if label_rects_px else axis_baseline_y - BASE_OFFSET_PX
-    needed_extra = (axis_baseline_y - deepest_bottom) + 14.0
-    new_bottom = clamp(base_bottom + needed_extra / (fig.get_size_inches()[1] * fig.dpi), 0.16, 0.85)
+    needed_extra = (axis_baseline_y - deepest_bottom) + 20.0
+    new_bottom = clamp(base_bottom + needed_extra / (fig.get_size_inches()[1] * fig.dpi), 0.16, 0.88)
     fig.subplots_adjust(bottom=new_bottom)
     fig.canvas.draw()
     print(f"[INFO] Bottom margin set to {new_bottom:.3f} (needed extra: {needed_extra:.1f}px)")
 
     # ---------- SAVE LABELS-ONLY PLOT (before any pathfinding) ----------
-    save_labels_only_plot(
-        fig_ref=fig,
-        ax_ref=ax,
-        Xc_px=Xc_px,
-        Ytop_abs_px=Ytop_abs_px,
-        label_texts=label_texts,
-        fontsize=X_LABEL_FONTSIZE,
-        out_prefix=OUT_PREFIX,
-        margins=(0.16, 0.86, new_bottom, 0.90)
-    )
+    def save_labels_only_plot():
+        left, right, bottom, top = left_frac, right_frac, new_bottom, top_frac
+        w_in, h_in = fig.get_size_inches()
+        fig2, ax2 = plt.subplots(figsize=(w_in, h_in), constrained_layout=False)
+        fig2.subplots_adjust(left=left, right=right, bottom=bottom, top=top)
+        fig2.canvas.draw()
+        ax2.set_axis_off()
+        # Use the original axes' pixel box to convert absolute px to axes fractions
+        x0, y0, w, h = ax.get_window_extent(renderer=fig.canvas.get_renderer()).bounds
+        def to_axes_frac(px: float, py: float) -> Tuple[float, float]:
+            return ((px - x0) / w, (py - y0) / h)
+        for j, txt in enumerate(label_texts):
+            xf, yf = to_axes_frac(Xc_px[j], Ytop_abs_px[j])
+            ax2.text(xf, yf, txt, transform=ax2.transAxes, ha="center", va="top",
+                     fontsize=X_LABEL_FONTSIZE, clip_on=False)
+        out_svg = f"{OUT_PREFIX}_labels_only.svg"
+        out_pdf = f"{OUT_PREFIX}_labels_only.pdf"
+        fig2.savefig(out_svg)
+        fig2.savefig(out_pdf)
+        plt.close(fig2)
+        print(f"[SAVED] {out_svg}")
+        print(f"[SAVED] {out_pdf}")
 
-    # ---------- Global grids (TRIPLE depth & cover all labels) ----------
-    gx0, gy0, gw, gh = build_global_grids(
+    save_labels_only_plot()
+
+    # ---------- Global grid (CAVERNOUS, EASY) ----------
+    gx0, gy0, gw, gh, gx1, gy1 = build_global_grid(
         ax_x0=ax_x0, ax_y0=ax_y0, ax_w=ax_w, ax_h=ax_h,
         label_rects_px=label_rects_px,
-        grid_px=GRID_PX, scale=3.0, margin_px=32.0
+        grid_px=GRID_PX, scale=GRID_DEPTH_SCALE, margin_px=MARGIN_PX
     )
-
-    # Post-grid: assert coverage
-    starts_all = [(anchors_px[j], axis_baseline_y) for j in range(n_cols)]
-    # IMPORTANT FIX: goal should be ABOVE label top (toward baseline), not below it.
-    GOAL_LIFT_PX = 4.0 * GRID_PX
-    goals_all = [(Xc_px[j], Ytop_abs_px[j] + max(SAFETY_GAP_PX, GRID_PX) + GOAL_LIFT_PX) for j in range(n_cols)]
-    assert_grid_covers_labels_and_endpoints(
-        label_rects_px=label_rects_px,
-        starts_px=starts_all,
-        goals_px=goals_all,
-        gx0=gx0, gy0=gy0, gw=gw, gh=gh,
-        grid_px=GRID_PX
-    )
-
-    # Build global occupancies
+    # Build occupancy: labels only (we allow line overlaps → no line blocking)
     global_occ_labels = np.zeros((gh, gw), dtype=np.uint8)
     rasterize_labels_into(global_occ_labels, gx0, gy0, GRID_PX, label_rects_px)
-    global_occ_lines = np.zeros_like(global_occ_labels, dtype=np.uint8)
 
-    print(f"[INFO] Routing window px: x[{ax_x0:.1f},{ax_x0+ax_w:.1f}]  y[{gy0:.1f},{ax_y0:.1f}]")
+    # Carve FREE top band under baseline
+    carve_top_band_free(global_occ_labels, ax_y0=ax_y0, gx0=gx0, gy0=gy0, grid_px=GRID_PX, band_px=TOP_BAND_PX)
+
+    # Precompute endpoints
+    starts_all = [(anchors_px[j], axis_baseline_y) for j in range(n_cols)]
+    # Goals are above label top (toward baseline), safely within the free slit zone we’ll carve
+    goals_all  = [(Xc_px[j], Ytop_abs_px[j] + GOAL_GAP_PX) for j in range(n_cols)]
+
+    print(f"[INFO] Routing window px: x[{gx0:.1f},{gx1:.1f}]  y[{gy0:.1f},{ax_y0:.1f}]")
     print(f"[INFO] Global grid: {gw}×{gh} cells @ {GRID_PX:.1f}px; labels blocked cells: {int(global_occ_labels.sum())}")
 
-    # ---------- Route order: 4 batches by anchor quartiles ----------
-    order = np.argsort(anchors_px)
-    qsize = max(1, n_cols // 4)
-    batches = [
-        list(order[0:qsize]),
-        list(order[qsize:2*qsize]),
-        list(order[2*qsize:3*qsize]),
-        list(order[3*qsize:]),
-    ]
-    batches = [b for b in batches if len(b) > 0]
+    # ---------- Route ALL labels (sequential, robust) ----------
+    committed_paths: Dict[int, List[Tuple[float,float]]] = {}
 
-    committed_paths: Dict[int, List[Tuple[float, float]]] = {}
+    def pxtog(xp: float, yp: float) -> Tuple[int,int]:
+        c = int((xp - gx0) / GRID_PX)
+        r = int((yp - gy0) / GRID_PX)
+        return r, c
 
-    def path_cells_blocked(poly: List[Tuple[float, float]],
-                           carve_start: Optional[Tuple[float, float]] = None,
-                           carve_goal: Optional[Tuple[float, float]] = None,
-                           carve_r_cells: int = CLEAR_START_GOAL_RADIUS_CELLS) -> bool:
-        occ = (global_occ_labels | global_occ_lines).astype(np.uint8).copy()
+    band_mid_y = ax_y0 - (TOP_BAND_PX * 0.5)
 
-        def pxtog(xp: float, yp: float) -> Tuple[int, int]:
-            c = int((xp - gx0) / GRID_PX)
-            r = int((yp - gy0) / GRID_PX)
-            return r, c
+    for j in range(n_cols):
+        start = starts_all[j]
+        goal  = goals_all[j]
 
-        if carve_start is not None:
-            sr, sc = pxtog(*carve_start)
-            if 0 <= sr < gh and 0 <= sc < gw:
-                r = max(carve_r_cells, 3)
-                occ[max(0, sr - r):min(gh, sr + r + 1), max(0, sc - r):min(gw, sc + r + 1)] = 0
-        if carve_goal is not None:
-            gr, gc = pxtog(*carve_goal)
-            if 0 <= gr < gh and 0 <= gc < gw:
-                r = max(carve_r_cells, 3)
-                occ[max(0, gr - r):min(gh, gr + r + 1), max(0, gc - r):min(gw, gc + r + 1)] = 0
+        # Build a fresh working occupancy snapshot (labels only, plus free band)
+        occ = global_occ_labels.copy()
 
-        for p0, p1 in zip(poly, poly[1:]):
-            for (ci, cj) in supercover_cells(p0, p1, gx0, gy0, GRID_PX):
-                if not (0 <= cj < gh and 0 <= ci < gw):
-                    return True
-                if occ[cj, ci]:
-                    return True
-        return False
+        # Carve a vertical slit from band down to the goal for this label
+        carve_vertical_slit_for_goal(occ, gx0, gy0, GRID_PX,
+                                     goal_px=goal,
+                                     up_to_y=band_mid_y,
+                                     half_width_cells=1)
 
-    # ---------- Process batches ----------
-    for bi, batch in enumerate(batches, 1):
-        print(f"\n[INFO] === Batch {bi}/{len(batches)}: {len(batch)} labels ===")
-        starts = {j: (anchors_px[j], axis_baseline_y) for j in batch}
-        goals = {j: (Xc_px[j], Ytop_abs_px[j] + max(SAFETY_GAP_PX, GRID_PX) + GOAL_LIFT_PX) for j in batch}
+        # Carve halos at start & goal
+        sr, sc = pxtog(*start)
+        gr, gc = pxtog(*goal)
+        r = CLEAR_START_GOAL_RADIUS_CELLS
+        gh_occ, gw_occ = occ.shape
+        occ[max(0, sr - r):min(gh_occ, sr + r + 1), max(0, sc - r):min(gw_occ, sc + r + 1)] = 0
+        occ[max(0, gr - r):min(gh_occ, gr + r + 1), max(0, gc - r):min(gw_occ, gc + r + 1)] = 0
 
-        remaining = batch.copy()
-        round_id = 0
-        while remaining:
-            round_id += 1
-            t_round = time.perf_counter()
-            print(f"[INFO] Batch {bi} Round {round_id}: remaining {len(remaining)} | building candidates in parallel...")
+        # Try shortest path if available; else deterministic fallback
+        poly: List[Tuple[float,float]]
+        used_fallback = False
+        if HAVE_SKIMAGE:
+            try:
+                cost = np.ones_like(occ, dtype=np.float64)
+                cost[occ != 0] = np.inf
+                s_rc = (sr, sc); g_rc = (gr, gc)
+                path_rc, _ = skimage_route_through_array(
+                    cost, s_rc, g_rc, fully_connected=True, geometric=True
+                )
+                poly = [(gx0 + (c + 0.5) * GRID_PX, gy0 + (r + 0.5) * GRID_PX) for (r, c) in path_rc]
+            except Exception:
+                used_fallback = True
+        else:
+            used_fallback = True
 
-            args_list = []
-            for j in remaining:
-                args_list.append((
-                    j,
-                    starts[j], goals[j],
-                    global_occ_labels,
-                    global_occ_lines,
-                    gx0, gy0, gw, gh, GRID_PX,
-                    CLEAR_START_GOAL_RADIUS_CELLS
-                ))
+        if used_fallback:
+            poly = simple_manhattan_fallback(start, goal, band_y=band_mid_y)
 
-            candidates: Dict[int, Tuple[List[Tuple[float, float]], float, Tuple[int, int]]] = {}
-            with ProcessPoolExecutor(max_workers=min(8, max(1, len(remaining) // 4))) as ex:
-                futs = {ex.submit(_route_one_candidate, a): a[0] for a in args_list}
-                for fut in as_completed(futs):
-                    jid = futs[fut]
-                    try:
-                        label_id, poly, cost_val, shape = fut.result()
-                        candidates[label_id] = (poly, cost_val, shape)
-                    except Exception as e:
-                        print(f"[WARN] Candidate routing failed for label {jid}: {e}")
-                        candidates[label_id] = (None, float("inf"), (gh, gw))
+        # Light simplification (respecting current occupancy)
+        poly2 = greedy_shortcut(poly, occ, gx0, gy0, GRID_PX)
+        poly3 = douglas_peucker(poly2, DP_EPS_PX)
 
-            print(f"[INFO] Batch {bi} Round {round_id}: candidates built in {time.perf_counter() - t_round:.2f}s")
+        committed_paths[j] = poly3
 
-            accepted, rejected = [], []
-            for j in remaining:
-                cand = candidates.get(j, (None, float("inf"), (gh, gw)))[0]
-                if cand is None:
-                    rejected.append(j)
-                    continue
-                if path_cells_blocked(cand, carve_start=starts[j], carve_goal=goals[j]):
-                    rejected.append(j)
-                else:
-                    occ_active = (global_occ_labels | global_occ_lines).astype(np.uint8).copy()
-                    poly2 = greedy_shortcut(cand, occ_active, gx0, gy0, GRID_PX)
-                    simp = douglas_peucker(poly2, DP_EPS_PX)
-                    ok = True
-                    for p0, p1 in zip(simp, simp[1:]):
-                        if not los_free(occ_active, p0, p1, gx0, gy0, GRID_PX):
-                            ok = False
-                            break
-                    if ok:
-                        poly2 = simp
-                    if len(poly2) >= 3:
-                        smooth = sample_catmull_rom(poly2, SMOOTH_STEP_PX)
-                        ok2 = True
-                        for p0, p1 in zip(smooth, smooth[1:]):
-                            if not los_free(occ_active, p0, p1, gx0, gy0, GRID_PX):
-                                ok2 = False
-                                break
-                        if ok2:
-                            poly2 = smooth
-                    if path_cells_blocked(poly2, carve_start=starts[j], carve_goal=goals[j]):
-                        rejected.append(j)
-                    else:
-                        rasterize_polyline_tube_into(global_occ_lines, poly2, gx0, gy0, GRID_PX, LINE_TUBE_PX)
-                        committed_paths[j] = poly2
-                        accepted.append(j)
-
-            print(f"[INFO] Batch {bi} Round {round_id}: accepted {len(accepted)}, rejected {len(rejected)}")
-
-            if rejected:
-                next_remaining = []
-                for j in rejected:
-                    occ = (global_occ_labels | global_occ_lines).astype(np.uint8).copy()
-                    def pxtog(xp, yp) -> Tuple[int, int]:
-                        c = int((xp - gx0) / GRID_PX)
-                        r = int((yp - gy0) / GRID_PX)
-                        return (r, c)
-                    sr, sc = pxtog(*starts[j]); gr, gc = pxtog(*goals[j])
-                    r0 = max(CLEAR_START_GOAL_RADIUS_CELLS, 3)
-                    occ[max(0, sr - r0):min(gh, sr + r0 + 1), max(0, sc - r0):min(gw, sc + r0 + 1)] = 0
-                    occ[max(0, gr - r0):min(gh, gr + r0 + 1), max(0, gc - r0):min(gw, gc + r0 + 1)] = 0
-                    cost = np.ones_like(occ, dtype=np.float64)
-                    cost[occ != 0] = np.inf
-                    try:
-                        # Try lifted goals first (mirrors candidate function)
-                        lifted = False
-                        for lift in (0, 2, 4, 6, 8):
-                            gr_try = min(gh - 1, gr + lift)
-                            try:
-                                path_rc, _ = skimage_route_through_array(
-                                    cost, (sr, sc), (gr_try, gc), fully_connected=True, geometric=True
-                                )
-                                poly = [(gx0 + (c + 0.5) * GRID_PX, gy0 + (r + 0.5) * GRID_PX) for (r, c) in path_rc]
-                                lifted = True
-                                break
-                            except Exception:
-                                continue
-                        if not lifted:
-                            raise RuntimeError("no minimum-cost path was found to the specified end point")
-
-                        if not path_cells_blocked(poly, carve_start=starts[j], carve_goal=goals[j]):
-                            occ_active = (global_occ_labels | global_occ_lines).astype(np.uint8).copy()
-                            poly2 = greedy_shortcut(poly, occ_active, gx0, gy0, GRID_PX)
-                            simp = douglas_peucker(poly2, DP_EPS_PX)
-                            ok = True
-                            for p0, p1 in zip(simp, simp[1:]):
-                                if not los_free(occ_active, p0, p1, gx0, gy0, GRID_PX):
-                                    ok = False
-                                    break
-                            if ok:
-                                poly2 = simp
-                            if len(poly2) >= 3:
-                                smooth = sample_catmull_rom(poly2, SMOOTH_STEP_PX)
-                                ok2 = True
-                                for p0, p1 in zip(smooth, smooth[1:]):
-                                    if not los_free(occ_active, p0, p1, gx0, gy0, GRID_PX):
-                                        ok2 = False
-                                        break
-                                if ok2:
-                                    poly2 = smooth
-                            if not path_cells_blocked(poly2, carve_start=starts[j], carve_goal=goals[j]):
-                                rasterize_polyline_tube_into(global_occ_lines, poly2, gx0, gy0, GRID_PX, LINE_TUBE_PX)
-                                committed_paths[j] = poly2
-                            else:
-                                next_remaining.append(j)
-                        else:
-                            next_remaining.append(j)
-                    except Exception as e:
-                        print(f"[WARN] Sequential re-route failed for label {j}: {e}")
-                        next_remaining.append(j)
-
-                remaining = next_remaining
-            else:
-                remaining = []
-
-            print(f"[INFO] Batch {bi} Round {round_id} done in {time.perf_counter() - t_round:.2f}s, still remaining: {len(remaining)}")
-
-        print(f"[INFO] Batch {bi} committed lines so far: {len(committed_paths)}; blocked cells: {int(global_occ_lines.sum())}")
+    print(f"[INFO] Routed {len(committed_paths)} / {n_cols} label leaders (lines may overlap each other; labels are strictly avoided).")
 
     # ---------- DRAW: Curves & labels ----------
     ax_x0, ax_y0, ax_w, ax_h = axes_window_px(ax)
-    def to_axes_frac(p: Tuple[float, float]) -> Tuple[float, float]:
+    def to_axes_frac(p: Tuple[float,float]) -> Tuple[float,float]:
         return ((p[0] - ax_x0) / ax_w, (p[1] - ax_y0) / ax_h)
 
+    # Draw lines sorted by x to reduce visual overdraw noise
     for j in np.argsort(anchors_px):
         poly = committed_paths.get(j)
         if not poly:
@@ -1096,6 +775,7 @@ def main():
         xs = [p[0] for p in pts_axes]; ys = [p[1] for p in pts_axes]
         ax.add_line(Line2D(xs, ys, transform=ax.transAxes, lw=LEADER_LW, color=LEADER_COLOR, clip_on=False))
 
+    # Draw labels
     for j, txt in enumerate(label_texts):
         xf = (Xc_px[j] - ax_x0) / ax_w
         yf = (Ytop_abs_px[j] - ax_y0) / ax_h
@@ -1113,8 +793,7 @@ def main():
     print(f"\n[SAVED] {out_svg}")
     print(f"[SAVED] {out_pdf}")
     print(f"[DONE] Total time: {t_end - t_start:.2f}s | labels: {n_cols}, rows: {n_rows}, grid: {GRID_PX}px")
-    print(f"[STATS] Final blocked cells — labels: {int(global_occ_labels.sum())}, lines: {int(global_occ_lines.sum())}, total: {int((global_occ_labels|global_occ_lines).sum())}")
-
+    print(f"[STATS] Label blocks: {int(global_occ_labels.sum())}; paths drawn: {len(committed_paths)}")
 
 if __name__ == "__main__":
     main()
