@@ -252,6 +252,105 @@ def main():
         # Merge per-phenocode stats
         per_pheno = per_pheno.merge(eur_h2, on="phenocode", how="left")
 
+        # --- Build report of mapped PheCodes lacking usable h2/SE and why ---
+        # Set of mapped PheCodes (from PheCodeX→ICD→PheCode)
+        # Note: we haven't built aggregated_df yet; derive the mapped set from the lookup table we already have.
+        mapped_set = set(ukbb_lookup_df["ukbb_phenocode"].dropna().astype(str).unique().tolist())
+
+        # Phenocodes with usable p-values (i.e., considered for ACAT)
+        considered_set = set(per_pheno.loc[per_pheno["p_any_acat"].notna(), "phenocode"].astype(str).unique().tolist())
+
+        # Phenocode presence in manifest (pre-QC and post-QC)
+        manifest_preqc_set = set(h2_pre_qc_df["phenocode"].dropna().astype(str).unique().tolist())
+        manifest_postqc_set = set(h2_raw_df["phenocode"].dropna().astype(str).unique().tolist())
+
+        # Candidates to report = mapped but not considered
+        missing_set = sorted(mapped_set - considered_set)
+
+        # Helper: summarize per-phenocode row counts & issues
+        def summarize_issues_one(phenocode: str) -> dict:
+            # rows in manifest pre/post QC
+            pre = h2_pre_qc_df[h2_pre_qc_df["phenocode"].astype(str) == phenocode]
+            post = h2_raw_df[h2_raw_df["phenocode"].astype(str) == phenocode]
+
+            # Choose liability/observed (same logic as main path) for diagnostics
+            for df in (pre, post):
+                if "estimates.final.h2_liability" not in df.columns: df["estimates.final.h2_liability"] = np.nan
+                if "estimates.final.h2_liability_se" not in df.columns: df["estimates.final.h2_liability_se"] = np.nan
+                if "estimates.final.h2_observed" not in df.columns: df["estimates.final.h2_observed"] = np.nan
+                if "estimates.final.h2_observed_se" not in df.columns: df["estimates.final.h2_observed_se"] = np.nan
+                df["_h2_pref"] = np.where(
+                    df["estimates.final.h2_liability"].notna(),
+                    df["estimates.final.h2_liability"],
+                    df["estimates.final.h2_observed"],
+                )
+                df["_se_pref"] = np.where(
+                    df["estimates.final.h2_liability_se"].notna(),
+                    df["estimates.final.h2_liability_se"],
+                    df["estimates.final.h2_observed_se"],
+                )
+
+            # Counts
+            n_pops_preqc = int(pre.shape[0])
+            n_pops_postqc = int(post.shape[0])
+            n_h2_preqc = int(pre["_h2_pref"].notna().sum())
+            n_se_preqc = int(pre["_se_pref"].notna().sum())
+            n_sepos_postqc = int((post["_se_pref"].notna() & (post["_se_pref"] > 0)).sum())
+
+            # Which pops exist pre/post & with usable SE>0
+            pops_preqc = ";".join(sorted(pre["pop"].dropna().astype(str).unique().tolist())) if n_pops_preqc else ""
+            pops_postqc = ";".join(sorted(post["pop"].dropna().astype(str).unique().tolist())) if n_pops_postqc else ""
+            pops_sepos = ";".join(sorted(post.loc[(post["_se_pref"].notna()) & (post["_se_pref"] > 0), "pop"].dropna().astype(str).unique().tolist()))
+
+            # Primary reason classification (exclusive, ordered)
+            if phenocode not in manifest_preqc_set:
+                reason = "absent_from_manifest"
+            elif n_pops_postqc == 0 and USE_QC:
+                reason = "removed_by_qc_all_pops"
+            elif n_sepos_postqc == 0:
+                # present after QC but SE unsuitable everywhere
+                if n_se_preqc == 0:
+                    reason = "missing_se_all_pops"
+                else:
+                    reason = "nonpositive_or_missing_se_all_pops"
+            else:
+                # Should not happen if it's in missing_set; fallback label
+                reason = "other_not_considered"
+
+            # Descriptive: max h2 (pre-QC) if any
+            h2_vals = pre["_h2_pref"].astype(float)
+            h2_max_preqc = (float(np.nanmax(h2_vals)) if h2_vals.notna().any() else np.nan)
+
+            return dict(
+                phenocode=phenocode,
+                reason=reason,
+                n_pops_manifest_preqc=n_pops_preqc,
+                n_pops_manifest_postqc=n_pops_postqc,
+                n_rows_with_h2_preqc=n_h2_preqc,
+                n_rows_with_se_preqc=n_se_preqc,
+                n_rows_with_sepos_postqc=n_sepos_postqc,
+                pops_manifest_preqc=pops_preqc,
+                pops_manifest_postqc=pops_postqc,
+                pops_with_sepos_postqc=pops_sepos,
+                h2_max_preqc=h2_max_preqc,
+            )
+
+        missing_rows = [summarize_issues_one(pc) for pc in missing_set]
+        missing_df = pd.DataFrame(missing_rows, columns=[
+            "phenocode","reason",
+            "n_pops_manifest_preqc","n_pops_manifest_postqc",
+            "n_rows_with_h2_preqc","n_rows_with_se_preqc","n_rows_with_sepos_postqc",
+            "pops_manifest_preqc","pops_manifest_postqc","pops_with_sepos_postqc",
+            "h2_max_preqc"
+        ])
+
+        # Write TSV of “mapped but not considered” phenocodes with reasons
+        try:
+            missing_df.to_csv(MISSING_PHECODES_TSV, sep="\t", index=False)
+            print(f"Wrote detail on missing/unsuitable PheCodes to: {MISSING_PHECODES_TSV}")
+        except Exception as _e:
+            print(f"Warning: failed to write {MISSING_PHECODES_TSV}: {_e}")
+
         print("Successfully processed heritability data at the phenocode level (ACAT + BH-FDR).")
 
     except Exception as e:
