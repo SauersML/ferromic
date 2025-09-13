@@ -201,11 +201,14 @@ class ResourceGovernor:
         self.mem_guard_gb = 4.0
 
     def _update_history(self):
+        if not self._monitor:
+            return
         snap = self._monitor.snapshot()
         if snap.ts <= 0:
             return
         if not self._history or self._history[-1].ts != snap.ts:
             self._history.append(snap)
+
 
     def can_admit_next(self, predicted_extra_gb: float) -> bool:
         self._update_history()
@@ -272,6 +275,10 @@ class MultiTenantGovernor(ResourceGovernor):
         Uses PSS from /proc/<pid>/smaps_rollup to avoid double-counting shared pages.
         Falls back to USS via psutil if PSS is unavailable. As a last resort uses RSS.
         """
+        if not PSUTIL_AVAILABLE:
+            self.inv_rss_gb[inv_id] = 0.0
+            return 0.0
+    
         def _pss_kb(pid: int) -> int:
             path = f"/proc/{pid}/smaps_rollup"
             try:
@@ -287,13 +294,13 @@ class MultiTenantGovernor(ResourceGovernor):
             except Exception:
                 return -1
             return -1
-
+    
         total_bytes = 0
         pids = self.inv_pools.get(inv_id, [])
         if not pids:
             self.inv_rss_gb[inv_id] = 0.0
             return 0.0
-
+    
         valid_pids = []
         for pid in pids:
             try:
@@ -313,13 +320,14 @@ class MultiTenantGovernor(ResourceGovernor):
                 pass
             except Exception:
                 pass
-
+    
         if len(valid_pids) < len(pids):
             self.inv_pools[inv_id] = valid_pids
-
+    
         measured_gb = total_bytes / (1024**3)
         self.inv_rss_gb[inv_id] = measured_gb
         return measured_gb
+
 
     def total_active_footprint(self):
         return sum(self.inv_rss_gb.values())
@@ -585,7 +593,7 @@ def _pipeline_once():
                 A_slice = shared_data['A_global'].reindex(core_df_with_const.index).fillna(0.0)
                 core_df_with_const = pd.concat([core_df_with_const, A_slice], axis=1, copy=False)
 
-                delta_core_df_gb = monitor_thread.snapshot().app_rss_gb - baseline_rss_gb
+                delta_core_df_gb = (monitor_thread.snapshot().app_rss_gb - baseline_rss_gb) if monitor_thread else 0.0
                 governor.update_after_core_df(delta_core_df_gb)
 
                 core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
