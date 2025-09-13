@@ -501,6 +501,44 @@ def fit_overall_h2_reml(
         n_pops_used=int(K), n_phecodes_used=int(J), n_obs_used=int(n)
     )
 
+def _reml_worker(payload):
+    import os
+    # Limit BLAS oversubscription in workers
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
+    y, s2, pop, phe, mix_flag, transform_, B, rs, pi_t = payload
+    fit = fit_overall_h2_reml(
+        y, s2, pop, phe,
+        transform=transform_,
+        bootstrap_B=(int(B) if (B is not None and int(B) > 0) else None),
+        random_state=rs,
+        pi_target=pi_t
+    )
+    out = dict(
+        h2_overall_REML=fit["mu"],
+        se_overall_REML=fit["se_mu"],
+        ci95_l_overall_REML=fit["ci95_l"],
+        ci95_u_overall_REML=fit["ci95_u"],
+        tau2_between_pops=fit["tau2"],
+        omega2_between_phecodes=fit["omega2"],
+        sigma2_within_idio=fit["sigma2_e"],
+        I2_between_pops=fit["I2_between_pops"],
+        I2_between_phecodes=fit["I2_between_phecodes"],
+        I2_idiosyncratic=fit["I2_idiosyncratic"],
+        pred_int_l=fit["pred_int_l"],
+        pred_int_u=fit["pred_int_u"],
+        n_pops_used=fit["n_pops_used"],
+        n_phecodes_used=fit["n_phecodes_used"],
+        n_obs_used=fit["n_obs_used"],
+        any_scale_mix_flag=mix_flag,
+        # Legacy aliases (kept for downstream compatibility)
+        omega2_within_pop=fit["sigma2_e"],
+        I2_within_pops=fit["I2_idiosyncratic"],
+    )
+    return out
+
 def parametric_bootstrap_overall_2re(
     y_t, s2_t, pop_idx, phe_idx,
     mu_hat_t, tau2_hat, omega2_hat, sigma2_e_hat, s2_bar_t,
@@ -934,54 +972,14 @@ def build_disease_overall_estimates(
 
     results = [None] * len(tasks)
 
-    def _worker(payload):
-        # Limit BLAS oversubscription in workers
-        os.environ.setdefault("OMP_NUM_THREADS", "1")
-        os.environ.setdefault("MKL_NUM_THREADS", "1")
-        os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-
-        y, s2, pop, phe, mix_flag, transform_, B, rs, pi_t = payload
-        fit = fit_overall_h2_reml(
-            y, s2, pop, phe,
-            transform=transform_,
-            bootstrap_B=(int(B) if (B is not None and int(B) > 0) else None),
-            random_state=rs,
-            pi_target=pi_t
-        )
-        # Assemble result dict (add legacy aliases)
-        out = dict(
-            h2_overall_REML=fit["mu"],
-            se_overall_REML=fit["se_mu"],
-            ci95_l_overall_REML=fit["ci95_l"],
-            ci95_u_overall_REML=fit["ci95_u"],
-            tau2_between_pops=fit["tau2"],
-            omega2_between_phecodes=fit["omega2"],
-            sigma2_within_idio=fit["sigma2_e"],
-            I2_between_pops=fit["I2_between_pops"],
-            I2_between_phecodes=fit["I2_between_phecodes"],
-            I2_idiosyncratic=fit["I2_idiosyncratic"],
-            pred_int_l=fit["pred_int_l"],
-            pred_int_u=fit["pred_int_u"],
-            n_pops_used=fit["n_pops_used"],
-            n_phecodes_used=fit["n_phecodes_used"],
-            n_obs_used=fit["n_obs_used"],
-            any_scale_mix_flag=mix_flag,
-            # Legacy names for downstream compatibility
-            omega2_within_pop=fit["sigma2_e"],    # previously extra within-pop variance; now idiosyncratic
-            I2_within_pops=fit["I2_idiosyncratic"]
-        )
-        return out
-
     with ProcessPoolExecutor(max_workers=int(n_jobs)) as ex:
-        futs = [ex.submit(_worker, payload) for payload in tasks]
+        fut_to_idx = {ex.submit(_reml_worker, payload): i for i, payload in enumerate(tasks)}
+        iterator = as_completed(fut_to_idx)
         if show_progress:
-            for i, fut in enumerate(tqdm(as_completed(futs), total=len(futs), desc="REML per disease", unit="disease")):
-                idx = futs.index(fut)  # find position
-                results[idx] = fut.result()
-        else:
-            for i, fut in enumerate(as_completed(futs)):
-                idx = futs.index(fut)
-                results[idx] = fut.result()
+            iterator = tqdm(iterator, total=len(fut_to_idx), desc="REML per disease", unit="disease")
+        for fut in iterator:
+            idx = fut_to_idx[fut]
+            results[idx] = fut.result()
 
     # Build output DF
     rows = []
