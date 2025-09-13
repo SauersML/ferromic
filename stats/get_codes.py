@@ -253,9 +253,14 @@ def main():
         per_pheno = per_pheno.merge(eur_h2, on="phenocode", how="left")
 
         # --- Build report of mapped PheCodes lacking usable h2/SE and why ---
-        # Set of mapped PheCodes (from PheCodeX→ICD→PheCode)
-        # Note: we haven't built aggregated_df yet; derive the mapped set from the lookup table we already have.
-        mapped_set = set(ukbb_lookup_df["ukbb_phenocode"].dropna().astype(str).unique().tolist())
+        # Set of mapped PheCodes actually referenced by PheCodeX ICDs (restrict to ICDs present in PheCodeX)
+        mapped_set = set(
+            ukbb_lookup_df.loc[
+                ukbb_lookup_df["ICD"].isin(phecodex_df["ICD"].dropna().astype(str)),
+                "ukbb_phenocode"
+            ].dropna().astype(str).unique().tolist()
+        )
+
 
         # Phenocodes with usable p-values (i.e., considered for ACAT)
         considered_set = set(per_pheno.loc[per_pheno["p_any_acat"].notna(), "phenocode"].astype(str).unique().tolist())
