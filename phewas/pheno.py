@@ -550,10 +550,7 @@ def phenotype_fetcher_worker(pheno_queue,
 
         # Phase 1: compute/use manifest once per cohort (fingerprinted by the cohort index)
         try:
-            try:
-                cohort_fp = models._index_fingerprint(pd.Index(core_index.astype(str)))
-            except Exception:
-                cohort_fp = f"N{len(core_index)}"
+            cohort_fp = "GLOBAL"
             manifest_path = os.path.join(cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json")
             manifest_lock = manifest_path + ".lock"
 
@@ -819,10 +816,7 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
     N = int(len(core_index))
 
     # Cohort-specific manifest path
-    try:
-        cohort_fp = models._index_fingerprint(pd.Index(core_index.astype(str)))
-    except Exception:
-        cohort_fp = f"N{len(core_index)}"
+    cohort_fp = "GLOBAL"
     manifest_path = os.path.join(cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json")
 
     # 1) Materialize case indices per phenotype from cache; filter by min_cases
