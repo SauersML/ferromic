@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from matplotlib.lines import Line2D
 
+# OR-Tools CP-SAT
+from ortools.sat.python import cp_model
+
 # =========================
 # Global configuration
 # =========================
@@ -27,22 +30,31 @@ PERCENTILE_CAP = 99.5          # clip color range to this percentile of |ln(OR)|
 # Figure sizing (inches)
 CELL = 0.55                     # size per cell; keep squares feeling roomy
 EXTRA_W = 5.2                   # room for y labels, colorbar, legend
-EXTRA_H = 2.2                   # base room for title (x-label space is added dynamically)
+EXTRA_H = 2.2                   # base room for title (x-label space computed later)
 MIN_W, MAX_W = 12.0, 80.0
 MIN_H, MAX_H = 7.0, 60.0
 
 # Y-axis label density (to avoid overlap there)
 MAX_YLABELS = 80
 
-# X-axis label styling & layout (staggered, non-overlapping)
+# X-axis labels: text + routing setup (CP-SAT)
 X_LABEL_FONTSIZE = 9
-WRAP_CHARS = 22                 # wrap long phenotype labels for narrower width
-LABEL_BASE_DY_PT = 8            # first tier: points below the axis baseline
-LABEL_TIER_STEP_PT = 10         # additional points per tier
-LABEL_MAX_TIERS = 10            # up to this many tiers of labels
-LABEL_PADDING_PX = 3            # horizontal padding when testing for overlaps
-LEADER_LW = 0.5                 # leader (connector) line width
-LEADER_COLOR = "black"
+WRAP_CHARS = 22                 # wrap phenotype names to normalize widths
+
+# Leader routing geometry (in pixels; converted to axes-fraction for drawing)
+ROUTE_OFFSET_PX = 10            # vertical distance from axis baseline to the horizontal routing line
+LABEL_BOX_PAD_PX = 4            # extra horizontal padding added to measured label widths (visual breathing room)
+LABEL_GAP_MIN_PX = 6            # minimum horizontal gap between adjacent labels on the SAME tier
+EPS_ORDER_PX = 1                # minimal strictly-increasing separation for X order
+TIER_COUNT = 10                 # maximum tiers available (solver will minimize usage)
+
+# Solver objective weights
+W_ANCHOR = 1                    # weight for sum of |X - anchor|
+W_TIERS  = 1000                 # weight for max tier used (keeps labels close to axis)
+W_SPREAD = 1                    # weight to encourage larger min-gap between neighbors
+
+# CP-SAT parameters
+SOLVER_TIME_LIMIT_SEC = 15.0
 
 # Cell separation (natural whitespace between squares)
 DRAW_CELL_EDGES = True
@@ -53,6 +65,13 @@ EDGE_COLOR = "white"
 DASH_PATTERN = (0, (1.0, 1.0))  # short dash/short gap (looks dotted)
 LW_DASHED = 0.5                 # thin dashed outline (nominal p)
 LW_SOLID  = 0.9                 # slightly thicker solid outline (BH q)
+
+# Leader styling
+LEADER_LW = 0.5
+LEADER_COLOR = "black"
+
+# Label text box (optional subtle bounding box; set facecolor=None for no box)
+LABEL_BBOX = dict(facecolor=None, edgecolor=None, boxstyle=None, pad=0.0)
 
 # Fonts / rc
 mpl.rcParams.update({
@@ -92,105 +111,160 @@ def sparse_y_ticks(n: int, max_labels: int) -> np.ndarray:
     return np.arange(0, n, step)
 
 
-def _measure_one_line_width_px(fig, text: str, fontsize: float) -> float:
-    """Measure width of a single-line string in display pixels."""
-    renderer = fig.canvas.get_renderer()
-    t = mpl.text.Text(x=0, y=0, text=text, fontsize=fontsize)
-    t.set_figure(fig)  # attach figure so get_window_extent can access dpi
-    bbox = t.get_window_extent(renderer=renderer)
-    return bbox.width
-
-
-def measure_label_width_px(fig, label: str, fontsize: float) -> float:
+def measure_text_bbox_px(fig, text: str, fontsize: float) -> Tuple[float, float]:
     """
-    Measure width of a (possibly multi-line) label in pixels as
-    the max width across lines.
+    Measure multi-line text bounding box (width, height) in display pixels.
     """
-    # Ensure renderer exists
     fig.canvas.draw()
-    lines = str(label).split("\n")
-    if not lines:
-        return 0.0
-    return max(_measure_one_line_width_px(fig, ln, fontsize) for ln in lines)
+    t = mpl.text.Text(x=0, y=0, text=text, fontsize=fontsize, multialignment="center")
+    t.set_figure(fig)
+    bbox = t.get_window_extent(renderer=fig.canvas.get_renderer())
+    return bbox.width, bbox.height
 
 
-def compute_staggered_layout(fig, ax, labels: List[str], x_centers: np.ndarray) -> Tuple[List[Tuple[float,int,float]], float]:
-    """
-    Compute a non-overlapping, staggered placement for x-axis labels.
-
-    Returns:
-      placements: list of tuples (x_center_data, tier_index, dy_points)
-      max_dy_pt: maximum dy in points used (for margin calculation)
-    """
-    # Ensure renderer ready
+def data_x_to_px(ax, x_data: float) -> float:
+    """Map data x in [0..n_cols] to display pixel x using axes window extent."""
+    fig = ax.figure
     fig.canvas.draw()
-
-    # Transform to display pixels for x positions of column centers
-    x_disp = ax.transData.transform(np.column_stack([x_centers, np.zeros_like(x_centers)]))[:, 0]
-
-    # Prepare tiers: list of occupied intervals in pixels per tier
-    tiers: List[List[Tuple[float, float]]] = [[] for _ in range(LABEL_MAX_TIERS)]
-    placements: List[Tuple[float, int, float]] = []
-    max_dy_pt = 0.0
-
-    # Measure each label's width (max line width) in pixels
-    widths_px = [measure_label_width_px(fig, lab, X_LABEL_FONTSIZE) for lab in labels]
-
-    for j, (xc_px, w_px) in enumerate(zip(x_disp, widths_px)):
-        half = 0.5 * w_px + LABEL_PADDING_PX
-        interval = (xc_px - half, xc_px + half)
-
-        placed = False
-        for tier_idx in range(LABEL_MAX_TIERS):
-            occupied = tiers[tier_idx]
-            # Check overlap with any existing interval in this tier
-            overlaps = any(not (interval[1] < a or interval[0] > b) for (a, b) in occupied)
-            if not overlaps:
-                occupied.append(interval)
-                dy_pt = LABEL_BASE_DY_PT + tier_idx * LABEL_TIER_STEP_PT
-                placements.append((x_centers[j], tier_idx, dy_pt))
-                max_dy_pt = max(max_dy_pt, dy_pt)
-                placed = True
-                break
-
-        if not placed:
-            # Densest fallback: place on last tier anyway
-            tier_idx = LABEL_MAX_TIERS - 1
-            tiers[tier_idx].append(interval)
-            dy_pt = LABEL_BASE_DY_PT + tier_idx * LABEL_TIER_STEP_PT
-            placements.append((x_centers[j], tier_idx, dy_pt))
-            max_dy_pt = max(max_dy_pt, dy_pt)
-
-    return placements, max_dy_pt
+    bbox = ax.get_window_extent(renderer=fig.canvas.get_renderer())
+    x0, w = bbox.x0, bbox.width
+    # Data x range is [0, n_cols]; we assume axis limits are set accordingly
+    x_px = x0 + (x_data / (ax.get_xlim()[1] - ax.get_xlim()[0])) * w
+    return x_px
 
 
-def add_staggered_xlabels(fig, ax, labels: List[str], x_centers: np.ndarray):
+def px_to_axes_frac(ax, x_px: float, y_px: float) -> Tuple[float, float]:
+    """Convert display pixel coords to axes-fraction coords (0..1 inside, can be <0 below)."""
+    fig = ax.figure
+    fig.canvas.draw()
+    bbox = ax.get_window_extent(renderer=fig.canvas.get_renderer())
+    xf = (x_px - bbox.x0) / bbox.width
+    yf = (y_px - bbox.y0) / bbox.height
+    return xf, yf
+
+
+def axes_frac_x_from_px(ax, x_px: float) -> float:
+    """Convert display pixel X to axes-fraction X (0..1 inside)."""
+    fig = ax.figure
+    fig.canvas.draw()
+    bbox = ax.get_window_extent(renderer=fig.canvas.get_renderer())
+    return (x_px - bbox.x0) / bbox.width
+
+
+def get_axes_bbox_px(ax):
+    """Return axes bbox (x0, y0, width, height) in display pixels."""
+    fig = ax.figure
+    fig.canvas.draw()
+    bbox = ax.get_window_extent(renderer=fig.canvas.get_renderer())
+    return bbox.x0, bbox.y0, bbox.width, bbox.height
+
+
+# =========================
+# CP-SAT label layout
+# =========================
+def solve_label_layout_cp_sat(
+    anchors_px: List[int],
+    widths_px: List[int],
+    tier_count: int,
+    x_min_px: int,
+    x_max_px: int,
+    min_gap_px: int,
+    eps_order_px: int,
+    w_anchor: int,
+    w_tiers: int,
+    w_spread: int,
+    time_limit_sec: float,
+):
     """
-    Add staggered, non-overlapping x labels below the axis with leader lines.
-    Assumes layout (subplots_adjust) is already finalized.
+    CP-SAT model:
+      Variables:
+        X_j ∈ [x_min_px .. x_max_px] (int), strictly increasing
+        t_j ∈ {0..tier_count-1} (int)
+        d_j = |X_j - anchors_px[j]|
+        s_j ∈ {0,1} indicates (t_j == t_{j+1})
+        δ ≥ 0 min-gap across same-tier neighbors
+        M_t ≥ 0 max tier used
+
+      Constraints:
+        Order preserving: X_{j+1} - X_j ≥ eps_order_px
+        Same-tier channeling: (t_j == t_{j+1}) ↔ s_j
+        Same-tier nonoverlap (adjacent): (X_{j+1} - X_j) ≥ (W_j+W_{j+1})/2 + min_gap_px, enforced if s_j
+        Bound X_j (left/right), plus half-width margins are absorbed by widths_px in the inequality
+        t_j ≤ M_t
+
+      Objective:
+        Minimize   w_anchor * Σ d_j + w_tiers * M_t  − w_spread * δ
     """
-    placements, _ = compute_staggered_layout(fig, ax, labels, x_centers)
+    n = len(anchors_px)
+    model = cp_model.CpModel()
 
-    # Draw labels + leaders
-    for (x, tier, dy_pt), text in zip(placements, labels):
-        ann = ax.annotate(
-            text,
-            xy=(x, 0), xycoords=ax.get_xaxis_transform(),  # start at axis baseline
-            xytext=(0, -dy_pt), textcoords="offset points",
-            ha="center", va="top",
-            fontsize=X_LABEL_FONTSIZE,
-            arrowprops=dict(
-                arrowstyle="-",
-                lw=LEADER_LW,
-                color=LEADER_COLOR,
-                shrinkA=0, shrinkB=2,
-                mutation_scale=1.0,
-            ),
-            clip_on=False,
-        )
-        ann.set_multialignment("center")
+    # Variables
+    X = [model.NewIntVar(x_min_px, x_max_px, f"X_{j}") for j in range(n)]
+    T = [model.NewIntVar(0, tier_count - 1, f"T_{j}") for j in range(n)]
+    D = [model.NewIntVar(0, x_max_px - x_min_px, f"D_{j}") for j in range(n)]
+    S = [model.NewBoolVar(f"S_{j}") for j in range(n - 1)]  # same tier flags for adjacent pairs
+    delta = model.NewIntVar(0, x_max_px - x_min_px, "delta")
+    M_t = model.NewIntVar(0, tier_count - 1, "M_t")
+
+    # |X - anchor|
+    for j in range(n):
+        model.AddAbsEquality(D[j], X[j] - anchors_px[j])
+
+    # Order preserving
+    for j in range(n - 1):
+        model.Add(X[j + 1] - X[j] >= eps_order_px)
+
+    # Channel S_j ↔ (T_j == T_{j+1})
+    for j in range(n - 1):
+        model.Add(T[j] == T[j + 1]).OnlyEnforceIf(S[j])
+        model.Add(T[j] != T[j + 1]).OnlyEnforceIf(S[j].Not())
+
+    # Same-tier nonoverlap for adjacent neighbors
+    # X_{j+1} - X_j >= (W_j + W_{j+1})/2 + min_gap_px, enforced if same tier
+    for j in range(n - 1):
+        min_sep = (widths_px[j] + widths_px[j + 1]) // 2 + min_gap_px
+        model.Add(X[j + 1] - X[j] >= min_sep).OnlyEnforceIf(S[j])
+
+    # Encourage global spacing: X_{j+1} - X_j - halfwidthsum >= delta (if same tier)
+    for j in range(n - 1):
+        halfsum = (widths_px[j] + widths_px[j + 1]) // 2
+        model.Add(X[j + 1] - X[j] - halfsum >= delta).OnlyEnforceIf(S[j])
+
+    # Max tier usage
+    for j in range(n):
+        model.Add(T[j] <= M_t)
+
+    # Objective
+    # Minimize w_anchor * sum(D) + w_tiers * M_t  - w_spread * delta
+    obj_terms = []
+    if w_anchor:
+        obj_terms.append(w_anchor * sum(D))
+    if w_tiers:
+        obj_terms.append(w_tiers * M_t)
+    if w_spread:
+        obj_terms.append(-w_spread * delta)
+    model.Minimize(sum(obj_terms))
+
+    # Solve
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = time_limit_sec
+    solver.parameters.num_search_workers = 8  # parallelize if possible
+
+    status = solver.Solve(model)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        raise RuntimeError("CP-SAT could not find a feasible label layout.")
+
+    X_sol = [int(solver.Value(X[j])) for j in range(n)]
+    T_sol = [int(solver.Value(T[j])) for j in range(n)]
+    M_t_sol = int(solver.Value(M_t))
+    delta_sol = int(solver.Value(delta))
+
+    return X_sol, T_sol, M_t_sol, delta_sol
 
 
+# =========================
+# Main
+# =========================
 def main():
     in_path = Path(INPUT_PATH)
     if not in_path.exists():
@@ -231,7 +305,7 @@ def main():
 
     # Labels (phenotypes: underscores → spaces)
     raw_col_labels = [str(c) for c in pv.columns]
-    col_labels = [textwrap.fill(lbl.replace("_", " "), width=WRAP_CHARS) for lbl in raw_col_labels]
+    label_texts = [textwrap.fill(lbl.replace("_", " "), width=WRAP_CHARS) for lbl in raw_col_labels]
     row_labels = list(pv.index)
 
     data = pv.values
@@ -243,7 +317,7 @@ def main():
     if not np.isfinite(vmax) or vmax <= 0:
         vmax = 1.0
 
-    # Figure
+    # Figure (initial)
     fig_w, fig_h = compute_figsize(n_rows, n_cols)
     plt.close("all")
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), constrained_layout=False)
@@ -254,9 +328,7 @@ def main():
     masked = np.ma.masked_invalid(data)
 
     # Colormap (Matplotlib 3.7+)
-    cmap = mpl.colormaps.get_cmap(COLORMAP)
-    # Make a version with explicit 'bad' color for NaNs
-    cmap = cmap.with_extremes(bad="#D9D9D9")
+    cmap = mpl.colormaps.get_cmap(COLORMAP).with_extremes(bad="#D9D9D9")
 
     edgecolors = EDGE_COLOR if DRAW_CELL_EDGES else "face"
     linewidth = EDGE_LW if DRAW_CELL_EDGES else 0.0
@@ -274,15 +346,16 @@ def main():
     ax.set_title("Inversion–Phenotype Associations (normed OR = ln(OR))", pad=12)
 
     # Ticks: centers of cells for both axes
+    ax.set_xlim(0, n_cols)
     ax.set_xticks(np.arange(n_cols) + 0.5)
     ax.set_yticks(np.arange(n_rows) + 0.5)
 
-    # Y labels: sparsify to avoid overlap (phenotype labels handled via custom layout)
+    # Y labels: sparsify to avoid overlap (phenotype labels handled via optimized layout)
     y_keep = sparse_y_ticks(n_rows, MAX_YLABELS)
     y_ticklabels = [row_labels[i] if i in set(y_keep) else "" for i in range(n_rows)]
     ax.set_yticklabels(y_ticklabels)
 
-    # Hide default x tick labels; we'll add staggered labels with leaders
+    # Hide default x tick labels; we’ll draw optimized ones ourselves
     ax.set_xticklabels([])
     ax.tick_params(axis="x", length=0)
 
@@ -299,7 +372,7 @@ def main():
     col_lookup = {ph: j for j, ph in enumerate(pv.columns)}
 
     def outline_cell(i, j, kind):
-        xy = (j, i)  # bottom-left of cell
+        xy = (j, i)  # bottom-left of cell in data coords
         if kind == "q":  # strong (solid, slightly thicker)
             rect = Rectangle(
                 xy, 1, 1, fill=False, lw=LW_SOLID, linestyle="solid", edgecolor="black"
@@ -312,7 +385,7 @@ def main():
             return
         ax.add_patch(rect)
 
-    # Iterate rows once (df is deduplicated on (Inversion, Phenotype))
+    # Iterate once (df deduplicated on (Inversion, Phenotype))
     for inv, ph, pval, qval in zip(df["Inversion"], df["Phenotype"], df["P_Value"], df["BH_q"]):
         i = row_lookup.get(inv, None)
         j = col_lookup.get(ph, None)
@@ -323,39 +396,92 @@ def main():
         elif pd.notna(pval) and pval < P_THRESHOLD:
             outline_cell(i, j, "p")
 
-    # Legend for outlines
-    legend_elems = [
-        Line2D([0], [0], color="black", lw=LW_SOLID, linestyle="solid", label=f"BH q < {Q_THRESHOLD:g}"),
-        Line2D([0], [0], color="black", lw=LW_DASHED, linestyle=DASH_PATTERN, label=f"p < {P_THRESHOLD:g}"),
-    ]
-    ax.legend(
-        handles=legend_elems,
-        loc="upper left",
-        bbox_to_anchor=(1.01, 1.0),
-        frameon=False,
-        title="Significance"
-    )
-
-    # ---------- Custom, staggered x labels with leaders ----------
-    # First pass: modest bottom margin so we can measure/render
+    # ---------- Optimized phenotype labels with CP-SAT ----------
+    # Layout prep: fix left/right margins first so axes width is stable
     base_bottom = 0.16
     fig.subplots_adjust(left=0.16, right=0.86, bottom=base_bottom, top=0.90)
+    fig.canvas.draw()
 
-    # Column centers in data coords
-    x_centers = np.arange(n_cols) + 0.5
+    # Anchors in display pixels (center of each column)
+    x_centers_data = np.arange(n_cols) + 0.5
+    anchors_px = [int(round(data_x_to_px(ax, xc))) for xc in x_centers_data]
 
-    # Compute layout (tiers & offsets) and the max vertical extent needed
-    _, max_dy_pt = compute_staggered_layout(fig, ax, col_labels, x_centers)
+    # Measure label sizes in pixels (multi-line)
+    label_sizes = [measure_text_bbox_px(fig, txt, X_LABEL_FONTSIZE) for txt in label_texts]
+    widths_px = [int(math.ceil(w + 2 * LABEL_BOX_PAD_PX)) for (w, h) in label_sizes]
+    heights_px = [int(math.ceil(h)) for (w, h) in label_sizes]
 
-    # Convert needed label space (points) to figure fraction and update bottom margin
-    extra_bottom_in = (max_dy_pt + 12) / 72.0   # add a small cushion (12pt)
-    extra_frac = extra_bottom_in / fig.get_size_inches()[1]
-    new_bottom = base_bottom + extra_frac
-    new_bottom = clamp(new_bottom, 0.16, 0.50)  # cap so we don't overgrow
+    # Tier height: uniform spacing based on tallest label + vertical padding
+    TIER_HEIGHT_PX = max(heights_px) + 6
+
+    # X bounds for label centers (keep labels within axes width, respecting half-widths)
+    ax_x0, ax_y0, ax_w, ax_h = get_axes_bbox_px(ax)
+    x_min_px = int(math.floor(ax_x0 + widths_px[0] / 2 + 2))   # small left buffer
+    x_max_px = int(math.ceil(ax_x0 + ax_w - widths_px[-1] / 2 - 2))
+
+    # Solve CP-SAT layout
+    X_sol_px, T_sol, M_t_sol, delta_sol = solve_label_layout_cp_sat(
+        anchors_px=anchors_px,
+        widths_px=widths_px,
+        tier_count=TIER_COUNT,
+        x_min_px=x_min_px,
+        x_max_px=x_max_px,
+        min_gap_px=LABEL_GAP_MIN_PX,
+        eps_order_px=EPS_ORDER_PX,
+        w_anchor=W_ANCHOR,
+        w_tiers=W_TIERS,
+        w_spread=W_SPREAD,
+        time_limit_sec=SOLVER_TIME_LIMIT_SEC,
+    )
+
+    # Compute required bottom margin (in figure fraction) for the labels area
+    max_tier_used = M_t_sol
+    needed_px = ROUTE_OFFSET_PX + (max_tier_used + 1) * TIER_HEIGHT_PX + 12  # + small cushion
+    fig_h_px = fig.get_size_inches()[1] * fig.dpi
+    new_bottom = clamp(base_bottom + needed_px / fig_h_px, 0.16, 0.60)
     fig.subplots_adjust(bottom=new_bottom)
+    fig.canvas.draw()
 
-    # Draw labels + leaders in final layout
-    add_staggered_xlabels(fig, ax, col_labels, x_centers)
+    # Convert solved X to axes-fraction (for drawing)
+    X_sol_frac = [axes_frac_x_from_px(ax, xpx) for xpx in X_sol_px]
+    A_frac = [axes_frac_x_from_px(ax, apx) for apx in anchors_px]
+
+    # Y positions in axes-fraction units (negative values extend into bottom margin)
+    # Axis baseline (inside axes) is y=0 in ax.transAxes. Below-axis positions are negative.
+    route_y_frac = -ROUTE_OFFSET_PX / ax_h
+    tier_y_tops = [-(ROUTE_OFFSET_PX + (t + 0) * TIER_HEIGHT_PX) / ax_h for t in range(TIER_COUNT)]
+    # Label anchor position (top of the text box) per label:
+    label_top_y_frac = [-(ROUTE_OFFSET_PX + (T_sol[j]) * TIER_HEIGHT_PX) / ax_h for j in range(n_cols)]
+
+    # Draw leaders: 3-segment orthogonal polylines (no crossings by construction)
+    for j in range(n_cols):
+        # Segment 1: vertical from (A_frac[j], 0) to (A_frac[j], route_y_frac)
+        ax.add_line(Line2D(
+            [A_frac[j], A_frac[j]], [0.0, route_y_frac],
+            transform=ax.transAxes, lw=LEADER_LW, color=LEADER_COLOR, clip_on=False
+        ))
+        # Segment 2: horizontal from (A_frac[j], route_y_frac) to (X_sol_frac[j], route_y_frac)
+        ax.add_line(Line2D(
+            [A_frac[j], X_sol_frac[j]], [route_y_frac, route_y_frac],
+            transform=ax.transAxes, lw=LEADER_LW, color=LEADER_COLOR, clip_on=False
+        ))
+        # Segment 3: vertical from (X_sol_frac[j], route_y_frac) down to top of label box
+        ax.add_line(Line2D(
+            [X_sol_frac[j], X_sol_frac[j]], [route_y_frac, label_top_y_frac[j]],
+            transform=ax.transAxes, lw=LEADER_LW, color=LEADER_COLOR, clip_on=False
+        ))
+
+    # Draw labels (top-aligned at label_top_y_frac)
+    for j, txt in enumerate(label_texts):
+        ax.text(
+            X_sol_frac[j], label_top_y_frac[j],
+            txt,
+            transform=ax.transAxes,
+            ha="center", va="top",
+            fontsize=X_LABEL_FONTSIZE,
+            bbox=LABEL_BBOX,
+            clip_on=False,
+        )
 
     # Ensure vector output (no rasterization of the QuadMesh)
     mesh.set_rasterized(False)
