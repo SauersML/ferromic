@@ -22,6 +22,8 @@ H2_MANIFEST_URL = "https://pan-ukb-us-east-1.s3.amazonaws.com/sumstats_release/h
 # Define the name for the final, comprehensive output file.
 OUTPUT_FILENAME = "phecodex_with_phenocode_and_h2_mappings.tsv"
 
+MISSING_PHECODES_TSV = "phecodes_without_usable_h2.tsv"
+
 # Define the delimiter for joining lists into a single string.
 LIST_DELIMITER = ";"
 
@@ -160,10 +162,13 @@ def main():
             "qcflags.defined_h2", "qcflags.in_bounds_h2", "qcflags.pass_all"
         ]
         h2_raw_df = read_bgz_tsv(H2_MANIFEST_URL, usecols=usecols)
-
+        
         # Keep only phecode traits (so 'phenocode' matches PheCodes)
         h2_raw_df = h2_raw_df[h2_raw_df["trait_type"] == "phecode"].copy()
-
+        
+        # Preserve a pre-QC snapshot for diagnostics
+        h2_pre_qc_df = h2_raw_df.copy()
+        
         # Optional QC filters
         if USE_QC:
             have_defined = "qcflags.defined_h2" in h2_raw_df.columns
@@ -173,6 +178,7 @@ def main():
                     (h2_raw_df["qcflags.defined_h2"] == True) &
                     (h2_raw_df["qcflags.in_bounds_h2"] == True)
                 ].copy()
+
 
         # Ensure columns exist
         for col in [
