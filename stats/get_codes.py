@@ -839,10 +839,20 @@ def main():
                    .reset_index()
         )
 
-        valid_mask = per_pheno["p_any_acat"].notna()
+        # Guard for the extreme "no usable h\u00B2 rows" case
+        if per_pheno.empty:
+            per_pheno = pd.DataFrame(
+                columns=["phenocode", "p_any_acat", "h2_max_any_pop", "pop_min_p"]
+            )
+
+        # Flag phenocodes that actually have heritability data
+        per_pheno["has_h2_data_for_phenocode"] = per_pheno["p_any_acat"].notna().astype("int64")
         per_pheno["q_bh"] = np.nan
+        valid_mask = per_pheno["p_any_acat"].notna()
         if valid_mask.any():
-            per_pheno.loc[valid_mask, "q_bh"] = bh_fdr(per_pheno.loc[valid_mask, "p_any_acat"].to_numpy(dtype=float))
+            per_pheno.loc[valid_mask, "q_bh"] = bh_fdr(
+                per_pheno.loc[valid_mask, "p_any_acat"].to_numpy(dtype=float)
+            )
 
         # Rename detection flag as requested
         per_pheno["phenocode_anypop_gt_threshold_fdr"] = (
@@ -924,16 +934,25 @@ def main():
                .reset_index()
     )
 
+    # Flag whether each disease maps to at least one UKBB phenocode
+    aggregated_df["has_ukbb_phenocode_mapping"] = aggregated_df["ukbb_phenocode"].apply(lambda xs: len(xs) > 0)
+
     # Detection → disease level
     long_df = aggregated_df.explode("ukbb_phenocode")
     long_df["ukbb_phenocode"] = long_df["ukbb_phenocode"].astype("string")
     per_pheno["phenocode"] = per_pheno["phenocode"].astype("string")
 
     long_joined = long_df.merge(
-        per_pheno[["phenocode", "phenocode_anypop_gt_threshold_fdr", "eur_h2_mean"]],
+        per_pheno[["phenocode", "phenocode_anypop_gt_threshold_fdr", "eur_h2_mean", "has_h2_data_for_phenocode"]],
         left_on="ukbb_phenocode",
         right_on="phenocode",
         how="left"
+    )
+
+    data_presence = (
+        long_joined.groupby(grouping_cols, as_index=False)["has_h2_data_for_phenocode"]
+                   .max()
+                   .rename(columns={"has_h2_data_for_phenocode": "has_ukbb_heritability_data"})
     )
 
     disease_signals = (
@@ -946,9 +965,13 @@ def main():
     )
 
     final_df = aggregated_df.merge(disease_signals, on=grouping_cols, how="left")
+    final_df = final_df.merge(data_presence, on=grouping_cols, how="left")
+
     final_df["is_h2_significant_in_any_ancestry"] = (
-        final_df["is_h2_significant_in_any_ancestry"].fillna(0).astype("int64")
+        final_df["is_h2_significant_in_any_ancestry"].astype("Int64")
     )
+    final_df["has_ukbb_heritability_data"] = final_df["has_ukbb_heritability_data"].fillna(0).astype("int64")
+    final_df["has_ukbb_phenocode_mapping"] = final_df["has_ukbb_phenocode_mapping"].astype("int64")
 
     # ---------- Estimation (REML) ONLY for diseases passing detection ----------
     sig_keys = final_df.loc[final_df["is_h2_significant_in_any_ancestry"] == 1, grouping_cols].drop_duplicates()
@@ -1028,7 +1051,10 @@ def main():
         "n_pops_used",
         "n_obs_used",
         "any_scale_mix_flag",
-        "h2_overall_RE"  # optional alias
+        "h2_overall_RE",  # optional alias
+        # NEW flags
+        "has_ukbb_phenocode_mapping",
+        "has_ukbb_heritability_data",
     ]
     for c in out_cols:
         if c not in final_df.columns:
