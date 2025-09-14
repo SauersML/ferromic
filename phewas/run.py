@@ -29,6 +29,7 @@ from . import iox as io
 from . import pheno
 from . import pipes
 from . import models
+from . import testing
 
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
@@ -385,6 +386,12 @@ MIN_CONTROLS_FILTER = 1000
 MIN_NEFF_FILTER = 0 # Default off
 FDR_ALPHA = 0.05
 
+# --- Testing configuration (centralized in testing.py) ---
+tctx = testing.get_testing_ctx()
+PHENO_PROTECT = set()
+MAX_CONCURRENT_INVERSIONS_DEFAULT = tctx["MAX_CONCURRENT_INVERSIONS_DEFAULT"]
+MAX_CONCURRENT_INVERSIONS_BOOT = tctx["MAX_CONCURRENT_INVERSIONS_BOOT"]
+
 # --- Per-ancestry thresholds and multiple-testing for ancestry splits ---
 PER_ANC_MIN_CASES = 100
 PER_ANC_MIN_CONTROLS = 100
@@ -522,9 +529,9 @@ def _pipeline_once():
                 cdr_codename=cdr_codename,
                 cache_dir=CACHE_DIR,
                 min_cases=MIN_CASES_FILTER,
-                phi_threshold=float(os.getenv("PHENO_CORR_PHI", "0.90")),
-                share_threshold=float(os.getenv("PHENO_SHARE_THRESH", "0.80")),
-                protect=set(filter(None, os.getenv("PHENO_PROTECT", "").split(",")))
+                phi_threshold=pheno.PHI_THRESHOLD,
+                share_threshold=pheno.SHARE_THRESHOLD,
+                protect=PHENO_PROTECT
             )
             print("[Setup]    - Global phenotype dedup manifest ready.", flush=True)
         except Exception as e:
@@ -541,11 +548,15 @@ def _pipeline_once():
                 results_cache_dir = os.path.join(inversion_cache_dir, "results_atomic")
                 lrt_overall_cache_dir = os.path.join(inversion_cache_dir, "lrt_overall")
                 lrt_followup_cache_dir = os.path.join(inversion_cache_dir, "lrt_followup")
+                boot_overall_cache_dir = os.path.join(inversion_cache_dir, "boot_overall")
                 os.makedirs(results_cache_dir, exist_ok=True)
-                os.makedirs(lrt_overall_cache_dir, exist_ok=True)
                 os.makedirs(lrt_followup_cache_dir, exist_ok=True)
+                if tctx["MODE"] == "bootstrap":
+                    os.makedirs(boot_overall_cache_dir, exist_ok=True)
+                else:
+                    os.makedirs(lrt_overall_cache_dir, exist_ok=True)
 
-                ctx = {"NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER, "MIN_NEFF_FILTER": MIN_NEFF_FILTER, "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS, "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE, "RESULTS_CACHE_DIR": results_cache_dir, "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir, "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir, "cdr_codename": shared_data['cdr_codename'], "REPAIR_META_IF_MISSING": True}
+                ctx = {"NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER, "MIN_NEFF_FILTER": MIN_NEFF_FILTER, "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS, "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE, "RESULTS_CACHE_DIR": results_cache_dir, "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir, "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir, "BOOT_OVERALL_CACHE_DIR": boot_overall_cache_dir, "BOOTSTRAP_B": tctx["BOOTSTRAP_B"], "BOOT_SEED_BASE": tctx["BOOT_SEED_BASE"], "cdr_codename": shared_data['cdr_codename'], "REPAIR_META_IF_MISSING": True}
                 dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
                 inversion_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, f"inversion_{target_inversion}.parquet"), io.load_inversions, target_inversion, dosages_path, validate_target=target_inversion)
                 inversion_df.index = inversion_df.index.astype(str)
@@ -589,7 +600,7 @@ def _pipeline_once():
                 except Exception as e:
                     print(f"{log_prefix} [WARN] Pre-cache skipped: {e}", flush=True)
                 
-                # --- Build Stage-1 LRT worklist without running main PheWAS ---
+                # --- Build Stage-1 testing worklist without running main PheWAS ---
                 phenos_list = []
                 for row in shared_data['pheno_defs'][['sanitized_name','disease_category']].to_dict('records'):
                     info = {
@@ -613,15 +624,16 @@ def _pipeline_once():
                     if ok:
                         phenos_list.append(row['sanitized_name'])
                 
-                print(f"{log_prefix} Queued {len(phenos_list)} phenotypes for Stage-1 LRT (pre-filtered).")
+                print(f"{log_prefix} Queued {len(phenos_list)} phenotypes for Stage-1 testing (pre-filtered).")
 
                 def on_pool_started_callback(num_procs, worker_pids):
                     governor.register_pool(inv_safe_name, worker_pids)
                     time.sleep(10)
                     measured_gb = governor.measure_inv(inv_safe_name)
                     core_shm_gb = float(pipes.BUDGET._reserved_by_inv.get(inv_safe_name, {}).get("core_shm", 0.0))
-                    # Do not double-charge the shared design matrix: reserve only the pool's incremental footprint.
-                    pool_steady_gb = max(0.0, measured_gb - core_shm_gb)
+                    boot_shm_gb = float(pipes.BUDGET._reserved_by_inv.get(inv_safe_name, {}).get("boot_shm", 0.0))
+                    # Do not double-charge shared matrices: reserve only the pool's incremental footprint.
+                    pool_steady_gb = max(0.0, measured_gb - core_shm_gb - boot_shm_gb)
                     governor.update_steady_state(inv_safe_name, pool_steady_gb)
                     pipes.BUDGET.revise(inv_safe_name, "pool_steady", pool_steady_gb)
                     per_worker = max(0.25, pool_steady_gb / max(1, num_procs))
@@ -630,7 +642,7 @@ def _pipeline_once():
 
                 name_to_cat = shared_data['pheno_defs'].set_index('sanitized_name')['disease_category'].to_dict()
                 if phenos_list:
-                    pipes.run_lrt_overall(
+                    testing.run_overall(
                         core_df_with_const,
                         allowed_mask_by_cat,
                         shared_data['anc_series'],
@@ -640,17 +652,26 @@ def _pipeline_once():
                         target_inversion,
                         ctx,
                         mem_floor_callable,
-                        on_pool_started=on_pool_started_callback
+                        on_pool_started=on_pool_started_callback,
+                        mode=tctx["MODE"],
                     )
                 else:
-                    print(f"{log_prefix} No phenotypes qualified for Stage-1 LRT after prefiltering.")
+                    print(f"{log_prefix} No phenotypes qualified for Stage-1 testing after prefiltering.")
 
                 try:
-                    lrt_files = [f for f in os.listdir(lrt_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
                     rows = []
-                    for fn in lrt_files:
-                        s = pd.read_json(os.path.join(lrt_overall_cache_dir, fn), typ="series")
-                        rows.append({"Phenotype": os.path.splitext(fn)[0], "P_LRT_Overall": pd.to_numeric(s.get("P_LRT_Overall"), errors="coerce")})
+                    if tctx["MODE"] == "lrt_bh":
+                        lrt_files = [f for f in os.listdir(lrt_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+                        for fn in lrt_files:
+                            s = pd.read_json(os.path.join(lrt_overall_cache_dir, fn), typ="series")
+                            rows.append({"Phenotype": os.path.splitext(fn)[0], "P_LRT_Overall": pd.to_numeric(s.get("P_LRT_Overall"), errors="coerce")})
+                        p_col = "P_LRT_Overall"
+                    else:
+                        boot_files = [f for f in os.listdir(boot_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+                        for fn in boot_files:
+                            s = pd.read_json(os.path.join(boot_overall_cache_dir, fn), typ="series")
+                            rows.append({"Phenotype": os.path.splitext(fn)[0], "P_EMP": pd.to_numeric(s.get("P_EMP"), errors="coerce")})
+                        p_col = "P_EMP"
                     lrt_df = pd.DataFrame(rows)
                     res_files = [f for f in os.listdir(results_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
                     rrows = []
@@ -667,18 +688,17 @@ def _pipeline_once():
                             "N_Controls": pd.to_numeric(s.get("N_Controls"), errors="coerce"),
                         })
                     res_df = pd.DataFrame(rrows)
-                    inv_df = lrt_df.merge(res_df, on="Phenotype", how="left") if not lrt_df.empty else pd.DataFrame(
-                        columns=["Phenotype", "P_LRT_Overall", "N_Total", "OR", "Beta", "P_Value", "N_Cases", "N_Controls"]
-                    )
-                    m = int(inv_df["P_LRT_Overall"].notna().sum()) if not inv_df.empty else 0
+                    inv_df = lrt_df.merge(res_df, on="Phenotype", how="left") if not lrt_df.empty else pd.DataFrame(columns=["Phenotype", p_col, "N_Total", "OR", "Beta", "P_Value", "N_Cases", "N_Controls"])
+                    m = int(inv_df[p_col].notna().sum()) if not inv_df.empty else 0
                     if m > 0:
-                        mask = inv_df["P_LRT_Overall"].notna()
-                        _, q_within, _, _ = multipletests(inv_df.loc[mask, "P_LRT_Overall"], alpha=FDR_ALPHA, method="fdr_bh")
+                        mask = inv_df[p_col].notna()
+                        _, q_within, _, _ = multipletests(inv_df.loc[mask, p_col], alpha=FDR_ALPHA, method="fdr_bh")
                         inv_df.loc[mask, "Q_within"] = q_within
 
-                    def _fmt(v, fmt_str): return f"{float(v):{fmt_str}}" if pd.notna(v) else ""
-                    top = inv_df.sort_values("P_LRT_Overall").head(10).copy() if m > 0 else inv_df.head(0)
-                    top["P"] = top["P_LRT_Overall"].apply(lambda v: _fmt(v, ".3e"))
+                    def _fmt(v, fmt_str):
+                        return f"{float(v):{fmt_str}}" if pd.notna(v) else ""
+                    top = inv_df.sort_values(p_col).head(10).copy() if m > 0 else inv_df.head(0)
+                    top["P"] = top[p_col].apply(lambda v: _fmt(v, ".3e"))
                     top["Q"] = top["Q_within"].apply(lambda v: _fmt(v, ".3f"))
                     top["OR"] = top["OR"].apply(lambda v: _fmt(v, "0.3f"))
                     top["Beta"] = top["Beta"].apply(lambda v: _fmt(v, "+0.4f"))
@@ -710,7 +730,9 @@ def _pipeline_once():
         }
         num_ancestry_dummies = len(A_cols)
         C = 1 + 1 + 1 + NUM_PCS + 2 + num_ancestry_dummies
-        MAX_CONCURRENT_INVERSIONS = int(os.getenv("MAX_CONCURRENT_INVERSIONS", "8"))
+        MAX_CONCURRENT_INVERSIONS = MAX_CONCURRENT_INVERSIONS_DEFAULT
+        if tctx["MODE"] == "bootstrap":
+            MAX_CONCURRENT_INVERSIONS = MAX_CONCURRENT_INVERSIONS_BOOT
         pending_inversions = deque(sorted(list(run.TARGET_INVERSIONS)))
         running_inversions = {}
 
@@ -804,39 +826,14 @@ def _pipeline_once():
                 missing_ci_mask &= (df["Used_Ridge"] == False)
             df.loc[missing_ci_mask, "OR_CI95"] = df.loc[missing_ci_mask, ["Beta", "P_Value"]].apply(lambda r: _compute_overall_or_ci(r["Beta"], r["P_Value"]), axis=1)
 
-            # Collect all Stage-1 LRT results from their per-inversion cache directories
-            print("\n--- Collecting Stage-1 LRT results ---")
-            overall_records = []
-            for target_inversion in run.TARGET_INVERSIONS:
-                lrt_overall_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion), "lrt_overall")
-                if not os.path.isdir(lrt_overall_cache_dir): continue
-                files_overall = [f for f in os.listdir(lrt_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
-                for filename in files_overall:
-                    try:
-                        rec = pd.read_json(os.path.join(lrt_overall_cache_dir, filename), typ="series").to_dict()
-                        rec['Inversion'] = target_inversion
-                        overall_records.append(rec)
-                    except Exception as e:
-                        print(f"Warning: Could not read LRT overall file: {filename}, Error: {e}")
-
-            if overall_records:
-                overall_df = pd.DataFrame(overall_records)
-                print(f"Collected {len(overall_df)} Stage-1 LRT records across {len(run.TARGET_INVERSIONS)} inversions.")
-                # Merge LRT results into the main dataframe
-                df = df.merge(overall_df, on=["Phenotype", "Inversion"], how="left")
-            else:
-                print("No Stage-1 LRT records found.")
-
-            # Perform global FDR correction on the merged dataframe
-            mask_overall = pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna()
-            m_total = int(mask_overall.sum())
-            df["Q_GLOBAL"] = np.nan
-            if m_total > 0:
-                print(f"\n--- Applying global BH-FDR correction to {m_total} valid P-values ---")
-                _, q_adj_global, _, _ = multipletests(df.loc[mask_overall, "P_LRT_Overall"], alpha=FDR_ALPHA, method="fdr_bh")
-                df.loc[mask_overall, "Q_GLOBAL"] = q_adj_global
-
-            df["Sig_Global"] = df["Q_GLOBAL"] < FDR_ALPHA
+            df, _ = testing.consolidate_and_select(
+                df,
+                run.TARGET_INVERSIONS,
+                CACHE_DIR,
+                alpha=FDR_ALPHA,
+                mode=tctx["MODE"],
+                selection=tctx["SELECTION"],
+            )
 
             # --- PART 4: SCHEDULE AND RUN STAGE-2 FOLLOW-UPS ---
             print("\n" + "=" * 70)
@@ -911,50 +908,10 @@ def _pipeline_once():
                 print(f"Collected {len(follow_df)} follow-up records.")
                 df = df.merge(follow_df, on=["Phenotype", "Inversion"], how="left")
 
-            m_total = int(pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna().sum())
-            R_selected = int(pd.to_numeric(df["Sig_Global"], errors="coerce").fillna(False).astype(bool).sum())
-            alpha_within = (FDR_ALPHA * (R_selected / m_total)) if m_total > 0 else 0.0
+            if "EUR_P_Source" in df.columns:
+                df = df.drop(columns=["EUR_P_Source"], errors="ignore")
 
-            if R_selected > 0 and alpha_within > 0.0:
-                selected_idx = df.index[df["Sig_Global"] == True].tolist()
-                for idx in selected_idx:
-                    p_lrt = df.at[idx, "P_LRT_AncestryxDosage"] if "P_LRT_AncestryxDosage" in df.columns else np.nan
-                    if (not pd.notna(p_lrt)) or (p_lrt >= LRT_SELECT_ALPHA): continue
-                    levels_str = df.at[idx, "LRT_Ancestry_Levels"] if "LRT_Ancestry_Levels" in df.columns else ""
-                    anc_levels = [s for s in str(levels_str).split(",") if s]
-                    anc_upper = [s.upper() for s in anc_levels]
-                    pvals, keys = [], []
-                    for anc in anc_upper:
-                        pcol, rcol = f"{anc}_P", f"{anc}_REASON"
-                        if pcol in df.columns and rcol in df.columns:
-                            pval, reason = df.at[idx, pcol], df.at[idx, rcol]
-                            if pd.notna(pval) and reason != "insufficient_stratum_counts" and reason != "not_selected_by_LRT":
-                                pvals.append(float(pval)); keys.append(anc)
-                    if len(pvals) > 0:
-                        _, p_adj_vals, _, _ = multipletests(pvals, alpha=alpha_within, method="fdr_bh")
-                        for anc_key, adj_val in zip(keys, p_adj_vals):
-                            df.at[idx, f"{anc_key}_P_FDR"] = float(adj_val)
-
-            if "EUR_P_Source" in df.columns: df = df.drop(columns=["EUR_P_Source"], errors="ignore")
-
-            if "Sig_Global" in df.columns:
-                df["FINAL_INTERPRETATION"] = ""
-                for idx in df.index[df['Sig_Global'] == True].tolist():
-                    p_lrt = df.at[idx, "P_LRT_AncestryxDosage"] if "P_LRT_AncestryxDosage" in df.columns else np.nan
-                    if pd.isna(p_lrt) or p_lrt >= LRT_SELECT_ALPHA:
-                        df.at[idx, "FINAL_INTERPRETATION"] = "overall"
-                        continue
-
-                    levels_str = df.at[idx, "LRT_Ancestry_Levels"] if "LRT_Ancestry_Levels" in df.columns else ""
-                    anc_levels = [s.upper() for s in str(levels_str).split(",") if s]
-                    sig_groups = []
-                    for anc in anc_levels:
-                        adj_col, rcol = f"{anc}_P_FDR", f"{anc}_REASON"
-                        if adj_col in df.columns:
-                            p_adj, reason = df.at[idx, adj_col], df.at[idx, rcol] if rcol in df.columns else ""
-                            if pd.notna(p_adj) and p_adj < alpha_within and reason != "insufficient_stratum_counts" and reason != "not_selected_by_LRT":
-                                sig_groups.append(anc)
-                    df.at[idx, "FINAL_INTERPRETATION"] = ",".join(sig_groups) if sig_groups else "unable to determine"
+            df = testing.apply_followup_fdr(df, FDR_ALPHA, LRT_SELECT_ALPHA)
 
             print(f"\n--- Saving final results to '{MASTER_RESULTS_CSV}' ---")
             # Atomic write of the master results TSV to guard against partial files.

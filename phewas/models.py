@@ -17,6 +17,7 @@ from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparatio
 from . import iox as io
 
 CTX = {}  # Worker context with constants from run.py
+allowed_fp_by_cat = {}
 
 def safe_basename(name: str) -> str:
     """Allow only [-._a-zA-Z0-9], map others to '_'."""
@@ -611,6 +612,33 @@ def _apply_sex_restriction_np(X, y, sex_ix):
 
     return X, y, "", None, False
 
+
+# --- Bootstrap helpers ---
+def _score_test_components(X_red: pd.DataFrame, y: pd.Series, target: str):
+    const_ix = X_red.columns.get_loc('const') if 'const' in X_red.columns else None
+    fit_red, _ = _fit_logit_ladder(X_red, y, const_ix=const_ix, prefer_mle_first=True)
+    if fit_red is None:
+        raise ValueError('reduced fit failed')
+    eta = X_red.to_numpy(dtype=np.float64, copy=False) @ np.asarray(fit_red.params, dtype=np.float64)
+    p_hat = expit(eta)
+    W = p_hat * (1.0 - p_hat)
+    return fit_red, p_hat, W
+
+
+def _efficient_score_vector(target_vec: np.ndarray, X_red_mat: np.ndarray, W: np.ndarray):
+    XTW = X_red_mat.T * W
+    XtWX = XTW @ X_red_mat
+    try:
+        c = np.linalg.cholesky(XtWX)
+        tmp = np.linalg.solve(c, XTW @ target_vec)
+        beta_hat = np.linalg.solve(c.T, tmp)
+    except np.linalg.LinAlgError:
+        beta_hat = np.linalg.pinv(XtWX) @ (XTW @ target_vec)
+    proj = X_red_mat @ beta_hat
+    h = target_vec - proj
+    denom = float(h.T @ (W * h))
+    return h, denom
+
 # --- Worker globals ---
 # Populated by init_worker and read-only thereafter.
 worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, finite_mask_worker = None, None, 0, None, None
@@ -618,6 +646,8 @@ worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, finite_mask_work
 X_all, col_ix, worker_core_df_cols, worker_core_df_index = None, None, None, None
 # Handle to keep shared memory alive in workers
 _BASE_SHM_HANDLE = None
+# Shared uniform matrix for bootstrap
+U_boot, _BOOT_SHM_HANDLE, B_boot = None, None, 0
 # Per-category cached indices only (no big matrices)
 control_indices_by_cat = {}
 
@@ -714,6 +744,14 @@ def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx
         nonfinite_cols = [c for j, c in enumerate(worker_core_df_cols) if not np.isfinite(X_all[:, j]).all()]
         print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={nonfinite_cols[:10]}", flush=True)
     print(f"[LRT-Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks, {worker_anc_series.nunique()} ancestries.", flush=True)
+
+
+def init_boot_worker(base_shm_meta, boot_shm_meta, core_cols, core_index, masks, anc_series, ctx):
+    init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx)
+    global U_boot, _BOOT_SHM_HANDLE, B_boot
+    U_boot, _BOOT_SHM_HANDLE = io.attach_shared_ndarray(boot_shm_meta)
+    B_boot = U_boot.shape[1]
+    print(f"[Boot-Worker-{os.getpid()}] Attached U matrix shape={U_boot.shape}", flush=True)
 
 def _index_fingerprint(index):
     """Fast, order-insensitive fingerprint of a person_id index using XOR hashing."""
@@ -1408,6 +1446,176 @@ def lrt_overall_worker(task):
                     })
     except Exception as e:
         io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
+        traceback.print_exc()
+    finally:
+        gc.collect()
+
+def bootstrap_overall_worker(task):
+    s_name, cat, target = task["name"], task["category"], task["target"]
+    s_name_safe = safe_basename(s_name)
+    boot_dir = CTX["BOOT_OVERALL_CACHE_DIR"]
+    os.makedirs(boot_dir, exist_ok=True)
+    tnull_dir = os.path.join(boot_dir, "t_null")
+    os.makedirs(tnull_dir, exist_ok=True)
+    result_path = os.path.join(boot_dir, f"{s_name_safe}.json")
+    meta_path = result_path + ".meta.json"
+    res_path = os.path.join(CTX["RESULTS_CACHE_DIR"], f"{s_name_safe}.json")
+    try:
+        pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
+        if not os.path.exists(pheno_path):
+            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": "missing_case_cache"})
+            return
+
+        case_idx = None
+        if task.get("case_idx") is not None:
+            case_idx = np.asarray(task["case_idx"], dtype=np.int32)
+        if task.get("case_fp") is not None:
+            case_fp = task["case_fp"]
+            if case_idx is None:
+                case_idx = np.array([], dtype=np.int32)
+        else:
+            case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+            idx = worker_core_df_index.get_indexer(case_ids)
+            case_idx = idx[idx >= 0].astype(np.int32)
+            case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
+
+        allowed_mask = allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool))
+        allowed_fp = allowed_fp_by_cat.get(cat) if 'allowed_fp_by_cat' in globals() else None
+        if allowed_fp is None:
+            allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df_index)
+        case_mask = np.zeros(N_core, dtype=bool)
+        if case_idx.size > 0:
+            case_mask[case_idx] = True
+        valid_mask = (allowed_mask | case_mask) & finite_mask_worker
+
+        pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
+        anc_cols = [c for c in worker_core_df_cols if c.startswith("ANC_")]
+        base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq'] + anc_cols
+        base_ix = [col_ix[c] for c in base_cols]
+        X_base = pd.DataFrame(
+            X_all[np.ix_(valid_mask, base_ix)],
+            index=worker_core_df_index[valid_mask],
+            columns=base_cols,
+        ).astype(np.float64, copy=False)
+        y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base.index, dtype=np.int8)
+
+        n_cases_pre = int(y_series.sum())
+        n_ctrls_pre = int(len(y_series) - n_cases_pre)
+        n_total_pre = int(len(y_series))
+
+        Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
+        n_total_used, n_cases_used = len(yb), int(yb.sum())
+        n_ctrls_used = n_total_used - n_cases_used
+        if skip:
+            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": skip, "N_Total_Used": n_total_used})
+            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp})
+            io.atomic_write_json(res_path, {
+                "Phenotype": s_name,
+                "N_Total": n_total_pre,
+                "N_Cases": n_cases_pre,
+                "N_Controls": n_ctrls_pre,
+                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
+                "Used_Ridge": False, "Final_Is_MLE": False,
+                "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
+                "Model_Notes": note or "", "Skip_Reason": skip
+            })
+            return
+
+        ok, reason, det = validate_min_counts_for_fit(yb, stage_tag="boot_stage1", extra_context={"phenotype": s_name})
+        if not ok:
+            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": reason, "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls']})
+            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "counts": det})
+            io.atomic_write_json(res_path, {
+                "Phenotype": s_name,
+                "N_Total": n_total_pre,
+                "N_Cases": n_cases_pre,
+                "N_Controls": n_ctrls_pre,
+                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
+                "Used_Ridge": False, "Final_Is_MLE": False,
+                "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
+                "Model_Notes": reason
+            })
+            return
+
+        X_full_df = Xb
+        X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=(target,))
+        X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=(target,))
+        if target not in X_full_zv.columns:
+            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": "target_dropped_in_pruning"})
+            return
+        red_cols = [c for c in X_full_zv.columns if c != target]
+        X_red_zv = X_full_zv[red_cols]
+
+        fit_red, p_hat, W = _score_test_components(X_red_zv, yb, target)
+        t_vec = X_full_zv[target].to_numpy(dtype=np.float64, copy=False)
+        Xr = X_red_zv.to_numpy(dtype=np.float64, copy=False)
+        h, denom = _efficient_score_vector(t_vec, Xr, W)
+        if not np.isfinite(denom) or denom <= 0:
+            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": "nonpos_denom"})
+            return
+        resid = yb.to_numpy(dtype=np.float64, copy=False) - p_hat
+        S_obs = float(h @ resid)
+        T_obs = (S_obs * S_obs) / denom
+
+        pos = worker_core_df_index.get_indexer(X_red_zv.index)
+        pos = pos[pos >= 0]
+        U_slice = U_boot[pos, :]
+        B = U_slice.shape[1]
+        T_b = np.empty(B, dtype=np.float64)
+        for j0 in range(0, B, 64):
+            j1 = min(B, j0 + 64)
+            Ystar = (U_slice[:, j0:j1] < p_hat[:, None]).astype(np.float64, copy=False)
+            R = Ystar - p_hat[:, None]
+            S = h @ R
+            T_b[j0:j1] = (S * S) / denom
+        p_emp = float((1.0 + np.sum(T_b >= T_obs)) / (1.0 + B))
+
+        io.atomic_write_json(result_path, {
+            "Phenotype": s_name,
+            "T_OBS": T_obs,
+            "P_EMP": p_emp,
+            "B": int(B),
+            "Test_Stat": "score",
+            "Boot": "bernoulli",
+            "N_Total_Used": n_total_used,
+            "N_Cases_Used": n_cases_used,
+            "N_Controls_Used": n_ctrls_used,
+            "Model_Notes": note or ""
+        })
+        np.save(os.path.join(tnull_dir, f"{s_name_safe}.npy"), T_b)
+        _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+
+        const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
+        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
+        beta_full, wald_p, ci95, or_val, final_is_mle = np.nan, np.nan, None, np.nan, getattr(fit_full, "_final_is_mle", False)
+        if fit_full is not None and target in X_full_zv.columns:
+            beta_full = float(getattr(fit_full, "params", pd.Series(np.nan, index=X_full_zv.columns))[target])
+            or_val = float(np.exp(beta_full))
+            if final_is_mle and hasattr(fit_full, "pvalues"):
+                wald_p = float(getattr(fit_full, "pvalues", pd.Series(np.nan, index=X_full_zv.columns))[target])
+                se = float(getattr(fit_full, "bse", pd.Series(np.nan, index=X_full_zv.columns))[target]) if hasattr(fit_full, "bse") else np.nan
+                if np.isfinite(se) and se > 0:
+                    lo, hi = np.exp(beta_full - 1.96*se), np.exp(beta_full + 1.96*se)
+                    ci95 = f"{lo:.3f},{hi:.3f}"
+        io.atomic_write_json(res_path, {
+            "Phenotype": s_name,
+            "N_Total": n_total_pre,
+            "N_Cases": n_cases_pre,
+            "N_Controls": n_ctrls_pre,
+            "Beta": beta_full,
+            "OR": or_val,
+            "P_Value": wald_p,
+            "OR_CI95": ci95,
+            "Used_Ridge": (not final_is_mle),
+            "Final_Is_MLE": bool(final_is_mle),
+            "N_Total_Used": n_total_used,
+            "N_Cases_Used": n_cases_used,
+            "N_Controls_Used": n_ctrls_used,
+            "Model_Notes": reason_full or note or ""
+        })
+
+    except Exception as e:
+        io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": f"exception:{type(e).__name__}"})
         traceback.print_exc()
     finally:
         gc.collect()

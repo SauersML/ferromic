@@ -126,7 +126,7 @@ class ProgressRegistry:
 PROGRESS = ProgressRegistry()
 
 _WORKER_GB_EST = 0.5
-POOL_PROCS_PER_INV = int(os.getenv("POOL_PROCS_PER_INV", "8"))
+POOL_PROCS_PER_INV = 8
 
 try:
     import psutil
@@ -487,6 +487,150 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
             base_shm.unlink()
             BUDGET.release(target_inversion, "pool_steady")
             BUDGET.release(target_inversion, "core_shm")
+    finally:
+        monitor.stop()
+
+
+def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
+                          phenos_list, name_to_cat, cdr_codename, target_inversion,
+                          ctx, min_available_memory_gb, on_pool_started=None):
+    """Stage-1 parametric bootstrap with shared U matrix."""
+    import gc, os, numpy as np, random, threading, time, hashlib
+    tasks = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": target_inversion}
+             for s in phenos_list]
+    random.shuffle(tasks)
+
+    monitor = MemoryMonitor()
+    monitor.start()
+    try:
+        BUDGET.reserve(target_inversion, "core_shm", 0.0, block=True)
+        X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
+        base_meta, base_shm = io.create_shared_from_ndarray(X_base, readonly=True)
+        core_cols = list(core_df_with_const.columns)
+        core_index = core_df_with_const.index.astype(str)
+        shm_gb = (X_base.nbytes) / (1024**3)
+        BUDGET.revise(target_inversion, "core_shm", shm_gb)
+        del X_base, core_df_with_const
+        gc.collect()
+
+        B = int(ctx.get("BOOTSTRAP_B", 1000))
+        seed_base = int(ctx.get("BOOT_SEED_BASE", 2025))
+        inv_tag = str(target_inversion).encode()
+        inv_hash = int(hashlib.blake2s(inv_tag, digest_size=8).hexdigest(), 16)
+        rng = np.random.default_rng(seed_base ^ inv_hash)
+        N = len(core_index)
+        U = np.empty((N, B), dtype=np.float32)
+        step = max(1, min(B, 64))
+        for j0 in range(0, B, step):
+            j1 = min(B, j0 + step)
+            U[:, j0:j1] = rng.random((N, j1 - j0), dtype=np.float32)
+        boot_meta, boot_shm = io.create_shared_from_ndarray(U, readonly=True)
+        U_gb = (U.nbytes) / (1024**3)
+        BUDGET.reserve(target_inversion, "boot_shm", U_gb, block=True)
+        del U
+        gc.collect()
+
+        C = cpu_count()
+        W_gb = max(0.25, _WORKER_GB_EST)
+        max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
+        n_procs = max(1, min(C, max_by_budget, POOL_PROCS_PER_INV))
+        print(f"[Bootstrap-Stage1] Scheduling {len(tasks)} phenotypes (B={B}) with {n_procs} workers.", flush=True)
+
+        bar_len, queued, done = 40, 0, 0
+        lock = threading.Lock()
+
+        def _print(q, d):
+            pct = int((d * 100) / q) if q else 0
+            filled = int(bar_len * (d / max(1, q)))
+            bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
+            print(
+                f"\r[Bootstrap-Stage1] {bar} {d}/{q} ({pct}%) | App≈{monitor.rss_gb:.2f}GB  Sys≈{monitor.available_memory_gb:.2f}GB  Budget≈{BUDGET.remaining_gb():.2f}GB",
+                end="",
+                flush=True,
+            )
+
+        BUDGET.reserve(target_inversion, "pool_steady", 0.0, block=True)
+        pool = None
+        try:
+            pool = get_context(MP_CONTEXT).Pool(
+                processes=n_procs,
+                initializer=models.init_boot_worker,
+                initargs=(base_meta, boot_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+                maxtasksperchild=500,
+            )
+            if on_pool_started:
+                try:
+                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                except Exception:
+                    worker_pids = []
+                try:
+                    on_pool_started(n_procs, worker_pids)
+                except Exception as e:
+                    print(f"\n[WARN] on_pool_started callback failed: {e}", flush=True)
+
+            inflight = []
+
+            def _cb(_):
+                nonlocal done
+                with lock:
+                    done += 1
+                    _print(queued, done)
+
+            def _err_cb(e):
+                print(f"[pool ERR] Worker failed: {e}", flush=True)
+
+            for task in tasks:
+                floor = _resolve_floor(min_available_memory_gb)
+                while BUDGET.remaining_gb() < floor:
+                    print(
+                        f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pause...",
+                        flush=True,
+                    )
+                    time.sleep(2)
+                queued += 1
+                ar = pool.apply_async(models.bootstrap_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
+                inflight.append(ar)
+                _print(queued, done)
+
+            pool.close()
+            for ar in inflight:
+                ar.wait()
+            pool.join()
+            _print(queued, done)
+            print("")
+        finally:
+            try:
+                if pool is not None:
+                    pool.close()
+                    pool.join()
+            except Exception:
+                try:
+                    if pool is not None:
+                        pool.terminate()
+                except Exception:
+                    pass
+            try:
+                BUDGET.release(target_inversion, "pool_steady")
+            except Exception:
+                pass
+            try:
+                boot_shm.close()
+                boot_shm.unlink()
+            except Exception:
+                pass
+            try:
+                base_shm.close()
+                base_shm.unlink()
+            except Exception:
+                pass
+            try:
+                BUDGET.release(target_inversion, "boot_shm")
+            except Exception:
+                pass
+            try:
+                BUDGET.release(target_inversion, "core_shm")
+            except Exception:
+                pass
     finally:
         monitor.stop()
 
