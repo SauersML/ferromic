@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import FancyArrowPatch
-from adjustText import adjust_text as ADJUST_TEXT
+from adjustText import adjust_text as ADJUST_TEXT  # required
 
 # ---------- Config ----------
 INFILE = "phewas_results.tsv"
@@ -26,10 +26,10 @@ UNCAT_NAME = "Uncategorized"
 MIN_WIDTH       = 14.0
 MAX_WIDTH       = 26.0
 WIDTH_PER_100   = 0.40
-FIG_HEIGHT      = 7.6
+FIG_HEIGHT      = 7.8
 
 # Markers & style
-TRI_SIZE        = 80.0     # triangle area (pt^2)
+TRI_SIZE        = 82.0     # triangle area (pt^2)
 CIRCLE_SIZE     = 300.0    # FDR circle area (pt^2)
 POINT_EDGE_LW   = 0.45
 POINT_ALPHA     = 0.98
@@ -42,18 +42,18 @@ TICK_FONTSZ     = 10.5
 TITLE_FONTSZ    = 15
 ANNOTATE_Q_THRESH = 0.1
 
-# Linebreak
+# Single linebreak rule
 MIN_WORDS_BREAK = 6
 MIN_WORDS_SIDE  = 3
 
-# Inner margins & headroom
-X_PAD_PX       = 18        # add ~px padding left/right (converted to data)
-Y_TOP_PAD_FRAC = 0.08
+# Pixel-based margins/headroom
+X_PAD_PX        = 18       # left/right padding in pixels (converted to data)
+Y_TOP_PAD_FRAC  = 0.08
 
 # adjustText tuning
-ADJ_EXPAND_TEXT = (1.06, 1.26)
-ADJ_EXPAND_PNTS = (1.03, 1.14)
-ADJ_FORCE_PNTS  = (0.07, 0.30)
+ADJ_EXPAND_TEXT = (1.06, 1.28)
+ADJ_EXPAND_PNTS = (1.03, 1.16)
+ADJ_FORCE_PNTS  = (0.07, 0.32)
 
 plt.rcParams.update({
     "font.size": 11,
@@ -141,10 +141,10 @@ def pts_to_px(fig, pts):  # points -> pixels
 
 def tri_radius_px(fig, s_pt2: float) -> float:
     """
-    Visual contact radius for triangle given scatter 's' (pt^2).
-    Use equivalent circle radius r = sqrt(s/pi) with slight deflate to meet edge.
+    Contact radius approximation for triangle: use equivalent circle radius
+    r = sqrt(s/pi), slightly deflated so line touches the triangle edge visually.
     """
-    r_pt = math.sqrt(max(s_pt2, 1e-9) / math.pi) * 0.95   # tuned factor
+    r_pt = math.sqrt(max(s_pt2, 1e-9) / math.pi) * 0.95
     return pts_to_px(fig, r_pt)
 
 # Rect/point geometry in pixel space
@@ -194,30 +194,29 @@ def load_category_map(phecode_csv: str) -> pd.DataFrame:
     return cmap
 
 # ---------- Collision resolution (second pass) ----------
-def resolve_overlaps_strict(ax, texts, points_px, point_rad_px, max_iter=400, step_px=2.5):
+def resolve_overlaps_strict(ax, texts, points_px, point_rad_px, max_iter=450, step_px=2.5):
     """
-    Remove any residual overlaps:
-      - label–label (bbox vs bbox)
-      - label–marker (bbox vs circle of radius point_rad_px around each point)
-    Move labels in pixel space (both x and y), smallest nudges first.
+    Remove residual overlaps (label–label AND label–marker) in pixel space.
+    Moves labels in both x and y by small px steps, iteratively.
     """
     if not texts: return
     fig = ax.get_figure()
-    inv = ax.transData.inverted()
+
+    def labels_bboxes():
+        fig.canvas.draw()
+        return texts_bboxes_px(ax, texts)
 
     for _ in range(max_iter):
-        fig.canvas.draw()
-        bbs, renderer = texts_bboxes_px(ax, texts)
         moved=False
+        bbs, renderer = labels_bboxes()
 
-        # 1) label–label
+        # 1) label–label separation
         for i in range(len(bbs)):
             ti, bi = bbs[i]
             for j in range(i+1, len(bbs)):
                 tj, bj = bbs[j]
                 overlap = not (bi.x1 < bj.x0 or bi.x0 > bj.x1 or bi.y1 < bj.y0 or bi.y0 > bj.y1)
                 if overlap:
-                    # push apart horizontally by step_px toward opposite directions
                     ci = np.array([(bi.x0+bi.x1)/2.0, (bi.y0+bi.y1)/2.0])
                     cj = np.array([(bj.x0+bj.x1)/2.0, (bj.y0+bj.y1)/2.0])
                     v = ci - cj
@@ -230,21 +229,29 @@ def resolve_overlaps_strict(ax, texts, points_px, point_rad_px, max_iter=400, st
                     xj, yj = tj.get_position(); tj.set_position((xj+xdj, yj+ydj))
                     moved=True
 
-        # 2) label–marker
+        # 2) label–marker separation (vs nearest violating marker)
         fig.canvas.draw()
-        bbs, renderer = texts_bboxes_px(ax, texts)
+        bbs, renderer = labels_bboxes()
         for t, bb in bbs:
-            # nearest point
             centers = points_px
-            dists = np.hypot(centers[:,0]- (bb.x0+bb.x1)/2.0, centers[:,1]- (bb.y0+bb.y1)/2.0)
-            k = int(np.argmin(dists))
-            dist_to_edge, q = rect_point_dist(bb, centers[k])
-            if dist_to_edge < point_rad_px[k] + 2.0:  # 2px cushion
-                # move label away from the point along outward normal
-                v = ( (bb.x0+bb.x1)/2.0 - centers[k][0], (bb.y0+bb.y1)/2.0 - centers[k][1] )
-                if np.allclose(v, 0): v = (0.0, -1.0)
-                vx, vy = np.array(v) / np.linalg.norm(v)
-                dx, dy = vx*step_px, vy*step_px
+            # distance from label bbox edge to each point center
+            dists = []
+            qs = []
+            for c in centers:
+                d, q = rect_point_dist(bb, c)
+                dists.append(d); qs.append(q)
+            dists = np.asarray(dists)
+            # Find any violation: dist < radius + cushion
+            cushion = 2.0
+            viol = dists < (point_rad_px + cushion)
+            if viol.any():
+                k = int(np.argmin(dists - point_rad_px))  # closest offender
+                # move away from offending point along outward normal (from point to label center)
+                center = np.array([(bb.x0+bb.x1)/2.0, (bb.y0+bb.y1)/2.0])
+                v = center - centers[k]
+                if np.allclose(v, 0): v = np.array([0.0, -1.0])
+                v = v / np.linalg.norm(v)
+                dx, dy = v * step_px
                 xd, yd = px_step_to_data(ax, dx, dy)
                 x0, y0 = t.get_position()
                 t.set_position((x0+xd, y0+yd))
@@ -256,8 +263,8 @@ def resolve_overlaps_strict(ax, texts, points_px, point_rad_px, max_iter=400, st
 # ---------- Connector drawing ----------
 def draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2):
     """
-    For each label, draw a connector from the label-box edge to the triangle edge,
-    computed in pixel space and transformed back to data.
+    Connector from label-box edge to triangle edge, in pixel space (exact),
+    then transformed back to data coords. Color matches the triangle.
     """
     if not texts: return
     fig = ax.get_figure()
@@ -265,7 +272,7 @@ def draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2):
     renderer = fig.canvas.get_renderer()
     inv = ax.transData.inverted()
 
-    # Precompute point pixels and triangle radii per annotated row
+    # per-row point pixels & marker radii
     pt_px = {}
     tri_rad_px = {}
     for idx, r in ann_rows.iterrows():
@@ -275,24 +282,18 @@ def draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2):
 
     for t in texts:
         rowid = getattr(t, "_rowid", None)
-        if rowid is None or rowid not in pt_px:
-            continue
+        if rowid is None or rowid not in pt_px: continue
 
-        # label bbox in pixels (use actual drawn patch)
         patch = t.get_bbox_patch()
         bb = patch.get_window_extent(renderer=renderer)
 
-        # closest contact point on label box to the point
         p = pt_px[rowid]
         q = closest_point_on_rect(bb, p)
 
-        # move along vector from label to point, stopping at triangle edge
         v = p - q; L = np.linalg.norm(v)
-        if L < 1e-6:
-            v = np.array([0.0, -1.0]); L = 1.0
-        e = p - (v / L) * tri_rad_px[rowid]   # triangle-edge contact
+        if L < 1e-6: v = np.array([0.0, -1.0]); L = 1.0
+        e = p - (v / L) * tri_rad_px[rowid]  # triangle edge
 
-        # Convert to data coords and draw
         qd = inv.transform(q)
         ed = inv.transform(e)
         color = color_by_rowid[rowid]
@@ -301,7 +302,7 @@ def draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2):
             linewidth=1.0, color=color, zorder=3.2, shrinkA=0.0, shrinkB=0.0
         ))
 
-# ---------- Plotting per inversion ----------
+# ---------- Plot per inversion ----------
 def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | None:
     g = df_group.copy()
     g[P_Q_COL] = pd.to_numeric(g[P_Q_COL], errors="coerce")
@@ -314,7 +315,7 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
     tiny = np.nextafter(0, 1)
     g.loc[g[P_Q_COL] <= 0, P_Q_COL] = tiny
 
-    # display fields
+    # display
     g["Phen_display"] = g[PHENO_COL].map(pretty_text)
     g["Phen_wrapped"] = g["Phen_display"].map(lambda s: balanced_linebreak(s, MIN_WORDS_SIDE))
     g["y"] = -np.log10(g[P_Q_COL])
@@ -331,26 +332,48 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
     )["cat_name"].tolist()
     cat_to_base = build_palette(cat_order)
 
-    # shade by |log(OR)| normalized (p95)
+    # shade by |log(OR)| normalized
     or_vals = g[OR_COL].fillna(1.0).astype(float).clip(lower=np.nextafter(0,1))
     mag = np.abs(np.log(or_vals))
     p95 = np.nanpercentile(mag, 95) if np.isfinite(np.nanpercentile(mag, 95)) else 1.0
     denom = p95 if p95 > 0 else (mag.max() if mag.max() > 0 else 1.0)
     norm_all = np.clip(mag / denom, 0, 1)
 
-    # x positions grouped by category
+    # x positions within category:
+    # left side (dec) sorted by q; right side (inc) sorted by q
     pieces, centers, ticklabels = [], [], []
-    start=0
+    start = 0
     for cat in cat_order:
-        block = g[g["cat_name"]==cat].sort_values([P_Q_COL,"Phen_display"], kind="mergesort").copy()
-        n=len(block)
-        block["x"] = np.arange(start, start+n, dtype=float)
-        idxs = block.index.tolist()
-        block["color"] = [shade_with_norm(cat_to_base[cat], float(norm_all.loc[idx])) for idx in idxs]
-        pieces.append(block)
-        centers.append(start + (n-1)/2.0)
-        ticklabels.append(cat)
-        start += n
+        cat_df = g[g["cat_name"] == cat].copy()
+        dec_df = cat_df[cat_df["risk_dir"] == "dec"].sort_values(P_Q_COL, kind="mergesort")
+        inc_df = cat_df[cat_df["risk_dir"] == "inc"].sort_values(P_Q_COL, kind="mergesort")
+
+        n_dec = len(dec_df)
+        n_inc = len(inc_df)
+        n_tot = n_dec + n_inc
+
+        # Left block: dec
+        if n_dec > 0:
+            dec_df = dec_df.copy()
+            dec_df["x"] = np.arange(start, start + n_dec, dtype=float)
+
+        # Right block: inc
+        if n_inc > 0:
+            inc_df = inc_df.copy()
+            inc_df["x"] = np.arange(start + n_dec, start + n_tot, dtype=float)
+
+        block = pd.concat([dec_df, inc_df], axis=0)
+        if not block.empty:
+            # color shading (per point) using category hue
+            base = cat_to_base[cat]
+            idxs = block.index.tolist()
+            block["color"] = [shade_with_norm(base, float(norm_all.loc[i])) for i in idxs]
+            pieces.append(block)
+            centers.append(start + (n_tot - 1)/2.0)
+            ticklabels.append(cat)
+            start += n_tot
+
+    if not pieces: return None
     g = pd.concat(pieces, ignore_index=False).sort_values("x")
     m = len(g)
 
@@ -360,8 +383,8 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
     ax.set_facecolor("#ffffff")
 
     obstacles = []
-    # FDR circles
-    circ = None
+    # FDR circles (behind triangles)
+    circ=None
     if SIG_COL in g.columns:
         sig = truthy_series(g[SIG_COL])
         if sig.any():
@@ -397,24 +420,27 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
     # annotations: q < 0.1 OR FDR significant
     annotate_mask = (g[P_Q_COL] < ANNOTATE_Q_THRESH)
     if SIG_COL in g.columns: annotate_mask |= truthy_series(g[SIG_COL])
-    ann_rows = g.loc[annotate_mask].sort_values("x")
+    ann_rows = g.loc[annotate_mask].sort_values([ "cat_num", "x" ])
+
+    # initial placement: natural side
     texts=[]
-    # initial small horizontal offsets alternating
+    # side-aware offset (right for inc, left for dec)
     x_range = (g["x"].max() - g["x"].min()) if m>1 else 1.0
-    dx = 0.02 * max(1.0, x_range)
-    for i, (idx, r) in enumerate(ann_rows.iterrows()):
-        x0 = r["x"] + (dx if (i % 2 == 0) else -dx)
-        ha = "left" if (i % 2 == 0) else "right"
+    dx_side = 0.02 * max(1.0, x_range)
+    for idx, r in ann_rows.iterrows():
+        place_right = (r["risk_dir"] == "inc")
+        x0 = r["x"] + (dx_side if place_right else -dx_side)
+        ha = "left" if place_right else "right"
         t = ax.text(
             x0, r["y"], balanced_linebreak(r["Phen_wrapped"]),
             fontsize=LABEL_FONTSZ, ha=ha, va="bottom", zorder=3.6,
             bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
                       edgecolor="#333333", linewidth=0.35, alpha=0.98)
         )
-        t._rowid = idx  # bind permanently for exact pairing
+        t._rowid = idx  # persistent binding for connectors
         texts.append(t)
 
-    # let adjustText move in both axes (no constraints)
+    # let adjustText move labels freely (natural)
     if texts:
         ADJUST_TEXT(
             texts, ax=ax,
@@ -425,29 +451,34 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
             arrowprops=None
         )
 
-    # second-pass strict overlap resolver (labels vs labels AND labels vs markers)
-    # prepare point centers (px) and radii (px) for all points
+    # strict second pass: remove any residual overlaps (labels vs labels and vs markers)
     fig.canvas.draw()
+    # per-point px centers and collision radii (max of triangle & circle if sig)
     pts_px = []
     rad_px = []
-    for _, r in g.iterrows():
+    sig_mask_full = truthy_series(g[SIG_COL]) if (SIG_COL in g.columns) else pd.Series(False, index=g.index)
+    tri_r = tri_radius_px(fig, TRI_SIZE)
+    circ_r = tri_radius_px(fig, CIRCLE_SIZE)  # consistent scale conversion
+    for i, r in g.iterrows():
         px = ax.transData.transform((float(r["x"]), float(r["y"])))
         pts_px.append(np.array(px))
-        rad_px.append(tri_radius_px(fig, TRI_SIZE))
+        rad_px.append(max(tri_r, circ_r if bool(sig_mask_full.get(i, False)) else tri_r))
     pts_px = np.vstack(pts_px)
     rad_px = np.array(rad_px)
+    resolve_overlaps_strict(ax, texts, pts_px, rad_px, max_iter=450, step_px=2.5)
 
-    resolve_overlaps_strict(ax, texts, pts_px, rad_px, max_iter=400, step_px=2.0)
-
-    # after all moves & any layout, finalize limits/margins and compute connectors last
-    # inner margin in pixels → data units
-    x0_px, _ = ax.transData.transform((0, 0))
+    # margins & headroom
+    # convert X_PAD_PX to data units
     xpad_data = px_step_to_data(ax, X_PAD_PX, 0)[0]
     xmin, xmax = g["x"].min(), g["x"].max()
     ax.set_xlim(xmin - xpad_data, xmax + xpad_data)
 
     ymin, ymax = g["y"].min(), g["y"].max()
     ax.set_ylim(ymin, ymax + max(0.25, (ymax - ymin) * Y_TOP_PAD_FRAC))
+
+    # q = 0.05 reference line
+    q05_y = -math.log10(0.05)
+    ax.axhline(q05_y, color="#666666", linestyle="--", linewidth=1.0, label="q = 0.05")
 
     # axes / ticks / title
     ax.set_title(str(inversion_label), fontsize=TITLE_FONTSZ, pad=10)
@@ -465,9 +496,9 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
     h, l = ax.get_legend_handles_labels()
     if h: ax.legend(fontsize=9, loc="upper right")
 
-    # connectors (color by exact rowid)
+    # connectors (AFTER final layout; color by exact rowid)
+    fig.canvas.draw()
     color_by_rowid = g["color"].to_dict()
-    fig.canvas.draw()  # ensure final renderer
     draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2=TRI_SIZE)
 
     fig.tight_layout()
