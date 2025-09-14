@@ -229,20 +229,20 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
     if not missing:
         return
 
-def _process_one(pheno_info):
-    s_name = pheno_info['sanitized_name']
-
-    try:
-        # Fast exit if cache already exists
-        if os.path.exists(os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")):
+    def _process_one(pheno_info):
+        s_name = pheno_info['sanitized_name']
+    
+        try:
+            # Fast exit if cache already exists
+            if os.path.exists(os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")):
+                return None
+    
+            # Let _query_single_pheno_bq handle locking and atomic write
+            _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename, bq_client=bq_client)
+            return s_name
+        except Exception as e:
+            print(f"[Prepass]  - [FAIL] Failed to process '{s_name}': {e}", flush=True)
             return None
-
-        # Let _query_single_pheno_bq handle locking and atomic write
-        _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename, bq_client=bq_client)
-        return s_name
-    except Exception as e:
-        print(f"[Prepass]  - [FAIL] Failed to process '{s_name}': {e}", flush=True)
-        return None
 
     # Use a thread pool to process phenotypes in parallel, respecting locks
     with ThreadPoolExecutor(max_workers=BQ_BATCH_WORKERS * 2) as executor:
