@@ -683,13 +683,6 @@ def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx
     worker_core_df_index = pd.Index(core_index)
     worker_anc_series = anc_series.reindex(worker_core_df_index).str.lower()
 
-    allowed_fp_by_cat = {}
-    for cat, mask in allowed_mask_by_cat.items():
-        idx = np.flatnonzero(mask)
-        allowed_fp_by_cat[cat] = _index_fingerprint(
-            worker_core_df_index[idx] if idx.size else pd.Index([])
-        )
-
     X_all, _BASE_SHM_HANDLE = io.attach_shared_ndarray(base_shm_meta)
 
     def _cleanup():
@@ -705,6 +698,16 @@ def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx
     col_ix = {name: i for i, name in enumerate(worker_core_df_cols)}
 
     finite_mask_worker = np.isfinite(X_all).all(axis=1)
+
+    # Precompute per-category allowed-mask fingerprints once (use allowed ∧ finite)
+    allowed_fp_by_cat = {}
+    for cat, mask in allowed_mask_by_cat.items():
+        eff = mask & finite_mask_worker
+        idx = np.flatnonzero(eff)
+        allowed_fp_by_cat[cat] = _index_fingerprint(
+            worker_core_df_index[idx] if idx.size else pd.Index([])
+        )
+
     bad = ~finite_mask_worker
     if bad.any():
         rows = worker_core_df_index[bad][:5].tolist()
@@ -1177,6 +1180,65 @@ def lrt_overall_worker(task):
 
         target_ix = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
 
+        if target_ix is None:
+            skip_reason = "target_dropped_in_pruning"
+            io.atomic_write_json(result_path, {
+                "Phenotype": s_name,
+                "P_LRT_Overall": np.nan,
+                "LRT_Overall_Reason": skip_reason,
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+            })
+            io.atomic_write_json(res_path, {
+                "Phenotype": s_name,
+                "N_Total": n_total_pre,
+                "N_Cases": n_cases_pre,
+                "N_Controls": n_ctrls_pre,
+                "Beta": np.nan,
+                "OR": np.nan,
+                "P_Value": np.nan,
+                "OR_CI95": None,
+                "Used_Ridge": False,
+                "Final_Is_MLE": False,
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+                "Model_Notes": note or "",
+                "Skip_Reason": skip_reason,
+            })
+            io.atomic_write_json(res_path + ".meta.json", {
+                "kind": "phewas_result",
+                "s_name": s_name,
+                "category": cat,
+                "model_columns": list(worker_core_df_cols),
+                "num_pcs": CTX["NUM_PCS"],
+                "min_cases": CTX["MIN_CASES_FILTER"],
+                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                "target": target,
+                "core_index_fp": _index_fingerprint(worker_core_df_index),
+                "case_idx_fp": case_fp,
+                "allowed_mask_fp": allowed_fp,
+                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            _write_meta(
+                meta_path,
+                "lrt_overall",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra={
+                    "allowed_mask_fp": allowed_fp,
+                    "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                    "skip_reason": skip_reason,
+                },
+            )
+            return
+
         # The reduced model MUST be a subset of the pruned full model for the LRT to be valid.
         # Construct it by dropping the target column from the *already pruned* full model columns.
         if target in X_full_zv.columns:
@@ -1286,6 +1348,8 @@ def lrt_overall_worker(task):
         model_notes = [note] if note else []
         if isinstance(reason_full, str) and reason_full:
             model_notes.append(reason_full)
+        if isinstance(reason_red, str) and reason_red:
+            model_notes.append(reason_red)
 
         res_record = {
             "Phenotype": s_name,
@@ -1303,6 +1367,9 @@ def lrt_overall_worker(task):
             "N_Controls_Used": n_ctrls_used,
             "Model_Notes": ";".join(model_notes)
         }
+        final_cols_names = list(X_full_zv.columns)
+        final_cols_pos = [col_ix.get(c, -1) for c in final_cols_names]
+
         io.atomic_write_json(res_path, res_record)
         io.atomic_write_json(res_path + ".meta.json", {
             "kind": "phewas_result",
@@ -1317,13 +1384,28 @@ def lrt_overall_worker(task):
             "case_idx_fp": case_fp,
             "allowed_mask_fp": allowed_fp,
             "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "final_cols_names": final_cols_names,
+            "final_cols_pos": final_cols_pos,
+            "full_llf": float(getattr(fit_full, "llf", np.nan)),
+            "full_is_mle": bool(final_is_mle),
+            "used_firth": bool(getattr(fit_full, "_used_firth", False)),
+            "prune_recipe_version": "zv+greedy-rank-v1",
         })
 
         io.atomic_write_json(result_path, out)
         _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols,
                     _index_fingerprint(worker_core_df_index), case_fp,
-                    extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+                    extra={
+                        "allowed_mask_fp": allowed_fp,
+                        "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                        "final_cols_names": final_cols_names,
+                        "final_cols_pos": final_cols_pos,
+                        "full_llf": float(getattr(fit_full, "llf", np.nan)),
+                        "full_is_mle": bool(final_is_mle),
+                        "used_firth": bool(getattr(fit_full, "_used_firth", False)),
+                        "prune_recipe_version": "zv+greedy-rank-v1",
+                    })
     except Exception as e:
         io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
         traceback.print_exc()
