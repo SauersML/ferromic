@@ -35,7 +35,7 @@ FDR_Q        = 0.05   # BH-FDR across phenocodes
 USE_QC       = False  # set True to require QC flags (defined_h2 & in_bounds_h2), if available
 
 # REML parametric bootstrap draws for CI/PI (set None or 0 to disable).
-REML_BOOTSTRAP_B = 2000
+REML_BOOTSTRAP_B = 0
 
 # =============================================================================
 # Utility helpers (pandas/numpy only)
