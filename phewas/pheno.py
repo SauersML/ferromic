@@ -22,19 +22,44 @@ LOCK_MAX_AGE_SEC = 360000 # 100h
 
 # --- BigQuery batch fetch tuning ---
 PHENO_BUCKET_SERIES = [1, 4, 16, 64]  # escalate result sharding if needed
-BQ_PAGE_ROWS = int(os.getenv("BQ_PAGE_ROWS", "50000"))  # page size for streaming results
-BQ_BATCH_PHENOS = int(os.getenv("BQ_BATCH_PHENOS", "80"))  # max phenotypes per batch
-BQ_BATCH_MAX_CODES = int(os.getenv("BQ_BATCH_MAX_CODES", "8000"))  # cap total codes per batch
-BQ_BATCH_WORKERS = int(os.getenv("BQ_BATCH_WORKERS", "2"))  # concurrent batch queries
+BQ_PAGE_ROWS = 50_000  # page size for streaming results
+BQ_BATCH_PHENOS = 80  # max phenotypes per batch
+BQ_BATCH_MAX_CODES = 8_000  # cap total codes per batch
+BQ_BATCH_WORKERS = 2  # concurrent batch queries
 
 
 # --- Dedup ---
-PHENO_DEDUP_ENABLE = os.getenv("PHENO_DEDUP_ENABLE", "true").lower() not in ("0", "false", "no")
+PHENO_DEDUP_ENABLE = True
 PHI_THRESHOLD = 0.70
 SHARE_THRESHOLD = 0.70
-PHENO_PROTECT: Set[str] = set(filter(None, os.getenv("PHENO_PROTECT", "").split(",")))
-_pp_cap = os.getenv("PHENO_DEDUP_CAP_PER_PERSON", "0")
-PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = (int(_pp_cap) if _pp_cap.isdigit() and int(_pp_cap) > 0 else None)
+PHENO_PROTECT: Set[str] = set()
+PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = None
+
+
+def configure_from_ctx(ctx: Dict) -> None:
+    """Override module-level knobs from CTX (if provided)."""
+    global BQ_PAGE_ROWS, BQ_BATCH_PHENOS, BQ_BATCH_MAX_CODES, BQ_BATCH_WORKERS
+    global PHENO_DEDUP_ENABLE, PHENO_DEDUP_CAP_PER_PERSON, PHI_THRESHOLD, SHARE_THRESHOLD, PHENO_PROTECT
+
+    def _as_bool(v):
+        if isinstance(v, bool):
+            return v
+        return str(v).strip().lower() not in ("0", "false", "no", "off")
+
+    BQ_PAGE_ROWS = int(ctx.get("BQ_PAGE_ROWS", BQ_PAGE_ROWS))
+    BQ_BATCH_PHENOS = int(ctx.get("BQ_BATCH_PHENOS", BQ_BATCH_PHENOS))
+    BQ_BATCH_MAX_CODES = int(ctx.get("BQ_BATCH_MAX_CODES", BQ_BATCH_MAX_CODES))
+    BQ_BATCH_WORKERS = int(ctx.get("BQ_BATCH_WORKERS", BQ_BATCH_WORKERS))
+    PHENO_DEDUP_ENABLE = _as_bool(ctx.get("PHENO_DEDUP_ENABLE", PHENO_DEDUP_ENABLE))
+    cap = ctx.get("PHENO_DEDUP_CAP_PER_PERSON", PHENO_DEDUP_CAP_PER_PERSON)
+    if cap is None:
+        PHENO_DEDUP_CAP_PER_PERSON = None
+    else:
+        _cap = int(cap)
+        PHENO_DEDUP_CAP_PER_PERSON = _cap if _cap > 0 else None
+    PHI_THRESHOLD = float(ctx.get("PHI_THRESHOLD", PHI_THRESHOLD))
+    SHARE_THRESHOLD = float(ctx.get("SHARE_THRESHOLD", SHARE_THRESHOLD))
+    PHENO_PROTECT = set(ctx.get("PHENO_PROTECT", PHENO_PROTECT))
 
 def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
                          min_cases, min_ctrls, sex_mode="majority", sex_prop=0.99, max_other=0, min_neff=None):
@@ -617,7 +642,7 @@ def phenotype_fetcher_worker(pheno_queue,
 
         # Phase 1: compute/use manifest once per cohort (fingerprinted by the cohort index)
         try:
-            cohort_fp = "GLOBAL"
+            cohort_fp = str(models._index_fingerprint(core_index))
             manifest_path = os.path.join(cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json")
             manifest_lock = manifest_path + ".lock"
 
@@ -867,23 +892,6 @@ def _precache_all_missing_phenos(pheno_defs_df: pd.DataFrame,
     finally:
         io.release_lock(prec_guard)
 
-    if not missing:
-        return
-
-    missing.sort(key=lambda r: len(r.get("all_codes") or []), reverse=True)
-    batches = list(_batch_pheno_defs(missing, BQ_BATCH_PHENOS, BQ_BATCH_MAX_CODES))
-    print(f"[Dedup]     - Pre-caching: {len(missing)} phenotypes in {len(batches)} batches.", flush=True)
-
-    # Conservative concurrency; let _query_batch_bq handle fallbacks internally.
-    with ThreadPoolExecutor(max_workers=min(BQ_BATCH_WORKERS, max(1, len(batches)))) as executor:
-        futs = [executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
-                for batch in batches]
-        for fut in as_completed(futs):
-            try:
-                _ = fut.result()
-            except Exception as e:
-                print(f"[Dedup]     - [WARN] Batch pre-cache failed: {str(e)[:200]}", flush=True)
-
 
 def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
                            core_index: pd.Index,
@@ -911,7 +919,7 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
     N = int(len(core_index))
 
     # Cohort-specific manifest path
-    cohort_fp = "GLOBAL"
+    cohort_fp = str(models._index_fingerprint(core_index))
     manifest_path = os.path.join(cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json")
 
     # 1) Materialize case indices per phenotype from cache; filter by min_cases

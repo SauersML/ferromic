@@ -557,6 +557,7 @@ def _pipeline_once():
                     os.makedirs(lrt_overall_cache_dir, exist_ok=True)
 
                 ctx = {"NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER, "MIN_NEFF_FILTER": MIN_NEFF_FILTER, "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS, "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE, "RESULTS_CACHE_DIR": results_cache_dir, "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir, "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir, "BOOT_OVERALL_CACHE_DIR": boot_overall_cache_dir, "BOOTSTRAP_B": tctx["BOOTSTRAP_B"], "BOOT_SEED_BASE": tctx["BOOT_SEED_BASE"], "cdr_codename": shared_data['cdr_codename'], "REPAIR_META_IF_MISSING": True}
+                pheno.configure_from_ctx(ctx)
                 dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
                 inversion_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, f"inversion_{target_inversion}.parquet"), io.load_inversions, target_inversion, dosages_path, validate_target=target_inversion)
                 inversion_df.index = inversion_df.index.astype(str)
@@ -567,10 +568,10 @@ def _pipeline_once():
                 core_df['AGE_c_sq'] = core_df['AGE_c'] ** 2
                 pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
                 covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
-                core_df_subset = core_df[covariate_cols]
-                core_df_with_const = sm.add_constant(core_df_subset, prepend=True)
-                A_slice = shared_data['A_global'].reindex(core_df_with_const.index).fillna(0.0)
-                core_df_with_const = pd.concat([core_df_with_const, A_slice], axis=1, copy=False)
+                core_df_subset = core_df[covariate_cols].astype(np.float32, copy=False)
+                core_df_subset["const"] = np.float32(1.0)
+                A_slice = shared_data['A_global'].reindex(core_df_subset.index).fillna(0.0).astype(np.float32)
+                core_df_with_const = pd.concat([core_df_subset, A_slice], axis=1, copy=False).astype(np.float32, copy=False)
 
                 delta_core_df_gb = (monitor_thread.snapshot().app_rss_gb - baseline_rss_gb) if monitor_thread else 0.0
                 governor.update_after_core_df(delta_core_df_gb)
@@ -856,10 +857,10 @@ def _pipeline_once():
                 core_df['AGE_c_sq'] = core_df['AGE_c'] ** 2
                 pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
                 covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
-                core_df_subset = core_df[covariate_cols]
-                core_df_with_const = sm.add_constant(core_df_subset, prepend=True)
-                A_slice = A_global.reindex(core_df_with_const.index).fillna(0.0)
-                core_df_with_const = pd.concat([core_df_with_const, A_slice], axis=1, copy=False)
+                core_df_subset = core_df[covariate_cols].astype(np.float32, copy=False)
+                core_df_subset["const"] = np.float32(1.0)
+                A_slice = A_global.reindex(core_df_subset.index).fillna(0.0).astype(np.float32)
+                core_df_with_const = pd.concat([core_df_subset, A_slice], axis=1, copy=False).astype(np.float32, copy=False)
                 core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
                 global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
                 pan_path = os.path.join(CACHE_DIR, f"pan_category_cases_{cdr_codename}.pkl")
@@ -879,8 +880,11 @@ def _pipeline_once():
                     "RESULTS_CACHE_DIR": os.path.join(inversion_cache_dir, "results_atomic"),
                     "LRT_OVERALL_CACHE_DIR": os.path.join(inversion_cache_dir, "lrt_overall"),
                     "LRT_FOLLOWUP_CACHE_DIR": os.path.join(inversion_cache_dir, "lrt_followup"),
+                    "BOOT_OVERALL_CACHE_DIR": os.path.join(inversion_cache_dir, "boot_overall"),
                     "cdr_codename": cdr_codename,
                 }
+
+                pheno.configure_from_ctx(ctx)
 
                 # Select hits for the current inversion and run follow-up
                 hit_phenos = df.loc[(df["Sig_Global"] == True) & (df["Inversion"] == target_inversion), "Phenotype"].astype(str).tolist()
