@@ -30,8 +30,8 @@ BQ_BATCH_WORKERS = int(os.getenv("BQ_BATCH_WORKERS", "2"))  # concurrent batch q
 
 # --- Dedup ---
 PHENO_DEDUP_ENABLE = os.getenv("PHENO_DEDUP_ENABLE", "true").lower() not in ("0", "false", "no")
-PHI_THRESHOLD = float(os.getenv("PHENO_CORR_PHI", "0.90"))
-SHARE_THRESHOLD = float(os.getenv("PHENO_SHARE_THRESH", "0.80"))
+PHI_THRESHOLD = float(os.getenv("PHENO_CORR_PHI", "0.70"))
+SHARE_THRESHOLD = float(os.getenv("PHENO_SHARE_THRESH", "0.70"))
 PHENO_PROTECT: Set[str] = set(filter(None, os.getenv("PHENO_PROTECT", "").split(",")))
 _pp_cap = os.getenv("PHENO_DEDUP_CAP_PER_PERSON", "0")
 PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = (int(_pp_cap) if _pp_cap.isdigit() and int(_pp_cap) > 0 else None)
