@@ -1,5 +1,3 @@
-# chr6-76111919-INV-44661 E. coli
-
 # chr7-57835189-INV-284465 two breast cancer related and PMDD
 
 # chr6-141867315-INV-29159 Laryngitis and tracheitis
