@@ -422,18 +422,42 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         s_name = row["sanitized_name"]
         lock_path = os.path.join(lock_dir, f"pheno_{s_name}_{cdr_codename}.lock")
         pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
-        while True:
-            if io.ensure_lock(lock_path, LOCK_MAX_AGE_SEC):
-                if os.path.exists(pheno_cache_path):
-                    io.release_lock(lock_path)
-                    break
-                locks[s_name] = lock_path
-                filtered_infos.append(row)
-                break
-            else:
-                if os.path.exists(pheno_cache_path):
-                    break
-                time.sleep(0.5)
+
+        # If cache already exists, no need to lock/include
+        if os.path.exists(pheno_cache_path):
+            continue
+
+        # Try to acquire the per-pheno lock
+        if io.ensure_lock(lock_path, LOCK_MAX_AGE_SEC):
+            # Double-check cache inside the lock
+            if os.path.exists(pheno_cache_path):
+                io.release_lock(lock_path)
+                continue
+            locks[s_name] = lock_path
+            filtered_infos.append(row)
+            continue
+
+        # Another process holds the lock. If it's stale, break it and try once.
+        try:
+            st = os.stat(lock_path)
+            if (time.time() - st.st_mtime) > LOCK_MAX_AGE_SEC:
+                print(f"[Fetcher]  - [LOCK] Breaking stale lock for '{s_name}'", flush=True)
+                io.release_lock(lock_path)  # break stale lock
+                if io.ensure_lock(lock_path, LOCK_MAX_AGE_SEC):
+                    if os.path.exists(pheno_cache_path):
+                        io.release_lock(lock_path)
+                        continue
+                    locks[s_name] = lock_path
+                    filtered_infos.append(row)
+                    continue
+        except FileNotFoundError:
+            # Lock disappeared between checks; let the next loop/worker handle it
+            pass
+
+        # Fresh lock held by someone else: skip this phenotype (do not spin)
+        print(f"[Fetcher]  - [Batch] Skipping '{s_name}', another process has the lock.", flush=True)
+
+    batch_infos = filtered_infos
 
     batch_infos = filtered_infos
     try:
@@ -813,10 +837,36 @@ def _precache_all_missing_phenos(pheno_defs_df: pd.DataFrame,
     Ensure *all* phenotypes in pheno_defs_df have on-disk parquet caches before dedup runs.
     Uses existing batching helpers to minimize BigQuery scans.
     """
-    missing = [
-        row.to_dict() for _, row in pheno_defs_df.iterrows()
-        if not os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))
-    ]
+    # Coarse guard so only one precache runner works a subset at a time
+    lock_dir = os.path.join(cache_dir, "locks")
+    os.makedirs(lock_dir, exist_ok=True)
+    prec_guard = os.path.join(lock_dir, f"precache_subset_{cdr_codename}.lock")
+    if not io.ensure_lock(prec_guard, LOCK_MAX_AGE_SEC):
+        print("[Dedup]     - Pre-caching already running elsewhere; skipping.", flush=True)
+        return
+    try:
+        missing = [
+            row.to_dict() for _, row in pheno_defs_df.iterrows()
+            if not os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))
+        ]
+        if not missing:
+            return
+
+        missing.sort(key=lambda r: len(r.get("all_codes") or []), reverse=True)
+        batches = list(_batch_pheno_defs(missing, BQ_BATCH_PHENOS, BQ_BATCH_MAX_CODES))
+        print(f"[Dedup]     - Pre-caching: {len(missing)} phenotypes in {len(batches)} batches.", flush=True)
+
+        with ThreadPoolExecutor(max_workers=min(BQ_BATCH_WORKERS, max(1, len(batches)))) as executor:
+            futs = [executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
+                    for batch in batches]
+            for fut in as_completed(futs):
+                try:
+                    _ = fut.result()
+                except Exception as e:
+                    print(f"[Dedup]     - [WARN] Batch pre-cache failed: {str(e)[:200]}", flush=True)
+    finally:
+        io.release_lock(prec_guard)
+
     if not missing:
         return
 
