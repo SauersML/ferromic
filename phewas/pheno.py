@@ -231,15 +231,18 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
 
     def _process_one(pheno_info):
         s_name = pheno_info['sanitized_name']
-    
         try:
             # Fast exit if cache already exists
-            if os.path.exists(os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")):
+            ph_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
+            if os.path.exists(ph_path):
                 return None
-    
-            # Let _query_single_pheno_bq handle locking and atomic write
-            _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename, bq_client=bq_client)
-            return s_name
+
+            # Prepass must NEVER block on locks. Try once; if locked, skip.
+            res = _query_single_pheno_bq(
+                pheno_info, cdr_id, core_index, cache_dir, cdr_codename,
+                bq_client=bq_client, non_blocking=True
+            )
+            return (res or {}).get("name")
         except Exception as e:
             print(f"[Prepass]  - [FAIL] Failed to process '{s_name}': {e}", flush=True)
             return None
@@ -287,7 +290,7 @@ def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
         print(f"[CacheLoader] - [FAIL] Failed to load '{s_name}': {e}", flush=True)
         return None
 
-def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename, bq_client=None):
+def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename, bq_client=None, non_blocking=False):
     """THREAD WORKER: Queries one phenotype from BigQuery, caches it, and returns a descriptor."""
     from google.cloud import bigquery
     if bq_client is None:
@@ -300,6 +303,44 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
     os.makedirs(lock_dir, exist_ok=True)
     lock_path = os.path.join(lock_dir, f"pheno_{s_name}_{cdr_codename}.lock")
 
+    # Non-blocking prepass: skip immediately if another process is working on it
+    if non_blocking:
+        if os.path.exists(pheno_cache_path):
+            return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
+        if not io.ensure_lock(lock_path, LOCK_MAX_AGE_SEC):
+            print(f"[Prepass]  - Skipping '{s_name}', another process has the lock.", flush=True)
+            return None
+        try:
+            # do the work without re-locking later
+            if os.path.exists(pheno_cache_path):
+                return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
+            print(f"[Fetcher]  - [BQ] Querying '{s_name}'...", flush=True)
+            pids = []
+            if codes_upper:
+                sql = f"""
+                  SELECT DISTINCT CAST(person_id AS STRING) AS person_id
+                  FROM `{cdr_id}.condition_occurrence`
+                  WHERE condition_source_value IS NOT NULL
+                    AND UPPER(TRIM(condition_source_value)) IN UNNEST(@codes)
+                """
+                try:
+                    job_cfg = bigquery.QueryJobConfig(
+                        query_parameters=[bigquery.ArrayQueryParameter("codes", "STRING", codes_upper)]
+                    )
+                    df_ids = bq_client.query(sql, job_config=job_cfg).to_dataframe()
+                    pids = df_ids["person_id"].astype(str)
+                except Exception as e:
+                    print(f"[Fetcher]  - [FAIL] BQ query failed for {s_name}. Error: {str(e)[:150]}", flush=True)
+                    pids = []
+            pids_for_cache = pd.Index(sorted(pids), dtype=str, name='person_id')
+            df_to_cache = pd.DataFrame({'is_case': 1}, index=pids_for_cache, dtype=np.int8)
+            io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
+            print(f"[Fetcher]  - Cached {len(pids_for_cache):,} new cases for '{s_name}'", flush=True)
+            return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
+        finally:
+            io.release_lock(lock_path)
+
+    # Default (blocking) path for normal callers; includes stale-lock breaker
     while True:
         if io.ensure_lock(lock_path, LOCK_MAX_AGE_SEC):
             try:
@@ -323,7 +364,6 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
                     except Exception as e:
                         print(f"[Fetcher]  - [FAIL] BQ query failed for {s_name}. Error: {str(e)[:150]}", flush=True)
                         pids = []
-
                 pids_for_cache = pd.Index(sorted(pids), dtype=str, name='person_id')
                 df_to_cache = pd.DataFrame({'is_case': 1}, index=pids_for_cache, dtype=np.int8)
                 io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
@@ -332,6 +372,16 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
             finally:
                 io.release_lock(lock_path)
         else:
+            # If another process holds the lock, break stale locks to avoid infinite wait
+            try:
+                if os.path.exists(lock_path):
+                    st = os.stat(lock_path)
+                    if (time.time() - st.st_mtime) > LOCK_MAX_AGE_SEC:
+                        print(f"[Fetcher]  - [LOCK] Breaking stale lock for '{s_name}'", flush=True)
+                        io.release_lock(lock_path)
+                        continue
+            except FileNotFoundError:
+                pass
             if os.path.exists(pheno_cache_path):
                 return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
             time.sleep(0.5)
