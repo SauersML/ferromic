@@ -1,6 +1,6 @@
 # chr7-57835189-INV-284465 breast cancer
 
-# chr17-45585160-INV-706887 skin conditions, skin cancer, obesity, breast cancer, heart failure, cognitive impairment
+# chr17-45585160-INV-706887 skin conditions, obesity, breast cancer, heart failure, cognitive impairment
 
 # chr12-46897663-INV-16289 skin conditions
 
@@ -18,12 +18,6 @@ Are you still seeing a doctor or health care provider for a skin condition (e.g.
 Who in your family has had skin condition(s) (e.g., eczema, psoriasis)? Select all that apply.
 Including yourself, who in your family has had skin condition(s) (e.g., eczema, psoriasis)? Select all that apply.
 Are you currently prescribed medications and/or receiving treatment for a skin condition (e.g., eczema, psoriasis)?
-
-Skin cancer indicators:
-Who in your family has had skin cancer? Select all that apply.
-Are you still seeing a doctor or health care provider for skin cancer?
-Including yourself, who in your family has had skin cancer? Select all that apply.
-Are you currently prescribed medications and/or receiving treatment for skin cancer?
 
 Obesity indicators:
 Who in your family has had obesity? Select all that apply.
