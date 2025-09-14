@@ -41,12 +41,12 @@ def main():
     not_sig = pl.col("is_h2_significant_in_any_ancestry").fill_null(0) == 0
     remove_not_sig = has_data & not_sig
 
-    remove_reml_neg = (
+    remove_reml_thresh = (
         pl.col("h2_overall_REML").is_not_null()
-        & (pl.col("h2_overall_REML") < 0.0)
+        & (pl.col("h2_overall_REML") < 0.15)
     )
 
-    removal_flag = (remove_not_sig | remove_reml_neg).fill_null(False)  # | remove_no_icd
+    removal_flag = (remove_not_sig | remove_reml_thresh).fill_null(False)  # | remove_no_icd
 
     kept_df = df.filter(~removal_flag)
 
