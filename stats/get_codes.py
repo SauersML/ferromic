@@ -988,16 +988,20 @@ def build_disease_overall_estimates(
 def main():
     """
     Build the master TSV with:
-      (A) ANY-pop detection via ACAT + BH-FDR at H2_THRESHOLD,
-      (B) REML-based overall heritability per disease (h2_overall_REML) with CI/PI.
+      (A) ANY-pop detection via ACAT + BH-FDR at H2_THRESHOLD (liability-only),
+      (B) REML-based overall heritability per disease (only for diseases passing detection).
     """
+    import numpy as np
+    import pandas as pd
+    import math
+
     print("Starting combined PheCodeX, UKBB Phenocode, and Heritability mapping process...")
 
-    # =========================================================================
-    # PHASE 2: DATA ACQUISITION AND LOADING
-    # =========================================================================
+    # -----------------------------
+    # PHASE 2: DATA ACQUISITION
+    # -----------------------------
     try:
-        # --- 2a: Load Primary PheCodeX Data ---
+        # --- PheCodeX
         print(f"Downloading PheCodeX data from: {PHECODE_MAP_URL}")
         phecodex_df = pd.read_csv(
             PHECODE_MAP_URL,
@@ -1014,7 +1018,7 @@ def main():
             }
         )[["phecode", "ICD", "flag", "phecode_string", "phecode_category"]]
 
-        # --- 2b: Load UK Biobank Phenocode (PheCode) Data ---
+        # --- UKBB ICD→PheCode maps
         print("Downloading UKBB ICD-to-Phenocode maps...")
         icd10_map = pd.read_csv(
             UKBB_ICD10_MAP_URL, sep="\t", engine="python",
@@ -1029,23 +1033,17 @@ def main():
         ukbb_lookup_df = pd.concat([icd9_map, icd10_map], ignore_index=True).drop_duplicates()
         print("Created a unified UKBB lookup table.")
 
-        # --- 2c: Load and Pre-process Heritability Data ---
+        # --- Heritability manifest (liability-only; no observed fallback)
         print(f"Downloading heritability data from: {H2_MANIFEST_URL}")
         usecols = [
             "trait_type", "phenocode", "pop",
             "estimates.final.h2_liability", "estimates.final.h2_liability_se",
-            "estimates.final.h2_observed", "estimates.final.h2_observed_se",
             "qcflags.defined_h2", "qcflags.in_bounds_h2", "qcflags.pass_all"
         ]
         h2_raw_df = read_bgz_tsv(H2_MANIFEST_URL, usecols=usecols)
-
-        # Keep only phecode traits (so 'phenocode' matches PheCodes)
         h2_raw_df = h2_raw_df[h2_raw_df["trait_type"] == "phecode"].copy()
 
-        # Preserve a pre-QC snapshot for diagnostics
         h2_pre_qc_df = h2_raw_df.copy()
-
-        # Optional QC filters
         if USE_QC:
             have_defined = "qcflags.defined_h2" in h2_raw_df.columns
             have_inbounds = "qcflags.in_bounds_h2" in h2_raw_df.columns
@@ -1055,33 +1053,18 @@ def main():
                     (h2_raw_df["qcflags.in_bounds_h2"] == True)
                 ].copy()
 
-        # Ensure key columns exist
-        for col in [
-            "estimates.final.h2_liability", "estimates.final.h2_liability_se",
-            "estimates.final.h2_observed", "estimates.final.h2_observed_se"
-        ]:
-            if col not in h2_raw_df.columns:
-                h2_raw_df[col] = np.nan
-
-        # Prefer liability; fallback to observed; also record scale_used for diagnostics
+        # Require liability h2 + SE; drop everything else (no scale mixing)
         liab  = h2_raw_df["estimates.final.h2_liability"]
         liab_se = h2_raw_df["estimates.final.h2_liability_se"]
-        obs   = h2_raw_df["estimates.final.h2_observed"]
-        obs_se  = h2_raw_df["estimates.final.h2_observed_se"]
+        keep = liab.notna() & liab_se.notna() & (liab_se > 0)
+        h2_rows = h2_raw_df.loc[keep, ["phenocode", "pop"]].copy()
+        h2_rows["h2"] = liab[keep].astype(float).to_numpy()
+        h2_rows["se"] = liab_se[keep].astype(float).to_numpy()
+        h2_rows["scale_used"] = "liability"
 
-        use_liab = liab.notna() & liab_se.notna()
-        h2_raw_df["h2"] = np.where(use_liab, liab, obs)
-        h2_raw_df["se"] = np.where(use_liab, liab_se, obs_se)
-        h2_raw_df["scale_used"] = np.where(use_liab, "liability", "observed")
-
-        # Drop rows with missing/invalid SE or h2
-        h2_rows = h2_raw_df[
-            h2_raw_df["h2"].notna() & h2_raw_df["se"].notna() & (h2_raw_df["se"] > 0)
-        ][["phenocode", "pop", "h2", "se", "scale_used"]].copy()
-
-        # ----------------------------
+        # -----------------------------
         # Detection: ACAT + BH-FDR
-        # ----------------------------
+        # -----------------------------
         z = (h2_rows["h2"].to_numpy(dtype=float) - H2_THRESHOLD) / h2_rows["se"].to_numpy(dtype=float)
         p_one = np.array([0.5 * math.erfc(val / math.sqrt(2.0)) for val in z], dtype=float)
         p_one = np.clip(p_one, 1e-15, 1.0 - 1e-15)
@@ -1090,12 +1073,10 @@ def main():
         def acat_group(g: pd.DataFrame) -> pd.Series:
             ps = g["p_one"].to_numpy(dtype=float)
             p_ac = acat(ps)
-            p_bf = min(1.0, float(ps.min() * len(ps)))
             h2_max = float(np.nanmax(g["h2"].to_numpy(dtype=float))) if len(g) else np.nan
             pop_min = g.loc[g["p_one"].idxmin(), "pop"] if len(g) else np.nan
             return pd.Series({
                 "p_any_acat": p_ac,
-                "p_any_bonf": p_bf,
                 "h2_max_any_pop": h2_max,
                 "pop_min_p": pop_min
             })
@@ -1106,18 +1087,17 @@ def main():
                    .reset_index()
         )
 
-        # BH-FDR across phenocodes using ACAT p-values
         valid_mask = per_pheno["p_any_acat"].notna()
         per_pheno["q_bh"] = np.nan
         if valid_mask.any():
             per_pheno.loc[valid_mask, "q_bh"] = bh_fdr(per_pheno.loc[valid_mask, "p_any_acat"].to_numpy(dtype=float))
 
-        # Phenocode-level flag (FDR)
-        per_pheno["phenocode_is_gt5_fdr"] = (
+        # Rename detection flag as requested
+        per_pheno["phenocode_anypop_gt_threshold_fdr"] = (
             (per_pheno["q_bh"].notna()) & (per_pheno["q_bh"] <= FDR_Q)
         ).astype("int64")
 
-        # EUR descriptive summary (IVW mean EUR h2 across rows; already liability-preferred)
+        # EUR descriptive (IVW across multiple EUR rows, if any)
         eur_rows = h2_rows[h2_rows["pop"] == "EUR"].copy()
         if not eur_rows.empty:
             tmp = eur_rows.copy()
@@ -1130,7 +1110,7 @@ def main():
         else:
             per_pheno["eur_h2_mean"] = np.nan
 
-        # --- Build report of mapped PheCodes lacking usable h2/SE and why ---
+        # Diagnostics: mapped-but-missing phenocodes (optional write)
         mapped_set = set(
             ukbb_lookup_df.loc[
                 ukbb_lookup_df["ICD"].isin(phecodex_df["ICD"].dropna().astype(str)),
@@ -1139,79 +1119,21 @@ def main():
         )
         considered_set = set(per_pheno.loc[per_pheno["p_any_acat"].notna(), "phenocode"].astype(str).unique().tolist())
         manifest_preqc_set = set(h2_pre_qc_df["phenocode"].dropna().astype(str).unique().tolist())
-        manifest_postqc_set = set(h2_raw_df["phenocode"].dropna().astype(str).unique().tolist())
         missing_set = sorted(mapped_set - considered_set)
 
-        def summarize_issues_one(phenocode: str) -> dict:
-            pre = h2_pre_qc_df[h2_pre_qc_df["phenocode"].astype(str) == phenocode]
-            post = h2_raw_df[h2_raw_df["phenocode"].astype(str) == phenocode]
-
-            for df in (pre, post):
-                if "estimates.final.h2_liability" not in df.columns: df["estimates.final.h2_liability"] = np.nan
-                if "estimates.final.h2_liability_se" not in df.columns: df["estimates.final.h2_liability_se"] = np.nan
-                if "estimates.final.h2_observed" not in df.columns: df["estimates.final.h2_observed"] = np.nan
-                if "estimates.final.h2_observed_se" not in df.columns: df["estimates.final.h2_observed_se"] = np.nan
-                df["_h2_pref"] = np.where(
-                    df["estimates.final.h2_liability"].notna(),
-                    df["estimates.final.h2_liability"],
-                    df["estimates.final.h2_observed"],
-                )
-                df["_se_pref"] = np.where(
-                    df["estimates.final.h2_liability_se"].notna(),
-                    df["estimates.final.h2_liability_se"],
-                    df["estimates.final.h2_observed_se"],
-                )
-
-            n_pops_preqc = int(pre.shape[0])
-            n_pops_postqc = int(post.shape[0])
-            n_h2_preqc = int(pre["_h2_pref"].notna().sum())
-            n_se_preqc = int(pre["_se_pref"].notna().sum())
-            n_sepos_postqc = int((post["_se_pref"].notna() & (post["_se_pref"] > 0)).sum())
-
-            pops_preqc = ";".join(sorted(pre["pop"].dropna().astype(str).unique().tolist())) if n_pops_preqc else ""
-            pops_postqc = ";".join(sorted(post["pop"].dropna().astype(str).unique().tolist())) if n_pops_postqc else ""
-            pops_sepos = ";".join(sorted(post.loc[(post["_se_pref"].notna()) & (post["_se_pref"] > 0), "pop"].dropna().astype(str).unique().tolist()))
-
-            if phenocode not in manifest_preqc_set:
-                reason = "absent_from_manifest"
-            elif n_pops_postqc == 0 and USE_QC:
-                reason = "removed_by_qc_all_pops"
-            elif n_sepos_postqc == 0:
-                if n_se_preqc == 0:
-                    reason = "missing_se_all_pops"
-                else:
-                    reason = "nonpositive_or_missing_se_all_pops"
-            else:
-                reason = "other_not_considered"
-
-            h2_vals = pre["_h2_pref"].astype(float)
-            h2_max_preqc = (float(np.nanmax(h2_vals)) if h2_vals.notna().any() else np.nan)
-
-            return dict(
-                phenocode=phenocode,
-                reason=reason,
-                n_pops_manifest_preqc=n_pops_preqc,
-                n_pops_manifest_postqc=n_pops_postqc,
-                n_rows_with_h2_preqc=n_h2_preqc,
-                n_rows_with_se_preqc=n_se_preqc,
-                n_rows_with_sepos_postqc=n_sepos_postqc,
-                pops_manifest_preqc=pops_preqc,
-                pops_manifest_postqc=pops_postqc,
-                pops_with_sepos_postqc=pops_sepos,
-                h2_max_preqc=h2_max_preqc,
-            )
-
         if len(missing_set) > 0:
-            missing_rows = [summarize_issues_one(pc) for pc in missing_set]
-            missing_df = pd.DataFrame(missing_rows, columns=[
-                "phenocode","reason",
-                "n_pops_manifest_preqc","n_pops_manifest_postqc",
-                "n_rows_with_h2_preqc","n_rows_with_se_preqc","n_rows_with_sepos_postqc",
-                "pops_manifest_preqc","pops_manifest_postqc","pops_with_sepos_postqc",
-                "h2_max_preqc"
-            ])
+            def summarize_issues_one(phenocode: str) -> dict:
+                pre = h2_pre_qc_df[h2_pre_qc_df["phenocode"].astype(str) == phenocode]
+                n_pops_preqc = int(pre.shape[0])
+                pops_preqc = ";".join(sorted(pre["pop"].dropna().astype(str).unique().tolist())) if n_pops_preqc else ""
+                return dict(
+                    phenocode=phenocode,
+                    reason=("absent_from_manifest" if phenocode not in manifest_preqc_set else "no_liability_h2_se"),
+                    n_pops_manifest_preqc=n_pops_preqc,
+                    pops_manifest_preqc=pops_preqc
+                )
             try:
-                missing_df.to_csv(MISSING_PHECODES_TSV, sep="\t", index=False)
+                pd.DataFrame([summarize_issues_one(pc) for pc in missing_set]).to_csv(MISSING_PHECODES_TSV, sep="\t", index=False)
                 print(f"Wrote detail on missing/unsuitable PheCodes to: {MISSING_PHECODES_TSV}")
             except Exception as _e:
                 print(f"Warning: failed to write {MISSING_PHECODES_TSV}: {_e}")
@@ -1224,17 +1146,16 @@ def main():
         print(f"Error details: {e}")
         return
 
-    # =========================================================================
-    # PHASE 3: MERGING, DETECTION, AND ESTIMATION
-    # =========================================================================
+    # ------------------------------------------
+    # PHASE 3: MERGE, DETECTION, & ESTIMATION
+    # ------------------------------------------
     print("Enriching data with UKBB PheCodes and Heritability stats...")
 
-    # Map ICD -> ukbb_phenocode (PheCodes), left-join into PheCodeX rows
+    # Map ICD -> PheCodes into PheCodeX rows
     base_df = phecodex_df.merge(ukbb_lookup_df, on="ICD", how="left")
 
     grouping_cols = ["phecode", "phecode_string", "phecode_category"]
 
-    # Aggregate to PheCodeX disease level with deduplicated code lists and PheCodes
     def agg_disease(g: pd.DataFrame) -> pd.Series:
         icd9 = combine_codes_unique_sorted(g.loc[g["flag"] == 9, "ICD"])
         icd10 = combine_codes_unique_sorted(g.loc[g["flag"] == 10, "ICD"])
@@ -1251,13 +1172,13 @@ def main():
                .reset_index()
     )
 
-    # -------- Detection branch --------
+    # Detection → disease level
     long_df = aggregated_df.explode("ukbb_phenocode")
     long_df["ukbb_phenocode"] = long_df["ukbb_phenocode"].astype("string")
     per_pheno["phenocode"] = per_pheno["phenocode"].astype("string")
 
     long_joined = long_df.merge(
-        per_pheno[["phenocode", "phenocode_is_gt5_fdr", "eur_h2_mean"]],
+        per_pheno[["phenocode", "phenocode_anypop_gt_threshold_fdr", "eur_h2_mean"]],
         left_on="ukbb_phenocode",
         right_on="phenocode",
         how="left"
@@ -1265,75 +1186,72 @@ def main():
 
     disease_signals = (
         long_joined.groupby(grouping_cols, as_index=False)
-                   .agg({"phenocode_is_gt5_fdr": "max", "eur_h2_mean": "mean"})
+                   .agg({"phenocode_anypop_gt_threshold_fdr": "max", "eur_h2_mean": "mean"})
                    .rename(columns={
-                       "phenocode_is_gt5_fdr": "is_h2_significant_in_any_ancestry",
+                       "phenocode_anypop_gt_threshold_fdr": "is_h2_significant_in_any_ancestry",
                        "eur_h2_mean": "h2_eur_avg"
                    })
     )
 
-    # Merge detection signals back
     final_df = aggregated_df.merge(disease_signals, on=grouping_cols, how="left")
     final_df["is_h2_significant_in_any_ancestry"] = (
         final_df["is_h2_significant_in_any_ancestry"].fillna(0).astype("int64")
     )
 
-    # -------- Estimation branch (REML one-shot) --------
-    # Build a long table of (disease keys, phenocode) x (pop, h2, se, scale_used)
-    disease_pheno_pop_long = (
-        long_df.merge(
+    # ---------- Estimation (REML) ONLY for diseases passing detection ----------
+    sig_keys = final_df.loc[final_df["is_h2_significant_in_any_ancestry"] == 1, grouping_cols].drop_duplicates()
+    if not sig_keys.empty:
+        # Restrict disease×phenocode list to passing diseases
+        long_sig = long_df.merge(sig_keys, on=grouping_cols, how="inner")
+
+        # Attach pop-level liability h2 rows
+        disease_pheno_pop_long = long_sig.merge(
             h2_rows.rename(columns={"phenocode": "ukbb_phenocode"}),
             on="ukbb_phenocode",
             how="left"
         )
-    )
-    # REML meta across populations per disease (one-shot)
-    B_boot = None
-    if REML_BOOTSTRAP_B and int(REML_BOOTSTRAP_B) > 0:
-        B_boot = int(REML_BOOTSTRAP_B)
 
-    disease_overall_df = build_disease_overall_estimates(
-        disease_pheno_pop_long,
-        grouping_cols=grouping_cols,
-        transform="liability",     # keep liability scale primary; switch to 'logit' if desired
-        bootstrap_B=B_boot,
-        random_state=42
-    )
+        B_boot = int(REML_BOOTSTRAP_B) if (REML_BOOTSTRAP_B and int(REML_BOOTSTRAP_B) > 0) else None
 
-    # Merge overall REML estimates into master
-    final_df = final_df.merge(disease_overall_df, on=grouping_cols, how="left")
+        disease_overall_df = build_disease_overall_estimates(
+            disease_pheno_pop_long,
+            grouping_cols=grouping_cols,
+            transform="liability",     # no scale mixing
+            bootstrap_B=B_boot,
+            random_state=42,
+            # other build_disease_overall_estimates args at defaults
+        )
+        final_df = final_df.merge(disease_overall_df, on=grouping_cols, how="left")
+    else:
+        # No passing diseases; create empty columns expected downstream
+        for c in [
+            "h2_overall_REML","se_overall_REML","ci95_l_overall_REML","ci95_u_overall_REML",
+            "tau2_between_pops","omega2_between_phecodes","sigma2_within_idio",
+            "I2_between_pops","I2_between_phecodes","I2_idiosyncratic",
+            "pred_int_l","pred_int_u",
+            "n_pops_used","n_obs_used","any_scale_mix_flag"
+        ]:
+            if c not in final_df.columns:
+                final_df[c] = np.nan
 
-    # Back-compat alias: h2_overall_RE (same as REML estimate)
+    # Back-compat alias if desired (harmless)
     if "h2_overall_REML" in final_df.columns:
         final_df["h2_overall_RE"] = final_df["h2_overall_REML"]
 
-    # --- Reporting summaries ---
-    n_diseases = int(final_df.shape[0])
-    n_diseases_sig = int(final_df["is_h2_significant_in_any_ancestry"].sum())
-    n_overall = int(final_df["h2_overall_REML"].notna().sum()) if "h2_overall_REML" in final_df.columns else 0
-
-    print("Disease-level summary:")
-    print(f"  Total PheCodeX diseases: {n_diseases}")
-    print(f"  With > {H2_THRESHOLD*100:.0f}% any-pop signal (via mapped PheCodes, FDR): {n_diseases_sig}")
-    print(f"  With overall heritability computed (REML): {n_overall}")
-
-    # =========================================================================
-    # PHASE 4: FINAL FORMATTING AND OUTPUT GENERATION
-    # =========================================================================
+    # -----------------------------
+    # PHASE 4: OUTPUT FORMATTING
+    # -----------------------------
     print("Formatting final data and preparing for output...")
 
-    # Convert lists to delimited strings; keep ukbb_phenocode column name unchanged
     final_df["icd9_codes"] = final_df["ICD9_Mappings"].apply(list_join_safe)
     final_df["icd10_codes"] = final_df["ICD10_Mappings"].apply(list_join_safe)
     final_df["ukbb_phenocode"] = final_df["ukbb_phenocode"].apply(list_join_safe)
 
-    # Round h2_eur_avg to 4 decimals; empty string if NaN (compat with prior outputs)
     if "h2_eur_avg" not in final_df.columns:
         final_df["h2_eur_avg"] = np.nan
     final_df["h2_eur_avg"] = final_df["h2_eur_avg"].round(4)
     final_df["h2_eur_avg"] = final_df["h2_eur_avg"].apply(lambda x: "" if pd.isna(x) else f"{x:.4f}")
 
-    # Select and order columns (include REML outputs + alias)
     out_cols = [
         "phecode",
         "ukbb_phenocode",
@@ -1348,15 +1266,17 @@ def main():
         "ci95_l_overall_REML",
         "ci95_u_overall_REML",
         "tau2_between_pops",
-        "omega2_within_pop",
+        "omega2_between_phecodes",
+        "sigma2_within_idio",
         "I2_between_pops",
-        "I2_within_pops",
+        "I2_between_phecodes",
+        "I2_idiosyncratic",
         "pred_int_l",
         "pred_int_u",
         "n_pops_used",
         "n_obs_used",
         "any_scale_mix_flag",
-        "h2_overall_RE"  # back-compat
+        "h2_overall_RE"  # optional alias
     ]
     for c in out_cols:
         if c not in final_df.columns:
