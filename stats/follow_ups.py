@@ -1,9 +1,8 @@
-# chr7-57835189-INV-284465 two breast cancer related
+# chr7-57835189-INV-284465 breast cancer
 
-# chr17-45585160-INV-706887 multiple skin conditions, obesity, multiple breast cancer-related, Diastolic heart failure, Mild cognitive impairment
+# chr17-45585160-INV-706887 skin conditions, skin cancer, obesity, breast cancer, heart failure, cognitive impairment
 
-# chr12-46897663-INV-16289 eye inflammation, migraine, Rosacea
-
+# chr12-46897663-INV-16289 skin conditions
 
 Breast cancer indicators:
 Has anyone in your family ever been diagnosed with the following cancer conditions? Think only of the people you are related to by blood. Select all that apply.
