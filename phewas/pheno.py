@@ -805,6 +805,8 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
       1) phi > phi_threshold  -> drop the one with fewer cases (ties: more codes wins, then name)
       2) directional share >= share_threshold in *either* direction -> drop the smaller
 
+    Prints a message every time a phenotype is dropped, with the reason and relevant statistics.
+
     Returns:
       {
         "config": {...},
@@ -873,6 +875,28 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
     def _pair_key(x: str, y: str) -> Tuple[str, str]:
         return (x, y) if x < y else (y, x)
 
+    # Helper to explain tiebreak decision in human-readable form
+    def _tiebreak_explanation(a_name: str, n1a: int, n_codes_a: int,
+                              b_name: str, n1b: int, n_codes_b: int,
+                              dropped: str) -> str:
+        if n1a != n1b:
+            # smaller case count drops
+            if n1a < n1b and dropped == a_name:
+                return f"tiebreak: smaller case count ({n1a} < {n1b})"
+            if n1b < n1a and dropped == b_name:
+                return f"tiebreak: smaller case count ({n1b} < {n1a})"
+        if n_codes_a != n_codes_b:
+            # fewer ICD codes drops
+            if n_codes_a < n_codes_b and dropped == a_name:
+                return f"tiebreak: fewer ICD codes ({n_codes_a} < {n_codes_b})"
+            if n_codes_b < n_codes_a and dropped == b_name:
+                return f"tiebreak: fewer ICD codes ({n_codes_b} < {n_codes_a})"
+        # final: lexicographically larger name drops
+        larger = b_name if b_name > a_name else a_name
+        if dropped == larger:
+            return f"tiebreak: lexicographically larger name ('{larger}')"
+        return "tiebreak: deterministic rule"
+
     # 4) Greedy sweep
     for name_a, n1a, n_codes_a in items:
         if name_a in dropped_names:
@@ -899,6 +923,21 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
                 drop = _tiebreak_drop(name_a, n1a, n_codes_a, name_b, n1b, n_codes_b)
                 if drop not in protect:
                     other = name_b if drop == name_a else name_a
+                    # Explain which direction(s) triggered
+                    trigger_dirs = []
+                    if share_ab >= share_threshold:
+                        trigger_dirs.append(f"{name_a}->{name_b} ({share_ab:.4f}≥{share_threshold})")
+                    if share_ba >= share_threshold:
+                        trigger_dirs.append(f"{name_b}->{name_a} ({share_ba:.4f}≥{share_threshold})")
+                    tie_expl = _tiebreak_explanation(name_a, n1a, n_codes_a, name_b, n1b, n_codes_b, drop)
+                    print(
+                        f"Dropped '{drop}' because directional share>=threshold with '{other}'; "
+                        f"triggers: {', '.join(trigger_dirs)}; "
+                        f"k={k}, n1_self={n1_map.get(drop, 0)}, n1_other={n1_map.get(other, 0)}, "
+                        f"share_self={(share_ba if drop == name_b else share_ab):.4f}, "
+                        f"share_other={(share_ab if drop == name_b else share_ba):.4f}; {tie_expl}"
+                    )
+
                     dropped_records.append({
                         "name": drop,
                         "reason": "share>=threshold",
@@ -926,6 +965,13 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
                 if drop in protect:
                     continue
                 other = name_b if drop == name_a else name_a
+                tie_expl = _tiebreak_explanation(name_a, n1a, n_codes_a, name_b, n1b, n_codes_b, drop)
+                print(
+                    f"Dropped '{drop}' because phi>{phi_threshold} with '{other}'; "
+                    f"k={k}, n1_self={n1_map.get(drop, 0)}, n1_other={n1_map.get(other, 0)}, "
+                    f"phi={phi:.4f}; {tie_expl}"
+                )
+
                 dropped_records.append({
                     "name": drop,
                     "reason": "phi>threshold",
