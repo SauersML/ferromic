@@ -674,7 +674,7 @@ def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx
     for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]: os.environ[v] = "1"
     _suppress_worker_warnings()
     _validate_ctx(ctx)
-    global worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, CTX, finite_mask_worker
+    global worker_core_df, allowed_mask_by_cat, allowed_fp_by_cat, N_core, worker_anc_series, CTX, finite_mask_worker
     global X_all, col_ix, worker_core_df_cols, worker_core_df_index, _BASE_SHM_HANDLE
 
     worker_core_df = None
@@ -682,6 +682,13 @@ def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx
     worker_core_df_cols = pd.Index(core_cols)
     worker_core_df_index = pd.Index(core_index)
     worker_anc_series = anc_series.reindex(worker_core_df_index).str.lower()
+
+    allowed_fp_by_cat = {}
+    for cat, mask in allowed_mask_by_cat.items():
+        idx = np.flatnonzero(mask)
+        allowed_fp_by_cat[cat] = _index_fingerprint(
+            worker_core_df_index[idx] if idx.size else pd.Index([])
+        )
 
     X_all, _BASE_SHM_HANDLE = io.attach_shared_ndarray(base_shm_meta)
 
@@ -980,8 +987,24 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
             or_ci95_str = f"{lo:.3f},{hi:.3f}"
 
-        result = {"Phenotype": s_name, "N_Cases": n_cases, "N_Controls": n_ctrls, "Beta": beta, "OR": np.exp(beta), "P_Value": pval, "OR_CI95": or_ci95_str, "Used_Ridge": not final_is_mle, "Final_Is_MLE": final_is_mle}
-        result.update({"N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used, "Model_Notes": ";".join(notes) if notes else ""})
+        result = {
+            "Phenotype": s_name,
+            "N_Total": n_total,
+            "N_Cases": n_cases,
+            "N_Controls": n_ctrls,
+            "Beta": beta,
+            "OR": np.exp(beta),
+            "P_Value": pval,
+            "OR_CI95": or_ci95_str,
+            "Used_Ridge": not final_is_mle,
+            "Final_Is_MLE": final_is_mle,
+        }
+        result.update({
+            "N_Total_Used": n_total_used,
+            "N_Cases_Used": n_cases_used,
+            "N_Controls_Used": n_ctrls_used,
+            "Model_Notes": ";".join(notes) if notes else "",
+        })
         io.atomic_write_json(result_path, result)
         _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_idx_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
         print(f"[fit OK] name={s_name_safe} OR={np.exp(beta):.3f} p={pval:.3e} notes={'|'.join(notes)}", flush=True)
@@ -998,6 +1021,8 @@ def lrt_overall_worker(task):
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
+    res_path = os.path.join(CTX["RESULTS_CACHE_DIR"], f"{s_name_safe}.json")
+    os.makedirs(CTX["RESULTS_CACHE_DIR"], exist_ok=True)
     try:
         pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
         if not os.path.exists(pheno_path):
@@ -1035,8 +1060,11 @@ def lrt_overall_worker(task):
         if os.path.exists(result_path) and _lrt_meta_should_skip(
             meta_path, worker_core_df_cols, core_fp, case_fp, cat, target, allowed_fp
         ):
-            print(f"[skip cache-ok] {s_name_safe} (LRT-Stage1)", flush=True)
-            return
+            if os.path.exists(res_path):
+                print(f"[skip cache-ok] {s_name_safe} (LRT-Stage1)", flush=True)
+                return
+            else:
+                print(f"[backfill] {s_name_safe} (LRT-Stage1) missing results JSON; regenerating", flush=True)
 
         allowed_mask = allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool))
         case_mask = np.zeros(N_core, dtype=bool)
@@ -1056,12 +1084,45 @@ def lrt_overall_worker(task):
         ).astype(np.float64, copy=False)
         y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base.index, dtype=np.int8)
 
+        # Pre-sex-restriction counts to mirror main PheWAS semantics
+        n_cases_pre = int(y_series.sum())
+        n_ctrls_pre = int(len(y_series) - n_cases_pre)
+        n_total_pre = int(len(y_series))
+
         Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
         n_total_used, n_cases_used, n_ctrls_used = len(yb), int(yb.sum()), len(yb) - int(yb.sum())
 
         if skip:
             io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": skip, "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used})
             _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": skip})
+
+            # Write the PheWAS-style result as a skip to mirror main pass outputs
+            io.atomic_write_json(res_path, {
+                "Phenotype": s_name,
+                "N_Total": n_total_pre,
+                "N_Cases": n_cases_pre,
+                "N_Controls": n_ctrls_pre,
+                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
+                "Used_Ridge": False, "Final_Is_MLE": False,
+                "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
+                "Model_Notes": note or "",
+                "Skip_Reason": skip
+            })
+            io.atomic_write_json(res_path + ".meta.json", {
+                "kind": "phewas_result",
+                "s_name": s_name,
+                "category": cat,
+                "model_columns": list(worker_core_df_cols),
+                "num_pcs": CTX["NUM_PCS"],
+                "min_cases": CTX["MIN_CASES_FILTER"],
+                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                "target": target,
+                "core_index_fp": _index_fingerprint(worker_core_df_index),
+                "case_idx_fp": case_fp,
+                "allowed_mask_fp": allowed_fp,
+                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
             return
 
         ok, reason, det = validate_min_counts_for_fit(yb, stage_tag="lrt_stage1", extra_context={"phenotype": s_name})
@@ -1069,8 +1130,43 @@ def lrt_overall_worker(task):
             print(f"[skip] name={s_name_safe} stage=LRT-Stage1 reason={reason} "
                   f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
                   f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}", flush=True)
-            io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": reason, "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls']})
+            io.atomic_write_json(result_path, {
+                "Phenotype": s_name,
+                "P_LRT_Overall": np.nan,
+                "LRT_Overall_Reason": reason,
+                "N_Total_Used": det['N'],
+                "N_Cases_Used": det['N_cases'],
+                "N_Controls_Used": det['N_ctrls']
+            })
             _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": reason, "counts": det})
+
+            # Emit a PheWAS-style skip result to keep downstream shape identical
+            io.atomic_write_json(res_path, {
+                "Phenotype": s_name,
+                "N_Total": n_total_pre,
+                "N_Cases": n_cases_pre,
+                "N_Controls": n_ctrls_pre,
+                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
+                "Used_Ridge": False, "Final_Is_MLE": False,
+                "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
+                "Model_Notes": note or "",
+                "Skip_Reason": reason
+            })
+            io.atomic_write_json(res_path + ".meta.json", {
+                "kind": "phewas_result",
+                "s_name": s_name,
+                "category": cat,
+                "model_columns": list(worker_core_df_cols),
+                "num_pcs": CTX["NUM_PCS"],
+                "min_cases": CTX["MIN_CASES_FILTER"],
+                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                "target": target,
+                "core_index_fp": _index_fingerprint(worker_core_df_index),
+                "case_idx_fp": case_fp,
+                "allowed_mask_fp": allowed_fp,
+                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
             return
 
         X_full_df = Xb
@@ -1078,6 +1174,8 @@ def lrt_overall_worker(task):
         # Prune the full model first to resolve rank deficiency.
         X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=(target,))
         X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=(target,))
+
+        target_ix = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
 
         # The reduced model MUST be a subset of the pruned full model for the LRT to be valid.
         # Construct it by dropping the target column from the *already pruned* full model columns.
@@ -1141,6 +1239,86 @@ def lrt_overall_worker(task):
                 out["LRT_Overall_Reason"] = "zero_df_lrt"
         else:
             out["LRT_Overall_Reason"] = "penalized_fit_in_path" if (fit_red or fit_full) else "fit_failed"
+
+        # --- Emit PheWAS-style per-phenotype result from the FULL fit ---
+        beta_full = np.nan
+        or_val = np.nan
+        wald_p = np.nan
+        ci95 = None
+        final_is_mle = getattr(fit_full, "_final_is_mle", False)
+
+        if fit_full is not None and target_ix is not None:
+            try:
+                params = getattr(fit_full, "params", None)
+                if hasattr(params, "index"):
+                    beta_full = float(params[target])
+                else:
+                    beta_full = float(params[target_ix])
+                or_val = float(np.exp(beta_full))
+            except Exception:
+                pass
+
+            if final_is_mle and hasattr(fit_full, "pvalues"):
+                try:
+                    pvals = fit_full.pvalues
+                    try:
+                        wald_p = float(pvals[target_ix])
+                    except Exception:
+                        try:
+                            wald_p = float(pvals.loc[target])
+                        except Exception:
+                            wald_p = np.nan
+                    se = np.nan
+                    if hasattr(fit_full, "bse"):
+                        try:
+                            se = float(fit_full.bse[target_ix])
+                        except Exception:
+                            try:
+                                se = float(fit_full.bse.loc[target])
+                            except Exception:
+                                se = np.nan
+                    if np.isfinite(se) and se > 0:
+                        lo, hi = np.exp(beta_full - 1.96 * se), np.exp(beta_full + 1.96 * se)
+                        ci95 = f"{lo:.3f},{hi:.3f}"
+                except Exception:
+                    pass
+
+        model_notes = [note] if note else []
+        if isinstance(reason_full, str) and reason_full:
+            model_notes.append(reason_full)
+
+        res_record = {
+            "Phenotype": s_name,
+            "N_Total": n_total_pre,
+            "N_Cases": n_cases_pre,
+            "N_Controls": n_ctrls_pre,
+            "Beta": beta_full,
+            "OR": or_val,
+            "P_Value": wald_p,
+            "OR_CI95": ci95,
+            "Used_Ridge": (not final_is_mle),
+            "Final_Is_MLE": bool(final_is_mle),
+            "N_Total_Used": n_total_used,
+            "N_Cases_Used": n_cases_used,
+            "N_Controls_Used": n_ctrls_used,
+            "Model_Notes": ";".join(model_notes)
+        }
+        io.atomic_write_json(res_path, res_record)
+        io.atomic_write_json(res_path + ".meta.json", {
+            "kind": "phewas_result",
+            "s_name": s_name,
+            "category": cat,
+            "model_columns": list(worker_core_df_cols),
+            "num_pcs": CTX["NUM_PCS"],
+            "min_cases": CTX["MIN_CASES_FILTER"],
+            "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+            "target": target,
+            "core_index_fp": _index_fingerprint(worker_core_df_index),
+            "case_idx_fp": case_fp,
+            "allowed_mask_fp": allowed_fp,
+            "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
 
         io.atomic_write_json(result_path, out)
         _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols,
