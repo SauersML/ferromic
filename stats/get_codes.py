@@ -314,44 +314,20 @@ def fit_overall_h2_reml(
 ):
     """
     REML for hierarchical model with two random effects:
-        y_{i} = mu + u_{pop(i)} + b_{phe(i)} + eps_i
+        y_i = mu + u_{pop(i)} + b_{phe(i)} + eps_i
         u_p   ~ N(0, tau2)
         b_j   ~ N(0, omega2)
-        eps_i ~ N(0, s2_i + sigma2_e)
-    where s2_i are known measurement variances from the manifest.
+        eps_i ~ N(0, s2_i + sigma2_e)   (s2_i = known measurement variance)
 
-    Parameters
-    ----------
-    y : array-like (n,)
-      Point estimates of h2 (analysis scale).
-    s2 : array-like (n,)
-      Measurement variances (SE^2) aligned with y.
-    pop_ids : array-like (n,)
-      Population labels (strings/objects).
-    phe_ids : array-like (n,)
-      PheCode labels (strings/objects).
-    transform : {"liability","logit"}
-      Analysis scale. "logit" keeps estimates in [0,1] via delta/back-transform.
-    bootstrap_B : int or None
-      If >0, run parametric bootstrap for CI/PI (accurate, slower).
-    random_state : int or np.random.Generator or None
-      RNG for bootstrap.
-    pi_target : {"new_pop_new_phe","new_pop_existing_phe","existing_pop_new_phe"}
-      Predictive interval target.
-
-    Returns
-    -------
-    dict with:
-      mu, se_mu, ci95_l, ci95_u,
-      tau2, omega2, sigma2_e,
-      I2_between_pops, I2_between_phecodes, I2_idiosyncratic,
-      pred_int_l, pred_int_u,
-      n_pops_used, n_phecodes_used, n_obs_used
+    Notes / policy choices implemented:
+      - No ad-hoc t-approx fallback for CI/PI. If bootstrap_B is None/0, CI/PI are NaN.
+      - Transform == "liability": identity; "logit": delta & back-transform used for mu/se.
     """
     import numpy as np
-    from scipy import optimize, stats
+    from scipy import optimize
+    from scipy.stats import norm  # only for constants, not used if bootstrap off
 
-    # Basic masking
+    # ---- basic masking & encoding
     y = np.asarray(y, dtype=float)
     s2 = np.asarray(s2, dtype=float)
     pop_ids = np.asarray(pop_ids)
@@ -370,18 +346,16 @@ def fit_overall_h2_reml(
             n_pops_used=0, n_phecodes_used=0, n_obs_used=0
         )
 
-    # Prepare analysis scale
+    # ---- analysis scale transform
     y_t, se_t, meta = _prep_transform(y, np.sqrt(s2), transform)
     s2_t = se_t ** 2
 
-    # Encode groups
+    # ---- encode groups
     pop_idx, phe_idx, uniq_pops, uniq_phe = _encode_groups(pop_ids, phe_ids)
     K = len(uniq_pops)
     J = len(uniq_phe)
 
-    # Edge cases: if either K==0 or J==0, solver collapses naturally
-
-    # REML objective in log-parameters (positivity via exp)
+    # ---- REML objective
     def neg_reml(theta):
         ltau2, lomega2, lsig2 = theta
         tau2 = np.exp(ltau2)
@@ -394,17 +368,15 @@ def fit_overall_h2_reml(
         Vinv_y   = sol["apply_Vinv"](y_t)
         XtVinvX  = sol["XtVinvX"]()
         XtVinvY  = sol["XtVinv_vec"](y_t)
-        mu_hat   = XtVinvY / XtVinvX
         yPy      = float(y_t @ Vinv_y - (XtVinvY ** 2) / XtVinvX)
 
-        logdetV       = sol["logdet_V"]()
-        logdet_XtVinvX = np.log(XtVinvX)
+        logdetV  = sol["logdet_V"]()
+        logdet_X = np.log(XtVinvX)
 
-        # REML loglik (drop constants): -0.5*(log|V| + log|X'V^{-1}X| + y'Py)
-        ll = -0.5 * (logdetV + logdet_XtVinvX + yPy)
+        # REML loglik (drop constants)
+        ll = -0.5 * (logdetV + logdet_X + yPy)
         return -ll
 
-    # Start small, positive variances
     x0 = np.array([-4.0, -4.0, -4.0], dtype=float)
     bounds = [(-20.0, 8.0)] * 3
 
@@ -417,7 +389,7 @@ def fit_overall_h2_reml(
     omega2_hat  = float(np.exp(lomega2_opt))
     sigma2_e_hat= float(np.exp(lsig2_opt))
 
-    # Recompute GLS summaries at optimum
+    # ---- GLS summaries at optimum
     d = s2_t + sigma2_e_hat + 1e-12
     sol = _woodbury_multi_solvers(d, pop_idx, phe_idx, tau2_hat, omega2_hat)
 
@@ -425,16 +397,16 @@ def fit_overall_h2_reml(
     XtVinvY  = sol["XtVinv_vec"](y_t)
     mu_hat_t = XtVinvY / XtVinvX
     var_mu_t = 1.0 / XtVinvX
-    se_mu_t  = np.sqrt(var_mu_t)
+    se_mu_t  = float(np.sqrt(var_mu_t))
 
-    # Typical measurement variance (for PI)
+    # Typical measurement variance for prediction
     s2_bar_t = compute_typical_s2(s2_t, sigma2_e_hat)
 
-    # Back-transform point/SE
-    mu_point = meta["back"](mu_hat_t) if meta["scale"] == "logit" else mu_hat_t
+    # ---- back-transform point & SE to original scale
+    mu_point = meta["back"](mu_hat_t) if meta["scale"] == "logit" else float(mu_hat_t)
     se_point = meta["delta"](mu_hat_t, se_mu_t)
 
-    # CIs / PIs
+    # ---- intervals: bootstrap only; otherwise NaN
     if bootstrap_B is not None and int(bootstrap_B) > 0:
         boot = parametric_bootstrap_overall_2re(
             y_t, s2_t, pop_idx, phe_idx,
@@ -445,39 +417,15 @@ def fit_overall_h2_reml(
         ci_l, ci_u = np.percentile(boot["mu_draws"], [2.5, 97.5])
         pi_l, pi_u = np.percentile(boot["pred_draws"], [2.5, 97.5])
 
-        if meta["scale"] == "logit":
-            ci_l = float(np.clip(ci_l, 0.0, 1.0))
-            ci_u = float(np.clip(ci_u, 0.0, 1.0))
-            pi_l = float(np.clip(pi_l, 0.0, 1.0))
-            pi_u = float(np.clip(pi_u, 0.0, 1.0))
+        # ensure [0,1] on original h2 scale
+        ci_l = float(min(1.0, max(0.0, ci_l)))
+        ci_u = float(min(1.0, max(0.0, ci_u)))
+        pi_l = float(min(1.0, max(0.0, pi_l)))
+        pi_u = float(min(1.0, max(0.0, pi_u)))
     else:
-        # Fallback t-approx on analysis scale with df = max(1, K + J - 2)
-        df = max(1, K + J - 2)
-        tcrit = stats.t.ppf(0.975, df)
-        if meta["scale"] == "logit":
-            ci_l = meta["back"](mu_hat_t - tcrit * se_mu_t)
-            ci_u = meta["back"](mu_hat_t + tcrit * se_mu_t)
-        else:
-            ci_l = mu_hat_t - tcrit * se_mu_t
-            ci_u = mu_hat_t + tcrit * se_mu_t
+        ci_l = ci_u = pi_l = pi_u = float("nan")
 
-        # Predictive SD (analysis scale) depends on target
-        if pi_target == "new_pop_new_phe":
-            pred_var_t = tau2_hat + omega2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
-        elif pi_target == "new_pop_existing_phe":
-            pred_var_t = tau2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
-        else:  # "existing_pop_new_phe"
-            pred_var_t = omega2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
-
-        pred_sd_t = float(np.sqrt(max(0.0, pred_var_t)))
-        if meta["scale"] == "logit":
-            pi_l = meta["back"](mu_hat_t - tcrit * pred_sd_t)
-            pi_u = meta["back"](mu_hat_t + tcrit * pred_sd_t)
-        else:
-            pi_l = mu_hat_t - tcrit * pred_sd_t
-            pi_u = mu_hat_t + tcrit * pred_sd_t
-
-    # I^2 decomposition (fractions) on analysis scale using variance additivity
+    # ---- I^2 decomposition (analysis scale)
     denom = tau2_hat + omega2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
     if denom <= 0:
         I2_pop = I2_phe = I2_eps = 0.0
@@ -485,12 +433,6 @@ def fit_overall_h2_reml(
         I2_pop = float(tau2_hat / denom)
         I2_phe = float(omega2_hat / denom)
         I2_eps = float(sigma2_e_hat / denom)
-
-    # Clip bounds for original h2 scale if needed
-    def _clip01(x): return float(min(1.0, max(0.0, x)))
-    if meta["scale"] == "logit":
-        ci_l = _clip01(ci_l); ci_u = _clip01(ci_u)
-        pi_l = _clip01(pi_l); pi_u = _clip01(pi_u)
 
     return dict(
         mu=float(mu_point), se_mu=float(se_point),
@@ -502,13 +444,34 @@ def fit_overall_h2_reml(
     )
 
 def _reml_worker(payload):
+    """
+    Worker used by build_disease_overall_estimates to fit the 2-RE REML model
+    for a single disease. Removes misleading legacy aliases.
+
+    Parameters
+    ----------
+    payload : tuple
+        (y, s2, pop, phe, mix_flag, transform_, B, rs, pi_t)
+
+    Returns
+    -------
+    dict
+        Keys include:
+          - h2_overall_REML, se_overall_REML, ci95_l_overall_REML, ci95_u_overall_REML
+          - tau2_between_pops, omega2_between_phecodes, sigma2_within_idio
+          - I2_between_pops, I2_between_phecodes, I2_idiosyncratic
+          - pred_int_l, pred_int_u
+          - n_pops_used, n_phecodes_used, n_obs_used
+          - any_scale_mix_flag
+        (No legacy/misleading aliases are included.)
+    """
     import os
-    # Limit BLAS oversubscription in workers
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
     y, s2, pop, phe, mix_flag, transform_, B, rs, pi_t = payload
+
     fit = fit_overall_h2_reml(
         y, s2, pop, phe,
         transform=transform_,
@@ -516,7 +479,9 @@ def _reml_worker(payload):
         random_state=rs,
         pi_target=pi_t
     )
-    out = dict(
+
+    # Return only clearly labeled components (no legacy aliases)
+    return dict(
         h2_overall_REML=fit["mu"],
         se_overall_REML=fit["se_mu"],
         ci95_l_overall_REML=fit["ci95_l"],
@@ -532,12 +497,9 @@ def _reml_worker(payload):
         n_pops_used=fit["n_pops_used"],
         n_phecodes_used=fit["n_phecodes_used"],
         n_obs_used=fit["n_obs_used"],
-        any_scale_mix_flag=mix_flag,
-        # Legacy aliases (kept for downstream compatibility)
-        omega2_within_pop=fit["sigma2_e"],
-        I2_within_pops=fit["I2_idiosyncratic"],
+        any_scale_mix_flag=mix_flag
     )
-    return out
+
 
 def parametric_bootstrap_overall_2re(
     y_t, s2_t, pop_idx, phe_idx,
@@ -545,14 +507,16 @@ def parametric_bootstrap_overall_2re(
     *, transform="liability", B=2000, random_state=None, pi_target="new_pop_new_phe"
 ):
     """
-    Parametric bootstrap under the 2-RE model (population + PheCode) on analysis scale.
+    Parametric bootstrap under the 2-RE model (population + PheCode) on the ANALYSIS scale.
+    **Fixes scale mixing**: predictive noise is added on analysis scale; results are
+    back-transformed only at the end when needed (logit case).
 
     Simulate:
       u_p ~ N(0, tau2_hat), b_j ~ N(0, omega2_hat),
       eps_i ~ N(0, s2_t[i] + sigma2_e_hat),
       y*_i = mu_hat_t + u_{pop(i)} + b_{phe(i)} + eps_i.
-    Refit REML on y* (with bootstrap disabled) to get mu*_b.
-    Predictive draw per b using pi_target and s2_bar_t.
+    Refit REML on y* (bootstrap disabled) to get mu*_b (original scale).
+    Predictive draw per b on analysis scale; then back-transform if logit.
 
     Returns
     -------
@@ -561,13 +525,21 @@ def parametric_bootstrap_overall_2re(
     import numpy as np
 
     rng = np.random.default_rng(random_state)
-
     K = int(pop_idx.max()) + 1 if pop_idx.size else 0
     J = int(phe_idx.max()) + 1 if phe_idx.size else 0
     n = y_t.size
 
     mu_draws = np.empty(B, dtype=float)
     pred_draws = np.empty(B, dtype=float)
+
+    # Predictive variance on analysis scale (depends on target)
+    if pi_target == "new_pop_new_phe":
+        pred_var_t = tau2_hat + omega2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
+    elif pi_target == "new_pop_existing_phe":
+        pred_var_t = tau2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
+    else:  # "existing_pop_new_phe"
+        pred_var_t = omega2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
+    pred_sd_t = float(np.sqrt(max(0.0, pred_var_t)))
 
     for b in range(B):
         u = rng.normal(0.0, np.sqrt(max(tau2_hat, 0.0)), size=K) if K > 0 else np.zeros(0, dtype=float)
@@ -576,31 +548,31 @@ def parametric_bootstrap_overall_2re(
 
         y_star = mu_hat_t + (u[pop_idx] if K > 0 else 0.0) + (v[phe_idx] if J > 0 else 0.0) + eps
 
+        # Refit (returns mu on ORIGINAL scale)
         fit_b = fit_overall_h2_reml(
             y_star, s2_t, pop_idx, phe_idx,
             transform=("logit" if transform == "logit" else "liability"),
-            bootstrap_B=None, random_state=rng, pi_target=pi_target
+            bootstrap_B=None,  # no nested bootstrap
+            random_state=rng, pi_target=pi_target
         )
-        mu_b = fit_b["mu"]
+        mu_b = fit_b["mu"]               # original scale
         mu_draws[b] = mu_b
 
-        # Predictive draw on original scale using variance composition
-        if pi_target == "new_pop_new_phe":
-            var_pred_t = tau2_hat + omega2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
-        elif pi_target == "new_pop_existing_phe":
-            var_pred_t = tau2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
-        else:  # "existing_pop_new_phe"
-            var_pred_t = omega2_hat + sigma2_e_hat + (s2_bar_t if np.isfinite(s2_bar_t) else 0.0)
-
-        pred_sd_t = np.sqrt(max(0.0, var_pred_t))
-        pred_draws[b] = float(np.clip(mu_b + rng.normal(0.0, pred_sd_t), 0.0, 1.0)) if transform == "logit" else float(mu_b + rng.normal(0.0, pred_sd_t))
-
+        # Predictive draw: add noise on analysis scale, then back-transform
         if transform == "logit":
-            # Already on original scale via fit_b["mu"]; pred just adds noise, then clipped.
-            pass
+            from scipy.special import logit, expit
+            mu_b_t = logit(np.clip(mu_b, 1e-12, 1 - 1e-12))
+            mu_pred_t = mu_b_t + rng.normal(0.0, pred_sd_t)
+            pred = float(expit(mu_pred_t))
+        else:
+            mu_b_t = mu_b  # identity
+            mu_pred_t = mu_b_t + rng.normal(0.0, pred_sd_t)
+            pred = float(mu_pred_t)
+
+        # Clip to [0,1] on original scale (h2)
+        pred_draws[b] = min(1.0, max(0.0, pred))
 
     return {"mu_draws": mu_draws, "pred_draws": pred_draws}
-
 
 
 def parametric_bootstrap_overall(
