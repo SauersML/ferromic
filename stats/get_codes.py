@@ -1033,7 +1033,7 @@ def main():
     final_df["h2_eur_avg"] = final_df["h2_eur_avg"].round(4)
     final_df["h2_eur_avg"] = final_df["h2_eur_avg"].apply(lambda x: "" if pd.isna(x) else f"{x:.4f}")
 
-out_cols = [
+    out_cols = [
         "phecode",
         "ukbb_phenocode",
         "phecode_string",
