@@ -943,11 +943,12 @@ def main():
     per_pheno["phenocode"] = per_pheno["phenocode"].astype("string")
 
     long_joined = long_df.merge(
-        per_pheno[["phenocode", "phenocode_anypop_gt_threshold_fdr", "eur_h2_mean", "has_h2_data_for_phenocode"]],
+        per_pheno[["phenocode", "p_any_acat", "phenocode_anypop_gt_threshold_fdr", "eur_h2_mean", "has_h2_data_for_phenocode"]],
         left_on="ukbb_phenocode",
         right_on="phenocode",
         how="left"
     )
+
 
     data_presence = (
         long_joined.groupby(grouping_cols, as_index=False)["has_h2_data_for_phenocode"]
@@ -957,10 +958,15 @@ def main():
 
     disease_signals = (
         long_joined.groupby(grouping_cols, as_index=False)
-                   .agg({"phenocode_anypop_gt_threshold_fdr": "max", "eur_h2_mean": "mean"})
+                   .agg({
+                       "phenocode_anypop_gt_threshold_fdr": "max",
+                       "eur_h2_mean": "mean",
+                       "p_any_acat": "min"   # best (smallest) ACAT p across mapped phenocodes
+                   })
                    .rename(columns={
                        "phenocode_anypop_gt_threshold_fdr": "is_h2_significant_in_any_ancestry",
-                       "eur_h2_mean": "h2_eur_avg"
+                       "eur_h2_mean": "h2_eur_avg",
+                       "p_any_acat": "anypop_acat_p_best_T"
                    })
     )
 
@@ -1027,13 +1033,14 @@ def main():
     final_df["h2_eur_avg"] = final_df["h2_eur_avg"].round(4)
     final_df["h2_eur_avg"] = final_df["h2_eur_avg"].apply(lambda x: "" if pd.isna(x) else f"{x:.4f}")
 
-    out_cols = [
+out_cols = [
         "phecode",
         "ukbb_phenocode",
         "phecode_string",
         "phecode_category",
         "is_h2_significant_in_any_ancestry",
         "h2_eur_avg",
+        "anypop_acat_p_best_T",   # disease-level ACAT p (best over mapped phenocodes)
         "icd9_codes",
         "icd10_codes",
         "h2_overall_REML",
@@ -1051,11 +1058,11 @@ def main():
         "n_pops_used",
         "n_obs_used",
         "any_scale_mix_flag",
-        "h2_overall_RE",  # optional alias
-        # NEW flags
+        "h2_overall_RE",
         "has_ukbb_phenocode_mapping",
         "has_ukbb_heritability_data",
     ]
+
     for c in out_cols:
         if c not in final_df.columns:
             final_df[c] = np.nan
