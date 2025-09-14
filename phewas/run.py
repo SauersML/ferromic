@@ -575,7 +575,20 @@ def _pipeline_once():
                 allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
 
                 sex_vec = core_df_with_const['sex'].to_numpy(dtype=np.float32, copy=False)
-
+                
+                # Ensure per-phenotype case caches exist BEFORE the prequeue filter
+                try:
+                    pheno._precache_all_missing_phenos(
+                        shared_data['pheno_defs'],
+                        shared_data['bq_client'],
+                        shared_data['cdr_id'],
+                        core_index,
+                        CACHE_DIR,
+                        shared_data['cdr_codename']
+                    )
+                except Exception as e:
+                    print(f"{log_prefix} [WARN] Pre-cache skipped: {e}", flush=True)
+                
                 # --- Build Stage-1 LRT worklist without running main PheWAS ---
                 phenos_list = []
                 for row in shared_data['pheno_defs'][['sanitized_name','disease_category']].to_dict('records'):
@@ -599,22 +612,8 @@ def _pipeline_once():
                     )
                     if ok:
                         phenos_list.append(row['sanitized_name'])
-
+                
                 print(f"{log_prefix} Queued {len(phenos_list)} phenotypes for Stage-1 LRT (pre-filtered).")
-
-                # Make per-phenotype case caches exist for the queued set
-                try:
-                    subset_defs = shared_data['pheno_defs'][shared_data['pheno_defs']['sanitized_name'].isin(phenos_list)]
-                    pheno._precache_all_missing_phenos(
-                        subset_defs,
-                        shared_data['bq_client'],
-                        shared_data['cdr_id'],
-                        core_index,
-                        CACHE_DIR,
-                        shared_data['cdr_codename']
-                    )
-                except Exception as e:
-                    print(f"{log_prefix} [WARN] Could not pre-cache queued phenotypes: {e}", flush=True)
 
                 def on_pool_started_callback(num_procs, worker_pids):
                     governor.register_pool(inv_safe_name, worker_pids)
