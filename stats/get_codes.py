@@ -115,58 +115,6 @@ def combine_codes_unique_sorted(series: pd.Series) -> list:
     return sorted(vals)
 
 # =============================================================================
-# Diagnostics helpers (within-pop IVW & heterogeneity)
-# =============================================================================
-
-def ivw_fixed(h2_array, se_array):
-    """
-    Fixed-effect IVW combine across PheCodes within a population.
-    Returns: (theta_hat, se_hat, w_sum, n_used)
-    """
-    h2 = np.asarray(h2_array, dtype=float)
-    se = np.asarray(se_array, dtype=float)
-    mask = np.isfinite(h2) & np.isfinite(se) & (se > 0)
-    h2, se = h2[mask], se[mask]
-    n_used = int(h2.size)
-    if n_used == 0:
-        return (np.nan, np.nan, 0.0, 0)
-    w = 1.0 / np.square(se)
-    w_sum = float(np.sum(w))
-    if w_sum <= 0:
-        return (np.nan, np.nan, 0.0, 0)
-    theta_hat = float(np.sum(w * h2) / w_sum)
-    se_hat = float(np.sqrt(1.0 / w_sum))
-    return (theta_hat, se_hat, w_sum, n_used)
-
-def cochran_q_i2(h2_array, se_array, theta_hat):
-    """
-    Cochran's Q and I^2 (in %) for heterogeneity across PheCodes within a population.
-    """
-    h2 = np.asarray(h2_array, dtype=float)
-    se = np.asarray(se_array, dtype=float)
-    mask = np.isfinite(h2) & np.isfinite(se) & (se > 0)
-    h2, se = h2[mask], se[mask]
-    k = h2.size
-    if (k <= 1) or (not np.isfinite(theta_hat)):
-        return (np.nan, 0.0)
-    w = 1.0 / np.square(se)
-    Q = float(np.sum(w * np.square(h2 - theta_hat)))
-    df = k - 1
-    if Q <= 0:
-        return (Q, 0.0)
-    I2 = max(0.0, (Q - df) / Q) * 100.0
-    return (Q, float(I2))
-
-def flag_scale_mix(scale_used_series):
-    """
-    Returns 1 if any contributing row used observed-scale fallback; else 0.
-    """
-    if scale_used_series is None or len(scale_used_series) == 0:
-        return 0
-    vals = pd.Series(scale_used_series).astype(str).str.lower()
-    return int(any(v != "liability" for v in vals if pd.notna(v)))
-
-# =============================================================================
 # REML HIERARCHICAL META (one-shot across populations & phenocodes)
 # =============================================================================
 
@@ -237,73 +185,6 @@ def _prep_transform(y, se, transform):
                 "clamp_eps": None,
             },
         )
-
-def _woodbury_solvers(s2_plus_omega2, pop_ids, tau2):
-    """
-    Build fast solvers for V = diag(s2+omega2) + tau2 * Z Z^T using Woodbury.
-
-    Returns dict with:
-      - 'apply_Vinv'(v): compute V^{-1} v
-      - 'logdet_V'():    compute log|V|
-      - 'XtVinvX'():     compute 1^T V^{-1} 1
-      - 'XtVinv_vec'(v): compute 1^T V^{-1} v
-    """
-    s2_plus_omega2 = np.asarray(s2_plus_omega2, dtype=float)
-    n = s2_plus_omega2.size
-    d = s2_plus_omega2
-    dinv = 1.0 / d
-
-    # Map populations to contiguous 0..K-1
-    pop_ids = np.asarray(pop_ids)
-    unique_pops, inv = np.unique(pop_ids, return_inverse=True)
-    K = unique_pops.size
-
-    # Z^T D^{-1} Z is diagonal with diag_p = sum_{i in pop p} dinv_i
-    sum_dinv_by_pop = np.bincount(inv, weights=dinv, minlength=K)
-
-    # For inversion: M = tau^{-2} I_K + Z^T D^{-1} Z (KxK diagonal)
-    if tau2 <= 0.0:
-        tau2 = 0.0
-    M_diag = (0.0 if tau2 == 0.0 else (1.0 / tau2)) + sum_dinv_by_pop
-    Minv_diag = 1.0 / M_diag
-
-    # Helpers for Z^T D^{-1} v  and  Z Minv Z^T D^{-1} v
-    def Zt_Dinv_v(v):
-        return np.bincount(inv, weights=dinv * v, minlength=K)  # K-vector
-
-    def Z_Minv_Zt_Dinv_v(v):
-        t = Zt_Dinv_v(v) * Minv_diag  # K-vector
-        return t[inv]  # n-vector (broadcast back per obs's pop)
-
-    def apply_Vinv(v):
-        v = np.asarray(v, dtype=float)
-        # D^{-1} v - D^{-1} Z M^{-1} Z^T D^{-1} v
-        return dinv * (v - Z_Minv_Zt_Dinv_v(v))
-
-    def logdet_V():
-        # |V| = |D| * |I_K + tau2 * Z^T D^{-1} Z|
-        # Use det-lemma, but with tau2=0 -> term=1
-        term = 1.0 + tau2 * sum_dinv_by_pop
-        # For tau2=0, term==1 -> log(1)=0
-        return float(np.sum(np.log(d)) + np.sum(np.log(term)))
-
-    def XtVinvX():
-        one = np.ones(n, dtype=float)
-        return float(one @ apply_Vinv(one))
-
-    def XtVinv_vec(v):
-        return float(np.ones(n, dtype=float) @ apply_Vinv(v))
-
-    return {
-        "apply_Vinv": apply_Vinv,
-        "logdet_V": logdet_V,
-        "XtVinvX": XtVinvX,
-        "XtVinv_vec": XtVinv_vec,
-        "n": n,
-        "K": K,
-        "unique_pops": unique_pops,
-    }
-
 
 def fit_overall_h2_reml(
     y, s2, pop_ids, phe_ids, *,
@@ -574,61 +455,6 @@ def parametric_bootstrap_overall_2re(
 
     return {"mu_draws": mu_draws, "pred_draws": pred_draws}
 
-
-def parametric_bootstrap_overall(
-    y_t, s2_t, pop_ids, mu_hat_t, tau2_hat, omega2_hat, s2_bar_t,
-    *, transform="liability", B=2000, random_state=None
-):
-    """
-    Parametric bootstrap on the analysis scale (liability or logit):
-      - Simulate u_p ~ N(0, tau2_hat) per population, and eps_i ~ N(0, s2_i + omega2_hat)
-      - y*_i = mu_hat_t + u_{pop(i)} + eps_i
-      - Refit REML on (y*, s2_t, pop_ids) to get mu*_b
-      - Predictive draw for new population & typical phenocode:
-          y_pred*_b = mu*_b + u_new + eps_new, with
-              u_new ~ N(0, tau2_hat), eps_new ~ N(0, s2_bar_t + omega2_hat)
-
-    Returns dict with arrays on ORIGINAL scale:
-      - 'mu_draws'   : shape (B,)
-      - 'pred_draws' : shape (B,)
-    """
-    rng = np.random.default_rng(random_state)
-    y_t = np.asarray(y_t, dtype=float)
-    s2_t = np.asarray(s2_t, dtype=float)
-    pop_ids = np.asarray(pop_ids)
-
-    uniq_pops, inv = np.unique(pop_ids, return_inverse=True)
-    K = uniq_pops.size
-    n = y_t.size
-
-    mu_draws = np.empty(B, dtype=float)
-    pred_draws = np.empty(B, dtype=float)
-
-    for b in range(B):
-        # Simulate population effects
-        u = rng.normal(loc=0.0, scale=np.sqrt(tau2_hat), size=K)
-        # Simulate epsilons per observation
-        eps = rng.normal(loc=0.0, scale=np.sqrt(s2_t + omega2_hat), size=n)
-        y_star = mu_hat_t + u[inv] + eps
-
-        # Refit REML on the same s2_t and pop_ids
-        fit_b = fit_overall_h2_reml(
-            y_star, s2_t, pop_ids, transform=("logit" if transform == "logit" else "liability"),
-            bootstrap_B=None, random_state=rng
-        )
-        mu_draws[b] = fit_b["mu"]  # already on original scale due to back-transform inside fit
-
-        # Predictive draw using fixed tau2_hat/omega2_hat for stability
-        u_new = rng.normal(loc=0.0, scale=np.sqrt(tau2_hat))
-        eps_new = rng.normal(loc=0.0, scale=np.sqrt(max(0.0, (s2_bar_t if np.isfinite(s2_bar_t) else 0.0) + omega2_hat)))
-        pred_draws[b] = float(mu_draws[b] + u_new + eps_new)
-
-        # Clip to [0,1] for the original h2 scale
-        pred_draws[b] = min(1.0, max(0.0, pred_draws[b]))
-
-    return {"mu_draws": mu_draws, "pred_draws": pred_draws}
-
-
 def _encode_groups(pop_ids, phe_ids):
     """
     Encode string/object labels for populations and PheCodes into 0..K-1 and 0..J-1.
@@ -819,47 +645,6 @@ def _woodbury_multi_solvers(s2_plus_sigma2_e, pop_idx, phe_idx, tau2, omega2):
 # =============================================================================
 # Aggregation helpers
 # =============================================================================
-
-def build_disease_pop_estimates(disease_pheno_pop_long, grouping_cols):
-    """
-    Diagnostic only:
-      For each (disease, pop), compute IVW across mapped phenocodes:
-        theta_pop (IVW point), se_pop (IVW SE), n_phecodes_used_pop,
-        i2_within_pop (Cochran's I^2 across phenocodes within pop),
-        scale_mix_pop (1 if any observed-scale used in that (disease,pop) set).
-    """
-    req = grouping_cols + ["pop", "h2", "se", "scale_used"]
-    if not set(req).issubset(set(disease_pheno_pop_long.columns)):
-        missing = [c for c in req if c not in disease_pheno_pop_long.columns]
-        raise ValueError(f"build_disease_pop_estimates: missing columns: {missing}")
-
-    df = disease_pheno_pop_long[req].copy()
-    df = df[df["h2"].notna() & df["se"].notna() & (df["se"] > 0)]
-
-    if df.empty:
-        cols = grouping_cols + ["pop", "theta_pop", "se_pop", "n_phecodes_used_pop", "i2_within_pop", "scale_mix_pop"]
-        return pd.DataFrame(columns=cols)
-
-    def _one_group(g):
-        h2_arr = g["h2"].to_numpy(dtype=float)
-        se_arr = g["se"].to_numpy(dtype=float)
-        theta_hat, se_hat, _, n_used = ivw_fixed(h2_arr, se_arr)
-        Q, I2 = cochran_q_i2(h2_arr, se_arr, theta_hat)
-        mix = int((g["scale_used"].astype(str).str.lower() != "liability").any())
-        return pd.Series({
-            "theta_pop": theta_hat,
-            "se_pop": se_hat,
-            "n_phecodes_used_pop": int(n_used),
-            "i2_within_pop": float(I2),
-            "scale_mix_pop": mix
-        })
-
-    out = (
-        df.groupby(grouping_cols + ["pop"], dropna=False)
-          .apply(_one_group)
-          .reset_index()
-    )
-    return out
 
 def build_disease_overall_estimates(
     disease_pheno_pop_long,
