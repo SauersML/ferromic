@@ -160,6 +160,10 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
     If numpy arrays are provided, const_ix identifies the intercept column for zero-penalty.
     Returns a tuple (fit_result, reason_tag).
     """
+    # avoid accidental duplication/override of start_params
+    kwargs = dict(kwargs)
+    user_start = kwargs.pop("start_params", None)
+
     is_pandas = hasattr(X, "columns")
     if not ridge_ok:
         return None, "ridge_disabled"
@@ -187,7 +191,7 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         "newton",
                         maxiter=400,
                         tol=1e-8,
-                        start_params=kwargs.get("start_params", None)
+                        start_params=user_start
                     )
                     if _converged(mle_newton) and hasattr(mle_newton, "bse") and np.all(np.isfinite(mle_newton.bse)) and np.max(mle_newton.bse) <= 100.0:
                         setattr(mle_newton, "_final_is_mle", True)
@@ -200,7 +204,7 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         "bfgs",
                         maxiter=800,
                         gtol=1e-8,
-                        start_params=kwargs.get("start_params", None)
+                        start_params=user_start
                     )
                     if _converged(mle_bfgs) and hasattr(mle_bfgs, "bse") and np.all(np.isfinite(mle_bfgs.bse)) and np.max(mle_bfgs.bse) <= 100.0:
                         setattr(mle_bfgs, "_final_is_mle", True)
@@ -216,7 +220,14 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
         alpha_scalar = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / n_eff), 1e-6)
         # DiscreteModel.fit_regularized expects scalar alpha; per-parameter weights are not reliably supported.
         # Using scalar ridge is OK since we refit MLE (unpenalized) when possible.
-        ridge_fit = sm.Logit(y, X).fit_regularized(alpha=float(alpha_scalar), L1_wt=0.0, maxiter=800, disp=0, **kwargs)
+        ridge_fit = sm.Logit(y, X).fit_regularized(
+            alpha=float(alpha_scalar),
+            L1_wt=0.0,
+            maxiter=800,
+            disp=0,
+            start_params=user_start,
+            **kwargs,
+        )
 
         setattr(ridge_fit, "_used_ridge", True)
         setattr(ridge_fit, "_final_is_mle", False)
@@ -477,8 +488,9 @@ def _suppress_worker_warnings():
 
 REQUIRED_CTX_KEYS = {
  "NUM_PCS", "MIN_CASES_FILTER", "MIN_CONTROLS_FILTER", "CACHE_DIR",
- "RESULTS_CACHE_DIR", "LRT_OVERALL_CACHE_DIR", "LRT_FOLLOWUP_CACHE_DIR", "RIDGE_L2_BASE",
- "PER_ANC_MIN_CASES", "PER_ANC_MIN_CONTROLS"
+ "RESULTS_CACHE_DIR", "LRT_OVERALL_CACHE_DIR", "LRT_FOLLOWUP_CACHE_DIR",
+ "RIDGE_L2_BASE", "PER_ANC_MIN_CASES", "PER_ANC_MIN_CONTROLS",
+ "BOOT_OVERALL_CACHE_DIR"
 }
 
 def _validate_ctx(ctx):
@@ -1459,7 +1471,9 @@ def bootstrap_overall_worker(task):
     os.makedirs(tnull_dir, exist_ok=True)
     result_path = os.path.join(boot_dir, f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
-    res_path = os.path.join(CTX["RESULTS_CACHE_DIR"], f"{s_name_safe}.json")
+    res_dir = CTX["RESULTS_CACHE_DIR"]
+    os.makedirs(res_dir, exist_ok=True)
+    res_path = os.path.join(res_dir, f"{s_name_safe}.json")
     try:
         pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
         if not os.path.exists(pheno_path):
@@ -1550,7 +1564,7 @@ def bootstrap_overall_worker(task):
         t_vec = X_full_zv[target].to_numpy(dtype=np.float64, copy=False)
         Xr = X_red_zv.to_numpy(dtype=np.float64, copy=False)
         h, denom = _efficient_score_vector(t_vec, Xr, W)
-        if not np.isfinite(denom) or denom <= 0:
+        if not np.isfinite(denom) or denom <= 1e-14:
             io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": "nonpos_denom"})
             return
         resid = yb.to_numpy(dtype=np.float64, copy=False) - p_hat
@@ -1559,12 +1573,12 @@ def bootstrap_overall_worker(task):
 
         pos = worker_core_df_index.get_indexer(X_red_zv.index)
         pos = pos[pos >= 0]
-        U_slice = U_boot[pos, :]
-        B = U_slice.shape[1]
+        B = U_boot.shape[1]
         T_b = np.empty(B, dtype=np.float64)
         for j0 in range(0, B, 64):
             j1 = min(B, j0 + 64)
-            Ystar = (U_slice[:, j0:j1] < p_hat[:, None]).astype(np.float64, copy=False)
+            U_blk = U_boot[np.ix_(pos, np.arange(j0, j1))]
+            Ystar = (U_blk < p_hat[:, None]).astype(np.float64, copy=False)
             R = Ystar - p_hat[:, None]
             S = h @ R
             T_b[j0:j1] = (S * S) / denom
@@ -1582,7 +1596,7 @@ def bootstrap_overall_worker(task):
             "N_Controls_Used": n_ctrls_used,
             "Model_Notes": note or ""
         })
-        np.save(os.path.join(tnull_dir, f"{s_name_safe}.npy"), T_b)
+        np.save(os.path.join(tnull_dir, f"{s_name_safe}.npy"), T_b.astype(np.float32, copy=False))
         _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
 
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
