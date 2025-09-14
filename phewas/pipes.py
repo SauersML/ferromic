@@ -519,14 +519,15 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
         inv_hash = int(hashlib.blake2s(inv_tag, digest_size=8).hexdigest(), 16)
         rng = np.random.default_rng(seed_base ^ inv_hash)
         N = len(core_index)
+        U_gb = (N * B * 4) / (1024**3)
+        BUDGET.reserve(target_inversion, "boot_shm", U_gb, block=True)
         U = np.empty((N, B), dtype=np.float32)
         step = max(1, min(B, 64))
         for j0 in range(0, B, step):
             j1 = min(B, j0 + step)
             U[:, j0:j1] = rng.random((N, j1 - j0), dtype=np.float32)
         boot_meta, boot_shm = io.create_shared_from_ndarray(U, readonly=True)
-        U_gb = (U.nbytes) / (1024**3)
-        BUDGET.reserve(target_inversion, "boot_shm", U_gb, block=True)
+        BUDGET.revise(target_inversion, "boot_shm", U_gb)
         del U
         gc.collect()
 
