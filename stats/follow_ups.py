@@ -18,21 +18,25 @@ Skin condition indicators:
 Are you still seeing a doctor or health care provider for a skin condition (e.g., eczema, psoriasis)?
 Who in your family has had skin condition(s) (e.g., eczema, psoriasis)? Select all that apply.
 Including yourself, who in your family has had skin condition(s) (e.g., eczema, psoriasis)? Select all that apply.
+Are you currently prescribed medications and/or receiving treatment for a skin condition (e.g., eczema, psoriasis)?
 
 Skin cancer indicators:
 Who in your family has had skin cancer? Select all that apply.
 Are you still seeing a doctor or health care provider for skin cancer?
 Including yourself, who in your family has had skin cancer? Select all that apply.
+Are you currently prescribed medications and/or receiving treatment for skin cancer?
 
 Obesity indicators:
 Who in your family has had obesity? Select all that apply.
 Are you still seeing a doctor or health care provider for obesity?
 Including yourself, who in your family has had obesity? Select all that apply.
+Are you currently prescribed medications and/or receiving treatment for obesity?
 
 Heart failure indicators:
 Who in your family has had congestive heart failure? Select all that apply.
 Are you still seeing a doctor or health care provider for congestive heart failure?
 Including yourself, who in your family has had congestive heart failure? Select all that apply.
+Are you currently prescribed medications and/or receiving treatment for congestive heart failure?
 
 Mild cognitive impairment:
 Because of a physical, mental, or emotional condition, do you have serious difficulty concentrating, remembering or making decisions?
@@ -46,8 +50,12 @@ Are you currently prescribed medications and/or receiving treatment for memory l
 Including yourself, who in your family has had dementia (includes Alzheimer's, vascular, etc.)? Select all that apply.
 Including yourself, who in your family has had memory loss or impairment? Select all that apply.
 Because of a physical, mental, or emotional condition, do you have difficulty doing errands alone such as visiting doctor's office or shopping?
+Do you have difficulty dressing or bathing?
+Are you still seeing a doctor or health care provider for dementia (includes Alzheimer's, vascular, etc.)?
+Are you currently prescribed medications and/or receiving treatment for dementia (includes Alzheimer's, vascular, etc.)?
 
 Migraine:
 Who in your family has had migraine headaches? Select all that apply.
 Are you still seeing a doctor or health care provider for migraine headaches?
 Including yourself, who in your family has had migraine headaches? Select all that apply.
+Are you currently prescribed medications and/or receiving treatment for migraine headaches?
