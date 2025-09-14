@@ -46,9 +46,6 @@ def main():
         & (pl.col("h2_overall_REML") < 0.0)
     )
 
-    # Optional rule 3 (disabled): remove rows lacking both ICD codes
-    # remove_no_icd = (pl.col("icd9_codes") == "") & (pl.col("icd10_codes") == "")
-
     removal_flag = (remove_not_sig | remove_reml_neg).fill_null(False)  # | remove_no_icd
 
     kept_df = df.filter(~removal_flag)
@@ -56,7 +53,7 @@ def main():
     kept_df = kept_df.with_columns(
         pl.when(pl.col("h2_overall_REML").is_not_null())
           .then(pl.col("h2_overall_REML").round(4).cast(pl.Utf8))
-          .otherwise("")
+          .otherwise(pl.lit(""))
           .alias("h2_overall_REML")
     )
 
