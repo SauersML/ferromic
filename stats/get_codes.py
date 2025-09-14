@@ -4,7 +4,7 @@ import math
 import urllib.request
 import numpy as np
 import pandas as pd
-from scipy import optimize, stats, special
+from scipy import optimize
 
 # =============================================================================
 # PHASE 1: SCRIPT CONFIGURATION
@@ -147,44 +147,18 @@ def compute_typical_s2(s2, sigma2_e):
     return float(np.sum(w * s2) / sw)
 
 def _prep_transform(y, se, transform):
-    """
-    Prepare analysis scale.
-    - If transform == 'liability': return y, se unchanged.
-    - If transform == 'logit': clamp y to (eps,1-eps) and delta-transform se.
-    Returns:
-      y_t, se_t, meta dict with 'back' and 'delta' helpers
-    """
     y = np.asarray(y, dtype=float)
     se = np.asarray(se, dtype=float)
-    eps = 1e-9
-
-    if transform == "logit":
-        y_clamped = np.clip(y, eps, 1 - eps)
-        # delta method: SE(logit(y)) ≈ SE(y) / (y*(1-y))
-        gprime = y_clamped * (1.0 - y_clamped)
-        se_logit = se / np.maximum(gprime, eps)
-        return (
-            special.logit(y_clamped),
-            se_logit,
-            {
-                "scale": "logit",
-                "back": special.expit,
-                "delta": lambda mu_logit, se_mu_logit: se_mu_logit * special.expit(mu_logit) * (1 - special.expit(mu_logit)),
-                "clamp_eps": eps,
-            },
-        )
-    else:
-        # liability/original scale
-        return (
-            y,
-            se,
-            {
-                "scale": "liability",
-                "back": lambda x: x,
-                "delta": lambda mu, se_mu: se_mu,
-                "clamp_eps": None,
-            },
-        )
+    return (
+        y,
+        se,
+        {
+            "scale": "liability",
+            "back": lambda x: x,
+            "delta": lambda mu, se_mu: se_mu,
+            "clamp_eps": None,
+        },
+    )
 
 def fit_overall_h2_reml(
     y, s2, pop_ids, phe_ids, *,
@@ -214,7 +188,7 @@ def fit_overall_h2_reml(
     pop_ids = np.asarray(pop_ids)
     phe_ids = np.asarray(phe_ids)
 
-    mask = np.isfinite(y) & np.isfinite(s2) & (s2 > 0) & (pop_ids != None) & (phe_ids != None)
+    mask = (np.isfinite(y) & np.isfinite(s2) & (s2 > 0) & (~pd.isna(pop_ids)) & (~pd.isna(phe_ids)) & (pop_ids.astype(str) != "") & (phe_ids.astype(str) != ""))
     y = y[mask]; s2 = s2[mask]; pop_ids = pop_ids[mask]; phe_ids = phe_ids[mask]
     n = y.size
 
@@ -432,7 +406,7 @@ def parametric_bootstrap_overall_2re(
         # Refit (returns mu on ORIGINAL scale)
         fit_b = fit_overall_h2_reml(
             y_star, s2_t, pop_idx, phe_idx,
-            transform=("logit" if transform == "logit" else "liability"),
+            transform="liability",
             bootstrap_B=None,  # no nested bootstrap
             random_state=rng, pi_target=pi_target
         )
@@ -440,15 +414,8 @@ def parametric_bootstrap_overall_2re(
         mu_draws[b] = mu_b
 
         # Predictive draw: add noise on analysis scale, then back-transform
-        if transform == "logit":
-            from scipy.special import logit, expit
-            mu_b_t = logit(np.clip(mu_b, 1e-12, 1 - 1e-12))
-            mu_pred_t = mu_b_t + rng.normal(0.0, pred_sd_t)
-            pred = float(expit(mu_pred_t))
-        else:
-            mu_b_t = mu_b  # identity
-            mu_pred_t = mu_b_t + rng.normal(0.0, pred_sd_t)
-            pred = float(mu_pred_t)
+        mu_pred_t = mu_b + rng.normal(0.0, pred_sd_t)
+        pred = float(mu_pred_t)
 
         # Clip to [0,1] on original scale (h2)
         pred_draws[b] = min(1.0, max(0.0, pred))
