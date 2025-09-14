@@ -30,7 +30,7 @@ MISSING_PHECODES_TSV = "phecodes_without_usable_h2.tsv"
 LIST_DELIMITER = ";"
 
 # --- Statistical knobs ---
-H2_THRESHOLD = 0.10   # 10% heritability boundary (used for detection test)
+H2_THRESHOLD = 0.0   # 0% heritability boundary (used for detection test)
 FDR_Q        = 0.05   # BH-FDR across phenocodes
 USE_QC       = False  # set True to require QC flags (defined_h2 & in_bounds_h2), if available
 
