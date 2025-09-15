@@ -3,6 +3,7 @@ import math
 import warnings
 from typing import Tuple, Dict, Iterable, Optional
 import re
+import itertools
 
 import numpy as np
 import pandas as pd
@@ -562,6 +563,197 @@ def run_model_C(matched: pd.DataFrame, invinfo_path: Optional[str], eps: float, 
     return resC, tabC, dfC, used_covariates
 
 
+
+# ==== MODEL D: Shapley attribution of the attenuation in the Recurrence effect (Model A → Model C) ====
+
+# output filename for Model D
+OUT_MODEL_D_TABLE = "modelD_attribution.csv"
+
+def _add_const(df_or_arr: pd.DataFrame) -> pd.DataFrame:
+    """Add intercept column; keeps column names stable."""
+    return sm.add_constant(df_or_arr, has_constant='add')
+
+def _fit_beta_R_HC3(y: np.ndarray, g: np.ndarray, Z: Optional[pd.DataFrame]) -> float:
+    """
+    Fit OLS with HC3 and return the coefficient on G ('Recurrent') using design: [const, G, Z_S].
+    Coefficient estimate is identical under robust vs classic OLS; HC3 only affects SEs.
+    """
+    parts = [pd.Series(g, name="Recurrent")]
+    if Z is not None and Z.shape[1] > 0:
+        parts.append(Z)
+    X = _add_const(pd.concat(parts, axis=1))
+    res = sm.OLS(y, X).fit(cov_type="HC3")
+    if "Recurrent" not in res.params.index:
+        raise RuntimeError("MODEL D: 'Recurrent' coefficient missing from design—check inputs.")
+    return float(res.params["Recurrent"])
+
+def _residualize_on_S(vec: np.ndarray, Z: Optional[pd.DataFrame]) -> np.ndarray:
+    """
+    Residualize a vector on Z (with intercept). Uses plain OLS (robustness irrelevant for projection).
+    Returns residuals with an intercept included in the regression.
+    """
+    if Z is None or Z.shape[1] == 0:
+        # Only intercept: residuals are vec - mean(vec)
+        return vec - np.mean(vec)
+    X = _add_const(Z)
+    # Use np.linalg.lstsq for numerical stability
+    beta, *_ = np.linalg.lstsq(X.to_numpy(float), vec.astype(float), rcond=None)
+    fitted = X.to_numpy(float) @ beta
+    return vec.astype(float) - fitted
+
+def _subset_key(cols: Iterable[str]) -> frozenset:
+    return frozenset(cols)
+
+def run_model_D(dfC: pd.DataFrame, used_covariates: Iterable[str]):
+    """
+    MODEL D (exact, order-free Shapley decomposition):
+      - Operates on the SAME analysis rows and ε as Model C (consume dfC and used_covariates from run_model_C).
+      - Attributes the total attenuation in the 'Recurrent' coefficient from:
+            A0:  Y ~ Recurrent        (on Model-C rows)   → β_R(∅)
+        to  C:   Y ~ Recurrent + Z     (full Model C set)  → β_R(Z)
+        where Y = logFC, G = Recurrent (0/1), and Z = used_covariates (z-scored).
+
+      - Returns:
+          tabD : DataFrame with per-covariate Shapley contributions (log units), ratio, % of total drop,
+                 and a split into covariance vs variance channels (FWL).
+          summaryD : dict with beta_A0, beta_C, delta_beta, n_covariates.
+    """
+    if dfC is None or used_covariates is None:
+        raise ValueError("MODEL D requires dfC and used_covariates from Model C.")
+    Z_all = list(used_covariates)
+    p = len(Z_all)
+    if p == 0:
+        raise ValueError("MODEL D: No covariates available in Model C (used_covariates empty).")
+
+    # Extract core vectors/matrix from dfC (SAME rows / ε as Model C)
+    y = dfC["logFC"].to_numpy(float)
+    g = dfC["Recurrent"].to_numpy(int).astype(float)
+    Zmat = dfC[Z_all].copy()
+
+    # Baseline A0 (on Model C rows): Y ~ Recurrent
+    beta_A0 = _fit_beta_R_HC3(y, g, Z=None)
+
+    # Full C: Y ~ Recurrent + Z_all
+    beta_C  = _fit_beta_R_HC3(y, g, Z=Zmat)
+
+    delta_beta = beta_A0 - beta_C
+
+    # Precompute β_R(S), C(S), V(S) for all subsets S ⊆ Z
+    # Use dictionary keyed by frozenset of column names
+    beta_map: Dict[frozenset, float] = {}
+    C_map:    Dict[frozenset, float] = {}
+    V_map:    Dict[frozenset, float] = {}
+
+    # Helper: build Z for a subset
+    def Z_of(S: frozenset) -> Optional[pd.DataFrame]:
+        if not S:
+            return None
+        return Zmat[list(S)]
+
+    n = float(len(y))
+    tiny = 1e-12
+
+    # Enumerate all subsets once (2^p)
+    all_cols = Z_all
+    for r in range(0, p + 1):
+        for comb in itertools.combinations(all_cols, r):
+            S = _subset_key(comb)
+            ZS = Z_of(S)
+
+            # β_R(S)
+            beta_S = _fit_beta_R_HC3(y, g, ZS)
+            beta_map[S] = beta_S
+
+            # FWL residuals to get C(S) and V(S)
+            rY = _residualize_on_S(y, ZS)
+            rG = _residualize_on_S(g, ZS)
+
+            # With an intercept in the residualization, residuals should be mean-zero; use population moments
+            C_map[S] = float(np.dot(rG, rY) / n)
+            V_map[S] = float(np.dot(rG, rG) / n)
+
+    # Shapley contributions for each covariate k
+    fact = math.factorial
+    denom = float(fact(p))
+    rows = []
+
+    for k in Z_all:
+        phi_total = 0.0
+        phi_cov   = 0.0
+        phi_var   = 0.0
+        w_sum     = 0.0
+
+        others = [c for c in Z_all if c != k]
+
+        # All S ⊆ (Z\{k})
+        for r in range(0, p):
+            for comb in itertools.combinations(others, r):
+                S = _subset_key(comb)
+                Sk = _subset_key(set(comb) | {k})
+
+                w = (fact(len(S)) * fact(p - len(S) - 1)) / denom
+
+                beta_S  = beta_map[S]
+                beta_Sk = beta_map[Sk]
+
+                VS  = V_map[S]
+                VSk = V_map[Sk]
+                CS  = C_map[S]
+                CSk = C_map[Sk]
+
+                # Guard against degenerate residualized G variance
+                if VSk <= tiny or VS <= tiny:
+                    continue
+
+                # Total marginal change in β_R when adding k to S
+                d_beta = beta_S - beta_Sk
+
+                # FWL channel split (exact algebra):
+                # β(S) - β(Sk) = [C(S) - C(Sk)] / V(Sk)  +  β(S) * [V(Sk) - V(S)] / V(Sk)
+                cov_term = (CS - CSk) / VSk
+                var_term = beta_S * (VSk - VS) / VSk
+
+                phi_total += w * d_beta
+                phi_cov   += w * cov_term
+                phi_var   += w * var_term
+                w_sum     += w
+
+        if w_sum <= 0.0:
+            raise RuntimeError(f"MODEL D: All Shapley terms degenerate for covariate '{k}' (residualized variance ~ 0).")
+
+        # Normalize if any degenerate subsets were skipped
+        phi_total /= w_sum
+        phi_cov   /= w_sum
+        phi_var   /= w_sum
+
+        rows.append({
+            "covariate": k,
+            "phi_log":   phi_total,
+            "phi_ratio": float(math.exp(phi_total)),
+            "phi_cov":   phi_cov,
+            "phi_var":   phi_var,
+        })
+
+    tabD = pd.DataFrame(rows)
+    # Add % of drop; handle near-zero delta safely
+    if abs(delta_beta) < 1e-15:
+        tabD["pct_of_drop"] = float("nan")
+    else:
+        tabD["pct_of_drop"] = 100.0 * tabD["phi_log"] / delta_beta
+
+    # Order by absolute contribution
+    tabD.sort_values(by="phi_log", key=lambda s: np.abs(s), ascending=False, inplace=True)
+    tabD.reset_index(drop=True, inplace=True)
+
+    summaryD = {
+        "beta_A0": beta_A0,
+        "beta_C":  beta_C,
+        "delta_beta": delta_beta,
+        "n_covariates": p,
+    }
+    return tabD, summaryD
+
+
 # ------------------------- PERMUTATION TESTS ----------------
 
 def perm_test_interaction(dfA: pd.DataFrame, n: int, seed: int) -> Tuple[float, float]:
@@ -806,6 +998,28 @@ def main():
     if SAVE_TABLES:
         try: tabC.to_csv(OUT_MODEL_C_TABLE, index=False)
         except Exception: pass
+    
+    # 5b) Model D — Shapley attribution of Recurrence effect attenuation (Model A → Model C)
+    _print_header("MODEL D — Shapley attribution of Recurrence effect attenuation (Model A → Model C)")
+    try:
+        tabD, summaryD = run_model_D(dfC, used_covs)
+        # Summary of attenuation
+        betaA0 = summaryD["beta_A0"]; betaC = summaryD["beta_C"]; dB = summaryD["delta_beta"]
+        print(f"Baseline A0 (on Model-C rows): β_R={betaA0:.6f}  ratio={_fmt_ratio(math.exp(betaA0))}")
+        print(f"Full Model C:                 β_R={betaC:.6f}  ratio={_fmt_ratio(math.exp(betaC))}")
+        print(f"Total attenuation Δβ_R (A→C):  {dB:.6f}  fold={_fmt_ratio(math.exp(dB))}")
+    
+        # Contributions (sorted by absolute log contribution)
+        for _, r in tabD.iterrows():
+            share = "NA" if not np.isfinite(r.get("pct_of_drop", np.nan)) else f"{r['pct_of_drop']:.1f}%"
+            print(f"  {r['covariate']:<40}  contribution(log)={r['phi_log']:+.6f}  fold={_fmt_ratio(r['phi_ratio'])}  share={share}  "
+                  f"[channels: cov={r['phi_cov']:+.6f}, var={r['phi_var']:+.6f}]")
+        if SAVE_TABLES:
+            try: tabD.to_csv(OUT_MODEL_D_TABLE, index=False)
+            except Exception: pass
+    except Exception as e:
+        print(f"  MODEL D attribution skipped: {e}")
+
 
     # 6) Permutation tests for Model A interaction, plus stratified variant if available
     if RUN_PERMUTATION_TEST:
