@@ -6,9 +6,9 @@ from statsmodels.stats.multitest import multipletests
 from . import models
 
 DEFAULTS = {
-    "MODE": "bootstrap",
-    "SELECTION": "bh_empirical",
-    "BOOTSTRAP_B": 1000,
+    "MODE": "lrt_bh",
+    "SELECTION": "lrt_bh",
+    "BOOTSTRAP_B": 1000, # not nearly enough for many tests... lrt_bh is better unless there is a ton of compute
     "BOOT_SEED_BASE": 2025,
     "MAX_CONCURRENT_INVERSIONS_DEFAULT": 8,
     "MAX_CONCURRENT_INVERSIONS_BOOT": 8,
