@@ -158,14 +158,14 @@ def map_regions_to_inversions(inversion_df: pd.DataFrame) -> tuple[dict, dict]:
     # Correct data types, coercing errors to NaT/NaN
     inversion_df['Start'] = pd.to_numeric(inversion_df['Start'], errors='coerce')
     inversion_df['End'] = pd.to_numeric(inversion_df['End'], errors='coerce')
-    inversion_df['0_single_1_recur'] = pd.to_numeric(inversion_df['0_single_1_recur'], errors='coerce')
+    inversion_df['0_single_1_recur_consensus'] = pd.to_numeric(inversion_df['0_single_1_recur_consensus'], errors='coerce')
     # Chromosome is string for normalization
     inversion_df['Chromosome'] = inversion_df['Chromosome'].astype(str)
 
 
     # Drop rows where essential information is missing
     original_rows = len(inversion_df)
-    inversion_df = inversion_df.dropna(subset=['Chromosome', 'Start', 'End', '0_single_1_recur'])
+    inversion_df = inversion_df.dropna(subset=['Chromosome', 'Start', 'End', '0_single_1_recur_consensus'])
     dropped_rows = original_rows - len(inversion_df)
     if dropped_rows > 0:
         logger.warning(f"Dropped {dropped_rows} rows from inversion info due to missing values.")
@@ -177,7 +177,7 @@ def map_regions_to_inversions(inversion_df: pd.DataFrame) -> tuple[dict, dict]:
 
         start = int(row['Start']) # Already numeric and not NaN
         end = int(row['End'])
-        is_recurrent = int(row['0_single_1_recur']) == 1
+        is_recurrent = int(row['0_single_1_recur_consensus']) == 1
 
         target_dict = recurrent_regions if is_recurrent else single_event_regions
 
