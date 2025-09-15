@@ -182,10 +182,82 @@ def main():
     sum_df['inversion_type'] = sum_df.apply(assign_inversion_type, axis=1, args=(rec_map, sing_map))
     key_rec = INVERSION_CATEGORY_MAPPING['Recurrent']
     key_sing = INVERSION_CATEGORY_MAPPING['Single-event']
-    rec_vals = pd.to_numeric(sum_df.loc[sum_df['inversion_type'] == key_rec, HUDSON_FST_COL], errors='coerce').dropna().tolist()
-    se_vals  = pd.to_numeric(sum_df.loc[sum_df['inversion_type'] == key_sing, HUDSON_FST_COL], errors='coerce').dropna().tolist()
+    
+    # Extract numeric FST values by category
+    rec_series = pd.to_numeric(sum_df.loc[sum_df['inversion_type'] == key_rec, HUDSON_FST_COL], errors='coerce')
+    se_series  = pd.to_numeric(sum_df.loc[sum_df['inversion_type'] == key_sing, HUDSON_FST_COL], errors='coerce')
+    rec_vals = rec_series.dropna().tolist()
+    se_vals  = se_series.dropna().tolist()
     n_rec, n_se = len(rec_vals), len(se_vals)
     log.info(f"Hudson F_ST values: Recurrent N={n_rec}, Single-event N={n_se}")
+
+    # ----- NEW: summary stats, p-value, fold changes, and per-locus listing -----
+    rec_mean = float(np.mean(rec_vals)) if n_rec else float('nan')
+    se_mean  = float(np.mean(se_vals)) if n_se else float('nan')
+    rec_median = float(np.median(rec_vals)) if n_rec else float('nan')
+    se_median  = float(np.median(se_vals)) if n_se else float('nan')
+
+    # Mann–Whitney U test (two-sided)
+    p_value = np.nan
+    try:
+        if n_rec and n_se:
+            if (np.var(rec_vals) == 0 and np.var(se_vals) == 0 and np.mean(rec_vals) == np.mean(se_vals)):
+                p_value = 1.0
+            else:
+                _, p_value = mannwhitneyu(rec_vals, se_vals, alternative='two-sided')
+    except Exception:
+        pass
+
+    # Safe fold helper
+    def _safe_fold(num, den):
+        if den is None or np.isnan(den) or den == 0:
+            return np.inf if (num is not None and not np.isnan(num) and num > 0) else np.nan
+        return float(num) / float(den)
+
+    fold_median_rec_over_se = _safe_fold(rec_median, se_median)
+    fold_median_se_over_rec = _safe_fold(se_median, rec_median)
+    fold_mean_rec_over_se   = _safe_fold(rec_mean, se_mean)
+    fold_mean_se_over_rec   = _safe_fold(se_mean, rec_mean)
+
+    log.info("--- Hudson F_ST summary ---")
+    log.info(f"Median F_ST: Recurrent = {rec_median:.6g}, Single-event = {se_median:.6g}")
+    log.info(f"Mean   F_ST: Recurrent = {rec_mean:.6g},  Single-event = {se_mean:.6g}")
+    if not np.isnan(p_value):
+        log.info(f"Mann–Whitney U (two-sided): p = {p_value:.6g}")
+    else:
+        log.info("Mann–Whitney U (two-sided): p = N/A")
+
+    log.info(f"Fold (medians): recurrent/single-event = {fold_median_rec_over_se:.6g}; single-event/recurrent = {fold_median_se_over_rec:.6g}")
+    log.info(f"Fold (means)  : recurrent/single-event = {fold_mean_rec_over_se:.6g}; single-event/recurrent = {fold_mean_se_over_rec:.6g}")
+
+    # List all loci with F_ST values (by category)
+    chr_col   = SUMMARY_STATS_COORDINATE_COLUMNS['chr']
+    start_col = SUMMARY_STATS_COORDINATE_COLUMNS['start']
+    end_col   = SUMMARY_STATS_COORDINATE_COLUMNS['end']
+
+    def _fmt_id(row):
+        try:
+            c = normalize_chromosome_name(row[chr_col])
+            s = int(row[start_col]); e = int(row[end_col])
+            if s > e: s, e = e, s
+            return f"{c}:{s}-{e}"
+        except Exception:
+            return "unknown"
+
+    rec_rows = sum_df.loc[sum_df['inversion_type'] == key_rec,  [chr_col, start_col, end_col, HUDSON_FST_COL]].copy()
+    se_rows  = sum_df.loc[sum_df['inversion_type'] == key_sing, [chr_col, start_col, end_col, HUDSON_FST_COL]].copy()
+    rec_rows[HUDSON_FST_COL] = pd.to_numeric(rec_rows[HUDSON_FST_COL], errors='coerce')
+    se_rows[HUDSON_FST_COL]  = pd.to_numeric(se_rows[HUDSON_FST_COL],  errors='coerce')
+
+    log.info("-- Per-locus F_ST (recurrent) --")
+    for _, r in rec_rows.dropna(subset=[HUDSON_FST_COL]).iterrows():
+        log.info(f"recurrent\t{_fmt_id(r)}\tF_ST={float(r[HUDSON_FST_COL]):.6g}")
+
+    log.info("-- Per-locus F_ST (single-event) --")
+    for _, r in se_rows.dropna(subset=[HUDSON_FST_COL]).iterrows():
+        log.info(f"single-event\t{_fmt_id(r)}\tF_ST={float(r[HUDSON_FST_COL]):.6g}")
+    # ---------------------------------------------------------------------------
+
     fig, ax = plt.subplots(figsize=FIGSIZE)
     ax.set_facecolor('white')
     positions = [0, 1]
