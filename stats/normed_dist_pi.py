@@ -37,7 +37,7 @@ SCATTER_SIZE = 8          # Size for underlying bin points
 # Use N-1 cores for parallel processing to leave one for system tasks
 N_CORES = max(1, multiprocessing.cpu_count() - 1)
 
-# File paths (Update these paths if necessary)
+# File paths
 PI_DATA_FILE = 'per_site_diversity_output.falsta'
 # No inversion file needed for overall analysis
 #Output Directory Name
