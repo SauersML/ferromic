@@ -63,8 +63,11 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
         if rows:
             lrt_df = pd.DataFrame(rows)
             df = df.merge(lrt_df, on=["Phenotype", "Inversion"], how="left")
+        else:
+            df["P_LRT_Overall"] = np.nan
         mask = pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna()
         df["Q_GLOBAL"] = np.nan
+
         if int(mask.sum()) > 0:
             _, q, _, _ = multipletests(df.loc[mask, "P_LRT_Overall"], alpha=alpha, method="fdr_bh")
             df.loc[mask, "Q_GLOBAL"] = q
@@ -74,7 +77,6 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
     if selection != "bh_empirical":
         raise ValueError(f"unknown selection: {selection}")
 
-    df["P_EMP"] = np.nan
     df["Q_GLOBAL"] = np.nan
     df["Sig_Global"] = False
 
@@ -96,7 +98,10 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
     if rows:
         boot_df = pd.DataFrame(rows)
         df = df.merge(boot_df, on=["Phenotype", "Inversion"], how="left")
+    else:
+        df["P_EMP"] = np.nan
     mask = pd.to_numeric(df["P_EMP"], errors="coerce").notna()
+
     if int(mask.sum()) > 0:
         _, q, _, _ = multipletests(df.loc[mask, "P_EMP"], alpha=alpha, method="fdr_bh")
         df.loc[mask, "Q_GLOBAL"] = q
