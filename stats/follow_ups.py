@@ -1,54 +1,367 @@
 # chr7-57835189-INV-284465 breast cancer
+# chr17-45585160-INV-706887 obesity, breast cancer, heart failure, cognitive impairment
 
-# chr17-45585160-INV-706887 skin conditions, obesity, breast cancer, heart failure, cognitive impairment
 
-# chr12-46897663-INV-16289 skin conditions
+# ===================== GLOBALS =====================
+import os
+PROJECT_ID        = os.getenv("GOOGLE_PROJECT")                  # required for BQ
+CDR_DATASET_ID    = os.getenv("WORKSPACE_CDR")                   # required for SQL formatting
+INVERSION_FILE    = "../imputed_inversion_dosages.tsv"           # TSV with SampleID + inversion cols
+OUTPUT_DIR        = "./assoc_outputs"
+CACHE_DIR         = ".bq_cache"
+QUANTILE_BINS     = 5
 
-Breast cancer indicators:
-Has anyone in your family ever been diagnosed with the following cancer conditions? Think only of the people you are related to by blood. Select all that apply.
-Who in your family has had breast cancer? Select all that apply.
-Has a doctor or health care provider ever told you that you have or had any of the following cancers? Select all that apply.
-Are you still seeing a doctor or health care provider for breast cancer?
-Have you or anyone in your family ever been diagnosed with the following cancer conditions? Think only of the people you are related to by blood. Select all that apply.
-Including yourself, who in your family has had breast cancer? Select all that apply.
-Are you currently prescribed medications and/or receiving treatment for breast cancer?
+INVERSION_17      = "chr17-45585160-INV-706887"
+INVERSION_7       = "chr7-57835189-INV-284465"
+# ===================================================
 
-Skin condition indicators:
-Are you still seeing a doctor or health care provider for a skin condition (e.g., eczema, psoriasis)?
-Who in your family has had skin condition(s) (e.g., eczema, psoriasis)? Select all that apply.
-Including yourself, who in your family has had skin condition(s) (e.g., eczema, psoriasis)? Select all that apply.
-Are you currently prescribed medications and/or receiving treatment for a skin condition (e.g., eczema, psoriasis)?
+import hashlib, json, math, warnings
+from pathlib import Path
 
-Obesity indicators:
-Who in your family has had obesity? Select all that apply.
-Are you still seeing a doctor or health care provider for obesity?
-Including yourself, who in your family has had obesity? Select all that apply.
-Are you currently prescribed medications and/or receiving treatment for obesity?
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import pyarrow as _
+import statsmodels.api as sm
+from statsmodels.tools.sm_exceptions import PerfectSeparationError
 
-Heart failure indicators:
-Who in your family has had congestive heart failure? Select all that apply.
-Are you still seeing a doctor or health care provider for congestive heart failure?
-Including yourself, who in your family has had congestive heart failure? Select all that apply.
-Are you currently prescribed medications and/or receiving treatment for congestive heart failure?
+# --- plotting theme ---
+plt.rcParams.update({
+    "figure.dpi": 150,
+    "axes.grid": True,
+    "grid.alpha": 0.25,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+    "font.size": 10,
+    "axes.titleweight": "semibold",
+    "axes.labelweight": "regular",
+})
 
-Mild cognitive impairment:
-Because of a physical, mental, or emotional condition, do you have serious difficulty concentrating, remembering or making decisions?
-Are you still seeing a doctor or health care provider for memory loss or impairment?
-Are you still seeing a doctor or health care provider for dementia?
-Who in your family has had dementia (includes Alzheimer's, vascular, etc.)? Select all that apply.
-About how old were you when you were first told you had dementia?
-Are you currently prescribed medications and/or receiving treatment for dementia?
-About how old were you when you were first told you had memory loss or impairment?
-Are you currently prescribed medications and/or receiving treatment for memory loss or impairment?
-Including yourself, who in your family has had dementia (includes Alzheimer's, vascular, etc.)? Select all that apply.
-Including yourself, who in your family has had memory loss or impairment? Select all that apply.
-Because of a physical, mental, or emotional condition, do you have difficulty doing errands alone such as visiting doctor's office or shopping?
-Do you have difficulty dressing or bathing?
-Are you still seeing a doctor or health care provider for dementia (includes Alzheimer's, vascular, etc.)?
-Are you currently prescribed medications and/or receiving treatment for dementia (includes Alzheimer's, vascular, etc.)?
+Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
-Migraine:
-Who in your family has had migraine headaches? Select all that apply.
-Are you still seeing a doctor or health care provider for migraine headaches?
-Including yourself, who in your family has had migraine headaches? Select all that apply.
-Are you currently prescribed medications and/or receiving treatment for migraine headaches?
+pd.set_option("display.width", 160)
+pd.set_option("display.max_colwidth", None)
+pd.set_option("display.float_format", lambda x: f"{x:.4g}")
+
+# -------------------- SQL DEFINITIONS --------------------
+PHENO_SQL = {
+    "Breast Cancer": {
+        "universe": "SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%breast cancer%'",
+        "personal_case": """
+            SELECT DISTINCT person_id FROM (
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Including yourself, who in your family has had breast cancer%' AND answer LIKE '% - Self'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you still seeing a doctor or health care provider for breast cancer?%' AND answer LIKE '% - Yes'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you currently prescribed medications and/or receiving treatment for breast cancer?%' AND answer LIKE '% - Yes'
+            )
+        """,
+        "family_case": """
+            SELECT DISTINCT person_id FROM `{CDR}.ds_survey`
+            WHERE question LIKE 'Have you or anyone in your family ever been diagnosed with the following cancer conditions%Select all that apply.'
+              AND answer LIKE '% - Breast cancer'
+        """,
+    },
+    "Obesity": {
+        "universe": "SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%obesity%'",
+        "personal_case": """
+            SELECT DISTINCT person_id FROM (
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Including yourself, who in your family has had obesity%' AND answer LIKE '% - Self'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you still seeing a doctor or health care provider for obesity?%' AND answer LIKE '% - Yes'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you currently prescribed medications and/or receiving treatment for obesity?%' AND answer LIKE '% - Yes'
+            )
+        """,
+        "family_case": """
+            SELECT DISTINCT person_id FROM `{CDR}.ds_survey`
+            WHERE question LIKE 'Including yourself, who in your family has had obesity%' AND answer LIKE '% - %' AND answer NOT LIKE '% - Self'
+        """,
+    },
+    "Heart Failure": {
+        "universe": "SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%congestive heart failure%'",
+        "personal_case": """
+            SELECT DISTINCT person_id FROM (
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Including yourself, who in your family has had congestive heart failure%' AND answer LIKE '% - Self'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you still seeing a doctor or health care provider for congestive heart failure?%' AND answer LIKE '% - Yes'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you currently prescribed medications and/or receiving treatment for congestive heart failure?%' AND answer LIKE '% - Yes'
+            )
+        """,
+        "family_case": """
+            SELECT DISTINCT person_id FROM `{CDR}.ds_survey`
+            WHERE question LIKE 'Including yourself, who in your family has had congestive heart failure%' AND answer LIKE '% - %' AND answer NOT LIKE '% - Self'
+        """,
+    },
+    "Cognitive Impairment": {
+        "universe": """
+            SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE 
+                question LIKE '%dementia%' OR
+                question LIKE '%memory loss or impairment%' OR
+                question LIKE '%difficulty concentrating, remembering or making decisions%' OR
+                question LIKE '%difficulty doing errands alone%' OR
+                question LIKE '%difficulty dressing or bathing%'
+        """,
+        "personal_case": """
+            SELECT DISTINCT person_id FROM (
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Including yourself, who in your family has had dementia%' AND answer LIKE '% - Self'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Including yourself, who in your family has had memory loss or impairment%' AND answer LIKE '% - Self'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you still seeing a doctor%for dementia%' AND answer LIKE '% - Yes'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you currently prescribed medications%for dementia%' AND answer LIKE '% - Yes'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you still seeing a doctor%for memory loss or impairment%' AND answer LIKE '% - Yes'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you currently prescribed medications%for memory loss or impairment%' AND answer LIKE '% - Yes'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%difficulty concentrating, remembering or making decisions%' AND answer NOT LIKE 'PMI: Skip'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%difficulty doing errands alone%' AND answer NOT LIKE 'PMI: Skip'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%difficulty dressing or bathing%' AND answer NOT LIKE 'PMI: Skip'
+            )
+        """,
+        "family_case": """
+            SELECT DISTINCT person_id FROM (
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Including yourself, who in your family has had dementia%' AND answer LIKE '% - %' AND answer NOT LIKE '% - Self'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Including yourself, who in your family has had memory loss or impairment%' AND answer LIKE '% - %' AND answer NOT LIKE '% - Self'
+            )
+        """,
+    },
+    "Migraine": {
+        "universe": "SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%migraine headaches%'",
+        "personal_case": """
+            SELECT DISTINCT person_id FROM (
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Including yourself, who in your family has had migraine headaches%' AND answer LIKE '% - Self'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you still seeing a doctor or health care provider for migraine headaches?%' AND answer LIKE '% - Yes'
+                UNION DISTINCT
+                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you currently prescribed medications and/or receiving treatment for migraine headaches?%' AND answer LIKE '% - Yes'
+            )
+        """,
+        "family_case": """
+            SELECT DISTINCT person_id FROM `{CDR}.ds_survey`
+            WHERE question LIKE 'Including yourself, who in your family has had migraine headaches%' AND answer LIKE '% - %' AND answer NOT LIKE '% - Self'
+        """,
+    },
+}
+
+# -------------------- CACHE + BIGQUERY --------------------
+def _cache_key(sql: str) -> str:
+    payload = json.dumps({"sql": sql, "cdr": CDR_DATASET_ID}, sort_keys=True).encode()
+    return hashlib.sha1(payload).hexdigest()  # non-crypto; fine for caching
+
+def _cache_path(key: str) -> Path:
+    return Path(CACHE_DIR) / f"{key}.parquet"
+
+def execute_query(sql: str, desc: str) -> pd.DataFrame:
+    from pandas import read_gbq  # assume installed
+    key = _cache_key(sql)
+    path = _cache_path(key)
+    if path.exists():
+        print(f"INFO | {desc:16s} | cache -> {path.name}")
+        df = pd.read_parquet(path)
+    else:
+        print(f"INFO | {desc:16s} | BigQuery")
+        df = read_gbq(sql, project_id=PROJECT_ID, progress_bar_type=None)
+        df.to_parquet(path, index=False)
+    n = len(df)
+    uniq = df["person_id"].nunique() if "person_id" in df.columns else None
+    msg = f"DEBUG| {desc:16s} | rows={n:,}" + (f" unique_person_id={uniq:,}" if uniq is not None else "")
+    print(msg)
+    return df
+
+# -------------------- PHENOTYPE COHORTS --------------------
+def get_phenotypes(universe_sql: str, case_sql: str) -> pd.DataFrame:
+    u = execute_query(universe_sql, "Universe")
+    c = execute_query(case_sql,     "Cases")
+    cases = c.assign(status=1) if not c.empty else pd.DataFrame(columns=["person_id","status"])
+    ctrls = u[~u.person_id.isin(c.person_id)].assign(status=0) if not c.empty else u.assign(status=0)
+    pheno = pd.concat([cases, ctrls], ignore_index=True)[["person_id","status"]]
+    print(f"INFO | Cohort        | universe={len(u):,} cases={pheno['status'].sum():,} controls={(len(pheno)-pheno['status'].sum()):,}")
+    return pheno
+
+# -------------------- TESTS (no covariates) --------------------
+def _fit_logit(y: pd.Series, x: pd.Series):
+    X = sm.add_constant(x.astype(float))
+    try:
+        return sm.Logit(y.astype(int), X).fit(disp=0)
+    except PerfectSeparationError:
+        return None
+
+def _lrt_p(llf_alt: float, llf_null: float, df_diff: int = 1) -> float:
+    from scipy.stats import chi2
+    return float(chi2.sf(2*(llf_alt-llf_null), df_diff))
+
+def cochran_armitage(y: pd.Series, g: pd.Series):
+    from scipy.stats import norm
+    t = (pd.DataFrame({"y":y.astype(int),"g":g.round().clip(0,2).astype(int)})
+           .groupby("g").agg(cases=("y","sum"), n=("y","size")).reindex([0,1,2], fill_value=0))
+    scores = np.array([0.,1.,2.])
+    n = float(t["n"].sum()); p = float(t["cases"].sum()/max(n,1))
+    w = t["n"].to_numpy(); sbar = np.average(scores, weights=w)
+    num = float(np.sum(scores*t["cases"].to_numpy()) - p*np.sum(scores*w))
+    den = math.sqrt(max(p*(1-p)*np.sum(w*(scores-sbar)**2), 1e-12))
+    z = num/den if den>0 else 0.0
+    return z, float(2*norm.sf(abs(z)))
+
+def run_tests(df: pd.DataFrame, inv: str) -> dict:
+    y = df["status"].astype(int)
+    x = df[inv].astype(float)
+    out = {"wald_p": np.nan, "lrt_p": np.nan, "or": np.nan, "ci_low": np.nan, "ci_high": np.nan,
+           "pseudo_r2": np.nan, "trend_z": np.nan, "trend_p": np.nan}
+    m = _fit_logit(y, x)
+    if m is not None:
+        out["wald_p"]   = float(m.pvalues.get(inv, np.nan))
+        out["or"]       = float(np.exp(m.params.get(inv, np.nan)))
+        if inv in m.params.index:
+            ci = m.conf_int().loc[inv]
+            out["ci_low"], out["ci_high"] = float(np.exp(ci[0])), float(np.exp(ci[1]))
+        out["pseudo_r2"] = float(1 - (m.llf / m.llnull)) if m.llnull != 0 else np.nan
+        out["lrt_p"]     = float(_lrt_p(m.llf, m.llnull, 1))
+    z, p_trend = cochran_armitage(y, x)
+    out["trend_z"], out["trend_p"] = float(z), float(p_trend)
+    return out
+
+# -------------------- PLOTS (Relative Risk) --------------------
+def _relative_risk(series_status: pd.Series, by: pd.Series) -> pd.DataFrame:
+    base = float(series_status.mean())  # cohort prevalence as baseline
+    g = (pd.DataFrame({"bin": by, "status": series_status.astype(int)})
+         .groupby("bin", dropna=False)
+         .agg(n=("status","size"), risk=("status","mean"))
+         .reset_index())
+    g["rr"] = g["risk"] / max(base, 1e-12)
+    # simple SE for p (binomial), propagate to RR (denom treated as constant)
+    g["se_rr"] = np.sqrt(g["risk"]*(1-g["risk"])/g["n"].clip(lower=1)) / max(base, 1e-12)
+    g["rr_low"] = (g["rr"] - 1.96*g["se_rr"]).clip(lower=0)
+    g["rr_high"] = g["rr"] + 1.96*g["se_rr"]
+    g["base_risk"] = base
+    return g
+
+def plot_quantiles(df: pd.DataFrame, inv: str, phenotype: str, test_type: str):
+    series = df[inv].astype(float)
+    q = pd.qcut(series, q=QUANTILE_BINS, duplicates="drop")
+    mid = q.apply(lambda b: (b.left + b.right)/2)
+    g = _relative_risk(df["status"], q)
+    # merge mids for x
+    mids = (pd.DataFrame({"bin": q, "mid": mid}).groupby("bin").agg(mid=("mid","mean")).reset_index())
+    g = g.merge(mids, on="bin", how="left")
+    fig = plt.figure(figsize=(7.5, 4.6))
+    plt.plot(g["mid"], g["rr"], marker="o", linewidth=2.2)
+    plt.fill_between(g["mid"], g["rr_low"], g["rr_high"], alpha=0.15, linewidth=0)
+    plt.axhline(1.0, linestyle="--", linewidth=1.0)
+    plt.xlabel(f"{inv} dosage (quantile centers)")
+    plt.ylabel("Relative risk vs cohort prevalence")
+    plt.title(f"{phenotype} — {test_type}: RR by {QUANTILE_BINS}-quantile of {inv}")
+    plt.tight_layout()
+    out = Path(OUTPUT_DIR)/f"rr_quantiles_{phenotype.replace(' ','_')}_{test_type.replace(' ','_')}_{inv}.png"
+    fig.savefig(out, dpi=150); plt.close(fig)
+    return str(out)
+
+def plot_rounded_bins(df: pd.DataFrame, inv: str, phenotype: str, test_type: str):
+    b = df[inv].astype(float).round().clip(0,2)
+    g = _relative_risk(df["status"], b).sort_values("bin")
+    fig = plt.figure(figsize=(6.8, 4.2))
+    plt.bar(g["bin"].astype(str), g["rr"])
+    for i, (rr, n) in enumerate(zip(g["rr"], g["n"])):
+        plt.text(i, rr, f"{rr:.2f}\n(n={n})", ha="center", va="bottom")
+    plt.axhline(1.0, linestyle="--", linewidth=1.0)
+    plt.xlabel("Rounded dosage bin {0,1,2}")
+    plt.ylabel("Relative risk vs cohort prevalence")
+    plt.title(f"{phenotype} — {test_type}: RR by rounded bins of {inv}")
+    plt.tight_layout()
+    out = Path(OUTPUT_DIR)/f"rr_bins_{phenotype.replace(' ','_')}_{test_type.replace(' ','_')}_{inv}.png"
+    fig.savefig(out, dpi=150); plt.close(fig)
+    return str(out)
+
+# -------------------- CORR DIAGNOSTICS --------------------
+def corr_chr17_vs_all(dosage: pd.DataFrame):
+    num_cols = dosage.select_dtypes(include=[np.number]).columns
+    s = dosage[num_cols].corr(method="pearson")[INVERSION_17].sort_values(ascending=False)
+    out = Path(OUTPUT_DIR)/"chr17_correlations.csv"; s.to_csv(out, header=["pearson_corr_with_chr17"])
+    print("INFO | Top correlations with chr17:")
+    for k, v in s.head(10).round(4).items():
+        print(f"      {k:>36s}  {v:+.4f}")
+    return str(out)
+
+# -------------------- ORCHESTRATION --------------------
+def run_for_phenotype(name: str, sqls: dict, dosage: pd.DataFrame, inversions: list):
+    print("\n" + "#"*80)
+    print(f"INFO | Phenotype: {name}")
+    print("#"*80)
+
+    ph = get_phenotypes(sqls["universe"], sqls["personal_case"])
+    fh = get_phenotypes(sqls["universe"], sqls["family_case"])
+
+    dfp = ph.merge(dosage, on="person_id", how="inner")
+    dff = fh.merge(dosage, on="person_id", how="inner")
+    print(f"INFO | Merge (Personal) | rows={len(dfp):,} cases={int(dfp['status'].sum()):,}")
+    print(f"INFO | Merge (Family)   | rows={len(dff):,} cases={int(dff['status'].sum()):,}")
+
+    rows = []
+    for label, d in [("Personal History", dfp), ("Family History", dff)]:
+        for inv in inversions:
+            if inv not in d.columns:
+                print(f"WARN | {inv} not in data; skip."); continue
+            sub = d[["status", inv]].dropna()
+            desc = sub[inv].describe(percentiles=[.01,.1,.5,.9,.99]).round(4)
+            bins = sub[inv].round().clip(0,2).value_counts().reindex([0,1,2], fill_value=0).astype(int).tolist()
+            print(f"DEBUG| {label:16s} | {inv} nonnull={len(sub):,} min={desc['min']:.3f} p50={desc['50%']:.3f} max={desc['max']:.3f} bins(0/1/2)={bins}")
+
+            stats = run_tests(sub, inv)
+            qplot = plot_quantiles(d, inv, name, label)
+            bplot = plot_rounded_bins(d, inv, name, label)
+
+            rows.append({
+                "phenotype": name, "test_type": label, "inversion": inv,
+                "n": int(len(d)), "n_cases": int(d["status"].sum()),
+                "n_controls": int(len(d)-d["status"].sum()),
+                **{k: (None if (isinstance(v,float) and np.isnan(v)) else v) for k,v in stats.items()},
+                "quantile_plot": qplot, "rounded_bin_plot": bplot,
+            })
+    return rows
+
+def main():
+    # Fill CDR in SQL
+    sqls = {k: {kk: vv.format(CDR=CDR_DATASET_ID) for kk, vv in v.items()} for k, v in PHENO_SQL.items()}
+
+    # Load dosages
+    print(f"INFO | Loading dosages: {INVERSION_FILE}")
+    d = pd.read_csv(INVERSION_FILE, sep="\t").rename(columns={"SampleID":"person_id"})
+    d["person_id"] = d["person_id"].astype("int64")
+    inv_cols = [c for c in d.columns if c.startswith("chr") and "INV" in c]
+    print(f"INFO | Dosage shape={d.shape} inversions={len(inv_cols)} sample={inv_cols[:4]}")
+
+    # chr17 for all; chr7 only for Breast Cancer
+    inv_map = {name: [INVERSION_17] for name in sqls}
+    inv_map["Breast Cancer"].append(INVERSION_7)
+
+    all_rows = []
+    for name in sqls:
+        all_rows += run_for_phenotype(name, sqls[name], d, inv_map[name])
+
+    # Report table
+    rep = pd.DataFrame(all_rows).sort_values(["phenotype","test_type","inversion"])
+    out_csv = Path(OUTPUT_DIR)/"association_results.csv"; rep.to_csv(out_csv, index=False)
+
+    print("\n" + "="*100)
+    if not rep.empty:
+        view = rep[["phenotype","test_type","inversion","n","n_cases","n_controls","or","ci_low","ci_high","wald_p","lrt_p","trend_p","pseudo_r2"]]
+        print("INFO | Final results (OR per dosage unit):")
+        print(view.to_string(index=False))
+    else:
+        print("INFO | No results produced.")
+    print("="*100)
+
+    # chr17 correlations
+    corr_path = corr_chr17_vs_all(d)
+    print(f"INFO | chr17 correlation CSV -> {corr_path}")
+    print(f"INFO | Outputs -> {Path(OUTPUT_DIR).resolve()}")
+
+if __name__ == "__main__":
+    main()
