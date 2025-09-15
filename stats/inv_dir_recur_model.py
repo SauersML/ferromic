@@ -2,6 +2,7 @@ import sys
 import math
 import warnings
 from typing import Tuple, Dict, Iterable, Optional
+import re
 
 import numpy as np
 import pandas as pd
@@ -295,6 +296,272 @@ def run_model_B(matched: pd.DataFrame, eps: float):
 
     return res, tab, d, res_overall
 
+
+# ==== MODEL C: helpers + run_model_C ====
+
+# New output filename for Model C (used by the rewritten main)
+OUT_MODEL_C_TABLE = "modelC_effects.csv"
+
+def _parse_percent_to_prop(val) -> float:
+    """
+    Convert strings like '95%' to 0.95.
+    If already numeric in [0,1] or [0,100], normalize accordingly.
+    Non-parsable -> NaN.
+    """
+    if val is None:
+        return float("nan")
+    s = str(val).strip()
+    if s == "" or s.upper() == "NA":
+        return float("nan")
+    try:
+        if s.endswith("%"):
+            num = float(s[:-1].strip())
+            return num / 100.0
+        # already numeric?
+        x = float(s)
+        if 0.0 <= x <= 1.0:
+            return x
+        if 1.0 < x <= 100.0:
+            return x / 100.0
+        return float("nan")
+    except Exception:
+        return float("nan")
+
+_CI_LEAD_RE = re.compile(r"^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(?:\s|\[|$)", re.IGNORECASE)
+
+def _parse_ci_point(val) -> float:
+    """
+    Extract the leading numeric point estimate from strings like:
+      '1.02e-04 [2.72e-05 ,1.21e-04]'  -> 1.02e-04
+    Also accepts plain numerics. Non-parsable -> NaN.
+    """
+    if val is None:
+        return float("nan")
+    s = str(val).strip()
+    if s == "" or s.upper() == "NA":
+        return float("nan")
+    m = _CI_LEAD_RE.match(s)
+    if m:
+        try:
+            return float(m.group(1))
+        except Exception:
+            return float("nan")
+    try:
+        return float(s)
+    except Exception:
+        return float("nan")
+
+def _to_float(val) -> float:
+    """Coerce to float; NA on failure."""
+    try:
+        x = float(val)
+        if np.isfinite(x):
+            return x
+        return float("nan")
+    except Exception:
+        return float("nan")
+
+def _to_int(val) -> float:
+    """Coerce to integer (returned as float for modeling); NA on failure."""
+    try:
+        x = int(float(val))
+        return float(x)
+    except Exception:
+        return float("nan")
+
+def _safe_log_pos(x: pd.Series) -> pd.Series:
+    """Natural log for strictly positive x; else NaN."""
+    x = pd.to_numeric(x, errors="coerce")
+    return np.log(x.where(x > 0.0, np.nan))
+
+def _ln1p_count(x: pd.Series) -> pd.Series:
+    """ln(1 + count) for counts ≥0; NA if negative/non-numeric."""
+    x = pd.to_numeric(x, errors="coerce")
+    x = x.where(x >= 0.0, np.nan)
+    return np.log1p(x)
+
+def _zscore_series(s: pd.Series) -> pd.Series:
+    """Z-score (mean 0, sd 1) ignoring NaNs; returns NaNs where input NaN; drops constants to 0."""
+    mu = np.nanmean(s.to_numpy(float))
+    sd = np.nanstd(s.to_numpy(float), ddof=0)
+    if not np.isfinite(sd) or sd == 0.0:
+        # If constant/degenerate, return zeros (kept so model stays stable but contributes nothing)
+        return s.apply(lambda v: 0.0 if np.isfinite(v) else float("nan"))
+    return (s - mu) / sd
+
+def _impute_by_recurrence_transformed(df: pd.DataFrame, col: str, rec_col: str = "Recurrence") -> Tuple[pd.Series, pd.Series]:
+    """
+    Impute transformed feature 'col' by Recurrence-class median.
+    Returns (imputed_series, missing_indicator)
+    """
+    miss = df[col].isna().astype(int)
+    # per-class medians in transformed scale
+    meds = df.groupby(rec_col)[col].median()
+    overall = np.nanmedian(df[col].to_numpy(float))
+    def fill_row(row):
+        if not np.isfinite(row[col]):
+            # class median
+            cm = meds.get(row[rec_col], np.nan)
+            if not np.isfinite(cm):
+                cm = overall
+            if not np.isfinite(cm):
+                cm = 0.0
+            return float(cm)
+        return float(row[col])
+    filled = df.apply(fill_row, axis=1).astype(float)
+    return filled, miss
+
+def _prepare_invinfo_covariates(invinfo_path: Optional[str]) -> pd.DataFrame:
+    """
+    Load inv_info.tsv, filter to 0/1 in consensus, compute cleaned & transformed covariates.
+    """
+    path = invinfo_path if invinfo_path is not None else INVINFO_TSV
+    inv = pd.read_csv(path, sep="\t")
+
+    # Standardize chromosome label
+    inv["chr_std"] = inv["Chromosome"].apply(_standardize_chr)
+
+    # Enforce presence & 0/1 filter on consensus
+    if "0_single_1_recur_consensus" not in inv.columns:
+        raise KeyError(f"{path} missing column: 0_single_1_recur_consensus")
+    inv["_cons"] = pd.to_numeric(inv["0_single_1_recur_consensus"], errors="coerce")
+    inv = inv[inv["_cons"].isin([0, 1])].copy()
+
+    # Check for duplicate keys (strict)
+    dup = inv.duplicated(subset=["chr_std", "Start", "End"], keep=False)
+    if dup.any():
+        bad = inv.loc[dup, ["chr_std", "Start", "End"]].drop_duplicates()
+        raise ValueError(f"{path} contains duplicate (chr,Start,End) keys.\n{bad.to_string(index=False)}")
+
+    # Raw numeric extractions
+    inv["_nr_events"]      = inv["Number_recurrent_events"].apply(_to_int) if "Number_recurrent_events" in inv.columns else float("nan")
+    inv["_size_kbp"]       = pd.to_numeric(inv.get("Size_.kbp.", np.nan), errors="coerce")
+    inv["_inverted_af"]    = pd.to_numeric(inv.get("Inverted_AF", np.nan), errors="coerce")
+    inv["_form_rate"]      = inv.get("Formation_rate_per_generation_.95..C.I..", np.nan)
+    inv["_form_rate"]      = inv["_form_rate"].apply(_parse_ci_point)
+
+    # Transformations
+    inv["T_nr_events"]        = _ln1p_count(inv["_nr_events"])
+    inv["T_ln_size_kbp"]      = _safe_log_pos(inv["_size_kbp"])
+    inv["T_inverted_af"]      = pd.to_numeric(inv["_inverted_af"], errors="coerce")  # keep on raw scale (can be negative)
+    inv["T_ln_form_rate"]     = _safe_log_pos(inv["_form_rate"])
+
+    # Assemble transformed columns
+    tcols = [
+        ("T_nr_events",        "Z_nr_events"),
+        ("T_ln_size_kbp",      "Z_ln_size_kbp"),
+        ("T_inverted_af",      "Z_inverted_af"),
+        ("T_ln_form_rate",     "Z_ln_formation_rate"),
+    ]
+
+    tidy = inv[["chr_std", "Start", "End", "_cons"]].copy()
+    tidy.rename(columns={"_cons": "consensus_numeric"}, inplace=True)
+
+    for tcol, zcol in tcols:
+        tidy[zcol] = _zscore_series(inv[tcol])
+        # No NA indicators; missing values are disallowed downstream.
+
+
+    return tidy
+
+def run_model_C(matched: pd.DataFrame, invinfo_path: Optional[str], eps: float, nonzero_only: bool=False):
+    """
+    MODEL C:
+      - Outcome: logFC = log(pi_inverted+eps) - log(pi_direct+eps)
+      - Predictors: Recurrent + z-scored covariates from inv_info.tsv (with missingness dummies)
+      - SEs: HC3 robust
+      - Reporting: rows for SE, RE, Interaction, plus each covariate (per +1 SD)
+    Returns:
+      resC (RegressionResultsWrapper), tabC (effects table), dfC (model frame), used_covariates (list)
+    """
+    # Start from matched (already 0/1 consensus-only, finite π)
+    dfC = matched.copy()
+
+    # Outcome and group
+    if nonzero_only:
+        keep = (dfC["pi_direct"] > 0) & (dfC["pi_inverted"] > 0)
+        dfC = dfC.loc[keep].copy()
+
+    dfC["logFC"] = np.log(dfC["pi_inverted"].to_numpy(float) + float(eps)) \
+                 - np.log(dfC["pi_direct"  ].to_numpy(float) + float(eps))
+    dfC["Recurrent"] = (dfC["Recurrence"] == "Recurrent").astype(int)
+
+    # Bring covariates
+    cov = _prepare_invinfo_covariates(invinfo_path)
+
+    # Merge by strict keys chosen earlier
+    dfC = dfC.merge(cov, on=["chr_std", "Start", "End"], how="left", validate="m:1")
+
+    # Build covariate lists
+    z_covs = [
+        "Z_nr_events",
+        "Z_ln_size_kbp",
+        "Z_inverted_af",
+        "Z_ln_formation_rate",
+    ]
+
+    # No imputation; enforce completeness across all covariates
+    missing_mask = dfC[z_covs].isna().any(axis=1)
+    if bool(missing_mask.any()):
+            bad = dfC.loc[missing_mask, ["region_id"] + z_covs].head(10)
+            raise ValueError(f"MODEL C: Missing covariate values after merge; rows={int(missing_mask.sum())}. Example:\n{bad.to_string(index=False)}")
+    
+    # Drop covariates that are constant (all zeros after z-scoring) and verify finiteness
+    used_covariates = []
+    for zc in list(z_covs):
+            col = pd.to_numeric(dfC[zc], errors="coerce")
+            if not np.isfinite(col.to_numpy(float)).all():
+                raise ValueError(f"MODEL C: Non-finite values detected in covariate '{zc}'.")
+            if np.nanstd(col.to_numpy(float), ddof=0) == 0.0:
+                z_covs.remove(zc)
+            else:
+                used_covariates.append(zc)
+    
+    na_covs = []  # ensure no NA indicators are used
+
+
+    # Design matrix: const + Recurrent + Z-covariates + NA indicators
+    X_parts = [dfC[["Recurrent"]]]
+    if z_covs:
+            X_parts.append(dfC[z_covs])
+    X = pd.concat(X_parts, axis=1)
+    X = sm.add_constant(X)
+
+
+    # Fit with HC3 robust SEs
+    resC = sm.OLS(dfC["logFC"], X).fit(cov_type="HC3")
+
+    # Build effects table
+    rows = []
+
+    # 1) Single-event (adjusted): const
+    est_SE, se_SE, p_SE = _linear_combo(resC, {"const": 1.0})
+    rows.append({**_pack_effect_row("Single-event: Inverted vs Direct (adjusted)", est_SE, se_SE), "p": p_SE})
+
+    # 2) Recurrent (adjusted): const + Recurrent
+    est_RE, se_RE, p_RE = _linear_combo(resC, {"const": 1.0, "Recurrent": 1.0})
+    rows.append({**_pack_effect_row("Recurrent: Inverted vs Direct (adjusted)", est_RE, se_RE), "p": p_RE})
+
+    # 3) Interaction (difference between those two): Recurrent
+    est_INT, se_INT, p_INT = _linear_combo(resC, {"Recurrent": 1.0})
+    rows.append({**_pack_effect_row("Interaction (difference between those two)", est_INT, se_INT), "p": p_INT})
+
+    # 4) Covariate main effects (per +1 SD increase on transformed scale)
+    pretty = {
+        "Z_nr_events": "Covariate: Number_recurrent_events (ln1p, z)",
+        "Z_ln_size_kbp": "Covariate: Size_.kbp. (ln, z)",
+        "Z_inverted_af": "Covariate: Inverted_AF (z)",
+        "Z_ln_formation_rate": "Covariate: Formation_rate_per_generation (ln, z)",
+    }
+    for zc in used_covariates:
+        est, se, p = _linear_combo(resC, {zc: 1.0})
+        label = pretty.get(zc, f"Covariate: {zc}")
+        rows.append({**_pack_effect_row(label, est, se), "p": p})
+
+    tabC = pd.DataFrame(rows)
+    return resC, tabC, dfC, used_covariates
+
+
 # ------------------------- PERMUTATION TESTS ----------------
 
 def perm_test_interaction(dfA: pd.DataFrame, n: int, seed: int) -> Tuple[float, float]:
@@ -505,11 +772,11 @@ def main():
 
     # 1) Load & STRICT match
     matched = load_and_match(OUTPUT_CSV, INVINFO_TSV)
-    n_single = (matched['Recurrence']=='Single-event').sum()
-    n_recur  = (matched['Recurrence']=='Recurrent').sum()
+    n_single = (matched['Recurrence'] == 'Single-event').sum()
+    n_recur  = (matched['Recurrence'] == 'Recurrent').sum()
     print(f"Matched paired regions (STRICT): {matched.shape[0]}  (Single-event: {n_single}, Recurrent: {n_recur})")
 
-    # 2) Choose epsilon (quantile-only, no fallback)
+    # 2) Choose epsilon (quantile-only, no fallback) — same rule as before
     all_pi = np.r_[matched["pi_direct"].to_numpy(float), matched["pi_inverted"].to_numpy(float)]
     floor_used = choose_floor_from_quantile(all_pi, q=FLOOR_QUANTILE, min_floor=MIN_FLOOR)
 
@@ -517,21 +784,30 @@ def main():
     _print_header("MODEL A — Δ-logπ ~ Recurrence (HC3)")
     resA, tabA, dfA = run_model_A(matched, eps=floor_used, nonzero_only=False)
     for _, r in tabA.iterrows():
-        print(f"{r['effect']:<44}  ratio={_fmt_ratio(r['ratio'])}  CI={_fmt_ci(r['ci_low'], r['ci_high'])}  "
-              f"change={_fmt_pct(r['ratio'])}  p={_fmt_p(r['p'])}")
+        print(f"{r['effect']:<52}  ratio={_fmt_ratio(r['ratio'])}  CI={_fmt_ci(r['ci_low'], r['ci_high'])}  change={_fmt_pct(r['ratio'])}  p={_fmt_p(r['p'])}")
     if SAVE_TABLES:
-        tabA.to_csv(OUT_MODEL_A_TABLE, index=False)
+        try: tabA.to_csv(OUT_MODEL_A_TABLE, index=False)
+        except Exception: pass
 
-    # 4) Model B (confirmatory, FE + cluster by region)
+    # 4) Model B (confirmatory FE + cluster by region)
     _print_header("MODEL B — logπ ~ Inverted + Inverted:Recurrence + C(region_id)  (cluster-robust by region)")
     resB, tabB, longB, resOverall = run_model_B(matched, eps=floor_used)
     for _, r in tabB.iterrows():
-        print(f"{r['effect']:<44}  ratio={_fmt_ratio(r['ratio'])}  CI={_fmt_ci(r['ci_low'], r['ci_high'])}  "
-              f"change={_fmt_pct(r['ratio'])}  p={_fmt_p(r['p'])}")
+        print(f"{r['effect']:<52}  ratio={_fmt_ratio(r['ratio'])}  CI={_fmt_ci(r['ci_low'], r['ci_high'])}  change={_fmt_pct(r['ratio'])}  p={_fmt_p(r['p'])}")
     if SAVE_TABLES:
-        tabB.to_csv(OUT_MODEL_B_TABLE, index=False)
+        try: tabB.to_csv(OUT_MODEL_B_TABLE, index=False)
+        except Exception: pass
 
-    # 5) Permutation interaction test(s)
+    # 5) Model C (covariate-adjusted)
+    _print_header("MODEL C — Δ-logπ ~ Recurrence + covariates from inv_info.tsv (HC3)")
+    resC, tabC, dfC, used_covs = run_model_C(matched, invinfo_path=INVINFO_TSV, eps=floor_used, nonzero_only=False)
+    for _, r in tabC.iterrows():
+        print(f"{r['effect']:<52}  ratio={_fmt_ratio(r['ratio'])}  CI={_fmt_ci(r['ci_low'], r['ci_high'])}  change={_fmt_pct(r['ratio'])}  p={_fmt_p(r['p'])}")
+    if SAVE_TABLES:
+        try: tabC.to_csv(OUT_MODEL_C_TABLE, index=False)
+        except Exception: pass
+
+    # 6) Permutation tests for Model A interaction, plus stratified variant if available
     if RUN_PERMUTATION_TEST:
         _print_header(f"PERMUTATION TEST (Model A interaction) — {N_PERMUTATIONS} shuffles")
         obs, pperm = perm_test_interaction(dfA, n=N_PERMUTATIONS, seed=PERM_SEED)
@@ -545,21 +821,29 @@ def main():
             except Exception as e:
                 print(f"  Stratified permutation skipped: {e}")
 
-    # 6) McNemar within class (paired zeros)
+    # 7) McNemar within class (paired zeros)
     mcnemar_by_class(matched)
 
-    # 7) Diagnostics & agreement
+    # 8) Diagnostics & agreement (A vs B)
     print_diagnostics(matched, dfA, floor_used, resA, resB, resOverall)
 
-    # 8) Nonzero-only sensitivity
+    # 9) Nonzero-only sensitivity (Model A)
     if RUN_NONZERO_SENSITIVITY:
-        _print_header("NONZERO-ONLY SENSITIVITY — drop any pair with π=0 on either arm")
+        _print_header("NONZERO-ONLY SENSITIVITY — Model A (drop any pair with π=0 on either arm)")
         resA_nz, tabA_nz, _ = run_model_A(matched, eps=floor_used, nonzero_only=True)
         for _, r in tabA_nz.iterrows():
-            print(f"{r['effect']:<44}  ratio={_fmt_ratio(r['ratio'])}  CI={_fmt_ci(r['ci_low'], r['ci_high'])}  "
-                  f"change={_fmt_pct(r['ratio'])}  p={_fmt_p(r['p'])}")
+            print(f"{r['effect']:<52}  ratio={_fmt_ratio(r['ratio'])}  CI={_fmt_ci(r['ci_low'], r['ci_high'])}  change={_fmt_pct(r['ratio'])}  p={_fmt_p(r['p'])}")
 
-    # 9) Floor sweep (quantiles + big epsilon), and save
+        # Also run the analogous sensitivity for Model C
+        _print_header("NONZERO-ONLY SENSITIVITY — Model C (drop any pair with π=0 on either arm)")
+        try:
+            resC_nz, tabC_nz, _, _ = run_model_C(matched, invinfo_path=INVINFO_TSV, eps=floor_used, nonzero_only=True)
+            for _, r in tabC_nz.iterrows():
+                print(f"{r['effect']:<52}  ratio={_fmt_ratio(r['ratio'])}  CI={_fmt_ci(r['ci_low'], r['ci_high'])}  change={_fmt_pct(r['ratio'])}  p={_fmt_p(r['p'])}")
+        except Exception as e:
+            print(f"  Model C nonzero-only sensitivity skipped: {e}")
+
+    # 10) Floor sweep (Model A across floors)
     if RUN_FLOOR_SWEEP:
         _print_header("FLOOR SENSITIVITY SWEEP — Model A across floors")
         sweep = floor_sweep(matched)
@@ -567,33 +851,61 @@ def main():
                 "SE_ratio","SE_p","RE_ratio","RE_p","INT_ratio","INT_p"]
         print(sweep[cols].to_string(index=False))
         if SAVE_TABLES:
-            sweep.to_csv(OUT_FLOOR_SWEEP, index=False)
+            try: sweep.to_csv(OUT_FLOOR_SWEEP, index=False)
+            except Exception: pass
 
-    # 10) TOST (equivalence) for recurrent effect
+    # 11) TOST equivalence (±20%) for recurrent effect — both Model A and Model C
     if RUN_TOST:
         _print_header(f"EQUIVALENCE (TOST) — recurrent inversion effect within ±{int((TOST_MARGIN_RATIO-1)*100)}%")
-        est_RE, se_RE, p_equiv, delta = tost_equivalence_on_recurrent(resA, margin_ratio=TOST_MARGIN_RATIO)
-        ratio = math.exp(est_RE)
-        lo, hi = math.exp(est_RE - 1.96*se_RE), math.exp(est_RE + 1.96*se_RE)
-        print(f"Recurrent effect: ratio={_fmt_ratio(ratio)}  CI={_fmt_ci(lo, hi)}  "
-              f"TOST p_equiv={_fmt_p(p_equiv)}  (delta={_fmt_ci(math.exp(-delta), math.exp(delta))})")
-        if SAVE_TABLES:
-            pd.DataFrame([{
-                "recurrent_log_est": est_RE, "recurrent_log_se": se_RE,
-                "recurrent_ratio": ratio, "ci_low": lo, "ci_high": hi,
-                "tost_delta_log": delta, "tost_margin_ratio_low": math.exp(-delta),
-                "tost_margin_ratio_high": math.exp(delta), "p_equiv": p_equiv
-            }]).to_csv(OUT_TOST, index=False)
+        # Model A
+        est_RE_A, se_RE_A, p_equiv_A, deltaA = tost_equivalence_on_recurrent(resA, margin_ratio=TOST_MARGIN_RATIO)
+        ratio_A = math.exp(est_RE_A)
+        lo_A, hi_A = math.exp(est_RE_A - 1.96*se_RE_A), math.exp(est_RE_A + 1.96*se_RE_A)
+        print(f"Model A — Recurrent effect: ratio={_fmt_ratio(ratio_A)}  CI={_fmt_ci(lo_A, hi_A)}  TOST p_equiv={_fmt_p(p_equiv_A)}  (delta={_fmt_ci(math.exp(-deltaA), math.exp(deltaA))})")
 
-    # 11) Save influence table for Model A
+        # Model C
+        try:
+            est_RE_C, se_RE_C, p_equiv_C, deltaC = tost_equivalence_on_recurrent(resC, margin_ratio=TOST_MARGIN_RATIO)
+            ratio_C = math.exp(est_RE_C)
+            lo_C, hi_C = math.exp(est_RE_C - 1.96*se_RE_C), math.exp(est_RE_C + 1.96*se_RE_C)
+            print(f"Model C — Recurrent effect (adjusted): ratio={_fmt_ratio(ratio_C)}  CI={_fmt_ci(lo_C, hi_C)}  TOST p_equiv={_fmt_p(p_equiv_C)}  (delta={_fmt_ci(math.exp(-deltaC), math.exp(deltaC))})")
+            if SAVE_TABLES:
+                try:
+                    pd.DataFrame([{
+                        "recurrent_log_est": est_RE_C, "recurrent_log_se": se_RE_C,
+                        "recurrent_ratio": ratio_C, "ci_low": lo_C, "ci_high": hi_C,
+                        "tost_delta_log": deltaC, "tost_margin_ratio_low": math.exp(-deltaC),
+                        "tost_margin_ratio_high": math.exp(deltaC), "p_equiv": p_equiv_C
+                    }]).to_csv("tost_recurrent_modelC.csv", index=False)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"  TOST (Model C) skipped: {e}")
+
+    # 12) Save influence tables for Model A (existing)
     try:
         X = sm.add_constant(dfA[["Recurrent"]]); X.index = dfA["region_id"]
         y = dfA["logFC"]; y.index = dfA["region_id"]
         top = cooks_distance_top(X, y, k=SHOW_TOP_INFLUENCERS)
         if SAVE_TABLES:
             top.to_csv(OUT_INFLUENCE, index=False)
+            dfb = dfbetas_table(X, y, ["const","Recurrent"])
+            dfb.to_csv(OUT_DFBETAS, index=False)
     except Exception:
         pass
 
+    # 13) Influence diagnostics for Model C
+    # Build the X,y that were used in Model C
+    # Recover columns: const already added in fit; rebuild to align indices
+    z_covs = list(used_covs)
+    Xc = sm.add_constant(pd.concat([dfC[["Recurrent"]], dfC[z_covs]], axis=1))
+    Xc.index = dfC["region_id"]
+    yc = dfC["logFC"]; yc.index = dfC["region_id"]
+    topC = cooks_distance_top(Xc, yc, k=SHOW_TOP_INFLUENCERS)
+    if SAVE_TABLES:
+        topC.to_csv("influence_top_modelC.csv", index=False)
+        dfbC = dfbetas_table(Xc, yc, Xc.columns)
+        dfbC.to_csv("influence_dfbetas_modelC.csv", index=False)
+ 
 if __name__ == "__main__":
     main()
