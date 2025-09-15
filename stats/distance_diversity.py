@@ -214,7 +214,7 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
 def main():
     print("=== Starting Execution ===")
     start_time = time.time()
-    file_path = 'per_site_output.falsta'
+    file_path = 'per_site_diversity_output.falsta'
     (theta_labels, theta_data), (pi_labels, pi_data) = load_data(file_path)
     
     if not theta_data.size and not pi_data.size:
