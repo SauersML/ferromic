@@ -27,7 +27,7 @@ MIN_LEN_PI     = 100_000
 MIN_LEN_FST    = 100_000
 
 # Proportion mode
-NUM_BINS_PROP  = 50
+NUM_BINS_PROP  = 100
 
 # Base-pair mode 
 MAX_BP         = 1_000_000          # cap distance from inversion edge at 2 Mbp
