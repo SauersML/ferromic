@@ -232,9 +232,10 @@ def run_tests(df: pd.DataFrame, inv: str) -> dict:
 def _relative_risk(series_status: pd.Series, by: pd.Series) -> pd.DataFrame:
     base = float(series_status.mean())  # cohort prevalence as baseline
     g = (pd.DataFrame({"bin": by, "status": series_status.astype(int)})
-         .groupby("bin", dropna=False)
+         .groupby("bin", observed=True, dropna=False)
          .agg(n=("status","size"), risk=("status","mean"))
          .reset_index())
+
     g["rr"] = g["risk"] / max(base, 1e-12)
     # simple SE for p (binomial), propagate to RR (denom treated as constant)
     g["se_rr"] = np.sqrt(g["risk"]*(1-g["risk"])/g["n"].clip(lower=1)) / max(base, 1e-12)
@@ -246,11 +247,18 @@ def _relative_risk(series_status: pd.Series, by: pd.Series) -> pd.DataFrame:
 def plot_quantiles(df: pd.DataFrame, inv: str, phenotype: str, test_type: str):
     series = df[inv].astype(float)
     q = pd.qcut(series, q=QUANTILE_BINS, duplicates="drop")
-    mid = q.apply(lambda b: (b.left + b.right)/2)
+    # midpoints as pure float series to avoid categorical reductions
+    mid = pd.Series(q).map(lambda b: (b.left + b.right) / 2).astype(float)
     g = _relative_risk(df["status"], q)
-    # merge mids for x
-    mids = (pd.DataFrame({"bin": q, "mid": mid}).groupby("bin").agg(mid=("mid","mean")).reset_index())
-    g = g.merge(mids, on="bin", how="left")
+    # per-bin midpoint (mean is safe since 'mid' is float)
+    mids = (
+        pd.DataFrame({"bin": q, "mid": mid})
+          .groupby("bin", observed=True, dropna=False)
+          .agg(mid=("mid", "mean"))
+          .reset_index()
+    )
+    g = g.merge(mids, on="bin", how="left").sort_values("mid")
+
     fig = plt.figure(figsize=(7.5, 4.6))
     plt.plot(g["mid"], g["rr"], marker="o", linewidth=2.2)
     plt.fill_between(g["mid"], g["rr_low"], g["rr_high"], alpha=0.15, linewidth=0)
