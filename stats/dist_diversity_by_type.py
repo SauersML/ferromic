@@ -1,14 +1,3 @@
-"""
-Analyzes nucleotide diversity (pi) in flanking regions vs. middle regions
-of genomic segments, categorized by inversion type and haplotype status,
-focusing on mean values and ensuring robust statistical testing.
-
-Retains only sequences marked 'filtered_pi' in the header and sequences
-meeting a minimum length requirement. All other filtering (e.g., strict pairing,
-haplotype completeness) is removed.
-
-Handles potentially sparse pi data (many zeros).
-"""
 import logging
 import re
 import sys
@@ -39,7 +28,7 @@ PERMUTATIONS = 10000 # Number of permutations for significance testing
 BAR_ALPHA = 0.3      # Transparency for plot bars (Used previously, kept for reference)
 
 # File paths (Update these paths if necessary)
-PI_DATA_FILE = 'per_site_output.falsta'
+PI_DATA_FILE = 'per_site_diversity_output.falsta'
 INVERSION_FILE = 'inv_info.tsv'
 OUTPUT_DIR = Path('pi_analysis_results_filtered_pi_length') #  output directory name
 
@@ -736,7 +725,7 @@ def diagnose_single_event_discrepancy(
     filtered out by `load_pi_data` (Not Found, Not 'filtered_pi', Too Short, Coord/Group Error).
 
     Args:
-        pi_file_path: Path to the per_site_output.falsta file.
+        pi_file_path: Path to the per_site_diversity_output.falsta file.
         single_event_regions: Dict mapping {chrom: [(start, end), ...]} for SINGLE events.
         min_length: The minimum sequence length threshold used in load_pi_data.
         inv_info_path: Path to the inversion info file (for logging context).
