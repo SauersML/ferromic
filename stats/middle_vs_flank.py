@@ -863,8 +863,7 @@ def create_paired_violin_with_overlays(all_sequences_stats: List[Dict], test_res
     fig_trans = fig.transFigure
     if cax is not None:
         cbpos = cax.get_position()
-        # Shift legends LEFT of the colorbar by ~0.08 figure-width units, but not into the plot
-        desired_x = cbpos.x0 - 0.08
+        desired_x = cbpos.x0 - 0.12
         min_x = axpos.x1 + 0.02
         legend_x = max(min_x, desired_x)
 
