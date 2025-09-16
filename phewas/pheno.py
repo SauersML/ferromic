@@ -496,8 +496,6 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         print(f"[Fetcher]  - [Batch] Skipping '{s_name}', another process has the lock.", flush=True)
 
     batch_infos = filtered_infos
-
-    batch_infos = filtered_infos
     try:
         codes_list = []
         phenos_list = []
