@@ -801,15 +801,10 @@ def create_paired_violin_with_overlays(all_sequences_stats: List[Dict], test_res
     panel_w = min(0.62, 0.92 * axpos.width)         # WIDER so the whole line fits inside the box
     panel_x = axpos.x0                               # align left edge with main axes
     # Bring it DOWN: small gap above axes top (not near top of figure)
-    panel_y = axpos.y1 + 0.008
+    panel_y = axpos.y1 - 0.008
 
     ann_ax = fig.add_axes([panel_x, panel_y, panel_w, panel_h])
     ann_ax.set_axis_off()
-
-    # Draw a soft white rounded-ish box as the background, fully covering the panel
-    box = plt.Rectangle((0, 0), 1, 1, transform=ann_ax.transAxes,
-                        facecolor="white", edgecolor="grey", linewidth=1.0, alpha=0.92)
-    ann_ax.add_patch(box)
 
     # Compose 3 lines: (1) N = ... pairs
     #                  (2) Mean Diff (Middle − Flank): <value>
