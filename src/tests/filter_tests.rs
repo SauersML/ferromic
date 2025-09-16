@@ -1,7 +1,5 @@
 // tests/filter_tests.rs
 
-use assert_cmd::prelude::*;
-use predicates::prelude::*;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

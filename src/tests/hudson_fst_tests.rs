@@ -2,7 +2,6 @@
 mod hudson_fst_tests {
     use crate::process::*;
     use crate::stats::*;
-    use std::collections::HashMap;
 
     /// Helper function to create test variants
     fn create_test_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
@@ -650,7 +649,7 @@ mod hudson_fst_tests {
         let result = calculate_hudson_fst_for_pair_with_sites(&pop1_context, &pop2_context, region);
         assert!(result.is_ok(), "Hudson FST calculation should succeed for multi-allelic site");
 
-        let (outcome, sites) = result.unwrap();
+        let (_outcome, sites) = result.unwrap();
         
         let variant_sites: Vec<_> = sites.iter().filter(|s| s.fst.is_some()).collect();
         assert_eq!(variant_sites.len(), 1, "Should have exactly 1 variant site");
@@ -812,132 +811,6 @@ mod hudson_fst_tests {
         assert!(result.is_err(), "Safe wrapper should return error for incompatible variants");
 
         println!("Variant compatibility guard test PASSED");
-    }
-
-    fn validate_falsta_content(content: &str) {
-        let lines: Vec<&str> = content.lines().collect();
-        
-        // Should have headers and data lines
-        assert!(!lines.is_empty(), "FALSTA file is empty");
-
-        let mut found_hudson_header = false;
-        let mut found_hudson_data = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            if line.starts_with(">hudson_pairwise_fst_hap_0v1_chr_") {
-                found_hudson_header = true;
-                
-                // Validate header format
-                assert!(line.contains("chr_chr1_start_50_end_550"), 
-                    "Hudson header format incorrect: {}", line);
-
-                // Next line should be data
-                if i + 1 < lines.len() {
-                    let data_line = lines[i + 1];
-                    found_hudson_data = true;
-                    
-                    // Validate data format
-                    let values: Vec<&str> = data_line.split(',').collect();
-                    assert!(!values.is_empty(), "Hudson data line is empty");
-                    
-                    // Should have 501 values (positions 50-550 inclusive)
-                    assert_eq!(values.len(), 501, 
-                        "Expected 501 values for region 50-550, got {}", values.len());
-
-                    // Check that values are either "NA" or valid floats
-                    let mut valid_fst_count = 0;
-                    let mut na_count = 0;
-                    
-                    for (pos, value) in values.iter().enumerate() {
-                        if *value == "NA" {
-                            na_count += 1;
-                        } else {
-                            match value.parse::<f64>() {
-                                Ok(fst_val) => {
-                                    valid_fst_count += 1;
-                                    // FST should be between -1 and 1 (though negative values are rare)
-                                    assert!(fst_val >= -1.0 && fst_val <= 1.0, 
-                                        "FST value {} at position {} is outside valid range [-1, 1]", 
-                                        fst_val, pos + 50);
-                                }
-                                Err(_) => panic!("Invalid FST value '{}' at position {}", value, pos + 50),
-                            }
-                        }
-                    }
-
-                    println!("Hudson FST validation: {} valid FST values, {} NA values", 
-                        valid_fst_count, na_count);
-                    
-                    // Should have some valid FST values (not all NA)
-                    assert!(valid_fst_count > 0, "All Hudson FST values are NA");
-                    
-                    // Should have some variant sites with FST calculations
-                    // Based on our test VCF, we have variants at positions 100, 200, 300, 400, 500
-                    // These should have FST values, not NA
-                    let variant_positions = [100, 200, 300, 400, 500];
-                    for &var_pos in &variant_positions {
-                        let idx = (var_pos - 50) as usize; // Convert to 0-based index in the array
-                        if idx < values.len() {
-                            let value = values[idx];
-                            if value != "NA" {
-                                let fst_val: f64 = value.parse().expect("Failed to parse FST value");
-                                println!("Position {}: Hudson FST = {}", var_pos, fst_val);
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-        }
-
-        assert!(found_hudson_header, "Hudson FST header not found in FALSTA file");
-        assert!(found_hudson_data, "Hudson FST data not found in FALSTA file");
-    }
-
-    fn validate_csv_hudson_columns(content: &str) {
-        let lines: Vec<&str> = content.lines().collect();
-        assert!(!lines.is_empty(), "CSV file is empty");
-
-        // Check header line
-        let header = lines[0];
-        println!("CSV header: {}", header);
-
-        // Should contain Hudson FST columns
-        assert!(header.contains("hudson_fst_hap_group_0v1"), 
-            "CSV missing hudson_fst_hap_group_0v1 column");
-        assert!(header.contains("hudson_dxy_hap_group_0v1"), 
-            "CSV missing hudson_dxy_hap_group_0v1 column");
-        assert!(header.contains("hudson_pi_hap_group_0"), 
-            "CSV missing hudson_pi_hap_group_0 column");
-        assert!(header.contains("hudson_pi_hap_group_1"), 
-            "CSV missing hudson_pi_hap_group_1 column");
-
-        // Check data line
-        if lines.len() > 1 {
-            let data_line = lines[1];
-            println!("CSV data: {}", data_line);
-            
-            let values: Vec<&str> = data_line.split(',').collect();
-            assert!(!values.is_empty(), "CSV data line is empty");
-
-            // Find Hudson FST column and validate its value
-            let header_cols: Vec<&str> = header.split(',').collect();
-            for (i, col_name) in header_cols.iter().enumerate() {
-                if col_name.contains("hudson_fst_hap_group_0v1") && i < values.len() {
-                    let fst_value = values[i];
-                    if fst_value != "NA" && !fst_value.is_empty() {
-                        match fst_value.parse::<f64>() {
-                            Ok(fst) => {
-                                println!("Regional Hudson FST: {}", fst);
-                                assert!(fst >= -1.0 && fst <= 1.0, 
-                                    "Regional Hudson FST {} is outside valid range", fst);
-                            }
-                            Err(_) => panic!("Invalid Hudson FST value in CSV: '{}'", fst_value),
-                        }
-                    }
-                }
-            }
-        }
     }
 
     #[test]
