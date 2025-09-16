@@ -276,6 +276,8 @@ def run_tests(df: pd.DataFrame, inv: str) -> dict:
     x = df[inv].astype(float)
     out = {"wald_p": np.nan, "lrt_p": np.nan, "or": np.nan, "ci_low": np.nan, "ci_high": np.nan,
            "pseudo_r2": np.nan, "trend_z": np.nan, "trend_p": np.nan}
+
+    # Try logistic; if it fails (or predictor is constant) _fit_logit returns None
     m = _fit_logit(y, x)
     if m is not None:
         out["wald_p"]   = float(m.pvalues.get(inv, np.nan))
@@ -285,6 +287,13 @@ def run_tests(df: pd.DataFrame, inv: str) -> dict:
             out["ci_low"], out["ci_high"] = float(np.exp(ci[0])), float(np.exp(ci[1]))
         out["pseudo_r2"] = float(1 - (m.llf / m.llnull)) if m.llnull != 0 else np.nan
         out["lrt_p"]     = float(_lrt_p(m.llf, m.llnull, 1))
+    else:
+        if pd.Series(x).dropna().nunique() < 2:
+            print(f"WARN | {inv}: predictor constant → logistic skipped; reporting trend only.")
+        else:
+            print(f"WARN | {inv}: logistic failed numerically; reporting trend only.")
+
+    # Always provide the Cochran–Armitage trend test as a stable fallback
     z, p_trend = cochran_armitage(y, x)
     out["trend_z"], out["trend_p"] = float(z), float(p_trend)
     return out
