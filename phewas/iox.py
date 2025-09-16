@@ -6,11 +6,24 @@ import shutil
 import tempfile
 import time
 import uuid
+import hashlib
 from typing import Any, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
+
+
+CACHE_VERSION_TAG = "phewas_v1"
+
+
+def stable_hash(obj: Any, digest_size: int = 8) -> str:
+    """Return a short, stable hash for arbitrary JSON-serializable payloads."""
+    try:
+        payload = json.dumps(obj, sort_keys=True, default=str)
+    except TypeError:
+        payload = str(obj)
+    return hashlib.blake2s(payload.encode("utf-8"), digest_size=digest_size).hexdigest()
 
 try:
     import psutil  # optional, for rss_gb()
@@ -176,6 +189,8 @@ def get_cached_or_generate(
     *args,
     validate_target: Optional[str] = None,
     validate_num_pcs: Optional[int] = None,
+    lock_dir: Optional[str] = None,
+    lock_timeout: float = 600.0,
     **kwargs,
 ) -> pd.DataFrame:
     """
@@ -228,7 +243,7 @@ def get_cached_or_generate(
             bn.startswith("demographics_")
             or bn.startswith("inversion_")
             or bn.startswith("pcs_")
-            or bn == "genetic_sex.parquet"
+            or bn.startswith("genetic_sex_")
         )
 
     def _validate(path: str, df: pd.DataFrame) -> bool:
@@ -239,7 +254,7 @@ def get_cached_or_generate(
             return _valid_inversion(df)
         if bn.startswith("pcs_"):
             return _valid_pcs(df)
-        if bn == "genetic_sex.parquet":
+        if bn.startswith("genetic_sex_"):
             return _valid_sex(df)
         return True
 
@@ -250,40 +265,113 @@ def get_cached_or_generate(
         out.index.name = "person_id"
         return out
 
-    if os.path.exists(cache_path):
+    def _load_existing() -> Optional[pd.DataFrame]:
+        if not os.path.exists(cache_path):
+            return None
         print(f"  -> Found cache, loading from '{cache_path}'...")
         try:
-            df = pd.read_parquet(cache_path)
+            df_loaded = pd.read_parquet(cache_path)
         except Exception as e:
             print(f"  -> Cache unreadable ({e}); regenerating...")
-            df = _coerce_index(generation_func(*args, **kwargs))
-            atomic_write_parquet(cache_path, df)
-            return df
+            return None
 
-        df = _coerce_index(df)
-        if _needs_validation(cache_path) and not _validate(cache_path, df):
+        df_loaded = _coerce_index(df_loaded)
+        if _needs_validation(cache_path) and not _validate(cache_path, df_loaded):
             print(f"  -> Cache at '{cache_path}' failed validation; regenerating...")
-            df = _coerce_index(generation_func(*args, **kwargs))
-            atomic_write_parquet(cache_path, df)
+            return None
+        return df_loaded
+
+    existing = _load_existing()
+    if existing is not None:
+        return existing
+
+    lock_path = None
+    lock_acquired = False
+    if lock_dir:
+        _ensure_dir(lock_dir)
+        lock_name = f"{stable_hash(os.path.abspath(cache_path))}.lock"
+        lock_path = os.path.join(lock_dir, lock_name)
+        start = time.time()
+        while True:
+            got = ensure_lock(lock_path, max_age_sec=lock_timeout)
+            if got:
+                lock_acquired = True
+                break
+            time.sleep(0.25)
+            existing = _load_existing()
+            if existing is not None:
+                return existing
+            if (time.time() - start) > lock_timeout:
+                raise TimeoutError(f"Timed out waiting for cache lock on '{cache_path}'")
+
+    try:
+        existing = _load_existing()
+        if existing is not None:
+            return existing
+
+        print(f"  -> No cache found at '{cache_path}'. Generating data...")
+        df = _coerce_index(generation_func(*args, **kwargs))
+        atomic_write_parquet(cache_path, df)
         return df
-
-    print(f"  -> No cache found at '{cache_path}'. Generating data...")
-    df = _coerce_index(generation_func(*args, **kwargs))
-    atomic_write_parquet(cache_path, df)
-    return df
+    finally:
+        if lock_acquired and lock_path:
+            release_lock(lock_path)
 
 
-def get_cached_or_generate_pickle(cache_path, generation_func, *args, **kwargs):
-    """Simple cache wrapper for pickled objects."""
-    if os.path.exists(cache_path):
+def get_cached_or_generate_pickle(
+    cache_path,
+    generation_func,
+    *args,
+    lock_dir: Optional[str] = None,
+    lock_timeout: float = 600.0,
+    **kwargs,
+):
+    """Simple cache wrapper for pickled objects with optional locking."""
+
+    def _load_existing_pickle():
+        if not os.path.exists(cache_path):
+            return None
         print(f"  -> Found cache, loading from '{cache_path}'...")
         try:
             return pd.read_pickle(cache_path)
         except Exception as e:
             print(f"  -> Cache unreadable ({e}); regenerating...")
-    obj = generation_func(*args, **kwargs)
-    atomic_write_pickle(cache_path, obj)
-    return obj
+            return None
+
+    existing = _load_existing_pickle()
+    if existing is not None:
+        return existing
+
+    lock_path = None
+    lock_acquired = False
+    if lock_dir:
+        _ensure_dir(lock_dir)
+        lock_name = f"{stable_hash(os.path.abspath(cache_path))}.lock"
+        lock_path = os.path.join(lock_dir, lock_name)
+        start = time.time()
+        while True:
+            got = ensure_lock(lock_path, max_age_sec=lock_timeout)
+            if got:
+                lock_acquired = True
+                break
+            time.sleep(0.25)
+            existing = _load_existing_pickle()
+            if existing is not None:
+                return existing
+            if (time.time() - start) > lock_timeout:
+                raise TimeoutError(f"Timed out waiting for cache lock on '{cache_path}'")
+
+    try:
+        existing = _load_existing_pickle()
+        if existing is not None:
+            return existing
+
+        obj = generation_func(*args, **kwargs)
+        atomic_write_pickle(cache_path, obj)
+        return obj
+    finally:
+        if lock_acquired and lock_path:
+            release_lock(lock_path)
 
 
 # ---------------------------------------------------------------------------
