@@ -78,7 +78,7 @@ mpl.rcParams.update({
 })
 
 N_CORES        = max(1, mp.cpu_count() - 1)
-OPEN_PLOTS_ON_LINUX = True  # auto open PNGs using `xdg-open` if available
+OPEN_PLOTS_ON_LINUX = True  # auto open generated PDFs using `xdg-open` if available
 
 logging.basicConfig(
     level=logging.INFO,
@@ -360,7 +360,7 @@ def _spearman(x: np.ndarray, y: np.ndarray) -> Tuple[Optional[float], Optional[f
 
 # -------------------- UTILS --------------------
 
-def _maybe_open_png(path: Path):
+def _maybe_open_path(path: Path):
     if not OPEN_PLOTS_ON_LINUX:
         return
     try:
@@ -537,7 +537,7 @@ def _draw_patterned_line(ax,
 def _plot_multi(x_centers: np.ndarray,
                 group_stats: Dict[str, dict],
                 y_label: str,
-                out_png: Path,
+                out_path: Path,
                 x_label: str,
                 metric: str):
     """
@@ -659,13 +659,12 @@ def _plot_multi(x_centers: np.ndarray,
                   borderpad=0.5, labelspacing=0.8, handlelength=2.8, handletextpad=0.8)
 
     fig.tight_layout()
-    out_png.parent.mkdir(parents=True, exist_ok=True)
-    out_svg = out_png.with_suffix(".svg")
-    plt.savefig(out_png, dpi=300, bbox_inches="tight")
-    plt.savefig(out_svg, bbox_inches="tight")
+    out_pdf = out_path.with_suffix(".pdf")
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)
-    log.info(f"Saved plot → {out_png} and {out_svg}")
-    _maybe_open_png(out_png)
+    log.info(f"Saved plot → {out_pdf}")
+    _maybe_open_path(out_pdf)
 
 # --------------------- END-TO-END RUN -----------------------
 
@@ -744,7 +743,7 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       num_bins: int,
                       max_bp: Optional[int],
                       y_label: str,
-                      out_png: Path,
+                      out_path: Path,
                       out_tsv: Path):
     """
     Build tables, compute stats, and plot for given mode.
@@ -836,12 +835,12 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
 
 
     # Plot (grouped)
-    _plot_multi(x_centers, group_stats, y_label, out_png, x_label, metric=which)
+    _plot_multi(x_centers, group_stats, y_label, out_path, x_label, metric=which)
 
     # Plot (overall only)
-    overall_only_png = out_png.with_name(f"{out_png.stem}_overall_only.png")
+    overall_only_path = out_path.with_name(f"{out_path.stem}_overall_only.pdf")
     overall_stats = {"overall": group_stats["overall"]} if "overall" in group_stats else {}
-    _plot_multi(x_centers, overall_stats, y_label, overall_only_png, x_label, metric=which)
+    _plot_multi(x_centers, overall_stats, y_label, overall_only_path, x_label, metric=which)
 
 def run_metric(which: str,
                falsta: Path,
@@ -849,10 +848,10 @@ def run_metric(which: str,
                fuzzy_map: Dict[Tuple[str,int,int], str],
                y_label: str,
                # proportion mode outputs
-               out_png_prop: Path,
+               out_plot_prop: Path,
                out_tsv_prop: Path,
                # bp mode outputs
-               out_png_bp: Path,
+               out_plot_bp: Path,
                out_tsv_bp: Path):
     t0 = time.time()
 
@@ -874,7 +873,7 @@ def run_metric(which: str,
             per_group_means_prop, per_group_counts_prop,
             which=which, mode="proportion", num_bins=NUM_BINS_PROP, max_bp=None,
             y_label=y_label,
-            out_png=out_png_prop,
+            out_path=out_plot_prop,
             out_tsv=out_tsv_prop,
         )
 
@@ -896,7 +895,7 @@ def run_metric(which: str,
             per_group_means_bp, per_group_counts_bp,
             which=which, mode="bp", num_bins=NUM_BINS_BP, max_bp=MAX_BP,
             y_label=y_label,
-            out_png=out_png_bp,
+            out_path=out_plot_bp,
             out_tsv=out_tsv_bp,
         )
 
@@ -919,10 +918,10 @@ def main():
         fuzzy_map=fuzzy_map,
         y_label="Mean nucleotide diversity (π per site)",
         # proportion mode outputs
-        out_png_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.png",
+        out_plot_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.pdf",
         out_tsv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.tsv",
-        # bp mode outputs 
-        out_png_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.png",
+        # bp mode outputs
+        out_plot_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.pdf",
         out_tsv_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.tsv",
     )
 
@@ -934,10 +933,10 @@ def main():
         fuzzy_map=fuzzy_map,
         y_label="Mean Hudson FST (per site)",
         # proportion mode outputs
-        out_png_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.png",
+        out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.pdf",
         out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.tsv",
         # bp mode outputs
-        out_png_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.png",
+        out_plot_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.pdf",
         out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.tsv",
     )
 
