@@ -14,6 +14,34 @@ import time
 import random
 import queue
 
+
+def cgroup_available_gb():
+    """Return remaining memory permitted by the active cgroup, if known."""
+    try:
+        max_v2 = "/sys/fs/cgroup/memory.max"
+        cur_v2 = "/sys/fs/cgroup/memory.current"
+        if os.path.exists(max_v2) and os.path.exists(cur_v2):
+            with open(max_v2, "r") as fh:
+                raw = fh.read().strip()
+            if raw != "max":
+                limit = int(raw)
+                with open(cur_v2, "r") as fh:
+                    usage = int(fh.read().strip())
+                return max(0.0, (limit - usage) / (1024**3))
+
+        max_v1 = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+        cur_v1 = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+        if os.path.exists(max_v1) and os.path.exists(cur_v1):
+            with open(max_v1, "r") as fh:
+                limit = int(fh.read().strip())
+            if limit < (1 << 60):  # guard "unlimited" sentinel
+                with open(cur_v1, "r") as fh:
+                    usage = int(fh.read().strip())
+                return max(0.0, (limit - usage) / (1024**3))
+    except Exception:
+        pass
+    return None
+
 # ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
@@ -37,6 +65,9 @@ def _evict_if_ctx_mismatch(meta_path, res_path, ctx, expected_target):
     if version_tag and meta.get("cache_version_tag") != version_tag:
         stale = True
     if expected_target and meta.get("target") != expected_target:
+        stale = True
+    data_keys = ctx.get("DATA_KEYS")
+    if data_keys and meta.get("data_keys") != data_keys:
         stale = True
 
     if not stale:
@@ -236,7 +267,9 @@ class MemoryMonitor(threading.Thread):
         while not self.stop_event.is_set():
             try:
                 vm = psutil.virtual_memory()
-                self.available_memory_gb = vm.available / (1024**3)
+                host_avail = vm.available / (1024**3)
+                cg_avail = cgroup_available_gb()
+                self.available_memory_gb = min(host_avail, cg_avail) if cg_avail is not None else host_avail
 
                 cg = _cgroup_bytes()
                 if cg is not None:
