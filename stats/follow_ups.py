@@ -182,24 +182,17 @@ def execute_query(sql: str, desc: str) -> pd.DataFrame:
     print(msg)
     return df
 
-# -------------------- EHR PRESENCE (NEW) --------------------
+# -------------------- EHR PRESENCE --------------------
 def get_all_ehr_person_ids(cdr: str) -> pd.DataFrame:
     """
-    Returns DISTINCT person_id for ANY EHR data in OMOP clinical domains.
-    We intentionally do NOT touch ds_survey (that's self-report).
+    Returns DISTINCT person_id for participants with any EHR visits.
+    We anchor EHR presence on visit_occurrence only (excludes survey-only participants).
     """
     sql = f"""
-    SELECT DISTINCT person_id FROM (
-      SELECT person_id FROM `{cdr}.condition_occurrence`
-      UNION DISTINCT SELECT person_id FROM `{cdr}.procedure_occurrence`
-      UNION DISTINCT SELECT person_id FROM `{cdr}.drug_exposure`
-      UNION DISTINCT SELECT person_id FROM `{cdr}.measurement`
-      UNION DISTINCT SELECT person_id FROM `{cdr}.visit_occurrence`
-      UNION DISTINCT SELECT person_id FROM `{cdr}.device_exposure`
-      UNION DISTINCT SELECT person_id FROM `{cdr}.observation`
-    )
+    SELECT DISTINCT person_id
+    FROM `{cdr}.visit_occurrence`
     """
-    df = execute_query(sql, "EHR any-domain")
+    df = execute_query(sql, "EHR from visits")
     # normalize dtype
     if "person_id" in df.columns:
         df["person_id"] = pd.to_numeric(df["person_id"], errors="coerce").astype("Int64")
