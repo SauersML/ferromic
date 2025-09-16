@@ -100,7 +100,8 @@ def load_and_prepare(path):
     # Keep only finite, positive p
     df = df[np.isfinite(df["P_LRT_Overall"].to_numpy()) & (df["P_LRT_Overall"] > 0)].copy()
 
-    df["lnOR"] = np.log(df["OR"])
+    df["lnOR"] = np.log(df["OR"]) / np.log(3.0)   # log_base3(OR)
+
     df["neglog10p"] = -np.log10(df["P_LRT_Overall"])
 
     df = df[np.isfinite(df["lnOR"]) & np.isfinite(df["neglog10p"])].copy()
@@ -116,7 +117,7 @@ def load_and_prepare(path):
 
 def make_or_ticks_sparse(xlim_ln):
     candidates = np.array([0.1, 0.2, 0.33, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0])
-    ln_pos = np.log(candidates)
+    ln_pos = np.log(candidates) / np.log(3.0)
 
     # Within current xlim
     in_range = (ln_pos >= xlim_ln[0]) & (ln_pos <= xlim_ln[1])
@@ -304,7 +305,7 @@ def plot_volcano(df, out_pdf):
     # Minimum -log10(p) required for both plotting and labeling
     LABEL_MIN_Y = 2.0
 
-    # X-limits: show ALL data
+    # X-limits: show ALL data (entirely in log space via lnOR; symmetric around 0 == OR 1)
     xabs = np.abs(df["lnOR"].to_numpy())
     xmax = np.nanmax(xabs) if xabs.size else 1.0
     if not np.isfinite(xmax) or xmax <= 0:
@@ -313,7 +314,8 @@ def plot_volcano(df, out_pdf):
     xlim = (-xmax - xpad, xmax + xpad)
 
     fig, ax = plt.subplots()
-    ax.set_xscale('symlog', linthresh=0.0000000000000000001, linscale=1.25, base=2)  # keep your params
+
+    # FULL LOG REGION: we already plot ln(OR) on a linear axis, so the entire axis is logarithmic in OR with no linear band.
     ax.set_xlim(xlim)
 
     ymax = df["y_plot"].max()
