@@ -139,22 +139,6 @@ PHENO_SQL = {
             )
         """,
     },
-    "Migraine": {
-        "universe": "SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%migraine headaches%'",
-        "personal_case": """
-            SELECT DISTINCT person_id FROM (
-                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Including yourself, who in your family has had migraine headaches%' AND answer LIKE '% - Self'
-                UNION DISTINCT
-                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you still seeing a doctor or health care provider for migraine headaches?%' AND answer LIKE '% - Yes'
-                UNION DISTINCT
-                SELECT person_id FROM `{CDR}.ds_survey` WHERE question LIKE 'Are you currently prescribed medications and/or receiving treatment for migraine headaches?%' AND answer LIKE '% - Yes'
-            )
-        """,
-        "family_case": """
-            SELECT DISTINCT person_id FROM `{CDR}.ds_survey`
-            WHERE question LIKE 'Including yourself, who in your family has had migraine headaches%' AND answer LIKE '% - %' AND answer NOT LIKE '% - Self'
-        """,
-    },
 }
 
 # -------------------- CACHE + BIGQUERY --------------------
