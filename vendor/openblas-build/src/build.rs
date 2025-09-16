@@ -321,6 +321,7 @@ impl Target {
             "armv5te" => Some(Target::ARMV5),
             "armv6" => Some(Target::ARMV6),
             "armv7" => Some(Target::ARMV7),
+            "powerpc64" | "powerpc64le" => Some(Target::POWER8),
             "loongarch64" => Some(Target::LOONGSONGENERIC),
             "mips64" => Some(Target::MIPS64_GENERIC),
             "mips64el" => Some(Target::MIPS64_GENERIC),
