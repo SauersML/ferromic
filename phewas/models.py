@@ -24,11 +24,23 @@ DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_BACKFILL_P_FROM_STAGE1 = True
 DEFAULT_ALLOW_PENALIZED_WALD = True
 
+
 def safe_basename(name: str) -> str:
     """Allow only [-._a-zA-Z0-9], map others to '_'."""
     return "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in str(name))
 
-def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_fp, case_fp, extra=None):
+
+def _write_meta(
+    meta_path,
+    kind,
+    s_name,
+    category,
+    target,
+    core_cols,
+    core_idx_fp,
+    case_fp,
+    extra=None,
+):
     """Helper to write a standardized metadata JSON file."""
     base = {
         "kind": kind,
@@ -49,9 +61,13 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
         "mode": CTX.get("MODE"),
         "selection": CTX.get("SELECTION"),
     }
+    data_keys = CTX.get("DATA_KEYS")
+    if data_keys:
+        base["data_keys"] = data_keys
     if extra:
         base.update(extra)
     io.atomic_write_json(meta_path, base)
+
 
 # thresholds (configured via CTX; here are defaults/fallbacks)
 DEFAULT_MIN_CASES = 1000
@@ -59,12 +75,18 @@ DEFAULT_MIN_CONTROLS = 1000
 DEFAULT_MIN_NEFF = 0  # set 0 to disable
 DEFAULT_SEX_RESTRICT_PROP = 0.99
 
-def _thresholds(cases_key="MIN_CASES_FILTER", controls_key="MIN_CONTROLS_FILTER", neff_key="MIN_NEFF_FILTER"):
+
+def _thresholds(
+    cases_key="MIN_CASES_FILTER",
+    controls_key="MIN_CONTROLS_FILTER",
+    neff_key="MIN_NEFF_FILTER",
+):
     return (
         int(CTX.get(cases_key, DEFAULT_MIN_CASES)),
         int(CTX.get(controls_key, DEFAULT_MIN_CONTROLS)),
         float(CTX.get(neff_key, DEFAULT_MIN_NEFF)),
     )
+
 
 def _counts_from_y(y):
     y = np.asarray(y, dtype=np.int8)
@@ -75,31 +97,50 @@ def _counts_from_y(y):
     n_eff = 4.0 * n * pi * (1.0 - pi) if n > 0 else 0.0
     return n, n_cases, n_ctrls, n_eff
 
-def validate_min_counts_for_fit(y, stage_tag, extra_context=None, cases_key="MIN_CASES_FILTER", controls_key="MIN_CONTROLS_FILTER", neff_key="MIN_NEFF_FILTER"):
+
+def validate_min_counts_for_fit(
+    y,
+    stage_tag,
+    extra_context=None,
+    cases_key="MIN_CASES_FILTER",
+    controls_key="MIN_CONTROLS_FILTER",
+    neff_key="MIN_NEFF_FILTER",
+):
     """
     Validate *final* y used for the fit. Returns (ok: bool, reason: str, details: dict)
     stage_tag: 'phewas' | 'lrt_stage1' | 'lrt_followup:<ANC>'
     """
-    min_cases, min_ctrls, min_neff = _thresholds(cases_key=cases_key, controls_key=controls_key, neff_key=neff_key)
+    min_cases, min_ctrls, min_neff = _thresholds(
+        cases_key=cases_key, controls_key=controls_key, neff_key=neff_key
+    )
     n, n_cases, n_ctrls, n_eff = _counts_from_y(y)
     ok = True
     reasons = []
     if n_cases < min_cases:
-        ok = False; reasons.append(f"cases<{min_cases}({n_cases})")
+        ok = False
+        reasons.append(f"cases<{min_cases}({n_cases})")
     if n_ctrls < min_ctrls:
-        ok = False; reasons.append(f"controls<{min_ctrls}({n_ctrls})")
+        ok = False
+        reasons.append(f"controls<{min_ctrls}({n_ctrls})")
     if min_neff > 0 and n_eff < min_neff:
-        ok = False; reasons.append(f"neff<{min_neff:g}({n_eff:.1f})")
+        ok = False
+        reasons.append(f"neff<{min_neff:g}({n_eff:.1f})")
 
     details = {
         "stage": stage_tag,
-        "N": n, "N_cases": n_cases, "N_ctrls": n_ctrls, "N_eff": n_eff,
-        "min_cases": min_cases, "min_ctrls": min_ctrls, "min_neff": min_neff,
+        "N": n,
+        "N_cases": n_cases,
+        "N_ctrls": n_ctrls,
+        "N_eff": n_eff,
+        "min_cases": min_cases,
+        "min_ctrls": min_ctrls,
+        "min_neff": min_neff,
     }
     if extra_context:
         details.update(extra_context)
     reason = "OK" if ok else "insufficient_counts:" + "|".join(reasons)
     return ok, reason, details
+
 
 def _converged(fit_obj):
     """Checks for convergence in a statsmodels fit object."""
@@ -111,6 +152,7 @@ def _converged(fit_obj):
         return False
     except Exception:
         return False
+
 
 def _logit_fit(model, method, **kw):
     """
@@ -165,7 +207,10 @@ def _leverages_batched(X_np, XtWX_inv, W, batch=100_000):
         h[i0:i1] = np.clip(W[i0:i1] * s, 0.0, 1.0)
     return h
 
-def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False, **kwargs):
+
+def _fit_logit_ladder(
+    X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False, **kwargs
+):
     """
     Logistic fit ladder with an option to attempt unpenalized MLE first.
     If numpy arrays are provided, const_ix identifies the intercept column for zero-penalty.
@@ -176,7 +221,9 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
     user_start = kwargs.pop("start_params", None)
 
     is_pandas = hasattr(X, "columns")
-    prefer_firth_on_ridge = bool(CTX.get("PREFER_FIRTH_ON_RIDGE", DEFAULT_PREFER_FIRTH_ON_RIDGE))
+    prefer_firth_on_ridge = bool(
+        CTX.get("PREFER_FIRTH_ON_RIDGE", DEFAULT_PREFER_FIRTH_ON_RIDGE)
+    )
 
     def _maybe_firth(path_tags):
         if not prefer_firth_on_ridge:
@@ -201,13 +248,13 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     "ignore",
                     message="overflow encountered in exp",
                     category=RuntimeWarning,
-                    module=r"statsmodels\.discrete\.discrete_model"
+                    module=r"statsmodels\.discrete\.discrete_model",
                 )
                 warnings.filterwarnings(
                     "ignore",
                     message="divide by zero encountered in log",
                     category=RuntimeWarning,
-                    module=r"statsmodels\.discrete\.discrete_model"
+                    module=r"statsmodels\.discrete\.discrete_model",
                 )
                 try:
                     mle_newton = _logit_fit(
@@ -215,9 +262,14 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         "newton",
                         maxiter=400,
                         tol=1e-8,
-                        start_params=user_start
+                        start_params=user_start,
                     )
-                    if _converged(mle_newton) and hasattr(mle_newton, "bse") and np.all(np.isfinite(mle_newton.bse)) and np.max(mle_newton.bse) <= 100.0:
+                    if (
+                        _converged(mle_newton)
+                        and hasattr(mle_newton, "bse")
+                        and np.all(np.isfinite(mle_newton.bse))
+                        and np.max(mle_newton.bse) <= 100.0
+                    ):
                         setattr(mle_newton, "_final_is_mle", True)
                         setattr(mle_newton, "_path_reasons", ["mle_first_newton"])
                         return mle_newton, "mle_first_newton"
@@ -229,9 +281,14 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         "bfgs",
                         maxiter=800,
                         gtol=1e-8,
-                        start_params=user_start
+                        start_params=user_start,
                     )
-                    if _converged(mle_bfgs) and hasattr(mle_bfgs, "bse") and np.all(np.isfinite(mle_bfgs.bse)) and np.max(mle_bfgs.bse) <= 100.0:
+                    if (
+                        _converged(mle_bfgs)
+                        and hasattr(mle_bfgs, "bse")
+                        and np.all(np.isfinite(mle_bfgs.bse))
+                        and np.max(mle_bfgs.bse) <= 100.0
+                    ):
                         setattr(mle_bfgs, "_final_is_mle", True)
                         setattr(mle_bfgs, "_path_reasons", ["mle_first_bfgs"])
                         return mle_bfgs, "mle_first_bfgs"
@@ -239,7 +296,12 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     pass
 
         # Ridge-first pathway with strict MLE gating based on numerical diagnostics.
-        p = X.shape[1] - (1 if (is_pandas and "const" in X.columns) or (not is_pandas and const_ix is not None) else 0)
+        p = X.shape[1] - (
+            1
+            if (is_pandas and "const" in X.columns)
+            or (not is_pandas and const_ix is not None)
+            else 0
+        )
         n = max(1, X.shape[0])
         pi = float(np.mean(y)) if len(y) > 0 else 0.5
         n_eff = max(1.0, 4.0 * float(len(y)) * pi * (1.0 - pi))
@@ -256,7 +318,9 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
         )
 
         setattr(ridge_fit, "_ridge_alpha", float(alpha_scalar))
-        setattr(ridge_fit, "_ridge_const_ix", None if const_ix is None else int(const_ix))
+        setattr(
+            ridge_fit, "_ridge_const_ix", None if const_ix is None else int(const_ix)
+        )
         setattr(ridge_fit, "_used_ridge", True)
         setattr(ridge_fit, "_final_is_mle", False)
 
@@ -266,8 +330,15 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
             max_abs_linpred, frac_lo, frac_hi = float("inf"), 1.0, 1.0
 
         neff_gate = float(CTX.get("MLE_REFIT_MIN_NEFF", 0.0))
-        gate_tags = _ridge_gate_reasons(max_abs_linpred, frac_lo, frac_hi, n_eff, neff_gate)
-        blocked_by_gate = ((max_abs_linpred > 15.0) or (frac_lo > 0.02) or (frac_hi > 0.02) or (neff_gate > 0 and n_eff < neff_gate))
+        gate_tags = _ridge_gate_reasons(
+            max_abs_linpred, frac_lo, frac_hi, n_eff, neff_gate
+        )
+        blocked_by_gate = (
+            (max_abs_linpred > 15.0)
+            or (frac_lo > 0.02)
+            or (frac_hi > 0.02)
+            or (neff_gate > 0 and n_eff < neff_gate)
+        )
         path_prefix = ["ridge_reached"] + gate_tags
         if blocked_by_gate and not prefer_mle_first:
             firth_attempt = _maybe_firth(path_prefix)
@@ -286,16 +357,18 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                 "ignore",
                 message="overflow encountered in exp",
                 category=RuntimeWarning,
-                module=r"statsmodels\.discrete\.discrete_model"
+                module=r"statsmodels\.discrete\.discrete_model",
             )
             warnings.filterwarnings(
                 "ignore",
                 message="divide by zero encountered in log",
                 category=RuntimeWarning,
-                module=r"statsmodels\.discrete\.discrete_model"
+                module=r"statsmodels\.discrete\.discrete_model",
             )
             try:
-                extra_flag = {} if ('_already_failed' in kwargs) else {'_already_failed': True}
+                extra_flag = (
+                    {} if ("_already_failed" in kwargs) else {"_already_failed": True}
+                )
                 refit_newton = _logit_fit(
                     sm.Logit(y, X),
                     "newton",
@@ -303,9 +376,13 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     tol=1e-8,
                     start_params=ridge_fit.params,
                     **extra_flag,
-                    **kwargs
+                    **kwargs,
                 )
-                if _converged(refit_newton) and hasattr(refit_newton, "bse") and np.all(np.isfinite(refit_newton.bse)):
+                if (
+                    _converged(refit_newton)
+                    and hasattr(refit_newton, "bse")
+                    and np.all(np.isfinite(refit_newton.bse))
+                ):
                     if np.max(refit_newton.bse) > 100.0:
                         raise PerfectSeparationWarning("Large SEs detected")
                     setattr(refit_newton, "_used_ridge_seed", True)
@@ -317,7 +394,9 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                 pass
 
             try:
-                extra_flag = {} if ('_already_failed' in kwargs) else {'_already_failed': True}
+                extra_flag = (
+                    {} if ("_already_failed" in kwargs) else {"_already_failed": True}
+                )
                 refit_bfgs = _logit_fit(
                     sm.Logit(y, X),
                     "bfgs",
@@ -325,9 +404,13 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     gtol=1e-8,
                     start_params=ridge_fit.params,
                     **extra_flag,
-                    **kwargs
+                    **kwargs,
                 )
-                if _converged(refit_bfgs) and hasattr(refit_bfgs, "bse") and np.all(np.isfinite(refit_bfgs.bse)):
+                if (
+                    _converged(refit_bfgs)
+                    and hasattr(refit_bfgs, "bse")
+                    and np.all(np.isfinite(refit_bfgs.bse))
+                ):
                     if np.max(refit_bfgs.bse) > 100.0:
                         raise PerfectSeparationWarning("Large SEs detected")
                     setattr(refit_bfgs, "_used_ridge_seed", True)
@@ -351,7 +434,10 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
     except Exception as e:
         return None, f"ridge_exception:{type(e).__name__}"
 
-def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), eps=1e-12):
+
+def _drop_zero_variance(
+    X: pd.DataFrame, keep_cols=("const",), always_keep=(), eps=1e-12
+):
     """Drops columns with no or near-zero variance, keeping specified columns."""
     keep = set(keep_cols) | set(always_keep)
     cols = []
@@ -369,7 +455,9 @@ def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), e
     return X.loc[:, cols]
 
 
-def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), rtol=1e-10):
+def _drop_rank_deficient(
+    X: pd.DataFrame, keep_cols=("const",), always_keep=(), rtol=1e-10
+):
     """
     Removes columns that render the design matrix rank-deficient by greedily dropping
     non-essential columns based on ascending column standard deviation while preserving
@@ -386,7 +474,10 @@ def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), 
     remaining = list(X.columns)
     removable = [c for c in remaining if c not in keep]
     X_work = X.copy()
-    while np.linalg.matrix_rank(X_work.to_numpy(dtype=np.float64, copy=False)) < X_work.shape[1]:
+    while (
+        np.linalg.matrix_rank(X_work.to_numpy(dtype=np.float64, copy=False))
+        < X_work.shape[1]
+    ):
         if not removable:
             break
         stds = np.nanstd(X_work.to_numpy(dtype=np.float64, copy=False), axis=0)
@@ -397,7 +488,10 @@ def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), 
             if colname not in removable:
                 continue
             trial = X_work.drop(columns=[colname])
-            if np.linalg.matrix_rank(trial.to_numpy(dtype=np.float64, copy=False)) == trial.shape[1]:
+            if (
+                np.linalg.matrix_rank(trial.to_numpy(dtype=np.float64, copy=False))
+                == trial.shape[1]
+            ):
                 X_work = trial
                 remaining = list(X_work.columns)
                 removable = [c for c in remaining if c not in keep]
@@ -414,7 +508,11 @@ def _fit_diagnostics(X, y, params):
       - max absolute linear predictor
       - fraction of probabilities effectively at 0 or 1
     """
-    X_arr = X if (isinstance(X, np.ndarray) and X.dtype == np.float64) else np.asarray(X, dtype=np.float64)
+    X_arr = (
+        X
+        if (isinstance(X, np.ndarray) and X.dtype == np.float64)
+        else np.asarray(X, dtype=np.float64)
+    )
     params_arr = np.asarray(params, dtype=np.float64)
     linpred = X_arr @ params_arr
     if not np.all(np.isfinite(linpred)):
@@ -437,7 +535,12 @@ def _ridge_gate_reasons(max_abs_linpred, frac_lo, frac_hi, n_eff, neff_gate):
         reasons.append("gate:p<1e-12>2%")
     if np.isfinite(frac_hi) and frac_hi > 0.02:
         reasons.append("gate:p>1-1e-12>2%")
-    if (neff_gate is not None) and (neff_gate > 0) and np.isfinite(n_eff) and (n_eff < neff_gate):
+    if (
+        (neff_gate is not None)
+        and (neff_gate > 0)
+        and np.isfinite(n_eff)
+        and (n_eff < neff_gate)
+    ):
         reasons.append(f"gate:neff<{neff_gate:g}")
     return reasons
 
@@ -527,7 +630,19 @@ def _firth_refit(X, y):
     return firth_res
 
 
-def _print_fit_diag(s_name_safe, stage, model_tag, N_total, N_cases, N_ctrls, solver_tag, X, y, params, notes):
+def _print_fit_diag(
+    s_name_safe,
+    stage,
+    model_tag,
+    N_total,
+    N_cases,
+    N_ctrls,
+    solver_tag,
+    X,
+    y,
+    params,
+    notes,
+):
     """
     Emits a single-line diagnostic message for a fit attempt. This is intended for real-time visibility
     into numerical behavior and sample composition while models are running in worker processes.
@@ -541,33 +656,57 @@ def _print_fit_diag(s_name_safe, stage, model_tag, N_total, N_cases, N_ctrls, so
     )
     print(msg, flush=True)
 
+
 def _suppress_worker_warnings():
     """Configures warning filters for the worker process to ignore specific, benign warnings."""
     # RuntimeWarning: overflow encountered in exp
-    warnings.filterwarnings('ignore', message='overflow encountered in exp', category=RuntimeWarning)
-    
+    warnings.filterwarnings(
+        "ignore", message="overflow encountered in exp", category=RuntimeWarning
+    )
+
     # RuntimeWarning: divide by zero encountered in log
-    warnings.filterwarnings('ignore', message='divide by zero encountered in log', category=RuntimeWarning)
-    
+    warnings.filterwarnings(
+        "ignore", message="divide by zero encountered in log", category=RuntimeWarning
+    )
+
     # ConvergenceWarning: QC check did not pass for X out of Y parameters
-    warnings.filterwarnings('ignore', message=r'QC check did not pass', category=ConvergenceWarning)
-    
+    warnings.filterwarnings(
+        "ignore", message=r"QC check did not pass", category=ConvergenceWarning
+    )
+
     # ConvergenceWarning: Could not trim params automatically
-    warnings.filterwarnings('ignore', message=r'Could not trim params automatically', category=ConvergenceWarning)
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Could not trim params automatically",
+        category=ConvergenceWarning,
+    )
     return
 
+
 REQUIRED_CTX_KEYS = {
- "NUM_PCS", "MIN_CASES_FILTER", "MIN_CONTROLS_FILTER", "CACHE_DIR",
- "RESULTS_CACHE_DIR", "LRT_OVERALL_CACHE_DIR", "LRT_FOLLOWUP_CACHE_DIR",
- "RIDGE_L2_BASE", "PER_ANC_MIN_CASES", "PER_ANC_MIN_CONTROLS",
- "BOOT_OVERALL_CACHE_DIR"
+    "NUM_PCS",
+    "MIN_CASES_FILTER",
+    "MIN_CONTROLS_FILTER",
+    "CACHE_DIR",
+    "RESULTS_CACHE_DIR",
+    "LRT_OVERALL_CACHE_DIR",
+    "LRT_FOLLOWUP_CACHE_DIR",
+    "RIDGE_L2_BASE",
+    "PER_ANC_MIN_CASES",
+    "PER_ANC_MIN_CONTROLS",
+    "BOOT_OVERALL_CACHE_DIR",
 }
+
 
 def _validate_ctx(ctx):
     """Raises RuntimeError if required context keys are missing."""
     missing = [k for k in REQUIRED_CTX_KEYS if k not in ctx]
     if missing:
-        raise RuntimeError(f"[Worker-{os.getpid()}] Missing CTX keys: {', '.join(missing)}")
+        raise RuntimeError(
+            f"[Worker-{os.getpid()}] Missing CTX keys: {', '.join(missing)}"
+        )
+
+
 def _drop_zero_variance_np(X, keep_ix=(), eps=1e-12):
     """
     Drops columns with no or near-zero variance from a NumPy array.
@@ -591,7 +730,8 @@ def _drop_rank_deficiency_np(X, keep_ix=()):
     or no more columns can be removed.
     Returns the pruned matrix and the kept column indices relative to the original X.
     """
-    if X.shape[1] == 0: return X, np.array([], int)
+    if X.shape[1] == 0:
+        return X, np.array([], int)
     keep_ix = set(int(i) for i in keep_ix)
     cols = np.arange(X.shape[1])
     while np.linalg.matrix_rank(X) < X.shape[1]:
@@ -601,7 +741,9 @@ def _drop_rank_deficiency_np(X, keep_ix=()):
         stds = np.nanstd(X, axis=0)
         # Find the position of the column with the minimum standard deviation among those that can be removed.
         # np.argmin operates on the filtered stds, so we need to map the index back to the original position.
-        min_std_removable_pos = removable_positions[int(np.argmin(stds[removable_positions]))]
+        min_std_removable_pos = removable_positions[
+            int(np.argmin(stds[removable_positions]))
+        ]
         X = np.delete(X, min_std_removable_pos, axis=1)
         cols = np.delete(cols, min_std_removable_pos, axis=0)
     return X, cols
@@ -611,9 +753,11 @@ def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
     """
     Returns: (X2, y2, note:str, skip_reason:str|None)
     """
-    if 'sex' not in X.columns:
+    if "sex" not in X.columns:
         return X, y, "", None
-    tab = pd.crosstab(X['sex'], y).reindex(index=[0.0, 1.0], columns=[0, 1], fill_value=0)
+    tab = pd.crosstab(X["sex"], y).reindex(
+        index=[0.0, 1.0], columns=[0, 1], fill_value=0
+    )
     total_cases = int(tab.loc[0.0, 1] + tab.loc[1.0, 1])
     if total_cases <= 0:
         return X, y, "", None
@@ -625,8 +769,13 @@ def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
         return X, y, "", None
     if int(tab.loc[dominant_sex, 0]) == 0:
         return X, y, "", "sex_no_controls_in_case_sex"
-    keep = X['sex'].eq(dominant_sex)
-    return X.loc[keep].drop(columns=['sex']), y.loc[keep], f"sex_restricted_to_{int(dominant_sex)}", None
+    keep = X["sex"].eq(dominant_sex)
+    return (
+        X.loc[keep].drop(columns=["sex"]),
+        y.loc[keep],
+        f"sex_restricted_to_{int(dominant_sex)}",
+        None,
+    )
 
 
 def _apply_sex_restriction_np(X, y, sex_ix):
@@ -647,7 +796,9 @@ def _apply_sex_restriction_np(X, y, sex_ix):
     max_other = int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0))
 
     sex_col = X[:, sex_ix]
-    keep_mask, note, skip, restricted = _sex_keep_mask_numpy(sex_col, y, mode, majority_prop, max_other)
+    keep_mask, note, skip, restricted = _sex_keep_mask_numpy(
+        sex_col, y, mode, majority_prop, max_other
+    )
     if skip:
         return X, y, "", skip, False
     if not restricted:
@@ -661,17 +812,21 @@ def _apply_sex_restriction_np(X, y, sex_ix):
 
 # --- Bootstrap helpers ---
 def _score_test_components(X_red: pd.DataFrame, y: pd.Series, target: str):
-    const_ix = X_red.columns.get_loc('const') if 'const' in X_red.columns else None
+    const_ix = X_red.columns.get_loc("const") if "const" in X_red.columns else None
     fit_red, _ = _fit_logit_ladder(X_red, y, const_ix=const_ix, prefer_mle_first=True)
     if fit_red is None:
-        raise ValueError('reduced fit failed')
-    eta = X_red.to_numpy(dtype=np.float64, copy=False) @ np.asarray(fit_red.params, dtype=np.float64)
+        raise ValueError("reduced fit failed")
+    eta = X_red.to_numpy(dtype=np.float64, copy=False) @ np.asarray(
+        fit_red.params, dtype=np.float64
+    )
     p_hat = expit(eta)
     W = p_hat * (1.0 - p_hat)
     return fit_red, p_hat, W
 
 
-def _efficient_score_vector(target_vec: np.ndarray, X_red_mat: np.ndarray, W: np.ndarray):
+def _efficient_score_vector(
+    target_vec: np.ndarray, X_red_mat: np.ndarray, W: np.ndarray
+):
     XTW = X_red_mat.T * W
     XtWX = XTW @ X_red_mat
     try:
@@ -685,9 +840,16 @@ def _efficient_score_vector(target_vec: np.ndarray, X_red_mat: np.ndarray, W: np
     denom = float(h.T @ (W * h))
     return h, denom
 
+
 # --- Worker globals ---
 # Populated by init_worker and read-only thereafter.
-worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, finite_mask_worker = None, None, 0, None, None
+worker_core_df, allowed_mask_by_cat, N_core, worker_anc_series, finite_mask_worker = (
+    None,
+    None,
+    0,
+    None,
+    None,
+)
 # Array-based versions for performance
 X_all, col_ix, worker_core_df_cols, worker_core_df_index = None, None, None, None
 # Handle to keep shared memory alive in workers
@@ -700,7 +862,8 @@ control_indices_by_cat = {}
 
 def init_worker(base_shm_meta, core_cols, core_index, masks, ctx):
     """Initializer that attaches to the shared core design matrix."""
-    for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]: os.environ[v] = "1"
+    for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]:
+        os.environ[v] = "1"
     _suppress_worker_warnings()
     _validate_ctx(ctx)
     global worker_core_df, allowed_mask_by_cat, N_core, CTX, finite_mask_worker
@@ -736,18 +899,32 @@ def init_worker(base_shm_meta, core_cols, core_index, masks, ctx):
     global allowed_fp_by_cat
     allowed_fp_by_cat = {}
     for category, idx in control_indices_by_cat.items():
-        allowed_fp_by_cat[category] = _index_fingerprint(worker_core_df_index[idx] if len(idx) else pd.Index([]))
+        allowed_fp_by_cat[category] = _index_fingerprint(
+            worker_core_df_index[idx] if len(idx) else pd.Index([])
+        )
 
     bad = ~finite_mask_worker
     if bad.any():
         rows = worker_core_df_index[bad][:5].tolist()
-        nonfinite_cols = [c for j, c in enumerate(worker_core_df_cols) if not np.isfinite(X_all[:, j]).all()]
-        print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={nonfinite_cols[:10]}", flush=True)
-    print(f"[Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks. Array is shared, no per-worker copy.", flush=True)
+        nonfinite_cols = [
+            c
+            for j, c in enumerate(worker_core_df_cols)
+            if not np.isfinite(X_all[:, j]).all()
+        ]
+        print(
+            f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={nonfinite_cols[:10]}",
+            flush=True,
+        )
+    print(
+        f"[Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks. Array is shared, no per-worker copy.",
+        flush=True,
+    )
+
 
 def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx):
     """Initializer for LRT pools that also provides ancestry labels and context."""
-    for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]: os.environ[v] = "1"
+    for v in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]:
+        os.environ[v] = "1"
     _suppress_worker_warnings()
     _validate_ctx(ctx)
     global worker_core_df, allowed_mask_by_cat, allowed_fp_by_cat, N_core, worker_anc_series, CTX, finite_mask_worker
@@ -787,17 +964,33 @@ def init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx
     bad = ~finite_mask_worker
     if bad.any():
         rows = worker_core_df_index[bad][:5].tolist()
-        nonfinite_cols = [c for j, c in enumerate(worker_core_df_cols) if not np.isfinite(X_all[:, j]).all()]
-        print(f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={nonfinite_cols[:10]}", flush=True)
-    print(f"[LRT-Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks, {worker_anc_series.nunique()} ancestries.", flush=True)
+        nonfinite_cols = [
+            c
+            for j, c in enumerate(worker_core_df_cols)
+            if not np.isfinite(X_all[:, j]).all()
+        ]
+        print(
+            f"[Worker-{os.getpid()}] Non-finite sample rows={rows} cols={nonfinite_cols[:10]}",
+            flush=True,
+        )
+    print(
+        f"[LRT-Worker-{os.getpid()}] Initialized with {N_core} subjects, {len(masks)} masks, {worker_anc_series.nunique()} ancestries.",
+        flush=True,
+    )
 
 
-def init_boot_worker(base_shm_meta, boot_shm_meta, core_cols, core_index, masks, anc_series, ctx):
+def init_boot_worker(
+    base_shm_meta, boot_shm_meta, core_cols, core_index, masks, anc_series, ctx
+):
     init_lrt_worker(base_shm_meta, core_cols, core_index, masks, anc_series, ctx)
     global U_boot, _BOOT_SHM_HANDLE, B_boot
     U_boot, _BOOT_SHM_HANDLE = io.attach_shared_ndarray(boot_shm_meta)
     B_boot = U_boot.shape[1]
-    print(f"[Boot-Worker-{os.getpid()}] Attached U matrix shape={U_boot.shape}", flush=True)
+    print(
+        f"[Boot-Worker-{os.getpid()}] Attached U matrix shape={U_boot.shape}",
+        flush=True,
+    )
+
 
 def _index_fingerprint(index):
     """Fast, order-insensitive fingerprint of a person_id index using XOR hashing."""
@@ -807,6 +1000,7 @@ def _index_fingerprint(index):
         h ^= int(hashlib.sha256(pid.encode()).hexdigest()[:16], 16)
         n += 1
     return f"{h:016x}:{n}"
+
 
 def _mask_fingerprint(mask: np.ndarray, index: pd.Index) -> str:
     """Fast, order-insensitive fingerprint of a subset of an index using XOR hashing."""
@@ -826,7 +1020,9 @@ def _subjects_fingerprint_from_indices(index: pd.Index, rows: np.ndarray) -> str
     return _index_fingerprint(index[rows])
 
 
-def _sex_keep_mask_numpy(sex_vec: np.ndarray, y_vec: np.ndarray, mode: str, prop: float, max_other: int):
+def _sex_keep_mask_numpy(
+    sex_vec: np.ndarray, y_vec: np.ndarray, mode: str, prop: float, max_other: int
+):
     """Return row mask and notes for potential sex restriction using NumPy inputs."""
     sex_arr = np.asarray(sex_vec, dtype=np.float64)
     y_bool = np.asarray(y_vec, dtype=bool)
@@ -870,7 +1066,7 @@ def _sex_keep_mask_numpy(sex_vec: np.ndarray, y_vec: np.ndarray, mode: str, prop
         skip_reason = "sex_no_controls_in_case_sex"
         return keep_mask, note, skip_reason, restricted
 
-    keep_mask = (sex_arr == s_dom)
+    keep_mask = sex_arr == s_dom
     restricted = True
     if mode == "strict":
         note = f"sex_restricted_to_{int(s_dom)}"
@@ -878,8 +1074,20 @@ def _sex_keep_mask_numpy(sex_vec: np.ndarray, y_vec: np.ndarray, mode: str, prop
         note = f"sex_majority_restricted_to_{int(s_dom)}:prop={share_dom:.3f};other_cases={other_cases}"
     return keep_mask, note, skip_reason, restricted
 
-def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp, *,
-                 used_index_fp=None, sex_cfg=None, thresholds=None):
+
+def _should_skip(
+    meta_path,
+    core_df_cols,
+    core_index_fp,
+    case_idx_fp,
+    category,
+    target,
+    allowed_fp,
+    *,
+    used_index_fp=None,
+    sex_cfg=None,
+    thresholds=None,
+):
     """Determines if a model run can be skipped based on metadata."""
     meta = io.read_meta_json(meta_path)
     if not meta:
@@ -888,17 +1096,22 @@ def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, 
         return False
     if CTX.get("cdr_codename") and meta.get("cdr_codename") != CTX.get("cdr_codename"):
         return False
-    if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get("CACHE_VERSION_TAG"):
+    if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get(
+        "CACHE_VERSION_TAG"
+    ):
         return False
-    return (
-        meta.get("model_columns") == list(core_df_cols) and
-        meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
-        meta.get("core_index_fp") == core_index_fp and
-        meta.get("case_idx_fp") == case_idx_fp and
-        meta.get("allowed_mask_fp") == allowed_fp and
-        meta.get("target") == target
+    base_ok = (
+        meta.get("model_columns") == list(core_df_cols)
+        and meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"]
+        and meta.get("core_index_fp") == core_index_fp
+        and meta.get("case_idx_fp") == case_idx_fp
+        and meta.get("allowed_mask_fp") == allowed_fp
+        and meta.get("target") == target
     )
     if not base_ok:
+        return False
+    data_keys = CTX.get("DATA_KEYS")
+    if data_keys and meta.get("data_keys") != data_keys:
         return False
     if used_index_fp is not None and meta.get("used_index_fp") != used_index_fp:
         return False
@@ -913,26 +1126,43 @@ def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, 
     return True
 
 
-def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp, *,
-                          used_index_fp=None, sex_cfg=None, thresholds=None):
+def _lrt_meta_should_skip(
+    meta_path,
+    core_df_cols,
+    core_index_fp,
+    case_idx_fp,
+    category,
+    target,
+    allowed_fp,
+    *,
+    used_index_fp=None,
+    sex_cfg=None,
+    thresholds=None,
+):
     """Determines if an LRT run can be skipped based on metadata."""
     meta = io.read_meta_json(meta_path)
-    if not meta: return False
+    if not meta:
+        return False
     if CTX.get("CTX_TAG") and meta.get("ctx_tag") != CTX.get("CTX_TAG"):
         return False
     if CTX.get("cdr_codename") and meta.get("cdr_codename") != CTX.get("cdr_codename"):
         return False
-    if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get("CACHE_VERSION_TAG"):
+    if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get(
+        "CACHE_VERSION_TAG"
+    ):
         return False
-    return (
-        meta.get("model_columns") == list(core_df_cols) and
-        meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
-        meta.get("core_index_fp") == core_index_fp and
-        meta.get("case_idx_fp") == case_idx_fp and
-        meta.get("allowed_mask_fp") == allowed_fp and
-        meta.get("target") == target
+    base_ok = (
+        meta.get("model_columns") == list(core_df_cols)
+        and meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"]
+        and meta.get("core_index_fp") == core_index_fp
+        and meta.get("case_idx_fp") == case_idx_fp
+        and meta.get("allowed_mask_fp") == allowed_fp
+        and meta.get("target") == target
     )
     if not base_ok:
+        return False
+    data_keys = CTX.get("DATA_KEYS")
+    if data_keys and meta.get("data_keys") != data_keys:
         return False
     if used_index_fp is not None and meta.get("used_index_fp") != used_index_fp:
         return False
@@ -1005,7 +1235,11 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         case_ids_for_fp = case_ids
     else:
         case_idx_global = np.asarray(case_idx_global, dtype=np.int32)
-        case_ids_for_fp = worker_core_df_index[case_idx_global] if case_idx_global.size > 0 else pd.Index([])
+        case_ids_for_fp = (
+            worker_core_df_index[case_idx_global]
+            if case_idx_global.size > 0
+            else pd.Index([])
+        )
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(results_cache_dir, f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
@@ -1014,46 +1248,72 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         # Prefer precomputed fingerprint if provided
         case_idx_fp = pheno_data.get("case_fp")
         if case_idx_fp is None:
-            case_idx_fp = _index_fingerprint(case_ids_for_fp if case_ids_for_fp is not None
-                                             else (worker_core_df_index[case_idx_global]
-                                                   if case_idx_global.size > 0 else pd.Index([])))
+            case_idx_fp = _index_fingerprint(
+                case_ids_for_fp
+                if case_ids_for_fp is not None
+                else (
+                    worker_core_df_index[case_idx_global]
+                    if case_idx_global.size > 0
+                    else pd.Index([])
+                )
+            )
 
         # Use per-category fingerprint computed in init_worker (fallback to one-off if missing)
-        allowed_fp = allowed_fp_by_cat.get(category) if 'allowed_fp_by_cat' in globals() else None
+        allowed_fp = (
+            allowed_fp_by_cat.get(category)
+            if "allowed_fp_by_cat" in globals()
+            else None
+        )
         if allowed_fp is None:
-            control_indices = control_indices_by_cat.get(category, np.array([], dtype=int))
+            control_indices = control_indices_by_cat.get(
+                category, np.array([], dtype=int)
+            )
             allowed_fp = _index_fingerprint(worker_core_df_index[control_indices])
 
         core_fp = _index_fingerprint(worker_core_df_index)
 
-        case_indices_in_X_all = case_idx_global[finite_mask_worker[case_idx_global]] if case_idx_global.size else np.array([], dtype=int)
+        case_indices_in_X_all = (
+            case_idx_global[finite_mask_worker[case_idx_global]]
+            if case_idx_global.size
+            else np.array([], dtype=int)
+        )
         ctrl_idx = control_indices_by_cat.get(category, np.array([], dtype=int))
         if ctrl_idx.size or case_indices_in_X_all.size:
             rows_idx0 = np.concatenate((ctrl_idx, case_indices_in_X_all))
-            y0 = np.concatenate((
-                np.zeros(ctrl_idx.size, dtype=np.int8),
-                np.ones(case_indices_in_X_all.size, dtype=np.int8)
-            ))
+            y0 = np.concatenate(
+                (
+                    np.zeros(ctrl_idx.size, dtype=np.int8),
+                    np.ones(case_indices_in_X_all.size, dtype=np.int8),
+                )
+            )
         else:
             rows_idx0 = np.array([], dtype=int)
             y0 = np.array([], dtype=np.int8)
 
-        sex_ix = col_ix.get('sex')
+        sex_ix = col_ix.get("sex")
         sex_cfg = {
             "sex_restrict_mode": str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower(),
-            "sex_restrict_prop": float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)),
+            "sex_restrict_prop": float(
+                CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)
+            ),
             "sex_restrict_max_other": int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0)),
         }
         if sex_ix is not None and rows_idx0.size:
             sex_vec0 = X_all[rows_idx0, sex_ix]
             keep_mask_pre, _, _, _ = _sex_keep_mask_numpy(
-                sex_vec0, y0, sex_cfg["sex_restrict_mode"], sex_cfg["sex_restrict_prop"], sex_cfg["sex_restrict_max_other"]
+                sex_vec0,
+                y0,
+                sex_cfg["sex_restrict_mode"],
+                sex_cfg["sex_restrict_prop"],
+                sex_cfg["sex_restrict_max_other"],
             )
         else:
             keep_mask_pre = np.ones(rows_idx0.size, dtype=bool)
 
         rows_idx_used = rows_idx0[keep_mask_pre] if rows_idx0.size else rows_idx0
-        used_index_fp = _subjects_fingerprint_from_indices(worker_core_df_index, rows_idx_used)
+        used_index_fp = _subjects_fingerprint_from_indices(
+            worker_core_df_index, rows_idx_used
+        )
 
         thresholds = {
             "min_cases": int(CTX.get("MIN_CASES_FILTER", DEFAULT_MIN_CASES)),
@@ -1069,17 +1329,35 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         meta_extra_common.update(sex_cfg)
         meta_extra_common.update(thresholds)
 
-        if os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False):
+        if (
+            os.path.exists(result_path)
+            and (not os.path.exists(meta_path))
+            and CTX.get("REPAIR_META_IF_MISSING", False)
+        ):
             _write_meta(
-                meta_path, "phewas_result", s_name, category, target_inversion,
-                worker_core_df_cols, core_fp, case_idx_fp,
-                extra=dict(meta_extra_common)
+                meta_path,
+                "phewas_result",
+                s_name,
+                category,
+                target_inversion,
+                worker_core_df_cols,
+                core_fp,
+                case_idx_fp,
+                extra=dict(meta_extra_common),
             )
             print(f"[meta repaired] {s_name_safe}", flush=True)
 
         if os.path.exists(result_path) and _should_skip(
-            meta_path, worker_core_df_cols, core_fp, case_idx_fp, category, target_inversion, allowed_fp,
-            used_index_fp=used_index_fp, sex_cfg=sex_cfg, thresholds=thresholds
+            meta_path,
+            worker_core_df_cols,
+            core_fp,
+            case_idx_fp,
+            category,
+            target_inversion,
+            allowed_fp,
+            used_index_fp=used_index_fp,
+            sex_cfg=sex_cfg,
+            thresholds=thresholds,
         ):
             print(f"[skip cache-ok] {s_name_safe}", flush=True)
             return
@@ -1090,7 +1368,11 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         # --- Array-based data assembly ---
         # Fancy indexing returns a copy (that’s OK; it’s ephemeral and per-fit)
-        X_controls = X_all[ctrl_idx].astype(np.float64, copy=False) if ctrl_idx.size else np.empty((0, X_all.shape[1]), dtype=np.float64)
+        X_controls = (
+            X_all[ctrl_idx].astype(np.float64, copy=False)
+            if ctrl_idx.size
+            else np.empty((0, X_all.shape[1]), dtype=np.float64)
+        )
         y_controls = np.zeros(len(X_controls), dtype=np.int8)
 
         X_cases = X_all[case_indices_in_X_all].astype(np.float64, copy=False)
@@ -1102,15 +1384,23 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         # Free big temporaries ASAP after each fit
         del X_controls, y_controls, X_cases
 
-        n_total, n_cases, n_ctrls = len(y_clean), int(y_clean.sum()), len(y_clean) - int(y_clean.sum())
+        n_total, n_cases, n_ctrls = (
+            len(y_clean),
+            int(y_clean.sum()),
+            len(y_clean) - int(y_clean.sum()),
+        )
 
         # --- Pre-fit sanity checks ---
         notes = []
-        backfill_stage1 = bool(CTX.get("BACKFILL_P_FROM_STAGE1", DEFAULT_BACKFILL_P_FROM_STAGE1))
-        allow_penalized_wald = bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
+        backfill_stage1 = bool(
+            CTX.get("BACKFILL_P_FROM_STAGE1", DEFAULT_BACKFILL_P_FROM_STAGE1)
+        )
+        allow_penalized_wald = bool(
+            CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)
+        )
         target_ix = col_ix.get(target_inversion)
-        const_ix = col_ix.get('const')
-        sex_ix = col_ix.get('sex')
+        const_ix = col_ix.get("const")
+        sex_ix = col_ix.get("sex")
 
         if target_ix is None:
             skip_reason = "target_inversion_not_in_cols"
@@ -1123,11 +1413,30 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         if skip_reason:
             # ... (identical skip logic as before, just using different N vars)
-            result_data = {"Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls, "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": skip_reason}
+            result_data = {
+                "Phenotype": s_name,
+                "N_Total": n_total,
+                "N_Cases": n_cases,
+                "N_Controls": n_ctrls,
+                "Beta": np.nan,
+                "OR": np.nan,
+                "P_Value": np.nan,
+                "Skip_Reason": skip_reason,
+            }
             io.atomic_write_json(result_path, result_data)
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip_reason
-            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_idx_fp, extra=meta_extra)
+            _write_meta(
+                meta_path,
+                "phewas_result",
+                s_name,
+                category,
+                target_inversion,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_idx_fp,
+                extra=meta_extra,
+            )
             return
 
         # --- Model fitting pipeline (on arrays) ---
@@ -1137,8 +1446,11 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         assert current_col_indices.ndim == 1 and current_col_indices.dtype.kind in "iu"
 
         # Sex restriction behavior is driven by CTX keys: SEX_RESTRICT_MODE, SEX_RESTRICT_PROP, SEX_RESTRICT_MAX_OTHER_CASES.
-        X_work, y_work, sex_note, sex_skip, sex_col_dropped = _apply_sex_restriction_np(X_work, y_work, sex_ix)
-        if sex_note: notes.append(sex_note)
+        X_work, y_work, sex_note, sex_skip, sex_col_dropped = _apply_sex_restriction_np(
+            X_work, y_work, sex_ix
+        )
+        if sex_note:
+            notes.append(sex_note)
 
         if sex_skip:
             # Persist a deterministic skip result when sex restriction leaves no valid control stratum.
@@ -1154,7 +1466,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "N_Total_Used": n_total_used,
                 "N_Cases_Used": n_cases_used,
                 "N_Controls_Used": n_ctrls_used,
-                "Model_Notes": ";".join(notes) if notes else ""
+                "Model_Notes": ";".join(notes) if notes else "",
             }
             io.atomic_write_json(result_path, result_data)
             meta_extra = dict(meta_extra_common)
@@ -1168,50 +1480,113 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 worker_core_df_cols,
                 _index_fingerprint(worker_core_df_index),
                 case_idx_fp,
-                extra=meta_extra
+                extra=meta_extra,
             )
             return
 
         if sex_col_dropped:
             current_col_indices = np.delete(current_col_indices, sex_ix)
-            tgt_orig = col_ix.get(target_inversion) if target_inversion in col_ix else None
-            cst_orig = col_ix.get('const') if 'const' in col_ix else None
-            target_ix = _pos_in_current(tgt_orig, current_col_indices) if tgt_orig is not None else None
-            const_ix = _pos_in_current(cst_orig, current_col_indices) if cst_orig is not None else None
+            tgt_orig = (
+                col_ix.get(target_inversion) if target_inversion in col_ix else None
+            )
+            cst_orig = col_ix.get("const") if "const" in col_ix else None
+            target_ix = (
+                _pos_in_current(tgt_orig, current_col_indices)
+                if tgt_orig is not None
+                else None
+            )
+            const_ix = (
+                _pos_in_current(cst_orig, current_col_indices)
+                if cst_orig is not None
+                else None
+            )
 
-        n_total_used, n_cases_used, n_ctrls_used = len(y_work), int(y_work.sum()), len(y_work) - int(y_work.sum())
+        n_total_used, n_cases_used, n_ctrls_used = (
+            len(y_work),
+            int(y_work.sum()),
+            len(y_work) - int(y_work.sum()),
+        )
         keep_ix_zv = {idx for idx in [target_ix, const_ix] if idx is not None}
-        X_work_zv, kept_indices_after_zv = _drop_zero_variance_np(X_work, keep_ix=keep_ix_zv)
+        X_work_zv, kept_indices_after_zv = _drop_zero_variance_np(
+            X_work, keep_ix=keep_ix_zv
+        )
 
         current_col_indices = current_col_indices[kept_indices_after_zv]
         # After dropping zero-variance columns, find the new positions of our key columns.
         tgt_orig = col_ix.get(target_inversion) if target_inversion in col_ix else None
-        cst_orig = col_ix.get('const') if 'const' in col_ix else None
-        target_ix_mid = _pos_in_current(tgt_orig, current_col_indices) if (tgt_orig is not None) else None
-        const_ix_mid = _pos_in_current(cst_orig, current_col_indices) if (cst_orig is not None) else None
+        cst_orig = col_ix.get("const") if "const" in col_ix else None
+        target_ix_mid = (
+            _pos_in_current(tgt_orig, current_col_indices)
+            if (tgt_orig is not None)
+            else None
+        )
+        const_ix_mid = (
+            _pos_in_current(cst_orig, current_col_indices)
+            if (cst_orig is not None)
+            else None
+        )
 
-        X_work_fd, kept_indices_after_fd = _drop_rank_deficiency_np(X_work_zv, keep_ix={i for i in [target_ix_mid, const_ix_mid] if i is not None})
+        X_work_fd, kept_indices_after_fd = _drop_rank_deficiency_np(
+            X_work_zv,
+            keep_ix={i for i in [target_ix_mid, const_ix_mid] if i is not None},
+        )
         current_col_indices = current_col_indices[kept_indices_after_fd]
         # Final pass after rank-deficiency removal to get final positions.
-        target_ix_final = _pos_in_current(tgt_orig, current_col_indices) if (tgt_orig is not None) else None
-        const_ix_final = _pos_in_current(cst_orig, current_col_indices) if (cst_orig is not None) else None
+        target_ix_final = (
+            _pos_in_current(tgt_orig, current_col_indices)
+            if (tgt_orig is not None)
+            else None
+        )
+        const_ix_final = (
+            _pos_in_current(cst_orig, current_col_indices)
+            if (cst_orig is not None)
+            else None
+        )
 
-        ok, reason, det = validate_min_counts_for_fit(y_work, stage_tag="phewas", extra_context={"phenotype": s_name})
+        ok, reason, det = validate_min_counts_for_fit(
+            y_work, stage_tag="phewas", extra_context={"phenotype": s_name}
+        )
         if not ok:
-            print(f"[skip] name={s_name_safe} stage=phewas reason={reason} "
-                  f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
-                  f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}", flush=True)
-            result_data = {"Phenotype": s_name, "N_Total": det['N'], "N_Cases": det['N_cases'], "N_Controls": det['N_ctrls'], "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": reason}
+            print(
+                f"[skip] name={s_name_safe} stage=phewas reason={reason} "
+                f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
+                f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}",
+                flush=True,
+            )
+            result_data = {
+                "Phenotype": s_name,
+                "N_Total": det["N"],
+                "N_Cases": det["N_cases"],
+                "N_Controls": det["N_ctrls"],
+                "Beta": np.nan,
+                "OR": np.nan,
+                "P_Value": np.nan,
+                "Skip_Reason": reason,
+            }
             io.atomic_write_json(result_path, result_data)
             meta_extra = dict(meta_extra_common)
             meta_extra.update({"skip_reason": reason, "counts": det})
-            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
-                        worker_core_df_cols, _index_fingerprint(worker_core_df_index),
-                        case_idx_fp, extra=meta_extra)
+            _write_meta(
+                meta_path,
+                "phewas_result",
+                s_name,
+                category,
+                target_inversion,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_idx_fp,
+                extra=meta_extra,
+            )
             return
 
-        fit, fit_reason = _fit_logit_ladder(X_work_fd, y_work, const_ix=const_ix_final, prefer_mle_first=bool(sex_col_dropped))
-        if fit_reason: notes.append(fit_reason)
+        fit, fit_reason = _fit_logit_ladder(
+            X_work_fd,
+            y_work,
+            const_ix=const_ix_final,
+            prefer_mle_first=bool(sex_col_dropped),
+        )
+        if fit_reason:
+            notes.append(fit_reason)
         if fit is not None:
             diag_notes = list(notes)
             extra_diag = list(getattr(fit, "_path_reasons", []) or [])
@@ -1228,9 +1603,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 X=X_work_fd,
                 y=y_work,
                 params=fit.params,
-                notes=diag_notes
+                notes=diag_notes,
             )
-
 
         if not fit or target_ix_final is None or target_ix_final >= len(fit.params):
             # Persist a deterministic skip result when the fit fails or the target coefficient is unavailable.
@@ -1243,7 +1617,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "N_Total_Used": n_total_used,
                 "N_Cases_Used": n_cases_used,
                 "N_Controls_Used": n_ctrls_used,
-                "Model_Notes": ";".join(notes) if notes else ""
+                "Model_Notes": ";".join(notes) if notes else "",
             }
             io.atomic_write_json(result_path, result_data)
             meta_extra = dict(meta_extra_common)
@@ -1257,7 +1631,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 worker_core_df_cols,
                 _index_fingerprint(worker_core_df_index),
                 case_idx_fp,
-                extra=meta_extra
+                extra=meta_extra,
             )
             return
 
@@ -1281,9 +1655,18 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             if np.isfinite(pval):
                 p_source = "firth_wald" if used_firth else "mle_wald"
 
-        se = float(fit.bse[target_ix_final]) if hasattr(fit, "bse") and target_ix_final < len(fit.bse) else np.nan
+        se = (
+            float(fit.bse[target_ix_final])
+            if hasattr(fit, "bse") and target_ix_final < len(fit.bse)
+            else np.nan
+        )
         or_ci95_str = None
-        if (final_is_mle or used_firth) and np.isfinite(beta) and np.isfinite(se) and se > 0:
+        if (
+            (final_is_mle or used_firth)
+            and np.isfinite(beta)
+            and np.isfinite(se)
+            and se > 0
+        ):
             lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
             or_ci95_str = f"{lo:.3f},{hi:.3f}"
 
@@ -1292,7 +1675,12 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             if b_src and np.isfinite(b_p):
                 pval, p_source = b_p, b_src
 
-        if (not np.isfinite(pval)) and (not final_is_mle) and (not used_firth) and allow_penalized_wald:
+        if (
+            (not np.isfinite(pval))
+            and (not final_is_mle)
+            and (not used_firth)
+            and allow_penalized_wald
+        ):
             try:
                 beta_hat = np.asarray(fit.params, dtype=np.float64)
                 Xnp = np.asarray(X_work_fd, dtype=np.float64)
@@ -1305,7 +1693,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                     raise ValueError("non-finite weights")
                 XTW = Xnp.T * W
                 XtWX = XTW @ Xnp
-                alpha = float(getattr(fit, "_ridge_alpha", CTX.get("RIDGE_L2_BASE", 1.0)))
+                alpha = float(
+                    getattr(fit, "_ridge_alpha", CTX.get("RIDGE_L2_BASE", 1.0))
+                )
                 P = np.eye(Xnp.shape[1], dtype=np.float64)
                 info_mat = XtWX + alpha * P
                 cov = np.linalg.pinv(info_mat)
@@ -1317,15 +1707,24 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                         pval = 2.0 * sp_stats.norm.sf(abs(z))
                         p_source = "penalized_wald"
                         if or_ci95_str is None:
-                            lo, hi = np.exp(beta - 1.96 * se_pen), np.exp(beta + 1.96 * se_pen)
+                            lo, hi = np.exp(beta - 1.96 * se_pen), np.exp(
+                                beta + 1.96 * se_pen
+                            )
                             or_ci95_str = f"{lo:.3f},{hi:.3f}"
             except Exception:
                 pass
 
-        if (p_source is None) and (not final_is_mle) and (not used_firth) and CTX.get("BOOT_OVERALL_CACHE_DIR"):
+        if (
+            (p_source is None)
+            and (not final_is_mle)
+            and (not used_firth)
+            and CTX.get("BOOT_OVERALL_CACHE_DIR")
+        ):
             try:
                 os.makedirs(CTX["BOOT_OVERALL_CACHE_DIR"], exist_ok=True)
-                rq_path = os.path.join(CTX["BOOT_OVERALL_CACHE_DIR"], f"REQUEST.{s_name_safe}")
+                rq_path = os.path.join(
+                    CTX["BOOT_OVERALL_CACHE_DIR"], f"REQUEST.{s_name_safe}"
+                )
                 with open(rq_path, "w") as _f:
                     _f.write("ridge_only_need_bootstrap\n")
             except Exception:
@@ -1369,30 +1768,51 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "Final_Is_MLE": bool(final_is_mle),
             "Used_Firth": used_firth,
         }
-        result.update({
-            "N_Total_Used": n_total_used,
-            "N_Cases_Used": n_cases_used,
-            "N_Controls_Used": n_ctrls_used,
-            "Model_Notes": model_notes_str,
-            "Inference_Type": inference_type,
-            "P_Source": p_source,
-            "Path_Reasons": path_reason_str,
-        })
+        result.update(
+            {
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+                "Model_Notes": model_notes_str,
+                "Inference_Type": inference_type,
+                "P_Source": p_source,
+                "Path_Reasons": path_reason_str,
+            }
+        )
         io.atomic_write_json(result_path, result)
         meta_extra = dict(meta_extra_common)
-        meta_extra.update({
-            "final_is_mle": bool(final_is_mle),
-            "used_firth": used_firth,
-            "used_ridge": used_ridge,
-        })
-        _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_idx_fp, extra=meta_extra)
-        print(f"[fit OK] name={s_name_safe} OR={or_val:.3f} p={pval:.3e} notes={path_reason_str}", flush=True)
+        meta_extra.update(
+            {
+                "final_is_mle": bool(final_is_mle),
+                "used_firth": used_firth,
+                "used_ridge": used_ridge,
+            }
+        )
+        _write_meta(
+            meta_path,
+            "phewas_result",
+            s_name,
+            category,
+            target_inversion,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_idx_fp,
+            extra=meta_extra,
+        )
+        print(
+            f"[fit OK] name={s_name_safe} OR={or_val:.3f} p={pval:.3e} notes={path_reason_str}",
+            flush=True,
+        )
 
     except Exception as e:
-        io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
+        io.atomic_write_json(
+            result_path,
+            {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"},
+        )
         traceback.print_exc()
     finally:
         gc.collect()
+
 
 def lrt_overall_worker(task):
     """Worker for Stage-1 overall LRT. Uses array-based pipeline."""
@@ -1403,9 +1823,18 @@ def lrt_overall_worker(task):
     res_path = os.path.join(CTX["RESULTS_CACHE_DIR"], f"{s_name_safe}.json")
     os.makedirs(CTX["RESULTS_CACHE_DIR"], exist_ok=True)
     try:
-        pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
+        pheno_path = os.path.join(
+            CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet"
+        )
         if not os.path.exists(pheno_path):
-            io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": "missing_case_cache"})
+            io.atomic_write_json(
+                result_path,
+                {
+                    "Phenotype": s_name,
+                    "P_LRT_Overall": np.nan,
+                    "LRT_Overall_Reason": "missing_case_cache",
+                },
+            )
             return
 
         # Prefer precomputed case_idx / case_fp; fall back to parquet
@@ -1417,19 +1846,34 @@ def lrt_overall_worker(task):
             if case_idx is None:
                 case_idx = np.array([], dtype=np.int32)
         else:
-            case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+            case_ids = (
+                pd.read_parquet(pheno_path, columns=["is_case"])
+                .query("is_case == 1")
+                .index
+            )
             idx = worker_core_df_index.get_indexer(case_ids)
             case_idx = idx[idx >= 0].astype(np.int32)
-            case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
+            case_fp = _index_fingerprint(
+                worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([])
+            )
 
         # Use per-category allowed fingerprint computed once in worker
-        allowed_fp = allowed_fp_by_cat.get(cat) if 'allowed_fp_by_cat' in globals() else _mask_fingerprint(
-            allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool)), worker_core_df_index
+        allowed_fp = (
+            allowed_fp_by_cat.get(cat)
+            if "allowed_fp_by_cat" in globals()
+            else _mask_fingerprint(
+                allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool)),
+                worker_core_df_index,
+            )
         )
 
         core_fp = _index_fingerprint(worker_core_df_index)
 
-        repair_meta = os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False)
+        repair_meta = (
+            os.path.exists(result_path)
+            and (not os.path.exists(meta_path))
+            and CTX.get("REPAIR_META_IF_MISSING", False)
+        )
 
         allowed_mask = allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool))
         case_mask = np.zeros(N_core, dtype=bool)
@@ -1439,7 +1883,9 @@ def lrt_overall_worker(task):
 
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
         anc_cols = [c for c in worker_core_df_cols if c.startswith("ANC_")]
-        base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq'] + anc_cols
+        base_cols = (
+            ["const", target, "sex"] + pc_cols + ["AGE_c", "AGE_c_sq"] + anc_cols
+        )
         base_ix = [col_ix[c] for c in base_cols]
 
         X_base = pd.DataFrame(
@@ -1447,7 +1893,9 @@ def lrt_overall_worker(task):
             index=worker_core_df_index[valid_mask],
             columns=base_cols,
         ).astype(np.float64, copy=False)
-        y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base.index, dtype=np.int8)
+        y_series = pd.Series(
+            np.where(case_mask[valid_mask], 1, 0), index=X_base.index, dtype=np.int8
+        )
 
         # Pre-sex-restriction counts to mirror main PheWAS semantics
         n_cases_pre = int(y_series.sum())
@@ -1455,12 +1903,18 @@ def lrt_overall_worker(task):
         n_total_pre = int(len(y_series))
 
         Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
-        n_total_used, n_cases_used, n_ctrls_used = len(yb), int(yb.sum()), len(yb) - int(yb.sum())
+        n_total_used, n_cases_used, n_ctrls_used = (
+            len(yb),
+            int(yb.sum()),
+            len(yb) - int(yb.sum()),
+        )
 
         used_index_fp = _index_fingerprint(Xb.index)
         sex_cfg = {
             "sex_restrict_mode": str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower(),
-            "sex_restrict_prop": float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)),
+            "sex_restrict_prop": float(
+                CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)
+            ),
             "sex_restrict_max_other": int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0)),
         }
         thresholds = {
@@ -1480,166 +1934,266 @@ def lrt_overall_worker(task):
             extra_meta = dict(meta_extra_common)
             if skip:
                 extra_meta["skip_reason"] = skip
-            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, core_fp, case_fp, extra=extra_meta)
+            _write_meta(
+                meta_path,
+                "lrt_overall",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                core_fp,
+                case_fp,
+                extra=extra_meta,
+            )
             print(f"[meta repaired] {s_name_safe} (LRT-Stage1)", flush=True)
 
         if os.path.exists(result_path) and _lrt_meta_should_skip(
-            meta_path, worker_core_df_cols, core_fp, case_fp, cat, target, allowed_fp,
-            used_index_fp=used_index_fp, sex_cfg=sex_cfg, thresholds=thresholds
+            meta_path,
+            worker_core_df_cols,
+            core_fp,
+            case_fp,
+            cat,
+            target,
+            allowed_fp,
+            used_index_fp=used_index_fp,
+            sex_cfg=sex_cfg,
+            thresholds=thresholds,
         ):
             if os.path.exists(res_path):
                 print(f"[skip cache-ok] {s_name_safe} (LRT-Stage1)", flush=True)
                 return
             else:
-                print(f"[backfill] {s_name_safe} (LRT-Stage1) missing results JSON; regenerating", flush=True)
+                print(
+                    f"[backfill] {s_name_safe} (LRT-Stage1) missing results JSON; regenerating",
+                    flush=True,
+                )
 
         if skip:
-            io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": skip, "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used})
+            io.atomic_write_json(
+                result_path,
+                {
+                    "Phenotype": s_name,
+                    "P_LRT_Overall": np.nan,
+                    "LRT_Overall_Reason": skip,
+                    "N_Total_Used": n_total_used,
+                    "N_Cases_Used": n_cases_used,
+                    "N_Controls_Used": n_ctrls_used,
+                },
+            )
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip
-            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(
+                meta_path,
+                "lrt_overall",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra,
+            )
 
             # Write the PheWAS-style result as a skip to mirror main pass outputs
-            io.atomic_write_json(res_path, {
-                "Phenotype": s_name,
-                "N_Total": n_total_pre,
-                "N_Cases": n_cases_pre,
-                "N_Controls": n_ctrls_pre,
-                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
-                "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
-                "Model_Notes": note or "",
-                "Skip_Reason": skip
-            })
-            io.atomic_write_json(res_path + ".meta.json", {
-                "kind": "phewas_result",
-                "s_name": s_name,
-                "category": cat,
-                "model_columns": list(worker_core_df_cols),
-                "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"],
-                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-                "target": target,
-                "core_index_fp": _index_fingerprint(worker_core_df_index),
-                "case_idx_fp": case_fp,
-                "allowed_mask_fp": allowed_fp,
-                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                "used_index_fp": used_index_fp,
-                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-                "created_at": datetime.now(timezone.utc).isoformat()
-            })
+            io.atomic_write_json(
+                res_path,
+                {
+                    "Phenotype": s_name,
+                    "N_Total": n_total_pre,
+                    "N_Cases": n_cases_pre,
+                    "N_Controls": n_ctrls_pre,
+                    "Beta": np.nan,
+                    "OR": np.nan,
+                    "P_Value": np.nan,
+                    "OR_CI95": None,
+                    "Used_Ridge": False,
+                    "Final_Is_MLE": False,
+                    "Used_Firth": False,
+                    "N_Total_Used": n_total_used,
+                    "N_Cases_Used": n_cases_used,
+                    "N_Controls_Used": n_ctrls_used,
+                    "Model_Notes": note or "",
+                    "Skip_Reason": skip,
+                },
+            )
+            io.atomic_write_json(
+                res_path + ".meta.json",
+                {
+                    "kind": "phewas_result",
+                    "s_name": s_name,
+                    "category": cat,
+                    "model_columns": list(worker_core_df_cols),
+                    "num_pcs": CTX["NUM_PCS"],
+                    "min_cases": CTX["MIN_CASES_FILTER"],
+                    "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                    "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
+                    "target": target,
+                    "core_index_fp": _index_fingerprint(worker_core_df_index),
+                    "case_idx_fp": case_fp,
+                    "allowed_mask_fp": allowed_fp,
+                    "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                    "used_index_fp": used_index_fp,
+                    "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
+                    "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
+                    "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
             return
 
-        ok, reason, det = validate_min_counts_for_fit(yb, stage_tag="lrt_stage1", extra_context={"phenotype": s_name})
+        ok, reason, det = validate_min_counts_for_fit(
+            yb, stage_tag="lrt_stage1", extra_context={"phenotype": s_name}
+        )
         if not ok:
-            print(f"[skip] name={s_name_safe} stage=LRT-Stage1 reason={reason} "
-                  f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
-                  f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}", flush=True)
-            io.atomic_write_json(result_path, {
-                "Phenotype": s_name,
-                "P_LRT_Overall": np.nan,
-                "LRT_Overall_Reason": reason,
-                "N_Total_Used": det['N'],
-                "N_Cases_Used": det['N_cases'],
-                "N_Controls_Used": det['N_ctrls']
-            })
+            print(
+                f"[skip] name={s_name_safe} stage=LRT-Stage1 reason={reason} "
+                f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
+                f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}",
+                flush=True,
+            )
+            io.atomic_write_json(
+                result_path,
+                {
+                    "Phenotype": s_name,
+                    "P_LRT_Overall": np.nan,
+                    "LRT_Overall_Reason": reason,
+                    "N_Total_Used": det["N"],
+                    "N_Cases_Used": det["N_cases"],
+                    "N_Controls_Used": det["N_ctrls"],
+                },
+            )
             meta_extra = dict(meta_extra_common)
             meta_extra.update({"skip_reason": reason, "counts": det})
-            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(
+                meta_path,
+                "lrt_overall",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra,
+            )
 
             # Emit a PheWAS-style skip result to keep downstream shape identical
-            io.atomic_write_json(res_path, {
-                "Phenotype": s_name,
-                "N_Total": n_total_pre,
-                "N_Cases": n_cases_pre,
-                "N_Controls": n_ctrls_pre,
-                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
-                "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
-                "Model_Notes": note or "",
-                "Skip_Reason": reason
-            })
-            io.atomic_write_json(res_path + ".meta.json", {
-                "kind": "phewas_result",
-                "s_name": s_name,
-                "category": cat,
-                "model_columns": list(worker_core_df_cols),
-                "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"],
-                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-                "target": target,
-                "core_index_fp": _index_fingerprint(worker_core_df_index),
-                "case_idx_fp": case_fp,
-                "allowed_mask_fp": allowed_fp,
-                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                "used_index_fp": used_index_fp,
-                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-                "created_at": datetime.now(timezone.utc).isoformat()
-            })
+            io.atomic_write_json(
+                res_path,
+                {
+                    "Phenotype": s_name,
+                    "N_Total": n_total_pre,
+                    "N_Cases": n_cases_pre,
+                    "N_Controls": n_ctrls_pre,
+                    "Beta": np.nan,
+                    "OR": np.nan,
+                    "P_Value": np.nan,
+                    "OR_CI95": None,
+                    "Used_Ridge": False,
+                    "Final_Is_MLE": False,
+                    "Used_Firth": False,
+                    "N_Total_Used": det["N"],
+                    "N_Cases_Used": det["N_cases"],
+                    "N_Controls_Used": det["N_ctrls"],
+                    "Model_Notes": note or "",
+                    "Skip_Reason": reason,
+                },
+            )
+            io.atomic_write_json(
+                res_path + ".meta.json",
+                {
+                    "kind": "phewas_result",
+                    "s_name": s_name,
+                    "category": cat,
+                    "model_columns": list(worker_core_df_cols),
+                    "num_pcs": CTX["NUM_PCS"],
+                    "min_cases": CTX["MIN_CASES_FILTER"],
+                    "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                    "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
+                    "target": target,
+                    "core_index_fp": _index_fingerprint(worker_core_df_index),
+                    "case_idx_fp": case_fp,
+                    "allowed_mask_fp": allowed_fp,
+                    "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                    "used_index_fp": used_index_fp,
+                    "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
+                    "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
+                    "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
             return
 
         X_full_df = Xb
 
         # Prune the full model first to resolve rank deficiency.
-        X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=(target,))
-        X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=(target,))
+        X_full_zv = _drop_zero_variance(
+            X_full_df, keep_cols=("const",), always_keep=(target,)
+        )
+        X_full_zv = _drop_rank_deficient(
+            X_full_zv, keep_cols=("const",), always_keep=(target,)
+        )
 
-        target_ix = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
+        target_ix = (
+            X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
+        )
 
         if target_ix is None:
             skip_reason = "target_dropped_in_pruning"
-            io.atomic_write_json(result_path, {
-                "Phenotype": s_name,
-                "P_LRT_Overall": np.nan,
-                "LRT_Overall_Reason": skip_reason,
-                "N_Total_Used": n_total_used,
-                "N_Cases_Used": n_cases_used,
-                "N_Controls_Used": n_ctrls_used,
-            })
-            io.atomic_write_json(res_path, {
-                "Phenotype": s_name,
-                "N_Total": n_total_pre,
-                "N_Cases": n_cases_pre,
-                "N_Controls": n_ctrls_pre,
-                "Beta": np.nan,
-                "OR": np.nan,
-                "P_Value": np.nan,
-                "OR_CI95": None,
-                "Used_Ridge": False,
-                "Final_Is_MLE": False,
-                "Used_Firth": False,
-                "N_Total_Used": n_total_used,
-                "N_Cases_Used": n_cases_used,
-                "N_Controls_Used": n_ctrls_used,
-                "Model_Notes": note or "",
-                "Skip_Reason": skip_reason,
-            })
-            io.atomic_write_json(res_path + ".meta.json", {
-                "kind": "phewas_result",
-                "s_name": s_name,
-                "category": cat,
-                "model_columns": list(worker_core_df_cols),
-                "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"],
-                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-                "target": target,
-                "core_index_fp": _index_fingerprint(worker_core_df_index),
-                "case_idx_fp": case_fp,
-                "allowed_mask_fp": allowed_fp,
-                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                "used_index_fp": used_index_fp,
-                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
+            io.atomic_write_json(
+                result_path,
+                {
+                    "Phenotype": s_name,
+                    "P_LRT_Overall": np.nan,
+                    "LRT_Overall_Reason": skip_reason,
+                    "N_Total_Used": n_total_used,
+                    "N_Cases_Used": n_cases_used,
+                    "N_Controls_Used": n_ctrls_used,
+                },
+            )
+            io.atomic_write_json(
+                res_path,
+                {
+                    "Phenotype": s_name,
+                    "N_Total": n_total_pre,
+                    "N_Cases": n_cases_pre,
+                    "N_Controls": n_ctrls_pre,
+                    "Beta": np.nan,
+                    "OR": np.nan,
+                    "P_Value": np.nan,
+                    "OR_CI95": None,
+                    "Used_Ridge": False,
+                    "Final_Is_MLE": False,
+                    "Used_Firth": False,
+                    "N_Total_Used": n_total_used,
+                    "N_Cases_Used": n_cases_used,
+                    "N_Controls_Used": n_ctrls_used,
+                    "Model_Notes": note or "",
+                    "Skip_Reason": skip_reason,
+                },
+            )
+            io.atomic_write_json(
+                res_path + ".meta.json",
+                {
+                    "kind": "phewas_result",
+                    "s_name": s_name,
+                    "category": cat,
+                    "model_columns": list(worker_core_df_cols),
+                    "num_pcs": CTX["NUM_PCS"],
+                    "min_cases": CTX["MIN_CASES_FILTER"],
+                    "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                    "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
+                    "target": target,
+                    "core_index_fp": _index_fingerprint(worker_core_df_index),
+                    "case_idx_fp": case_fp,
+                    "allowed_mask_fp": allowed_fp,
+                    "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                    "used_index_fp": used_index_fp,
+                    "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
+                    "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
+                    "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip_reason
             _write_meta(
@@ -1664,11 +2218,19 @@ def lrt_overall_worker(task):
             # If the target was dropped during pruning, the models are identical.
             X_red_zv = X_full_zv
 
-        const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
-        const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
+        const_ix_red = (
+            X_red_zv.columns.get_loc("const") if "const" in X_red_zv.columns else None
+        )
+        const_ix_full = (
+            X_full_zv.columns.get_loc("const") if "const" in X_full_zv.columns else None
+        )
 
-        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red, prefer_mle_first=bool(note))
-        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
+        fit_red, reason_red = _fit_logit_ladder(
+            X_red_zv, yb, const_ix=const_ix_red, prefer_mle_first=bool(note)
+        )
+        fit_full, reason_full = _fit_logit_ladder(
+            X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note)
+        )
 
         if fit_red is not None:
             _print_fit_diag(
@@ -1682,7 +2244,7 @@ def lrt_overall_worker(task):
                 X=X_red_zv,
                 y=yb,
                 params=fit_red.params,
-                notes=[note] if note else []
+                notes=[note] if note else [],
             )
         if fit_full is not None:
             _print_fit_diag(
@@ -1696,7 +2258,7 @@ def lrt_overall_worker(task):
                 X=X_full_zv,
                 y=yb,
                 params=fit_full.params,
-                notes=[note] if note else []
+                notes=[note] if note else [],
             )
         red_final_is_mle = bool(getattr(fit_red, "_final_is_mle", False))
         full_final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
@@ -1706,22 +2268,42 @@ def lrt_overall_worker(task):
         full_is_classic_mle = full_final_is_mle and (not full_used_firth)
 
         out = {
-            "Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_df_Overall": np.nan, "Model_Notes": note,
-            "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
+            "Phenotype": s_name,
+            "P_LRT_Overall": np.nan,
+            "LRT_df_Overall": np.nan,
+            "Model_Notes": note,
+            "N_Total_Used": n_total_used,
+            "N_Cases_Used": n_cases_used,
+            "N_Controls_Used": n_ctrls_used,
         }
-        if red_is_classic_mle and full_is_classic_mle and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
-            r_full, r_red = np.linalg.matrix_rank(X_full_zv.to_numpy()), np.linalg.matrix_rank(X_red_zv.to_numpy())
+        if (
+            red_is_classic_mle
+            and full_is_classic_mle
+            and fit_full
+            and fit_red
+            and hasattr(fit_full, "llf")
+            and hasattr(fit_red, "llf")
+            and fit_full.llf >= fit_red.llf
+        ):
+            r_full, r_red = np.linalg.matrix_rank(
+                X_full_zv.to_numpy()
+            ), np.linalg.matrix_rank(X_red_zv.to_numpy())
             df_lrt = max(0, int(r_full - r_red))
             if df_lrt > 0:
                 llr = 2 * (fit_full.llf - fit_red.llf)
                 out["P_LRT_Overall"] = sp_stats.chi2.sf(llr, df_lrt)
                 out["LRT_df_Overall"] = df_lrt
                 out["P_Source"] = "lrt_chi2"
-                print(f"[LRT-Stage1-OK] name={s_name_safe} p={out['P_LRT_Overall']:.3e} df={df_lrt}", flush=True)
+                print(
+                    f"[LRT-Stage1-OK] name={s_name_safe} p={out['P_LRT_Overall']:.3e} df={df_lrt}",
+                    flush=True,
+                )
             else:
                 out["LRT_Overall_Reason"] = "zero_df_lrt"
         else:
-            out["LRT_Overall_Reason"] = "penalized_or_firth_in_path" if (fit_red or fit_full) else "fit_failed"
+            out["LRT_Overall_Reason"] = (
+                "penalized_or_firth_in_path" if (fit_red or fit_full) else "fit_failed"
+            )
 
         # --- Emit PheWAS-style per-phenotype result from the FULL fit ---
         beta_full = np.nan
@@ -1763,7 +2345,9 @@ def lrt_overall_worker(task):
                             except Exception:
                                 se = np.nan
                     if np.isfinite(se) and se > 0:
-                        lo, hi = np.exp(beta_full - 1.96 * se), np.exp(beta_full + 1.96 * se)
+                        lo, hi = np.exp(beta_full - 1.96 * se), np.exp(
+                            beta_full + 1.96 * se
+                        )
                         ci95 = f"{lo:.3f},{hi:.3f}"
                 except Exception:
                     pass
@@ -1789,59 +2373,76 @@ def lrt_overall_worker(task):
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
-            "Model_Notes": ";".join(model_notes)
+            "Model_Notes": ";".join(model_notes),
         }
         final_cols_names = list(X_full_zv.columns)
         final_cols_pos = [col_ix.get(c, -1) for c in final_cols_names]
 
         io.atomic_write_json(res_path, res_record)
-        io.atomic_write_json(res_path + ".meta.json", {
-            "kind": "phewas_result",
-            "s_name": s_name,
-            "category": cat,
-            "model_columns": list(worker_core_df_cols),
-            "num_pcs": CTX["NUM_PCS"],
-            "min_cases": CTX["MIN_CASES_FILTER"],
-            "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-            "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-            "target": target,
-            "core_index_fp": _index_fingerprint(worker_core_df_index),
-            "case_idx_fp": case_fp,
-            "allowed_mask_fp": allowed_fp,
-            "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-            "used_index_fp": used_index_fp,
-            "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-            "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-            "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "final_cols_names": final_cols_names,
-            "final_cols_pos": final_cols_pos,
-            "full_llf": float(getattr(fit_full, "llf", np.nan)),
-            "full_is_mle": bool(final_is_mle),
-            "used_firth": used_firth_full,
-            "used_ridge": used_ridge_full,
-            "prune_recipe_version": "zv+greedy-rank-v1",
-        })
+        io.atomic_write_json(
+            res_path + ".meta.json",
+            {
+                "kind": "phewas_result",
+                "s_name": s_name,
+                "category": cat,
+                "model_columns": list(worker_core_df_cols),
+                "num_pcs": CTX["NUM_PCS"],
+                "min_cases": CTX["MIN_CASES_FILTER"],
+                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
+                "target": target,
+                "core_index_fp": _index_fingerprint(worker_core_df_index),
+                "case_idx_fp": case_fp,
+                "allowed_mask_fp": allowed_fp,
+                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                "used_index_fp": used_index_fp,
+                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
+                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
+                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "final_cols_names": final_cols_names,
+                "final_cols_pos": final_cols_pos,
+                "full_llf": float(getattr(fit_full, "llf", np.nan)),
+                "full_is_mle": bool(final_is_mle),
+                "used_firth": used_firth_full,
+                "used_ridge": used_ridge_full,
+                "prune_recipe_version": "zv+greedy-rank-v1",
+            },
+        )
 
         io.atomic_write_json(result_path, out)
         meta_extra = dict(meta_extra_common)
-        meta_extra.update({
-            "final_cols_names": final_cols_names,
-            "final_cols_pos": final_cols_pos,
-            "full_llf": float(getattr(fit_full, "llf", np.nan)),
-            "full_is_mle": bool(final_is_mle),
-            "used_firth": used_firth_full,
-            "used_ridge": used_ridge_full,
-            "prune_recipe_version": "zv+greedy-rank-v1",
-        })
-        _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols,
-                    _index_fingerprint(worker_core_df_index), case_fp,
-                    extra=meta_extra)
+        meta_extra.update(
+            {
+                "final_cols_names": final_cols_names,
+                "final_cols_pos": final_cols_pos,
+                "full_llf": float(getattr(fit_full, "llf", np.nan)),
+                "full_is_mle": bool(final_is_mle),
+                "used_firth": used_firth_full,
+                "used_ridge": used_ridge_full,
+                "prune_recipe_version": "zv+greedy-rank-v1",
+            }
+        )
+        _write_meta(
+            meta_path,
+            "lrt_overall",
+            s_name,
+            cat,
+            target,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_fp,
+            extra=meta_extra,
+        )
     except Exception as e:
-        io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
+        io.atomic_write_json(
+            result_path,
+            {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"},
+        )
         traceback.print_exc()
     finally:
         gc.collect()
+
 
 def bootstrap_overall_worker(task):
     s_name, cat, target = task["name"], task["category"], task["target"]
@@ -1856,9 +2457,13 @@ def bootstrap_overall_worker(task):
     os.makedirs(res_dir, exist_ok=True)
     res_path = os.path.join(res_dir, f"{s_name_safe}.json")
     try:
-        pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
+        pheno_path = os.path.join(
+            CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet"
+        )
         if not os.path.exists(pheno_path):
-            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": "missing_case_cache"})
+            io.atomic_write_json(
+                result_path, {"Phenotype": s_name, "Reason": "missing_case_cache"}
+            )
             return
 
         case_idx = None
@@ -1869,13 +2474,21 @@ def bootstrap_overall_worker(task):
             if case_idx is None:
                 case_idx = np.array([], dtype=np.int32)
         else:
-            case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+            case_ids = (
+                pd.read_parquet(pheno_path, columns=["is_case"])
+                .query("is_case == 1")
+                .index
+            )
             idx = worker_core_df_index.get_indexer(case_ids)
             case_idx = idx[idx >= 0].astype(np.int32)
-            case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
+            case_fp = _index_fingerprint(
+                worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([])
+            )
 
         allowed_mask = allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool))
-        allowed_fp = allowed_fp_by_cat.get(cat) if 'allowed_fp_by_cat' in globals() else None
+        allowed_fp = (
+            allowed_fp_by_cat.get(cat) if "allowed_fp_by_cat" in globals() else None
+        )
         if allowed_fp is None:
             allowed_fp = _mask_fingerprint(allowed_mask, worker_core_df_index)
         case_mask = np.zeros(N_core, dtype=bool)
@@ -1885,14 +2498,18 @@ def bootstrap_overall_worker(task):
 
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
         anc_cols = [c for c in worker_core_df_cols if c.startswith("ANC_")]
-        base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq'] + anc_cols
+        base_cols = (
+            ["const", target, "sex"] + pc_cols + ["AGE_c", "AGE_c_sq"] + anc_cols
+        )
         base_ix = [col_ix[c] for c in base_cols]
         X_base = pd.DataFrame(
             X_all[np.ix_(valid_mask, base_ix)],
             index=worker_core_df_index[valid_mask],
             columns=base_cols,
         ).astype(np.float64, copy=False)
-        y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base.index, dtype=np.int8)
+        y_series = pd.Series(
+            np.where(case_mask[valid_mask], 1, 0), index=X_base.index, dtype=np.int8
+        )
 
         n_cases_pre = int(y_series.sum())
         n_ctrls_pre = int(len(y_series) - n_cases_pre)
@@ -1905,7 +2522,9 @@ def bootstrap_overall_worker(task):
         used_index_fp = _index_fingerprint(Xb.index)
         sex_cfg = {
             "sex_restrict_mode": str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower(),
-            "sex_restrict_prop": float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)),
+            "sex_restrict_prop": float(
+                CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)
+            ),
             "sex_restrict_max_other": int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0)),
         }
         thresholds = {
@@ -1921,45 +2540,107 @@ def bootstrap_overall_worker(task):
         meta_extra_common.update(sex_cfg)
         meta_extra_common.update(thresholds)
         if skip:
-            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": skip, "N_Total_Used": n_total_used})
+            io.atomic_write_json(
+                result_path,
+                {"Phenotype": s_name, "Reason": skip, "N_Total_Used": n_total_used},
+            )
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip
-            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
-            io.atomic_write_json(res_path, {
-                "Phenotype": s_name,
-                "N_Total": n_total_pre,
-                "N_Cases": n_cases_pre,
-                "N_Controls": n_ctrls_pre,
-                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
-                "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
-                "Model_Notes": note or "", "Skip_Reason": skip
-            })
+            _write_meta(
+                meta_path,
+                "boot_overall",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra,
+            )
+            io.atomic_write_json(
+                res_path,
+                {
+                    "Phenotype": s_name,
+                    "N_Total": n_total_pre,
+                    "N_Cases": n_cases_pre,
+                    "N_Controls": n_ctrls_pre,
+                    "Beta": np.nan,
+                    "OR": np.nan,
+                    "P_Value": np.nan,
+                    "OR_CI95": None,
+                    "Used_Ridge": False,
+                    "Final_Is_MLE": False,
+                    "Used_Firth": False,
+                    "N_Total_Used": n_total_used,
+                    "N_Cases_Used": n_cases_used,
+                    "N_Controls_Used": n_ctrls_used,
+                    "Model_Notes": note or "",
+                    "Skip_Reason": skip,
+                },
+            )
             return
 
-        ok, reason, det = validate_min_counts_for_fit(yb, stage_tag="boot_stage1", extra_context={"phenotype": s_name})
+        ok, reason, det = validate_min_counts_for_fit(
+            yb, stage_tag="boot_stage1", extra_context={"phenotype": s_name}
+        )
         if not ok:
-            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": reason, "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls']})
+            io.atomic_write_json(
+                result_path,
+                {
+                    "Phenotype": s_name,
+                    "Reason": reason,
+                    "N_Total_Used": det["N"],
+                    "N_Cases_Used": det["N_cases"],
+                    "N_Controls_Used": det["N_ctrls"],
+                },
+            )
             meta_extra = dict(meta_extra_common)
             meta_extra.update({"counts": det, "skip_reason": reason})
-            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
-            io.atomic_write_json(res_path, {
-                "Phenotype": s_name,
-                "N_Total": n_total_pre,
-                "N_Cases": n_cases_pre,
-                "N_Controls": n_ctrls_pre,
-                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
-                "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
-                "Model_Notes": reason
-            })
+            _write_meta(
+                meta_path,
+                "boot_overall",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra,
+            )
+            io.atomic_write_json(
+                res_path,
+                {
+                    "Phenotype": s_name,
+                    "N_Total": n_total_pre,
+                    "N_Cases": n_cases_pre,
+                    "N_Controls": n_ctrls_pre,
+                    "Beta": np.nan,
+                    "OR": np.nan,
+                    "P_Value": np.nan,
+                    "OR_CI95": None,
+                    "Used_Ridge": False,
+                    "Final_Is_MLE": False,
+                    "Used_Firth": False,
+                    "N_Total_Used": det["N"],
+                    "N_Cases_Used": det["N_cases"],
+                    "N_Controls_Used": det["N_ctrls"],
+                    "Model_Notes": reason,
+                },
+            )
             return
 
         X_full_df = Xb
-        X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=(target,))
-        X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=(target,))
+        X_full_zv = _drop_zero_variance(
+            X_full_df, keep_cols=("const",), always_keep=(target,)
+        )
+        X_full_zv = _drop_rank_deficient(
+            X_full_zv, keep_cols=("const",), always_keep=(target,)
+        )
         if target not in X_full_zv.columns:
-            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": "target_dropped_in_pruning"})
+            io.atomic_write_json(
+                result_path,
+                {"Phenotype": s_name, "Reason": "target_dropped_in_pruning"},
+            )
             return
         red_cols = [c for c in X_full_zv.columns if c != target]
         X_red_zv = X_full_zv[red_cols]
@@ -1969,7 +2650,9 @@ def bootstrap_overall_worker(task):
         Xr = X_red_zv.to_numpy(dtype=np.float64, copy=False)
         h, denom = _efficient_score_vector(t_vec, Xr, W)
         if not np.isfinite(denom) or denom <= 1e-14:
-            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": "nonpos_denom"})
+            io.atomic_write_json(
+                result_path, {"Phenotype": s_name, "Reason": "nonpos_denom"}
+            )
             return
         resid = yb.to_numpy(dtype=np.float64, copy=False) - p_hat
         S_obs = float(h @ resid)
@@ -1988,60 +2671,105 @@ def bootstrap_overall_worker(task):
             T_b[j0:j1] = (S * S) / denom
         p_emp = float((1.0 + np.sum(T_b >= T_obs)) / (1.0 + B))
 
-        io.atomic_write_json(result_path, {
-            "Phenotype": s_name,
-            "T_OBS": T_obs,
-            "P_EMP": p_emp,
-            "B": int(B),
-            "Test_Stat": "score",
-            "Boot": "bernoulli",
-            "P_Source": "score_boot",
-            "N_Total_Used": n_total_used,
-            "N_Cases_Used": n_cases_used,
-            "N_Controls_Used": n_ctrls_used,
-            "Model_Notes": note or ""
-        })
-        np.save(os.path.join(tnull_dir, f"{s_name_safe}.npy"), T_b.astype(np.float32, copy=False))
-        _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
+        io.atomic_write_json(
+            result_path,
+            {
+                "Phenotype": s_name,
+                "T_OBS": T_obs,
+                "P_EMP": p_emp,
+                "B": int(B),
+                "Test_Stat": "score",
+                "Boot": "bernoulli",
+                "P_Source": "score_boot",
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+                "Model_Notes": note or "",
+            },
+        )
+        np.save(
+            os.path.join(tnull_dir, f"{s_name_safe}.npy"),
+            T_b.astype(np.float32, copy=False),
+        )
+        _write_meta(
+            meta_path,
+            "boot_overall",
+            s_name,
+            cat,
+            target,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_fp,
+            extra=dict(meta_extra_common),
+        )
 
-        const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
-        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
+        const_ix_full = (
+            X_full_zv.columns.get_loc("const") if "const" in X_full_zv.columns else None
+        )
+        fit_full, reason_full = _fit_logit_ladder(
+            X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note)
+        )
         beta_full, wald_p, ci95, or_val = np.nan, np.nan, None, np.nan
         final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
         used_firth_full = bool(getattr(fit_full, "_used_firth", False))
         used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
         if fit_full is not None and target in X_full_zv.columns:
-            beta_full = float(getattr(fit_full, "params", pd.Series(np.nan, index=X_full_zv.columns))[target])
+            beta_full = float(
+                getattr(fit_full, "params", pd.Series(np.nan, index=X_full_zv.columns))[
+                    target
+                ]
+            )
             or_val = float(np.exp(beta_full))
             if (final_is_mle or used_firth_full) and hasattr(fit_full, "pvalues"):
-                wald_p = float(getattr(fit_full, "pvalues", pd.Series(np.nan, index=X_full_zv.columns))[target])
-                se = float(getattr(fit_full, "bse", pd.Series(np.nan, index=X_full_zv.columns))[target]) if hasattr(fit_full, "bse") else np.nan
+                wald_p = float(
+                    getattr(
+                        fit_full, "pvalues", pd.Series(np.nan, index=X_full_zv.columns)
+                    )[target]
+                )
+                se = (
+                    float(
+                        getattr(
+                            fit_full, "bse", pd.Series(np.nan, index=X_full_zv.columns)
+                        )[target]
+                    )
+                    if hasattr(fit_full, "bse")
+                    else np.nan
+                )
                 if np.isfinite(se) and se > 0:
-                    lo, hi = np.exp(beta_full - 1.96*se), np.exp(beta_full + 1.96*se)
+                    lo, hi = np.exp(beta_full - 1.96 * se), np.exp(
+                        beta_full + 1.96 * se
+                    )
                     ci95 = f"{lo:.3f},{hi:.3f}"
-        io.atomic_write_json(res_path, {
-            "Phenotype": s_name,
-            "N_Total": n_total_pre,
-            "N_Cases": n_cases_pre,
-            "N_Controls": n_ctrls_pre,
-            "Beta": beta_full,
-            "OR": or_val,
-            "P_Value": wald_p,
-            "OR_CI95": ci95,
-            "Used_Ridge": used_ridge_full,
-            "Final_Is_MLE": bool(final_is_mle),
-            "Used_Firth": used_firth_full,
-            "N_Total_Used": n_total_used,
-            "N_Cases_Used": n_cases_used,
-            "N_Controls_Used": n_ctrls_used,
-            "Model_Notes": reason_full or note or ""
-        })
+        io.atomic_write_json(
+            res_path,
+            {
+                "Phenotype": s_name,
+                "N_Total": n_total_pre,
+                "N_Cases": n_cases_pre,
+                "N_Controls": n_ctrls_pre,
+                "Beta": beta_full,
+                "OR": or_val,
+                "P_Value": wald_p,
+                "OR_CI95": ci95,
+                "Used_Ridge": used_ridge_full,
+                "Final_Is_MLE": bool(final_is_mle),
+                "Used_Firth": used_firth_full,
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+                "Model_Notes": reason_full or note or "",
+            },
+        )
 
     except Exception as e:
-        io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": f"exception:{type(e).__name__}"})
+        io.atomic_write_json(
+            result_path,
+            {"Phenotype": s_name, "Reason": f"exception:{type(e).__name__}"},
+        )
         traceback.print_exc()
     finally:
         gc.collect()
+
 
 def lrt_followup_worker(task):
     """Worker for Stage-2 ancestry×dosage LRT and per-ancestry splits. Uses array-based pipeline."""
@@ -2050,9 +2778,19 @@ def lrt_followup_worker(task):
     result_path = os.path.join(CTX["LRT_FOLLOWUP_CACHE_DIR"], f"{s_name_safe}.json")
     meta_path = result_path + ".meta.json"
     try:
-        pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
+        pheno_path = os.path.join(
+            CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet"
+        )
         if not os.path.exists(pheno_path):
-            io.atomic_write_json(result_path, {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "missing_case_cache"})
+            io.atomic_write_json(
+                result_path,
+                {
+                    "Phenotype": s_name,
+                    "P_LRT_AncestryxDosage": np.nan,
+                    "LRT_df": np.nan,
+                    "LRT_Reason": "missing_case_cache",
+                },
+            )
             return
 
         case_idx = None
@@ -2063,18 +2801,33 @@ def lrt_followup_worker(task):
             if case_idx is None:
                 case_idx = np.array([], dtype=np.int32)
         else:
-            case_ids = pd.read_parquet(pheno_path, columns=['is_case']).query("is_case == 1").index
+            case_ids = (
+                pd.read_parquet(pheno_path, columns=["is_case"])
+                .query("is_case == 1")
+                .index
+            )
             idx = worker_core_df_index.get_indexer(case_ids)
             case_idx = idx[idx >= 0].astype(np.int32)
-            case_fp = _index_fingerprint(worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([]))
+            case_fp = _index_fingerprint(
+                worker_core_df_index[case_idx] if case_idx.size > 0 else pd.Index([])
+            )
 
-        allowed_fp = allowed_fp_by_cat.get(category) if 'allowed_fp_by_cat' in globals() else _mask_fingerprint(
-            allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool)), worker_core_df_index
+        allowed_fp = (
+            allowed_fp_by_cat.get(category)
+            if "allowed_fp_by_cat" in globals()
+            else _mask_fingerprint(
+                allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool)),
+                worker_core_df_index,
+            )
         )
 
         core_fp = _index_fingerprint(worker_core_df_index)
 
-        repair_meta = os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False)
+        repair_meta = (
+            os.path.exists(result_path)
+            and (not os.path.exists(meta_path))
+            and CTX.get("REPAIR_META_IF_MISSING", False)
+        )
 
         allowed_mask = allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool))
         case_mask = np.zeros(N_core, dtype=bool)
@@ -2083,21 +2836,31 @@ def lrt_followup_worker(task):
         valid_mask = (allowed_mask | case_mask) & finite_mask_worker
 
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
-        base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq']
+        base_cols = ["const", target, "sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
         base_ix = [col_ix[c] for c in base_cols]
         X_base_df = pd.DataFrame(
             X_all[np.ix_(valid_mask, base_ix)],
             index=worker_core_df_index[valid_mask],
             columns=base_cols,
         ).astype(np.float64, copy=False)
-        y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base_df.index, dtype=np.int8)
+        y_series = pd.Series(
+            np.where(case_mask[valid_mask], 1, 0), index=X_base_df.index, dtype=np.int8
+        )
 
         Xb, yb, note, skip = _apply_sex_restriction(X_base_df, y_series)
-        out = {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "", "Model_Notes": note}
+        out = {
+            "Phenotype": s_name,
+            "P_LRT_AncestryxDosage": np.nan,
+            "LRT_df": np.nan,
+            "LRT_Reason": "",
+            "Model_Notes": note,
+        }
         used_index_fp = _index_fingerprint(Xb.index)
         sex_cfg = {
             "sex_restrict_mode": str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower(),
-            "sex_restrict_prop": float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)),
+            "sex_restrict_prop": float(
+                CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)
+            ),
             "sex_restrict_max_other": int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0)),
         }
         thresholds = {
@@ -2116,39 +2879,85 @@ def lrt_followup_worker(task):
             extra_meta = dict(meta_extra_common)
             if skip:
                 extra_meta["skip_reason"] = skip
-            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, core_fp, case_fp, extra=extra_meta)
+            _write_meta(
+                meta_path,
+                "lrt_followup",
+                s_name,
+                category,
+                target,
+                worker_core_df_cols,
+                core_fp,
+                case_fp,
+                extra=extra_meta,
+            )
             print(f"[meta repaired] {s_name_safe} (LRT-Stage2)", flush=True)
         if os.path.exists(result_path) and _lrt_meta_should_skip(
-            meta_path, worker_core_df_cols, core_fp, case_fp, category, target, allowed_fp,
-            used_index_fp=used_index_fp, sex_cfg=sex_cfg, thresholds=thresholds
+            meta_path,
+            worker_core_df_cols,
+            core_fp,
+            case_fp,
+            category,
+            target,
+            allowed_fp,
+            used_index_fp=used_index_fp,
+            sex_cfg=sex_cfg,
+            thresholds=thresholds,
         ):
             print(f"[skip cache-ok] {s_name_safe} (LRT-Stage2)", flush=True)
             return
         if skip:
-            out['LRT_Reason'] = skip; io.atomic_write_json(result_path, out)
+            out["LRT_Reason"] = skip
+            io.atomic_write_json(result_path, out)
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip
-            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(
+                meta_path,
+                "lrt_followup",
+                s_name,
+                category,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra,
+            )
             return
 
         anc_vec = worker_anc_series.loc[Xb.index]
         levels = pd.Index(anc_vec.dropna().unique(), dtype=str).tolist()
-        levels_sorted = (['eur'] if 'eur' in levels else []) + [x for x in sorted(levels) if x != 'eur']
-        out['LRT_Ancestry_Levels'] = ",".join(levels_sorted)
+        levels_sorted = (["eur"] if "eur" in levels else []) + [
+            x for x in sorted(levels) if x != "eur"
+        ]
+        out["LRT_Ancestry_Levels"] = ",".join(levels_sorted)
 
         if len(levels_sorted) < 2:
-            out['LRT_Reason'] = "only_one_ancestry_level"; io.atomic_write_json(result_path, out)
+            out["LRT_Reason"] = "only_one_ancestry_level"
+            io.atomic_write_json(result_path, out)
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = "only_one_ancestry_level"
-            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
+            _write_meta(
+                meta_path,
+                "lrt_followup",
+                s_name,
+                category,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra,
+            )
             return
 
-        if 'eur' in levels:
-            anc_cat = pd.Categorical(anc_vec, categories=['eur'] + sorted([x for x in levels if x != 'eur']))
+        if "eur" in levels:
+            anc_cat = pd.Categorical(
+                anc_vec, categories=["eur"] + sorted([x for x in levels if x != "eur"])
+            )
         else:
             anc_cat = pd.Categorical(anc_vec)
 
-        A_df = pd.get_dummies(anc_cat, prefix='ANC', drop_first=True).reindex(Xb.index, fill_value=0)
+        A_df = pd.get_dummies(anc_cat, prefix="ANC", drop_first=True).reindex(
+            Xb.index, fill_value=0
+        )
         X_red_df = Xb.join(A_df)
 
         # Use vectorized broadcasting to create interaction terms
@@ -2156,11 +2965,23 @@ def lrt_followup_worker(task):
         A_np = A_df.to_numpy(copy=False)
         interaction_mat = target_col_np * A_np
         interaction_cols = [f"{target}:{c}" for c in A_df.columns]
-        X_full_df = pd.concat([X_red_df, pd.DataFrame(interaction_mat, index=X_red_df.index, columns=interaction_cols)], axis=1)
+        X_full_df = pd.concat(
+            [
+                X_red_df,
+                pd.DataFrame(
+                    interaction_mat, index=X_red_df.index, columns=interaction_cols
+                ),
+            ],
+            axis=1,
+        )
 
         # Prune the full model (with interactions) first.
-        X_full_zv = _drop_zero_variance(X_full_df, keep_cols=('const',), always_keep=[target] + interaction_cols)
-        X_full_zv = _drop_rank_deficient(X_full_zv, keep_cols=('const',), always_keep=[target] + interaction_cols)
+        X_full_zv = _drop_zero_variance(
+            X_full_df, keep_cols=("const",), always_keep=[target] + interaction_cols
+        )
+        X_full_zv = _drop_rank_deficient(
+            X_full_zv, keep_cols=("const",), always_keep=[target] + interaction_cols
+        )
 
         # Construct the reduced model by dropping interaction terms from the pruned full model.
         # This ensures the reduced model is properly nested within the full model.
@@ -2168,11 +2989,19 @@ def lrt_followup_worker(task):
         red_cols = [c for c in X_full_zv.columns if c not in kept_interaction_cols]
         X_red_zv = X_full_zv[red_cols]
 
-        const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
-        const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
+        const_ix_red = (
+            X_red_zv.columns.get_loc("const") if "const" in X_red_zv.columns else None
+        )
+        const_ix_full = (
+            X_full_zv.columns.get_loc("const") if "const" in X_full_zv.columns else None
+        )
 
-        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red, prefer_mle_first=bool(note))
-        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
+        fit_red, reason_red = _fit_logit_ladder(
+            X_red_zv, yb, const_ix=const_ix_red, prefer_mle_first=bool(note)
+        )
+        fit_full, reason_full = _fit_logit_ladder(
+            X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note)
+        )
 
         if fit_red is not None:
             _print_fit_diag(
@@ -2186,7 +3015,7 @@ def lrt_followup_worker(task):
                 X=X_red_zv,
                 y=yb,
                 params=fit_red.params,
-                notes=[note] if note else []
+                notes=[note] if note else [],
             )
         if fit_full is not None:
             _print_fit_diag(
@@ -2200,7 +3029,7 @@ def lrt_followup_worker(task):
                 X=X_full_zv,
                 y=yb,
                 params=fit_full.params,
-                notes=[note] if note else []
+                notes=[note] if note else [],
             )
         red_final_is_mle = bool(getattr(fit_red, "_final_is_mle", False))
         full_final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
@@ -2209,41 +3038,70 @@ def lrt_followup_worker(task):
         red_is_classic = red_final_is_mle and (not red_used_firth)
         full_is_classic = full_final_is_mle and (not full_used_firth)
 
-        if red_is_classic and full_is_classic and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
-            r_full, r_red = np.linalg.matrix_rank(X_full_zv.to_numpy()), np.linalg.matrix_rank(X_red_zv.to_numpy())
+        if (
+            red_is_classic
+            and full_is_classic
+            and fit_full
+            and fit_red
+            and hasattr(fit_full, "llf")
+            and hasattr(fit_red, "llf")
+            and fit_full.llf >= fit_red.llf
+        ):
+            r_full, r_red = np.linalg.matrix_rank(
+                X_full_zv.to_numpy()
+            ), np.linalg.matrix_rank(X_red_zv.to_numpy())
             df_lrt = max(0, int(r_full - r_red))
             if df_lrt > 0:
                 llr = 2 * (fit_full.llf - fit_red.llf)
-                out['P_LRT_AncestryxDosage'] = sp_stats.chi2.sf(llr, df_lrt)
-                out['LRT_df'] = df_lrt
-            else: out['LRT_Reason'] = "zero_df_lrt"
-        else: out['LRT_Reason'] = "penalized_or_firth_in_path"
+                out["P_LRT_AncestryxDosage"] = sp_stats.chi2.sf(llr, df_lrt)
+                out["LRT_df"] = df_lrt
+            else:
+                out["LRT_Reason"] = "zero_df_lrt"
+        else:
+            out["LRT_Reason"] = "penalized_or_firth_in_path"
 
         for anc in levels_sorted:
             anc_mask = (anc_vec == anc).to_numpy()
             X_anc, y_anc = Xb[anc_mask], yb[anc_mask]
 
             _, n_cases_anc, n_ctrls_anc, _ = _counts_from_y(y_anc)
-            out[f"{anc.upper()}_N"], out[f"{anc.upper()}_N_Cases"], out[f"{anc.upper()}_N_Controls"] = len(y_anc), n_cases_anc, n_ctrls_anc
+            (
+                out[f"{anc.upper()}_N"],
+                out[f"{anc.upper()}_N_Cases"],
+                out[f"{anc.upper()}_N_Controls"],
+            ) = (len(y_anc), n_cases_anc, n_ctrls_anc)
 
             ok, reason, det = validate_min_counts_for_fit(
                 y_anc,
                 stage_tag=f"lrt_followup:{anc}",
                 extra_context={"phenotype": s_name, "ancestry": anc},
                 cases_key="PER_ANC_MIN_CASES",
-                controls_key="PER_ANC_MIN_CONTROLS"
+                controls_key="PER_ANC_MIN_CONTROLS",
             )
             if not ok:
-                print(f"[skip] name={s_name_safe} stage=LRT-Followup anc={anc} reason={reason} "
-                      f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
-                      f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}", flush=True)
+                print(
+                    f"[skip] name={s_name_safe} stage=LRT-Followup anc={anc} reason={reason} "
+                    f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
+                    f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}",
+                    flush=True,
+                )
                 out[f"{anc.upper()}_REASON"] = reason
                 continue
 
-            X_anc_zv = _drop_zero_variance(X_anc, keep_cols=('const',), always_keep=(target,))
-            X_anc_zv = _drop_rank_deficient(X_anc_zv, keep_cols=('const',), always_keep=(target,))
-            const_ix_anc = X_anc_zv.columns.get_loc('const') if 'const' in X_anc_zv.columns else None
-            fit, _ = _fit_logit_ladder(X_anc_zv, y_anc, const_ix=const_ix_anc, prefer_mle_first=bool(note))
+            X_anc_zv = _drop_zero_variance(
+                X_anc, keep_cols=("const",), always_keep=(target,)
+            )
+            X_anc_zv = _drop_rank_deficient(
+                X_anc_zv, keep_cols=("const",), always_keep=(target,)
+            )
+            const_ix_anc = (
+                X_anc_zv.columns.get_loc("const")
+                if "const" in X_anc_zv.columns
+                else None
+            )
+            fit, _ = _fit_logit_ladder(
+                X_anc_zv, y_anc, const_ix=const_ix_anc, prefer_mle_first=bool(note)
+            )
 
             if fit and target in getattr(fit, "params", {}):
                 beta = float(fit.params[target])
@@ -2253,7 +3111,11 @@ def lrt_followup_worker(task):
                 if (final_is_mle or used_firth) and hasattr(fit, "pvalues"):
                     pval = float(fit.pvalues.get(target, np.nan))
                     out[f"{anc.upper()}_P"] = pval
-                    se = float(getattr(fit, "bse", {}).get(target, np.nan)) if hasattr(fit, "bse") else np.nan
+                    se = (
+                        float(getattr(fit, "bse", {}).get(target, np.nan))
+                        if hasattr(fit, "bse")
+                        else np.nan
+                    )
                     if np.isfinite(se) and se > 0:
                         lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
                         out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
@@ -2262,11 +3124,23 @@ def lrt_followup_worker(task):
             else:
                 out[f"{anc.upper()}_REASON"] = "subset_fit_failed"
 
-
         io.atomic_write_json(result_path, out)
-        _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
+        _write_meta(
+            meta_path,
+            "lrt_followup",
+            s_name,
+            category,
+            target,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_fp,
+            extra=dict(meta_extra_common),
+        )
     except Exception as e:
-        io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
+        io.atomic_write_json(
+            result_path,
+            {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"},
+        )
         traceback.print_exc()
     finally:
         gc.collect()

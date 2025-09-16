@@ -25,14 +25,17 @@ def stable_hash(obj: Any, digest_size: int = 8) -> str:
         payload = str(obj)
     return hashlib.blake2s(payload.encode("utf-8"), digest_size=digest_size).hexdigest()
 
+
 try:
     import psutil  # optional, for rss_gb()
+
     _PSUTIL = True
 except Exception:
     _PSUTIL = False
 
 try:
     import pyarrow.parquet as pq  # optional, for parquet_n_rows()
+
     _PYARROW = True
 except Exception:
     _PYARROW = False
@@ -51,6 +54,7 @@ _MEMMAP_PREFIX = "mm_ferromic_"
 # SHM path (Linux); if not present, we skip SHM usage entirely
 _SHM_PATH = "/dev/shm"
 
+
 # ---------------------------------------------------------------------------
 # Filesystem helpers
 # ---------------------------------------------------------------------------
@@ -67,8 +71,12 @@ def _best_effort_fsync(fobj) -> None:
 
 def _fsync_dir(path: str) -> None:
     d = os.path.dirname(os.path.abspath(path)) or "."
+    flags = getattr(os, "O_DIRECTORY", 0)
+    if not flags:
+        # Platforms without O_DIRECTORY (e.g., Windows/macOS) don't need an explicit dir fsync.
+        return
     try:
-        dir_fd = os.open(d, os.O_DIRECTORY)
+        dir_fd = os.open(d, flags)
         try:
             os.fsync(dir_fd)
         finally:
@@ -219,7 +227,9 @@ def get_cached_or_generate(
         if validate_target not in df.columns:
             return False
         s = pd.to_numeric(df[validate_target], errors="coerce")
-        return is_numeric_dtype(s) and s.notna().sum() > 0 and s.nunique(dropna=True) > 1
+        return (
+            is_numeric_dtype(s) and s.notna().sum() > 0 and s.nunique(dropna=True) > 1
+        )
 
     def _valid_pcs(df: pd.DataFrame) -> bool:
         if validate_num_pcs is None:
@@ -302,7 +312,9 @@ def get_cached_or_generate(
             if existing is not None:
                 return existing
             if (time.time() - start) > lock_timeout:
-                raise TimeoutError(f"Timed out waiting for cache lock on '{cache_path}'")
+                raise TimeoutError(
+                    f"Timed out waiting for cache lock on '{cache_path}'"
+                )
 
     try:
         existing = _load_existing()
@@ -359,7 +371,9 @@ def get_cached_or_generate_pickle(
             if existing is not None:
                 return existing
             if (time.time() - start) > lock_timeout:
-                raise TimeoutError(f"Timed out waiting for cache lock on '{cache_path}'")
+                raise TimeoutError(
+                    f"Timed out waiting for cache lock on '{cache_path}'"
+                )
 
     try:
         existing = _load_existing_pickle()
@@ -434,22 +448,40 @@ def ensure_lock(path: str, max_age_sec: float) -> bool:
 # ---------------------------------------------------------------------------
 from multiprocessing import shared_memory  # noqa: E402  (import after __future__)
 
+_SHM_PROBE_RESULT: Optional[bool] = None
+
+
 def _shm_supported() -> bool:
-    return os.path.exists(_SHM_PATH)
+    global _SHM_PROBE_RESULT
+    if _SHM_PROBE_RESULT is not None:
+        return _SHM_PROBE_RESULT
+    try:
+        probe = shared_memory.SharedMemory(create=True, size=1)
+    except Exception:
+        _SHM_PROBE_RESULT = False
+        return False
+    else:
+        try:
+            probe.close()
+            probe.unlink()
+        except Exception:
+            pass
+        _SHM_PROBE_RESULT = True
+        return True
 
 
 def _can_use_shm(arr_bytes: int) -> bool:
     if not _shm_supported():
         return False
-    if arr_bytes <= 0:
+    if arr_bytes <= 0 or arr_bytes > _SHM_MAX_BYTES:
         return False
-    if arr_bytes > _SHM_MAX_BYTES:
-        return False
-    free = _disk_free_bytes(_SHM_PATH)
-    if free is None:
-        # If we can't measure free space, be conservative for large arrays
-        return arr_bytes <= (_SHM_MAX_BYTES // 2)
-    return (arr_bytes + _SHM_CUSHION) <= free
+    if os.path.exists(_SHM_PATH):
+        free = _disk_free_bytes(_SHM_PATH)
+        if free is not None:
+            return (arr_bytes + _SHM_CUSHION) <= free
+    # If /dev/shm is absent or free space can't be measured, optimistically try SHM;
+    # allocation failures will fall back to memmap in create_shared_from_ndarray.
+    return True
 
 
 def _memmap_backing(arr: np.ndarray, readonly: bool) -> Tuple[dict, Any]:
@@ -515,7 +547,9 @@ def _memmap_backing(arr: np.ndarray, readonly: bool) -> Tuple[dict, Any]:
     return meta, _Handle()
 
 
-def create_shared_from_ndarray(arr: np.ndarray, readonly: bool = True) -> Tuple[dict, Any]:
+def create_shared_from_ndarray(
+    arr: np.ndarray, readonly: bool = True
+) -> Tuple[dict, Any]:
     """
     Create a shareable backing for arr and return (meta, handle).
 
@@ -659,7 +693,9 @@ def attach_shared_ndarray(meta: dict) -> Tuple[np.ndarray, Any]:
     return arr, shm
 
 
-def dispose_shared(meta: Optional[dict], handle: Optional[Any], unlink: bool = True) -> None:
+def dispose_shared(
+    meta: Optional[dict], handle: Optional[Any], unlink: bool = True
+) -> None:
     """
     Best-effort cleanup for resources returned by create_shared_from_ndarray/attach_shared_ndarray.
 
@@ -688,7 +724,7 @@ def rss_gb() -> float:
     if not _PSUTIL:
         return 0.0
     try:
-        return psutil.Process(os.getpid()).memory_info().rss / (1024 ** 3)
+        return psutil.Process(os.getpid()).memory_info().rss / (1024**3)
     except Exception:
         return 0.0
 
@@ -697,12 +733,28 @@ def rss_gb() -> float:
 # Domain-specific loaders
 # ---------------------------------------------------------------------------
 def load_inversions(TARGET_INVERSION: str, INVERSION_DOSAGES_FILE: str) -> pd.DataFrame:
-    """Load target inversion dosage (tsv with SampleID + TARGET_INVERSION)."""
+    """Load target inversion dosage; autodetect the identifier column."""
     try:
-        df = pd.read_csv(INVERSION_DOSAGES_FILE, sep="\t", usecols=["SampleID", TARGET_INVERSION])
+        header = pd.read_csv(INVERSION_DOSAGES_FILE, sep="\t", nrows=0).columns.tolist()
+        id_candidates = [
+            "SampleID",
+            "sample_id",
+            "person_id",
+            "research_id",
+            "participant_id",
+            "ID",
+        ]
+        id_col = next((col for col in id_candidates if col in header), None)
+        if id_col is None:
+            raise RuntimeError(
+                f"No identifier column found in '{INVERSION_DOSAGES_FILE}'. "
+                f"Looked for {id_candidates}."
+            )
+        usecols = [id_col, TARGET_INVERSION]
+        df = pd.read_csv(INVERSION_DOSAGES_FILE, sep="\t", usecols=usecols)
         df[TARGET_INVERSION] = pd.to_numeric(df[TARGET_INVERSION], errors="coerce")
-        df["SampleID"] = df["SampleID"].astype(str)
-        return df.set_index("SampleID").rename_axis("person_id")
+        df[id_col] = df[id_col].astype(str)
+        return df.set_index(id_col).rename_axis("person_id")
     except Exception as e:
         raise RuntimeError(f"Failed to load inversion data: {e}") from e
 
@@ -710,7 +762,11 @@ def load_inversions(TARGET_INVERSION: str, INVERSION_DOSAGES_FILE: str) -> pd.Da
 def load_pcs(gcp_project: str, PCS_URI: str, NUM_PCS: int) -> pd.DataFrame:
     """Load genetic PCs from a tsv with columns research_id, pca_features (list-like)."""
     try:
-        raw_pcs = pd.read_csv(PCS_URI, sep="\t", storage_options={"project": gcp_project, "requester_pays": True})
+        raw_pcs = pd.read_csv(
+            PCS_URI,
+            sep="\t",
+            storage_options={"project": gcp_project, "requester_pays": True},
+        )
 
         def _parse_and_pad_fast(s) -> list[float]:
             if pd.isna(s):
@@ -733,7 +789,9 @@ def load_pcs(gcp_project: str, PCS_URI: str, NUM_PCS: int) -> pd.DataFrame:
             raw_pcs["pca_features"].apply(_parse_and_pad_fast).tolist(),
             columns=[f"PC{i}" for i in range(1, NUM_PCS + 1)],
         )
-        pc_df = pc_mat.assign(person_id=raw_pcs["research_id"].astype(str)).set_index("person_id")
+        pc_df = pc_mat.assign(person_id=raw_pcs["research_id"].astype(str)).set_index(
+            "person_id"
+        )
         return pc_df
     except Exception as e:
         raise RuntimeError(f"Failed to load PCs: {e}") from e
@@ -807,14 +865,21 @@ def load_demographics_with_stable_age(bq_client, cdr_id: str) -> pd.DataFrame:
     obs_df["person_id"] = obs_df["person_id"].astype(str)
 
     demographics = pd.merge(yob_df, obs_df, on="person_id", how="inner")
-    demographics["year_of_birth"] = pd.to_numeric(demographics["year_of_birth"], errors="coerce")
+    demographics["year_of_birth"] = pd.to_numeric(
+        demographics["year_of_birth"], errors="coerce"
+    )
     demographics["AGE"] = demographics["obs_end_year"] - demographics["year_of_birth"]
     demographics["AGE"] = demographics["AGE"].clip(lower=0, upper=120)
     demographics["AGE_sq"] = demographics["AGE"] ** 2
 
-    final_df = demographics[["person_id", "AGE", "AGE_sq"]].dropna().set_index("person_id")
-    print(f"    -> Successfully calculated stable age for {len(final_df):,} participants.")
+    final_df = (
+        demographics[["person_id", "AGE", "AGE_sq"]].dropna().set_index("person_id")
+    )
+    print(
+        f"    -> Successfully calculated stable age for {len(final_df):,} participants."
+    )
     return final_df
+
 
 # ---------------------------------------------------------------------------
 # Misc helpers
@@ -829,7 +894,9 @@ def parquet_n_rows(path: str) -> Optional[int]:
         return None
 
 
-def load_pheno_cases_from_cache(name: str, cache_dir: str, cdr_codename: str) -> pd.Index:
+def load_pheno_cases_from_cache(
+    name: str, cache_dir: str, cdr_codename: str
+) -> pd.Index:
     path = os.path.join(cache_dir, f"pheno_{name}_{cdr_codename}.parquet")
     if not os.path.exists(path):
         return pd.Index([], dtype=str)

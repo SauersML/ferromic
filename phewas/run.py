@@ -1,4 +1,5 @@
 import os
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -11,8 +12,10 @@ import faulthandler
 import sys
 import traceback
 import json
+
 try:
     import psutil
+
     PSUTIL_AVAILABLE = True
 except Exception:
     PSUTIL_AVAILABLE = False
@@ -34,21 +37,32 @@ from . import testing
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 # 1. RuntimeWarning: overflow encountered in exp
-warnings.filterwarnings('ignore', message='overflow encountered in exp', category=RuntimeWarning)
+warnings.filterwarnings(
+    "ignore", message="overflow encountered in exp", category=RuntimeWarning
+)
 
 # 2. RuntimeWarning: divide by zero encountered in log
-warnings.filterwarnings('ignore', message='divide by zero encountered in log', category=RuntimeWarning)
+warnings.filterwarnings(
+    "ignore", message="divide by zero encountered in log", category=RuntimeWarning
+)
 
 # 3. ConvergenceWarning: QC check did not pass
-warnings.filterwarnings('ignore', message=r'QC check did not pass', category=ConvergenceWarning)
+warnings.filterwarnings(
+    "ignore", message=r"QC check did not pass", category=ConvergenceWarning
+)
 
 # 4. ConvergenceWarning: Could not trim params automatically
-warnings.filterwarnings('ignore', message=r'Could not trim params automatically', category=ConvergenceWarning)
+warnings.filterwarnings(
+    "ignore",
+    message=r"Could not trim params automatically",
+    category=ConvergenceWarning,
+)
 
 try:
     faulthandler.enable()
 except Exception:
     pass
+
 
 def _global_excepthook(exc_type, exc, tb):
     """
@@ -58,18 +72,23 @@ def _global_excepthook(exc_type, exc, tb):
     traceback.print_exception(exc_type, exc, tb)
     sys.stderr.flush()
 
+
 sys.excepthook = _global_excepthook
+
 
 def _thread_excepthook(args):
     _global_excepthook(args.exc_type, args.exc_value, args.exc_traceback)
 
+
 threading.excepthook = _thread_excepthook
+
 
 class SystemMonitor(threading.Thread):
     """
     A thread that monitors and reports system resource usage periodically.
     It is also a thread-safe data provider for the ResourceGovernor.
     """
+
     def __init__(self, interval=2):
         super().__init__(daemon=True)
         self.interval = interval
@@ -88,7 +107,7 @@ class SystemMonitor(threading.Thread):
         self.app_cpu_percent = 0.0
         self._sample_ts = 0.0
 
-    def snapshot(self) -> 'ResourceSnapshot':
+    def snapshot(self) -> "ResourceSnapshot":
         """Returns a thread-safe snapshot of the current stats."""
         with self._lock:
             return ResourceSnapshot(
@@ -121,7 +140,12 @@ class SystemMonitor(threading.Thread):
                 cpu = psutil.cpu_percent(interval=self.interval)
                 mem = psutil.virtual_memory()
                 ram_percent = mem.percent
-                available_gb = mem.available / (1024**3)
+                host_available_gb = mem.available / (1024**3)
+                cgroup_available = pipes.cgroup_available_gb()
+                if cgroup_available is not None:
+                    available_gb = min(host_available_gb, cgroup_available)
+                else:
+                    available_gb = host_available_gb
                 child_processes = self._main_process.children(recursive=True)
                 main_mem = self._main_process.memory_info()
                 child_mem = sum(p.memory_info().rss for p in child_processes)
@@ -147,9 +171,14 @@ class SystemMonitor(threading.Thread):
                     self.app_cpu_percent = app_cpu
                     self._sample_ts = time.time()
 
+                if cgroup_available is not None:
+                    avail_str = f"{available_gb:.2f}GB (cg:{cgroup_available:.2f}GB)"
+                else:
+                    avail_str = f"{available_gb:.2f}GB"
+
                 print(
                     f"[SysMonitor] CPU: {cpu:5.1f}% | AppCPU: {app_cpu:5.1f}% | RAM: {ram_percent:5.1f}% "
-                    f"(avail: {available_gb:.2f}GB) | App RSS: {total_rss_gb:.2f}GB | "
+                    f"(avail: {avail_str}) | App RSS: {total_rss_gb:.2f}GB | "
                     f"Budget: {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB",
                     flush=True,
                 )
@@ -160,11 +189,12 @@ class SystemMonitor(threading.Thread):
                     for (inv, stage), (d, q, ts) in prog.items():
                         prev = by_inv.get(inv)
                         if (prev is None) or (ts > prev[-1]):
-                            pct = int((100*d/q)) if q else 0
+                            pct = int((100 * d / q)) if q else 0
                             by_inv[inv] = (stage, d, q, pct, ts)
                     if by_inv:
                         parts = [
-                            f"{inv}:{stage} {pct}%" for inv, (stage, _, _, pct, _) in sorted(by_inv.items())
+                            f"{inv}:{stage} {pct}%"
+                            for inv, (stage, _, _, pct, _) in sorted(by_inv.items())
                         ]
                         print("[Progress] " + " | ".join(parts), flush=True)
                 except Exception:
@@ -173,6 +203,7 @@ class SystemMonitor(threading.Thread):
                 break
             except Exception as e:
                 print(f"[SysMonitor] Error: {e}", flush=True)
+
 
 from collections import deque
 from dataclasses import dataclass
@@ -183,6 +214,7 @@ try:
 except Exception:
     pass
 
+
 @dataclass
 class ResourceSnapshot:
     ts: float
@@ -190,6 +222,7 @@ class ResourceSnapshot:
     sys_available_gb: float
     app_rss_gb: float
     app_cpu_percent: float
+
 
 class ResourceGovernor:
     def __init__(self, monitor: SystemMonitor, history_sec: int = 30):
@@ -209,7 +242,6 @@ class ResourceGovernor:
         if not self._history or self._history[-1].ts != snap.ts:
             self._history.append(snap)
 
-
     def can_admit_next(self, predicted_extra_gb: float) -> bool:
         self._update_history()
         if not self._history:
@@ -217,10 +249,13 @@ class ResourceGovernor:
 
         with self._lock:
             latest_mem_gb = self._history[-1].sys_available_gb
-            mem_ok = (latest_mem_gb - predicted_extra_gb) >= self.mem_guard_gb
+            budget_avail = pipes.BUDGET.remaining_gb()
+            effective_avail = min(latest_mem_gb, budget_avail)
+            mem_ok = (effective_avail - predicted_extra_gb) >= self.mem_guard_gb
             if not mem_ok:
                 print(
-                    f"[Governor] Hold: mem_avail={latest_mem_gb:.2f}GB, pred_cost={predicted_extra_gb:.2f}GB",
+                    f"[Governor] Hold: mem_avail~{effective_avail:.2f}GB (budget {budget_avail:.2f}GB), "
+                    f"pred_cost={predicted_extra_gb:.2f}GB",
                     flush=True,
                 )
             return mem_ok
@@ -228,13 +263,18 @@ class ResourceGovernor:
     def predict_extra_gb_before_pool(self, N: int, C: int) -> float:
         base_estimate = (N * C * 8 / 1024**3) * 1.6
         with self._lock:
-            if not self.observed_core_df_gb: return base_estimate
+            if not self.observed_core_df_gb:
+                return base_estimate
             return max(base_estimate, np.percentile(self.observed_core_df_gb, 75))
 
     def predict_extra_gb_after_pool(self) -> float:
         with self._lock:
             if not self.observed_steady_state_gb:
-                core_df_pred = np.percentile(self.observed_core_df_gb, 75) if self.observed_core_df_gb else 1.0
+                core_df_pred = (
+                    np.percentile(self.observed_core_df_gb, 75)
+                    if self.observed_core_df_gb
+                    else 1.0
+                )
                 return core_df_pred * 1.3
             return np.percentile(self.observed_steady_state_gb, 75)
 
@@ -254,6 +294,7 @@ class ResourceGovernor:
         predicted_ss_footprint = self.predict_extra_gb_after_pool()
         # Raise the floor based on the predicted steady-state footprint of one inversion
         return max(base_floor, predicted_ss_footprint + 0.5)
+
 
 class MultiTenantGovernor(ResourceGovernor):
     def __init__(self, monitor, history_sec=30):
@@ -278,7 +319,7 @@ class MultiTenantGovernor(ResourceGovernor):
         if not PSUTIL_AVAILABLE:
             self.inv_rss_gb[inv_id] = 0.0
             return 0.0
-    
+
         def _pss_kb(pid: int) -> int:
             path = f"/proc/{pid}/smaps_rollup"
             try:
@@ -294,13 +335,13 @@ class MultiTenantGovernor(ResourceGovernor):
             except Exception:
                 return -1
             return -1
-    
+
         total_bytes = 0
         pids = self.inv_pools.get(inv_id, [])
         if not pids:
             self.inv_rss_gb[inv_id] = 0.0
             return 0.0
-    
+
         valid_pids = []
         for pid in pids:
             try:
@@ -320,14 +361,13 @@ class MultiTenantGovernor(ResourceGovernor):
                 pass
             except Exception:
                 pass
-    
+
         if len(valid_pids) < len(pids):
             self.inv_pools[inv_id] = valid_pids
-    
+
         measured_gb = total_bytes / (1024**3)
         self.inv_rss_gb[inv_id] = measured_gb
         return measured_gb
-
 
     def total_active_footprint(self):
         return sum(self.inv_rss_gb.values())
@@ -349,28 +389,32 @@ class MultiTenantGovernor(ResourceGovernor):
         if not self._history:
             return True
         latest_avail = self._history[-1].sys_available_gb
+        budget_avail = pipes.BUDGET.remaining_gb()
+        effective_avail = min(latest_avail, budget_avail)
         active = self.total_active_footprint()
-        mem_ok = (latest_avail - predicted_gb) >= self.mem_guard_gb
+        mem_ok = (effective_avail - predicted_gb) >= self.mem_guard_gb
         if active == 0 and mem_ok:
             return True
         if not mem_ok:
             print(
-                f"[Governor] Hold: mem_avail={latest_avail:.2f}GB, active={active:.2f}GB, next_pred={predicted_gb:.2f}GB",
+                f"[Governor] Hold: mem_avail~{effective_avail:.2f}GB (budget {budget_avail:.2f}GB), "
+                f"active={active:.2f}GB, next_pred={predicted_gb:.2f}GB",
                 flush=True,
             )
         return mem_ok
 
+
 # --- Configuration ---
 TARGET_INVERSIONS = {
-    'chr10-79542902-INV-674513', 
-    'chr12-46897663-INV-16289', 
-    'chr17-45585160-INV-706887', 
-    'chr21-13992018-INV-65632', 
-    'chr4-33098029-INV-7075', 
-    'chr6-141867315-INV-29159', 
-    'chr6-167181003-INV-209976', 
-    'chr6-76111919-INV-44661', 
-    'chr7-57835189-INV-284465'
+    "chr10-79542902-INV-674513",
+    "chr12-46897663-INV-16289",
+    "chr17-45585160-INV-706887",
+    "chr21-13992018-INV-65632",
+    "chr4-33098029-INV-7075",
+    "chr6-141867315-INV-29159",
+    "chr6-167181003-INV-209976",
+    "chr6-76111919-INV-44661",
+    "chr7-57835189-INV-284465",
 }
 
 PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads/main/data/significant_heritability_diseases.tsv"
@@ -396,7 +440,7 @@ CACHE_VERSION_TAG = io.CACHE_VERSION_TAG
 NUM_PCS = 16
 MIN_CASES_FILTER = 1000
 MIN_CONTROLS_FILTER = 1000
-MIN_NEFF_FILTER = 0 # Default off
+MIN_NEFF_FILTER = 0  # Default off
 FDR_ALPHA = 0.05
 
 # --- Testing configuration (centralized in testing.py) ---
@@ -419,14 +463,18 @@ RIDGE_L2_BASE = 1.0
 pd.options.mode.chained_assignment = None
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+
 class Timer:
     """Context manager for timing code blocks."""
+
     def __enter__(self):
         self.start_time = time.time()
         return self
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.end_time = time.time()
         self.duration = self.end_time - self.start_time
+
 
 def _find_upwards(pathname: str) -> str:
     """
@@ -452,6 +500,7 @@ def _find_upwards(pathname: str) -> str:
 def _source_key(*parts) -> str:
     return io.stable_hash({"parts": parts, "version": CACHE_VERSION_TAG})
 
+
 def _pipeline_once():
     """
     Entry point for the PheWAS pipeline. Uses module-level configuration directly.
@@ -475,7 +524,6 @@ def _pipeline_once():
         # Lower-bound at 4 GB guard; raise to predicted steady state + small cushion.
         return max(4.0, governor.dynamic_floor_callable())
 
-
     print("=" * 70)
     print(" Starting Robust, Parallel PheWAS Pipeline")
     print("=" * 70)
@@ -485,6 +533,7 @@ def _pipeline_once():
         TARGET_INVERSIONS = {TARGET_INVERSIONS}
 
     from types import SimpleNamespace
+
     run = SimpleNamespace(TARGET_INVERSIONS=TARGET_INVERSIONS)
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(LOCK_DIR, exist_ok=True)
@@ -497,8 +546,11 @@ def _pipeline_once():
             gcp_project = os.environ["GOOGLE_PROJECT"]
             bq_client = bigquery.Client(project=gcp_project)
             cdr_codename = cdr_dataset_id.split(".")[-1]
+            demographics_cache_path = os.path.join(
+                CACHE_DIR, f"demographics_{cdr_codename}.parquet"
+            )
             demographics_df = io.get_cached_or_generate(
-                os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"),
+                demographics_cache_path,
                 io.load_demographics_with_stable_age,
                 bq_client=bq_client,
                 cdr_id=cdr_dataset_id,
@@ -528,12 +580,22 @@ def _pipeline_once():
                 SEX_URI,
                 lock_dir=LOCK_DIR,
             )
-            related_ids_to_remove = io.load_related_to_remove(gcp_project=gcp_project, RELATEDNESS_URI=RELATEDNESS_URI)
-            demographics_df.index, pc_df.index, sex_df.index = [df.index.astype(str) for df in (demographics_df, pc_df, sex_df)]
-            shared_covariates_df = demographics_df.join(pc_df, how="inner").join(sex_df, how="inner")
-            shared_covariates_df = shared_covariates_df[~shared_covariates_df.index.isin(related_ids_to_remove)]
+            related_ids_to_remove = io.load_related_to_remove(
+                gcp_project=gcp_project, RELATEDNESS_URI=RELATEDNESS_URI
+            )
+            demographics_df.index, pc_df.index, sex_df.index = [
+                df.index.astype(str) for df in (demographics_df, pc_df, sex_df)
+            ]
+            shared_covariates_df = demographics_df.join(pc_df, how="inner").join(
+                sex_df, how="inner"
+            )
+            shared_covariates_df = shared_covariates_df[
+                ~shared_covariates_df.index.isin(related_ids_to_remove)
+            ]
 
-            LABELS_URI = PCS_URI # Clarify that PCs and Ancestry labels are from the same source
+            LABELS_URI = (
+                PCS_URI  # Clarify that PCs and Ancestry labels are from the same source
+            )
             ancestry_cache = os.path.join(
                 CACHE_DIR,
                 f"ancestry_labels_{_source_key(gcp_project, LABELS_URI)}.parquet",
@@ -545,35 +607,61 @@ def _pipeline_once():
                 LABELS_URI=LABELS_URI,
                 lock_dir=LOCK_DIR,
             )
-            anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"].str.lower()
-            anc_cat_global = pd.Categorical(anc_series.reindex(shared_covariates_df.index))
-            A_global = pd.get_dummies(anc_cat_global, prefix='ANC', drop_first=True, dtype=np.float32)
+            anc_series = ancestry.reindex(shared_covariates_df.index)[
+                "ANCESTRY"
+            ].str.lower()
+            anc_cat_global = pd.Categorical(
+                anc_series.reindex(shared_covariates_df.index)
+            )
+            A_global = pd.get_dummies(
+                anc_cat_global, prefix="ANC", drop_first=True, dtype=np.float32
+            )
             A_global.index = A_global.index.astype(str)
             A_cols = list(A_global.columns)
         print(f"\n--- Shared Setup Time: {t_setup.duration:.2f}s ---")
-        
+
         # --- Filter TARGET_INVERSIONS to only those present in the dosages TSV ---
         dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
         dosages_resolved = os.path.abspath(dosages_path)
         try:
             hdr = pd.read_csv(dosages_path, sep="\t", nrows=0).columns.tolist()
-            id_candidates = {"SampleID", "sample_id", "person_id", "research_id", "participant_id", "ID"}
+            id_candidates = {
+                "SampleID",
+                "sample_id",
+                "person_id",
+                "research_id",
+                "participant_id",
+                "ID",
+            }
             id_col = next((c for c in hdr if c in id_candidates), None)
             available_inversions = set(hdr) - ({id_col} if id_col else set())
-        
+
             missing = sorted(run.TARGET_INVERSIONS - available_inversions)
             if missing:
-                print(f"[Config] Skipping {len(missing)} inversions not present in dosages file. "
-                      f"Examples: {', '.join(missing[:5])}")
-        
+                print(
+                    f"[Config] Skipping {len(missing)} inversions not present in dosages file. "
+                    f"Examples: {', '.join(missing[:5])}"
+                )
+
             run.TARGET_INVERSIONS = run.TARGET_INVERSIONS & available_inversions
             if not run.TARGET_INVERSIONS:
-                raise RuntimeError("No target inversions remain after filtering; check your dosages file and configuration.")
+                raise RuntimeError(
+                    "No target inversions remain after filtering; check your dosages file and configuration."
+                )
         except Exception as e:
-            print(f"[Config WARN] Could not inspect dosages header at '{dosages_path}': {e}")
+            print(
+                f"[Config WARN] Could not inspect dosages header at '{dosages_path}': {e}"
+            )
 
         try:
-            pheno.populate_caches_prepass(pheno_defs_df, bq_client, cdr_dataset_id, shared_covariates_df.index, CACHE_DIR, cdr_codename)
+            pheno.populate_caches_prepass(
+                pheno_defs_df,
+                bq_client,
+                cdr_dataset_id,
+                shared_covariates_df.index,
+                CACHE_DIR,
+                cdr_codename,
+            )
         except Exception as e:
             print(f"[Prepass WARN] Cache prepass failed: {e}", flush=True)
 
@@ -587,11 +675,27 @@ def _pipeline_once():
                 min_cases=MIN_CASES_FILTER,
                 phi_threshold=pheno.PHI_THRESHOLD,
                 share_threshold=pheno.SHARE_THRESHOLD,
-                protect=PHENO_PROTECT
+                protect=PHENO_PROTECT,
             )
             print("[Setup]    - Global phenotype dedup manifest ready.", flush=True)
         except Exception as e:
             print(f"[Dedup WARN] Global dedup pass failed: {e}", flush=True)
+
+        dosages_key = _source_key(dosages_resolved)
+        covar_key = _source_key(
+            demographics_cache_path,
+            pcs_cache,
+            sex_cache,
+            ancestry_cache,
+            gcp_project,
+            PCS_URI,
+            SEX_URI,
+            RELATEDNESS_URI,
+        )
+        data_keys = {
+            "dosages": dosages_key,
+            "covars": covar_key,
+        }
 
         def _inversion_cache_path(inv: str) -> str:
             inv_safe = models.safe_basename(inv)
@@ -616,14 +720,17 @@ def _pipeline_once():
                 "SELECTION": tctx.get("SELECTION"),
                 "BOOTSTRAP_B": tctx.get("BOOTSTRAP_B"),
                 "BOOT_SEED_BASE": tctx.get("BOOT_SEED_BASE"),
+                "DATA_KEYS": data_keys,
             }
             return io.stable_hash(payload)
 
         ctx_tag_by_inversion = {inv: _ctx_tag_for(inv) for inv in run.TARGET_INVERSIONS}
 
         governor = MultiTenantGovernor(monitor_thread)
-        
-        def run_single_inversion(target_inversion: str, baseline_rss_gb: float, shared_data: dict):
+
+        def run_single_inversion(
+            target_inversion: str, baseline_rss_gb: float, shared_data: dict
+        ):
             inv_safe_name = models.safe_basename(target_inversion)
             log_prefix = f"[INV {inv_safe_name}]"
             try:
@@ -631,8 +738,12 @@ def _pipeline_once():
                 inversion_cache_dir = os.path.join(CACHE_DIR, inv_safe_name)
                 results_cache_dir = os.path.join(inversion_cache_dir, "results_atomic")
                 lrt_overall_cache_dir = os.path.join(inversion_cache_dir, "lrt_overall")
-                lrt_followup_cache_dir = os.path.join(inversion_cache_dir, "lrt_followup")
-                boot_overall_cache_dir = os.path.join(inversion_cache_dir, "boot_overall")
+                lrt_followup_cache_dir = os.path.join(
+                    inversion_cache_dir, "lrt_followup"
+                )
+                boot_overall_cache_dir = os.path.join(
+                    inversion_cache_dir, "boot_overall"
+                )
                 os.makedirs(results_cache_dir, exist_ok=True)
                 os.makedirs(lrt_followup_cache_dir, exist_ok=True)
                 if tctx["MODE"] == "bootstrap":
@@ -657,60 +768,90 @@ def _pipeline_once():
                     "BOOT_OVERALL_CACHE_DIR": boot_overall_cache_dir,
                     "BOOTSTRAP_B": tctx["BOOTSTRAP_B"],
                     "BOOT_SEED_BASE": tctx["BOOT_SEED_BASE"],
-                    "cdr_codename": shared_data['cdr_codename'],
+                    "cdr_codename": shared_data["cdr_codename"],
                     "REPAIR_META_IF_MISSING": True,
                     "CACHE_VERSION_TAG": CACHE_VERSION_TAG,
                     "MODE": tctx.get("MODE"),
                     "SELECTION": tctx.get("SELECTION"),
                     "TARGET_INVERSION": target_inversion,
                     "CTX_TAG": ctx_tag_by_inversion.get(target_inversion),
+                    "DATA_KEYS": data_keys,
                 }
                 pheno.configure_from_ctx(ctx)
                 inversion_df = io.get_cached_or_generate(
                     _inversion_cache_path(target_inversion),
                     io.load_inversions,
                     target_inversion,
-                    dosages_path,
+                    dosages_resolved,
                     validate_target=target_inversion,
                     lock_dir=LOCK_DIR,
                 )
                 inversion_df.index = inversion_df.index.astype(str)
-                core_df = shared_data['covariates'].join(inversion_df, how="inner")
+                core_df = shared_data["covariates"].join(inversion_df, how="inner")
 
-                age_mean = core_df['AGE'].mean()
-                core_df['AGE_c'] = core_df['AGE'] - age_mean
-                core_df['AGE_c_sq'] = core_df['AGE_c'] ** 2
+                age_mean = core_df["AGE"].mean()
+                core_df["AGE_c"] = core_df["AGE"] - age_mean
+                core_df["AGE_c_sq"] = core_df["AGE_c"] ** 2
                 pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-                covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
+                covariate_cols = (
+                    [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
+                )
                 core_df_subset = core_df[covariate_cols].astype(np.float32, copy=False)
                 core_df_subset["const"] = np.float32(1.0)
-                A_slice = shared_data['A_global'].reindex(core_df_subset.index).fillna(0.0).astype(np.float32)
-                core_df_with_const = pd.concat([core_df_subset, A_slice], axis=1, copy=False).astype(np.float32, copy=False)
+                A_slice = (
+                    shared_data["A_global"]
+                    .reindex(core_df_subset.index)
+                    .fillna(0.0)
+                    .astype(np.float32)
+                )
+                core_df_with_const = pd.concat(
+                    [core_df_subset, A_slice], axis=1, copy=False
+                ).astype(np.float32, copy=False)
 
-                delta_core_df_gb = (monitor_thread.snapshot().app_rss_gb - baseline_rss_gb) if monitor_thread else 0.0
+                delta_core_df_gb = (
+                    (monitor_thread.snapshot().app_rss_gb - baseline_rss_gb)
+                    if monitor_thread
+                    else 0.0
+                )
                 governor.update_after_core_df(delta_core_df_gb)
 
-                core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
-                global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
-                pan_path = os.path.join(CACHE_DIR, f"pan_category_cases_{shared_data['cdr_codename']}.pkl")
+                core_index = pd.Index(
+                    core_df_with_const.index.astype(str), name="person_id"
+                )
+                global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(
+                    axis=1
+                )
+                pan_path = os.path.join(
+                    CACHE_DIR, f"pan_category_cases_{shared_data['cdr_codename']}.pkl"
+                )
                 category_to_pan_cases = io.get_cached_or_generate_pickle(
                     pan_path,
                     pheno.build_pan_category_cases,
-                    shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], CACHE_DIR, shared_data['cdr_codename'],
+                    shared_data["pheno_defs"],
+                    shared_data["bq_client"],
+                    shared_data["cdr_id"],
+                    CACHE_DIR,
+                    shared_data["cdr_codename"],
                     lock_dir=LOCK_DIR,
                 )
-                allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
+                allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(
+                    core_index, category_to_pan_cases, global_notnull_mask
+                )
 
-                sex_vec = core_df_with_const['sex'].to_numpy(dtype=np.float32, copy=False)
-                
+                sex_vec = core_df_with_const["sex"].to_numpy(
+                    dtype=np.float32, copy=False
+                )
+
                 # --- Build Stage-1 testing worklist without running main PheWAS ---
                 phenos_list = []
-                for row in shared_data['pheno_defs'][['sanitized_name','disease_category']].to_dict('records'):
+                for row in shared_data["pheno_defs"][
+                    ["sanitized_name", "disease_category"]
+                ].to_dict("records"):
                     info = {
-                        'sanitized_name': row['sanitized_name'],
-                        'disease_category': row['disease_category'],
-                        'cdr_codename': shared_data['cdr_codename'],
-                        'cache_dir': CACHE_DIR
+                        "sanitized_name": row["sanitized_name"],
+                        "disease_category": row["disease_category"],
+                        "cdr_codename": shared_data["cdr_codename"],
+                        "cache_dir": CACHE_DIR,
                     }
                     ok = pheno._prequeue_should_run(
                         info,
@@ -722,36 +863,53 @@ def _pipeline_once():
                         sex_mode="majority",
                         sex_prop=models.DEFAULT_SEX_RESTRICT_PROP,
                         max_other=ctx.get("SEX_RESTRICT_MAX_OTHER_CASES", 0),
-                        min_neff=(MIN_NEFF_FILTER if MIN_NEFF_FILTER > 0 else None)
+                        min_neff=(MIN_NEFF_FILTER if MIN_NEFF_FILTER > 0 else None),
                     )
                     if ok:
-                        phenos_list.append(row['sanitized_name'])
-                
-                print(f"{log_prefix} Queued {len(phenos_list)} phenotypes for Stage-1 testing (pre-filtered).")
+                        phenos_list.append(row["sanitized_name"])
+
+                print(
+                    f"{log_prefix} Queued {len(phenos_list)} phenotypes for Stage-1 testing (pre-filtered)."
+                )
 
                 def on_pool_started_callback(num_procs, worker_pids):
                     governor.register_pool(inv_safe_name, worker_pids)
                     time.sleep(10)
                     measured_gb = governor.measure_inv(inv_safe_name)
-                    core_shm_gb = float(pipes.BUDGET._reserved_by_inv.get(inv_safe_name, {}).get("core_shm", 0.0))
-                    boot_shm_gb = float(pipes.BUDGET._reserved_by_inv.get(inv_safe_name, {}).get("boot_shm", 0.0))
+                    core_shm_gb = float(
+                        pipes.BUDGET._reserved_by_inv.get(inv_safe_name, {}).get(
+                            "core_shm", 0.0
+                        )
+                    )
+                    boot_shm_gb = float(
+                        pipes.BUDGET._reserved_by_inv.get(inv_safe_name, {}).get(
+                            "boot_shm", 0.0
+                        )
+                    )
                     # Do not double-charge shared matrices: reserve only the pool's incremental footprint.
                     pool_steady_gb = max(0.0, measured_gb - core_shm_gb - boot_shm_gb)
                     governor.update_steady_state(inv_safe_name, pool_steady_gb)
                     pipes.BUDGET.revise(inv_safe_name, "pool_steady", pool_steady_gb)
                     per_worker = max(0.25, pool_steady_gb / max(1, num_procs))
                     pipes._WORKER_GB_EST = 0.5 * pipes._WORKER_GB_EST + 0.5 * per_worker
-                    print(f"[Budget] {inv_safe_name}.pool_steady: set {pool_steady_gb:.2f}GB | remaining {pipes.BUDGET.remaining_gb():.2f}GB", flush=True)
+                    print(
+                        f"[Budget] {inv_safe_name}.pool_steady: set {pool_steady_gb:.2f}GB | remaining {pipes.BUDGET.remaining_gb():.2f}GB",
+                        flush=True,
+                    )
 
-                name_to_cat = shared_data['pheno_defs'].set_index('sanitized_name')['disease_category'].to_dict()
+                name_to_cat = (
+                    shared_data["pheno_defs"]
+                    .set_index("sanitized_name")["disease_category"]
+                    .to_dict()
+                )
                 if phenos_list:
                     testing.run_overall(
                         core_df_with_const,
                         allowed_mask_by_cat,
-                        shared_data['anc_series'],
+                        shared_data["anc_series"],
                         phenos_list,
                         name_to_cat,
-                        shared_data['cdr_codename'],
+                        shared_data["cdr_codename"],
                         target_inversion,
                         ctx,
                         mem_floor_callable,
@@ -759,80 +917,187 @@ def _pipeline_once():
                         mode=tctx["MODE"],
                     )
                 else:
-                    print(f"{log_prefix} No phenotypes qualified for Stage-1 testing after prefiltering.")
+                    print(
+                        f"{log_prefix} No phenotypes qualified for Stage-1 testing after prefiltering."
+                    )
 
                 try:
                     rows = []
                     if tctx["MODE"] == "lrt_bh":
-                        lrt_files = [f for f in os.listdir(lrt_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+                        lrt_files = [
+                            f
+                            for f in os.listdir(lrt_overall_cache_dir)
+                            if f.endswith(".json") and not f.endswith(".meta.json")
+                        ]
                         for fn in lrt_files:
-                            meta_path = os.path.join(lrt_overall_cache_dir, fn.replace(".json", ".meta.json"))
+                            meta_path = os.path.join(
+                                lrt_overall_cache_dir, fn.replace(".json", ".meta.json")
+                            )
                             meta = io.read_meta_json(meta_path)
                             if not meta:
                                 continue
-                            if meta.get("ctx_tag") != ctx.get("CTX_TAG") or meta.get("cdr_codename") != shared_data['cdr_codename'] or meta.get("target") != target_inversion:
+                            if (
+                                meta.get("ctx_tag") != ctx.get("CTX_TAG")
+                                or meta.get("cdr_codename")
+                                != shared_data["cdr_codename"]
+                                or meta.get("target") != target_inversion
+                            ):
                                 continue
-                            s = pd.read_json(os.path.join(lrt_overall_cache_dir, fn), typ="series")
-                            rows.append({"Phenotype": os.path.splitext(fn)[0], "P_LRT_Overall": pd.to_numeric(s.get("P_LRT_Overall"), errors="coerce")})
+                            s = pd.read_json(
+                                os.path.join(lrt_overall_cache_dir, fn), typ="series"
+                            )
+                            rows.append(
+                                {
+                                    "Phenotype": os.path.splitext(fn)[0],
+                                    "P_LRT_Overall": pd.to_numeric(
+                                        s.get("P_LRT_Overall"), errors="coerce"
+                                    ),
+                                }
+                            )
                         p_col = "P_LRT_Overall"
                     else:
-                        boot_files = [f for f in os.listdir(boot_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+                        boot_files = [
+                            f
+                            for f in os.listdir(boot_overall_cache_dir)
+                            if f.endswith(".json") and not f.endswith(".meta.json")
+                        ]
                         for fn in boot_files:
-                            meta_path = os.path.join(boot_overall_cache_dir, fn.replace(".json", ".meta.json"))
+                            meta_path = os.path.join(
+                                boot_overall_cache_dir,
+                                fn.replace(".json", ".meta.json"),
+                            )
                             meta = io.read_meta_json(meta_path)
                             if not meta:
                                 continue
-                            if meta.get("ctx_tag") != ctx.get("CTX_TAG") or meta.get("cdr_codename") != shared_data['cdr_codename'] or meta.get("target") != target_inversion:
+                            if (
+                                meta.get("ctx_tag") != ctx.get("CTX_TAG")
+                                or meta.get("cdr_codename")
+                                != shared_data["cdr_codename"]
+                                or meta.get("target") != target_inversion
+                            ):
                                 continue
-                            s = pd.read_json(os.path.join(boot_overall_cache_dir, fn), typ="series")
-                            rows.append({"Phenotype": os.path.splitext(fn)[0], "P_EMP": pd.to_numeric(s.get("P_EMP"), errors="coerce")})
+                            s = pd.read_json(
+                                os.path.join(boot_overall_cache_dir, fn), typ="series"
+                            )
+                            rows.append(
+                                {
+                                    "Phenotype": os.path.splitext(fn)[0],
+                                    "P_EMP": pd.to_numeric(
+                                        s.get("P_EMP"), errors="coerce"
+                                    ),
+                                }
+                            )
                         p_col = "P_EMP"
                     lrt_df = pd.DataFrame(rows)
-                    res_files = [f for f in os.listdir(results_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+                    res_files = [
+                        f
+                        for f in os.listdir(results_cache_dir)
+                        if f.endswith(".json") and not f.endswith(".meta.json")
+                    ]
                     rrows = []
                     for fn in res_files:
-                        meta_path = os.path.join(results_cache_dir, fn.replace(".json", ".meta.json"))
+                        meta_path = os.path.join(
+                            results_cache_dir, fn.replace(".json", ".meta.json")
+                        )
                         meta = io.read_meta_json(meta_path)
                         if not meta:
                             continue
-                        if meta.get("ctx_tag") != ctx.get("CTX_TAG") or meta.get("cdr_codename") != shared_data['cdr_codename'] or meta.get("target") != target_inversion:
+                        if (
+                            meta.get("ctx_tag") != ctx.get("CTX_TAG")
+                            or meta.get("cdr_codename") != shared_data["cdr_codename"]
+                            or meta.get("target") != target_inversion
+                        ):
                             continue
-                        s = pd.read_json(os.path.join(results_cache_dir, fn), typ="series")
-                        rrows.append({
-                            "Phenotype": os.path.splitext(fn)[0],
-                            "N_Total": pd.to_numeric(s.get("N_Total"), errors="coerce"),
-                            "OR": pd.to_numeric(s.get("OR"), errors="coerce"),
-                            "Beta": pd.to_numeric(s.get("Beta"), errors="coerce"),
-                            "P_Value": pd.to_numeric(s.get("P_Value"), errors="coerce"),
-                            "OR_CI95": s.get("OR_CI95"),
-                            "N_Cases": pd.to_numeric(s.get("N_Cases"), errors="coerce"),
-                            "N_Controls": pd.to_numeric(s.get("N_Controls"), errors="coerce"),
-                        })
+                        s = pd.read_json(
+                            os.path.join(results_cache_dir, fn), typ="series"
+                        )
+                        rrows.append(
+                            {
+                                "Phenotype": os.path.splitext(fn)[0],
+                                "N_Total": pd.to_numeric(
+                                    s.get("N_Total"), errors="coerce"
+                                ),
+                                "OR": pd.to_numeric(s.get("OR"), errors="coerce"),
+                                "Beta": pd.to_numeric(s.get("Beta"), errors="coerce"),
+                                "P_Value": pd.to_numeric(
+                                    s.get("P_Value"), errors="coerce"
+                                ),
+                                "OR_CI95": s.get("OR_CI95"),
+                                "N_Cases": pd.to_numeric(
+                                    s.get("N_Cases"), errors="coerce"
+                                ),
+                                "N_Controls": pd.to_numeric(
+                                    s.get("N_Controls"), errors="coerce"
+                                ),
+                            }
+                        )
                     res_df = pd.DataFrame(rrows)
-                    inv_df = lrt_df.merge(res_df, on="Phenotype", how="left") if not lrt_df.empty else pd.DataFrame(columns=["Phenotype", p_col, "N_Total", "OR", "Beta", "P_Value", "N_Cases", "N_Controls"])
+                    inv_df = (
+                        lrt_df.merge(res_df, on="Phenotype", how="left")
+                        if not lrt_df.empty
+                        else pd.DataFrame(
+                            columns=[
+                                "Phenotype",
+                                p_col,
+                                "N_Total",
+                                "OR",
+                                "Beta",
+                                "P_Value",
+                                "N_Cases",
+                                "N_Controls",
+                            ]
+                        )
+                    )
                     m = int(inv_df[p_col].notna().sum()) if not inv_df.empty else 0
                     if m > 0:
                         mask = inv_df[p_col].notna()
-                        _, q_within, _, _ = multipletests(inv_df.loc[mask, p_col], alpha=FDR_ALPHA, method="fdr_bh")
+                        _, q_within, _, _ = multipletests(
+                            inv_df.loc[mask, p_col], alpha=FDR_ALPHA, method="fdr_bh"
+                        )
                         inv_df.loc[mask, "Q_within"] = q_within
 
                     def _fmt(v, fmt_str):
                         return f"{float(v):{fmt_str}}" if pd.notna(v) else ""
-                    top = inv_df.sort_values(p_col).head(10).copy() if m > 0 else inv_df.head(0)
+
+                    top = (
+                        inv_df.sort_values(p_col).head(10).copy()
+                        if m > 0
+                        else inv_df.head(0)
+                    )
                     top["P"] = top[p_col].apply(lambda v: _fmt(v, ".3e"))
                     top["Q"] = top["Q_within"].apply(lambda v: _fmt(v, ".3f"))
                     top["OR"] = top["OR"].apply(lambda v: _fmt(v, "0.3f"))
                     top["Beta"] = top["Beta"].apply(lambda v: _fmt(v, "+0.4f"))
                     top["N"] = (
-                        pd.to_numeric(top["N_Total"], errors="coerce").fillna(0).astype(int).astype(str)
+                        pd.to_numeric(top["N_Total"], errors="coerce")
+                        .fillna(0)
+                        .astype(int)
+                        .astype(str)
                         + ";"
-                        + (pd.to_numeric(top["N_Cases"], errors="coerce").fillna(0).astype(int)).astype(str)
+                        + (
+                            pd.to_numeric(top["N_Cases"], errors="coerce")
+                            .fillna(0)
+                            .astype(int)
+                        ).astype(str)
                         + "/"
-                        + (pd.to_numeric(top["N_Controls"], errors="coerce").fillna(0).astype(int)).astype(str)
+                        + (
+                            pd.to_numeric(top["N_Controls"], errors="coerce")
+                            .fillna(0)
+                            .astype(int)
+                        ).astype(str)
                     )
-                    print(f"\n{log_prefix} --- Top Hits Summary (provisional) ---\n" + top[["Phenotype","P","Q","OR","Beta","N"]].to_string(index=False) + "\n")
+                    print(
+                        f"\n{log_prefix} --- Top Hits Summary (provisional) ---\n"
+                        + top[["Phenotype", "P", "Q", "OR", "Beta", "N"]].to_string(
+                            index=False
+                        )
+                        + "\n"
+                    )
                 except Exception:
-                    print(f"{log_prefix} [WARN] Could not produce per-inversion summary.", flush=True)
+                    print(
+                        f"{log_prefix} [WARN] Could not produce per-inversion summary.",
+                        flush=True,
+                    )
 
                 print(f"{log_prefix} Finished.", flush=True)
             except Exception as e:
@@ -884,21 +1149,34 @@ def _pipeline_once():
                 try:
                     inversion_path = _inversion_cache_path(target_inv)
                     if os.path.exists(inversion_path):
-                        inversion_index = pd.read_parquet(inversion_path, columns=[target_inv]).index.astype(str)
-                        N = shared_covariates_df.index.intersection(inversion_index).size
+                        inversion_index = pd.read_parquet(
+                            inversion_path, columns=[target_inv]
+                        ).index.astype(str)
+                        N = shared_covariates_df.index.intersection(
+                            inversion_index
+                        ).size
                     else:
                         N = len(shared_covariates_df)
                     core_bytes = N * C * 4
                     core_gb = core_bytes / (1024**3)
                 except Exception as e:
-                    print(f"[Orchestrator] Could not predict memory for {target_inv}, using fallback. Error: {e}")
+                    print(
+                        f"[Orchestrator] Could not predict memory for {target_inv}, using fallback. Error: {e}"
+                    )
                     core_gb = 2.0
 
                 if pipes.BUDGET.reserve(target_inv, "core_shm", core_gb, block=False):
                     target_inv = pending_inversions.popleft()
-                    print(f"[Orchestrator] Admitted {target_inv} | reserved core_shm={core_gb:.2f}GB | budget {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB")
-                    baseline_rss = (monitor_thread.snapshot().app_rss_gb if monitor_thread else 0.0)
-                    thread = threading.Thread(target=run_single_inversion, args=(target_inv, baseline_rss, shared_data_for_threads))
+                    print(
+                        f"[Orchestrator] Admitted {target_inv} | reserved core_shm={core_gb:.2f}GB | budget {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB"
+                    )
+                    baseline_rss = (
+                        monitor_thread.snapshot().app_rss_gb if monitor_thread else 0.0
+                    )
+                    thread = threading.Thread(
+                        target=run_single_inversion,
+                        args=(target_inv, baseline_rss, shared_data_for_threads),
+                    )
                     running_inversions[thread] = target_inv
                     thread.start()
                 else:
@@ -915,44 +1193,75 @@ def _pipeline_once():
 
         all_results_from_disk = []
         for target_inversion in run.TARGET_INVERSIONS:
-            inversion_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion))
+            inversion_cache_dir = os.path.join(
+                CACHE_DIR, models.safe_basename(target_inversion)
+            )
             results_cache_dir = os.path.join(inversion_cache_dir, "results_atomic")
-            result_files = [f for f in os.listdir(results_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+            result_files = [
+                f
+                for f in os.listdir(results_cache_dir)
+                if f.endswith(".json") and not f.endswith(".meta.json")
+            ]
             for filename in result_files:
                 try:
-                    meta_path = os.path.join(results_cache_dir, filename.replace(".json", ".meta.json"))
+                    meta_path = os.path.join(
+                        results_cache_dir, filename.replace(".json", ".meta.json")
+                    )
                     meta = io.read_meta_json(meta_path)
                     expected_tag = ctx_tag_by_inversion.get(target_inversion)
                     if not meta:
                         continue
-                    if meta.get("ctx_tag") != expected_tag or meta.get("cdr_codename") != cdr_codename or meta.get("target") != target_inversion:
+                    if (
+                        meta.get("ctx_tag") != expected_tag
+                        or meta.get("cdr_codename") != cdr_codename
+                        or meta.get("target") != target_inversion
+                    ):
                         continue
-                    result = pd.read_json(os.path.join(results_cache_dir, filename), typ="series").to_dict()
-                    result['Inversion'] = target_inversion
+                    result = pd.read_json(
+                        os.path.join(results_cache_dir, filename), typ="series"
+                    ).to_dict()
+                    result["Inversion"] = target_inversion
                     all_results_from_disk.append(result)
                 except Exception as e:
-                    print(f"Warning: Could not read corrupted result file: {filename}, Error: {e}")
+                    print(
+                        f"Warning: Could not read corrupted result file: {filename}, Error: {e}"
+                    )
 
         if not all_results_from_disk:
             print("No results found to process.")
         else:
             df = pd.DataFrame(all_results_from_disk)
-            print(f"Successfully consolidated {len(df)} results across {len(run.TARGET_INVERSIONS)} inversions.")
+            print(
+                f"Successfully consolidated {len(df)} results across {len(run.TARGET_INVERSIONS)} inversions."
+            )
 
-            if "OR_CI95" not in df.columns: df["OR_CI95"] = np.nan
+            if "OR_CI95" not in df.columns:
+                df["OR_CI95"] = np.nan
+
             def _compute_overall_or_ci(beta_val, p_val):
-                if pd.isna(beta_val) or pd.isna(p_val): return np.nan
-                b = float(beta_val); p = float(p_val)
-                if not (np.isfinite(b) and np.isfinite(p) and 0.0 < p < 1.0): return np.nan
+                if pd.isna(beta_val) or pd.isna(p_val):
+                    return np.nan
+                b = float(beta_val)
+                p = float(p_val)
+                if not (np.isfinite(b) and np.isfinite(p) and 0.0 < p < 1.0):
+                    return np.nan
                 z = stats.norm.ppf(1.0 - p / 2.0)
-                if not (np.isfinite(z) and z > 0): return np.nan
+                if not (np.isfinite(z) and z > 0):
+                    return np.nan
                 se = abs(b) / z
                 lo, hi = np.exp(b - 1.96 * se), np.exp(b + 1.96 * se)
                 return f"{lo:.3f},{hi:.3f}"
-            missing_ci_mask = (df["OR_CI95"].isna() | (df["OR_CI95"].astype(str) == "") | (df["OR_CI95"].astype(str).str.lower() == "nan"))
+
+            missing_ci_mask = (
+                df["OR_CI95"].isna()
+                | (df["OR_CI95"].astype(str) == "")
+                | (df["OR_CI95"].astype(str).str.lower() == "nan")
+            )
             if "Used_Ridge" in df.columns:
-                missing_ci_mask &= (df["Used_Ridge"] == False)
-            df.loc[missing_ci_mask, "OR_CI95"] = df.loc[missing_ci_mask, ["Beta", "P_Value"]].apply(lambda r: _compute_overall_or_ci(r["Beta"], r["P_Value"]), axis=1)
+                missing_ci_mask &= df["Used_Ridge"] == False
+            df.loc[missing_ci_mask, "OR_CI95"] = df.loc[
+                missing_ci_mask, ["Beta", "P_Value"]
+            ].apply(lambda r: _compute_overall_or_ci(r["Beta"], r["P_Value"]), axis=1)
 
             df, _ = testing.consolidate_and_select(
                 df,
@@ -969,7 +1278,9 @@ def _pipeline_once():
             print("\n" + "=" * 70)
             print(" Part 4: Running Stage-2 Follow-up Analyses for Global Hits")
             print("=" * 70)
-            name_to_cat = pheno_defs_df.set_index('sanitized_name')['disease_category'].to_dict()
+            name_to_cat = pheno_defs_df.set_index("sanitized_name")[
+                "disease_category"
+            ].to_dict()
 
             for target_inversion in run.TARGET_INVERSIONS:
                 # Re-create the inversion-specific context and data to ensure correct follow-up
@@ -985,36 +1296,72 @@ def _pipeline_once():
                 inversion_df.index = inversion_df.index.astype(str)
 
                 core_df = shared_covariates_df.join(inversion_df, how="inner")
-                age_mean = core_df['AGE'].mean()
-                core_df['AGE_c'] = core_df['AGE'] - age_mean
-                core_df['AGE_c_sq'] = core_df['AGE_c'] ** 2
+                age_mean = core_df["AGE"].mean()
+                core_df["AGE_c"] = core_df["AGE"] - age_mean
+                core_df["AGE_c_sq"] = core_df["AGE_c"] ** 2
                 pc_cols = [f"PC{i}" for i in range(1, NUM_PCS + 1)]
-                covariate_cols = [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
+                covariate_cols = (
+                    [target_inversion] + ["sex"] + pc_cols + ["AGE_c", "AGE_c_sq"]
+                )
                 core_df_subset = core_df[covariate_cols].astype(np.float32, copy=False)
                 core_df_subset["const"] = np.float32(1.0)
-                A_slice = A_global.reindex(core_df_subset.index).fillna(0.0).astype(np.float32)
-                core_df_with_const = pd.concat([core_df_subset, A_slice], axis=1, copy=False).astype(np.float32, copy=False)
-                core_index = pd.Index(core_df_with_const.index.astype(str), name="person_id")
-                global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(axis=1)
-                pan_path = os.path.join(CACHE_DIR, f"pan_category_cases_{cdr_codename}.pkl")
+                A_slice = (
+                    A_global.reindex(core_df_subset.index)
+                    .fillna(0.0)
+                    .astype(np.float32)
+                )
+                core_df_with_const = pd.concat(
+                    [core_df_subset, A_slice], axis=1, copy=False
+                ).astype(np.float32, copy=False)
+                core_index = pd.Index(
+                    core_df_with_const.index.astype(str), name="person_id"
+                )
+                global_notnull_mask = np.isfinite(core_df_with_const.to_numpy()).all(
+                    axis=1
+                )
+                pan_path = os.path.join(
+                    CACHE_DIR, f"pan_category_cases_{cdr_codename}.pkl"
+                )
                 category_to_pan_cases = io.get_cached_or_generate_pickle(
                     pan_path,
                     pheno.build_pan_category_cases,
-                    pheno_defs_df, bq_client, cdr_dataset_id, CACHE_DIR, cdr_codename,
+                    pheno_defs_df,
+                    bq_client,
+                    cdr_dataset_id,
+                    CACHE_DIR,
+                    cdr_codename,
                     lock_dir=LOCK_DIR,
                 )
-                allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
+                allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(
+                    core_index, category_to_pan_cases, global_notnull_mask
+                )
 
-                inversion_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion))
+                inversion_cache_dir = os.path.join(
+                    CACHE_DIR, models.safe_basename(target_inversion)
+                )
                 ctx = {
-                    "NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
+                    "NUM_PCS": NUM_PCS,
+                    "MIN_CASES_FILTER": MIN_CASES_FILTER,
+                    "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
                     "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
-                    "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
-                    "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE,
-                    "RESULTS_CACHE_DIR": os.path.join(inversion_cache_dir, "results_atomic"),
-                    "LRT_OVERALL_CACHE_DIR": os.path.join(inversion_cache_dir, "lrt_overall"),
-                    "LRT_FOLLOWUP_CACHE_DIR": os.path.join(inversion_cache_dir, "lrt_followup"),
-                    "BOOT_OVERALL_CACHE_DIR": os.path.join(inversion_cache_dir, "boot_overall"),
+                    "FDR_ALPHA": FDR_ALPHA,
+                    "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES,
+                    "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
+                    "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA,
+                    "CACHE_DIR": CACHE_DIR,
+                    "RIDGE_L2_BASE": RIDGE_L2_BASE,
+                    "RESULTS_CACHE_DIR": os.path.join(
+                        inversion_cache_dir, "results_atomic"
+                    ),
+                    "LRT_OVERALL_CACHE_DIR": os.path.join(
+                        inversion_cache_dir, "lrt_overall"
+                    ),
+                    "LRT_FOLLOWUP_CACHE_DIR": os.path.join(
+                        inversion_cache_dir, "lrt_followup"
+                    ),
+                    "BOOT_OVERALL_CACHE_DIR": os.path.join(
+                        inversion_cache_dir, "boot_overall"
+                    ),
                     "cdr_codename": cdr_codename,
                     "CACHE_VERSION_TAG": CACHE_VERSION_TAG,
                     "MODE": tctx.get("MODE"),
@@ -1026,32 +1373,70 @@ def _pipeline_once():
                 pheno.configure_from_ctx(ctx)
 
                 # Select hits for the current inversion and run follow-up
-                hit_phenos = df.loc[(df["Sig_Global"] == True) & (df["Inversion"] == target_inversion), "Phenotype"].astype(str).tolist()
+                hit_phenos = (
+                    df.loc[
+                        (df["Sig_Global"] == True)
+                        & (df["Inversion"] == target_inversion),
+                        "Phenotype",
+                    ]
+                    .astype(str)
+                    .tolist()
+                )
                 if hit_phenos:
-                    print(f"--- Running follow-up for {len(hit_phenos)} hits in {target_inversion} ---")
-                    pipes.run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_phenos, name_to_cat, cdr_codename, target_inversion, ctx, mem_floor_callable)
+                    print(
+                        f"--- Running follow-up for {len(hit_phenos)} hits in {target_inversion} ---"
+                    )
+                    pipes.run_lrt_followup(
+                        core_df_with_const,
+                        allowed_mask_by_cat,
+                        anc_series,
+                        hit_phenos,
+                        name_to_cat,
+                        cdr_codename,
+                        target_inversion,
+                        ctx,
+                        mem_floor_callable,
+                    )
 
             # Consolidate all follow-up results
             print("\n--- Consolidating all Stage-2 follow-up results ---")
             follow_records = []
             for target_inversion in run.TARGET_INVERSIONS:
-                lrt_followup_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion), "lrt_followup")
-                if not os.path.isdir(lrt_followup_cache_dir): continue
-                files_follow = [f for f in os.listdir(lrt_followup_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+                lrt_followup_cache_dir = os.path.join(
+                    CACHE_DIR, models.safe_basename(target_inversion), "lrt_followup"
+                )
+                if not os.path.isdir(lrt_followup_cache_dir):
+                    continue
+                files_follow = [
+                    f
+                    for f in os.listdir(lrt_followup_cache_dir)
+                    if f.endswith(".json") and not f.endswith(".meta.json")
+                ]
                 for filename in files_follow:
                     try:
-                        meta_path = os.path.join(lrt_followup_cache_dir, filename.replace(".json", ".meta.json"))
+                        meta_path = os.path.join(
+                            lrt_followup_cache_dir,
+                            filename.replace(".json", ".meta.json"),
+                        )
                         meta = io.read_meta_json(meta_path)
                         expected_tag = ctx_tag_by_inversion.get(target_inversion)
                         if not meta:
                             continue
-                        if meta.get("ctx_tag") != expected_tag or meta.get("cdr_codename") != cdr_codename or meta.get("target") != target_inversion:
+                        if (
+                            meta.get("ctx_tag") != expected_tag
+                            or meta.get("cdr_codename") != cdr_codename
+                            or meta.get("target") != target_inversion
+                        ):
                             continue
-                        rec = pd.read_json(os.path.join(lrt_followup_cache_dir, filename), typ="series").to_dict()
-                        rec['Inversion'] = target_inversion
+                        rec = pd.read_json(
+                            os.path.join(lrt_followup_cache_dir, filename), typ="series"
+                        ).to_dict()
+                        rec["Inversion"] = target_inversion
                         follow_records.append(rec)
                     except Exception as e:
-                        print(f"Warning: Could not read LRT follow-up file: {filename}, Error: {e}")
+                        print(
+                            f"Warning: Could not read LRT follow-up file: {filename}, Error: {e}"
+                        )
 
             if follow_records:
                 follow_df = pd.DataFrame(follow_records)
@@ -1068,10 +1453,13 @@ def _pipeline_once():
             _tmp_dir = os.path.dirname(MASTER_RESULTS_CSV) or "."
             os.makedirs(_tmp_dir, exist_ok=True)
             import tempfile
-            _fd, _tmp_path = tempfile.mkstemp(dir=_tmp_dir, prefix=os.path.basename(MASTER_RESULTS_CSV) + ".tmp.")
+
+            _fd, _tmp_path = tempfile.mkstemp(
+                dir=_tmp_dir, prefix=os.path.basename(MASTER_RESULTS_CSV) + ".tmp."
+            )
             os.close(_fd)
             try:
-                df.to_csv(_tmp_path, index=False, sep='\t')
+                df.to_csv(_tmp_path, index=False, sep="\t")
                 os.replace(_tmp_path, MASTER_RESULTS_CSV)
             finally:
                 try:
@@ -1080,16 +1468,29 @@ def _pipeline_once():
                 except Exception:
                     pass
 
-            out_df = df[df['Sig_Global'] == True].copy()
+            out_df = df[df["Sig_Global"] == True].copy()
             if not out_df.empty:
                 print("\n--- Top Hits Summary ---")
                 for col in ["N_Total", "N_Cases", "N_Controls"]:
                     if col in out_df.columns:
-                        out_df[col] = pd.to_numeric(out_df[col], errors="coerce").apply(lambda v: f"{int(v):,}" if pd.notna(v) else "")
-                for col, fmt in {"Beta": "+0.4f", "OR": "0.3f", "P_Value": ".3e", "Q_GLOBAL": ".3f"}.items():
+                        out_df[col] = pd.to_numeric(out_df[col], errors="coerce").apply(
+                            lambda v: f"{int(v):,}" if pd.notna(v) else ""
+                        )
+                for col, fmt in {
+                    "Beta": "+0.4f",
+                    "OR": "0.3f",
+                    "P_Value": ".3e",
+                    "Q_GLOBAL": ".3f",
+                }.items():
                     if col in out_df.columns:
-                        out_df[col] = pd.to_numeric(out_df[col], errors="coerce").apply(lambda v: f"{v:{fmt}}" if pd.notna(v) else "")
-                out_df["Sig_Global"] = out_df["Sig_Global"].fillna(False).map(lambda x: "✓" if bool(x) else "")
+                        out_df[col] = pd.to_numeric(out_df[col], errors="coerce").apply(
+                            lambda v: f"{v:{fmt}}" if pd.notna(v) else ""
+                        )
+                out_df["Sig_Global"] = (
+                    out_df["Sig_Global"]
+                    .fillna(False)
+                    .map(lambda x: "✓" if bool(x) else "")
+                )
                 print(out_df.to_string(index=False))
 
     except Exception as e:
@@ -1105,6 +1506,7 @@ def _pipeline_once():
 
 def supervisor_main(max_restarts=100, backoff_sec=10):
     import multiprocessing as mp, time, signal
+
     ctx = mp.get_context("spawn")
     should_stop = {"flag": False}
 
@@ -1133,7 +1535,10 @@ def supervisor_main(max_restarts=100, backoff_sec=10):
         if code in (-2, -15):
             break
         restarts += 1
-        print(f"[Supervisor] Child exited with code {code}. Restart {restarts}/{max_restarts} in {backoff_sec}s...", flush=True)
+        print(
+            f"[Supervisor] Child exited with code {code}. Restart {restarts}/{max_restarts} in {backoff_sec}s...",
+            flush=True,
+        )
         for _ in range(backoff_sec * 5):
             if should_stop["flag"]:
                 return

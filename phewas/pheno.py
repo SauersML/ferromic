@@ -18,7 +18,7 @@ from . import iox as io
 from . import pipes
 from . import models
 
-LOCK_MAX_AGE_SEC = 360000 # 100h
+LOCK_MAX_AGE_SEC = 360000  # 100h
 
 # --- BigQuery batch fetch tuning ---
 PHENO_BUCKET_SERIES = [1, 4, 16, 64]  # escalate result sharding if needed
@@ -33,7 +33,9 @@ PHENO_DEDUP_ENABLE = True
 PHI_THRESHOLD = 0.70
 SHARE_THRESHOLD = 0.70
 PHENO_PROTECT: Set[str] = set()
-PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = None
+PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = 64
+
+_CASE_CACHE_MAX = int(os.environ.get("PHENO_CASE_CACHE_MAX", "512"))
 
 
 def configure_from_ctx(ctx: Dict) -> None:
@@ -61,19 +63,33 @@ def configure_from_ctx(ctx: Dict) -> None:
     SHARE_THRESHOLD = float(ctx.get("SHARE_THRESHOLD", SHARE_THRESHOLD))
     PHENO_PROTECT = set(ctx.get("PHENO_PROTECT", PHENO_PROTECT))
 
-def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
-                         min_cases, min_ctrls, sex_mode="majority", sex_prop=0.99, max_other=0, min_neff=None):
+
+def _prequeue_should_run(
+    pheno_info,
+    core_index,
+    allowed_mask_by_cat,
+    sex_vec,
+    min_cases,
+    min_ctrls,
+    sex_mode="majority",
+    sex_prop=0.99,
+    max_other=0,
+    min_neff=None,
+):
     """
     Decide, without loading X, whether this phenotype should be queued.
     Uses cached case indices, allowed control mask, and sex restriction rule.
     Returns True if min cases/controls (and optional Neff) are satisfiable after restriction.
     """
-    category = pheno_info['disease_category']
+    category = pheno_info["disease_category"]
 
     # 1) get case indices in core index (fast parquet read of 'is_case')
-    case_idx = _load_single_pheno_cache(pheno_info, core_index,
-                                        pheno_info.get('cdr_codename', ''),
-                                        pheno_info.get('cache_dir', ''))  # may return None
+    case_idx = _load_single_pheno_cache(
+        pheno_info,
+        core_index,
+        pheno_info.get("cdr_codename", ""),
+        pheno_info.get("cache_dir", ""),
+    )  # may return None
     if not case_idx or (case_idx.get("case_idx") is None):
         return False
     case_ix_raw = case_idx["case_idx"]
@@ -129,22 +145,26 @@ def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
         return False
 
     if min_neff is not None:
-        neff_ub = 1.0 / (1.0/eff_cases + 1.0/eff_ctrls)
+        neff_ub = 1.0 / (1.0 / eff_cases + 1.0 / eff_ctrls)
         if neff_ub < float(min_neff):
             return False
 
     return True
 
+
 def sanitize_name(name):
     """Cleans a disease name to be a valid identifier."""
-    name = re.sub(r'[\*\(\)\[\]\/\']', '', name)
-    name = re.sub(r'[\s,-]+', '_', name.strip())
+    name = re.sub(r"[\*\(\)\[\]\/\']", "", name)
+    name = re.sub(r"[\s,-]+", "_", name.strip())
     return name
+
 
 def parse_icd_codes(code_string):
     """Parses a semi-colon delimited string of ICD codes into a clean set."""
-    if pd.isna(code_string) or not isinstance(code_string, str): return set()
-    return {code.strip().strip('"') for code in code_string.split(';') if code.strip()}
+    if pd.isna(code_string) or not isinstance(code_string, str):
+        return set()
+    return {code.strip().strip('"') for code in code_string.split(";") if code.strip()}
+
 
 def load_definitions(url) -> pd.DataFrame:
     """Copies the snippet from run: read TSV, add `sanitized_name`, compute `all_codes` using `parse_icd_codes`."""
@@ -154,7 +174,9 @@ def load_definitions(url) -> pd.DataFrame:
     sanitized_names = pheno_defs_df["disease"].apply(sanitize_name)
 
     if sanitized_names.duplicated().any():
-        print("[defs WARN] Sanitized name collisions detected. Appending short hash to duplicates.")
+        print(
+            "[defs WARN] Sanitized name collisions detected. Appending short hash to duplicates."
+        )
         dupes = sanitized_names[sanitized_names.duplicated()].unique()
 
         for d in dupes:
@@ -167,17 +189,28 @@ def load_definitions(url) -> pd.DataFrame:
     pheno_defs_df["sanitized_name"] = sanitized_names
 
     if pheno_defs_df["sanitized_name"].duplicated().any():
-        print("[defs ERROR] Sanitized name collisions persist after hashing.")
+        dupes = pheno_defs_df["sanitized_name"][
+            pheno_defs_df["sanitized_name"].duplicated()
+        ].unique()
+        raise RuntimeError(
+            "Sanitized name collisions persist after hashing: "
+            + ", ".join(map(str, dupes[:10]))
+        )
 
     pheno_defs_df["all_codes"] = pheno_defs_df.apply(
-        lambda row: parse_icd_codes(row["icd9_codes"]).union(parse_icd_codes(row["icd10_codes"])),
+        lambda row: parse_icd_codes(row["icd9_codes"]).union(
+            parse_icd_codes(row["icd10_codes"])
+        ),
         axis=1,
     )
     return pheno_defs_df
 
+
 def build_pan_category_cases(defs, bq_client, cdr_id, cache_dir, cdr_codename) -> dict:
     print("[Setup]    - Pre-calculating pan-category case sets...")
-    category_cache_path = os.path.join(cache_dir, f"pan_category_cases_{cdr_codename}.pkl")
+    category_cache_path = os.path.join(
+        cache_dir, f"pan_category_cases_{cdr_codename}.pkl"
+    )
     if os.path.exists(category_cache_path):
         try:
             return pd.read_pickle(category_cache_path)
@@ -185,6 +218,7 @@ def build_pan_category_cases(defs, bq_client, cdr_id, cache_dir, cdr_codename) -
             pass
 
     from google.cloud import bigquery
+
     category_to_pan_cases = {}
     for category, group in defs.groupby("disease_category"):
         # union of sets -> sorted list of UPPER() codes
@@ -192,7 +226,8 @@ def build_pan_category_cases(defs, bq_client, cdr_id, cache_dir, cdr_codename) -
         pan_codes = set.union(*code_sets) if code_sets else set()
         codes_upper = sorted({str(c).upper() for c in pan_codes if str(c).strip()})
         if not codes_upper:
-            category_to_pan_cases[category] = set(); continue
+            category_to_pan_cases[category] = set()
+            continue
 
         sql = f"""
           SELECT DISTINCT CAST(person_id AS STRING) AS person_id
@@ -200,7 +235,9 @@ def build_pan_category_cases(defs, bq_client, cdr_id, cache_dir, cdr_codename) -
           WHERE UPPER(TRIM(condition_source_value)) IN UNNEST(@codes)
         """
         job_cfg = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ArrayQueryParameter("codes", "STRING", codes_upper)]
+            query_parameters=[
+                bigquery.ArrayQueryParameter("codes", "STRING", codes_upper)
+            ]
         )
         df = bq_client.query(sql, job_config=job_cfg).to_dataframe()
         category_to_pan_cases[category] = set(df["person_id"].astype(str))
@@ -208,9 +245,14 @@ def build_pan_category_cases(defs, bq_client, cdr_id, cache_dir, cdr_codename) -
     io.atomic_write_pickle(category_cache_path, category_to_pan_cases)
     return category_to_pan_cases
 
-def build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask) -> dict:
+
+def build_allowed_mask_by_cat(
+    core_index, category_to_pan_cases, global_notnull_mask
+) -> dict:
     """Moves the “Building allowed-control masks…” block here unchanged."""
-    print("[Setup]    - Building allowed-control masks per category without constructing per-phenotype controls...")
+    print(
+        "[Setup]    - Building allowed-control masks per category without constructing per-phenotype controls..."
+    )
     allowed_mask_by_cat = {}
     n_core = len(core_index)
     for category, pan_cases in category_to_pan_cases.items():
@@ -223,7 +265,16 @@ def build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_
         allowed_mask_by_cat[category] = mask
     return allowed_mask_by_cat
 
-def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_dir, cdr_codename, max_lock_age_sec=LOCK_MAX_AGE_SEC):
+
+def populate_caches_prepass(
+    pheno_defs_df,
+    bq_client,
+    cdr_id,
+    core_index,
+    cache_dir,
+    cdr_codename,
+    max_lock_age_sec=LOCK_MAX_AGE_SEC,
+):
     """
     Populates phenotype caches deterministically using a single-writer, per-phenotype lock protocol.
     This function is safe to re-run and is resilient to crashes.
@@ -233,29 +284,65 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
     os.makedirs(lock_dir, exist_ok=True)
 
     # 1. Pre-calculate pan-category cases with locking
-    category_cache_path = os.path.join(cache_dir, f"pan_category_cases_{cdr_codename}.pkl")
-    category_lock_path = os.path.join(lock_dir, f"pan_category_cases_{cdr_codename}.lock")
+    category_cache_path = os.path.join(
+        cache_dir, f"pan_category_cases_{cdr_codename}.pkl"
+    )
+    category_lock_path = os.path.join(
+        lock_dir, f"pan_category_cases_{cdr_codename}.lock"
+    )
     if not os.path.exists(category_cache_path):
         if io.ensure_lock(category_lock_path, max_lock_age_sec):
             try:
-                if not os.path.exists(category_cache_path): # Check again inside lock
-                    print("[Prepass]  - Generating pan-category case sets...", flush=True)
-                    build_pan_category_cases(pheno_defs_df, bq_client, cdr_id, cache_dir, cdr_codename)
+                if not os.path.exists(category_cache_path):  # Check again inside lock
+                    print(
+                        "[Prepass]  - Generating pan-category case sets...", flush=True
+                    )
+                    build_pan_category_cases(
+                        pheno_defs_df, bq_client, cdr_id, cache_dir, cdr_codename
+                    )
             finally:
                 io.release_lock(category_lock_path)
         else:
-            print("[Prepass]  - Waiting for another process to generate pan-category cases...", flush=True)
+            print(
+                "[Prepass]  - Waiting for another process to generate pan-category cases...",
+                flush=True,
+            )
             while not os.path.exists(category_cache_path):
-                time.sleep(5) # Wait for the other process to finish
+                if io.ensure_lock(category_lock_path, max_lock_age_sec):
+                    try:
+                        if not os.path.exists(category_cache_path):
+                            print(
+                                "[Prepass]  - [LOCK] Reclaiming pan-category generation...",
+                                flush=True,
+                            )
+                            build_pan_category_cases(
+                                pheno_defs_df,
+                                bq_client,
+                                cdr_id,
+                                cache_dir,
+                                cdr_codename,
+                            )
+                    finally:
+                        io.release_lock(category_lock_path)
+                    break
+                time.sleep(5)  # Wait for the other process to finish
 
     # 2. Process per-phenotype caches
-    missing = [row.to_dict() for _, row in pheno_defs_df.iterrows() if not os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))]
+    missing = [
+        row.to_dict()
+        for _, row in pheno_defs_df.iterrows()
+        if not os.path.exists(
+            os.path.join(
+                cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"
+            )
+        )
+    ]
     print(f"[Prepass]  - Found {len(missing)} missing phenotype caches.", flush=True)
     if not missing:
         return
 
     def _process_one(pheno_info):
-        s_name = pheno_info['sanitized_name']
+        s_name = pheno_info["sanitized_name"]
         try:
             # Fast exit if cache already exists
             ph_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
@@ -264,8 +351,13 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
 
             # Prepass must NEVER block on locks. Try once; if locked, skip.
             res = _query_single_pheno_bq(
-                pheno_info, cdr_id, core_index, cache_dir, cdr_codename,
-                bq_client=bq_client, non_blocking=True
+                pheno_info,
+                cdr_id,
+                core_index,
+                cache_dir,
+                cdr_codename,
+                bq_client=bq_client,
+                non_blocking=True,
             )
             return (res or {}).get("name")
         except Exception as e:
@@ -283,21 +375,23 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
 
     print("[Prepass]  - Phenotype cache prepass complete.", flush=True)
 
-@lru_cache(maxsize=4096)
+
+@lru_cache(maxsize=_CASE_CACHE_MAX)
 def _case_ids_cached(s_name: str, cdr_codename: str, cache_dir: str) -> tuple:
     """
     Read the per-phenotype parquet ONCE per process and return the case person_ids as a tuple of str.
     Pure read-only; never writes or deletes any on-disk cache.
     """
     pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
-    ph = pd.read_parquet(pheno_cache_path, columns=['is_case'])
-    case_ids = ph.index[ph['is_case'] == 1].astype(str)
+    ph = pd.read_parquet(pheno_cache_path, columns=["is_case"])
+    case_ids = ph.index[ph["is_case"] == 1].astype(str)
     return tuple(case_ids)
+
 
 def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
     """THREAD WORKER: Loads one cached phenotype (via memoized IDs) and returns integer case indices."""
-    s_name = pheno_info['sanitized_name']
-    category = pheno_info['disease_category']
+    s_name = pheno_info["sanitized_name"]
+    category = pheno_info["disease_category"]
     try:
         # 1) Fast path: memoized person_id strings (no repeat disk I/O on cache hit)
         case_ids = _case_ids_cached(s_name, cdr_codename, cache_dir)
@@ -315,13 +409,29 @@ def _load_single_pheno_cache(pheno_info, core_index, cdr_codename, cache_dir):
         print(f"[CacheLoader] - [FAIL] Failed to load '{s_name}': {e}", flush=True)
         return None
 
-def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codename, bq_client=None, non_blocking=False):
+
+def _query_single_pheno_bq(
+    pheno_info,
+    cdr_id,
+    core_index,
+    cache_dir,
+    cdr_codename,
+    bq_client=None,
+    non_blocking=False,
+):
     """THREAD WORKER: Queries one phenotype from BigQuery, caches it, and returns a descriptor."""
     from google.cloud import bigquery
+
     if bq_client is None:
         bq_client = bigquery.Client()
-    s_name, category, all_codes = pheno_info['sanitized_name'], pheno_info['disease_category'], pheno_info['all_codes']
-    codes_upper = sorted({str(c).upper() for c in (all_codes or set()) if str(c).strip()})
+    s_name, category, all_codes = (
+        pheno_info["sanitized_name"],
+        pheno_info["disease_category"],
+        pheno_info["all_codes"],
+    )
+    codes_upper = sorted(
+        {str(c).upper() for c in (all_codes or set()) if str(c).strip()}
+    )
 
     pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
     lock_dir = os.path.join(cache_dir, "locks")
@@ -333,12 +443,19 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
         if os.path.exists(pheno_cache_path):
             return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
         if not io.ensure_lock(lock_path, LOCK_MAX_AGE_SEC):
-            print(f"[Prepass]  - Skipping '{s_name}', another process has the lock.", flush=True)
+            print(
+                f"[Prepass]  - Skipping '{s_name}', another process has the lock.",
+                flush=True,
+            )
             return None
         try:
             # do the work without re-locking later
             if os.path.exists(pheno_cache_path):
-                return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
+                return {
+                    "name": s_name,
+                    "category": category,
+                    "codes_n": len(codes_upper),
+                }
             print(f"[Fetcher]  - [BQ] Querying '{s_name}'...", flush=True)
             pids = []
             if codes_upper:
@@ -350,17 +467,27 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
                 """
                 try:
                     job_cfg = bigquery.QueryJobConfig(
-                        query_parameters=[bigquery.ArrayQueryParameter("codes", "STRING", codes_upper)]
+                        query_parameters=[
+                            bigquery.ArrayQueryParameter("codes", "STRING", codes_upper)
+                        ]
                     )
                     df_ids = bq_client.query(sql, job_config=job_cfg).to_dataframe()
                     pids = df_ids["person_id"].astype(str)
                 except Exception as e:
-                    print(f"[Fetcher]  - [FAIL] BQ query failed for {s_name}. Error: {str(e)[:150]}", flush=True)
+                    print(
+                        f"[Fetcher]  - [FAIL] BQ query failed for {s_name}. Error: {str(e)[:150]}",
+                        flush=True,
+                    )
                     pids = []
-            pids_for_cache = pd.Index(sorted(pids), dtype=str, name='person_id')
-            df_to_cache = pd.DataFrame({'is_case': 1}, index=pids_for_cache, dtype=np.int8)
+            pids_for_cache = pd.Index(sorted(pids), dtype=str, name="person_id")
+            df_to_cache = pd.DataFrame(
+                {"is_case": 1}, index=pids_for_cache, dtype=np.int8
+            )
             io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
-            print(f"[Fetcher]  - Cached {len(pids_for_cache):,} new cases for '{s_name}'", flush=True)
+            print(
+                f"[Fetcher]  - Cached {len(pids_for_cache):,} new cases for '{s_name}'",
+                flush=True,
+            )
             return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
         finally:
             io.release_lock(lock_path)
@@ -370,7 +497,11 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
         if io.ensure_lock(lock_path, LOCK_MAX_AGE_SEC):
             try:
                 if os.path.exists(pheno_cache_path):
-                    return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
+                    return {
+                        "name": s_name,
+                        "category": category,
+                        "codes_n": len(codes_upper),
+                    }
                 print(f"[Fetcher]  - [BQ] Querying '{s_name}'...", flush=True)
                 pids = []
                 if codes_upper:
@@ -382,18 +513,36 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
                     """
                     try:
                         job_cfg = bigquery.QueryJobConfig(
-                            query_parameters=[bigquery.ArrayQueryParameter("codes", "STRING", codes_upper)]
+                            query_parameters=[
+                                bigquery.ArrayQueryParameter(
+                                    "codes", "STRING", codes_upper
+                                )
+                            ]
                         )
                         df_ids = bq_client.query(sql, job_config=job_cfg).to_dataframe()
                         pids = df_ids["person_id"].astype(str)
                     except Exception as e:
-                        print(f"[Fetcher]  - [FAIL] BQ query failed for {s_name}. Error: {str(e)[:150]}", flush=True)
+                        print(
+                            f"[Fetcher]  - [FAIL] BQ query failed for {s_name}. Error: {str(e)[:150]}",
+                            flush=True,
+                        )
                         pids = []
-                pids_for_cache = pd.Index(sorted(pids), dtype=str, name='person_id')
-                df_to_cache = pd.DataFrame({'is_case': 1}, index=pids_for_cache, dtype=np.int8)
-                io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
-                print(f"[Fetcher]  - Cached {len(pids_for_cache):,} new cases for '{s_name}'", flush=True)
-                return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
+                pids_for_cache = pd.Index(sorted(pids), dtype=str, name="person_id")
+                df_to_cache = pd.DataFrame(
+                    {"is_case": 1}, index=pids_for_cache, dtype=np.int8
+                )
+                io.atomic_write_parquet(
+                    pheno_cache_path, df_to_cache, compression="snappy"
+                )
+                print(
+                    f"[Fetcher]  - Cached {len(pids_for_cache):,} new cases for '{s_name}'",
+                    flush=True,
+                )
+                return {
+                    "name": s_name,
+                    "category": category,
+                    "codes_n": len(codes_upper),
+                }
             finally:
                 io.release_lock(lock_path)
         else:
@@ -402,14 +551,22 @@ def _query_single_pheno_bq(pheno_info, cdr_id, core_index, cache_dir, cdr_codena
                 if os.path.exists(lock_path):
                     st = os.stat(lock_path)
                     if (time.time() - st.st_mtime) > LOCK_MAX_AGE_SEC:
-                        print(f"[Fetcher]  - [LOCK] Breaking stale lock for '{s_name}'", flush=True)
+                        print(
+                            f"[Fetcher]  - [LOCK] Breaking stale lock for '{s_name}'",
+                            flush=True,
+                        )
                         io.release_lock(lock_path)
                         continue
             except FileNotFoundError:
                 pass
             if os.path.exists(pheno_cache_path):
-                return {"name": s_name, "category": category, "codes_n": len(codes_upper)}
+                return {
+                    "name": s_name,
+                    "category": category,
+                    "codes_n": len(codes_upper),
+                }
             time.sleep(0.5)
+
 
 def _batch_pheno_defs(phenos_to_query_from_bq, max_phenos, max_codes):
     """
@@ -429,7 +586,10 @@ def _batch_pheno_defs(phenos_to_query_from_bq, max_phenos, max_codes):
     if batch:
         yield batch
 
-def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_codename):
+
+def _query_batch_bq(
+    batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_codename
+):
     """
     THREAD WORKER: Queries MANY phenotypes in one scan using an Array<STRUCT<code STRING, pheno STRING>> parameter.
     Streams results page-by-page and shards by person_id buckets when needed to bound output size.
@@ -437,7 +597,9 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
     Returns: list of {"name": sanitized_name, "category": disease_category, "codes_n": int}
     and writes per-phenotype parquet caches (is_case=1).
     """
-    from google.cloud import bigquery  # local import to not affect unit tests that bypass BQ
+    from google.cloud import (
+        bigquery,
+    )  # local import to not affect unit tests that bypass BQ
 
     lock_dir = os.path.join(cache_dir, "locks")
     os.makedirs(lock_dir, exist_ok=True)
@@ -446,7 +608,9 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
     for row in batch_infos:
         s_name = row["sanitized_name"]
         lock_path = os.path.join(lock_dir, f"pheno_{s_name}_{cdr_codename}.lock")
-        pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
+        pheno_cache_path = os.path.join(
+            cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet"
+        )
 
         # If cache already exists, no need to lock/include
         if os.path.exists(pheno_cache_path):
@@ -466,7 +630,10 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         try:
             st = os.stat(lock_path)
             if (time.time() - st.st_mtime) > LOCK_MAX_AGE_SEC:
-                print(f"[Fetcher]  - [LOCK] Breaking stale lock for '{s_name}'", flush=True)
+                print(
+                    f"[Fetcher]  - [LOCK] Breaking stale lock for '{s_name}'",
+                    flush=True,
+                )
                 io.release_lock(lock_path)  # break stale lock
                 if io.ensure_lock(lock_path, LOCK_MAX_AGE_SEC):
                     if os.path.exists(pheno_cache_path):
@@ -480,7 +647,10 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
             pass
 
         # Fresh lock held by someone else: skip this phenotype (do not spin)
-        print(f"[Fetcher]  - [Batch] Skipping '{s_name}', another process has the lock.", flush=True)
+        print(
+            f"[Fetcher]  - [Batch] Skipping '{s_name}', another process has the lock.",
+            flush=True,
+        )
 
     batch_infos = filtered_infos
 
@@ -501,11 +671,25 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
         if not codes_list:
             out = []
             for s_name, m in meta.items():
-                pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
-                io.atomic_write_parquet(pheno_cache_path,
-                    pd.DataFrame({'is_case': []}, index=pd.Index([], name='person_id'), dtype=np.int8),
-                    compression="snappy")
-                out.append({"name": s_name, "category": m["category"], "codes_n": len(m["codes"])})
+                pheno_cache_path = os.path.join(
+                    cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet"
+                )
+                io.atomic_write_parquet(
+                    pheno_cache_path,
+                    pd.DataFrame(
+                        {"is_case": []},
+                        index=pd.Index([], name="person_id"),
+                        dtype=np.int8,
+                    ),
+                    compression="snappy",
+                )
+                out.append(
+                    {
+                        "name": s_name,
+                        "category": m["category"],
+                        "codes_n": len(m["codes"]),
+                    }
+                )
             return out
 
         sql = f"""
@@ -532,10 +716,17 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
                     job_cfg = bigquery.QueryJobConfig(
                         query_parameters=[
                             bigquery.ArrayQueryParameter("codes", "STRING", codes_list),
-                            bigquery.ArrayQueryParameter("phenos", "STRING", phenos_list),
-                            bigquery.ScalarQueryParameter("bucket_count", "INT64", bucket_count),
-                            bigquery.ScalarQueryParameter("bucket_id", "INT64", bucket_id),
-                        ])
+                            bigquery.ArrayQueryParameter(
+                                "phenos", "STRING", phenos_list
+                            ),
+                            bigquery.ScalarQueryParameter(
+                                "bucket_count", "INT64", bucket_count
+                            ),
+                            bigquery.ScalarQueryParameter(
+                                "bucket_id", "INT64", bucket_id
+                            ),
+                        ]
+                    )
                     job = bq_client.query(sql, job_config=job_cfg)
                     for page in job.result(page_size=BQ_PAGE_ROWS).pages:
                         for row in page:
@@ -544,74 +735,134 @@ def _query_batch_bq(batch_infos, bq_client, cdr_id, core_index, cache_dir, cdr_c
                 succeeded = True
                 break
             except Exception as e:
-                print(f"[Fetcher]  - [WARN] Batch failed at {bucket_count} buckets: {str(e)[:200]}", flush=True)
+                print(
+                    f"[Fetcher]  - [WARN] Batch failed at {bucket_count} buckets: {str(e)[:200]}",
+                    flush=True,
+                )
                 pheno_to_pids = {s_name: set() for s_name in meta.keys()}
 
         if not succeeded:
-            print(f"[Fetcher]  - [FAIL] Batch could not be fetched after {PHENO_BUCKET_SERIES} buckets. Falling back to per-phenotype queries.", flush=True)
+            print(
+                f"[Fetcher]  - [FAIL] Batch could not be fetched after {PHENO_BUCKET_SERIES} buckets. Falling back to per-phenotype queries.",
+                flush=True,
+            )
             for lp in locks.values():
                 io.release_lock(lp)
             locks.clear()
             results = []
             for row in batch_infos:
                 try:
-                    results.append(_query_single_pheno_bq(row, cdr_id, core_index, cache_dir, cdr_codename, bq_client=bq_client))
+                    results.append(
+                        _query_single_pheno_bq(
+                            row,
+                            cdr_id,
+                            core_index,
+                            cache_dir,
+                            cdr_codename,
+                            bq_client=bq_client,
+                        )
+                    )
                 except Exception as e:
-                    print(f"[Fetcher]  - [FAIL] Fallback single query failed for {row['sanitized_name']}: {str(e)[:200]}", flush=True)
-                    results.append({"name": row["sanitized_name"], "category": row["disease_category"], "codes_n": len(row.get("all_codes") or [])})
+                    print(
+                        f"[Fetcher]  - [FAIL] Fallback single query failed for {row['sanitized_name']}: {str(e)[:200]}",
+                        flush=True,
+                    )
+                    results.append(
+                        {
+                            "name": row["sanitized_name"],
+                            "category": row["disease_category"],
+                            "codes_n": len(row.get("all_codes") or []),
+                        }
+                    )
             return results
 
         results = []
         for s_name, m in meta.items():
             pids = pheno_to_pids[s_name] if succeeded else set()
-            pheno_cache_path = os.path.join(cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet")
+            pheno_cache_path = os.path.join(
+                cache_dir, f"pheno_{s_name}_{cdr_codename}.parquet"
+            )
             if os.path.exists(pheno_cache_path):
-                results.append({"name": s_name, "category": m["category"], "codes_n": len(m["codes"])})
+                results.append(
+                    {
+                        "name": s_name,
+                        "category": m["category"],
+                        "codes_n": len(m["codes"]),
+                    }
+                )
                 continue
-            idx_for_cache = pd.Index(sorted(list(pids)), name='person_id')
-            df_to_cache = pd.DataFrame({'is_case': 1}, index=idx_for_cache, dtype=np.int8)
+            idx_for_cache = pd.Index(sorted(list(pids)), name="person_id")
+            df_to_cache = pd.DataFrame(
+                {"is_case": 1}, index=idx_for_cache, dtype=np.int8
+            )
             io.atomic_write_parquet(pheno_cache_path, df_to_cache, compression="snappy")
-            print(f"[Fetcher]  - Cached {len(df_to_cache):,} cases for '{s_name}' (batched)", flush=True)
-            results.append({"name": s_name, "category": m["category"], "codes_n": len(m["codes"])})
+            print(
+                f"[Fetcher]  - Cached {len(df_to_cache):,} cases for '{s_name}' (batched)",
+                flush=True,
+            )
+            results.append(
+                {"name": s_name, "category": m["category"], "codes_n": len(m["codes"])}
+            )
 
         return results
     finally:
         for lock_path in locks.values():
             io.release_lock(lock_path)
 
-def phenotype_fetcher_worker(pheno_queue,
-                             pheno_defs: pd.DataFrame,
-                             bq_client,
-                             cdr_id: str,
-                             cdr_codename: str,
-                             core_index: pd.Index,
-                             cache_dir: str,
-                             loader_chunk_size: int,
-                             loader_threads: int,
-                             allow_bq: bool = True,
-                             allowed_mask_by_cat: Optional[dict] = None,
-                             sex_vec: Optional[np.ndarray] = None,
-                             min_cases: int = 1000,
-                             min_ctrls: int = 1000,
-                             sex_mode: str = "majority",
-                             sex_prop: float = 0.99,
-                             max_other: int = 0,
-                             min_neff: Optional[int] = None):
+
+def phenotype_fetcher_worker(
+    pheno_queue,
+    pheno_defs: pd.DataFrame,
+    bq_client,
+    cdr_id: str,
+    cdr_codename: str,
+    core_index: pd.Index,
+    cache_dir: str,
+    loader_chunk_size: int,
+    loader_threads: int,
+    allow_bq: bool = True,
+    allowed_mask_by_cat: Optional[dict] = None,
+    sex_vec: Optional[np.ndarray] = None,
+    min_cases: int = 1000,
+    min_ctrls: int = 1000,
+    sex_mode: str = "majority",
+    sex_prop: float = 0.99,
+    max_other: int = 0,
+    min_neff: Optional[int] = None,
+):
     """
     PRODUCER: High-performance, memory-stable data loader that now optionally performs *global phenotype deduplication*
     before enqueueing work. Dedup uses two rules: phi > PHI_THRESHOLD or directional case-share >= SHARE_THRESHOLD.
     """
-    print("[Fetcher]  - Categorizing phenotypes into cached vs. uncached...", flush=True)
+    print(
+        "[Fetcher]  - Categorizing phenotypes into cached vs. uncached...", flush=True
+    )
     phenos_to_load_from_cache = [
-        row.to_dict() for _, row in pheno_defs.iterrows()
-        if os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))
+        row.to_dict()
+        for _, row in pheno_defs.iterrows()
+        if os.path.exists(
+            os.path.join(
+                cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"
+            )
+        )
     ]
     phenos_to_query_from_bq = [
-        row.to_dict() for _, row in pheno_defs.iterrows()
-        if not os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))
+        row.to_dict()
+        for _, row in pheno_defs.iterrows()
+        if not os.path.exists(
+            os.path.join(
+                cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"
+            )
+        )
     ]
-    print(f"[Fetcher]  - Found {len(phenos_to_load_from_cache)} cached phenotypes to fast-load.", flush=True)
-    print(f"[Fetcher]  - Found {len(phenos_to_query_from_bq)} uncached phenotypes.", flush=True)
+    print(
+        f"[Fetcher]  - Found {len(phenos_to_load_from_cache)} cached phenotypes to fast-load.",
+        flush=True,
+    )
+    print(
+        f"[Fetcher]  - Found {len(phenos_to_query_from_bq)} uncached phenotypes.",
+        flush=True,
+    )
 
     keep_set: Optional[Set[str]] = None
 
@@ -619,31 +870,61 @@ def phenotype_fetcher_worker(pheno_queue,
         # Phase 0: ensure caches exist for all phenotypes so dedup has full visibility (coarse lock to avoid duplicate scans)
         if phenos_to_query_from_bq:
             if allow_bq and (bq_client is not None) and (cdr_id is not None):
-                prec_lock = os.path.join(cache_dir, f"dedup_precache_{cdr_codename}.lock")
+                prec_lock = os.path.join(
+                    cache_dir, f"dedup_precache_{cdr_codename}.lock"
+                )
                 if io.ensure_lock(prec_lock, LOCK_MAX_AGE_SEC):
                     try:
-                        print(f"[Fetcher]  - [Dedup] Pre-caching {len(phenos_to_query_from_bq)} uncached phenotypes via BigQuery...", flush=True)
-                        _precache_all_missing_phenos(pheno_defs, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
+                        print(
+                            f"[Fetcher]  - [Dedup] Pre-caching {len(phenos_to_query_from_bq)} uncached phenotypes via BigQuery...",
+                            flush=True,
+                        )
+                        _precache_all_missing_phenos(
+                            pheno_defs,
+                            bq_client,
+                            cdr_id,
+                            core_index,
+                            cache_dir,
+                            cdr_codename,
+                        )
                     except Exception as e:
-                        print(f"[Fetcher]  - [WARN] Pre-cache failed: {str(e)[:200]}", flush=True)
+                        print(
+                            f"[Fetcher]  - [WARN] Pre-cache failed: {str(e)[:200]}",
+                            flush=True,
+                        )
                     finally:
                         io.release_lock(prec_lock)
                 else:
-                    print("[Fetcher]  - [Dedup] Another worker is pre-caching; proceeding with currently cached subset.", flush=True)
+                    print(
+                        "[Fetcher]  - [Dedup] Another worker is pre-caching; proceeding with currently cached subset.",
+                        flush=True,
+                    )
             else:
-                print("[Fetcher]  - [WARN] Dedup requested but BigQuery is disabled or unavailable; proceeding with cached subset only.", flush=True)
+                print(
+                    "[Fetcher]  - [WARN] Dedup requested but BigQuery is disabled or unavailable; proceeding with cached subset only.",
+                    flush=True,
+                )
 
         # Refresh cached list after any precache pass
         phenos_to_load_from_cache = [
-            row.to_dict() for _, row in pheno_defs.iterrows()
-            if os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))
+            row.to_dict()
+            for _, row in pheno_defs.iterrows()
+            if os.path.exists(
+                os.path.join(
+                    cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"
+                )
+            )
         ]
-        phenos_to_query_from_bq = []  # everything needed for dedup has been cached (or we proceed with cached-only)
+        phenos_to_query_from_bq = (
+            []
+        )  # everything needed for dedup has been cached (or we proceed with cached-only)
 
         # Phase 1: compute/use manifest once per cohort (fingerprinted by the cohort index)
         try:
             cohort_fp = str(models._index_fingerprint(core_index))
-            manifest_path = os.path.join(cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json")
+            manifest_path = os.path.join(
+                cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json"
+            )
             manifest_lock = manifest_path + ".lock"
 
             keep_set = None
@@ -654,7 +935,10 @@ def phenotype_fetcher_worker(pheno_queue,
                     ks = manifest.get("kept", [])
                     if isinstance(ks, list):
                         keep_set = set(ks)
-                        print(f"[Dedup] using existing manifest: kept {len(keep_set)}, dropped {len(manifest.get('dropped', []))}.", flush=True)
+                        print(
+                            f"[Dedup] using existing manifest: kept {len(keep_set)}, dropped {len(manifest.get('dropped', []))}.",
+                            flush=True,
+                        )
                 except Exception:
                     keep_set = None
 
@@ -676,10 +960,13 @@ def phenotype_fetcher_worker(pheno_queue,
                                 min_cases=min_cases,
                                 phi_threshold=PHI_THRESHOLD,
                                 share_threshold=SHARE_THRESHOLD,
-                                protect=PHENO_PROTECT
+                                protect=PHENO_PROTECT,
                             )
                             keep_set = set(ded.get("kept", set()))
-                            print(f"[Dedup] kept {len(keep_set)} phenotypes; dropped {len(ded.get('dropped', []))}.", flush=True)
+                            print(
+                                f"[Dedup] kept {len(keep_set)} phenotypes; dropped {len(ded.get('dropped', []))}.",
+                                flush=True,
+                            )
                     finally:
                         io.release_lock(manifest_lock)
                 else:
@@ -693,80 +980,145 @@ def phenotype_fetcher_worker(pheno_queue,
                     except Exception:
                         keep_set = None
         except Exception as e:
-            print(f"[Dedup WARN] Falling back to no-dedup due to error: {e}", flush=True)
+            print(
+                f"[Dedup WARN] Falling back to no-dedup due to error: {e}", flush=True
+            )
             keep_set = None
 
     # STAGE 1: enqueue cached phenotypes (optionally filtered by dedup keep_set)
     enqueued = 0
     for row in phenos_to_load_from_cache:
-        sname = row['sanitized_name']
+        sname = row["sanitized_name"]
         if (keep_set is not None) and (sname not in keep_set):
             continue
 
-        row['cdr_codename'] = cdr_codename
-        row['cache_dir'] = cache_dir
+        row["cdr_codename"] = cdr_codename
+        row["cache_dir"] = cache_dir
 
         if (allowed_mask_by_cat is not None) and (sex_vec is not None):
-            if not _prequeue_should_run(row, core_index, allowed_mask_by_cat, sex_vec,
-                                        min_cases, min_ctrls, sex_mode, sex_prop, max_other, min_neff):
+            if not _prequeue_should_run(
+                row,
+                core_index,
+                allowed_mask_by_cat,
+                sex_vec,
+                min_cases,
+                min_ctrls,
+                sex_mode,
+                sex_prop,
+                max_other,
+                min_neff,
+            ):
                 continue
 
-        pheno_queue.put({
-            "name": sname,
-            "category": row['disease_category'],
-            "codes_n": len(row.get('all_codes') or []),
-            "cdr_codename": cdr_codename
-        })
+        pheno_queue.put(
+            {
+                "name": sname,
+                "category": row["disease_category"],
+                "codes_n": len(row.get("all_codes") or []),
+                "cdr_codename": cdr_codename,
+            }
+        )
         enqueued += 1
 
     # STAGE 2: handle uncached (only if dedup disabled AND BigQuery allowed)
     if (not PHENO_DEDUP_ENABLE) and phenos_to_query_from_bq:
         if allow_bq and (bq_client is not None) and (cdr_id is not None):
-            print(f"[Fetcher]  - Processing {len(phenos_to_query_from_bq)} uncached phenotypes from BQ in batches...", flush=True)
-            phenos_to_query_from_bq.sort(key=lambda r: len(r.get("all_codes") or []), reverse=True)
+            print(
+                f"[Fetcher]  - Processing {len(phenos_to_query_from_bq)} uncached phenotypes from BQ in batches...",
+                flush=True,
+            )
+            phenos_to_query_from_bq.sort(
+                key=lambda r: len(r.get("all_codes") or []), reverse=True
+            )
             phenos_to_query_from_bq = [
-                r for r in phenos_to_query_from_bq
-                if not os.path.exists(os.path.join(cache_dir, f"pheno_{r['sanitized_name']}_{cdr_codename}.parquet"))
+                r
+                for r in phenos_to_query_from_bq
+                if not os.path.exists(
+                    os.path.join(
+                        cache_dir, f"pheno_{r['sanitized_name']}_{cdr_codename}.parquet"
+                    )
+                )
             ]
-            batches = list(_batch_pheno_defs(phenos_to_query_from_bq, BQ_BATCH_PHENOS, BQ_BATCH_MAX_CODES))
-            print(f"[Fetcher]  - Created {len(batches)} batches (<= {BQ_BATCH_PHENOS} phenos and <= {BQ_BATCH_MAX_CODES} codes per batch).", flush=True)
+            batches = list(
+                _batch_pheno_defs(
+                    phenos_to_query_from_bq, BQ_BATCH_PHENOS, BQ_BATCH_MAX_CODES
+                )
+            )
+            print(
+                f"[Fetcher]  - Created {len(batches)} batches (<= {BQ_BATCH_PHENOS} phenos and <= {BQ_BATCH_MAX_CODES} codes per batch).",
+                flush=True,
+            )
 
-            with ThreadPoolExecutor(max_workers=min(BQ_BATCH_WORKERS, len(batches))) as executor:
+            with ThreadPoolExecutor(
+                max_workers=min(BQ_BATCH_WORKERS, len(batches))
+            ) as executor:
                 inflight = set()
                 for batch in batches:
-                    fut = executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
+                    fut = executor.submit(
+                        _query_batch_bq,
+                        batch,
+                        bq_client,
+                        cdr_id,
+                        core_index,
+                        cache_dir,
+                        cdr_codename,
+                    )
                     inflight.add(fut)
                 for fut in as_completed(inflight):
                     try:
                         results = fut.result()
                         for r in results:
                             info = {
-                                'sanitized_name': r['name'],
-                                'disease_category': r['category'],
-                                'cdr_codename': cdr_codename,
-                                'cache_dir': cache_dir,
+                                "sanitized_name": r["name"],
+                                "disease_category": r["category"],
+                                "cdr_codename": cdr_codename,
+                                "cache_dir": cache_dir,
                             }
-                            if (allowed_mask_by_cat is not None) and (sex_vec is not None):
-                                if not _prequeue_should_run(info, core_index, allowed_mask_by_cat, sex_vec,
-                                                            min_cases, min_ctrls, sex_mode, sex_prop, max_other, min_neff):
+                            if (allowed_mask_by_cat is not None) and (
+                                sex_vec is not None
+                            ):
+                                if not _prequeue_should_run(
+                                    info,
+                                    core_index,
+                                    allowed_mask_by_cat,
+                                    sex_vec,
+                                    min_cases,
+                                    min_ctrls,
+                                    sex_mode,
+                                    sex_prop,
+                                    max_other,
+                                    min_neff,
+                                ):
                                     continue
-                            pheno_queue.put({
-                                "name": r['name'],
-                                "category": r['category'],
-                                "codes_n": int(r.get("codes_n") or 0),
-                                "cdr_codename": cdr_codename
-                            })
+                            pheno_queue.put(
+                                {
+                                    "name": r["name"],
+                                    "category": r["category"],
+                                    "codes_n": int(r.get("codes_n") or 0),
+                                    "cdr_codename": cdr_codename,
+                                }
+                            )
                             enqueued += 1
                     except Exception as e:
-                        print(f"[Fetcher]  - [FAIL] Batch query failed: {str(e)[:200]}", flush=True)
+                        print(
+                            f"[Fetcher]  - [FAIL] Batch query failed: {str(e)[:200]}",
+                            flush=True,
+                        )
         else:
-            print(f"[Fetcher]  - [WARN] Skipping {len(phenos_to_query_from_bq)} uncached phenotypes because allow_bq=False or client/cdr missing.", flush=True)
+            print(
+                f"[Fetcher]  - [WARN] Skipping {len(phenos_to_query_from_bq)} uncached phenotypes because allow_bq=False or client/cdr missing.",
+                flush=True,
+            )
 
     pheno_queue.put(None)
-    print(f"[Fetcher]  - All phenotypes fetched. Producer thread finished. Enqueued={enqueued}.", flush=True)
+    print(
+        f"[Fetcher]  - All phenotypes fetched. Producer thread finished. Enqueued={enqueued}.",
+        flush=True,
+    )
 
 
 # --- Dedup functions ---
+
 
 def phi_from_2x2(n11: int, n10: int, n01: int, n00: int) -> float:
     """
@@ -786,8 +1138,10 @@ def phi_from_2x2(n11: int, n10: int, n01: int, n00: int) -> float:
         return 0.0
 
 
-def _build_pair_overlap_counts(cases_by_pheno: Dict[str, np.ndarray],
-                               cap_per_person: Optional[int] = PHENO_DEDUP_CAP_PER_PERSON) -> Dict[Tuple[str, str], int]:
+def _build_pair_overlap_counts(
+    cases_by_pheno: Dict[str, np.ndarray],
+    cap_per_person: Optional[int] = PHENO_DEDUP_CAP_PER_PERSON,
+) -> Dict[Tuple[str, str], int]:
     """
     Builds sparse co-occurrence counts k(A,B)=|cases(A) ∩ cases(B)| by streaming per-person membership.
     Only pairs that actually co-occur are produced.
@@ -816,8 +1170,9 @@ def _build_pair_overlap_counts(cases_by_pheno: Dict[str, np.ndarray],
     return pair_k
 
 
-def _tiebreak_drop(a_name: str, n1a: int, n_codes_a: int,
-                   b_name: str, n1b: int, n_codes_b: int) -> str:
+def _tiebreak_drop(
+    a_name: str, n1a: int, n_codes_a: int, b_name: str, n1b: int, n_codes_b: int
+) -> str:
     """
     Decide which phenotype to drop when a rule fires.
     Primary: smaller case count; Secondary: fewer ICD codes; Tertiary: lexicographically larger name.
@@ -840,7 +1195,9 @@ def _write_dedup_manifest(path: str, manifest: dict) -> None:
     Atomically write dedup manifest JSON to the given path.
     """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix="pheno_dedup_manifest.", suffix=".json")
+    fd, tmp_path = tempfile.mkstemp(
+        dir=os.path.dirname(path) or ".", prefix="pheno_dedup_manifest.", suffix=".json"
+    )
     try:
         with os.fdopen(fd, "w") as fh:
             json.dump(manifest, fh, separators=(",", ":"), ensure_ascii=False)
@@ -852,12 +1209,15 @@ def _write_dedup_manifest(path: str, manifest: dict) -> None:
         except Exception:
             pass
 
-def _precache_all_missing_phenos(pheno_defs_df: pd.DataFrame,
-                                 bq_client,
-                                 cdr_id: str,
-                                 core_index: pd.Index,
-                                 cache_dir: str,
-                                 cdr_codename: str) -> None:
+
+def _precache_all_missing_phenos(
+    pheno_defs_df: pd.DataFrame,
+    bq_client,
+    cdr_id: str,
+    core_index: pd.Index,
+    cache_dir: str,
+    cdr_codename: str,
+) -> None:
     """
     Ensure *all* phenotypes in pheno_defs_df have on-disk parquet caches before dedup runs.
     Uses existing batching helpers to minimize BigQuery scans.
@@ -867,40 +1227,67 @@ def _precache_all_missing_phenos(pheno_defs_df: pd.DataFrame,
     os.makedirs(lock_dir, exist_ok=True)
     prec_guard = os.path.join(lock_dir, f"precache_subset_{cdr_codename}.lock")
     if not io.ensure_lock(prec_guard, LOCK_MAX_AGE_SEC):
-        print("[Dedup]     - Pre-caching already running elsewhere; skipping.", flush=True)
+        print(
+            "[Dedup]     - Pre-caching already running elsewhere; skipping.", flush=True
+        )
         return
     try:
         missing = [
-            row.to_dict() for _, row in pheno_defs_df.iterrows()
-            if not os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))
+            row.to_dict()
+            for _, row in pheno_defs_df.iterrows()
+            if not os.path.exists(
+                os.path.join(
+                    cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"
+                )
+            )
         ]
         if not missing:
             return
 
         missing.sort(key=lambda r: len(r.get("all_codes") or []), reverse=True)
         batches = list(_batch_pheno_defs(missing, BQ_BATCH_PHENOS, BQ_BATCH_MAX_CODES))
-        print(f"[Dedup]     - Pre-caching: {len(missing)} phenotypes in {len(batches)} batches.", flush=True)
+        print(
+            f"[Dedup]     - Pre-caching: {len(missing)} phenotypes in {len(batches)} batches.",
+            flush=True,
+        )
 
-        with ThreadPoolExecutor(max_workers=min(BQ_BATCH_WORKERS, max(1, len(batches)))) as executor:
-            futs = [executor.submit(_query_batch_bq, batch, bq_client, cdr_id, core_index, cache_dir, cdr_codename)
-                    for batch in batches]
+        with ThreadPoolExecutor(
+            max_workers=min(BQ_BATCH_WORKERS, max(1, len(batches)))
+        ) as executor:
+            futs = [
+                executor.submit(
+                    _query_batch_bq,
+                    batch,
+                    bq_client,
+                    cdr_id,
+                    core_index,
+                    cache_dir,
+                    cdr_codename,
+                )
+                for batch in batches
+            ]
             for fut in as_completed(futs):
                 try:
                     _ = fut.result()
                 except Exception as e:
-                    print(f"[Dedup]     - [WARN] Batch pre-cache failed: {str(e)[:200]}", flush=True)
+                    print(
+                        f"[Dedup]     - [WARN] Batch pre-cache failed: {str(e)[:200]}",
+                        flush=True,
+                    )
     finally:
         io.release_lock(prec_guard)
 
 
-def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
-                           core_index: pd.Index,
-                           cdr_codename: str,
-                           cache_dir: str,
-                           min_cases: int,
-                           phi_threshold: float = PHI_THRESHOLD,
-                           share_threshold: float = SHARE_THRESHOLD,
-                           protect: Optional[Set[str]] = None) -> dict:
+def deduplicate_phenotypes(
+    pheno_defs_df: pd.DataFrame,
+    core_index: pd.Index,
+    cdr_codename: str,
+    cache_dir: str,
+    min_cases: int,
+    phi_threshold: float = PHI_THRESHOLD,
+    share_threshold: float = SHARE_THRESHOLD,
+    protect: Optional[Set[str]] = None,
+) -> dict:
     """
     Greedy, deterministic phenotype deduplication using two rules:
       1) phi > phi_threshold  -> drop the one with fewer cases (ties: more codes wins, then name)
@@ -920,7 +1307,9 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
 
     # Cohort-specific manifest path
     cohort_fp = str(models._index_fingerprint(core_index))
-    manifest_path = os.path.join(cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json")
+    manifest_path = os.path.join(
+        cache_dir, f"pheno_dedup_manifest_{cdr_codename}_{cohort_fp}.json"
+    )
 
     # 1) Materialize case indices per phenotype from cache; filter by min_cases
     all_codes_map = pheno_defs_df.set_index("sanitized_name")["all_codes"].to_dict()
@@ -948,18 +1337,27 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
 
     if not cases_by_pheno:
         manifest = {
-            "config": {"min_cases": min_cases, "phi_threshold": phi_threshold, "share_threshold": share_threshold, "N": N},
+            "config": {
+                "min_cases": min_cases,
+                "phi_threshold": phi_threshold,
+                "share_threshold": share_threshold,
+                "N": N,
+            },
             "kept": [],
-            "dropped": []
+            "dropped": [],
         }
         _write_dedup_manifest(manifest_path, manifest)
         return {"kept": set(), "dropped": []}
 
     # 2) Build sparse overlap counts only for co-occurring pairs
-    pair_k = _build_pair_overlap_counts(cases_by_pheno, cap_per_person=PHENO_DEDUP_CAP_PER_PERSON)
+    pair_k = _build_pair_overlap_counts(
+        cases_by_pheno, cap_per_person=PHENO_DEDUP_CAP_PER_PERSON
+    )
 
     # 3) Prepare deterministic order: cases desc, codes desc, name asc
-    items = [(name, n1_map[name], n_codes_map.get(name, 0)) for name in cases_by_pheno.keys()]
+    items = [
+        (name, n1_map[name], n_codes_map.get(name, 0)) for name in cases_by_pheno.keys()
+    ]
     items.sort(key=lambda t: (-t[1], -t[2], t[0]))
 
     # Build neighbor map from pair_k to avoid scanning non-overlapping pairs
@@ -977,9 +1375,15 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
         return (x, y) if x < y else (y, x)
 
     # Helper to explain tiebreak decision in human-readable form
-    def _tiebreak_explanation(a_name: str, n1a: int, n_codes_a: int,
-                              b_name: str, n1b: int, n_codes_b: int,
-                              dropped: str) -> str:
+    def _tiebreak_explanation(
+        a_name: str,
+        n1a: int,
+        n_codes_a: int,
+        b_name: str,
+        n1b: int,
+        n_codes_b: int,
+        dropped: str,
+    ) -> str:
         if n1a != n1b:
             # smaller case count drops
             if n1a < n1b and dropped == a_name:
@@ -1027,10 +1431,16 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
                     # Explain which direction(s) triggered
                     trigger_dirs = []
                     if share_ab >= share_threshold:
-                        trigger_dirs.append(f"{name_a}->{name_b} ({share_ab:.4f}≥{share_threshold})")
+                        trigger_dirs.append(
+                            f"{name_a}->{name_b} ({share_ab:.4f}≥{share_threshold})"
+                        )
                     if share_ba >= share_threshold:
-                        trigger_dirs.append(f"{name_b}->{name_a} ({share_ba:.4f}≥{share_threshold})")
-                    tie_expl = _tiebreak_explanation(name_a, n1a, n_codes_a, name_b, n1b, n_codes_b, drop)
+                        trigger_dirs.append(
+                            f"{name_b}->{name_a} ({share_ba:.4f}≥{share_threshold})"
+                        )
+                    tie_expl = _tiebreak_explanation(
+                        name_a, n1a, n_codes_a, name_b, n1b, n_codes_b, drop
+                    )
                     print(
                         f"Dropped '{drop}' because directional share>=threshold with '{other}'; "
                         f"triggers: {', '.join(trigger_dirs)}; "
@@ -1039,16 +1449,22 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
                         f"share_other={(share_ab if drop == name_b else share_ba):.4f}; {tie_expl}"
                     )
 
-                    dropped_records.append({
-                        "name": drop,
-                        "reason": "share>=threshold",
-                        "with": other,
-                        "k": int(k),
-                        "n1_self": int(n1_map.get(drop, 0)),
-                        "n1_other": int(n1_map.get(other, 0)),
-                        "share_self": float(share_ba if drop == name_b else share_ab),
-                        "share_other": float(share_ab if drop == name_b else share_ba)
-                    })
+                    dropped_records.append(
+                        {
+                            "name": drop,
+                            "reason": "share>=threshold",
+                            "with": other,
+                            "k": int(k),
+                            "n1_self": int(n1_map.get(drop, 0)),
+                            "n1_other": int(n1_map.get(other, 0)),
+                            "share_self": float(
+                                share_ba if drop == name_b else share_ab
+                            ),
+                            "share_other": float(
+                                share_ab if drop == name_b else share_ba
+                            ),
+                        }
+                    )
                     dropped_names.add(drop)
                     if drop == name_a:
                         kept.discard(name_a)
@@ -1066,22 +1482,26 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
                 if drop in protect:
                     continue
                 other = name_b if drop == name_a else name_a
-                tie_expl = _tiebreak_explanation(name_a, n1a, n_codes_a, name_b, n1b, n_codes_b, drop)
+                tie_expl = _tiebreak_explanation(
+                    name_a, n1a, n_codes_a, name_b, n1b, n_codes_b, drop
+                )
                 print(
                     f"Dropped '{drop}' because phi>{phi_threshold} with '{other}'; "
                     f"k={k}, n1_self={n1_map.get(drop, 0)}, n1_other={n1_map.get(other, 0)}, "
                     f"phi={phi:.4f}; {tie_expl}"
                 )
 
-                dropped_records.append({
-                    "name": drop,
-                    "reason": "phi>threshold",
-                    "with": other,
-                    "k": int(k),
-                    "n1_self": int(n1_map.get(drop, 0)),
-                    "n1_other": int(n1_map.get(other, 0)),
-                    "phi": float(phi)
-                })
+                dropped_records.append(
+                    {
+                        "name": drop,
+                        "reason": "phi>threshold",
+                        "with": other,
+                        "k": int(k),
+                        "n1_self": int(n1_map.get(drop, 0)),
+                        "n1_other": int(n1_map.get(other, 0)),
+                        "phi": float(phi),
+                    }
+                )
                 dropped_names.add(drop)
                 if drop == name_a:
                     kept.discard(name_a)
@@ -1092,10 +1512,10 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
             "min_cases": min_cases,
             "phi_threshold": phi_threshold,
             "share_threshold": share_threshold,
-            "N": N
+            "N": N,
         },
         "kept": sorted(list(kept)),
-        "dropped": dropped_records
+        "dropped": dropped_records,
     }
     _write_dedup_manifest(manifest_path, manifest)
     return {"kept": kept, "dropped": dropped_records}

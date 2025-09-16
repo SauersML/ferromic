@@ -14,9 +14,39 @@ import time
 import random
 import queue
 
+
+def cgroup_available_gb():
+    """Return remaining memory permitted by the active cgroup, if known."""
+    try:
+        max_v2 = "/sys/fs/cgroup/memory.max"
+        cur_v2 = "/sys/fs/cgroup/memory.current"
+        if os.path.exists(max_v2) and os.path.exists(cur_v2):
+            with open(max_v2, "r") as fh:
+                raw = fh.read().strip()
+            if raw != "max":
+                limit = int(raw)
+                with open(cur_v2, "r") as fh:
+                    usage = int(fh.read().strip())
+                return max(0.0, (limit - usage) / (1024**3))
+
+        max_v1 = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+        cur_v1 = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+        if os.path.exists(max_v1) and os.path.exists(cur_v1):
+            with open(max_v1, "r") as fh:
+                limit = int(fh.read().strip())
+            if limit < (1 << 60):  # guard "unlimited" sentinel
+                with open(cur_v1, "r") as fh:
+                    usage = int(fh.read().strip())
+                return max(0.0, (limit - usage) / (1024**3))
+    except Exception:
+        pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
+
 
 def _evict_if_ctx_mismatch(meta_path, res_path, ctx, expected_target):
     """Remove stale metadata/results when the recorded context no longer matches."""
@@ -37,6 +67,9 @@ def _evict_if_ctx_mismatch(meta_path, res_path, ctx, expected_target):
     if version_tag and meta.get("cache_version_tag") != version_tag:
         stale = True
     if expected_target and meta.get("target") != expected_target:
+        stale = True
+    data_keys = ctx.get("DATA_KEYS")
+    if data_keys and meta.get("data_keys") != data_keys:
         stale = True
 
     if not stale:
@@ -60,19 +93,22 @@ def _evict_if_ctx_mismatch(meta_path, res_path, ctx, expected_target):
             pass
     return True
 
+
 # ---- Global Budget Manager (no new files) ----
+
 
 class BudgetManager:
     """
     Global memory token manager (GB). Respects container cgroup limit.
     Thread-safe; suitable for orchestrator + pool workers.
     """
+
     def __init__(self):
         self._lock = threading.RLock()
         self._cond = threading.Condition(self._lock)
         self._total_gb = self._detect_container_limit_gb()
         self._guard_gb = 2.0  # minimum headroom to avoid OOM killer (kept small; we rely on real reservations)
-        self._reserved_by_inv = {}   # inv_id -> {component -> gb}
+        self._reserved_by_inv = {}  # inv_id -> {component -> gb}
         self._total_reserved = 0.0
 
     def _detect_container_limit_gb(self):
@@ -88,12 +124,13 @@ class BudgetManager:
             path = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
             if os.path.exists(path):
                 lim = int(open(path).read().strip())
-                if lim > 0 and lim < (1<<60):
+                if lim > 0 and lim < (1 << 60):
                     return max(1.0, lim / (1024**3))
         except Exception:
             pass
         try:
             import psutil
+
             return psutil.virtual_memory().total / (1024**3)
         except Exception:
             return 16.0  # conservative fallback
@@ -116,12 +153,16 @@ class BudgetManager:
     def reserve(self, inv_id: str, component: str, gb: float, block=True):
         gb = max(0.0, float(gb))
         with self._cond:
-            while block and (self._total_reserved + gb + self._guard_gb) > self._total_gb:
+            while (
+                block and (self._total_reserved + gb + self._guard_gb) > self._total_gb
+            ):
                 self._cond.wait(timeout=0.5)
             if (self._total_reserved + gb + self._guard_gb) > self._total_gb:
                 return False  # non-blocking and can't reserve
             self._reserved_by_inv.setdefault(inv_id, {})
-            self._reserved_by_inv[inv_id][component] = self._reserved_by_inv[inv_id].get(component, 0.0) + gb
+            self._reserved_by_inv[inv_id][component] = (
+                self._reserved_by_inv[inv_id].get(component, 0.0) + gb
+            )
             self._total_reserved += gb
             return True
 
@@ -151,6 +192,7 @@ class BudgetManager:
             self._total_reserved = max(0.0, self._total_reserved)
             self._cond.notify_all()
 
+
 # module-global singleton
 BUDGET = BudgetManager()
 
@@ -176,17 +218,21 @@ POOL_PROCS_PER_INV = 8
 
 try:
     import psutil
+
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
 
-MP_CONTEXT = 'forkserver' if sys.platform.startswith('linux') else 'spawn'
+MP_CONTEXT = "forkserver" if sys.platform.startswith("linux") else "spawn"
+
 
 def mem_ok_for_submission(min_free_gb: float = None):
     from math import isfinite
+
     rem = BUDGET.remaining_gb()
     floor = BUDGET.floor_gb() if min_free_gb is None else float(min_free_gb)
     return isfinite(rem) and rem >= floor
+
 
 def _resolve_floor(v):
     """
@@ -200,8 +246,9 @@ def _resolve_floor(v):
             # rather than trying to cast the callable itself.
             # Here, we might just return a very high floor to be safe, or a default.
             # For now, let's assume the callable is trusted and this is for edge cases.
-            return 4.0 # Default fallback
+            return 4.0  # Default fallback
     return float(v)
+
 
 class MemoryMonitor(threading.Thread):
     def __init__(self, interval=1):
@@ -225,8 +272,10 @@ class MemoryMonitor(threading.Thread):
         n_cpus = psutil.cpu_count(logical=True) or os.cpu_count() or 1
 
         def _cgroup_bytes():
-            for path in ("/sys/fs/cgroup/memory.current",
-                         "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
+            for path in (
+                "/sys/fs/cgroup/memory.current",
+                "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+            ):
                 try:
                     return int(open(path, "r").read().strip())
                 except Exception:
@@ -236,7 +285,11 @@ class MemoryMonitor(threading.Thread):
         while not self.stop_event.is_set():
             try:
                 vm = psutil.virtual_memory()
-                self.available_memory_gb = vm.available / (1024**3)
+                host_avail = vm.available / (1024**3)
+                cg_avail = cgroup_available_gb()
+                self.available_memory_gb = (
+                    min(host_avail, cg_avail) if cg_avail is not None else host_avail
+                )
 
                 cg = _cgroup_bytes()
                 if cg is not None:
@@ -255,14 +308,14 @@ class MemoryMonitor(threading.Thread):
                     self.rss_gb = total / (1024**3)
 
                 cpu0 = 0.0
-                for proc in (p.children(recursive=True) or []):
+                for proc in p.children(recursive=True) or []:
                     try:
                         cpu0 += proc.cpu_percent(interval=None)
                     except Exception:
                         pass
                 time.sleep(0.25)
                 cpu1 = 0.0
-                for proc in (p.children(recursive=True) or []):
+                for proc in p.children(recursive=True) or []:
                     try:
                         cpu1 += proc.cpu_percent(interval=None)
                     except Exception:
@@ -276,13 +329,24 @@ class MemoryMonitor(threading.Thread):
         self.stop_event.set()
 
 
-def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_inversion, results_cache_dir, ctx, min_available_memory_gb, on_pool_started=None):
+def run_fits(
+    pheno_queue,
+    core_df_with_const,
+    allowed_mask_by_cat,
+    target_inversion,
+    results_cache_dir,
+    ctx,
+    min_available_memory_gb,
+    on_pool_started=None,
+):
     """
     Creates the process pool with models.init_worker and submits models.run_single_model_worker
     with the same callback/progress bar logic.
     """
     worker_func = partial(
-        models.run_single_model_worker, target_inversion=target_inversion, results_cache_dir=results_cache_dir
+        models.run_single_model_worker,
+        target_inversion=target_inversion,
+        results_cache_dir=results_cache_dir,
     )
 
     monitor = MemoryMonitor()
@@ -290,16 +354,25 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
     try:
         BUDGET.reserve(target_inversion, "core_shm", 0.0, block=True)
         # core_df_with_const is cast to float32 immediately after; 4 bytes per value
-        bytes_needed = int(core_df_with_const.index.size) * int(len(core_df_with_const.columns)) * 4
+        bytes_needed = (
+            int(core_df_with_const.index.size)
+            * int(len(core_df_with_const.columns))
+            * 4
+        )
         shm_gb = bytes_needed / (1024**3)
         BUDGET.revise(target_inversion, "core_shm", shm_gb)
-        print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
+        print(
+            f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB",
+            flush=True,
+        )
 
         C = cpu_count()
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
         n_procs = max(1, min(C, max_by_budget, POOL_PROCS_PER_INV))
-        print(f"\n--- Starting parallel model fitting with {n_procs} worker processes ({MP_CONTEXT} context) ---")
+        print(
+            f"\n--- Starting parallel model fitting with {n_procs} worker processes ({MP_CONTEXT} context) ---"
+        )
 
         X_base = core_df_with_const.to_numpy(dtype=np.float32, copy=True)
         base_meta, base_shm = io.create_shared_from_ndarray(X_base, readonly=True)
@@ -318,7 +391,9 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         try:
             if on_pool_started:
                 try:
-                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    worker_pids = [
+                        p.pid for p in getattr(pool, "_pool", []) if p and p.pid
+                    ]
                 except Exception:
                     worker_pids = []
                 try:
@@ -338,9 +413,11 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                 pct = int((d * 100) / q) if q else 0
                 filled = int(bar_len * (d / q)) if q else 0
                 bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-                mem_info = (f"| App≈{monitor.rss_gb:.2f}GB  "
-                            f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
-                            f"Budget≈{BUDGET.remaining_gb():.2f}GB")
+                mem_info = (
+                    f"| App≈{monitor.rss_gb:.2f}GB  "
+                    f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
+                    f"Budget≈{BUDGET.remaining_gb():.2f}GB"
+                )
                 PROGRESS.update(target_inversion, "Fit", d, q)
                 print(f"\r[Fit] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
@@ -351,6 +428,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                     _print_bar(queued, done)
 
             failed_tasks = []
+
             def _err_cb(e):
                 nonlocal failed_tasks
                 print(f"[pool ERR] Worker failed: {e}", flush=True)
@@ -362,13 +440,18 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                     break  # producer finished
                 floor = _resolve_floor(min_available_memory_gb)
                 while BUDGET.remaining_gb() < floor:
-                    print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    print(
+                        f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...",
+                        flush=True,
+                    )
                     time.sleep(2)
                 # Cache policy: if a previous result exists but has an invalid or NA P_Value and the
                 # association was attempted (no Skip_Reason), evict the meta to force a fresh run.
                 try:
                     res_path = os.path.join(results_cache_dir, f"{item['name']}.json")
-                    meta_path = os.path.join(results_cache_dir, f"{item['name']}.meta.json")
+                    meta_path = os.path.join(
+                        results_cache_dir, f"{item['name']}.meta.json"
+                    )
                     _evict_if_ctx_mismatch(meta_path, res_path, ctx, target_inversion)
                     if os.path.exists(res_path) and os.path.exists(meta_path):
                         with open(res_path, "r") as _rf:
@@ -385,13 +468,18 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                             if not _valid_p:
                                 try:
                                     os.remove(meta_path)
-                                    print(f"\n[cache POLICY] Invalid or missing P_Value for '{item['name']}'. Forcing re-run by removing meta.", flush=True)
+                                    print(
+                                        f"\n[cache POLICY] Invalid or missing P_Value for '{item['name']}'. Forcing re-run by removing meta.",
+                                        flush=True,
+                                    )
                                 except Exception:
                                     pass
                 except Exception:
                     pass
                 queued += 1
-                ar = pool.apply_async(worker_func, (item,), callback=_cb, error_callback=_err_cb)
+                ar = pool.apply_async(
+                    worker_func, (item,), callback=_cb, error_callback=_err_cb
+                )
                 inflight.append(ar)
                 _print_bar(queued, done)
 
@@ -400,7 +488,8 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
             for ar in inflight:
                 ar.wait()
             pool.join()
-            _print_bar(queued, done); print("")
+            _print_bar(queued, done)
+            print("")
         finally:
             base_shm.close()
             base_shm.unlink()
@@ -410,11 +499,30 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
         monitor.stop()
 
 
-def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_list, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb, on_pool_started=None):
+def run_lrt_overall(
+    core_df_with_const,
+    allowed_mask_by_cat,
+    anc_series,
+    phenos_list,
+    name_to_cat,
+    cdr_codename,
+    target_inversion,
+    ctx,
+    min_available_memory_gb,
+    on_pool_started=None,
+):
     """
     Same pool pattern; submits models.lrt_overall_worker.
     """
-    tasks = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": target_inversion} for s in phenos_list]
+    tasks = [
+        {
+            "name": s,
+            "category": name_to_cat.get(s, None),
+            "cdr_codename": cdr_codename,
+            "target": target_inversion,
+        }
+        for s in phenos_list
+    ]
     random.shuffle(tasks)
 
     monitor = MemoryMonitor()
@@ -422,16 +530,26 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
     try:
         BUDGET.reserve(target_inversion, "core_shm", 0.0, block=True)
         # core_df_with_const is cast to float32 immediately after; 4 bytes per value
-        bytes_needed = int(core_df_with_const.index.size) * int(len(core_df_with_const.columns)) * 4
+        bytes_needed = (
+            int(core_df_with_const.index.size)
+            * int(len(core_df_with_const.columns))
+            * 4
+        )
         shm_gb = bytes_needed / (1024**3)
         BUDGET.revise(target_inversion, "core_shm", shm_gb)
-        print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
+        print(
+            f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB",
+            flush=True,
+        )
 
         C = cpu_count()
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
         n_procs = max(1, min(C, max_by_budget, POOL_PROCS_PER_INV))
-        print(f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching ({n_procs} workers).", flush=True)
+        print(
+            f"[LRT-Stage1] Scheduling {len(tasks)} phenotypes for overall LRT with atomic caching ({n_procs} workers).",
+            flush=True,
+        )
         bar_len = 40
         queued = 0
         done = 0
@@ -443,9 +561,11 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
             pct = int((d * 100) / q) if q else 0
             filled = int(bar_len * (d / q)) if q else 0
             bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-            mem_info = (f"| App≈{monitor.rss_gb:.2f}GB  "
-                        f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
-                        f"Budget≈{BUDGET.remaining_gb():.2f}GB")
+            mem_info = (
+                f"| App≈{monitor.rss_gb:.2f}GB  "
+                f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
+                f"Budget≈{BUDGET.remaining_gb():.2f}GB"
+            )
             PROGRESS.update(target_inversion, label, d, q)
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
 
@@ -460,13 +580,22 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         pool = get_context(MP_CONTEXT).Pool(
             processes=n_procs,
             initializer=models.init_lrt_worker,
-            initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+            initargs=(
+                base_meta,
+                core_cols,
+                core_index,
+                allowed_mask_by_cat,
+                anc_series,
+                ctx,
+            ),
             maxtasksperchild=500,
         )
         try:
             if on_pool_started:
                 try:
-                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    worker_pids = [
+                        p.pid for p in getattr(pool, "_pool", []) if p and p.pid
+                    ]
                 except Exception:
                     worker_pids = []
                 try:
@@ -483,6 +612,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
                     _print_bar(queued, done, "LRT-Stage1")
 
             failed_tasks = []
+
             def _err_cb(e):
                 nonlocal failed_tasks
                 print(f"[pool ERR] Worker failed: {e}", flush=True)
@@ -491,14 +621,21 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
             for task in tasks:
                 floor = _resolve_floor(min_available_memory_gb)
                 while BUDGET.remaining_gb() < floor:
-                    print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    print(
+                        f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...",
+                        flush=True,
+                    )
                     time.sleep(2)
 
                 # Cache policy: if a previous Stage-1 LRT result exists but has an invalid or NA P_LRT_Overall,
                 # evict the meta to force a fresh run. LRT tasks are only scheduled for non-skipped models.
                 try:
-                    _res_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.json")
-                    _meta_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.meta.json")
+                    _res_path = os.path.join(
+                        ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.json"
+                    )
+                    _meta_path = os.path.join(
+                        ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.meta.json"
+                    )
                     _evict_if_ctx_mismatch(_meta_path, _res_path, ctx, target_inversion)
                     if os.path.exists(_res_path) and os.path.exists(_meta_path):
                         with open(_res_path, "r") as _rf:
@@ -513,14 +650,22 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
                         if not _valid:
                             try:
                                 os.remove(_meta_path)
-                                print(f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.", flush=True)
+                                print(
+                                    f"\n[cache POLICY] Invalid or missing P_LRT_Overall for '{task['name']}'. Forcing re-run by removing meta.",
+                                    flush=True,
+                                )
                             except Exception:
                                 pass
                 except Exception:
                     pass
 
                 queued += 1
-                ar = pool.apply_async(models.lrt_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
+                ar = pool.apply_async(
+                    models.lrt_overall_worker,
+                    (task,),
+                    callback=_cb,
+                    error_callback=_err_cb,
+                )
                 inflight.append(ar)
                 _print_bar(queued, done, "LRT-Stage1")
 
@@ -539,13 +684,30 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
         monitor.stop()
 
 
-def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
-                          phenos_list, name_to_cat, cdr_codename, target_inversion,
-                          ctx, min_available_memory_gb, on_pool_started=None):
+def run_bootstrap_overall(
+    core_df_with_const,
+    allowed_mask_by_cat,
+    anc_series,
+    phenos_list,
+    name_to_cat,
+    cdr_codename,
+    target_inversion,
+    ctx,
+    min_available_memory_gb,
+    on_pool_started=None,
+):
     """Stage-1 parametric bootstrap with shared U matrix."""
     import gc, os, numpy as np, random, threading, time, hashlib
-    tasks = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": target_inversion}
-             for s in phenos_list]
+
+    tasks = [
+        {
+            "name": s,
+            "category": name_to_cat.get(s, None),
+            "cdr_codename": cdr_codename,
+            "target": target_inversion,
+        }
+        for s in phenos_list
+    ]
     random.shuffle(tasks)
 
     monitor = MemoryMonitor()
@@ -583,7 +745,10 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
         n_procs = max(1, min(C, max_by_budget, POOL_PROCS_PER_INV))
-        print(f"[Bootstrap-Stage1] Scheduling {len(tasks)} phenotypes (B={B}) with {n_procs} workers.", flush=True)
+        print(
+            f"[Bootstrap-Stage1] Scheduling {len(tasks)} phenotypes (B={B}) with {n_procs} workers.",
+            flush=True,
+        )
 
         bar_len, queued, done = 40, 0, 0
         lock = threading.Lock()
@@ -604,12 +769,22 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
             pool = get_context(MP_CONTEXT).Pool(
                 processes=n_procs,
                 initializer=models.init_boot_worker,
-                initargs=(base_meta, boot_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+                initargs=(
+                    base_meta,
+                    boot_meta,
+                    core_cols,
+                    core_index,
+                    allowed_mask_by_cat,
+                    anc_series,
+                    ctx,
+                ),
                 maxtasksperchild=500,
             )
             if on_pool_started:
                 try:
-                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    worker_pids = [
+                        p.pid for p in getattr(pool, "_pool", []) if p and p.pid
+                    ]
                 except Exception:
                     worker_pids = []
                 try:
@@ -642,7 +817,12 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
                     meta_path = os.path.join(boot_dir, f"{task['name']}.meta.json")
                     _evict_if_ctx_mismatch(meta_path, res_path, ctx, target_inversion)
                 queued += 1
-                ar = pool.apply_async(models.bootstrap_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
+                ar = pool.apply_async(
+                    models.bootstrap_overall_worker,
+                    (task,),
+                    callback=_cb,
+                    error_callback=_err_cb,
+                )
                 inflight.append(ar)
                 _print(queued, done)
 
@@ -689,38 +869,70 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
         monitor.stop()
 
 
-def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_names, name_to_cat, cdr_codename, target_inversion, ctx, min_available_memory_gb, on_pool_started=None):
+def run_lrt_followup(
+    core_df_with_const,
+    allowed_mask_by_cat,
+    anc_series,
+    hit_names,
+    name_to_cat,
+    cdr_codename,
+    target_inversion,
+    ctx,
+    min_available_memory_gb,
+    on_pool_started=None,
+):
     if len(hit_names) > 0:
-        tasks_follow = [{"name": s, "category": name_to_cat.get(s, None), "cdr_codename": cdr_codename, "target": target_inversion} for s in hit_names]
+        tasks_follow = [
+            {
+                "name": s,
+                "category": name_to_cat.get(s, None),
+                "cdr_codename": cdr_codename,
+                "target": target_inversion,
+            }
+            for s in hit_names
+        ]
         random.shuffle(tasks_follow)
 
         monitor = MemoryMonitor()
         monitor.start()
         BUDGET.reserve(target_inversion, "core_shm", 0.0, block=True)
         # core_df_with_const is cast to float32 immediately after; 4 bytes per value
-        bytes_needed = int(core_df_with_const.index.size) * int(len(core_df_with_const.columns)) * 4
+        bytes_needed = (
+            int(core_df_with_const.index.size)
+            * int(len(core_df_with_const.columns))
+            * 4
+        )
         shm_gb = bytes_needed / (1024**3)
         BUDGET.revise(target_inversion, "core_shm", shm_gb)
-        print(f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB", flush=True)
+        print(
+            f"[Budget] {target_inversion}.core_shm: set {shm_gb:.2f}GB | remaining {BUDGET.remaining_gb():.2f}GB",
+            flush=True,
+        )
 
         C = cpu_count()
         W_gb = max(0.25, _WORKER_GB_EST)
         max_by_budget = max(1, int(BUDGET.remaining_gb() // W_gb))
         n_procs = max(1, min(C, max_by_budget, POOL_PROCS_PER_INV))
-        print(f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).", flush=True)
+        print(
+            f"[Ancestry] Scheduling follow-up for {len(tasks_follow)} FDR-significant phenotypes ({n_procs} workers).",
+            flush=True,
+        )
         bar_len = 40
         queued = 0
         done = 0
         lock = threading.Lock()
 
         def _print_bar(q, d, label):
-            q = int(q); d = int(d)
+            q = int(q)
+            d = int(d)
             pct = int((d * 100) / q) if q else 0
             filled = int(bar_len * (d / q)) if q else 0
             bar = "[" + "#" * filled + "-" * (bar_len - filled) + "]"
-            mem_info = (f" | App≈{monitor.rss_gb:.2f}GB  "
-                        f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
-                        f"Budget≈{BUDGET.remaining_gb():.2f}GB")
+            mem_info = (
+                f" | App≈{monitor.rss_gb:.2f}GB  "
+                f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
+                f"Budget≈{BUDGET.remaining_gb():.2f}GB"
+            )
             PROGRESS.update(target_inversion, label, d, q)
             print(f"\r[{label}] {bar} {d}/{q} ({pct}%)" + mem_info, end="", flush=True)
 
@@ -734,13 +946,22 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
         pool = get_context(MP_CONTEXT).Pool(
             processes=n_procs,
             initializer=models.init_lrt_worker,
-            initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, anc_series, ctx),
+            initargs=(
+                base_meta,
+                core_cols,
+                core_index,
+                allowed_mask_by_cat,
+                anc_series,
+                ctx,
+            ),
             maxtasksperchild=500,
         )
         try:
             if on_pool_started:
                 try:
-                    worker_pids = [p.pid for p in getattr(pool, "_pool", []) if p and p.pid]
+                    worker_pids = [
+                        p.pid for p in getattr(pool, "_pool", []) if p and p.pid
+                    ]
                 except Exception:
                     worker_pids = []
                 try:
@@ -766,7 +987,10 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
             for task in tasks_follow:
                 floor = _resolve_floor(min_available_memory_gb)
                 while BUDGET.remaining_gb() < floor:
-                    print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
+                    print(
+                        f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...",
+                        flush=True,
+                    )
                     time.sleep(2)
 
                 follow_dir = ctx.get("LRT_FOLLOWUP_CACHE_DIR")
@@ -776,7 +1000,12 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                     _evict_if_ctx_mismatch(meta_path, res_path, ctx, target_inversion)
 
                 queued += 1
-                ar = pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
+                ar = pool.apply_async(
+                    models.lrt_followup_worker,
+                    (task,),
+                    callback=_cb2,
+                    error_callback=_err_cb,
+                )
                 inflight.append(ar)
                 _print_bar(queued, done, "Ancestry")
 
