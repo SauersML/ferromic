@@ -37,7 +37,6 @@ HEADER_LIFT_STEP_FRAC = 0.06      # how much to move UP per iteration if overlap
 HEADER_MAX_ITERS      = 40        # max iterations while trying to resolve overlap
 
 # Row label positioning (near BOTTOM of the row box)
-ROW_LABEL_PAD_FRAC    = 0.15      # distance *above* the row-box bottom edge (fraction of ROW_BOX_H)
 
 # Axis warp to reduce bunching around OR=1:  x = sign(ln(OR)) * |ln(OR)|^GAMMA
 GAMMA            = 0.50           # 0<GAMMA<1 expands center; 0.5 is a gentle, readable default
@@ -337,15 +336,16 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
         for row in sec["rows"]:
             y0, y1, yc = row["row_y0"], row["row_y1"], row["row_yc"]
 
-            # Left labels near BOTTOM of the row box (va='bottom'); baseline slightly above bottom
-            y_label = y1 - ROW_BOX_H * ROW_LABEL_PAD_FRAC
-
+            # Left labels CENTERED vertically within the row box
+            y_label = yc  # center of the row box
+            
             phen = wrap_label(row["Phenotype"])
-            t1 = axL.text(0.02,  y_label, phen, ha="left",  va="bottom",
+            t1 = axL.text(0.02,  y_label, phen, ha="left",  va="center",
                           color="#111111", transform=yxf, zorder=3)
             t2 = axL.text(0.985, y_label, f"q = {format_plain_decimal(row['Q_GLOBAL'])}",
-                          ha="right", va="bottom", color="#444444",
+                          ha="right", va="center", color="#444444",
                           transform=yxf, zorder=3)
+
             row_texts_by_section[sec_id].extend([t1, t2])
 
             # Right panel: CI line & point at center
