@@ -827,7 +827,7 @@ pub fn core_sample_id(name: &str) -> &str {
 
 #[cfg(test)]
 mod core_sample_id_tests {
-    use super::*;
+    use super::core_sample_id;
 
     #[test]
     fn test_core_sample_id() {
@@ -1739,7 +1739,9 @@ fn freq_map_for_pop(
 /// For a site with n called haplotypes and allele frequencies {p_a}, the unbiased
 /// estimator of within-population diversity is:
 ///
-///     π = (n/(n-1)) * (1 - Σ p_a²)
+/// ```text
+/// π = (n/(n-1)) * (1 - Σ p_a²)
+/// ```
 ///
 /// This corrects for finite sample size bias. The term (1 - Σ p_a²) is the
 /// expected heterozygosity, and the n/(n-1) factor provides the unbiased correction
@@ -1770,7 +1772,9 @@ fn pi_from_counts(n: usize, counts: &HashMap<i32, usize>) -> Option<f64> {
 /// For two populations with allele frequencies {p_1a} and {p_2a}, the between-population
 /// diversity is the average pairwise difference between haplotypes from different populations:
 ///
-///     D_xy = 1 - Σ_a (p_1a * p_2a)
+/// ```text
+/// D_xy = 1 - Σ_a (p_1a * p_2a)
+/// ```
 ///
 /// This is Hudson's H_B term - the probability that two randomly chosen haplotypes
 /// from different populations differ at this site.
@@ -1805,7 +1809,9 @@ fn dxy_from_counts(
 /// Mathematical Foundation (Hudson et al. 1992):
 /// Hudson's FST at a single site is defined as:
 ///
-///     FST_i = (D_xy,i - 0.5*(π_1,i + π_2,i)) / D_xy,i = (H_B - H_S) / H_B
+/// ```text
+/// FST_i = (D_xy,i - 0.5*(π_1,i + π_2,i)) / D_xy,i = (H_B - H_S) / H_B
+/// ```
 ///
 /// Where:
 /// - H_B = D_xy,i = 1 - Σ_a p_1a * p_2a = between-population diversity
@@ -1942,7 +1948,9 @@ pub fn calculate_hudson_fst_per_site(
 /// Mathematical Foundation:
 /// The recommended window-level Hudson FST estimator is the "ratio of sums":
 ///
-///     FST_window = Σ_i [D_xy,i - 0.5*(π_1,i + π_2,i)] / Σ_i D_xy,i
+/// ```text
+/// FST_window = Σ_i [D_xy,i - 0.5*(π_1,i + π_2,i)] / Σ_i D_xy,i
+/// ```
 ///
 /// This is a weighted average where sites with higher D_xy contribute more weight.
 ///
@@ -3005,7 +3013,6 @@ pub fn extract_wc_fst_components(
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
     include!("tests/stats_tests.rs");
     include!("tests/filter_tests.rs");
 }
