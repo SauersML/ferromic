@@ -22,6 +22,8 @@ from . import iox  # atomic writers, cache utils
 # ===================== HARD-CODED CONFIG =====================
 
 CACHE_DIR = "./phewas_cache"
+LOCK_DIR = os.path.join(CACHE_DIR, "locks")
+CACHE_VERSION_TAG = iox.CACHE_VERSION_TAG
 DOSAGES_TSV = "imputed_inversion_dosages.tsv"  # resolved upward from CWD
 
 # Covariates from pipeline caches (AGE, AGE_sq, sex, PCs, ancestry labels)
@@ -159,6 +161,27 @@ def _resolve_env():
     cdr_codename = cdr_dataset_id.split(".")[-1] if cdr_dataset_id else None
     return cdr_dataset_id, cdr_codename, gcp_project
 
+
+def _pcs_cache_path(gcp_project):
+    return os.path.join(
+        CACHE_DIR,
+        f"pcs_{NUM_PCS}_{iox.stable_hash((gcp_project or '', PCS_URI, NUM_PCS, CACHE_VERSION_TAG))}.parquet",
+    )
+
+
+def _sex_cache_path(gcp_project):
+    return os.path.join(
+        CACHE_DIR,
+        f"genetic_sex_{iox.stable_hash((gcp_project or '', SEX_URI, CACHE_VERSION_TAG))}.parquet",
+    )
+
+
+def _ancestry_cache_path(gcp_project):
+    return os.path.join(
+        CACHE_DIR,
+        f"ancestry_labels_{iox.stable_hash((gcp_project or '', PCS_URI, CACHE_VERSION_TAG))}.parquet",
+    )
+
 def _autodetect_cdr_codename() -> str | None:
     pats = sorted(glob.glob(os.path.join(CACHE_DIR, "demographics_*.parquet")))
     if not pats: return None
@@ -173,21 +196,36 @@ def _maybe_materialize_covars(cdr_dataset_id, cdr_codename, gcp_project):
     from google.cloud import bigquery
     _p("[covars] Materializing missing caches via BigQuery (run.py-compatible)")
     bq_client = bigquery.Client(project=gcp_project)
+    os.makedirs(LOCK_DIR, exist_ok=True)
     _ = iox.get_cached_or_generate(
         os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"),
-        iox.load_demographics_with_stable_age, bq_client=bq_client, cdr_id=cdr_dataset_id
+        iox.load_demographics_with_stable_age,
+        bq_client=bq_client,
+        cdr_id=cdr_dataset_id,
+        lock_dir=LOCK_DIR,
     )
     _ = iox.get_cached_or_generate(
-        os.path.join(CACHE_DIR, f"pcs_{NUM_PCS}.parquet"),
-        iox.load_pcs, gcp_project, PCS_URI, NUM_PCS, validate_num_pcs=NUM_PCS
+        _pcs_cache_path(gcp_project),
+        iox.load_pcs,
+        gcp_project,
+        PCS_URI,
+        NUM_PCS,
+        validate_num_pcs=NUM_PCS,
+        lock_dir=LOCK_DIR,
     )
     _ = iox.get_cached_or_generate(
-        os.path.join(CACHE_DIR, "genetic_sex.parquet"),
-        iox.load_genetic_sex, gcp_project, SEX_URI
+        _sex_cache_path(gcp_project),
+        iox.load_genetic_sex,
+        gcp_project,
+        SEX_URI,
+        lock_dir=LOCK_DIR,
     )
     _ = iox.get_cached_or_generate(
-        os.path.join(CACHE_DIR, "ancestry_labels.parquet"),
-        iox.load_ancestry_labels, gcp_project, LABELS_URI=PCS_URI
+        _ancestry_cache_path(gcp_project),
+        iox.load_ancestry_labels,
+        gcp_project,
+        LABELS_URI=PCS_URI,
+        lock_dir=LOCK_DIR,
     )
 
 def _load_pipeline_covars() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -198,9 +236,9 @@ def _load_pipeline_covars() -> tuple[pd.DataFrame, pd.DataFrame]:
         _p(f"[covars] Autodetected CDR codename: {cdr_codename}")
 
     demo_path = os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet") if cdr_codename else None
-    pcs_path  = os.path.join(CACHE_DIR, f"pcs_{NUM_PCS}.parquet")
-    sex_path  = os.path.join(CACHE_DIR, "genetic_sex.parquet")
-    anc_path  = os.path.join(CACHE_DIR, "ancestry_labels.parquet")
+    pcs_path  = _pcs_cache_path(gcp_project)
+    sex_path  = _sex_cache_path(gcp_project)
+    anc_path  = _ancestry_cache_path(gcp_project)
 
     needed = [demo_path, pcs_path, sex_path, anc_path]
     missing = [p for p in needed if (p is None or not os.path.exists(p))]
@@ -212,9 +250,9 @@ def _load_pipeline_covars() -> tuple[pd.DataFrame, pd.DataFrame]:
 
     _p("[covars] Loading cached demographics/PCs/sex/ancestry...")
     demographics_df = pd.read_parquet(os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"))[["AGE","AGE_sq"]]
-    pc_df          = pd.read_parquet(os.path.join(CACHE_DIR, f"pcs_{NUM_PCS}.parquet"))[[f"PC{i}" for i in range(1, NUM_PCS+1)]]
-    sex_df         = pd.read_parquet(os.path.join(CACHE_DIR, "genetic_sex.parquet"))[["sex"]]
-    ancestry_df    = pd.read_parquet(os.path.join(CACHE_DIR, "ancestry_labels.parquet"))[["ANCESTRY"]]
+    pc_df          = pd.read_parquet(pcs_path)[[f"PC{i}" for i in range(1, NUM_PCS+1)]]
+    sex_df         = pd.read_parquet(sex_path)[["sex"]]
+    ancestry_df    = pd.read_parquet(anc_path)[["ANCESTRY"]]
 
     for df in (demographics_df, pc_df, sex_df, ancestry_df):
         df.index = df.index.astype(str)
