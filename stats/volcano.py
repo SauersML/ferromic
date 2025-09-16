@@ -28,6 +28,8 @@ plt.rcParams.update({
     "grid.linestyle": ":",
     "grid.linewidth": 0.55,
     "grid.alpha": 0.6,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
 })
 
 # --------------------------- Color / markers ---------------------------
