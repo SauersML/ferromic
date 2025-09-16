@@ -313,7 +313,7 @@ def plot_volcano(df, out_pdf):
     xlim = (-xmax - xpad, xmax + xpad)
 
     fig, ax = plt.subplots()
-    ax.set_xscale('symlog', linthresh=2, linscale=1.25, base=10)  # keep your params
+    ax.set_xscale('symlog', linthresh=0.0000000000000000001, linscale=1.25, base=2)  # keep your params
     ax.set_xlim(xlim)
 
     ymax = df["y_plot"].max()
