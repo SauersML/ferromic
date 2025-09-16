@@ -121,7 +121,12 @@ class SystemMonitor(threading.Thread):
                 cpu = psutil.cpu_percent(interval=self.interval)
                 mem = psutil.virtual_memory()
                 ram_percent = mem.percent
-                available_gb = mem.available / (1024**3)
+                host_available_gb = mem.available / (1024**3)
+                cgroup_available = pipes.cgroup_available_gb()
+                if cgroup_available is not None:
+                    available_gb = min(host_available_gb, cgroup_available)
+                else:
+                    available_gb = host_available_gb
                 child_processes = self._main_process.children(recursive=True)
                 main_mem = self._main_process.memory_info()
                 child_mem = sum(p.memory_info().rss for p in child_processes)
@@ -147,9 +152,14 @@ class SystemMonitor(threading.Thread):
                     self.app_cpu_percent = app_cpu
                     self._sample_ts = time.time()
 
+                if cgroup_available is not None:
+                    avail_str = f"{available_gb:.2f}GB (cg:{cgroup_available:.2f}GB)"
+                else:
+                    avail_str = f"{available_gb:.2f}GB"
+
                 print(
                     f"[SysMonitor] CPU: {cpu:5.1f}% | AppCPU: {app_cpu:5.1f}% | RAM: {ram_percent:5.1f}% "
-                    f"(avail: {available_gb:.2f}GB) | App RSS: {total_rss_gb:.2f}GB | "
+                    f"(avail: {avail_str}) | App RSS: {total_rss_gb:.2f}GB | "
                     f"Budget: {pipes.BUDGET.remaining_gb():.2f}/{pipes.BUDGET._total_gb:.2f}GB",
                     flush=True,
                 )
@@ -217,10 +227,13 @@ class ResourceGovernor:
 
         with self._lock:
             latest_mem_gb = self._history[-1].sys_available_gb
-            mem_ok = (latest_mem_gb - predicted_extra_gb) >= self.mem_guard_gb
+            budget_avail = pipes.BUDGET.remaining_gb()
+            effective_avail = min(latest_mem_gb, budget_avail)
+            mem_ok = (effective_avail - predicted_extra_gb) >= self.mem_guard_gb
             if not mem_ok:
                 print(
-                    f"[Governor] Hold: mem_avail={latest_mem_gb:.2f}GB, pred_cost={predicted_extra_gb:.2f}GB",
+                    f"[Governor] Hold: mem_avail~{effective_avail:.2f}GB (budget {budget_avail:.2f}GB), "
+                    f"pred_cost={predicted_extra_gb:.2f}GB",
                     flush=True,
                 )
             return mem_ok
@@ -349,13 +362,16 @@ class MultiTenantGovernor(ResourceGovernor):
         if not self._history:
             return True
         latest_avail = self._history[-1].sys_available_gb
+        budget_avail = pipes.BUDGET.remaining_gb()
+        effective_avail = min(latest_avail, budget_avail)
         active = self.total_active_footprint()
-        mem_ok = (latest_avail - predicted_gb) >= self.mem_guard_gb
+        mem_ok = (effective_avail - predicted_gb) >= self.mem_guard_gb
         if active == 0 and mem_ok:
             return True
         if not mem_ok:
             print(
-                f"[Governor] Hold: mem_avail={latest_avail:.2f}GB, active={active:.2f}GB, next_pred={predicted_gb:.2f}GB",
+                f"[Governor] Hold: mem_avail~{effective_avail:.2f}GB (budget {budget_avail:.2f}GB), "
+                f"active={active:.2f}GB, next_pred={predicted_gb:.2f}GB",
                 flush=True,
             )
         return mem_ok
@@ -497,8 +513,9 @@ def _pipeline_once():
             gcp_project = os.environ["GOOGLE_PROJECT"]
             bq_client = bigquery.Client(project=gcp_project)
             cdr_codename = cdr_dataset_id.split(".")[-1]
+            demographics_cache_path = os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet")
             demographics_df = io.get_cached_or_generate(
-                os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"),
+                demographics_cache_path,
                 io.load_demographics_with_stable_age,
                 bq_client=bq_client,
                 cdr_id=cdr_dataset_id,
@@ -551,7 +568,7 @@ def _pipeline_once():
             A_global.index = A_global.index.astype(str)
             A_cols = list(A_global.columns)
         print(f"\n--- Shared Setup Time: {t_setup.duration:.2f}s ---")
-        
+
         # --- Filter TARGET_INVERSIONS to only those present in the dosages TSV ---
         dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
         dosages_resolved = os.path.abspath(dosages_path)
@@ -593,6 +610,22 @@ def _pipeline_once():
         except Exception as e:
             print(f"[Dedup WARN] Global dedup pass failed: {e}", flush=True)
 
+        dosages_key = _source_key(dosages_resolved)
+        covar_key = _source_key(
+            demographics_cache_path,
+            pcs_cache,
+            sex_cache,
+            ancestry_cache,
+            gcp_project,
+            PCS_URI,
+            SEX_URI,
+            RELATEDNESS_URI,
+        )
+        data_keys = {
+            "dosages": dosages_key,
+            "covars": covar_key,
+        }
+
         def _inversion_cache_path(inv: str) -> str:
             inv_safe = models.safe_basename(inv)
             key = _source_key(dosages_resolved, inv)
@@ -616,6 +649,7 @@ def _pipeline_once():
                 "SELECTION": tctx.get("SELECTION"),
                 "BOOTSTRAP_B": tctx.get("BOOTSTRAP_B"),
                 "BOOT_SEED_BASE": tctx.get("BOOT_SEED_BASE"),
+                "DATA_KEYS": data_keys,
             }
             return io.stable_hash(payload)
 
@@ -664,13 +698,14 @@ def _pipeline_once():
                     "SELECTION": tctx.get("SELECTION"),
                     "TARGET_INVERSION": target_inversion,
                     "CTX_TAG": ctx_tag_by_inversion.get(target_inversion),
+                    "DATA_KEYS": data_keys,
                 }
                 pheno.configure_from_ctx(ctx)
                 inversion_df = io.get_cached_or_generate(
                     _inversion_cache_path(target_inversion),
                     io.load_inversions,
                     target_inversion,
-                    dosages_path,
+                    dosages_resolved,
                     validate_target=target_inversion,
                     lock_dir=LOCK_DIR,
                 )

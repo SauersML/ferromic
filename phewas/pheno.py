@@ -33,7 +33,9 @@ PHENO_DEDUP_ENABLE = True
 PHI_THRESHOLD = 0.70
 SHARE_THRESHOLD = 0.70
 PHENO_PROTECT: Set[str] = set()
-PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = None
+PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = 64
+
+_CASE_CACHE_MAX = int(os.environ.get("PHENO_CASE_CACHE_MAX", "512"))
 
 
 def configure_from_ctx(ctx: Dict) -> None:
@@ -167,7 +169,10 @@ def load_definitions(url) -> pd.DataFrame:
     pheno_defs_df["sanitized_name"] = sanitized_names
 
     if pheno_defs_df["sanitized_name"].duplicated().any():
-        print("[defs ERROR] Sanitized name collisions persist after hashing.")
+        dupes = pheno_defs_df["sanitized_name"][pheno_defs_df["sanitized_name"].duplicated()].unique()
+        raise RuntimeError(
+            "Sanitized name collisions persist after hashing: " + ", ".join(map(str, dupes[:10]))
+        )
 
     pheno_defs_df["all_codes"] = pheno_defs_df.apply(
         lambda row: parse_icd_codes(row["icd9_codes"]).union(parse_icd_codes(row["icd10_codes"])),
@@ -238,7 +243,7 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
     if not os.path.exists(category_cache_path):
         if io.ensure_lock(category_lock_path, max_lock_age_sec):
             try:
-                if not os.path.exists(category_cache_path): # Check again inside lock
+                if not os.path.exists(category_cache_path):  # Check again inside lock
                     print("[Prepass]  - Generating pan-category case sets...", flush=True)
                     build_pan_category_cases(pheno_defs_df, bq_client, cdr_id, cache_dir, cdr_codename)
             finally:
@@ -246,7 +251,15 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
         else:
             print("[Prepass]  - Waiting for another process to generate pan-category cases...", flush=True)
             while not os.path.exists(category_cache_path):
-                time.sleep(5) # Wait for the other process to finish
+                if io.ensure_lock(category_lock_path, max_lock_age_sec):
+                    try:
+                        if not os.path.exists(category_cache_path):
+                            print("[Prepass]  - [LOCK] Reclaiming pan-category generation...", flush=True)
+                            build_pan_category_cases(pheno_defs_df, bq_client, cdr_id, cache_dir, cdr_codename)
+                    finally:
+                        io.release_lock(category_lock_path)
+                    break
+                time.sleep(5)  # Wait for the other process to finish
 
     # 2. Process per-phenotype caches
     missing = [row.to_dict() for _, row in pheno_defs_df.iterrows() if not os.path.exists(os.path.join(cache_dir, f"pheno_{row['sanitized_name']}_{cdr_codename}.parquet"))]
@@ -283,7 +296,7 @@ def populate_caches_prepass(pheno_defs_df, bq_client, cdr_id, core_index, cache_
 
     print("[Prepass]  - Phenotype cache prepass complete.", flush=True)
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=_CASE_CACHE_MAX)
 def _case_ids_cached(s_name: str, cdr_codename: str, cache_dir: str) -> tuple:
     """
     Read the per-phenotype parquet ONCE per process and return the case person_ids as a tuple of str.
