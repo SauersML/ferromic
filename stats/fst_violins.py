@@ -36,7 +36,7 @@ POINT_ALPHA = 0.6
 JITTER_SD = 0.042
 FIGSIZE = (4.6, 9.6)
 DPI = 350
-OUTPUT_PNG = 'hudson_fst.png'
+OUTPUT_PDF = 'hudson_fst.pdf'
 
 plt.rcParams['hatch.linewidth'] = 0.18
 
@@ -264,7 +264,7 @@ def main():
     if n_rec == 0 and n_se == 0:
         ax.text(0.5, 0.5, "No numeric data for Hudson $F_{\\mathrm{ST}}$", ha='center', va='center', fontsize=12, color='crimson', transform=ax.transAxes)
         ax.axis('off')
-        plt.savefig(OUTPUT_PNG, dpi=DPI, bbox_inches='tight')
+        plt.savefig(OUTPUT_PDF, dpi=DPI, bbox_inches='tight')
         plt.close(fig)
         log.warning("No data available; saved placeholder figure.")
         return
@@ -309,9 +309,9 @@ def main():
     p_text = mann_whitney_fmt(rec_vals, se_vals)
     ax.text(0.04, 0.97, f"Mann–Whitney U\n{p_text}", transform=ax.transAxes, ha='left', va='top', fontsize=10, bbox=dict(boxstyle='round,pad=0.35', fc='ghostwhite', ec='lightgrey', alpha=0.9))
     plt.tight_layout(pad=1.6)
-    plt.savefig(OUTPUT_PNG, dpi=DPI, bbox_inches='tight')
+    plt.savefig(OUTPUT_PDF, dpi=DPI, bbox_inches='tight')
     plt.close(fig)
-    log.info(f"Saved figure to '{OUTPUT_PNG}'")
+    log.info(f"Saved figure to '{OUTPUT_PDF}'")
 
 if __name__ == "__main__":
     main()

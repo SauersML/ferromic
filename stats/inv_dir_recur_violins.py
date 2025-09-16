@@ -448,7 +448,6 @@ def main():
     cax.set_position([new_x, new_y, new_w, new_height])
 
     # Save
-    fig.savefig("pi_comparison_violins.svg", bbox_inches="tight")
     fig.savefig("pi_comparison_violins.pdf", bbox_inches="tight")
 
     # (Optional) show if interactive backend is available
