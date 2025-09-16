@@ -361,7 +361,17 @@ class MultiTenantGovernor(ResourceGovernor):
         return mem_ok
 
 # --- Configuration ---
-TARGET_INVERSIONS = { "chr1-13084312-INV-62181", "chr10-46135869-INV-77646", "chr10-79542902-INV-674513", "chr11-71571191-INV-6980", "chr12-46897663-INV-16289", "chr13-48199211-INV-7451", "chr16-28471894-INV-165758", "chr17-45585160-INV-706887", "chr21-13992018-INV-65632", "chr3-195749464-INV-230745", "chr4-33098029-INV-7075", "chr6-141867315-INV-29159", "chr6-167181003-INV-209976", "chr6-76111919-INV-44661", "chr7-57835189-INV-284465", "chr7-65219158-INV-312667", "chr7-70955928-INV-18020", "chr8-7301025-INV-5297356", }
+TARGET_INVERSIONS = {
+    'chr10-79542902-INV-674513', 
+    'chr12-46897663-INV-16289', 
+    'chr17-45585160-INV-706887', 
+    'chr21-13992018-INV-65632', 
+    'chr4-33098029-INV-7075', 
+    'chr6-141867315-INV-29159', 
+    'chr6-167181003-INV-209976', 
+    'chr6-76111919-INV-44661', 
+    'chr7-57835189-INV-284465'
+}
 
 PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads/main/data/significant_heritability_diseases.tsv"
 MASTER_RESULTS_CSV = f"phewas_results_{datetime.now().strftime('%Y%m%d%H%M%S')}.tsv"
@@ -380,7 +390,7 @@ SEX_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/gen
 RELATEDNESS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
 
 # --- Model parameters ---
-NUM_PCS = 10
+NUM_PCS = 16
 MIN_CASES_FILTER = 1000
 MIN_CONTROLS_FILTER = 1000
 MIN_NEFF_FILTER = 0 # Default off
