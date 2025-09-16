@@ -138,10 +138,19 @@ def prime_all_caches_for_run(core_data, phenos, cdr_codename, target_inversion, 
     os.makedirs(cache_dir, exist_ok=True)
 
     write_parquet(Path(cache_dir) / f"demographics_{cdr_codename}.parquet", core_data["demographics"])
-    write_parquet(Path(cache_dir) / f"inversion_{target_inversion}.parquet", core_data["inversion_main"])
-    write_parquet(Path(cache_dir) / "pcs_10.parquet", core_data["pcs"])
-    write_parquet(Path(cache_dir) / "genetic_sex.parquet", core_data["sex"])
-    write_parquet(Path(cache_dir) / "ancestry_labels.parquet", core_data["ancestry"])
+    num_pcs = core_data["pcs"].shape[1]
+    gcp_project = os.environ.get("GOOGLE_PROJECT", "")
+    pcs_path = Path(cache_dir) / f"pcs_{num_pcs}_{run._source_key(gcp_project, run.PCS_URI, num_pcs)}.parquet"
+    sex_path = Path(cache_dir) / f"genetic_sex_{run._source_key(gcp_project, run.SEX_URI)}.parquet"
+    anc_path = Path(cache_dir) / f"ancestry_labels_{run._source_key(gcp_project, run.PCS_URI)}.parquet"
+    dosages_resolved = os.path.abspath(run.INVERSION_DOSAGES_FILE)
+    inv_safe = models.safe_basename(target_inversion)
+    inv_path = Path(cache_dir) / f"inversion_{inv_safe}_{run._source_key(dosages_resolved, target_inversion)}.parquet"
+
+    write_parquet(inv_path, core_data["inversion_main"])
+    write_parquet(pcs_path, core_data["pcs"])
+    write_parquet(sex_path, core_data["sex"])
+    write_parquet(anc_path, core_data["ancestry"])
 
     pheno_defs_list = []
     for s_name, p_data in phenos.items():
@@ -195,6 +204,8 @@ def test_ctx():
         # We will override these in specific tests that check the filters.
         "MIN_NEFF_FILTER": 0,
         "MLE_REFIT_MIN_NEFF": 0,
+        "CACHE_VERSION_TAG": io.CACHE_VERSION_TAG,
+        "CTX_TAG": "test_ctx",
     }
 
 # --- Unit Tests ---
@@ -678,8 +689,12 @@ def test_multi_inversion_pipeline_produces_master_file():
         # Base caches (demographics, etc.)
         defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, INV_A) # target_inversion here is just a dummy
         # Overwrite with specific inversion caches
-        write_parquet(Path("./phewas_cache") / f"inversion_{INV_A}.parquet", core_data["inversion_A"])
-        write_parquet(Path("./phewas_cache") / f"inversion_{INV_B}.parquet", core_data["inversion_B"])
+        run.INVERSION_DOSAGES_FILE = "dummy_dosages.tsv"
+        dosages_resolved = os.path.abspath(run.INVERSION_DOSAGES_FILE)
+        inv_a_path = Path("./phewas_cache") / f"inversion_{models.safe_basename(INV_A)}_{run._source_key(dosages_resolved, INV_A)}.parquet"
+        inv_b_path = Path("./phewas_cache") / f"inversion_{models.safe_basename(INV_B)}_{run._source_key(dosages_resolved, INV_B)}.parquet"
+        write_parquet(inv_a_path, core_data["inversion_A"])
+        write_parquet(inv_b_path, core_data["inversion_B"])
 
         # 3. Configure and run the main pipeline
         local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
@@ -689,7 +704,6 @@ def test_multi_inversion_pipeline_produces_master_file():
         run.FDR_ALPHA = 0.9  # High alpha to ensure we get some hits
         run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
         # Write dummy dosage files (needed for io.load_inversions)
-        run.INVERSION_DOSAGES_FILE = "dummy_dosages.tsv"
         dummy_dosage_df = pd.DataFrame({
             'SampleID': core_data['demographics'].index,
             INV_A: core_data['inversion_A'][INV_A],

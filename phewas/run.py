@@ -384,10 +384,13 @@ LOADER_CHUNK_SIZE = 128
 
 # --- Data sources and caching ---
 CACHE_DIR = "./phewas_cache"
+LOCK_DIR = os.path.join(CACHE_DIR, "locks")
 INVERSION_DOSAGES_FILE = "imputed_inversion_dosages.tsv"
 PCS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
 SEX_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/qc/genomic_metrics.tsv"
 RELATEDNESS_URI = "gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
+
+CACHE_VERSION_TAG = io.CACHE_VERSION_TAG
 
 # --- Model parameters ---
 NUM_PCS = 16
@@ -445,6 +448,10 @@ def _find_upwards(pathname: str) -> str:
         cur = parent
     return pathname
 
+
+def _source_key(*parts) -> str:
+    return io.stable_hash({"parts": parts, "version": CACHE_VERSION_TAG})
+
 def _pipeline_once():
     """
     Entry point for the PheWAS pipeline. Uses module-level configuration directly.
@@ -480,7 +487,7 @@ def _pipeline_once():
     from types import SimpleNamespace
     run = SimpleNamespace(TARGET_INVERSIONS=TARGET_INVERSIONS)
     os.makedirs(CACHE_DIR, exist_ok=True)
-    os.makedirs(os.path.join(CACHE_DIR, "locks"), exist_ok=True)
+    os.makedirs(LOCK_DIR, exist_ok=True)
 
     try:
         with Timer() as t_setup:
@@ -490,16 +497,54 @@ def _pipeline_once():
             gcp_project = os.environ["GOOGLE_PROJECT"]
             bq_client = bigquery.Client(project=gcp_project)
             cdr_codename = cdr_dataset_id.split(".")[-1]
-            demographics_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"), io.load_demographics_with_stable_age, bq_client=bq_client, cdr_id=cdr_dataset_id)
-            pc_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, f"pcs_{NUM_PCS}.parquet"), io.load_pcs, gcp_project, PCS_URI, NUM_PCS, validate_num_pcs=NUM_PCS)
-            sex_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, "genetic_sex.parquet"), io.load_genetic_sex, gcp_project, SEX_URI)
+            demographics_df = io.get_cached_or_generate(
+                os.path.join(CACHE_DIR, f"demographics_{cdr_codename}.parquet"),
+                io.load_demographics_with_stable_age,
+                bq_client=bq_client,
+                cdr_id=cdr_dataset_id,
+                lock_dir=LOCK_DIR,
+            )
+            pcs_cache = os.path.join(
+                CACHE_DIR,
+                f"pcs_{NUM_PCS}_{_source_key(gcp_project, PCS_URI, NUM_PCS)}.parquet",
+            )
+            pc_df = io.get_cached_or_generate(
+                pcs_cache,
+                io.load_pcs,
+                gcp_project,
+                PCS_URI,
+                NUM_PCS,
+                validate_num_pcs=NUM_PCS,
+                lock_dir=LOCK_DIR,
+            )
+            sex_cache = os.path.join(
+                CACHE_DIR,
+                f"genetic_sex_{_source_key(gcp_project, SEX_URI)}.parquet",
+            )
+            sex_df = io.get_cached_or_generate(
+                sex_cache,
+                io.load_genetic_sex,
+                gcp_project,
+                SEX_URI,
+                lock_dir=LOCK_DIR,
+            )
             related_ids_to_remove = io.load_related_to_remove(gcp_project=gcp_project, RELATEDNESS_URI=RELATEDNESS_URI)
             demographics_df.index, pc_df.index, sex_df.index = [df.index.astype(str) for df in (demographics_df, pc_df, sex_df)]
             shared_covariates_df = demographics_df.join(pc_df, how="inner").join(sex_df, how="inner")
             shared_covariates_df = shared_covariates_df[~shared_covariates_df.index.isin(related_ids_to_remove)]
 
             LABELS_URI = PCS_URI # Clarify that PCs and Ancestry labels are from the same source
-            ancestry = io.get_cached_or_generate(os.path.join(CACHE_DIR, "ancestry_labels.parquet"), io.load_ancestry_labels, gcp_project, LABELS_URI=LABELS_URI)
+            ancestry_cache = os.path.join(
+                CACHE_DIR,
+                f"ancestry_labels_{_source_key(gcp_project, LABELS_URI)}.parquet",
+            )
+            ancestry = io.get_cached_or_generate(
+                ancestry_cache,
+                io.load_ancestry_labels,
+                gcp_project,
+                LABELS_URI=LABELS_URI,
+                lock_dir=LOCK_DIR,
+            )
             anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"].str.lower()
             anc_cat_global = pd.Categorical(anc_series.reindex(shared_covariates_df.index))
             A_global = pd.get_dummies(anc_cat_global, prefix='ANC', drop_first=True, dtype=np.float32)
@@ -509,6 +554,7 @@ def _pipeline_once():
         
         # --- Filter TARGET_INVERSIONS to only those present in the dosages TSV ---
         dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
+        dosages_resolved = os.path.abspath(dosages_path)
         try:
             hdr = pd.read_csv(dosages_path, sep="\t", nrows=0).columns.tolist()
             id_candidates = {"SampleID", "sample_id", "person_id", "research_id", "participant_id", "ID"}
@@ -525,7 +571,7 @@ def _pipeline_once():
                 raise RuntimeError("No target inversions remain after filtering; check your dosages file and configuration.")
         except Exception as e:
             print(f"[Config WARN] Could not inspect dosages header at '{dosages_path}': {e}")
-        
+
         try:
             pheno.populate_caches_prepass(pheno_defs_df, bq_client, cdr_dataset_id, shared_covariates_df.index, CACHE_DIR, cdr_codename)
         except Exception as e:
@@ -547,6 +593,34 @@ def _pipeline_once():
         except Exception as e:
             print(f"[Dedup WARN] Global dedup pass failed: {e}", flush=True)
 
+        def _inversion_cache_path(inv: str) -> str:
+            inv_safe = models.safe_basename(inv)
+            key = _source_key(dosages_resolved, inv)
+            return os.path.join(CACHE_DIR, f"inversion_{inv_safe}_{key}.parquet")
+
+        def _ctx_tag_for(inv: str) -> str:
+            payload = {
+                "version": CACHE_VERSION_TAG,
+                "cdr_codename": cdr_codename,
+                "target_inversion": inv,
+                "NUM_PCS": NUM_PCS,
+                "MIN_CASES_FILTER": MIN_CASES_FILTER,
+                "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
+                "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
+                "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES,
+                "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
+                "FDR_ALPHA": FDR_ALPHA,
+                "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA,
+                "RIDGE_L2_BASE": RIDGE_L2_BASE,
+                "MODE": tctx.get("MODE"),
+                "SELECTION": tctx.get("SELECTION"),
+                "BOOTSTRAP_B": tctx.get("BOOTSTRAP_B"),
+                "BOOT_SEED_BASE": tctx.get("BOOT_SEED_BASE"),
+            }
+            return io.stable_hash(payload)
+
+        ctx_tag_by_inversion = {inv: _ctx_tag_for(inv) for inv in run.TARGET_INVERSIONS}
+
         governor = MultiTenantGovernor(monitor_thread)
         
         def run_single_inversion(target_inversion: str, baseline_rss_gb: float, shared_data: dict):
@@ -566,10 +640,40 @@ def _pipeline_once():
                 else:
                     os.makedirs(lrt_overall_cache_dir, exist_ok=True)
 
-                ctx = {"NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER, "MIN_NEFF_FILTER": MIN_NEFF_FILTER, "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS, "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE, "RESULTS_CACHE_DIR": results_cache_dir, "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir, "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir, "BOOT_OVERALL_CACHE_DIR": boot_overall_cache_dir, "BOOTSTRAP_B": tctx["BOOTSTRAP_B"], "BOOT_SEED_BASE": tctx["BOOT_SEED_BASE"], "cdr_codename": shared_data['cdr_codename'], "REPAIR_META_IF_MISSING": True}
+                ctx = {
+                    "NUM_PCS": NUM_PCS,
+                    "MIN_CASES_FILTER": MIN_CASES_FILTER,
+                    "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
+                    "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
+                    "FDR_ALPHA": FDR_ALPHA,
+                    "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES,
+                    "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
+                    "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA,
+                    "CACHE_DIR": CACHE_DIR,
+                    "RIDGE_L2_BASE": RIDGE_L2_BASE,
+                    "RESULTS_CACHE_DIR": results_cache_dir,
+                    "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir,
+                    "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir,
+                    "BOOT_OVERALL_CACHE_DIR": boot_overall_cache_dir,
+                    "BOOTSTRAP_B": tctx["BOOTSTRAP_B"],
+                    "BOOT_SEED_BASE": tctx["BOOT_SEED_BASE"],
+                    "cdr_codename": shared_data['cdr_codename'],
+                    "REPAIR_META_IF_MISSING": True,
+                    "CACHE_VERSION_TAG": CACHE_VERSION_TAG,
+                    "MODE": tctx.get("MODE"),
+                    "SELECTION": tctx.get("SELECTION"),
+                    "TARGET_INVERSION": target_inversion,
+                    "CTX_TAG": ctx_tag_by_inversion.get(target_inversion),
+                }
                 pheno.configure_from_ctx(ctx)
-                dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
-                inversion_df = io.get_cached_or_generate(os.path.join(CACHE_DIR, f"inversion_{target_inversion}.parquet"), io.load_inversions, target_inversion, dosages_path, validate_target=target_inversion)
+                inversion_df = io.get_cached_or_generate(
+                    _inversion_cache_path(target_inversion),
+                    io.load_inversions,
+                    target_inversion,
+                    dosages_path,
+                    validate_target=target_inversion,
+                    lock_dir=LOCK_DIR,
+                )
                 inversion_df.index = inversion_df.index.astype(str)
                 core_df = shared_data['covariates'].join(inversion_df, how="inner")
 
@@ -592,24 +696,12 @@ def _pipeline_once():
                 category_to_pan_cases = io.get_cached_or_generate_pickle(
                     pan_path,
                     pheno.build_pan_category_cases,
-                    shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], CACHE_DIR, shared_data['cdr_codename']
+                    shared_data['pheno_defs'], shared_data['bq_client'], shared_data['cdr_id'], CACHE_DIR, shared_data['cdr_codename'],
+                    lock_dir=LOCK_DIR,
                 )
                 allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
 
                 sex_vec = core_df_with_const['sex'].to_numpy(dtype=np.float32, copy=False)
-                
-                # Ensure per-phenotype case caches exist BEFORE the prequeue filter
-                try:
-                    pheno._precache_all_missing_phenos(
-                        shared_data['pheno_defs'],
-                        shared_data['bq_client'],
-                        shared_data['cdr_id'],
-                        core_index,
-                        CACHE_DIR,
-                        shared_data['cdr_codename']
-                    )
-                except Exception as e:
-                    print(f"{log_prefix} [WARN] Pre-cache skipped: {e}", flush=True)
                 
                 # --- Build Stage-1 testing worklist without running main PheWAS ---
                 phenos_list = []
@@ -674,12 +766,24 @@ def _pipeline_once():
                     if tctx["MODE"] == "lrt_bh":
                         lrt_files = [f for f in os.listdir(lrt_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
                         for fn in lrt_files:
+                            meta_path = os.path.join(lrt_overall_cache_dir, fn.replace(".json", ".meta.json"))
+                            meta = io.read_meta_json(meta_path)
+                            if not meta:
+                                continue
+                            if meta.get("ctx_tag") != ctx.get("CTX_TAG") or meta.get("cdr_codename") != shared_data['cdr_codename'] or meta.get("target") != target_inversion:
+                                continue
                             s = pd.read_json(os.path.join(lrt_overall_cache_dir, fn), typ="series")
                             rows.append({"Phenotype": os.path.splitext(fn)[0], "P_LRT_Overall": pd.to_numeric(s.get("P_LRT_Overall"), errors="coerce")})
                         p_col = "P_LRT_Overall"
                     else:
                         boot_files = [f for f in os.listdir(boot_overall_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
                         for fn in boot_files:
+                            meta_path = os.path.join(boot_overall_cache_dir, fn.replace(".json", ".meta.json"))
+                            meta = io.read_meta_json(meta_path)
+                            if not meta:
+                                continue
+                            if meta.get("ctx_tag") != ctx.get("CTX_TAG") or meta.get("cdr_codename") != shared_data['cdr_codename'] or meta.get("target") != target_inversion:
+                                continue
                             s = pd.read_json(os.path.join(boot_overall_cache_dir, fn), typ="series")
                             rows.append({"Phenotype": os.path.splitext(fn)[0], "P_EMP": pd.to_numeric(s.get("P_EMP"), errors="coerce")})
                         p_col = "P_EMP"
@@ -687,6 +791,12 @@ def _pipeline_once():
                     res_files = [f for f in os.listdir(results_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
                     rrows = []
                     for fn in res_files:
+                        meta_path = os.path.join(results_cache_dir, fn.replace(".json", ".meta.json"))
+                        meta = io.read_meta_json(meta_path)
+                        if not meta:
+                            continue
+                        if meta.get("ctx_tag") != ctx.get("CTX_TAG") or meta.get("cdr_codename") != shared_data['cdr_codename'] or meta.get("target") != target_inversion:
+                            continue
                         s = pd.read_json(os.path.join(results_cache_dir, fn), typ="series")
                         rrows.append({
                             "Phenotype": os.path.splitext(fn)[0],
@@ -772,7 +882,7 @@ def _pipeline_once():
 
                 target_inv = pending_inversions[0]
                 try:
-                    inversion_path = os.path.join(CACHE_DIR, f"inversion_{target_inv}.parquet")
+                    inversion_path = _inversion_cache_path(target_inv)
                     if os.path.exists(inversion_path):
                         inversion_index = pd.read_parquet(inversion_path, columns=[target_inv]).index.astype(str)
                         N = shared_covariates_df.index.intersection(inversion_index).size
@@ -810,6 +920,13 @@ def _pipeline_once():
             result_files = [f for f in os.listdir(results_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
             for filename in result_files:
                 try:
+                    meta_path = os.path.join(results_cache_dir, filename.replace(".json", ".meta.json"))
+                    meta = io.read_meta_json(meta_path)
+                    expected_tag = ctx_tag_by_inversion.get(target_inversion)
+                    if not meta:
+                        continue
+                    if meta.get("ctx_tag") != expected_tag or meta.get("cdr_codename") != cdr_codename or meta.get("target") != target_inversion:
+                        continue
                     result = pd.read_json(os.path.join(results_cache_dir, filename), typ="series").to_dict()
                     result['Inversion'] = target_inversion
                     all_results_from_disk.append(result)
@@ -844,6 +961,8 @@ def _pipeline_once():
                 alpha=FDR_ALPHA,
                 mode=tctx["MODE"],
                 selection=tctx["SELECTION"],
+                ctx_tags=ctx_tag_by_inversion,
+                cdr_codename=cdr_codename,
             )
 
             # --- PART 4: SCHEDULE AND RUN STAGE-2 FOLLOW-UPS ---
@@ -856,8 +975,12 @@ def _pipeline_once():
                 # Re-create the inversion-specific context and data to ensure correct follow-up
                 dosages_path = _find_upwards(INVERSION_DOSAGES_FILE)
                 inversion_df = io.get_cached_or_generate(
-                    os.path.join(CACHE_DIR, f"inversion_{target_inversion}.parquet"),
-                    io.load_inversions, target_inversion, dosages_path, validate_target=target_inversion,
+                    _inversion_cache_path(target_inversion),
+                    io.load_inversions,
+                    target_inversion,
+                    dosages_path,
+                    validate_target=target_inversion,
+                    lock_dir=LOCK_DIR,
                 )
                 inversion_df.index = inversion_df.index.astype(str)
 
@@ -877,7 +1000,8 @@ def _pipeline_once():
                 category_to_pan_cases = io.get_cached_or_generate_pickle(
                     pan_path,
                     pheno.build_pan_category_cases,
-                    pheno_defs_df, bq_client, cdr_dataset_id, CACHE_DIR, cdr_codename
+                    pheno_defs_df, bq_client, cdr_dataset_id, CACHE_DIR, cdr_codename,
+                    lock_dir=LOCK_DIR,
                 )
                 allowed_mask_by_cat = pheno.build_allowed_mask_by_cat(core_index, category_to_pan_cases, global_notnull_mask)
 
@@ -892,6 +1016,11 @@ def _pipeline_once():
                     "LRT_FOLLOWUP_CACHE_DIR": os.path.join(inversion_cache_dir, "lrt_followup"),
                     "BOOT_OVERALL_CACHE_DIR": os.path.join(inversion_cache_dir, "boot_overall"),
                     "cdr_codename": cdr_codename,
+                    "CACHE_VERSION_TAG": CACHE_VERSION_TAG,
+                    "MODE": tctx.get("MODE"),
+                    "SELECTION": tctx.get("SELECTION"),
+                    "TARGET_INVERSION": target_inversion,
+                    "CTX_TAG": ctx_tag_by_inversion.get(target_inversion),
                 }
 
                 pheno.configure_from_ctx(ctx)
@@ -911,6 +1040,13 @@ def _pipeline_once():
                 files_follow = [f for f in os.listdir(lrt_followup_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
                 for filename in files_follow:
                     try:
+                        meta_path = os.path.join(lrt_followup_cache_dir, filename.replace(".json", ".meta.json"))
+                        meta = io.read_meta_json(meta_path)
+                        expected_tag = ctx_tag_by_inversion.get(target_inversion)
+                        if not meta:
+                            continue
+                        if meta.get("ctx_tag") != expected_tag or meta.get("cdr_codename") != cdr_codename or meta.get("target") != target_inversion:
+                            continue
                         rec = pd.read_json(os.path.join(lrt_followup_cache_dir, filename), typ="series").to_dict()
                         rec['Inversion'] = target_inversion
                         follow_records.append(rec)
