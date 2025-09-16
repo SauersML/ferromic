@@ -113,12 +113,7 @@ def load_and_prepare(path):
 # --------------------------- Axis ticks ---------------------------
 
 def make_or_ticks_sparse(xlim_ln):
-    """
-    Sparse, symmetric OR ticks with *fewer near the center* and *more in the low range*.
-    Candidate ORs (both sides): 0.1, 0.2, 0.25, 0.33, 0.5, 1, 2, 3, 4, 5, 10
-    We drop ticks in (0.8, 1.25) except 1× to thin the middle.
-    """
-    candidates = np.array([0.1, 0.2, 0.25, 0.33, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0])
+    candidates = np.array([0.1, 0.2, 0.33, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0])
     ln_pos = np.log(candidates)
 
     # Within current xlim
