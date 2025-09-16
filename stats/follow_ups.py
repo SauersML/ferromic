@@ -1,7 +1,3 @@
-# chr7-57835189-INV-284465 breast cancer
-# chr17-45585160-INV-706887 obesity, breast cancer, heart failure, cognitive impairment
-
-
 # ===================== GLOBALS =====================
 import os
 PROJECT_ID        = os.getenv("GOOGLE_PROJECT")                  # required for BQ
@@ -9,11 +5,20 @@ CDR_DATASET_ID    = os.getenv("WORKSPACE_CDR")                   # required for 
 INVERSION_FILE    = "../imputed_inversion_dosages.tsv"           # TSV with SampleID + inversion cols
 OUTPUT_DIR        = "./assoc_outputs"
 CACHE_DIR         = ".bq_cache"
-QUANTILE_BINS     = 5
+QUANTILE_BINS     = 3
 
 INVERSION_17      = "chr17-45585160-INV-706887"
-INVERSION_7       = "chr7-57835189-INV-284465"
 # ===================================================
+
+"""
+This script builds PERSONAL and FAMILY history cohorts from survey data, merges them
+with inversion dosages, runs association tests, and plots.
+
+  • PERSONAL history cohorts EXCLUDE anyone who has ANY EHR data (in any OMOP EHR domain).
+  • FAMILY history cohorts DO NOT exclude for EHR presence.
+
+We also print detailed statistics per phenotype on EHR coverage, removals, and remaining counts.
+"""
 
 import hashlib, json, math, warnings
 from pathlib import Path
@@ -45,6 +50,7 @@ pd.set_option("display.max_colwidth", None)
 pd.set_option("display.float_format", lambda x: f"{x:.4g}")
 
 # -------------------- SQL DEFINITIONS --------------------
+# Phenotype survey definitions (unchanged)
 PHENO_SQL = {
     "Breast Cancer": {
         "universe": "SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%breast cancer%'",
@@ -176,14 +182,76 @@ def execute_query(sql: str, desc: str) -> pd.DataFrame:
     print(msg)
     return df
 
+# -------------------- EHR PRESENCE (NEW) --------------------
+def get_all_ehr_person_ids(cdr: str) -> pd.DataFrame:
+    """
+    Returns DISTINCT person_id for ANY EHR data in OMOP clinical domains.
+    We intentionally do NOT touch ds_survey (that's self-report).
+    """
+    sql = f"""
+    SELECT DISTINCT person_id FROM (
+      SELECT person_id FROM `{cdr}.condition_occurrence`
+      UNION DISTINCT SELECT person_id FROM `{cdr}.procedure_occurrence`
+      UNION DISTINCT SELECT person_id FROM `{cdr}.drug_exposure`
+      UNION DISTINCT SELECT person_id FROM `{cdr}.measurement`
+      UNION DISTINCT SELECT person_id FROM `{cdr}.visit_occurrence`
+      UNION DISTINCT SELECT person_id FROM `{cdr}.device_exposure`
+      UNION DISTINCT SELECT person_id FROM `{cdr}.observation`
+    )
+    """
+    df = execute_query(sql, "EHR any-domain")
+    # normalize dtype
+    if "person_id" in df.columns:
+        df["person_id"] = pd.to_numeric(df["person_id"], errors="coerce").astype("Int64")
+        df = df.dropna(subset=["person_id"]).astype({"person_id": "int64"})
+    return df[["person_id"]].drop_duplicates()
+
 # -------------------- PHENOTYPE COHORTS --------------------
-def get_phenotypes(universe_sql: str, case_sql: str) -> pd.DataFrame:
-    u = execute_query(universe_sql, "Universe")
-    c = execute_query(case_sql,     "Cases")
+def _print_exclusion_stats(label: str, u0: pd.DataFrame, c0: pd.DataFrame, u: pd.DataFrame, c: pd.DataFrame,
+                           ehr_df: pd.DataFrame | None):
+    n_u0 = len(u0); n_c0 = len(c0); n_ctrl0 = n_u0 - n_c0
+    n_u  = len(u);  n_c  = len(c);  n_ctrl  = n_u  - n_c
+    rem_u = n_u0 - n_u; rem_c = n_c0 - n_c; rem_ctrl = n_ctrl0 - n_ctrl
+    print(f"INFO | Exclusion ({label}) | universe_removed={rem_u:,} cases_removed={rem_c:,} controls_removed={rem_ctrl:,} remaining_universe={n_u:,} remaining_cases={n_c:,} remaining_controls={n_ctrl:,}")
+
+    if ehr_df is not None and not ehr_df.empty:
+        u0_in_ehr = int(u0["person_id"].isin(ehr_df["person_id"]).sum())
+        u0_not_ehr = n_u0 - u0_in_ehr
+        print(f"INFO | EHR coverage      | universe_with_EHR={u0_in_ehr:,} universe_without_EHR={u0_not_ehr:,}")
+
+def get_phenotypes(universe_sql: str, case_sql: str,
+                   exclude_ids: pd.DataFrame | None = None,
+                   exclusion_label: str | None = None,
+                   ehr_df_for_stats: pd.DataFrame | None = None) -> pd.DataFrame:
+    """
+    Build a phenotype cohort (cases/controls) from survey-based universe + case SQL.
+    If exclude_ids is provided, remove those person_ids from both universe and cases (used for PERSONAL history).
+    """
+    u0 = execute_query(universe_sql, "Universe")
+    c0 = execute_query(case_sql,     "Cases")
+
+    # Standardize to int64 for stable merges
+    for df in (u0, c0):
+        if "person_id" in df.columns:
+            df["person_id"] = pd.to_numeric(df["person_id"], errors="coerce").astype("Int64")
+            df.dropna(subset=["person_id"], inplace=True)
+            df["person_id"] = df["person_id"].astype("int64")
+
+    if exclude_ids is not None and not exclude_ids.empty:
+        # Exclude from both universe and cases
+        ex = exclude_ids["person_id"].astype("int64")
+        u = u0[~u0["person_id"].isin(ex)].copy()
+        c = c0[~c0["person_id"].isin(ex)].copy()
+        _print_exclusion_stats(exclusion_label or "Excluded", u0, c0, u, c, ehr_df_for_stats)
+    else:
+        u, c = u0, c0
+        # Still print EHR coverage for transparency
+        _print_exclusion_stats("No exclusion", u0, c0, u, c, ehr_df_for_stats)
+
     cases = c.assign(status=1) if not c.empty else pd.DataFrame(columns=["person_id","status"])
     ctrls = u[~u.person_id.isin(c.person_id)].assign(status=0) if not c.empty else u.assign(status=0)
     pheno = pd.concat([cases, ctrls], ignore_index=True)[["person_id","status"]]
-    print(f"INFO | Cohort        | universe={len(u):,} cases={pheno['status'].sum():,} controls={(len(pheno)-pheno['status'].sum()):,}")
+    print(f"INFO | Cohort            | universe={len(u):,} cases={pheno['status'].sum():,} controls={(len(pheno)-pheno['status'].sum()):,}")
     return pheno
 
 # -------------------- TESTS (no covariates) --------------------
@@ -298,14 +366,30 @@ def corr_chr17_vs_all(dosage: pd.DataFrame):
     return str(out)
 
 # -------------------- ORCHESTRATION --------------------
-def run_for_phenotype(name: str, sqls: dict, dosage: pd.DataFrame, inversions: list):
+def run_for_phenotype(name: str, sqls: dict, dosage: pd.DataFrame, inversions: list,
+                      ehr_people: pd.DataFrame):
     print("\n" + "#"*80)
     print(f"INFO | Phenotype: {name}")
     print("#"*80)
 
-    ph = get_phenotypes(sqls["universe"], sqls["personal_case"])
-    fh = get_phenotypes(sqls["universe"], sqls["family_case"])
+    # PERSONAL: exclude EHR
+    ph = get_phenotypes(
+        sqls["universe"],
+        sqls["personal_case"],
+        exclude_ids=ehr_people,
+        exclusion_label="EHR present → EXCLUDED (Personal)",
+        ehr_df_for_stats=ehr_people
+    )
+    # FAMILY: no exclusion
+    fh = get_phenotypes(
+        sqls["universe"],
+        sqls["family_case"],
+        exclude_ids=None,
+        exclusion_label=None,
+        ehr_df_for_stats=ehr_people
+    )
 
+    # Merge with dosages
     dfp = ph.merge(dosage, on="person_id", how="inner")
     dff = fh.merge(dosage, on="person_id", how="inner")
     print(f"INFO | Merge (Personal) | rows={len(dfp):,} cases={int(dfp['status'].sum()):,}")
@@ -317,6 +401,9 @@ def run_for_phenotype(name: str, sqls: dict, dosage: pd.DataFrame, inversions: l
             if inv not in d.columns:
                 print(f"WARN | {inv} not in data; skip."); continue
             sub = d[["status", inv]].dropna()
+            if sub.empty:
+                print(f"WARN | {label}: no non-null rows after dropna for {inv}; skip.")
+                continue
             desc = sub[inv].describe(percentiles=[.01,.1,.5,.9,.99]).round(4)
             bins = sub[inv].round().clip(0,2).value_counts().reindex([0,1,2], fill_value=0).astype(int).tolist()
             print(f"DEBUG| {label:16s} | {inv} nonnull={len(sub):,} min={desc['min']:.3f} p50={desc['50%']:.3f} max={desc['max']:.3f} bins(0/1/2)={bins}")
@@ -335,23 +422,34 @@ def run_for_phenotype(name: str, sqls: dict, dosage: pd.DataFrame, inversions: l
     return rows
 
 def main():
+    if not PROJECT_ID or not CDR_DATASET_ID:
+        raise RuntimeError("GOOGLE_PROJECT and WORKSPACE_CDR environment variables are required.")
+
     # Fill CDR in SQL
     sqls = {k: {kk: vv.format(CDR=CDR_DATASET_ID) for kk, vv in v.items()} for k, v in PHENO_SQL.items()}
 
     # Load dosages
     print(f"INFO | Loading dosages: {INVERSION_FILE}")
     d = pd.read_csv(INVERSION_FILE, sep="\t").rename(columns={"SampleID":"person_id"})
-    d["person_id"] = d["person_id"].astype("int64")
+    d["person_id"] = pd.to_numeric(d["person_id"], errors="coerce").astype("Int64")
+    d = d.dropna(subset=["person_id"]).astype({"person_id":"int64"})
     inv_cols = [c for c in d.columns if c.startswith("chr") and "INV" in c]
     print(f"INFO | Dosage shape={d.shape} inversions={len(inv_cols)} sample={inv_cols[:4]}")
 
-    # chr17 for all; chr7 only for Breast Cancer
+    # chr17 for all
     inv_map = {name: [INVERSION_17] for name in sqls}
-    inv_map["Breast Cancer"].append(INVERSION_7)
 
+    # NEW: build EHR presence set once
+    ehr_people = get_all_ehr_person_ids(CDR_DATASET_ID)
+    n_ehr = len(ehr_people)
+    n_dosage_overlap_with_ehr = int(d["person_id"].isin(ehr_people["person_id"]).sum())
+    print(f"INFO | EHR global        | persons_with_any_EHR={n_ehr:,}")
+    print(f"INFO | EHR∩Dosage        | dosage_persons_with_EHR={n_dosage_overlap_with_ehr:,} out_of_dosage_n={len(d):,}")
+
+    # Run per phenotype
     all_rows = []
     for name in sqls:
-        all_rows += run_for_phenotype(name, sqls[name], d, inv_map[name])
+        all_rows += run_for_phenotype(name, sqls[name], d, inv_map[name], ehr_people)
 
     # Report table
     rep = pd.DataFrame(all_rows).sort_values(["phenotype","test_type","inversion"])
