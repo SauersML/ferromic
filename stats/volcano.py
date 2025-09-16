@@ -304,6 +304,9 @@ def plot_volcano(df, out_pdf):
     y_fdr = -np.log10(p_cut) if (isinstance(p_cut, (int, float)) and np.isfinite(p_cut) and p_cut > 0) else np.nan
     fdr_label = f"BH FDR 0.05 (p ≤ {p_cut:.2e})" if np.isfinite(y_fdr) else "BH FDR 0.05"
 
+    # Minimum -log10(p) required for both plotting and labeling
+    LABEL_MIN_Y = 2.0
+
     # X-limits: show ALL data
     xabs = np.abs(df["lnOR"].to_numpy())
     xmax = np.nanmax(xabs) if xabs.size else 1.0
