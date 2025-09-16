@@ -1172,7 +1172,7 @@ def create_kde_plot(all_sequences_stats: List[Dict], test_results: Dict) -> Opti
     except Exception as e:
         logger.error(f"Error during tight_layout adjustment: {e}", exc_info=True)
 
-    plot_filename = OUTPUT_DIR / f"pi_overall_{stat_type}_violin_paired_L2FC_inversion_outline.png"
+    plot_filename = OUTPUT_DIR / f"pi_overall_{stat_type}_violin_paired_L2FC_inversion_outline.pdf"
     try:
         plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
         logger.info(f"Saved overall styled paired violin plot to {plot_filename}")
