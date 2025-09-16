@@ -105,16 +105,16 @@ def load_and_prepare(path):
     df["OR"] = pd.to_numeric(df["OR"], errors="coerce")
     df["P_LRT_Overall"] = pd.to_numeric(df["P_LRT_Overall"], errors="coerce")
 
-    # Handle p-values (avoid -log10 issues)
-    tiny = np.finfo(float).tiny
-    p = df["P_LRT_Overall"].to_numpy()
-    p = np.where(~np.isfinite(p) | (p <= 0), tiny, p)
+    # Drop rows with missing or non-positive p-values
+    df = df[np.isfinite(df["P_LRT_Overall"].to_numpy()) & (df["P_LRT_Overall"] > 0)].copy()
 
+    # Axes transforms
     df["lnOR"] = np.log(df["OR"])                 # normalized OR (centered at 0)
-    df["neglog10p"] = -np.log10(p)
+    df["neglog10p"] = -np.log10(df["P_LRT_Overall"])
 
     # Keep only finite
     df = df[np.isfinite(df["lnOR"]) & np.isfinite(df["neglog10p"])].copy()
+
 
     # Clean Inversion
     df["Inversion"] = df["Inversion"].fillna("Unknown").astype(str)
