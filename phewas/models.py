@@ -36,7 +36,12 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
         "target": target,
         "core_index_fp": core_idx_fp,
         "case_idx_fp": case_fp,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "ctx_tag": CTX.get("CTX_TAG"),
+        "cache_version_tag": CTX.get("CACHE_VERSION_TAG"),
+        "cdr_codename": CTX.get("cdr_codename"),
+        "mode": CTX.get("MODE"),
+        "selection": CTX.get("SELECTION"),
     }
     if extra:
         base.update(extra)
@@ -788,6 +793,12 @@ def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, 
     meta = io.read_meta_json(meta_path)
     if not meta:
         return False
+    if CTX.get("CTX_TAG") and meta.get("ctx_tag") != CTX.get("CTX_TAG"):
+        return False
+    if CTX.get("cdr_codename") and meta.get("cdr_codename") != CTX.get("cdr_codename"):
+        return False
+    if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get("CACHE_VERSION_TAG"):
+        return False
     return (
         meta.get("model_columns") == list(core_df_cols) and
         meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
@@ -803,6 +814,12 @@ def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, c
     """Determines if an LRT run can be skipped based on metadata."""
     meta = io.read_meta_json(meta_path)
     if not meta: return False
+    if CTX.get("CTX_TAG") and meta.get("ctx_tag") != CTX.get("CTX_TAG"):
+        return False
+    if CTX.get("cdr_codename") and meta.get("cdr_codename") != CTX.get("cdr_codename"):
+        return False
+    if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get("CACHE_VERSION_TAG"):
+        return False
     return (
         meta.get("model_columns") == list(core_df_cols) and
         meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and

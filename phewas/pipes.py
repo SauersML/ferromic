@@ -14,6 +14,52 @@ import time
 import random
 import queue
 
+# ---------------------------------------------------------------------------
+# Cache helpers
+# ---------------------------------------------------------------------------
+
+def _evict_if_ctx_mismatch(meta_path, res_path, ctx, expected_target):
+    """Remove stale metadata/results when the recorded context no longer matches."""
+    if not os.path.exists(meta_path):
+        return False
+    meta = io.read_meta_json(meta_path)
+    if not meta:
+        return False
+
+    stale = False
+    ctx_tag = ctx.get("CTX_TAG")
+    if ctx_tag and meta.get("ctx_tag") != ctx_tag:
+        stale = True
+    cdr = ctx.get("cdr_codename")
+    if cdr and meta.get("cdr_codename") != cdr:
+        stale = True
+    version_tag = ctx.get("CACHE_VERSION_TAG")
+    if version_tag and meta.get("cache_version_tag") != version_tag:
+        stale = True
+    if expected_target and meta.get("target") != expected_target:
+        stale = True
+
+    if not stale:
+        return False
+
+    try:
+        os.remove(meta_path)
+    except Exception:
+        pass
+
+    if res_path and os.path.exists(res_path):
+        stale_path = res_path + ".stale"
+        try:
+            if os.path.exists(stale_path):
+                os.remove(stale_path)
+        except Exception:
+            pass
+        try:
+            os.replace(res_path, stale_path)
+        except Exception:
+            pass
+    return True
+
 # ---- Global Budget Manager (no new files) ----
 
 class BudgetManager:
@@ -323,6 +369,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                 try:
                     res_path = os.path.join(results_cache_dir, f"{item['name']}.json")
                     meta_path = os.path.join(results_cache_dir, f"{item['name']}.meta.json")
+                    _evict_if_ctx_mismatch(meta_path, res_path, ctx, target_inversion)
                     if os.path.exists(res_path) and os.path.exists(meta_path):
                         with open(res_path, "r") as _rf:
                             _res_obj = json.load(_rf)
@@ -452,6 +499,7 @@ def run_lrt_overall(core_df_with_const, allowed_mask_by_cat, anc_series, phenos_
                 try:
                     _res_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.json")
                     _meta_path = os.path.join(ctx["LRT_OVERALL_CACHE_DIR"], f"{task['name']}.meta.json")
+                    _evict_if_ctx_mismatch(_meta_path, _res_path, ctx, target_inversion)
                     if os.path.exists(_res_path) and os.path.exists(_meta_path):
                         with open(_res_path, "r") as _rf:
                             _res_obj = json.load(_rf)
@@ -588,6 +636,11 @@ def run_bootstrap_overall(core_df_with_const, allowed_mask_by_cat, anc_series,
                         flush=True,
                     )
                     time.sleep(2)
+                boot_dir = ctx.get("BOOT_OVERALL_CACHE_DIR")
+                if boot_dir:
+                    res_path = os.path.join(boot_dir, f"{task['name']}.json")
+                    meta_path = os.path.join(boot_dir, f"{task['name']}.meta.json")
+                    _evict_if_ctx_mismatch(meta_path, res_path, ctx, target_inversion)
                 queued += 1
                 ar = pool.apply_async(models.bootstrap_overall_worker, (task,), callback=_cb, error_callback=_err_cb)
                 inflight.append(ar)
@@ -715,6 +768,12 @@ def run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_na
                 while BUDGET.remaining_gb() < floor:
                     print(f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing task submission...", flush=True)
                     time.sleep(2)
+
+                follow_dir = ctx.get("LRT_FOLLOWUP_CACHE_DIR")
+                if follow_dir:
+                    res_path = os.path.join(follow_dir, f"{task['name']}.json")
+                    meta_path = os.path.join(follow_dir, f"{task['name']}.meta.json")
+                    _evict_if_ctx_mismatch(meta_path, res_path, ctx, target_inversion)
 
                 queued += 1
                 ar = pool.apply_async(models.lrt_followup_worker, (task,), callback=_cb2, error_callback=_err_cb)
