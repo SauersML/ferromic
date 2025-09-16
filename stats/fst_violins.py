@@ -39,6 +39,8 @@ DPI = 350
 OUTPUT_PDF = 'hudson_fst.pdf'
 
 plt.rcParams['hatch.linewidth'] = 0.18
+plt.rcParams['pdf.fonttype'] = 42
+plt.rcParams['ps.fonttype'] = 42
 
 logging.basicConfig(
     level=logging.INFO,

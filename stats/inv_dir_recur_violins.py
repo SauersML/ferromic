@@ -336,6 +336,8 @@ def main():
     mpl.rcParams.update({
         "font.family": "sans-serif",
         "font.sans-serif": ["DejaVu Sans", "Noto Sans", "Liberation Sans", "Ubuntu", "Arial"],
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
         "mathtext.fontset": "dejavusans",
         "axes.spines.top": False,
         "axes.spines.right": False,

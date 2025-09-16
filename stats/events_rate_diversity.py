@@ -58,7 +58,9 @@ plt.rcParams.update({
     "grid.linestyle": "--",
     "axes.spines.top": False,
     "axes.spines.right": False,
-    "legend.frameon": False
+    "legend.frameon": False,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
 })
 
 # ------------------------- HELPERS ---------------------------
