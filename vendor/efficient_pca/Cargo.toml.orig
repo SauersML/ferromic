@@ -1,0 +1,47 @@
+[package]
+name = "efficient_pca"
+version = "0.1.7"
+authors = ["Erik Garrison <erik.garrison@gmail.com>, SauersML"]
+edition = "2021"
+description = "Principal component computation using SVD and covariance matrix trick"
+license = "MIT"
+repository = "https://github.com/SauersML/efficient_pca"
+readme = "README.md"
+keywords = [
+    "pca",
+    "genomics",
+    "svd",
+    "bioinformatics",
+    "machine-learning",
+]
+categories = [
+    "algorithms",
+    "mathematics",
+    "science",
+    "science::bioinformatics",
+    "science::bioinformatics::genomics",
+]
+documentation = "https://github.com/SauersML/efficient_pca"
+
+[dependencies]
+float-cmp = "0.10.0"
+ndarray = { version = "0.16.1", features = ["serde"] }
+ndarray-linalg = { version = "0.17.0", features = ["openblas-static"] }
+ndarray-rand = "0.15.0"
+rand = "0.8.5"
+rand_chacha = "0.3.1"
+sysinfo = "0.33.1"
+rand_distr = "0.4.3"
+tempfile = "3.20.0"
+bincode = { version = "2.0.1", features = ["serde"] }
+serde = { version = "1.0.219", features = ["derive"] }
+
+[lib]
+name = "efficient_pca"
+path = "src/lib.rs"
+
+[dev-dependencies]
+dirs = "6.0.0"
+reqwest = { version = "0.12.15", features = ["blocking"] }
+tar = "0.4.44"
+zstd = "0.13.3"

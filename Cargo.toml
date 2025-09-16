@@ -50,6 +50,7 @@ openssl-sys = { version = "0.9.109", features = ["vendored"] }
 
 [patch.crates-io]
 openblas-build = { path = "vendor/openblas-build" }
+efficient_pca = { path = "vendor/efficient_pca" }
 
 [profile.release]
 lto = true
