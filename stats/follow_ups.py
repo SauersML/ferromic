@@ -249,10 +249,21 @@ def get_phenotypes(universe_sql: str, case_sql: str,
 
 # -------------------- TESTS (no covariates) --------------------
 def _fit_logit(y: pd.Series, x: pd.Series):
-    X = sm.add_constant(x.astype(float))
+    # Coerce + drop rows with NaNs in either vector
+    x = pd.to_numeric(x, errors="coerce").astype(float)
+    y = pd.to_numeric(y, errors="coerce").astype(int)
+    mask = ~(x.isna() | y.isna())
+    x, y = x[mask], y[mask]
+
+    # Degeneracy checks: constant predictor or single-class outcome → skip logistic
+    if pd.Series(x).nunique(dropna=True) < 2 or pd.Series(y).nunique(dropna=True) < 2:
+        return None
+
+    # Add intercept and fit with a robust optimizer; guard against numeric failures
+    X = sm.add_constant(x, has_constant="add")
     try:
-        return sm.Logit(y.astype(int), X).fit(disp=0)
-    except PerfectSeparationError:
+        return sm.Logit(y, X).fit(disp=0, method="lbfgs", maxiter=200)
+    except (PerfectSeparationError, np.linalg.LinAlgError, ValueError, RuntimeError):
         return None
 
 def _lrt_p(llf_alt: float, llf_null: float, df_diff: int = 1) -> float:
@@ -410,7 +421,18 @@ def run_for_phenotype(name: str, sqls: dict, dosage: pd.DataFrame, inversions: l
             bins = sub[inv].round().clip(0,2).value_counts().reindex([0,1,2], fill_value=0).astype(int).tolist()
             print(f"DEBUG| {label:16s} | {inv} nonnull={len(sub):,} min={desc['min']:.3f} p50={desc['50%']:.3f} max={desc['max']:.3f} bins(0/1/2)={bins}")
 
-            stats = run_tests(sub, inv)
+            # Skip logistic if predictor or outcome has no variation; fall back to trend only
+            if sub[inv].dropna().nunique() < 2 or sub["status"].dropna().nunique() < 2:
+                print(f"WARN | {label}: {inv} or outcome has no variation → skipping logistic; trend only.")
+                z, p_trend = cochran_armitage(sub["status"], sub[inv])
+                stats = {
+                    "wald_p": np.nan, "lrt_p": np.nan, "or": np.nan,
+                    "ci_low": np.nan, "ci_high": np.nan, "pseudo_r2": np.nan,
+                    "trend_z": float(z), "trend_p": float(p_trend),
+                }
+            else:
+                stats = run_tests(sub, inv)
+
             qplot = plot_quantiles(d, inv, name, label)
             bplot = plot_rounded_bins(d, inv, name, label)
 
