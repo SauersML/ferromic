@@ -49,6 +49,9 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
         "mode": CTX.get("MODE"),
         "selection": CTX.get("SELECTION"),
     }
+    data_keys = CTX.get("DATA_KEYS")
+    if data_keys:
+        base["data_keys"] = data_keys
     if extra:
         base.update(extra)
     io.atomic_write_json(meta_path, base)
@@ -890,7 +893,7 @@ def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, 
         return False
     if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get("CACHE_VERSION_TAG"):
         return False
-    return (
+    base_ok = (
         meta.get("model_columns") == list(core_df_cols) and
         meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
         meta.get("core_index_fp") == core_index_fp and
@@ -899,6 +902,9 @@ def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, 
         meta.get("target") == target
     )
     if not base_ok:
+        return False
+    data_keys = CTX.get("DATA_KEYS")
+    if data_keys and meta.get("data_keys") != data_keys:
         return False
     if used_index_fp is not None and meta.get("used_index_fp") != used_index_fp:
         return False
@@ -924,7 +930,7 @@ def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, c
         return False
     if CTX.get("CACHE_VERSION_TAG") and meta.get("cache_version_tag") != CTX.get("CACHE_VERSION_TAG"):
         return False
-    return (
+    base_ok = (
         meta.get("model_columns") == list(core_df_cols) and
         meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
         meta.get("core_index_fp") == core_index_fp and
@@ -933,6 +939,9 @@ def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, c
         meta.get("target") == target
     )
     if not base_ok:
+        return False
+    data_keys = CTX.get("DATA_KEYS")
+    if data_keys and meta.get("data_keys") != data_keys:
         return False
     if used_index_fp is not None and meta.get("used_index_fp") != used_index_fp:
         return False

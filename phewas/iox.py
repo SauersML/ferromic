@@ -67,8 +67,12 @@ def _best_effort_fsync(fobj) -> None:
 
 def _fsync_dir(path: str) -> None:
     d = os.path.dirname(os.path.abspath(path)) or "."
+    flags = getattr(os, "O_DIRECTORY", 0)
+    if not flags:
+        # Platforms without O_DIRECTORY (e.g., Windows/macOS) don't need an explicit dir fsync.
+        return
     try:
-        dir_fd = os.open(d, os.O_DIRECTORY)
+        dir_fd = os.open(d, flags)
         try:
             os.fsync(dir_fd)
         finally:
@@ -434,22 +438,40 @@ def ensure_lock(path: str, max_age_sec: float) -> bool:
 # ---------------------------------------------------------------------------
 from multiprocessing import shared_memory  # noqa: E402  (import after __future__)
 
+_SHM_PROBE_RESULT: Optional[bool] = None
+
+
 def _shm_supported() -> bool:
-    return os.path.exists(_SHM_PATH)
+    global _SHM_PROBE_RESULT
+    if _SHM_PROBE_RESULT is not None:
+        return _SHM_PROBE_RESULT
+    try:
+        probe = shared_memory.SharedMemory(create=True, size=1)
+    except Exception:
+        _SHM_PROBE_RESULT = False
+        return False
+    else:
+        try:
+            probe.close()
+            probe.unlink()
+        except Exception:
+            pass
+        _SHM_PROBE_RESULT = True
+        return True
 
 
 def _can_use_shm(arr_bytes: int) -> bool:
     if not _shm_supported():
         return False
-    if arr_bytes <= 0:
+    if arr_bytes <= 0 or arr_bytes > _SHM_MAX_BYTES:
         return False
-    if arr_bytes > _SHM_MAX_BYTES:
-        return False
-    free = _disk_free_bytes(_SHM_PATH)
-    if free is None:
-        # If we can't measure free space, be conservative for large arrays
-        return arr_bytes <= (_SHM_MAX_BYTES // 2)
-    return (arr_bytes + _SHM_CUSHION) <= free
+    if os.path.exists(_SHM_PATH):
+        free = _disk_free_bytes(_SHM_PATH)
+        if free is not None:
+            return (arr_bytes + _SHM_CUSHION) <= free
+    # If /dev/shm is absent or free space can't be measured, optimistically try SHM;
+    # allocation failures will fall back to memmap in create_shared_from_ndarray.
+    return True
 
 
 def _memmap_backing(arr: np.ndarray, readonly: bool) -> Tuple[dict, Any]:
@@ -697,12 +719,28 @@ def rss_gb() -> float:
 # Domain-specific loaders
 # ---------------------------------------------------------------------------
 def load_inversions(TARGET_INVERSION: str, INVERSION_DOSAGES_FILE: str) -> pd.DataFrame:
-    """Load target inversion dosage (tsv with SampleID + TARGET_INVERSION)."""
+    """Load target inversion dosage; autodetect the identifier column."""
     try:
-        df = pd.read_csv(INVERSION_DOSAGES_FILE, sep="\t", usecols=["SampleID", TARGET_INVERSION])
+        header = pd.read_csv(INVERSION_DOSAGES_FILE, sep="\t", nrows=0).columns.tolist()
+        id_candidates = [
+            "SampleID",
+            "sample_id",
+            "person_id",
+            "research_id",
+            "participant_id",
+            "ID",
+        ]
+        id_col = next((col for col in id_candidates if col in header), None)
+        if id_col is None:
+            raise RuntimeError(
+                f"No identifier column found in '{INVERSION_DOSAGES_FILE}'. "
+                f"Looked for {id_candidates}."
+            )
+        usecols = [id_col, TARGET_INVERSION]
+        df = pd.read_csv(INVERSION_DOSAGES_FILE, sep="\t", usecols=usecols)
         df[TARGET_INVERSION] = pd.to_numeric(df[TARGET_INVERSION], errors="coerce")
-        df["SampleID"] = df["SampleID"].astype(str)
-        return df.set_index("SampleID").rename_axis("person_id")
+        df[id_col] = df[id_col].astype(str)
+        return df.set_index(id_col).rename_axis("person_id")
     except Exception as e:
         raise RuntimeError(f"Failed to load inversion data: {e}") from e
 

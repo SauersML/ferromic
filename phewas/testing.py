@@ -95,28 +95,28 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
     df["Sig_Global"] = False
 
     rows = []
-        for inv in inversions:
-            boot_dir = os.path.join(cache_root, models.safe_basename(inv), "boot_overall")
-            if not os.path.isdir(boot_dir):
-                continue
-            for fn in os.listdir(boot_dir):
-                if fn.endswith(".json") and not fn.endswith(".meta.json"):
-                    meta_path = os.path.join(boot_dir, fn.replace(".json", ".meta.json"))
-                    meta = io.read_meta_json(meta_path)
-                    expected_tag = ctx_tags.get(inv)
-                    if not meta:
-                        continue
-                    if expected_tag and meta.get("ctx_tag") != expected_tag:
-                        continue
-                    if cdr_codename and meta.get("cdr_codename") != cdr_codename:
-                        continue
-                    if meta.get("target") != inv:
-                        continue
-                    rec = pd.read_json(os.path.join(boot_dir, fn), typ="series").to_dict()
-                    rows.append({
-                        "Phenotype": os.path.splitext(fn)[0],
-                        "Inversion": inv,
-                        "P_EMP": pd.to_numeric(rec.get("P_EMP"), errors="coerce"),
+    for inv in inversions:
+        boot_dir = os.path.join(cache_root, models.safe_basename(inv), "boot_overall")
+        if not os.path.isdir(boot_dir):
+            continue
+        for fn in os.listdir(boot_dir):
+            if fn.endswith(".json") and not fn.endswith(".meta.json"):
+                meta_path = os.path.join(boot_dir, fn.replace(".json", ".meta.json"))
+                meta = io.read_meta_json(meta_path)
+                expected_tag = ctx_tags.get(inv)
+                if not meta:
+                    continue
+                if expected_tag and meta.get("ctx_tag") != expected_tag:
+                    continue
+                if cdr_codename and meta.get("cdr_codename") != cdr_codename:
+                    continue
+                if meta.get("target") != inv:
+                    continue
+                rec = pd.read_json(os.path.join(boot_dir, fn), typ="series").to_dict()
+                rows.append({
+                    "Phenotype": os.path.splitext(fn)[0],
+                    "Inversion": inv,
+                    "P_EMP": pd.to_numeric(rec.get("P_EMP"), errors="coerce"),
                     "T_OBS": pd.to_numeric(rec.get("T_OBS"), errors="coerce"),
                     "B": int(rec.get("B", 0)),
                 })
