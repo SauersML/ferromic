@@ -19,6 +19,11 @@ from . import iox as io
 CTX = {}  # Worker context with constants from run.py
 allowed_fp_by_cat = {}
 
+# --- inference behavior toggles ---
+DEFAULT_PREFER_FIRTH_ON_RIDGE = True
+DEFAULT_BACKFILL_P_FROM_STAGE1 = True
+DEFAULT_ALLOW_PENALIZED_WALD = True
+
 def safe_basename(name: str) -> str:
     """Allow only [-._a-zA-Z0-9], map others to '_'."""
     return "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in str(name))
@@ -33,6 +38,7 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
         "num_pcs": CTX["NUM_PCS"],
         "min_cases": CTX["MIN_CASES_FILTER"],
         "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+        "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
         "target": target,
         "core_index_fp": core_idx_fp,
         "case_idx_fp": case_fp,
@@ -170,6 +176,19 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
     user_start = kwargs.pop("start_params", None)
 
     is_pandas = hasattr(X, "columns")
+    prefer_firth_on_ridge = bool(CTX.get("PREFER_FIRTH_ON_RIDGE", DEFAULT_PREFER_FIRTH_ON_RIDGE))
+
+    def _maybe_firth(path_tags):
+        if not prefer_firth_on_ridge:
+            return None
+        firth_res = _firth_refit(X, y)
+        if firth_res is None:
+            return None
+        tags = list(path_tags)
+        tags.append("firth_refit")
+        setattr(firth_res, "_path_reasons", tags)
+        return firth_res, "firth_refit"
+
     if not ridge_ok:
         return None, "ridge_disabled"
 
@@ -200,6 +219,7 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     )
                     if _converged(mle_newton) and hasattr(mle_newton, "bse") and np.all(np.isfinite(mle_newton.bse)) and np.max(mle_newton.bse) <= 100.0:
                         setattr(mle_newton, "_final_is_mle", True)
+                        setattr(mle_newton, "_path_reasons", ["mle_first_newton"])
                         return mle_newton, "mle_first_newton"
                 except (Exception, PerfectSeparationWarning):
                     pass
@@ -213,6 +233,7 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     )
                     if _converged(mle_bfgs) and hasattr(mle_bfgs, "bse") and np.all(np.isfinite(mle_bfgs.bse)) and np.max(mle_bfgs.bse) <= 100.0:
                         setattr(mle_bfgs, "_final_is_mle", True)
+                        setattr(mle_bfgs, "_path_reasons", ["mle_first_bfgs"])
                         return mle_bfgs, "mle_first_bfgs"
                 except (Exception, PerfectSeparationWarning):
                     pass
@@ -234,6 +255,8 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
             **kwargs,
         )
 
+        setattr(ridge_fit, "_ridge_alpha", float(alpha_scalar))
+        setattr(ridge_fit, "_ridge_const_ix", None if const_ix is None else int(const_ix))
         setattr(ridge_fit, "_used_ridge", True)
         setattr(ridge_fit, "_final_is_mle", False)
 
@@ -243,8 +266,17 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
             max_abs_linpred, frac_lo, frac_hi = float("inf"), 1.0, 1.0
 
         neff_gate = float(CTX.get("MLE_REFIT_MIN_NEFF", 0.0))
+        gate_tags = _ridge_gate_reasons(max_abs_linpred, frac_lo, frac_hi, n_eff, neff_gate)
         blocked_by_gate = ((max_abs_linpred > 15.0) or (frac_lo > 0.02) or (frac_hi > 0.02) or (neff_gate > 0 and n_eff < neff_gate))
+        path_prefix = ["ridge_reached"] + gate_tags
         if blocked_by_gate and not prefer_mle_first:
+            firth_attempt = _maybe_firth(path_prefix)
+            if firth_attempt is not None:
+                return firth_attempt
+            tags = ["ridge_only"] + gate_tags
+            if prefer_firth_on_ridge:
+                tags.append("firth_failed")
+            setattr(ridge_fit, "_path_reasons", tags)
             return ridge_fit, "ridge_only"
         # When prefer_mle_first is True, proceed to attempt an unpenalized refit seeded by ridge even if diagnostics indicate separation-like behavior.
 
@@ -278,6 +310,8 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         raise PerfectSeparationWarning("Large SEs detected")
                     setattr(refit_newton, "_used_ridge_seed", True)
                     setattr(refit_newton, "_final_is_mle", True)
+                    tags = ["ridge_seeded_refit"] + gate_tags
+                    setattr(refit_newton, "_path_reasons", tags)
                     return refit_newton, "ridge_seeded_refit"
             except (Exception, PerfectSeparationWarning):
                 pass
@@ -298,88 +332,21 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         raise PerfectSeparationWarning("Large SEs detected")
                     setattr(refit_bfgs, "_used_ridge_seed", True)
                     setattr(refit_bfgs, "_final_is_mle", True)
+                    tags = ["ridge_seeded_refit"] + gate_tags
+                    setattr(refit_bfgs, "_path_reasons", tags)
                     return refit_bfgs, "ridge_seeded_refit"
             except (Exception, PerfectSeparationWarning):
                 pass
 
-        # Firth fallback for separation-prone designs under prefer_mle_first.
-        # This implements bias-reduced logistic regression using the adjusted-score iteration.
-        if prefer_mle_first:
-            X_np = np.asarray(X, dtype=np.float64)
-            y_np = np.asarray(y, dtype=np.float64)
-            beta = np.zeros(X_np.shape[1], dtype=np.float64)
-            maxiter_firth = 200
-            tol_firth = 1e-8
-            converged_firth = False
-            for _it in range(maxiter_firth):
-                eta = X_np @ beta
-                p = expit(eta)
-                W = p * (1.0 - p)
-                if not np.all(np.isfinite(W)) or np.any(W <= 0):
-                    break
-                XTW = X_np.T * W
-                XtWX = XTW @ X_np
-                try:
-                    XtWX_inv = np.linalg.inv(XtWX)
-                except np.linalg.LinAlgError:
-                    try:
-                        XtWX_inv = np.linalg.pinv(XtWX)
-                    except Exception:
-                        break
-                # Compute leverages without constructing the full N×N hat matrix.
-                # h_i = w_i * x_i^T (X' W X)^{-1} x_i
-                h = _leverages_batched(X_np, XtWX_inv, W)
-                adj = (0.5 - p) * h
-                score = X_np.T @ (y_np - p + adj)
-                try:
-                    delta = XtWX_inv @ score
-                except Exception:
-                    break
-                beta_new = beta + delta
-                if not np.all(np.isfinite(beta_new)):
-                    break
-                if np.max(np.abs(delta)) < tol_firth:
-                    beta = beta_new
-                    converged_firth = True
-                    break
-                beta = beta_new
-            if converged_firth:
-                eta = X_np @ beta
-                p = expit(eta)
-                W = p * (1.0 - p)
-                XTW = X_np.T * W
-                XtWX = XTW @ X_np
-                try:
-                    cov = np.linalg.inv(XtWX)
-                except np.linalg.LinAlgError:
-                    cov = np.linalg.pinv(XtWX)
-                bse = np.sqrt(np.clip(np.diag(cov), 0.0, np.inf))
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    z = beta / bse
-                pvals = 2.0 * sp_stats.norm.sf(np.abs(z))
-                # Penalized log-likelihood for Firth logistic regression for LRT compatibility.
-                # Uses l(β) + 0.5 * log|X' W X|.
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    loglik = float(np.sum(y_np * np.log(p) + (1.0 - y_np) * np.log(1.0 - p)))
-                sign_det, logdet = np.linalg.slogdet(XtWX)
-                pll = loglik + 0.5 * logdet if sign_det > 0 else -np.inf
-                class _Result:
-                    """Lightweight container to mimic statsmodels results where needed."""
-                    pass
-                firth_res = _Result()
-                if is_pandas and hasattr(X, "columns"):
-                    firth_res.params = pd.Series(beta, index=X.columns)
-                    firth_res.bse = pd.Series(bse, index=X.columns)
-                    firth_res.pvalues = pd.Series(pvals, index=X.columns)
-                else:
-                    firth_res.params = beta
-                    firth_res.bse = bse
-                    firth_res.pvalues = pvals
-                setattr(firth_res, "llf", float(pll))
-                setattr(firth_res, "_final_is_mle", True)
-                setattr(firth_res, "_used_firth", True)
-                return firth_res, "firth_refit"
+        firth_path = list(path_prefix) + ["seeded_refit_failed"]
+        firth_attempt = _maybe_firth(firth_path)
+        if firth_attempt is not None:
+            return firth_attempt
 
+        tags = ["ridge_only"] + gate_tags
+        if prefer_firth_on_ridge:
+            tags.append("firth_failed")
+        setattr(ridge_fit, "_path_reasons", tags)
         return ridge_fit, "ridge_only"
     except Exception as e:
         return None, f"ridge_exception:{type(e).__name__}"
@@ -460,6 +427,104 @@ def _fit_diagnostics(X, y, params):
         frac_lo = float(np.mean(p < 1e-12)) if p.size else 0.0
         frac_hi = float(np.mean(p > 1.0 - 1e-12)) if p.size else 0.0
     return max_abs_linpred, frac_lo, frac_hi
+
+
+def _ridge_gate_reasons(max_abs_linpred, frac_lo, frac_hi, n_eff, neff_gate):
+    reasons = []
+    if np.isfinite(max_abs_linpred) and max_abs_linpred > 15.0:
+        reasons.append("gate:max|Xb|>15")
+    if np.isfinite(frac_lo) and frac_lo > 0.02:
+        reasons.append("gate:p<1e-12>2%")
+    if np.isfinite(frac_hi) and frac_hi > 0.02:
+        reasons.append("gate:p>1-1e-12>2%")
+    if (neff_gate is not None) and (neff_gate > 0) and np.isfinite(n_eff) and (n_eff < neff_gate):
+        reasons.append(f"gate:neff<{neff_gate:g}")
+    return reasons
+
+
+def _firth_refit(X, y):
+    X_np = np.asarray(X, dtype=np.float64)
+    y_np = np.asarray(y, dtype=np.float64)
+    if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
+        return None
+
+    beta = np.zeros(X_np.shape[1], dtype=np.float64)
+    maxiter_firth = 200
+    tol_firth = 1e-8
+    converged_firth = False
+
+    for _it in range(maxiter_firth):
+        eta = np.clip(X_np @ beta, -35.0, 35.0)
+        p = expit(eta)
+        p = np.clip(p, 1e-12, 1.0 - 1e-12)
+        W = p * (1.0 - p)
+        if not np.all(np.isfinite(W)):
+            break
+        XTW = X_np.T * W
+        XtWX = XTW @ X_np
+        try:
+            XtWX_inv = np.linalg.inv(XtWX)
+        except np.linalg.LinAlgError:
+            try:
+                XtWX_inv = np.linalg.pinv(XtWX)
+            except Exception:
+                break
+        h = _leverages_batched(X_np, XtWX_inv, W)
+        adj = (0.5 - p) * h
+        score = X_np.T @ (y_np - p + adj)
+        try:
+            delta = XtWX_inv @ score
+        except Exception:
+            break
+        beta_new = beta + delta
+        if not np.all(np.isfinite(beta_new)):
+            break
+        if np.max(np.abs(delta)) < tol_firth:
+            beta = beta_new
+            converged_firth = True
+            break
+        beta = beta_new
+
+    if not converged_firth:
+        return None
+
+    eta = np.clip(X_np @ beta, -35.0, 35.0)
+    p = expit(eta)
+    p = np.clip(p, 1e-12, 1.0 - 1e-12)
+    W = p * (1.0 - p)
+    XTW = X_np.T * W
+    XtWX = XTW @ X_np
+    try:
+        cov = np.linalg.inv(XtWX)
+    except np.linalg.LinAlgError:
+        cov = np.linalg.pinv(XtWX)
+    bse = np.sqrt(np.clip(np.diag(cov), 0.0, np.inf))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z = np.divide(beta, bse, out=np.zeros_like(beta), where=bse > 0)
+    pvals = 2.0 * sp_stats.norm.sf(np.abs(z))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        loglik = float(np.sum(y_np * np.log(p) + (1.0 - y_np) * np.log(1.0 - p)))
+    sign_det, logdet = np.linalg.slogdet(XtWX)
+    pll = loglik + 0.5 * logdet if sign_det > 0 else -np.inf
+
+    class _Result:
+        """Lightweight container to mimic statsmodels results where needed."""
+
+        pass
+
+    firth_res = _Result()
+    if hasattr(X, "columns"):
+        firth_res.params = pd.Series(beta, index=X.columns)
+        firth_res.bse = pd.Series(bse, index=X.columns)
+        firth_res.pvalues = pd.Series(pvals, index=X.columns)
+    else:
+        firth_res.params = beta
+        firth_res.bse = bse
+        firth_res.pvalues = pvals
+    setattr(firth_res, "llf", float(pll))
+    setattr(firth_res, "_final_is_mle", False)
+    setattr(firth_res, "_used_firth", True)
+    return firth_res
 
 
 def _print_fit_diag(s_name_safe, stage, model_tag, N_total, N_cases, N_ctrls, solver_tag, X, y, params, notes):
@@ -582,52 +647,16 @@ def _apply_sex_restriction_np(X, y, sex_ix):
     max_other = int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0))
 
     sex_col = X[:, sex_ix]
-    y_bool = y.astype(bool)
+    keep_mask, note, skip, restricted = _sex_keep_mask_numpy(sex_col, y, mode, majority_prop, max_other)
+    if skip:
+        return X, y, "", skip, False
+    if not restricted:
+        return X, y, note or "", None, False
 
-    n_f_case = int(np.sum((sex_col == 0.0) & y_bool))
-    n_m_case = int(np.sum((sex_col == 1.0) & y_bool))
-    n_f_ctrl = int(np.sum((sex_col == 0.0) & (~y_bool)))
-    n_m_ctrl = int(np.sum((sex_col == 1.0) & (~y_bool)))
-
-    def _restrict_to(s: float, tag: str):
-        if s == 0.0 and n_f_ctrl == 0:
-            return X, y, "", "sex_no_controls_in_case_sex", False
-        if s == 1.0 and n_m_ctrl == 0:
-            return X, y, "", "sex_no_controls_in_case_sex", False
-        keep_mask = (sex_col == s)
-        cols_to_keep = np.arange(X.shape[1]) != sex_ix
-        X_restr = X[keep_mask][:, cols_to_keep]
-        y_restr = y[keep_mask]
-        return X_restr, y_restr, f"{tag}_{int(s)}", None, True
-
-    case_sexes_present = []
-    if n_f_case > 0:
-        case_sexes_present.append(0.0)
-    if n_m_case > 0:
-        case_sexes_present.append(1.0)
-
-    if mode == "strict":
-        if len(case_sexes_present) == 1:
-            return _restrict_to(case_sexes_present[0], "sex_restricted_to")
-        return X, y, "", None, False
-
-    total_cases = n_f_case + n_m_case
-    if total_cases > 0:
-        if n_f_case >= n_m_case:
-            prop = n_f_case / total_cases
-            other = n_m_case
-            s_dom = 0.0
-        else:
-            prop = n_m_case / total_cases
-            other = n_f_case
-            s_dom = 1.0
-        if (prop >= majority_prop) or (other <= max_other):
-            X2, Y2, note, skip, dropped = _restrict_to(s_dom, "sex_majority_restricted_to")
-            if note:
-                note = f"{note}:prop={prop:.3f};other_cases={other}"
-            return X2, Y2, note, skip, dropped
-
-    return X, y, "", None, False
+    cols_to_keep = np.arange(X.shape[1]) != sex_ix
+    X_restr = X[keep_mask][:, cols_to_keep]
+    y_restr = y[keep_mask]
+    return X_restr, y_restr, note or "", None, True
 
 
 # --- Bootstrap helpers ---
@@ -788,7 +817,69 @@ def _mask_fingerprint(mask: np.ndarray, index: pd.Index) -> str:
         n += 1
     return f"{h:016x}:{n}"
 
-def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp):
+
+def _subjects_fingerprint_from_indices(index: pd.Index, rows: np.ndarray) -> str:
+    """Fingerprint the analytic sample given positional indices into the core index."""
+    if rows is None or len(rows) == 0:
+        return _index_fingerprint(pd.Index([]))
+    rows = np.asarray(rows, dtype=int)
+    return _index_fingerprint(index[rows])
+
+
+def _sex_keep_mask_numpy(sex_vec: np.ndarray, y_vec: np.ndarray, mode: str, prop: float, max_other: int):
+    """Return row mask and notes for potential sex restriction using NumPy inputs."""
+    sex_arr = np.asarray(sex_vec, dtype=np.float64)
+    y_bool = np.asarray(y_vec, dtype=bool)
+
+    keep_mask = np.ones_like(y_bool, dtype=bool)
+    note = ""
+    skip_reason = None
+    restricted = False
+
+    total_cases = int(np.sum(y_bool))
+    if total_cases <= 0:
+        return keep_mask, note, skip_reason, restricted
+
+    n_f_case = int(np.sum((sex_arr == 0.0) & y_bool))
+    n_m_case = int(np.sum((sex_arr == 1.0) & y_bool))
+    n_f_ctrl = int(np.sum((sex_arr == 0.0) & (~y_bool)))
+    n_m_ctrl = int(np.sum((sex_arr == 1.0) & (~y_bool)))
+
+    mode = str(mode or "majority").lower()
+
+    if mode == "strict":
+        if (n_f_case > 0) ^ (n_m_case > 0):
+            s_dom = 0.0 if n_f_case > 0 else 1.0
+            share_dom = 1.0
+            other_cases = 0
+        else:
+            return keep_mask, note, skip_reason, restricted
+    else:
+        if n_f_case >= n_m_case:
+            s_dom = 0.0
+            share_dom = (n_f_case / total_cases) if total_cases > 0 else 0.0
+            other_cases = n_m_case
+        else:
+            s_dom = 1.0
+            share_dom = (n_m_case / total_cases) if total_cases > 0 else 0.0
+            other_cases = n_f_case
+        if not ((share_dom >= float(prop)) or (other_cases <= int(max_other))):
+            return keep_mask, note, skip_reason, restricted
+
+    if (s_dom == 0.0 and n_f_ctrl == 0) or (s_dom == 1.0 and n_m_ctrl == 0):
+        skip_reason = "sex_no_controls_in_case_sex"
+        return keep_mask, note, skip_reason, restricted
+
+    keep_mask = (sex_arr == s_dom)
+    restricted = True
+    if mode == "strict":
+        note = f"sex_restricted_to_{int(s_dom)}"
+    else:
+        note = f"sex_majority_restricted_to_{int(s_dom)}:prop={share_dom:.3f};other_cases={other_cases}"
+    return keep_mask, note, skip_reason, restricted
+
+def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp, *,
+                 used_index_fp=None, sex_cfg=None, thresholds=None):
     """Determines if a model run can be skipped based on metadata."""
     meta = io.read_meta_json(meta_path)
     if not meta:
@@ -805,12 +896,25 @@ def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, 
         meta.get("core_index_fp") == core_index_fp and
         meta.get("case_idx_fp") == case_idx_fp and
         meta.get("allowed_mask_fp") == allowed_fp and
-        meta.get("min_cases") == CTX["MIN_CASES_FILTER"] and
-        meta.get("min_ctrls") == CTX["MIN_CONTROLS_FILTER"]
+        meta.get("target") == target
     )
+    if not base_ok:
+        return False
+    if used_index_fp is not None and meta.get("used_index_fp") != used_index_fp:
+        return False
+    if sex_cfg:
+        for k, v in sex_cfg.items():
+            if meta.get(k) != v:
+                return False
+    if thresholds:
+        for k, v in thresholds.items():
+            if meta.get(k) != v:
+                return False
+    return True
 
 
-def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp):
+def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp, *,
+                          used_index_fp=None, sex_cfg=None, thresholds=None):
     """Determines if an LRT run can be skipped based on metadata."""
     meta = io.read_meta_json(meta_path)
     if not meta: return False
@@ -825,13 +929,68 @@ def _lrt_meta_should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, c
         meta.get("ridge_l2_base") == CTX["RIDGE_L2_BASE"] and
         meta.get("core_index_fp") == core_index_fp and
         meta.get("case_idx_fp") == case_idx_fp and
-        meta.get("allowed_mask_fp") == allowed_fp
+        meta.get("allowed_mask_fp") == allowed_fp and
+        meta.get("target") == target
     )
+    if not base_ok:
+        return False
+    if used_index_fp is not None and meta.get("used_index_fp") != used_index_fp:
+        return False
+    if sex_cfg:
+        for k, v in sex_cfg.items():
+            if meta.get(k) != v:
+                return False
+    if thresholds:
+        for k, v in thresholds.items():
+            if meta.get(k) != v:
+                return False
+    return True
 
 
 def _pos_in_current(orig_ix, current_ix_array):
     pos = np.flatnonzero(current_ix_array == orig_ix)
     return int(pos[0]) if pos.size else None
+
+
+def _backfill_p_from_stage1(s_name_safe):
+    # Prefer cached Stage-1 chi-square then bootstrap score tests.
+    lrt_dir = CTX.get("LRT_OVERALL_CACHE_DIR")
+    if lrt_dir:
+        pth = os.path.join(lrt_dir, f"{s_name_safe}.json")
+        if os.path.exists(pth):
+            rec = io.read_meta_json(pth)
+            if not rec:
+                try:
+                    rec = pd.read_json(pth, typ="series").to_dict()
+                except Exception:
+                    rec = None
+            if rec is not None:
+                try:
+                    p_val = float(rec.get("P_LRT_Overall"))
+                except (TypeError, ValueError):
+                    p_val = np.nan
+                if np.isfinite(p_val):
+                    return float(p_val), "lrt_chi2"
+
+    boot_dir = CTX.get("BOOT_OVERALL_CACHE_DIR")
+    if boot_dir:
+        pth = os.path.join(boot_dir, f"{s_name_safe}.json")
+        if os.path.exists(pth):
+            rec = io.read_meta_json(pth)
+            if not rec:
+                try:
+                    rec = pd.read_json(pth, typ="series").to_dict()
+                except Exception:
+                    rec = None
+            if rec is not None:
+                try:
+                    p_emp = float(rec.get("P_EMP"))
+                except (TypeError, ValueError):
+                    p_emp = np.nan
+                if np.isfinite(p_emp):
+                    return float(p_emp), "score_boot"
+
+    return np.nan, None
 
 
 def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
@@ -867,26 +1026,69 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         core_fp = _index_fingerprint(worker_core_df_index)
 
-        # Repair missing meta for an existing result (enables fast skip)
+        case_indices_in_X_all = case_idx_global[finite_mask_worker[case_idx_global]] if case_idx_global.size else np.array([], dtype=int)
+        ctrl_idx = control_indices_by_cat.get(category, np.array([], dtype=int))
+        if ctrl_idx.size or case_indices_in_X_all.size:
+            rows_idx0 = np.concatenate((ctrl_idx, case_indices_in_X_all))
+            y0 = np.concatenate((
+                np.zeros(ctrl_idx.size, dtype=np.int8),
+                np.ones(case_indices_in_X_all.size, dtype=np.int8)
+            ))
+        else:
+            rows_idx0 = np.array([], dtype=int)
+            y0 = np.array([], dtype=np.int8)
+
+        sex_ix = col_ix.get('sex')
+        sex_cfg = {
+            "sex_restrict_mode": str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower(),
+            "sex_restrict_prop": float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)),
+            "sex_restrict_max_other": int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0)),
+        }
+        if sex_ix is not None and rows_idx0.size:
+            sex_vec0 = X_all[rows_idx0, sex_ix]
+            keep_mask_pre, _, _, _ = _sex_keep_mask_numpy(
+                sex_vec0, y0, sex_cfg["sex_restrict_mode"], sex_cfg["sex_restrict_prop"], sex_cfg["sex_restrict_max_other"]
+            )
+        else:
+            keep_mask_pre = np.ones(rows_idx0.size, dtype=bool)
+
+        rows_idx_used = rows_idx0[keep_mask_pre] if rows_idx0.size else rows_idx0
+        used_index_fp = _subjects_fingerprint_from_indices(worker_core_df_index, rows_idx_used)
+
+        thresholds = {
+            "min_cases": int(CTX.get("MIN_CASES_FILTER", DEFAULT_MIN_CASES)),
+            "min_ctrls": int(CTX.get("MIN_CONTROLS_FILTER", DEFAULT_MIN_CONTROLS)),
+            "min_neff": float(CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF)),
+        }
+
+        meta_extra_common = {
+            "allowed_mask_fp": allowed_fp,
+            "ridge_l2_base": CTX.get("RIDGE_L2_BASE", 1.0),
+            "used_index_fp": used_index_fp,
+        }
+        meta_extra_common.update(sex_cfg)
+        meta_extra_common.update(thresholds)
+
         if os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False):
             _write_meta(
                 meta_path, "phewas_result", s_name, category, target_inversion,
                 worker_core_df_cols, core_fp, case_idx_fp,
-                extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]}
+                extra=dict(meta_extra_common)
             )
             print(f"[meta repaired] {s_name_safe}", flush=True)
-            return
 
         if os.path.exists(result_path) and _should_skip(
-            meta_path, worker_core_df_cols, core_fp, case_idx_fp, category, target_inversion, allowed_fp
+            meta_path, worker_core_df_cols, core_fp, case_idx_fp, category, target_inversion, allowed_fp,
+            used_index_fp=used_index_fp, sex_cfg=sex_cfg, thresholds=thresholds
         ):
             print(f"[skip cache-ok] {s_name_safe}", flush=True)
             return
 
-        # --- Array-based data assembly ---
-        case_indices_in_X_all = case_idx_global[finite_mask_worker[case_idx_global]]
+        n_total = int(y0.size)
+        n_cases = int(y0.sum())
+        n_ctrls = n_total - n_cases
 
-        ctrl_idx = control_indices_by_cat.get(category, np.array([], dtype=int))
+        # --- Array-based data assembly ---
         # Fancy indexing returns a copy (that’s OK; it’s ephemeral and per-fit)
         X_controls = X_all[ctrl_idx].astype(np.float64, copy=False) if ctrl_idx.size else np.empty((0, X_all.shape[1]), dtype=np.float64)
         y_controls = np.zeros(len(X_controls), dtype=np.int8)
@@ -904,6 +1106,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         # --- Pre-fit sanity checks ---
         notes = []
+        backfill_stage1 = bool(CTX.get("BACKFILL_P_FROM_STAGE1", DEFAULT_BACKFILL_P_FROM_STAGE1))
+        allow_penalized_wald = bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
         target_ix = col_ix.get(target_inversion)
         const_ix = col_ix.get('const')
         sex_ix = col_ix.get('sex')
@@ -921,7 +1125,9 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             # ... (identical skip logic as before, just using different N vars)
             result_data = {"Phenotype": s_name, "N_Total": n_total, "N_Cases": n_cases, "N_Controls": n_ctrls, "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": skip_reason}
             io.atomic_write_json(result_path, result_data)
-            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_idx_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": skip_reason})
+            meta_extra = dict(meta_extra_common)
+            meta_extra["skip_reason"] = skip_reason
+            _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_idx_fp, extra=meta_extra)
             return
 
         # --- Model fitting pipeline (on arrays) ---
@@ -951,6 +1157,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "Model_Notes": ";".join(notes) if notes else ""
             }
             io.atomic_write_json(result_path, result_data)
+            meta_extra = dict(meta_extra_common)
+            meta_extra["skip_reason"] = sex_skip
             _write_meta(
                 meta_path,
                 "phewas_result",
@@ -960,7 +1168,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 worker_core_df_cols,
                 _index_fingerprint(worker_core_df_index),
                 case_idx_fp,
-                extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": sex_skip}
+                extra=meta_extra
             )
             return
 
@@ -995,14 +1203,20 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                   f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}", flush=True)
             result_data = {"Phenotype": s_name, "N_Total": det['N'], "N_Cases": det['N_cases'], "N_Controls": det['N_ctrls'], "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "Skip_Reason": reason}
             io.atomic_write_json(result_path, result_data)
+            meta_extra = dict(meta_extra_common)
+            meta_extra.update({"skip_reason": reason, "counts": det})
             _write_meta(meta_path, "phewas_result", s_name, category, target_inversion,
                         worker_core_df_cols, _index_fingerprint(worker_core_df_index),
-                        case_idx_fp, extra={"skip_reason": reason, "counts": det, "allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+                        case_idx_fp, extra=meta_extra)
             return
 
         fit, fit_reason = _fit_logit_ladder(X_work_fd, y_work, const_ix=const_ix_final, prefer_mle_first=bool(sex_col_dropped))
         if fit_reason: notes.append(fit_reason)
         if fit is not None:
+            diag_notes = list(notes)
+            extra_diag = list(getattr(fit, "_path_reasons", []) or [])
+            if extra_diag:
+                diag_notes.extend(extra_diag)
             _print_fit_diag(
                 s_name_safe=s_name_safe,
                 stage="phewas",
@@ -1014,7 +1228,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 X=X_work_fd,
                 y=y_work,
                 params=fit.params,
-                notes=notes
+                notes=diag_notes
             )
 
 
@@ -1032,6 +1246,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 "Model_Notes": ";".join(notes) if notes else ""
             }
             io.atomic_write_json(result_path, result_data)
+            meta_extra = dict(meta_extra_common)
+            meta_extra["skip_reason"] = "fit_failed_or_target_missing"
             _write_meta(
                 meta_path,
                 "phewas_result",
@@ -1041,43 +1257,136 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 worker_core_df_cols,
                 _index_fingerprint(worker_core_df_index),
                 case_idx_fp,
-                extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": "fit_failed_or_target_missing"}
+                extra=meta_extra
             )
             return
 
         beta = float(fit.params[target_ix_final])
-        final_is_mle = getattr(fit, "_final_is_mle", False)
+        final_is_mle = bool(getattr(fit, "_final_is_mle", False))
+        used_firth = bool(getattr(fit, "_used_firth", False))
+        used_ridge = bool(getattr(fit, "_used_ridge", False))
         pval = np.nan
-        if final_is_mle and hasattr(fit, "pvalues"):
-            pval = float(fit.pvalues[target_ix_final])
+        p_source = None
+        if (final_is_mle or used_firth) and hasattr(fit, "pvalues"):
+            try:
+                pval = float(fit.pvalues[target_ix_final])
+            except Exception:
+                try:
+                    pval = float(np.asarray(fit.pvalues)[target_ix_final])
+                except Exception:
+                    try:
+                        pval = float(fit.pvalues.iloc[target_ix_final])
+                    except Exception:
+                        pass
+            if np.isfinite(pval):
+                p_source = "firth_wald" if used_firth else "mle_wald"
 
         se = float(fit.bse[target_ix_final]) if hasattr(fit, "bse") and target_ix_final < len(fit.bse) else np.nan
         or_ci95_str = None
-        if final_is_mle and np.isfinite(beta) and np.isfinite(se) and se > 0:
+        if (final_is_mle or used_firth) and np.isfinite(beta) and np.isfinite(se) and se > 0:
             lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
             or_ci95_str = f"{lo:.3f},{hi:.3f}"
 
+        if (not np.isfinite(pval)) and backfill_stage1:
+            b_p, b_src = _backfill_p_from_stage1(s_name_safe)
+            if b_src and np.isfinite(b_p):
+                pval, p_source = b_p, b_src
+
+        if (not np.isfinite(pval)) and (not final_is_mle) and (not used_firth) and allow_penalized_wald:
+            try:
+                beta_hat = np.asarray(fit.params, dtype=np.float64)
+                Xnp = np.asarray(X_work_fd, dtype=np.float64)
+                if Xnp.shape[1] != beta_hat.shape[0]:
+                    raise ValueError("design/params mismatch")
+                eta = np.clip(Xnp @ beta_hat, -35.0, 35.0)
+                p_hat = expit(eta)
+                W = p_hat * (1.0 - p_hat)
+                if not np.all(np.isfinite(W)):
+                    raise ValueError("non-finite weights")
+                XTW = Xnp.T * W
+                XtWX = XTW @ Xnp
+                alpha = float(getattr(fit, "_ridge_alpha", CTX.get("RIDGE_L2_BASE", 1.0)))
+                P = np.eye(Xnp.shape[1], dtype=np.float64)
+                info_mat = XtWX + alpha * P
+                cov = np.linalg.pinv(info_mat)
+                var_j = float(cov[target_ix_final, target_ix_final])
+                if var_j >= 0 and np.isfinite(var_j):
+                    se_pen = np.sqrt(var_j)
+                    if se_pen > 0 and np.isfinite(beta):
+                        z = beta / se_pen
+                        pval = 2.0 * sp_stats.norm.sf(abs(z))
+                        p_source = "penalized_wald"
+                        if or_ci95_str is None:
+                            lo, hi = np.exp(beta - 1.96 * se_pen), np.exp(beta + 1.96 * se_pen)
+                            or_ci95_str = f"{lo:.3f},{hi:.3f}"
+            except Exception:
+                pass
+
+        if (p_source is None) and (not final_is_mle) and (not used_firth) and CTX.get("BOOT_OVERALL_CACHE_DIR"):
+            try:
+                os.makedirs(CTX["BOOT_OVERALL_CACHE_DIR"], exist_ok=True)
+                rq_path = os.path.join(CTX["BOOT_OVERALL_CACHE_DIR"], f"REQUEST.{s_name_safe}")
+                with open(rq_path, "w") as _f:
+                    _f.write("ridge_only_need_bootstrap\n")
+            except Exception:
+                pass
+
+        if used_firth:
+            inference_type = "firth"
+        elif final_is_mle:
+            inference_type = "mle"
+        else:
+            inference_type = "ridge"
+
+        path_tags = []
+        if isinstance(notes, list) and notes:
+            path_tags.extend(notes)
+        extra_tags = list(getattr(fit, "_path_reasons", []) or [])
+        if extra_tags:
+            path_tags.extend(extra_tags)
+        dedup_tags = []
+        seen_tags = set()
+        for tag in path_tags:
+            if not tag:
+                continue
+            if tag not in seen_tags:
+                dedup_tags.append(tag)
+                seen_tags.add(tag)
+        model_notes_str = ";".join(dedup_tags)
+        path_reason_str = "|".join(dedup_tags)
+
+        or_val = float(np.exp(beta))
         result = {
             "Phenotype": s_name,
             "N_Total": n_total,
             "N_Cases": n_cases,
             "N_Controls": n_ctrls,
             "Beta": beta,
-            "OR": np.exp(beta),
-            "P_Value": pval,
+            "OR": or_val,
+            "P_Value": float(pval) if np.isfinite(pval) else pval,
             "OR_CI95": or_ci95_str,
-            "Used_Ridge": not final_is_mle,
-            "Final_Is_MLE": final_is_mle,
+            "Used_Ridge": used_ridge,
+            "Final_Is_MLE": bool(final_is_mle),
+            "Used_Firth": used_firth,
         }
         result.update({
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
-            "Model_Notes": ";".join(notes) if notes else "",
+            "Model_Notes": model_notes_str,
+            "Inference_Type": inference_type,
+            "P_Source": p_source,
+            "Path_Reasons": path_reason_str,
         })
         io.atomic_write_json(result_path, result)
-        _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_idx_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
-        print(f"[fit OK] name={s_name_safe} OR={np.exp(beta):.3f} p={pval:.3e} notes={'|'.join(notes)}", flush=True)
+        meta_extra = dict(meta_extra_common)
+        meta_extra.update({
+            "final_is_mle": bool(final_is_mle),
+            "used_firth": used_firth,
+            "used_ridge": used_ridge,
+        })
+        _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_idx_fp, extra=meta_extra)
+        print(f"[fit OK] name={s_name_safe} OR={or_val:.3f} p={pval:.3e} notes={path_reason_str}", flush=True)
 
     except Exception as e:
         io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
@@ -1120,21 +1429,7 @@ def lrt_overall_worker(task):
 
         core_fp = _index_fingerprint(worker_core_df_index)
 
-        # Optional meta repair to enable skip when result exists but meta is missing
-        if os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False):
-            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, core_fp, case_fp,
-                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
-            print(f"[meta repaired] {s_name_safe} (LRT-Stage1)", flush=True)
-            return
-
-        if os.path.exists(result_path) and _lrt_meta_should_skip(
-            meta_path, worker_core_df_cols, core_fp, case_fp, cat, target, allowed_fp
-        ):
-            if os.path.exists(res_path):
-                print(f"[skip cache-ok] {s_name_safe} (LRT-Stage1)", flush=True)
-                return
-            else:
-                print(f"[backfill] {s_name_safe} (LRT-Stage1) missing results JSON; regenerating", flush=True)
+        repair_meta = os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False)
 
         allowed_mask = allowed_mask_by_cat.get(cat, np.ones(N_core, dtype=bool))
         case_mask = np.zeros(N_core, dtype=bool)
@@ -1162,9 +1457,47 @@ def lrt_overall_worker(task):
         Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
         n_total_used, n_cases_used, n_ctrls_used = len(yb), int(yb.sum()), len(yb) - int(yb.sum())
 
+        used_index_fp = _index_fingerprint(Xb.index)
+        sex_cfg = {
+            "sex_restrict_mode": str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower(),
+            "sex_restrict_prop": float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)),
+            "sex_restrict_max_other": int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0)),
+        }
+        thresholds = {
+            "min_cases": int(CTX.get("MIN_CASES_FILTER", DEFAULT_MIN_CASES)),
+            "min_ctrls": int(CTX.get("MIN_CONTROLS_FILTER", DEFAULT_MIN_CONTROLS)),
+            "min_neff": float(CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF)),
+        }
+        meta_extra_common = {
+            "allowed_mask_fp": allowed_fp,
+            "ridge_l2_base": CTX.get("RIDGE_L2_BASE", 1.0),
+            "used_index_fp": used_index_fp,
+        }
+        meta_extra_common.update(sex_cfg)
+        meta_extra_common.update(thresholds)
+
+        if repair_meta:
+            extra_meta = dict(meta_extra_common)
+            if skip:
+                extra_meta["skip_reason"] = skip
+            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, core_fp, case_fp, extra=extra_meta)
+            print(f"[meta repaired] {s_name_safe} (LRT-Stage1)", flush=True)
+
+        if os.path.exists(result_path) and _lrt_meta_should_skip(
+            meta_path, worker_core_df_cols, core_fp, case_fp, cat, target, allowed_fp,
+            used_index_fp=used_index_fp, sex_cfg=sex_cfg, thresholds=thresholds
+        ):
+            if os.path.exists(res_path):
+                print(f"[skip cache-ok] {s_name_safe} (LRT-Stage1)", flush=True)
+                return
+            else:
+                print(f"[backfill] {s_name_safe} (LRT-Stage1) missing results JSON; regenerating", flush=True)
+
         if skip:
             io.atomic_write_json(result_path, {"Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_Overall_Reason": skip, "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used})
-            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": skip})
+            meta_extra = dict(meta_extra_common)
+            meta_extra["skip_reason"] = skip
+            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
 
             # Write the PheWAS-style result as a skip to mirror main pass outputs
             io.atomic_write_json(res_path, {
@@ -1173,7 +1506,7 @@ def lrt_overall_worker(task):
                 "N_Cases": n_cases_pre,
                 "N_Controls": n_ctrls_pre,
                 "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-                "Used_Ridge": False, "Final_Is_MLE": False,
+                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
                 "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
                 "Model_Notes": note or "",
                 "Skip_Reason": skip
@@ -1186,11 +1519,16 @@ def lrt_overall_worker(task):
                 "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"],
                 "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
                 "target": target,
                 "core_index_fp": _index_fingerprint(worker_core_df_index),
                 "case_idx_fp": case_fp,
                 "allowed_mask_fp": allowed_fp,
                 "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                "used_index_fp": used_index_fp,
+                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
+                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
+                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
             return
@@ -1208,7 +1546,9 @@ def lrt_overall_worker(task):
                 "N_Cases_Used": det['N_cases'],
                 "N_Controls_Used": det['N_ctrls']
             })
-            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": reason, "counts": det})
+            meta_extra = dict(meta_extra_common)
+            meta_extra.update({"skip_reason": reason, "counts": det})
+            _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
 
             # Emit a PheWAS-style skip result to keep downstream shape identical
             io.atomic_write_json(res_path, {
@@ -1217,7 +1557,7 @@ def lrt_overall_worker(task):
                 "N_Cases": n_cases_pre,
                 "N_Controls": n_ctrls_pre,
                 "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-                "Used_Ridge": False, "Final_Is_MLE": False,
+                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
                 "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
                 "Model_Notes": note or "",
                 "Skip_Reason": reason
@@ -1230,11 +1570,16 @@ def lrt_overall_worker(task):
                 "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"],
                 "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
                 "target": target,
                 "core_index_fp": _index_fingerprint(worker_core_df_index),
                 "case_idx_fp": case_fp,
                 "allowed_mask_fp": allowed_fp,
                 "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                "used_index_fp": used_index_fp,
+                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
+                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
+                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
             return
@@ -1268,6 +1613,7 @@ def lrt_overall_worker(task):
                 "OR_CI95": None,
                 "Used_Ridge": False,
                 "Final_Is_MLE": False,
+                "Used_Firth": False,
                 "N_Total_Used": n_total_used,
                 "N_Cases_Used": n_cases_used,
                 "N_Controls_Used": n_ctrls_used,
@@ -1282,13 +1628,20 @@ def lrt_overall_worker(task):
                 "num_pcs": CTX["NUM_PCS"],
                 "min_cases": CTX["MIN_CASES_FILTER"],
                 "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
                 "target": target,
                 "core_index_fp": _index_fingerprint(worker_core_df_index),
                 "case_idx_fp": case_fp,
                 "allowed_mask_fp": allowed_fp,
                 "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+                "used_index_fp": used_index_fp,
+                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
+                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
+                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
+            meta_extra = dict(meta_extra_common)
+            meta_extra["skip_reason"] = skip_reason
             _write_meta(
                 meta_path,
                 "lrt_overall",
@@ -1298,11 +1651,7 @@ def lrt_overall_worker(task):
                 worker_core_df_cols,
                 _index_fingerprint(worker_core_df_index),
                 case_fp,
-                extra={
-                    "allowed_mask_fp": allowed_fp,
-                    "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                    "skip_reason": skip_reason,
-                },
+                extra=meta_extra,
             )
             return
 
@@ -1349,32 +1698,39 @@ def lrt_overall_worker(task):
                 params=fit_full.params,
                 notes=[note] if note else []
             )
-        red_is_mle = getattr(fit_red, "_final_is_mle", False)
-        full_is_mle = getattr(fit_full, "_final_is_mle", False)
+        red_final_is_mle = bool(getattr(fit_red, "_final_is_mle", False))
+        full_final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
+        red_used_firth = bool(getattr(fit_red, "_used_firth", False))
+        full_used_firth = bool(getattr(fit_full, "_used_firth", False))
+        red_is_classic_mle = red_final_is_mle and (not red_used_firth)
+        full_is_classic_mle = full_final_is_mle and (not full_used_firth)
 
         out = {
             "Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_df_Overall": np.nan, "Model_Notes": note,
             "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
         }
-        if red_is_mle and full_is_mle and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
+        if red_is_classic_mle and full_is_classic_mle and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
             r_full, r_red = np.linalg.matrix_rank(X_full_zv.to_numpy()), np.linalg.matrix_rank(X_red_zv.to_numpy())
             df_lrt = max(0, int(r_full - r_red))
             if df_lrt > 0:
                 llr = 2 * (fit_full.llf - fit_red.llf)
                 out["P_LRT_Overall"] = sp_stats.chi2.sf(llr, df_lrt)
                 out["LRT_df_Overall"] = df_lrt
+                out["P_Source"] = "lrt_chi2"
                 print(f"[LRT-Stage1-OK] name={s_name_safe} p={out['P_LRT_Overall']:.3e} df={df_lrt}", flush=True)
             else:
                 out["LRT_Overall_Reason"] = "zero_df_lrt"
         else:
-            out["LRT_Overall_Reason"] = "penalized_fit_in_path" if (fit_red or fit_full) else "fit_failed"
+            out["LRT_Overall_Reason"] = "penalized_or_firth_in_path" if (fit_red or fit_full) else "fit_failed"
 
         # --- Emit PheWAS-style per-phenotype result from the FULL fit ---
         beta_full = np.nan
         or_val = np.nan
         wald_p = np.nan
         ci95 = None
-        final_is_mle = getattr(fit_full, "_final_is_mle", False)
+        final_is_mle = full_final_is_mle
+        used_firth_full = full_used_firth
+        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
 
         if fit_full is not None and target_ix is not None:
             try:
@@ -1387,7 +1743,7 @@ def lrt_overall_worker(task):
             except Exception:
                 pass
 
-            if final_is_mle and hasattr(fit_full, "pvalues"):
+            if (final_is_mle or used_firth_full) and hasattr(fit_full, "pvalues"):
                 try:
                     pvals = fit_full.pvalues
                     try:
@@ -1427,8 +1783,9 @@ def lrt_overall_worker(task):
             "OR": or_val,
             "P_Value": wald_p,
             "OR_CI95": ci95,
-            "Used_Ridge": (not final_is_mle),
+            "Used_Ridge": used_ridge_full,
             "Final_Is_MLE": bool(final_is_mle),
+            "Used_Firth": used_firth_full,
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
@@ -1446,33 +1803,40 @@ def lrt_overall_worker(task):
             "num_pcs": CTX["NUM_PCS"],
             "min_cases": CTX["MIN_CASES_FILTER"],
             "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
+            "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
             "target": target,
             "core_index_fp": _index_fingerprint(worker_core_df_index),
             "case_idx_fp": case_fp,
             "allowed_mask_fp": allowed_fp,
             "ridge_l2_base": CTX["RIDGE_L2_BASE"],
+            "used_index_fp": used_index_fp,
+            "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
+            "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
+            "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
             "created_at": datetime.now(timezone.utc).isoformat(),
             "final_cols_names": final_cols_names,
             "final_cols_pos": final_cols_pos,
             "full_llf": float(getattr(fit_full, "llf", np.nan)),
             "full_is_mle": bool(final_is_mle),
-            "used_firth": bool(getattr(fit_full, "_used_firth", False)),
+            "used_firth": used_firth_full,
+            "used_ridge": used_ridge_full,
             "prune_recipe_version": "zv+greedy-rank-v1",
         })
 
         io.atomic_write_json(result_path, out)
+        meta_extra = dict(meta_extra_common)
+        meta_extra.update({
+            "final_cols_names": final_cols_names,
+            "final_cols_pos": final_cols_pos,
+            "full_llf": float(getattr(fit_full, "llf", np.nan)),
+            "full_is_mle": bool(final_is_mle),
+            "used_firth": used_firth_full,
+            "used_ridge": used_ridge_full,
+            "prune_recipe_version": "zv+greedy-rank-v1",
+        })
         _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols,
                     _index_fingerprint(worker_core_df_index), case_fp,
-                    extra={
-                        "allowed_mask_fp": allowed_fp,
-                        "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                        "final_cols_names": final_cols_names,
-                        "final_cols_pos": final_cols_pos,
-                        "full_llf": float(getattr(fit_full, "llf", np.nan)),
-                        "full_is_mle": bool(final_is_mle),
-                        "used_firth": bool(getattr(fit_full, "_used_firth", False)),
-                        "prune_recipe_version": "zv+greedy-rank-v1",
-                    })
+                    extra=meta_extra)
     except Exception as e:
         io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
         traceback.print_exc()
@@ -1537,16 +1901,37 @@ def bootstrap_overall_worker(task):
         Xb, yb, note, skip = _apply_sex_restriction(X_base, y_series)
         n_total_used, n_cases_used = len(yb), int(yb.sum())
         n_ctrls_used = n_total_used - n_cases_used
+
+        used_index_fp = _index_fingerprint(Xb.index)
+        sex_cfg = {
+            "sex_restrict_mode": str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower(),
+            "sex_restrict_prop": float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)),
+            "sex_restrict_max_other": int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0)),
+        }
+        thresholds = {
+            "min_cases": int(CTX.get("MIN_CASES_FILTER", DEFAULT_MIN_CASES)),
+            "min_ctrls": int(CTX.get("MIN_CONTROLS_FILTER", DEFAULT_MIN_CONTROLS)),
+            "min_neff": float(CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF)),
+        }
+        meta_extra_common = {
+            "allowed_mask_fp": allowed_fp,
+            "ridge_l2_base": CTX.get("RIDGE_L2_BASE", 1.0),
+            "used_index_fp": used_index_fp,
+        }
+        meta_extra_common.update(sex_cfg)
+        meta_extra_common.update(thresholds)
         if skip:
             io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": skip, "N_Total_Used": n_total_used})
-            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp})
+            meta_extra = dict(meta_extra_common)
+            meta_extra["skip_reason"] = skip
+            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
             io.atomic_write_json(res_path, {
                 "Phenotype": s_name,
                 "N_Total": n_total_pre,
                 "N_Cases": n_cases_pre,
                 "N_Controls": n_ctrls_pre,
                 "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-                "Used_Ridge": False, "Final_Is_MLE": False,
+                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
                 "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
                 "Model_Notes": note or "", "Skip_Reason": skip
             })
@@ -1555,14 +1940,16 @@ def bootstrap_overall_worker(task):
         ok, reason, det = validate_min_counts_for_fit(yb, stage_tag="boot_stage1", extra_context={"phenotype": s_name})
         if not ok:
             io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": reason, "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls']})
-            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "counts": det})
+            meta_extra = dict(meta_extra_common)
+            meta_extra.update({"counts": det, "skip_reason": reason})
+            _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
             io.atomic_write_json(res_path, {
                 "Phenotype": s_name,
                 "N_Total": n_total_pre,
                 "N_Cases": n_cases_pre,
                 "N_Controls": n_ctrls_pre,
                 "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-                "Used_Ridge": False, "Final_Is_MLE": False,
+                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
                 "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
                 "Model_Notes": reason
             })
@@ -1608,21 +1995,25 @@ def bootstrap_overall_worker(task):
             "B": int(B),
             "Test_Stat": "score",
             "Boot": "bernoulli",
+            "P_Source": "score_boot",
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
             "Model_Notes": note or ""
         })
         np.save(os.path.join(tnull_dir, f"{s_name_safe}.npy"), T_b.astype(np.float32, copy=False))
-        _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+        _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
 
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
         fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
-        beta_full, wald_p, ci95, or_val, final_is_mle = np.nan, np.nan, None, np.nan, getattr(fit_full, "_final_is_mle", False)
+        beta_full, wald_p, ci95, or_val = np.nan, np.nan, None, np.nan
+        final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
+        used_firth_full = bool(getattr(fit_full, "_used_firth", False))
+        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
         if fit_full is not None and target in X_full_zv.columns:
             beta_full = float(getattr(fit_full, "params", pd.Series(np.nan, index=X_full_zv.columns))[target])
             or_val = float(np.exp(beta_full))
-            if final_is_mle and hasattr(fit_full, "pvalues"):
+            if (final_is_mle or used_firth_full) and hasattr(fit_full, "pvalues"):
                 wald_p = float(getattr(fit_full, "pvalues", pd.Series(np.nan, index=X_full_zv.columns))[target])
                 se = float(getattr(fit_full, "bse", pd.Series(np.nan, index=X_full_zv.columns))[target]) if hasattr(fit_full, "bse") else np.nan
                 if np.isfinite(se) and se > 0:
@@ -1637,8 +2028,9 @@ def bootstrap_overall_worker(task):
             "OR": or_val,
             "P_Value": wald_p,
             "OR_CI95": ci95,
-            "Used_Ridge": (not final_is_mle),
+            "Used_Ridge": used_ridge_full,
             "Final_Is_MLE": bool(final_is_mle),
+            "Used_Firth": used_firth_full,
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
@@ -1682,17 +2074,7 @@ def lrt_followup_worker(task):
 
         core_fp = _index_fingerprint(worker_core_df_index)
 
-        if os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False):
-            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, core_fp, case_fp,
-                        extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
-            print(f"[meta repaired] {s_name_safe} (LRT-Stage2)", flush=True)
-            return
-
-        if os.path.exists(result_path) and _lrt_meta_should_skip(
-            meta_path, worker_core_df_cols, core_fp, case_fp, category, target, allowed_fp
-        ):
-            print(f"[skip cache-ok] {s_name_safe} (LRT-Stage2)", flush=True)
-            return
+        repair_meta = os.path.exists(result_path) and (not os.path.exists(meta_path)) and CTX.get("REPAIR_META_IF_MISSING", False)
 
         allowed_mask = allowed_mask_by_cat.get(category, np.ones(N_core, dtype=bool))
         case_mask = np.zeros(N_core, dtype=bool)
@@ -1712,9 +2094,41 @@ def lrt_followup_worker(task):
 
         Xb, yb, note, skip = _apply_sex_restriction(X_base_df, y_series)
         out = {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "", "Model_Notes": note}
+        used_index_fp = _index_fingerprint(Xb.index)
+        sex_cfg = {
+            "sex_restrict_mode": str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower(),
+            "sex_restrict_prop": float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP)),
+            "sex_restrict_max_other": int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0)),
+        }
+        thresholds = {
+            "min_cases": int(CTX.get("MIN_CASES_FILTER", DEFAULT_MIN_CASES)),
+            "min_ctrls": int(CTX.get("MIN_CONTROLS_FILTER", DEFAULT_MIN_CONTROLS)),
+            "min_neff": float(CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF)),
+        }
+        meta_extra_common = {
+            "allowed_mask_fp": allowed_fp,
+            "ridge_l2_base": CTX.get("RIDGE_L2_BASE", 1.0),
+            "used_index_fp": used_index_fp,
+        }
+        meta_extra_common.update(sex_cfg)
+        meta_extra_common.update(thresholds)
+        if repair_meta:
+            extra_meta = dict(meta_extra_common)
+            if skip:
+                extra_meta["skip_reason"] = skip
+            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, core_fp, case_fp, extra=extra_meta)
+            print(f"[meta repaired] {s_name_safe} (LRT-Stage2)", flush=True)
+        if os.path.exists(result_path) and _lrt_meta_should_skip(
+            meta_path, worker_core_df_cols, core_fp, case_fp, category, target, allowed_fp,
+            used_index_fp=used_index_fp, sex_cfg=sex_cfg, thresholds=thresholds
+        ):
+            print(f"[skip cache-ok] {s_name_safe} (LRT-Stage2)", flush=True)
+            return
         if skip:
             out['LRT_Reason'] = skip; io.atomic_write_json(result_path, out)
-            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": skip})
+            meta_extra = dict(meta_extra_common)
+            meta_extra["skip_reason"] = skip
+            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
             return
 
         anc_vec = worker_anc_series.loc[Xb.index]
@@ -1724,7 +2138,9 @@ def lrt_followup_worker(task):
 
         if len(levels_sorted) < 2:
             out['LRT_Reason'] = "only_one_ancestry_level"; io.atomic_write_json(result_path, out)
-            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"], "skip_reason": "only_one_ancestry_level"})
+            meta_extra = dict(meta_extra_common)
+            meta_extra["skip_reason"] = "only_one_ancestry_level"
+            _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
             return
 
         if 'eur' in levels:
@@ -1786,9 +2202,14 @@ def lrt_followup_worker(task):
                 params=fit_full.params,
                 notes=[note] if note else []
             )
-        red_is_mle, full_is_mle = getattr(fit_red, "_final_is_mle", False), getattr(fit_full, "_final_is_mle", False)
+        red_final_is_mle = bool(getattr(fit_red, "_final_is_mle", False))
+        full_final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
+        red_used_firth = bool(getattr(fit_red, "_used_firth", False))
+        full_used_firth = bool(getattr(fit_full, "_used_firth", False))
+        red_is_classic = red_final_is_mle and (not red_used_firth)
+        full_is_classic = full_final_is_mle and (not full_used_firth)
 
-        if red_is_mle and full_is_mle and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
+        if red_is_classic and full_is_classic and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
             r_full, r_red = np.linalg.matrix_rank(X_full_zv.to_numpy()), np.linalg.matrix_rank(X_red_zv.to_numpy())
             df_lrt = max(0, int(r_full - r_red))
             if df_lrt > 0:
@@ -1796,7 +2217,7 @@ def lrt_followup_worker(task):
                 out['P_LRT_AncestryxDosage'] = sp_stats.chi2.sf(llr, df_lrt)
                 out['LRT_df'] = df_lrt
             else: out['LRT_Reason'] = "zero_df_lrt"
-        else: out['LRT_Reason'] = "penalized_fit_in_path"
+        else: out['LRT_Reason'] = "penalized_or_firth_in_path"
 
         for anc in levels_sorted:
             anc_mask = (anc_vec == anc).to_numpy()
@@ -1827,8 +2248,9 @@ def lrt_followup_worker(task):
             if fit and target in getattr(fit, "params", {}):
                 beta = float(fit.params[target])
                 out[f"{anc.upper()}_OR"] = float(np.exp(beta))
-                final_is_mle = getattr(fit, "_final_is_mle", False)
-                if final_is_mle and hasattr(fit, "pvalues"):
+                final_is_mle = bool(getattr(fit, "_final_is_mle", False))
+                used_firth = bool(getattr(fit, "_used_firth", False))
+                if (final_is_mle or used_firth) and hasattr(fit, "pvalues"):
                     pval = float(fit.pvalues.get(target, np.nan))
                     out[f"{anc.upper()}_P"] = pval
                     se = float(getattr(fit, "bse", {}).get(target, np.nan)) if hasattr(fit, "bse") else np.nan
@@ -1842,7 +2264,7 @@ def lrt_followup_worker(task):
 
 
         io.atomic_write_json(result_path, out)
-        _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra={"allowed_mask_fp": allowed_fp, "ridge_l2_base": CTX["RIDGE_L2_BASE"]})
+        _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
     except Exception as e:
         io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
         traceback.print_exc()
