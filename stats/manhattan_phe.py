@@ -65,6 +65,8 @@ plt.rcParams.update({
     "grid.linewidth": 0.55,
     "grid.alpha": 0.6,
     "legend.frameon": False,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
 })
 
 # ---------- Helpers ----------
