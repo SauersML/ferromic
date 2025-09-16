@@ -331,7 +331,7 @@ def plot_volcano(df, out_pdf):
     N = df.shape[0]
     rasterize = N > 60000
     for inv in inv_levels:
-        sub = df[(df["Inversion"] == inv) & (df["neglog10p"] >= LABEL_MIN_Y)]
+        sub = df[df["Inversion"] == inv]
         norm = sub[~sub["is_extreme"]]
         if not norm.empty:
             ax.scatter(
