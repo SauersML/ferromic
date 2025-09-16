@@ -1,0 +1,27 @@
+[package]
+name = "openblas-build"
+version = "0.10.13"
+license = "Apache-2.0/MIT"
+edition = "2018"
+authors = ["Toshiki Teramura <toshiki.teramura@gmail.com>"]
+description = "The package provides a build helper for OpenBLAS."
+documentation = "https://docs.rs/openblas-build"
+homepage = "https://github.com/blas-lapack-rs/openblas-src"
+repository = "https://github.com/blas-lapack-rs/openblas-src"
+readme = "../README.md"
+exclude = ["test_build/"]
+rust-version = "1.71.1"
+
+[dependencies]
+anyhow = "1.0.68"
+cc = "1.0"
+flate2 = "1.0.25"
+tar = "0.4.38"
+thiserror = "2.0"
+ureq = { version = "3.0", default-features = false, features = [
+    "rustls",
+    "platform-verifier",
+] }
+
+[dev-dependencies]
+walkdir = "2.0"

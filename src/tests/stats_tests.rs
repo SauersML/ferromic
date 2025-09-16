@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::NamedTempFile;
     use std::fs::File;
     use std::collections::HashMap;
@@ -9,18 +8,13 @@ mod tests {
     use parking_lot::Mutex;
     use std::path::PathBuf;
 
-    use crate::transcripts::{CdsRegion, TranscriptAnnotationCDS};
+    use crate::transcripts::CdsRegion;
     use crate::parse::{parse_region, validate_vcf_header, read_reference_sequence, parse_config_file, find_vcf_file, open_vcf_reader};
     use crate::process::{MissingDataInfo, FilteringStats, process_variants, process_variant, ZeroBasedHalfOpen, Variant, VcfError, HaplotypeSide};
     use crate::stats::{count_segregating_sites, calculate_pairwise_differences, calculate_watterson_theta, calculate_pi, harmonic, calculate_inversion_allele_frequency};
 
     // Helper function to create a Variant for testing
     fn create_variant(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
-        Variant { position, genotypes }
-    }
-
-    // Helper function to create a Variant for testing with specific number of haplotypes
-    fn create_variant_with_genotypes(position: i64, genotypes: Vec<Option<Vec<u8>>>) -> Variant {
         Variant { position, genotypes }
     }
 
@@ -473,12 +467,11 @@ mod tests {
         sample_filter.insert("SAMPLE2".to_string(), (0, 1));
         sample_filter.insert("SAMPLE3".to_string(), (0, 1));
         let adjusted_sequence_length: Option<i64> = None;
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
 
         // Read reference sequence
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
             .expect("Failed to read reference sequence");
@@ -499,7 +492,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 },
             ZeroBasedHalfOpen { start: 999, end: 3001 },
             adjusted_sequence_length,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             false, // is_filtered_set
@@ -856,10 +848,9 @@ mod tests {
         sample_filter.insert("SAMPLE2".to_string(), (0, 1));
         sample_filter.insert("SAMPLE3".to_string(), (0, 1));
         let adjusted_sequence_length: Option<i64> = Some(2001);
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
             .expect("Failed to read reference sequence");
@@ -914,7 +905,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 },
             ZeroBasedHalfOpen { start: 999, end: 3001 },
             adjusted_sequence_length,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             false, // is_filtered_set
@@ -947,10 +937,9 @@ mod tests {
     fn test_group1_number_of_haplotypes() {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length: Option<i64> = None;
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
             .expect("Failed to read reference sequence");
@@ -970,7 +959,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             adjusted_sequence_length,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             false, // is_filtered_set
@@ -1007,12 +995,11 @@ mod tests {
         let adjusted_sequence_length: Option<i64> = None;
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
     
         // Adjusted CDS regions
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
     
         // Read reference sequence covering the CDS regions
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
@@ -1035,7 +1022,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             adjusted_sequence_length,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
@@ -1082,9 +1068,8 @@ mod tests {
            (1000, ('A', 'T')),
            (2000, ('A', 'T')),
        ])));
-       let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
        let chromosome = "1".to_string();
-       let (fasta_file, cds_regions) = setup_test_data();
+       let (fasta_file, _cds_regions) = setup_test_data();
        let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
        let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
            .expect("Failed to read reference sequence");
@@ -1103,7 +1088,6 @@ mod tests {
            ZeroBasedHalfOpen { start: 999, end: 2001 }, // Include position 2000
            ZeroBasedHalfOpen { start: 999, end: 2001 }, // Include position 2000
            Some(100),  // sequence_length=100 for some reason
-           Arc::clone(&seqinfo_storage),
            Arc::clone(&position_allele_map),
            chromosome,
            false,
@@ -1131,10 +1115,9 @@ mod tests {
         let adjusted_sequence_length: Option<i64> = None;
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
             .expect("Failed to read reference sequence");
@@ -1154,7 +1137,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             adjusted_sequence_length,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             false, // is_filtered_set
@@ -1189,10 +1171,9 @@ mod tests {
     fn test_global_allele_frequency_filtered() {
         let (variants, sample_names, sample_filter) = setup_global_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
             .expect("Failed to read reference sequence");
@@ -1213,7 +1194,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 },
             ZeroBasedHalfOpen { start: 999, end: 3001 },
             adjusted_sequence_length,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
@@ -1247,10 +1227,9 @@ mod tests {
         let (variants, sample_names, sample_filter) = setup_group1_test();
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
             .expect("Failed to read reference sequence");
@@ -1271,7 +1250,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             adjusted_sequence_length,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
@@ -1303,10 +1281,9 @@ mod tests {
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
             .expect("Failed to read reference sequence");
@@ -1327,7 +1304,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             adjusted_sequence_length,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
@@ -1359,10 +1335,9 @@ mod tests {
         let adjusted_sequence_length = Some(2001); // seq_length = 2001
         let _mask: Option<&[(i64, i64)]> = None;
         let mut _filtering_stats = FilteringStats::default();
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
             .expect("Failed to read reference sequence");
@@ -1383,7 +1358,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             ZeroBasedHalfOpen { start: 999, end: 3001 }, // Include position 3000
             adjusted_sequence_length,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
@@ -1470,10 +1444,9 @@ mod tests {
     #[test]
     fn test_group1_missing_data_allele_frequency() {
         let (variants, sample_names, sample_filter_unfiltered) = setup_group1_missing_data_test();
-        let seqinfo_storage = Arc::new(Mutex::new(Vec::new()));
         let position_allele_map = Arc::new(Mutex::new(HashMap::new()));
         let chromosome = "1".to_string();
-        let (fasta_file, cds_regions) = setup_test_data();
+        let (fasta_file, _cds_regions) = setup_test_data();
         let region = ZeroBasedHalfOpen { start: 999, end: 3001 };
         let reference_sequence = read_reference_sequence(fasta_file.path(), "1", region)
             .expect("Failed to read reference sequence");
@@ -1495,7 +1468,6 @@ mod tests {
             ZeroBasedHalfOpen { start: 999, end: 3001 },
             ZeroBasedHalfOpen { start: 999, end: 3001 },
             None,
-            Arc::clone(&seqinfo_storage),
             Arc::clone(&position_allele_map),
             chromosome.clone(),
             true, // is_filtered_set
