@@ -328,7 +328,7 @@ def plot_volcano(df, out_pdf):
     N = df.shape[0]
     rasterize = N > 60000
     for inv in inv_levels:
-        sub = df[df["Inversion"] == inv]
+        sub = df[(df["Inversion"] == inv) & (df["neglog10p"] >= LABEL_MIN_Y)]
         norm = sub[~sub["is_extreme"]]
         if not norm.empty:
             ax.scatter(
@@ -383,7 +383,7 @@ def plot_volcano(df, out_pdf):
         df["bin10"] = (10 - np.ceil(rk * 10).astype(int)) + 1
 
     # Do not attempt to label below threshold
-    LABEL_MIN_Y = math.log10(2.0)  # ≈0.30103
+    LABEL_MIN_Y = 2.0  # Only keep points with -log10(p) >= 2
 
     DX_LABEL_PX = 8.0
     DY_LABEL_PX = 2.0
