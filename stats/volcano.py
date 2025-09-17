@@ -12,26 +12,6 @@ from matplotlib import colors as mcolors
 INPUT_FILE = "phewas_results.tsv"
 OUTPUT_PDF = "phewas_volcano.pdf"
 
-# --------------------------- Appearance ---------------------------
-
-plt.rcParams.update({
-    "figure.figsize": (13, 8.5),
-    "axes.titlesize": 18,
-    "axes.labelsize": 16,
-    "xtick.labelsize": 13,
-    "ytick.labelsize": 13,
-    "legend.fontsize": 11,
-    "axes.linewidth": 1.2,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.grid": True,
-    "grid.linestyle": ":",
-    "grid.linewidth": 0.55,
-    "grid.alpha": 0.6,
-    "pdf.fonttype": 42,
-    "ps.fonttype": 42,
-})
-
 # --------------------------- Color / markers ---------------------------
 
 def non_orange_colors(n, seed=21):
@@ -313,7 +293,13 @@ def plot_volcano(df, out_pdf):
     xpad = xmax * 0.06
     xlim = (-xmax - xpad, xmax + xpad)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(13, 8.5))
+
+    for spine_name in ("top", "right"):
+        ax.spines[spine_name].set_visible(False)
+    for spine_name in ("left", "bottom"):
+        ax.spines[spine_name].set_linewidth(1.2)
+    ax.tick_params(axis='both', which='major', labelsize=15, width=1.2)
 
     # FULL LOG REGION: we already plot ln(OR) on a linear axis, so the entire axis is logarithmic in OR with no linear band.
     ax.set_xlim(xlim)
@@ -349,12 +335,12 @@ def plot_volcano(df, out_pdf):
             )
 
     # Axis labels & ticks
-    ax.set_ylabel(r"$-\log_{10}(p)$")  # italic p
-    ax.set_xlabel("")                  # remove x-axis title
+    ax.set_ylabel(r"$-\log_{10}(p)$", fontsize=18)  # italic p
+    ax.set_xlabel("", fontsize=18)                  # remove x-axis title
     xticks, xlabels = make_or_ticks_sparse(ax.get_xlim())
     if len(xticks) >= 3:
         ax.set_xticks(xticks)
-        ax.set_xticklabels(xlabels)
+        ax.set_xticklabels(xlabels, fontsize=15)
 
     # Legend inside top-right; include dotted FDR sample
     inv_handles = [
@@ -370,7 +356,8 @@ def plot_volcano(df, out_pdf):
     ax.legend(
         handles=handles, title="Key",
         loc="upper right", frameon=False, ncol=ncol,
-        borderaxespad=0.8, handlelength=1.6, columnspacing=1.0, labelspacing=0.6
+        borderaxespad=0.8, handlelength=1.6, columnspacing=1.0, labelspacing=0.6,
+        fontsize=13, title_fontsize=15
     )
 
     # -------------------- BINNED LABELING --------------------
@@ -408,7 +395,7 @@ def plot_volcano(df, out_pdf):
                 tx, ha = x + dx_data, "left"
             else:
                 tx, ha = x - dx_data, "right"
-            t = ax.text(tx, y, label_text, fontsize=11.0, ha=ha, va="bottom",
+            t = ax.text(tx, y, label_text, fontsize=13.0, ha=ha, va="bottom",
                         color="black", zorder=3.5)
             texts[idx] = t
 

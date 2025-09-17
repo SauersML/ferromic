@@ -43,6 +43,10 @@ mpl.rcParams.update({
     "axes.unicode_minus": True,
     "font.family": "DejaVu Sans",
     "font.sans-serif": ["DejaVu Sans"],
+    "font.size": 14,
+    "axes.labelsize": 16,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
 })
 
 # ------------------------------------------------------------------------------
@@ -747,14 +751,12 @@ def create_paired_violin_with_overlays(all_sequences_stats: List[Dict], test_res
         )
 
     # --- Axes cosmetics ---
-    ax.set_ylabel("Mean Nucleotide Diversity (π)", fontsize=12)
+    ax.set_ylabel("Mean Nucleotide Diversity (π)", fontsize=16)
     ax.set_xticks([X_POS["Flanking"], X_POS["Middle"]])
-    ax.set_xticklabels(["Flanking", "Middle"], fontsize=11)
+    ax.set_xticklabels(["Flanking", "Middle"], fontsize=14)
     ax.set_xlim(-0.5, 1.5)
     ax.set_xlabel("")   # NO 'region_type'
     ax.set_title("")    # No main title
-    ax.yaxis.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
-    ax.xaxis.grid(False)
     sns.despine(ax=ax, offset=5, trim=False)
 
     # Y-axis ticks: PLAIN decimals (no scientific)
@@ -783,8 +785,8 @@ def create_paired_violin_with_overlays(all_sequences_stats: List[Dict], test_res
         ax_pos = ax.get_position()
         cax = fig.add_axes([ax_pos.x1 + 0.02, ax_pos.y0 + 0.10, 0.03, ax_pos.height * 0.55])
         cbar = fig.colorbar(scalar_mappable, cax=cax)
-        cbar.set_label("Log2 (π Middle / π Flanking)", rotation=270, labelpad=14, fontsize=10)
-        cbar.ax.tick_params(labelsize=8)
+        cbar.set_label("Log2 (π Middle / π Flanking)", rotation=270, labelpad=14, fontsize=14)
+        cbar.ax.tick_params(labelsize=12)
         cbar.outline.set_visible(False)
         # Colorbar ticks: plain decimals (no sci)
         cbar.ax.yaxis.set_major_formatter(FuncFormatter(lambda v, pos: format_plain_no_e(v, max_decimals=3)))

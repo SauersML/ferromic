@@ -85,7 +85,7 @@ def create_plot(pi_beginning, pi_middle, pi_end, output_dir):
     
     print(f"Average Filtered Pi: Beginning={avg_beginning:.6f}, Middle={avg_middle:.6f}, End={avg_end:.6f}")
     
-    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.style.use('seaborn-v0_8-white')
     fig, ax = plt.subplots(figsize=(8, 6))
     
     # Plot individual sequences
@@ -99,11 +99,12 @@ def create_plot(pi_beginning, pi_middle, pi_end, output_dir):
             color='blue', linewidth=2, label='Average Filtered Pi', marker='o')
     
     ax.set_xticks([0, 1, 2])
-    ax.set_xticklabels(['Beginning', 'Middle', 'End'])
-    ax.set_xlabel('Position in Sequence', fontsize=12)
-    ax.set_ylabel('Pi Value', fontsize=12)
-    ax.set_title(f'Filtered Pi Values Across Sequences (n={len(pi_beginning)})', fontsize=14)
-    ax.legend()
+    ax.set_xticklabels(['Beginning', 'Middle', 'End'], fontsize=14)
+    ax.set_xlabel('Position in Sequence', fontsize=15)
+    ax.set_ylabel('Pi Value', fontsize=15)
+    ax.set_title(f'Filtered Pi Values Across Sequences (n={len(pi_beginning)})', fontsize=17)
+    ax.tick_params(axis='y', labelsize=13)
+    ax.legend(fontsize=13)
     
     plt.tight_layout()
     plot_path = output_dir / 'filtered_pi_beginning_middle_end.png'
