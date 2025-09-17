@@ -199,6 +199,7 @@ def test_ctx():
         "RESULTS_CACHE_DIR": "./phewas_cache/results_atomic",
         "LRT_OVERALL_CACHE_DIR": "./phewas_cache/lrt_overall",
         "LRT_FOLLOWUP_CACHE_DIR": "./phewas_cache/lrt_followup",
+        "BOOT_OVERALL_CACHE_DIR": "./phewas_cache/boot_overall",
         "RIDGE_L2_BASE": 1.0,
         # Disable new filters for tests by default.
         # We will override these in specific tests that check the filters.
