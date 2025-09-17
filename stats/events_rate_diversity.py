@@ -47,22 +47,6 @@ JITTER_X       = 0.10  # jitter amplitude for integer x in count+FST plots
 COLOR_SE       = "#0b3d91"  # dark blue
 COLOR_RE       = "#9b2c9b"  # reddish purple
 
-plt.rcParams.update({
-    "figure.dpi": 120,
-    "savefig.dpi": 160,
-    "font.size": 11,
-    "axes.titlesize": 13,
-    "axes.labelsize": 11,
-    "axes.grid": True,
-    "grid.alpha": 0.28,
-    "grid.linestyle": "--",
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "legend.frameon": False,
-    "pdf.fonttype": 42,
-    "ps.fonttype": 42,
-})
-
 # ------------------------- HELPERS ---------------------------
 
 def _standardize_chr(val: str) -> str:
@@ -351,7 +335,7 @@ def annotate_line_panel(ax, n: int,
         lines.append(f"Kendall τ={tau:+.3f}, perm p={_fmt_p(p)}")
     text = "\n".join(lines)
     ax.text(0.02, 0.98, text, ha="left", va="top",
-            transform=ax.transAxes, fontsize=10,
+            transform=ax.transAxes, fontsize=12,
             bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.85, linewidth=0.0))
 
 # ------------------------- MAIN -----------------------
@@ -381,9 +365,12 @@ def main():
         assert n >= 3, f"No sufficient data (>=3) for {cat} panel: logFC vs formation rate."
 
         ax.scatter(x, y, s=32, alpha=0.82, c=color)
-        ax.set_title(f"logFC vs formation rate — {cat}")
-        ax.set_xlabel("log10(Formation rate)")
-        ax.set_ylabel("logFC = log(π_inv+ε) − log(π_dir+ε)")
+        ax.set_title(f"logFC vs formation rate — {cat}", fontsize=16)
+        ax.set_xlabel("log10(Formation rate)", fontsize=14)
+        ax.set_ylabel("logFC = log(π_inv+ε) − log(π_dir+ε)", fontsize=14)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.tick_params(axis='both', labelsize=13)
 
         # Theil–Sen line (single straight line)
         slope, intercept, lo_slope, hi_slope = theilslopes(y, x, alpha=0.05)
@@ -408,7 +395,7 @@ def main():
             sp=(float(rho), float(ci_lo), float(ci_hi)),
             kd=(float(tau), float(p_tau_perm))
         )
-    fig1.suptitle("Paired π outcome: logFC vs formation rate", fontsize=14)
+    fig1.suptitle("Paired π outcome: logFC vs formation rate", fontsize=16)
     fig1.savefig(OUT_LOGFC_VS_FORMRATE_FIG, bbox_inches="tight")
 
     # ---------- π ANALYSES: logFC vs # recurrent events (SE, RE) ----------
@@ -428,9 +415,12 @@ def main():
         assert np.nanstd(x) > 0.0, f"Predictor constant in {cat} panel (#recurrent)."
 
         ax.scatter(x, y, s=32, alpha=0.82, c=color)
-        ax.set_title(f"logFC vs # recurrent events — {cat}")
-        ax.set_xlabel("ln(1 + Number of recurrent events)")
-        ax.set_ylabel("logFC = log(π_inv+ε) − log(π_dir+ε)")
+        ax.set_title(f"logFC vs # recurrent events — {cat}", fontsize=16)
+        ax.set_xlabel("ln(1 + Number of recurrent events)", fontsize=14)
+        ax.set_ylabel("logFC = log(π_inv+ε) − log(π_dir+ε)", fontsize=14)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.tick_params(axis='both', labelsize=13)
 
         # Theil–Sen line
         slope, intercept, lo_slope, hi_slope = theilslopes(y, x, alpha=0.05)
@@ -455,7 +445,7 @@ def main():
             sp=(float(rho), float(ci_lo), float(ci_hi)),
             kd=(float(tau), float(p_tau_perm))
         )
-    fig2.suptitle("Paired π outcome: logFC vs number of recurrent events", fontsize=14)
+    fig2.suptitle("Paired π outcome: logFC vs number of recurrent events", fontsize=16)
     fig2.savefig(OUT_LOGFC_VS_NRECUR_FIG, bbox_inches="tight")
 
     # ---------- FST ANALYSES: formation rate vs FST; #recur vs FST ----------
@@ -478,16 +468,19 @@ def main():
         xs, ys = _lowess_xy(Xp, y, frac=LOWESS_FRAC)
         ax.plot(xs, ys, linewidth=2.2, c=color)
 
-        ax.set_title(f"FST (0v1) vs formation rate — {cat}")
-        ax.set_xlabel("log10(Formation rate)")
-        ax.set_ylabel("Hudson F_ST (hap 0 vs 1)")
+        ax.set_title(f"FST (0v1) vs formation rate — {cat}", fontsize=16)
+        ax.set_xlabel("log10(Formation rate)", fontsize=14)
+        ax.set_ylabel("Hudson F_ST (hap 0 vs 1)", fontsize=14)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.tick_params(axis='both', labelsize=13)
 
         rho, _ = spearmanr(x, y)
         tau, _ = kendalltau(x, y)
         ax.text(0.02, 0.98, f"n={n}\nSpearman ρ={rho:+.3f}\nKendall τ={tau:+.3f}",
                 ha="left", va="top", transform=ax.transAxes,
-                fontsize=10, bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.85, linewidth=0.0))
-    fig3.suptitle("FST vs formation rate (two categories)", fontsize=14)
+                fontsize=12, bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.85, linewidth=0.0))
+    fig3.suptitle("FST vs formation rate (two categories)", fontsize=16)
     fig3.savefig(OUT_FST_VS_FORMRATE_FIG, bbox_inches="tight")
 
     # #recurrent vs FST (two categories)
@@ -511,16 +504,19 @@ def main():
         xs, ys = _lowess_xy(x, y, frac=LOWESS_FRAC)
         ax.plot(xs, ys, linewidth=2.2, c=color)
 
-        ax.set_title(f"FST (0v1) vs # recurrent events — {cat}")
-        ax.set_xlabel("Number of recurrent events")
-        ax.set_ylabel("Hudson F_ST (hap 0 vs 1)")
+        ax.set_title(f"FST (0v1) vs # recurrent events — {cat}", fontsize=16)
+        ax.set_xlabel("Number of recurrent events", fontsize=14)
+        ax.set_ylabel("Hudson F_ST (hap 0 vs 1)", fontsize=14)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.tick_params(axis='both', labelsize=13)
 
         rho, _ = spearmanr(x, y)
         tau, _ = kendalltau(x, y)
         ax.text(0.02, 0.98, f"n={n}\nSpearman ρ={rho:+.3f}\nKendall τ={tau:+.3f}",
                 ha="left", va="top", transform=ax.transAxes,
-                fontsize=10, bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.85, linewidth=0.0))
-    fig4.suptitle("FST vs number of recurrent events (two categories)", fontsize=14)
+                fontsize=12, bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.85, linewidth=0.0))
+    fig4.suptitle("FST vs number of recurrent events (two categories)", fontsize=16)
     fig4.savefig(OUT_FST_VS_NRECUR_FIG, bbox_inches="tight")
 
     # ---------- Save results table ----------

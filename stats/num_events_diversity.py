@@ -259,11 +259,11 @@ def main():
     print("\nGenerating visualization...")
 
     # Use a visually appealing seaborn style
-    sns.set_theme(style="whitegrid", palette="muted")
+    sns.set_theme(style="white", palette="muted")
     plot_colors = {'Direct': sns.color_palette("colorblind")[0], 'Inverted': sns.color_palette("colorblind")[3]} # Blue and Orange/Red
 
     fig, axs = plt.subplots(1, 2, figsize=(15, 6.5), sharey=True) # 1 row, 2 cols, shared Y axis
-    fig.suptitle('Nucleotide Diversity (π) vs. Number of Recurrent Events by Orientation', fontsize=18, y=1.03)
+    fig.suptitle('Nucleotide Diversity (π) vs. Number of Recurrent Events by Orientation', fontsize=20, y=1.03)
 
     max_pi_value = data_long['PiValue'].max()
 
@@ -275,10 +275,10 @@ def main():
         if result is None or data_subset.empty:
             ax.text(0.5, 0.5, f'No model or data\nfor {orientation}',
                     horizontalalignment='center', verticalalignment='center',
-                    transform=ax.transAxes, fontsize=12, color='grey')
-            ax.set_title(f'{orientation} Orientation', fontsize=14)
-            ax.set_xlabel('Number of Recurrent Events', fontsize=12)
-            if i == 0: ax.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
+                    transform=ax.transAxes, fontsize=14, color='grey')
+            ax.set_title(f'{orientation} Orientation', fontsize=16)
+            ax.set_xlabel('Number of Recurrent Events', fontsize=15)
+            if i == 0: ax.set_ylabel('Nucleotide Diversity (π)', fontsize=15)
             continue
 
         # Scatter plot of the actual data points
@@ -328,7 +328,7 @@ def main():
                           f"Slope = {slope:.2e}\n"
                           f"P-value (Slope) = {pval_text}")
             # Place annotation box in upper corner
-            ax.text(0.95, 0.95, annotation, transform=ax.transAxes, fontsize=9,
+            ax.text(0.95, 0.95, annotation, transform=ax.transAxes, fontsize=12,
                     verticalalignment='top', horizontalalignment='right',
                     bbox=dict(boxstyle='round,pad=0.4', fc='white', alpha=0.8, ec='grey'))
         except KeyError as e:
@@ -337,15 +337,15 @@ def main():
              print(f"Warning: Error during annotation for {orientation}: {e}")
 
 
-        ax.set_title(f'{orientation} Orientation', fontsize=14, fontweight='bold')
-        ax.set_xlabel('Number of Recurrent Events', fontsize=12)
+        ax.set_title(f'{orientation} Orientation', fontsize=18, fontweight='bold')
+        ax.set_xlabel('Number of Recurrent Events', fontsize=15)
         if i == 0:
-            ax.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
+            ax.set_ylabel('Nucleotide Diversity (π)', fontsize=15)
         else:
              ax.set_ylabel('') # Avoid repeating Y label
 
         ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True)) # Prefer integers for event counts
-        ax.tick_params(axis='both', which='major', labelsize=10)
+        ax.tick_params(axis='both', which='major', labelsize=13)
 
         # ax.set_ylim(bottom=0, top=max_pi_value * 1.1)
 

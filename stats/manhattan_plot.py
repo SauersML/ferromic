@@ -359,8 +359,6 @@ def create_manhattan_plot(data_file, inv_file='inv_info.tsv'):
             ax_top.set_yticks([])
             ax_top.set_ylabel("")
 
-        ax_top.yaxis.grid(True, which='major', color='lightgray', linestyle='--', lw=0.7)
-        ax_top.xaxis.grid(False)
         for spine in ['top','right']:
             ax_top.spines[spine].set_visible(False)
         ax_top.spines['left'].set_linewidth(0.5)

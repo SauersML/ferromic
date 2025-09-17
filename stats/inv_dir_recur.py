@@ -1093,21 +1093,20 @@ if result:
 
         # 8. Add Colorbar (Smaller)
         cbar = fig_viol.colorbar(scalar_mappable, ax=ax_viol, pad=0.02, aspect=25, shrink=0.65)
-        cbar.set_label('Log2 (π Direct / π Inverted)', rotation=270, labelpad=18, fontsize=10)
-        cbar.ax.tick_params(labelsize=8)
+        cbar.set_label('Log2 (π Direct / π Inverted)', rotation=270, labelpad=18, fontsize=13)
+        cbar.ax.tick_params(labelsize=12)
         cbar.outline.set_visible(False)
 
         # 9. Set titles, labels, and aesthetics
         title_text = "Nucleotide Diversity (π) by Inversion Type and Orientation"
-        ax_viol.set_title(title_text, fontsize=14, pad=20) # Adjusted pad for potential top annotation
-        ax_viol.set_xlabel('Inversion Recurrence Type', fontsize=12)
-        ax_viol.set_ylabel('Nucleotide Diversity (π)', fontsize=12)
-        ax_viol.tick_params(axis='both', which='major', labelsize=10, length=4)
+        ax_viol.set_title(title_text, fontsize=18, pad=20) # Adjusted pad for potential top annotation
+        ax_viol.set_xlabel('Inversion Recurrence Type', fontsize=16)
+        ax_viol.set_ylabel('Nucleotide Diversity (π)', fontsize=16)
+        ax_viol.tick_params(axis='both', which='major', labelsize=13, length=4)
         ax_viol.set_xticks(range(len(recurrence_categories)))
-        ax_viol.set_xticklabels(recurrence_categories)
+        ax_viol.set_xticklabels(recurrence_categories, fontsize=13)
 
-        # Add subtle gridlines and remove top/right spines
-        ax_viol.yaxis.grid(True, linestyle=':', linewidth=0.6, alpha=0.7)
+        # Remove top/right spines for a cleaner presentation
         sns.despine(ax=ax_viol, offset=5)
 
         # Handle legend (ensure it doesn't overlap colorbar)
@@ -1119,9 +1118,16 @@ if result:
         orient_legend_handles = [Patch(facecolor=orient_palette[label], alpha=0.6, label=label) for label in orientation_categories] # Use alpha similar to violins
         orient_legend_labels = orientation_categories
 
-        ax_viol.legend(orient_legend_handles, orient_legend_labels,
-                       title='Haplotype Orientation', title_fontsize='10', fontsize='9',
-                       loc='upper left', bbox_to_anchor=(1.04, 1), frameon=False) # Adjusted anchor slightly right
+        ax_viol.legend(
+            orient_legend_handles,
+            orient_legend_labels,
+            title='Haplotype Orientation',
+            title_fontsize=13,
+            fontsize=12,
+            loc='upper left',
+            bbox_to_anchor=(1.04, 1),
+            frameon=False,
+        )  # Adjusted anchor slightly right
 
         # Adjust layout AFTER placing elements like legend/colorbar/annotations
         # May need to adjust 'top' in rect to accommodate annotations
@@ -1157,19 +1163,25 @@ if result:
         # 3. Set titles, labels, and aesthetics
         title_text_int = "Interaction Plot: Mean Nucleotide Diversity (π)"
         caption_text_int = "Lines: Group Means ± 95% CI. Points: Raw Data per Inversion/Orientation."
-        ax_int.set_title(title_text_int, fontsize=13, pad=20)
-        fig_int.text(0.5, 0.95, caption_text_int, ha="center", va="bottom", fontsize=9, alpha=0.8, wrap=True)
+        ax_int.set_title(title_text_int, fontsize=17, pad=20)
+        fig_int.text(0.5, 0.95, caption_text_int, ha="center", va="bottom", fontsize=11, alpha=0.8, wrap=True)
 
-        ax_int.set_xlabel('Haplotype Orientation', fontsize=11)
-        ax_int.set_ylabel('Mean Nucleotide Diversity (π) [95% CI]', fontsize=11)
-        ax_int.tick_params(axis='both', which='major', labelsize=9, length=4)
-        ax_int.yaxis.grid(True, linestyle=':', linewidth=0.6, alpha=0.7)
+        ax_int.set_xlabel('Haplotype Orientation', fontsize=15)
+        ax_int.set_ylabel('Mean Nucleotide Diversity (π) [95% CI]', fontsize=15)
+        ax_int.tick_params(axis='both', which='major', labelsize=13, length=4)
         sns.despine(ax=ax_int, offset=5)
 
         handles, labels = ax_int.get_legend_handles_labels()
         num_recur_cats = len(recur_palette)
-        ax_int.legend(handles[:num_recur_cats], labels[:num_recur_cats],
-                      title='Recurrence Type', title_fontsize='10', fontsize='9', loc='best', frameon=False)
+        ax_int.legend(
+            handles[:num_recur_cats],
+            labels[:num_recur_cats],
+            title='Recurrence Type',
+            title_fontsize=13,
+            fontsize=12,
+            loc='best',
+            frameon=False,
+        )
 
         fig_int.tight_layout(rect=[0.02, 0.02, 0.98, 0.93])
 

@@ -50,7 +50,7 @@ def load_data(file_path, max_dist=10000, max_sequences=500):
     return (theta_dists, theta_vals), (pi_dists, pi_vals)
 
 def create_plots(theta_dists, theta_vals, pi_dists, pi_vals):
-    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.style.use('seaborn-v0_8-white')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
     
     # Colors and styles
@@ -62,29 +62,27 @@ def create_plots(theta_dists, theta_vals, pi_dists, pi_vals):
     if np.any(valid_theta):
         ax1.scatter(theta_dists[valid_theta], theta_vals[valid_theta], c=scatter_color, s=15, alpha=0.6, edgecolors='none')
     
-    ax1.set_title('Theta vs. Distance from Edge (0-10K)', fontsize=16, fontweight='bold', pad=15)
-    ax1.set_ylabel('Theta Value', fontsize=14, labelpad=10)
-    ax1.grid(True, ls='--', alpha=0.3, color='gray')
+    ax1.set_title('Theta vs. Distance from Edge (0-10K)', fontsize=18, fontweight='bold', pad=15)
+    ax1.set_ylabel('Theta Value', fontsize=16, labelpad=10)
     ax1.set_facecolor(bg_color)
-    ax1.tick_params(axis='both', labelsize=12)
+    ax1.tick_params(axis='both', labelsize=14)
     
     # Pi Plot
     nz_pi = pi_vals != 0
     if np.any(nz_pi):
         ax2.scatter(pi_dists[nz_pi], pi_vals[nz_pi], c=scatter_color, s=15, alpha=0.6, edgecolors='none')
     
-    ax2.set_title('Pi vs. Distance from Edge (0-10K)', fontsize=16, fontweight='bold', pad=15)
-    ax2.set_xlabel('Distance from Nearest Edge', fontsize=14, labelpad=10)
-    ax2.set_ylabel('Pi Value (Non-Zero)', fontsize=14, labelpad=10)
-    ax2.grid(True, ls='--', alpha=0.3, color='gray')
+    ax2.set_title('Pi vs. Distance from Edge (0-10K)', fontsize=18, fontweight='bold', pad=15)
+    ax2.set_xlabel('Distance from Nearest Edge', fontsize=16, labelpad=10)
+    ax2.set_ylabel('Pi Value (Non-Zero)', fontsize=16, labelpad=10)
     ax2.set_facecolor(bg_color)
-    ax2.tick_params(axis='both', labelsize=12)
+    ax2.tick_params(axis='both', labelsize=14)
     
     # Common settings
     for ax in [ax1, ax2]:
         ax.set_xlim(0, 10000)
     
-    fig.suptitle('Association with Distance from Edge', fontsize=20, fontweight='bold', y=1.02)
+    fig.suptitle('Association with Distance from Edge', fontsize=22, fontweight='bold', y=1.02)
     plt.tight_layout(rect=[0, 0, 1, 0.98])
     plot_path = Path.home() / 'distance_plots_10K_beautiful.png'
     plt.savefig(plot_path, dpi=200, bbox_inches='tight', facecolor='white')
