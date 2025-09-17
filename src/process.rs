@@ -145,6 +145,32 @@ pub struct ZeroBasedHalfOpen {
     pub end: usize,
 }
 
+#[inline]
+fn clamp_nonnegative_i64_to_usize(value: i64) -> usize {
+    if value <= 0 {
+        0
+    } else {
+        let value_u128 = value as u128;
+        let max_u128 = usize::MAX as u128;
+        if value_u128 > max_u128 {
+            usize::MAX
+        } else {
+            value as usize
+        }
+    }
+}
+
+#[inline]
+fn clamp_usize_to_i64(value: usize) -> i64 {
+    let value_u128 = value as u128;
+    let max_i64_u128 = i64::MAX as u128;
+    if value_u128 > max_i64_u128 {
+        i64::MAX
+    } else {
+        value as i64
+    }
+}
+
 impl ZeroBasedHalfOpen {
     /// Creates a new half-open interval from 1-based inclusive coordinates.
     /// This is for data that uses 1-based inclusive.
@@ -166,9 +192,18 @@ impl ZeroBasedHalfOpen {
     /// Creates a new half-open interval from 0-based inclusive coordinates.
     /// This converts [start..end] inclusive into [start..end+1) half-open.
     pub fn from_0based_inclusive(start_inclusive: i64, end_inclusive: i64) -> Self {
+        let adjusted_start = start_inclusive.max(0);
+        let adjusted_end = if end_inclusive < adjusted_start {
+            adjusted_start
+        } else {
+            end_inclusive
+                .saturating_add(1)
+                .max(adjusted_start)
+        };
+
         ZeroBasedHalfOpen {
-            start: start_inclusive.max(0) as usize,
-            end: (end_inclusive + 1).max(start_inclusive + 1) as usize,
+            start: clamp_nonnegative_i64_to_usize(adjusted_start),
+            end: clamp_nonnegative_i64_to_usize(adjusted_end),
         }
     }
 
@@ -276,9 +311,17 @@ impl ZeroBasedHalfOpen {
 
     // Query region
     pub fn to_zero_based_inclusive(&self) -> ZeroBasedInclusive {
+        let start_i64 = clamp_usize_to_i64(self.start);
+        let end_i64 = if self.end == 0 {
+            -1
+        } else {
+            let inclusive_end = self.end - 1;
+            clamp_usize_to_i64(inclusive_end)
+        };
+
         ZeroBasedInclusive {
-            start: self.start as i64,
-            end: (self.end - 1) as i64,
+            start: start_i64,
+            end: end_i64,
         }
     }
 
