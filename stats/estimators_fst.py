@@ -146,6 +146,8 @@ def create_scatter_plot(df, x_col, y_col, type_col, output_filename,
         plt.title(f"{x_col.replace('_', ' ').title()} vs. {y_col.replace('_', ' ').title()}", fontsize=16)
         plt.xlabel(x_col.replace('_', ' ').title() + (" (log scale)" if log_scale_x else ""), fontsize=14)
         plt.ylabel(y_col.replace('_', ' ').title() + (" (log scale)" if log_scale_y else ""), fontsize=14)
+        plt.xticks(fontsize=13)
+        plt.yticks(fontsize=13)
         try: plt.savefig(output_filename, dpi=300, bbox_inches='tight'); logger.info(f"Saved empty plot placeholder to '{output_filename}'")
         except Exception as e: logger.error(f"Failed to save empty scatter plot: {e}")
         plt.close()
@@ -178,12 +180,15 @@ def create_scatter_plot(df, x_col, y_col, type_col, output_filename,
             plt.scatter(subset[x_col], subset[y_col], label=f"{display_name} (N={len(subset)})", 
                         color=color_for_plot, alpha=0.7, s=50, edgecolor='k', linewidth=0.5)
 
-    plt.title(f"{x_col.replace('_', ' ').title()} vs. {y_col.replace('_', ' ').title()}", fontsize=16)
-    plt.xlabel(x_col.replace('_', ' ').title() + (" (log scale)" if log_scale_x else ""), fontsize=14)
-    plt.ylabel(y_col.replace('_', ' ').title() + (" (log scale)" if log_scale_y else ""), fontsize=14)
-    
-    if final_internal_keys_for_plotting: plt.legend(title="Inversion Type", loc='best', frameon=True, fancybox=True, shadow=True, borderpad=1)
-    plt.grid(True, linestyle=':', which='major', color='lightgrey', alpha=0.7)
+    plt.title(f"{x_col.replace('_', ' ').title()} vs. {y_col.replace('_', ' ').title()}", fontsize=18)
+    plt.xlabel(x_col.replace('_', ' ').title() + (" (log scale)" if log_scale_x else ""), fontsize=16)
+    plt.ylabel(y_col.replace('_', ' ').title() + (" (log scale)" if log_scale_y else ""), fontsize=16)
+    plt.xticks(fontsize=13)
+    plt.yticks(fontsize=13)
+
+    if final_internal_keys_for_plotting:
+        plt.legend(title="Inversion Type", loc='best', frameon=True, fancybox=True, shadow=True, borderpad=1,
+                   fontsize=12, title_fontsize=13)
 
     all_x_vals = df_plot[x_col].dropna() # Already filtered for positive if log_scale_x
     all_y_vals = df_plot[y_col].dropna() # Already filtered for positive if log_scale_y

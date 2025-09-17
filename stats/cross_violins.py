@@ -21,7 +21,6 @@ INVERSION_FILE = Path('inv_info.tsv')
 OUTPUT_PLOT_PATH = Path('inversion_omega_analysis_plot_median_only.png')
 
 # --- Plotting Style ---
-plt.rcParams.update({'font.size': 14})
 EVENT_TYPE_PALETTE = {
     "Single-Event": "skyblue",
     "Recurrent": "salmon"
@@ -195,6 +194,7 @@ def create_and_save_plot(data_df: pd.DataFrame, output_path: Path):
     ax.set_title('dN/dS Distribution by Inversion Event Type', fontsize=18, pad=20)
     ax.set_xlabel('Comparison Type', fontsize=14, labelpad=15)
     ax.set_ylabel('Omega (dN/dS)', fontsize=14, labelpad=15)
+    ax.tick_params(axis='y', labelsize=13)
 
     counts = data_df.groupby(['ComparisonGroup', 'EventType']).size().unstack(fill_value=0)
     new_xticklabels = []
@@ -204,10 +204,9 @@ def create_and_save_plot(data_df: pd.DataFrame, output_path: Path):
         r_count = counts.at[cat, 'Recurrent'] if cat in counts.index and 'Recurrent' in counts.columns else 0
         label += f"Single: {s_count}\nRecurrent: {r_count}"
         new_xticklabels.append(label)
-    ax.set_xticklabels(new_xticklabels)
+    ax.set_xticklabels(new_xticklabels, fontsize=13)
 
-    ax.grid(axis='y', linestyle='--', alpha=0.7)
-    ax.legend(title='Inversion Type', loc='upper right')
+    ax.legend(title='Inversion Type', loc='upper right', fontsize=12, title_fontsize=14)
     sns.despine(ax=ax)
     plt.tight_layout()
 

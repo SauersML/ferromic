@@ -55,19 +55,8 @@ ADJ_EXPAND_TEXT = (1.06, 1.28)
 ADJ_EXPAND_PNTS = (1.03, 1.16)
 ADJ_FORCE_PNTS  = (0.07, 0.32)
 
-plt.rcParams.update({
-    "font.size": 11,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.titleweight": "semibold",
-    "axes.grid": True,
-    "grid.linestyle": ":",
-    "grid.linewidth": 0.55,
-    "grid.alpha": 0.6,
-    "legend.frameon": False,
-    "pdf.fonttype": 42,
-    "ps.fonttype": 42,
-})
+plt.rcParams['pdf.fonttype'] = 42
+plt.rcParams['ps.fonttype'] = 42
 
 # ---------- Helpers ----------
 def canonicalize_name(s: str) -> str:
@@ -383,6 +372,8 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
     fig_w = compute_width(m)
     fig, ax = plt.subplots(figsize=(fig_w, FIG_HEIGHT))
     ax.set_facecolor("#ffffff")
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
 
     obstacles = []
     # FDR circles (behind triangles)
@@ -483,11 +474,12 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
     ax.axhline(q05_y, color="#666666", linestyle="--", linewidth=1.0, label="q = 0.05")
 
     # axes / ticks / title
-    ax.set_title(str(inversion_label), fontsize=TITLE_FONTSZ, pad=10)
+    ax.set_title(str(inversion_label), fontsize=TITLE_FONTSZ, pad=10, fontweight="semibold")
     ax.set_ylabel(r"$-\log_{10}(q)$", fontsize=AX_LABEL_FONTSZ)
     ax.set_xticks(centers)
     ax.set_xticklabels(ticklabels, rotation=45, ha="right", fontsize=TICK_FONTSZ)
-    ax.tick_params(axis="x", pad=3)
+    ax.tick_params(axis="x", pad=3, labelsize=TICK_FONTSZ)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSZ)
 
     # category separators
     cum = np.cumsum([len(g[g["cat_name"]==c]) for c in cat_order])
@@ -496,7 +488,7 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
 
     # legend
     h, l = ax.get_legend_handles_labels()
-    if h: ax.legend(fontsize=9, loc="upper right")
+    if h: ax.legend(fontsize=9, loc="upper right", frameon=False)
 
     # connectors (AFTER final layout; color by exact rowid)
     fig.canvas.draw()

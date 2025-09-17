@@ -92,7 +92,7 @@ def plot_proportions(results_df, output_path):
     fig_height = max(8, n_transcripts_plot * 0.28) # Dynamic height
     fig_width = 14 # Wider for labels
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-    plt.style.use('seaborn-v0_8-whitegrid') # Use a clean style
+    plt.style.use('seaborn-v0_8-white')
 
     bar_height = 0.38
     index = np.arange(n_transcripts_plot) # One position per transcript
@@ -116,9 +116,9 @@ def plot_proportions(results_df, output_path):
             edgecolor='black', linewidth=0.6, label='Direct')
 
     # --- Labels and Title ---
-    ax.set_xlabel('Proportion of Identical Pairs (ω = -1)', fontsize=14, labelpad=10)
-    ax.set_ylabel('Gene Name', fontsize=14, labelpad=10) # Label axis conceptually as Gene Name
-    ax.set_title(f'Proportion of Identical Sequence Pairs within Groups\n(Analysis per Transcript, N = {n_transcripts_plot})', fontsize=16, fontweight='bold', pad=20)
+    ax.set_xlabel('Proportion of Identical Pairs (ω = -1)', fontsize=16, labelpad=10)
+    ax.set_ylabel('Gene Name', fontsize=16, labelpad=10) # Label axis conceptually as Gene Name
+    ax.set_title(f'Proportion of Identical Sequence Pairs within Groups\n(Analysis per Transcript, N = {n_transcripts_plot})', fontsize=18, fontweight='bold', pad=20)
 
     # --- Y-axis Ticks and Labels ---
     # Labels are the extracted gene names. Duplicate labels are expected.
@@ -133,7 +133,7 @@ def plot_proportions(results_df, output_path):
     else:
         tick_labels = labels
     ax.set_yticks(index)
-    ax.set_yticklabels(tick_labels, fontsize=11) # Slightly larger font for names
+    ax.set_yticklabels(tick_labels, fontsize=13) # Slightly larger font for names
     ax.invert_yaxis() # Most significant transcript at top
 
     # --- Legend ---
@@ -145,13 +145,12 @@ def plot_proportions(results_df, output_path):
         ]
     ax.legend(handles=legend_elements, title="Group & Significance",
               loc='center left', bbox_to_anchor=(1.02, 0.5), # Place legend outside plot area
-              fontsize=11, title_fontsize=12, frameon=True, facecolor='white', framealpha=0.9)
+              fontsize=13, title_fontsize=14, frameon=True, facecolor='white', framealpha=0.9)
 
     # --- Styling and Saving ---
     ax.set_xlim(0, 1.05)
     ax.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0)) # Format x-axis as percentage
-    ax.tick_params(axis='both', which='major', labelsize=11)
-    ax.grid(axis='x', linestyle=':', alpha=0.6, color='grey') # Horizontal grid lines only
+    ax.tick_params(axis='both', which='major', labelsize=13)
     ax.set_axisbelow(True)
     # Remove spines
     ax.spines['top'].set_visible(False)

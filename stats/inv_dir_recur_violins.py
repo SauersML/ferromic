@@ -378,7 +378,6 @@ def main():
 
     # Main axis setup
     ax.set_ylim(ymin, ymax * 1.17)
-    ax.grid(axis="y", color="#e7e7e7", linewidth=0.8)
     ax.set_axisbelow(True)
 
     # Half-violins (outside halves)
@@ -407,20 +406,22 @@ def main():
     _paired_lines_and_points(ax, matched, cmap=cmap, norm=norm)
 
     # Axes labels and ticks
-    ax.set_ylabel("Nucleotide diversity (π)", color=AX_TEXT)
+    ax.set_ylabel("Nucleotide diversity (π)", color=AX_TEXT, fontsize=16)
     ax.set_xticks([
         POS[("Single-event", "Direct")],
         POS[("Single-event", "Inverted")],
         POS[("Recurrent", "Direct")],
         POS[("Recurrent", "Inverted")],
     ])
-    ax.set_xticklabels(["Direct", "Inverted", "Direct", "Inverted"])
+    ax.set_xticklabels(["Direct", "Inverted", "Direct", "Inverted"], fontsize=14)
+    ax.tick_params(axis='y', labelsize=12)
+    ax.tick_params(axis='x', labelsize=12)
 
     # Section labels under each pair (move up, closer to x-axis)
     ax.text(SECTION_CENTERS["Single-event"], -0.06, "Single-event", ha="center", va="top",
-            transform=ax.get_xaxis_transform(), fontsize=12, fontweight="bold", color=AX_TEXT)
+            transform=ax.get_xaxis_transform(), fontsize=14, fontweight="bold", color=AX_TEXT)
     ax.text(SECTION_CENTERS["Recurrent"], -0.06, "Recurrent", ha="center", va="top",
-            transform=ax.get_xaxis_transform(), fontsize=12, fontweight="bold", color=AX_TEXT)
+            transform=ax.get_xaxis_transform(), fontsize=14, fontweight="bold", color=AX_TEXT)
 
     # Subtle separator between sections
     ax.axvline(x=(POS[("Single-event", "Inverted")] + POS[("Recurrent", "Direct")]) / 2,
@@ -436,8 +437,12 @@ def main():
     # Thin horizontal color bar for log2 fold-change — under the key, moved UP slightly
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm); sm.set_array([])
     cbar = fig.colorbar(sm, cax=cax, orientation="horizontal")
-    cbar.set_label(r"$\log_{2}\!\left(\pi_{\mathrm{Direct}} \,/\, \pi_{\mathrm{Inverted}}\right)$", color=AX_TEXT)
-    cbar.ax.tick_params(color=AX_TEXT, labelcolor=AX_TEXT)
+    cbar.set_label(
+        r"$\log_{2}\!\left(\pi_{\mathrm{Direct}} \,/\, \pi_{\mathrm{Inverted}}\right)$",
+        color=AX_TEXT,
+        fontsize=13,
+    )
+    cbar.ax.tick_params(color=AX_TEXT, labelcolor=AX_TEXT, labelsize=12)
     for spine in cax.spines.values():
         spine.set_visible(False)
 
