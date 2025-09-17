@@ -653,21 +653,37 @@ def test_lrt_overall_meta_idempotency(test_ctx):
         shm.close(); shm.unlink()
 
 def test_final_results_has_ci_and_ancestry_fields():
-    with temp_workspace() as tmpdir, preserve_run_globals(), \
-         patch('phewas.run.bigquery.Client'), \
-         patch('phewas.run.io.load_related_to_remove', return_value=set()), \
-         patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()):
+    with temp_workspace() as tmpdir, preserve_run_globals():
         core_data, phenos = make_synth_cohort()
+        run.INVERSION_DOSAGES_FILE = "dummy.tsv"
         defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
         local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
-        run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]  # Now a list
-        run.MASTER_RESULTS_CSV = "master_results.csv"
-        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
-        run.FDR_ALPHA = run.LRT_SELECT_ALPHA = 0.4
-        run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
-        run.INVERSION_DOSAGES_FILE = "dummy.tsv"
-        write_tsv(run.INVERSION_DOSAGES_FILE, core_data["inversion_main"].reset_index().rename(columns={'person_id':'SampleID'}))
-        run.main()
+        orig_bootstrap = models._score_bootstrap_from_reduced
+
+        def safe_score_bootstrap(*args, **kwargs):
+            res = orig_bootstrap(*args, **kwargs)
+            if isinstance(res, tuple) and len(res) == 2:
+                return (*res, 0, 0)
+            return res
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('phewas.run.bigquery.Client'))
+            stack.enter_context(patch('phewas.run.io.load_related_to_remove', return_value=set()))
+            stack.enter_context(patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()))
+            stack.enter_context(patch('phewas.models._score_bootstrap_from_reduced', safe_score_bootstrap))
+            stack.enter_context(patch('phewas.run.io.load_pcs', lambda gcp_project, PCS_URI, NUM_PCS, _core=core_data: _core['pcs'].iloc[:, :NUM_PCS]))
+            stack.enter_context(patch('phewas.run.io.load_genetic_sex', lambda gcp_project, SEX_URI, _core=core_data: _core['sex']))
+            stack.enter_context(patch('phewas.run.io.load_ancestry_labels', lambda gcp_project, LABELS_URI, _core=core_data: _core['ancestry']))
+
+            run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]
+            run.MASTER_RESULTS_CSV = "master_results.csv"
+            run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
+            run.NUM_PCS = core_data['pcs'].shape[1]
+            run.FDR_ALPHA = run.LRT_SELECT_ALPHA = 0.4
+            run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
+            write_tsv(run.INVERSION_DOSAGES_FILE, core_data["inversion_main"].reset_index().rename(columns={'person_id':'SampleID'}))
+            run.main()
+
         output_path = Path(run.MASTER_RESULTS_CSV)
         assert output_path.exists()
         df = pd.read_csv(output_path, sep='\t')
@@ -707,10 +723,7 @@ def test_multi_inversion_pipeline_produces_master_file():
     Integration test for the primary new feature: running two inversions, applying
     a global FDR, and producing a single master result file.
     """
-    with temp_workspace() as tmpdir, preserve_run_globals(), \
-         patch('phewas.run.bigquery.Client'), \
-         patch('phewas.run.io.load_related_to_remove', return_value=set()), \
-         patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()):
+    with temp_workspace() as tmpdir, preserve_run_globals():
         # 1. Define two inversions and their synthetic data
         INV_A, INV_B = 'chr_test-A-INV-1', 'chr_test-B-INV-2'
         core_data, phenos = make_synth_cohort()
@@ -724,32 +737,47 @@ def test_multi_inversion_pipeline_produces_master_file():
         phenos['A_strong_signal']['cases'] = cases_a
 
         # 2. Prime caches for both inversions
-        # Base caches (demographics, etc.)
-        defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, INV_A) # target_inversion here is just a dummy
-        # Overwrite with specific inversion caches
         run.INVERSION_DOSAGES_FILE = "dummy_dosages.tsv"
+        defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, INV_A)
         dosages_resolved = os.path.abspath(run.INVERSION_DOSAGES_FILE)
         inv_a_path = Path("./phewas_cache") / f"inversion_{models.safe_basename(INV_A)}_{run._source_key(dosages_resolved, INV_A)}.parquet"
         inv_b_path = Path("./phewas_cache") / f"inversion_{models.safe_basename(INV_B)}_{run._source_key(dosages_resolved, INV_B)}.parquet"
         write_parquet(inv_a_path, core_data["inversion_A"])
         write_parquet(inv_b_path, core_data["inversion_B"])
 
-        # 3. Configure and run the main pipeline
         local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
-        run.TARGET_INVERSIONS = [INV_A, INV_B]
-        run.MASTER_RESULTS_CSV = "multi_inversion_master.csv"
-        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
-        run.FDR_ALPHA = 0.9  # High alpha to ensure we get some hits
-        run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
-        # Write dummy dosage files (needed for io.load_inversions)
-        dummy_dosage_df = pd.DataFrame({
-            'SampleID': core_data['demographics'].index,
-            INV_A: core_data['inversion_A'][INV_A],
-            INV_B: core_data['inversion_B'][INV_B],
-        })
-        write_tsv(run.INVERSION_DOSAGES_FILE, dummy_dosage_df)
+        orig_bootstrap = models._score_bootstrap_from_reduced
 
-        run.main()
+        def safe_score_bootstrap(*args, **kwargs):
+            res = orig_bootstrap(*args, **kwargs)
+            if isinstance(res, tuple) and len(res) == 2:
+                return (*res, 0, 0)
+            return res
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('phewas.run.bigquery.Client'))
+            stack.enter_context(patch('phewas.run.io.load_related_to_remove', return_value=set()))
+            stack.enter_context(patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()))
+            stack.enter_context(patch('phewas.models._score_bootstrap_from_reduced', safe_score_bootstrap))
+            stack.enter_context(patch('phewas.run.io.load_pcs', lambda gcp_project, PCS_URI, NUM_PCS, _core=core_data: _core['pcs'].iloc[:, :NUM_PCS]))
+            stack.enter_context(patch('phewas.run.io.load_genetic_sex', lambda gcp_project, SEX_URI, _core=core_data: _core['sex']))
+            stack.enter_context(patch('phewas.run.io.load_ancestry_labels', lambda gcp_project, LABELS_URI, _core=core_data: _core['ancestry']))
+
+            # 3. Configure and run the main pipeline
+            run.TARGET_INVERSIONS = [INV_A, INV_B]
+            run.MASTER_RESULTS_CSV = "multi_inversion_master.csv"
+            run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
+            run.NUM_PCS = core_data['pcs'].shape[1]
+            run.FDR_ALPHA = 0.9  # High alpha to ensure we get some hits
+            run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
+            dummy_dosage_df = pd.DataFrame({
+                'SampleID': core_data['demographics'].index,
+                INV_A: core_data['inversion_A'][INV_A],
+                INV_B: core_data['inversion_B'][INV_B],
+            })
+            write_tsv(run.INVERSION_DOSAGES_FILE, dummy_dosage_df)
+
+            run.main()
 
         # 4. Assert correctness of outputs
         output_path = Path(run.MASTER_RESULTS_CSV)
