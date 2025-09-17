@@ -36,6 +36,38 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::ops::Index;
 
+#[cfg(target_os = "macos")]
+macro_rules! align_bytes {
+    (2) => {
+        ".p2align 1"
+    };
+    (16) => {
+        ".p2align 4"
+    };
+    (32) => {
+        ".p2align 5"
+    };
+    (64) => {
+        ".p2align 6"
+    };
+}
+
+#[cfg(not(target_os = "macos"))]
+macro_rules! align_bytes {
+    (2) => {
+        ".align 2"
+    };
+    (16) => {
+        ".align 16"
+    };
+    (32) => {
+        ".align 32"
+    };
+    (64) => {
+        ".align 64"
+    };
+}
+
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 macro_rules! setup {
@@ -61,6 +93,14 @@ macro_rules! setup {
     };
 }
 
+#[cfg(target_os = "macos")]
+macro_rules! align {
+    () => {
+        asm!(".p2align 4")
+    };
+}
+
+#[cfg(not(target_os = "macos"))]
 macro_rules! align {
     () => {
         asm!(".align 16")
@@ -3486,17 +3526,17 @@ fn main() -> Result {
     writeln!(
         code,
         "
-            .align 64
+            {align_bytes!(64)}
             {func_name(\"gemm.microkernel.c64.flip.re.data\", \"\", true)}:
             .quad 0x8000000000000000,0,0x8000000000000000,0,0x8000000000000000,0,0x8000000000000000,0
-            .align 64
+            {align_bytes!(64)}
             {func_name(\"gemm.microkernel.c64.flip.im.data\", \"\", true)}:
             .quad 0,0x8000000000000000,0,0x8000000000000000,0,0x8000000000000000,0,0x8000000000000000
 
-            .align 64
+            {align_bytes!(64)}
             {func_name(\"gemm.microkernel.c32.flip.re.data\", \"\", true)}:
             .int 0x80000000,0,0x80000000,0,0x80000000,0,0x80000000,0,0x80000000,0,0x80000000,0,0x80000000,0,0x80000000,0
-            .align 64
+            {align_bytes!(64)}
             {func_name(\"gemm.microkernel.c32.flip.im.data\", \"\", true)}:
             .int 0,0x80000000,0,0x80000000,0,0x80000000,0,0x80000000,0,0x80000000,0,0x80000000,0,0x80000000,0,0x80000000
 
@@ -3505,16 +3545,16 @@ fn main() -> Result {
 
             
 
-            .align 16
+            {align_bytes!(16)}
             {func_name(\"gemm.microkernel.c64.simd128.rmask.data\", \"\", true)}:
             {func_name(\"gemm.microkernel.c64.simd128.mask.data\", \"\", true)}:
             .octa 0, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 
-            .align 32
+            {align_bytes!(32)}
             {func_name(\"gemm.microkernel.c64.simd256.rmask.data\", \"\", true)}:
             .octa 0,0, 0,0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 
-            .align 32
+            {align_bytes!(32)}
             {func_name(\"gemm.microkernel.c64.simd256.mask.data\", \"\", true)}:
             .octa 0,0, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,0, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 
@@ -3535,32 +3575,32 @@ fn main() -> Result {
 
 
 
-            .align 16
+            {align_bytes!(16)}
             {func_name(\"gemm.microkernel.c32.simd128.rmask.data\", \"\", true)}:
             {func_name(\"gemm.microkernel.f64.simd128.rmask.data\", \"\", true)}:
             .quad 0,0, 0,-1, -1,-1
 
-            .align 16
+            {align_bytes!(16)}
             {func_name(\"gemm.microkernel.c32.simd128.mask.data\", \"\", true)}:
             {func_name(\"gemm.microkernel.f64.simd128.mask.data\", \"\", true)}:
             .quad 0,0, -1,0, -1,-1
             
-            .align 32
+            {align_bytes!(32)}
             {func_name(\"gemm.microkernel.c32.simd256.rmask.data\", \"\", true)}:
             {func_name(\"gemm.microkernel.f64.simd256.rmask.data\", \"\", true)}:
             .quad 0,0,0,0, 0,0,0,-1, 0,0,-1,-1, 0,-1,-1,-1, -1,-1,-1,-1
 
-            .align 32
+            {align_bytes!(32)}
             {func_name(\"gemm.microkernel.c32.simd256.mask.data\", \"\", true)}:
             {func_name(\"gemm.microkernel.f64.simd256.mask.data\", \"\", true)}:
             .quad 0,0,0,0, -1,0,0,0, -1,-1,0,0, -1,-1,-1,0, -1,-1,-1,-1
 
 
-            .align 2
+            {align_bytes!(2)}
             {func_name(\"gemm.microkernel.c32.simd512.rmask.data\", \"\", true)}:
             .word 0b0000000000000000, 0b1100000000000000, 0b1111000000000000, 0b1111110000000000, 0b1111111100000000, 0b1111111111000000, 0b1111111111110000, 0b1111111111111100, 0b1111111111111111
 
-            .align 2
+            {align_bytes!(2)}
             {func_name(\"gemm.microkernel.c32.simd512.mask.data\", \"\", true)}:
             .word 0b0000000000000000, 0b0000000000000011, 0b0000000000001111, 0b0000000000111111, 0b0000000011111111, 0b0000001111111111, 0b0000111111111111, 0b0011111111111111, 0b1111111111111111
 
@@ -3568,28 +3608,28 @@ fn main() -> Result {
 
 
             
-            .align 16
+            {align_bytes!(16)}
             {func_name(\"gemm.microkernel.f32.simd128.rmask.data\", \"\", true)}:
             .int 0,0,0,0, 0,0,0,-1, 0,0,-1,-1, 0,-1,-1,-1, -1,-1,-1,-1
 
-            .align 16
+            {align_bytes!(16)}
             {func_name(\"gemm.microkernel.f32.simd128.mask.data\", \"\", true)}:
             .int 0,0,0,0, -1,0,0,0, -1,-1,0,0, -1,-1,-1,0, -1,-1,-1,-1
             
-            .align 32
+            {align_bytes!(32)}
             {func_name(\"gemm.microkernel.f32.simd256.rmask.data\", \"\", true)}:
             .int 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,-1, 0,0,0,0,0,0,-1,-1, 0,0,0,0,0,-1,-1,-1, 0,0,0,0,-1,-1,-1,-1, 0,0,0,-1,-1,-1,-1,-1, 0,0,-1,-1,-1,-1,-1,-1, 0,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1
 
-            .align 32
+            {align_bytes!(32)}
             {func_name(\"gemm.microkernel.f32.simd256.mask.data\", \"\", true)}:
             .int 0,0,0,0,0,0,0,0, -1,0,0,0,0,0,0,0, -1,-1,0,0,0,0,0,0, -1,-1,-1,0,0,0,0,0, -1,-1,-1,-1,0,0,0,0, -1,-1,-1,-1,-1,0,0,0, -1,-1,-1,-1,-1,-1,0,0, -1,-1,-1,-1,-1,-1,-1,0, -1,-1,-1,-1,-1,-1,-1,-1
 
 
-            .align 2
+            {align_bytes!(2)}
             {func_name(\"gemm.microkernel.f32.simd512.rmask.data\", \"\", true)}:
             .word 0b0000000000000000, 0b1000000000000000, 0b1100000000000000, 0b1110000000000000, 0b1111000000000000, 0b1111100000000000, 0b1111110000000000, 0b1111111000000000, 0b1111111100000000, 0b1111111110000000, 0b1111111111000000, 0b1111111111100000, 0b1111111111110000, 0b1111111111111000, 0b1111111111111100, 0b1111111111111110, 0b1111111111111111
 
-            .align 2
+            {align_bytes!(2)}
             {func_name(\"gemm.microkernel.f32.simd512.mask.data\", \"\", true)}:
             .word 0b0000000000000000, 0b0000000000000001, 0b0000000000000011, 0b0000000000000111, 0b0000000000001111, 0b0000000000011111, 0b0000000000111111, 0b0000000001111111, 0b0000000011111111, 0b0000000111111111, 0b0000001111111111, 0b0000011111111111, 0b0000111111111111, 0b0001111111111111, 0b0011111111111111, 0b0111111111111111, 0b1111111111111111
         "
