@@ -130,3 +130,77 @@ Generated for each transcript that overlaps with the query region:
   - θ = Infinity: Insufficient haplotypes or zero sequence length
   - π = 0: No nucleotide differences (genetic uniformity)
   - π = Infinity: Insufficient data
+
+## Python bindings with PyO3
+
+Ferromic ships with a small set of Python bindings powered by [PyO3](https://pyo3.rs/). The
+bindings make it possible to call the high-performance Rust implementations of the core
+population genetics statistics directly from Python scripts or notebooks.
+
+### Building the extension module
+
+1. Install Python 3.8+ and the [maturin](https://github.com/PyO3/maturin) build tool:
+   ```bash
+   python -m pip install maturin
+   ```
+2. Compile and install the extension into your active virtual environment:
+   ```bash
+   maturin develop --release
+   ```
+   The command compiles the `ferromic` shared library and makes it importable from Python. Use
+   the `--target` flag if you need to build for a different Python interpreter (e.g., a conda
+   environment) and set the `PYO3_PYTHON` environment variable when a non-default interpreter is
+   required.
+
+After `maturin develop` completes successfully, you can import the module with `import ferromic`
+inside Python.
+
+### Available Python functions
+
+The Python module exposes three functions that closely match their Rust counterparts:
+
+| Function | Purpose | Key arguments |
+| --- | --- | --- |
+| `ferromic.count_segregating_sites_py` | Count polymorphic sites in a list of variants. | `variants`: iterable of objects with a `.position` integer and a `.genotypes` iterable containing per-sample allele indices or `None` for missing calls. |
+| `ferromic.calculate_pi_py` | Compute nucleotide diversity (π). | `variants`: same structure as above; `haplotypes`: iterable of `(sample_index, side)` pairs where `side` is `0` (left) or `1` (right); `seq_length`: total number of sites in the analyzed region. |
+| `ferromic.calculate_watterson_theta_py` | Compute Watterson's θ estimator. | `seg_sites`: output of `count_segregating_sites_py`; `n`: number of haplotypes; `seq_length`: region length. |
+
+The conversion layer is intentionally lightweight—you can pass simple `dataclass` instances,
+namedtuples, or dictionaries as long as they provide the expected attributes.
+
+### Minimal usage example
+
+```python
+from dataclasses import dataclass
+
+from ferromic import (
+    count_segregating_sites_py,
+    calculate_pi_py,
+    calculate_watterson_theta_py,
+)
+
+
+@dataclass
+class Variant:
+    position: int
+    genotypes: list
+
+
+variants = [
+    Variant(position=1_000, genotypes=[(0, 0), (0, 1), None]),
+    Variant(position=1_010, genotypes=[(0, 0), (0, 0), (1, 1)]),
+]
+
+# Treat both haplotypes of the first two samples and the left haplotype of the third sample
+haplotypes = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0)]
+
+seg_sites = count_segregating_sites_py(variants)
+pi = calculate_pi_py(variants, haplotypes, seq_length=100)
+theta = calculate_watterson_theta_py(seg_sites, n=len(haplotypes), seq_length=100)
+
+print(pi, theta)
+```
+
+In the example above, `None` entries inside a genotype list are treated as missing data, and each
+tuple of integers represents allele indices from the VCF (0 for reference, 1 for alternate).
+
