@@ -234,11 +234,6 @@ def load_sex_from_genomic_metrics() -> pd.DataFrame:
             return 0.0
         if x == "XY":
             return 1.0
-        # simple fallbacks: presence of Y suggests male
-        if "XY" in x or "Y" in x:
-            return 1.0
-        if "XX" in x or "X" in x:
-            return 0.0
         return np.nan
     df["sex"] = ploidy.apply(_ploidy_to_sex).astype("float64")
     info(f"Sex loaded: rows={len(df):,}")
