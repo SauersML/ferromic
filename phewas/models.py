@@ -22,7 +22,15 @@ allowed_fp_by_cat = {}
 # --- inference behavior toggles ---
 DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_BACKFILL_P_FROM_STAGE1 = True
-DEFAULT_ALLOW_PENALIZED_WALD = True
+DEFAULT_ALLOW_PENALIZED_WALD = False
+
+MLE_SE_MAX_ALL = 10.0
+MLE_SE_MAX_TARGET = 5.0
+MLE_MAX_ABS_XB = 15.0
+MLE_FRAC_P_EXTREME = 0.02
+EPV_MIN_FOR_MLE = 10.0
+TARGET_VAR_MIN_FOR_MLE = 1e-8
+PROFILE_MAX_ABS_BETA = 40.0
 
 def safe_basename(name: str) -> str:
     """Allow only [-._a-zA-Z0-9], map others to '_'."""
@@ -77,6 +85,296 @@ def _counts_from_y(y):
     pi = (n_cases / n) if n > 0 else 0.0
     n_eff = 4.0 * n * pi * (1.0 - pi) if n > 0 else 0.0
     return n, n_cases, n_ctrls, n_eff
+
+
+def _fmt_num(x):
+    if not np.isfinite(x):
+        if np.isnan(x):
+            return "NA"
+        return "+inf" if x > 0 else "-inf"
+    ax = abs(float(x))
+    if ax != 0 and (ax < 1e-3 or ax > 1e3):
+        return f"{x:.3e}"
+    return f"{x:.3f}"
+
+
+def _fmt_ci(lo, hi):
+    return f"{_fmt_num(lo)},{_fmt_num(hi)}"
+
+
+def _ok_mle_fit(fit, X, y, target_ix=None,
+                se_max_all=None, se_max_target=None,
+                max_abs_xb=None, frac_extreme=None):
+    if fit is None or (not hasattr(fit, "bse")):
+        return False
+    se_max_all = float(CTX.get("MLE_SE_MAX_ALL", MLE_SE_MAX_ALL) if se_max_all is None else se_max_all)
+    se_max_target = float(CTX.get("MLE_SE_MAX_TARGET", MLE_SE_MAX_TARGET) if se_max_target is None else se_max_target)
+    max_abs_xb = float(CTX.get("MLE_MAX_ABS_XB", MLE_MAX_ABS_XB) if max_abs_xb is None else max_abs_xb)
+    frac_extreme = float(CTX.get("MLE_FRAC_P_EXTREME", MLE_FRAC_P_EXTREME) if frac_extreme is None else frac_extreme)
+    try:
+        bse = np.asarray(fit.bse, dtype=np.float64)
+    except Exception:
+        return False
+    if bse.ndim == 0:
+        bse = np.array([float(bse)], dtype=np.float64)
+    if not np.all(np.isfinite(bse)):
+        return False
+    if np.nanmax(bse) > se_max_all:
+        return False
+    if target_ix is not None and 0 <= int(target_ix) < bse.size:
+        if (not np.isfinite(bse[int(target_ix)])) or (bse[int(target_ix)] > se_max_target):
+            return False
+    try:
+        params = getattr(fit, "params", None)
+        if params is None:
+            return False
+        max_abs_linpred, frac_lo, frac_hi = _fit_diagnostics(X, y, params)
+        if (np.isfinite(max_abs_linpred) and max_abs_linpred > max_abs_xb):
+            return False
+        if (np.isfinite(frac_lo) and frac_lo > frac_extreme) or (np.isfinite(frac_hi) and frac_hi > frac_extreme):
+            return False
+    except Exception:
+        return False
+    return True
+
+
+def _mle_prefit_ok(X, y, target_ix=None, const_ix=None):
+    X_np = X.to_numpy(dtype=np.float64, copy=False) if hasattr(X, "to_numpy") else np.asarray(X, dtype=np.float64)
+    y_np = np.asarray(y, dtype=np.float64)
+    if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
+        return False
+    n = float(X_np.shape[0])
+    if n <= 0:
+        return False
+    n_cases = float(np.sum(y_np))
+    n_ctrls = n - n_cases
+    if n_cases <= 0 or n_ctrls <= 0:
+        return False
+    p_eff = int(X_np.shape[1])
+    if const_ix is not None and 0 <= int(const_ix) < X_np.shape[1]:
+        p_eff = max(1, p_eff - 1)
+    p_eff = max(1, p_eff)
+    epv = min(n_cases, n_ctrls) / float(p_eff)
+    epv_min = float(CTX.get("EPV_MIN_FOR_MLE", EPV_MIN_FOR_MLE))
+    if epv < epv_min:
+        return False
+    if target_ix is not None and 0 <= int(target_ix) < X_np.shape[1]:
+        tgt_std = float(np.nanstd(X_np[:, int(target_ix)]))
+        if tgt_std < float(CTX.get("TARGET_VAR_MIN_FOR_MLE", TARGET_VAR_MIN_FOR_MLE)):
+            return False
+    return True
+
+
+def _logit_mle_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
+    X_np = np.asarray(X, dtype=np.float64)
+    y_np = np.asarray(y, dtype=np.float64)
+    if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
+        raise ValueError("design/response mismatch for MLE offset refit")
+    n, p = X_np.shape
+    if offset is None:
+        offset = np.zeros(n, dtype=np.float64)
+    else:
+        offset = np.asarray(offset, dtype=np.float64)
+        if offset.shape != (n,):
+            raise ValueError("offset shape mismatch")
+    beta = np.zeros(p, dtype=np.float64)
+    converged = False
+    for _ in range(int(maxiter)):
+        eta = np.clip(offset + X_np @ beta, -35.0, 35.0)
+        p_hat = expit(eta)
+        W = p_hat * (1.0 - p_hat)
+        z = eta + (y_np - p_hat) / np.clip(W, 1e-12, None)
+        XTW = X_np.T * W
+        XtWX = XTW @ X_np
+        XtWz = XTW @ z
+        try:
+            delta = np.linalg.solve(XtWX, XtWz - XtWX @ beta)
+        except np.linalg.LinAlgError:
+            delta = np.linalg.pinv(XtWX) @ (XtWz - XtWX @ beta)
+        beta_new = beta + delta
+        if not np.all(np.isfinite(beta_new)):
+            break
+        if np.max(np.abs(delta)) < tol:
+            beta = beta_new
+            converged = True
+            break
+        beta = beta_new
+    if not converged:
+        raise RuntimeError("MLE offset refit failed to converge")
+    eta = np.clip(offset + X_np @ beta, -35.0, 35.0)
+    p_hat = expit(eta)
+    llf = float(np.sum(y_np * np.log(p_hat) + (1.0 - y_np) * np.log(1.0 - p_hat)))
+    W = p_hat * (1.0 - p_hat)
+    XTW = X_np.T * W
+    XtWX = XTW @ X_np
+    try:
+        cov = np.linalg.inv(XtWX)
+    except np.linalg.LinAlgError:
+        cov = np.linalg.pinv(XtWX)
+    bse = np.sqrt(np.clip(np.diag(cov), 0.0, np.inf))
+
+    class _Res:
+        pass
+
+    res = _Res()
+    res.params = beta
+    res.bse = bse
+    res.llf = llf
+    setattr(res, "_final_is_mle", True)
+    setattr(res, "_used_firth", False)
+    return res
+
+
+def _firth_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
+    X_np = np.asarray(X, dtype=np.float64)
+    y_np = np.asarray(y, dtype=np.float64)
+    if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
+        raise ValueError("design/response mismatch for Firth offset refit")
+    n, p = X_np.shape
+    if offset is None:
+        offset = np.zeros(n, dtype=np.float64)
+    else:
+        offset = np.asarray(offset, dtype=np.float64)
+        if offset.shape != (n,):
+            raise ValueError("offset shape mismatch")
+    beta = np.zeros(p, dtype=np.float64)
+    converged = False
+    for _ in range(int(maxiter)):
+        eta = np.clip(offset + X_np @ beta, -35.0, 35.0)
+        p_hat = np.clip(expit(eta), 1e-12, 1.0 - 1e-12)
+        W = p_hat * (1.0 - p_hat)
+        XTW = X_np.T * W
+        XtWX = XTW @ X_np
+        try:
+            XtWX_inv = np.linalg.inv(XtWX)
+        except np.linalg.LinAlgError:
+            XtWX_inv = np.linalg.pinv(XtWX)
+        h = _leverages_batched(X_np, XtWX_inv, W)
+        score = X_np.T @ (y_np - p_hat + (0.5 - p_hat) * h)
+        delta = XtWX_inv @ score
+        beta_new = beta + delta
+        if not np.all(np.isfinite(beta_new)):
+            break
+        if np.max(np.abs(delta)) < tol:
+            beta = beta_new
+            converged = True
+            break
+        beta = beta_new
+    if not converged:
+        raise RuntimeError("Firth offset refit failed to converge")
+    eta = np.clip(offset + X_np @ beta, -35.0, 35.0)
+    p_hat = np.clip(expit(eta), 1e-12, 1.0 - 1e-12)
+    W = p_hat * (1.0 - p_hat)
+    XTW = X_np.T * W
+    XtWX = XTW @ X_np
+    try:
+        cov = np.linalg.inv(XtWX)
+    except np.linalg.LinAlgError:
+        cov = np.linalg.pinv(XtWX)
+    bse = np.sqrt(np.clip(np.diag(cov), 0.0, np.inf))
+    loglik = float(np.sum(y_np * np.log(p_hat) + (1.0 - y_np) * np.log(1.0 - p_hat)))
+    sign_det, logdet = np.linalg.slogdet(XtWX)
+    pll = loglik + 0.5 * logdet if sign_det > 0 else -np.inf
+
+    class _Res:
+        pass
+
+    res = _Res()
+    res.params = beta
+    res.bse = bse
+    res.llf = float(pll)
+    setattr(res, "_final_is_mle", False)
+    setattr(res, "_used_firth", True)
+    return res
+
+
+def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max_abs_beta=None):
+    max_abs_beta = float(CTX.get("PROFILE_MAX_ABS_BETA", PROFILE_MAX_ABS_BETA) if max_abs_beta is None else max_abs_beta)
+    X_np = X_full.to_numpy(dtype=np.float64, copy=False) if hasattr(X_full, "to_numpy") else np.asarray(X_full, dtype=np.float64)
+    y_np = np.asarray(y, dtype=np.float64)
+    if X_np.ndim != 2 or y_np.ndim != 1 or X_np.shape[0] != y_np.shape[0]:
+        return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False, "method": None}
+    if target_ix is None or target_ix < 0 or target_ix >= X_np.shape[1]:
+        return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False, "method": None}
+    params = getattr(fit_full, "params", None)
+    if params is None:
+        return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False, "method": None}
+    beta_hat = float(np.asarray(params, dtype=np.float64)[int(target_ix)])
+    ll_full = float(getattr(fit_full, "llf", np.nan))
+    if not np.isfinite(ll_full):
+        return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False, "method": None}
+    X_red = np.delete(X_np, int(target_ix), axis=1)
+    x_target = X_np[:, int(target_ix)]
+    crit = float(sp_stats.chi2.ppf(1.0 - alpha, df=1))
+    refit = _logit_mle_refit_offset if kind == "mle" else _firth_refit_offset
+
+    def dev_at(b0):
+        try:
+            fit_c = refit(X_red, y_np, offset=b0 * x_target)
+        except Exception:
+            return np.inf
+        ll_con = float(getattr(fit_c, "llf", np.nan))
+        if not np.isfinite(ll_con):
+            return np.inf
+        val = 2.0 * (ll_full - ll_con)
+        return float(val)
+
+    base = dev_at(beta_hat)
+    if not np.isfinite(base):
+        return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False, "method": None}
+    diff0 = base - crit
+
+    def find_root(direction):
+        step = 0.5
+        for _ in range(60):
+            candidate = beta_hat + direction * step
+            if abs(candidate) > max_abs_beta:
+                break
+            diff_c = dev_at(candidate) - crit
+            if not np.isfinite(diff_c):
+                step *= 2.0
+                continue
+            if (diff0 <= 0 and diff_c >= 0) or (diff0 >= 0 and diff_c <= 0):
+                if direction < 0:
+                    low, high = candidate, beta_hat
+                    dl, dh = diff_c, diff0
+                else:
+                    low, high = beta_hat, candidate
+                    dl, dh = diff0, diff_c
+                for _ in range(80):
+                    mid = 0.5 * (low + high)
+                    diff_mid = dev_at(mid) - crit
+                    if not np.isfinite(diff_mid):
+                        break
+                    if abs(diff_mid) < 1e-6 or abs(high - low) < 1e-6:
+                        return mid, True
+                    if (dl <= 0 and diff_mid <= 0) or (dl >= 0 and diff_mid >= 0):
+                        low, dl = mid, diff_mid
+                    else:
+                        high, dh = mid, diff_mid
+                return 0.5 * (low + high), True
+            step *= 2.0
+        return None, False
+
+    blo, ok_lo = find_root(-1)
+    bhi, ok_hi = find_root(+1)
+    sided = "two"
+    if not ok_lo and not ok_hi:
+        return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False,
+                "method": "profile" if kind == "mle" else "profile_penalized"}
+    if not ok_lo:
+        blo = -np.inf
+        sided = "one"
+    if not ok_hi:
+        bhi = np.inf
+        sided = "one"
+    return {
+        "lo": float(blo),
+        "hi": float(bhi),
+        "sided": sided,
+        "valid": True,
+        "method": "profile" if kind == "mle" else "profile_penalized",
+    }
 
 def validate_min_counts_for_fit(y, stage_tag, extra_context=None, cases_key="MIN_CASES_FILTER", controls_key="MIN_CONTROLS_FILTER", neff_key="MIN_NEFF_FILTER"):
     """
@@ -168,7 +466,7 @@ def _leverages_batched(X_np, XtWX_inv, W, batch=100_000):
         h[i0:i1] = np.clip(W[i0:i1] * s, 0.0, 1.0)
     return h
 
-def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False, **kwargs):
+def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer_mle_first=False, **kwargs):
     """
     Logistic fit ladder with an option to attempt unpenalized MLE first.
     If numpy arrays are provided, const_ix identifies the intercept column for zero-penalty.
@@ -180,6 +478,8 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
 
     is_pandas = hasattr(X, "columns")
     prefer_firth_on_ridge = bool(CTX.get("PREFER_FIRTH_ON_RIDGE", DEFAULT_PREFER_FIRTH_ON_RIDGE))
+    allow_mle = _mle_prefit_ok(X, y, target_ix=target_ix, const_ix=const_ix)
+    prefit_gate_tags = [] if allow_mle else ["gate:mle_prefit_blocked"]
 
     def _maybe_firth(path_tags):
         if not prefer_firth_on_ridge:
@@ -197,7 +497,7 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
 
     try:
         # If requested, try unpenalized MLE first. This is particularly effective after design restrictions.
-        if prefer_mle_first:
+        if prefer_mle_first and allow_mle:
             with warnings.catch_warnings():
                 warnings.filterwarnings("error", category=PerfectSeparationWarning)
                 warnings.filterwarnings(
@@ -220,9 +520,9 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         tol=1e-8,
                         start_params=user_start
                     )
-                    if _converged(mle_newton) and hasattr(mle_newton, "bse") and np.all(np.isfinite(mle_newton.bse)) and np.max(mle_newton.bse) <= 100.0:
+                    if _converged(mle_newton) and _ok_mle_fit(mle_newton, X, y, target_ix=target_ix):
                         setattr(mle_newton, "_final_is_mle", True)
-                        setattr(mle_newton, "_path_reasons", ["mle_first_newton"])
+                        setattr(mle_newton, "_path_reasons", ["mle_first_newton"] + prefit_gate_tags)
                         return mle_newton, "mle_first_newton"
                 except (Exception, PerfectSeparationWarning):
                     pass
@@ -234,9 +534,9 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                         gtol=1e-8,
                         start_params=user_start
                     )
-                    if _converged(mle_bfgs) and hasattr(mle_bfgs, "bse") and np.all(np.isfinite(mle_bfgs.bse)) and np.max(mle_bfgs.bse) <= 100.0:
+                    if _converged(mle_bfgs) and _ok_mle_fit(mle_bfgs, X, y, target_ix=target_ix):
                         setattr(mle_bfgs, "_final_is_mle", True)
-                        setattr(mle_bfgs, "_path_reasons", ["mle_first_bfgs"])
+                        setattr(mle_bfgs, "_path_reasons", ["mle_first_bfgs"] + prefit_gate_tags)
                         return mle_bfgs, "mle_first_bfgs"
                 except (Exception, PerfectSeparationWarning):
                     pass
@@ -271,8 +571,8 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
         neff_gate = float(CTX.get("MLE_REFIT_MIN_NEFF", 0.0))
         gate_tags = _ridge_gate_reasons(max_abs_linpred, frac_lo, frac_hi, n_eff, neff_gate)
         blocked_by_gate = ((max_abs_linpred > 15.0) or (frac_lo > 0.02) or (frac_hi > 0.02) or (neff_gate > 0 and n_eff < neff_gate))
-        path_prefix = ["ridge_reached"] + gate_tags
-        if blocked_by_gate and not prefer_mle_first:
+        path_prefix = ["ridge_reached"] + gate_tags + prefit_gate_tags
+        if blocked_by_gate or (not allow_mle):
             firth_attempt = _maybe_firth(path_prefix)
             if firth_attempt is not None:
                 return firth_attempt
@@ -281,8 +581,7 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                 tags.append("firth_failed")
             setattr(ridge_fit, "_path_reasons", tags)
             return ridge_fit, "ridge_only"
-        # When prefer_mle_first is True, proceed to attempt an unpenalized refit seeded by ridge even if diagnostics indicate separation-like behavior.
-
+        # Proceed to attempt an unpenalized refit seeded by ridge if allowed.
         with warnings.catch_warnings():
             warnings.filterwarnings("error", category=PerfectSeparationWarning)
             warnings.filterwarnings(
@@ -308,12 +607,10 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     **extra_flag,
                     **kwargs
                 )
-                if _converged(refit_newton) and hasattr(refit_newton, "bse") and np.all(np.isfinite(refit_newton.bse)):
-                    if np.max(refit_newton.bse) > 100.0:
-                        raise PerfectSeparationWarning("Large SEs detected")
+                if _converged(refit_newton) and _ok_mle_fit(refit_newton, X, y, target_ix=target_ix):
                     setattr(refit_newton, "_used_ridge_seed", True)
                     setattr(refit_newton, "_final_is_mle", True)
-                    tags = ["ridge_seeded_refit"] + gate_tags
+                    tags = ["ridge_seeded_refit"] + gate_tags + prefit_gate_tags
                     setattr(refit_newton, "_path_reasons", tags)
                     return refit_newton, "ridge_seeded_refit"
             except (Exception, PerfectSeparationWarning):
@@ -330,12 +627,10 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, prefer_mle_first=False
                     **extra_flag,
                     **kwargs
                 )
-                if _converged(refit_bfgs) and hasattr(refit_bfgs, "bse") and np.all(np.isfinite(refit_bfgs.bse)):
-                    if np.max(refit_bfgs.bse) > 100.0:
-                        raise PerfectSeparationWarning("Large SEs detected")
+                if _converged(refit_bfgs) and _ok_mle_fit(refit_bfgs, X, y, target_ix=target_ix):
                     setattr(refit_bfgs, "_used_ridge_seed", True)
                     setattr(refit_bfgs, "_final_is_mle", True)
-                    tags = ["ridge_seeded_refit"] + gate_tags
+                    tags = ["ridge_seeded_refit"] + gate_tags + prefit_gate_tags
                     setattr(refit_bfgs, "_path_reasons", tags)
                     return refit_bfgs, "ridge_seeded_refit"
             except (Exception, PerfectSeparationWarning):
@@ -687,6 +982,61 @@ def _efficient_score_vector(target_vec: np.ndarray, X_red_mat: np.ndarray, W: np
     h = target_vec - proj
     denom = float(h.T @ (W * h))
     return h, denom
+
+
+def _score_test_from_reduced(X_red, y, x_target, const_ix=None):
+    """Analytic 1-df Rao score test computed from the reduced (null) model."""
+    fit_red, _ = _fit_logit_ladder(X_red, y, const_ix=const_ix, prefer_mle_first=True)
+    if fit_red is None:
+        return np.nan, np.nan
+    if not bool(getattr(fit_red, "_final_is_mle", False)) or bool(getattr(fit_red, "_used_firth", False)):
+        return np.nan, np.nan
+    Xr = X_red.to_numpy(dtype=np.float64, copy=False) if hasattr(X_red, "to_numpy") else np.asarray(X_red, dtype=np.float64)
+    yv = np.asarray(y, dtype=np.float64)
+    beta = np.asarray(getattr(fit_red, "params", np.zeros(Xr.shape[1])), dtype=np.float64)
+    eta = np.clip(Xr @ beta, -35.0, 35.0)
+    p_hat = expit(eta)
+    W = p_hat * (1.0 - p_hat)
+    x_tgt = np.asarray(x_target, dtype=np.float64)
+    h, denom = _efficient_score_vector(x_tgt, Xr, W)
+    S = float(h @ (yv - p_hat))
+    if not np.isfinite(denom) or denom <= 0.0:
+        return np.nan, np.nan
+    T_obs = (S * S) / denom
+    if not np.isfinite(T_obs):
+        return np.nan, np.nan
+    p = float(sp_stats.chi2.sf(T_obs, 1))
+    return p, T_obs
+
+
+def _score_bootstrap_from_reduced(X_red, y, x_target, const_ix=None, B=None, rng=None):
+    """Parametric bootstrap of the Rao score statistic under the reduced (null) model."""
+    B = int(CTX.get("FALLBACK_BOOTSTRAP_B", 500) if B is None else B)
+    rng = np.random.default_rng() if rng is None else rng
+    fit_red, _ = _fit_logit_ladder(X_red, y, const_ix=const_ix, prefer_mle_first=True)
+    if fit_red is None:
+        return np.nan, np.nan
+    Xr = X_red.to_numpy(dtype=np.float64, copy=False) if hasattr(X_red, "to_numpy") else np.asarray(X_red, dtype=np.float64)
+    yv = np.asarray(y, dtype=np.float64)
+    beta = np.asarray(getattr(fit_red, "params", np.zeros(Xr.shape[1])), dtype=np.float64)
+    eta = np.clip(Xr @ beta, -35.0, 35.0)
+    p_hat = np.clip(expit(eta), 1e-12, 1 - 1e-12)
+    W = p_hat * (1.0 - p_hat)
+    x_tgt = np.asarray(x_target, dtype=np.float64)
+    h, denom = _efficient_score_vector(x_tgt, Xr, W)
+    S = float(h @ (yv - p_hat))
+    if not np.isfinite(denom) or denom <= 0.0:
+        return np.nan, np.nan
+    T_obs = (S * S) / denom
+    if not np.isfinite(T_obs):
+        return np.nan, np.nan
+    U = rng.random((yv.size, B))
+    Y_star = (U < p_hat[:, None]).astype(np.float64, copy=False)
+    R = Y_star - p_hat[:, None]
+    Sb = h[:, None] * R
+    T_b = (np.sum(Sb, axis=0) ** 2) / denom
+    p_emp = float((1.0 + np.sum(T_b >= T_obs)) / (1.0 + B))
+    return p_emp, T_obs
 
 # --- Worker globals ---
 # Populated by init_worker and read-only thereafter.
@@ -1115,8 +1465,6 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         # --- Pre-fit sanity checks ---
         notes = []
-        backfill_stage1 = bool(CTX.get("BACKFILL_P_FROM_STAGE1", DEFAULT_BACKFILL_P_FROM_STAGE1))
-        allow_penalized_wald = bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
         target_ix = col_ix.get(target_inversion)
         const_ix = col_ix.get('const')
         sex_ix = col_ix.get('sex')
@@ -1219,7 +1567,12 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                         case_idx_fp, extra=meta_extra)
             return
 
-        fit, fit_reason = _fit_logit_ladder(X_work_fd, y_work, const_ix=const_ix_final, prefer_mle_first=bool(sex_col_dropped))
+        fit, fit_reason = _fit_logit_ladder(
+            X_work_fd,
+            y_work,
+            const_ix=const_ix_final,
+            target_ix=target_ix_final,
+        )
         if fit_reason: notes.append(fit_reason)
         if fit is not None:
             diag_notes = list(notes)
@@ -1271,88 +1624,142 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             return
 
         beta = float(fit.params[target_ix_final])
-        final_is_mle = bool(getattr(fit, "_final_is_mle", False))
-        used_firth = bool(getattr(fit, "_used_firth", False))
+        or_val = float(np.exp(beta)) if np.isfinite(beta) else np.nan
         used_ridge = bool(getattr(fit, "_used_ridge", False))
-        pval = np.nan
-        p_source = None
-        if (final_is_mle or used_firth) and hasattr(fit, "pvalues"):
-            try:
-                pval = float(fit.pvalues[target_ix_final])
-            except Exception:
-                try:
-                    pval = float(np.asarray(fit.pvalues)[target_ix_final])
-                except Exception:
-                    try:
-                        pval = float(fit.pvalues.iloc[target_ix_final])
-                    except Exception:
-                        pass
-            if np.isfinite(pval):
-                p_source = "firth_wald" if used_firth else "mle_wald"
 
-        se = float(fit.bse[target_ix_final]) if hasattr(fit, "bse") and target_ix_final < len(fit.bse) else np.nan
-        or_ci95_str = None
-        if (final_is_mle or used_firth) and np.isfinite(beta) and np.isfinite(se) and se > 0:
-            lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
-            or_ci95_str = f"{lo:.3f},{hi:.3f}"
-
-        if (not np.isfinite(pval)) and backfill_stage1:
-            b_p, b_src = _backfill_p_from_stage1(s_name_safe)
-            if b_src and np.isfinite(b_p):
-                pval, p_source = b_p, b_src
-
-        if (not np.isfinite(pval)) and (not final_is_mle) and (not used_firth) and allow_penalized_wald:
-            try:
-                beta_hat = np.asarray(fit.params, dtype=np.float64)
-                Xnp = np.asarray(X_work_fd, dtype=np.float64)
-                if Xnp.shape[1] != beta_hat.shape[0]:
-                    raise ValueError("design/params mismatch")
-                eta = np.clip(Xnp @ beta_hat, -35.0, 35.0)
-                p_hat = expit(eta)
-                W = p_hat * (1.0 - p_hat)
-                if not np.all(np.isfinite(W)):
-                    raise ValueError("non-finite weights")
-                XTW = Xnp.T * W
-                XtWX = XTW @ Xnp
-                alpha = float(getattr(fit, "_ridge_alpha", CTX.get("RIDGE_L2_BASE", 1.0)))
-                P = np.eye(Xnp.shape[1], dtype=np.float64)
-                info_mat = XtWX + alpha * P
-                cov = np.linalg.pinv(info_mat)
-                var_j = float(cov[target_ix_final, target_ix_final])
-                if var_j >= 0 and np.isfinite(var_j):
-                    se_pen = np.sqrt(var_j)
-                    if se_pen > 0 and np.isfinite(beta):
-                        z = beta / se_pen
-                        pval = 2.0 * sp_stats.norm.sf(abs(z))
-                        p_source = "penalized_wald"
-                        if or_ci95_str is None:
-                            lo, hi = np.exp(beta - 1.96 * se_pen), np.exp(beta + 1.96 * se_pen)
-                            or_ci95_str = f"{lo:.3f},{hi:.3f}"
-            except Exception:
-                pass
-
-        if (p_source is None) and (not final_is_mle) and (not used_firth) and CTX.get("BOOT_OVERALL_CACHE_DIR"):
-            try:
-                os.makedirs(CTX["BOOT_OVERALL_CACHE_DIR"], exist_ok=True)
-                rq_path = os.path.join(CTX["BOOT_OVERALL_CACHE_DIR"], f"REQUEST.{s_name_safe}")
-                with open(rq_path, "w") as _f:
-                    _f.write("ridge_only_need_bootstrap\n")
-            except Exception:
-                pass
-
-        if used_firth:
-            inference_type = "firth"
-        elif final_is_mle:
-            inference_type = "mle"
-        else:
-            inference_type = "ridge"
-
-        path_tags = []
         if isinstance(notes, list) and notes:
-            path_tags.extend(notes)
+            path_tags = list(notes)
+        else:
+            path_tags = []
         extra_tags = list(getattr(fit, "_path_reasons", []) or [])
         if extra_tags:
             path_tags.extend(extra_tags)
+
+        if target_ix_final is not None:
+            X_reduced = np.delete(X_work_fd, target_ix_final, axis=1)
+            if const_ix_final is None:
+                const_ix_red = None
+            elif const_ix_final < target_ix_final:
+                const_ix_red = const_ix_final
+            elif const_ix_final > target_ix_final:
+                const_ix_red = const_ix_final - 1
+            else:
+                const_ix_red = None
+        else:
+            X_reduced = None
+            const_ix_red = None
+
+        inference_family = None
+        fit_full_use = None
+        fit_red_use = None
+        reduced_reason = None
+        p_value = np.nan
+        p_source = None
+        ci_method = None
+        ci_sided = "two"
+        ci_valid = False
+        ci_lo_or = np.nan
+        ci_hi_or = np.nan
+        ci_label = ""
+        or_ci95_str = None
+
+        full_is_mle_candidate = bool(getattr(fit, "_final_is_mle", False)) and not bool(getattr(fit, "_used_firth", False))
+        if (
+            X_reduced is not None
+            and full_is_mle_candidate
+            and _ok_mle_fit(fit, X_work_fd, y_work, target_ix=target_ix_final)
+        ):
+            fit_red_mle, reduced_reason = _fit_logit_ladder(
+                X_reduced,
+                y_work,
+                const_ix=const_ix_red,
+            )
+            if fit_red_mle is not None:
+                red_is_mle = bool(getattr(fit_red_mle, "_final_is_mle", False)) and not bool(getattr(fit_red_mle, "_used_firth", False))
+                if red_is_mle and _ok_mle_fit(fit_red_mle, X_reduced, y_work):
+                    inference_family = "mle"
+                    fit_full_use = fit
+                    fit_red_use = fit_red_mle
+
+        if inference_family is None and X_reduced is not None:
+            fit_full_firth = fit if bool(getattr(fit, "_used_firth", False)) else _firth_refit(X_work_fd, y_work)
+            fit_red_firth = _firth_refit(X_reduced, y_work)
+            if (fit_full_firth is not None) and (fit_red_firth is not None):
+                inference_family = "firth"
+                fit_full_use = fit_full_firth
+                fit_red_use = fit_red_firth
+
+        if inference_family is not None:
+            ll_full = float(getattr(fit_full_use, "llf", np.nan))
+            ll_red = float(getattr(fit_red_use, "llf", np.nan))
+            if np.isfinite(ll_full) and np.isfinite(ll_red):
+                stat = max(0.0, 2.0 * (ll_full - ll_red))
+                p_value = float(sp_stats.chi2.sf(stat, 1))
+                p_source = "lrt_mle" if inference_family == "mle" else "lrt_firth"
+                ci_info = _profile_ci_beta(X_work_fd, y_work, target_ix_final, fit_full_use, kind=inference_family)
+                ci_method = ci_info.get("method")
+                ci_sided = ci_info.get("sided", "two")
+                ci_valid = bool(ci_info.get("valid", False))
+                if ci_valid:
+                    lo_beta = ci_info.get("lo")
+                    hi_beta = ci_info.get("hi")
+                    if lo_beta == -np.inf:
+                        ci_lo_or = 0.0
+                    elif np.isfinite(lo_beta):
+                        ci_lo_or = float(np.exp(lo_beta))
+                    else:
+                        ci_lo_or = np.nan
+                    if hi_beta == np.inf:
+                        ci_hi_or = np.inf
+                    elif np.isfinite(hi_beta):
+                        ci_hi_or = float(np.exp(hi_beta))
+                    else:
+                        ci_hi_or = np.nan
+                    or_ci95_str = _fmt_ci(ci_lo_or, ci_hi_or)
+                    if ci_sided == "one":
+                        ci_label = "one-sided (boundary)"
+                else:
+                    ci_lo_or = np.nan
+                    ci_hi_or = np.nan
+            else:
+                inference_family = None
+                p_value = np.nan
+                p_source = None
+
+        if (
+            inference_family is None
+            and X_reduced is not None
+            and target_ix_final is not None
+            and 0 <= int(target_ix_final) < X_work_fd.shape[1]
+        ):
+            x_target_vec = X_work_fd[:, int(target_ix_final)]
+            p_sc, _ = _score_test_from_reduced(
+                X_reduced,
+                y_work,
+                x_target_vec,
+                const_ix=const_ix_red,
+            )
+            if np.isfinite(p_sc):
+                p_value = p_sc
+                p_source = "score_chi2"
+                inference_family = "score"
+            else:
+                p_emp, _ = _score_bootstrap_from_reduced(
+                    X_reduced,
+                    y_work,
+                    x_target_vec,
+                    const_ix=const_ix_red,
+                )
+                if np.isfinite(p_emp):
+                    p_value = p_emp
+                    p_source = "score_boot"
+                    inference_family = "score_boot"
+
+        inference_type = inference_family if inference_family is not None else "none"
+        final_is_mle = inference_type == "mle"
+        used_firth = inference_type == "firth"
+        p_valid = bool(np.isfinite(p_value))
+
         dedup_tags = []
         seen_tags = set()
         for tag in path_tags:
@@ -1361,10 +1768,13 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             if tag not in seen_tags:
                 dedup_tags.append(tag)
                 seen_tags.add(tag)
+        if reduced_reason:
+            dedup_tags.append(f"reduced:{reduced_reason}")
+        dedup_tags.append(f"inference={inference_type}")
+        if ci_method:
+            dedup_tags.append(f"ci={ci_method}")
         model_notes_str = ";".join(dedup_tags)
         path_reason_str = "|".join(dedup_tags)
-
-        or_val = float(np.exp(beta))
         result = {
             "Phenotype": s_name,
             "N_Total": n_total,
@@ -1372,8 +1782,16 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "N_Controls": n_ctrls,
             "Beta": beta,
             "OR": or_val,
-            "P_Value": float(pval) if np.isfinite(pval) else pval,
+            "P_Value": float(p_value) if np.isfinite(p_value) else p_value,
+            "P_Valid": p_valid,
+            "P_Source": p_source,
             "OR_CI95": or_ci95_str,
+            "CI_Method": ci_method,
+            "CI_Sided": ci_sided,
+            "CI_Label": ci_label,
+            "CI_Valid": bool(ci_valid),
+            "CI_LO_OR": ci_lo_or,
+            "CI_HI_OR": ci_hi_or,
             "Used_Ridge": used_ridge,
             "Final_Is_MLE": bool(final_is_mle),
             "Used_Firth": used_firth,
@@ -1384,7 +1802,6 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "N_Controls_Used": n_ctrls_used,
             "Model_Notes": model_notes_str,
             "Inference_Type": inference_type,
-            "P_Source": p_source,
             "Path_Reasons": path_reason_str,
         })
         io.atomic_write_json(result_path, result)
@@ -1395,7 +1812,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "used_ridge": used_ridge,
         })
         _write_meta(meta_path, "phewas_result", s_name, category, target_inversion, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_idx_fp, extra=meta_extra)
-        print(f"[fit OK] name={s_name_safe} OR={or_val:.3f} p={pval:.3e} notes={path_reason_str}", flush=True)
+        print(f"[fit OK] name={s_name_safe} OR={or_val:.3f} p={p_value:.3e} notes={path_reason_str}", flush=True)
 
     except Exception as e:
         io.atomic_write_json(result_path, {"Phenotype": s_name, "Skip_Reason": f"exception:{type(e).__name__}"})
@@ -1676,8 +2093,13 @@ def lrt_overall_worker(task):
         const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
 
-        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red, prefer_mle_first=bool(note))
-        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
+        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red)
+        fit_full, reason_full = _fit_logit_ladder(
+            X_full_zv,
+            yb,
+            const_ix=const_ix_full,
+            target_ix=target_ix,
+        )
 
         if fit_red is not None:
             _print_fit_diag(
@@ -1707,81 +2129,152 @@ def lrt_overall_worker(task):
                 params=fit_full.params,
                 notes=[note] if note else []
             )
-        red_final_is_mle = bool(getattr(fit_red, "_final_is_mle", False))
-        full_final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
-        red_used_firth = bool(getattr(fit_red, "_used_firth", False))
-        full_used_firth = bool(getattr(fit_full, "_used_firth", False))
-        red_is_classic_mle = red_final_is_mle and (not red_used_firth)
-        full_is_classic_mle = full_final_is_mle and (not full_used_firth)
-
-        out = {
-            "Phenotype": s_name, "P_LRT_Overall": np.nan, "LRT_df_Overall": np.nan, "Model_Notes": note,
-            "N_Total_Used": n_total_used, "N_Cases_Used": n_cases_used, "N_Controls_Used": n_ctrls_used,
-        }
-        if red_is_classic_mle and full_is_classic_mle and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
-            r_full, r_red = np.linalg.matrix_rank(X_full_zv.to_numpy()), np.linalg.matrix_rank(X_red_zv.to_numpy())
-            df_lrt = max(0, int(r_full - r_red))
-            if df_lrt > 0:
-                llr = 2 * (fit_full.llf - fit_red.llf)
-                out["P_LRT_Overall"] = sp_stats.chi2.sf(llr, df_lrt)
-                out["LRT_df_Overall"] = df_lrt
-                out["P_Source"] = "lrt_chi2"
-                print(f"[LRT-Stage1-OK] name={s_name_safe} p={out['P_LRT_Overall']:.3e} df={df_lrt}", flush=True)
-            else:
-                out["LRT_Overall_Reason"] = "zero_df_lrt"
+        full_is_mle = bool(getattr(fit_full, "_final_is_mle", False)) and not bool(getattr(fit_full, "_used_firth", False))
+        red_is_mle = bool(getattr(fit_red, "_final_is_mle", False)) and not bool(getattr(fit_red, "_used_firth", False))
+        inference_family = None
+        fit_full_use = None
+        fit_red_use = None
+        if (
+            fit_full is not None
+            and fit_red is not None
+            and full_is_mle
+            and red_is_mle
+            and _ok_mle_fit(fit_full, X_full_zv, yb, target_ix=target_ix)
+            and _ok_mle_fit(fit_red, X_red_zv, yb)
+        ):
+            inference_family = "mle"
+            fit_full_use = fit_full
+            fit_red_use = fit_red
         else:
-            out["LRT_Overall_Reason"] = "penalized_or_firth_in_path" if (fit_red or fit_full) else "fit_failed"
+            fit_full_firth = fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_full_zv, yb)
+            fit_red_firth = fit_red if bool(getattr(fit_red, "_used_firth", False)) else _firth_refit(X_red_zv, yb)
+            if (fit_full_firth is not None) and (fit_red_firth is not None):
+                inference_family = "firth"
+                fit_full_use = fit_full_firth
+                fit_red_use = fit_red_firth
 
-        # --- Emit PheWAS-style per-phenotype result from the FULL fit ---
+        p_value = np.nan
+        p_source = None
+        ci_method = None
+        ci_sided = "two"
+        ci_label = ""
+        ci_valid = False
+        ci_lo_or = np.nan
+        ci_hi_or = np.nan
+        or_ci95 = None
         beta_full = np.nan
         or_val = np.nan
-        wald_p = np.nan
-        ci95 = None
-        final_is_mle = full_final_is_mle
-        used_firth_full = full_used_firth
-        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
 
-        if fit_full is not None and target_ix is not None:
-            try:
-                params = getattr(fit_full, "params", None)
-                if hasattr(params, "index"):
-                    beta_full = float(params[target])
-                else:
-                    beta_full = float(params[target_ix])
-                or_val = float(np.exp(beta_full))
-            except Exception:
-                pass
-
-            if (final_is_mle or used_firth_full) and hasattr(fit_full, "pvalues"):
-                try:
-                    pvals = fit_full.pvalues
+        if inference_family is not None:
+            ll_full = float(getattr(fit_full_use, "llf", np.nan))
+            ll_red = float(getattr(fit_red_use, "llf", np.nan))
+            if np.isfinite(ll_full) and np.isfinite(ll_red):
+                stat = max(0.0, 2.0 * (ll_full - ll_red))
+                p_value = float(sp_stats.chi2.sf(stat, 1))
+                p_source = "lrt_mle" if inference_family == "mle" else "lrt_firth"
+                ci_info = _profile_ci_beta(X_full_zv, yb, target_ix, fit_full_use, kind=inference_family)
+                ci_method = ci_info.get("method")
+                ci_sided = ci_info.get("sided", "two")
+                ci_valid = bool(ci_info.get("valid", False))
+                if ci_valid:
+                    lo_beta = ci_info.get("lo")
+                    hi_beta = ci_info.get("hi")
+                    if lo_beta == -np.inf:
+                        ci_lo_or = 0.0
+                    elif np.isfinite(lo_beta):
+                        ci_lo_or = float(np.exp(lo_beta))
+                    else:
+                        ci_lo_or = np.nan
+                    if hi_beta == np.inf:
+                        ci_hi_or = np.inf
+                    elif np.isfinite(hi_beta):
+                        ci_hi_or = float(np.exp(hi_beta))
+                    else:
+                        ci_hi_or = np.nan
+                    or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
+                    if ci_sided == "one":
+                        ci_label = "one-sided (boundary)"
+                params = getattr(fit_full_use, "params", None)
+                if params is not None:
                     try:
-                        wald_p = float(pvals[target_ix])
+                        if hasattr(params, "__getitem__"):
+                            beta_full = float(params[target]) if hasattr(params, "index") else float(params[target_ix])
+                        else:
+                            beta_full = float(np.asarray(params)[target_ix])
+                        or_val = float(np.exp(beta_full))
                     except Exception:
-                        try:
-                            wald_p = float(pvals.loc[target])
-                        except Exception:
-                            wald_p = np.nan
-                    se = np.nan
-                    if hasattr(fit_full, "bse"):
-                        try:
-                            se = float(fit_full.bse[target_ix])
-                        except Exception:
-                            try:
-                                se = float(fit_full.bse.loc[target])
-                            except Exception:
-                                se = np.nan
-                    if np.isfinite(se) and se > 0:
-                        lo, hi = np.exp(beta_full - 1.96 * se), np.exp(beta_full + 1.96 * se)
-                        ci95 = f"{lo:.3f},{hi:.3f}"
-                except Exception:
-                    pass
+                        beta_full = np.nan
+                        or_val = np.nan
+            else:
+                inference_family = None
+                p_value = np.nan
+                p_source = None
+
+        if (
+            inference_family is None
+            and target_ix is not None
+            and target in X_full_zv.columns
+        ):
+            x_target_vec = X_full_zv.iloc[:, int(target_ix)].to_numpy(dtype=np.float64, copy=False)
+            p_sc, _ = _score_test_from_reduced(
+                X_red_zv,
+                yb,
+                x_target_vec,
+                const_ix=const_ix_red,
+            )
+            if np.isfinite(p_sc):
+                p_value = p_sc
+                p_source = "score_chi2"
+                inference_family = "score"
+            else:
+                p_emp, _ = _score_bootstrap_from_reduced(
+                    X_red_zv,
+                    yb,
+                    x_target_vec,
+                    const_ix=const_ix_red,
+                )
+                if np.isfinite(p_emp):
+                    p_value = p_emp
+                    p_source = "score_boot"
+                    inference_family = "score_boot"
+
+        inference_type = inference_family if inference_family is not None else "none"
+        p_valid = bool(np.isfinite(p_value))
+
+        out = {
+            "Phenotype": s_name,
+            "P_LRT_Overall": float(p_value) if np.isfinite(p_value) else np.nan,
+            "P_Overall_Valid": p_valid,
+            "P_Source": p_source,
+            "P_Method": p_source,
+            "LRT_df_Overall": 1 if p_valid else np.nan,
+            "Inference_Type": inference_type,
+            "CI_Method": ci_method,
+            "CI_Sided": ci_sided,
+            "CI_Label": ci_label,
+            "CI_Valid": bool(ci_valid),
+            "CI_LO_OR": ci_lo_or,
+            "CI_HI_OR": ci_hi_or,
+            "Model_Notes": note,
+            "N_Total_Used": n_total_used,
+            "N_Cases_Used": n_cases_used,
+            "N_Controls_Used": n_ctrls_used,
+        }
+        if not p_valid:
+            out["LRT_Overall_Reason"] = "fit_failed"
 
         model_notes = [note] if note else []
         if isinstance(reason_full, str) and reason_full:
             model_notes.append(reason_full)
         if isinstance(reason_red, str) and reason_red:
             model_notes.append(reason_red)
+        model_notes.append(f"inference={inference_type}")
+        if ci_method:
+            model_notes.append(f"ci={ci_method}")
+
+        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
+        final_cols_names = list(X_full_zv.columns)
+        final_cols_pos = [col_ix.get(c, -1) for c in final_cols_names]
 
         res_record = {
             "Phenotype": s_name,
@@ -1790,18 +2283,25 @@ def lrt_overall_worker(task):
             "N_Controls": n_ctrls_pre,
             "Beta": beta_full,
             "OR": or_val,
-            "P_Value": wald_p,
-            "OR_CI95": ci95,
+            "P_Value": float(p_value) if np.isfinite(p_value) else p_value,
+            "P_Valid": p_valid,
+            "P_Source": p_source,
+            "OR_CI95": or_ci95,
+            "CI_Method": ci_method,
+            "CI_Sided": ci_sided,
+            "CI_Label": ci_label,
+            "CI_Valid": bool(ci_valid),
+            "CI_LO_OR": ci_lo_or,
+            "CI_HI_OR": ci_hi_or,
             "Used_Ridge": used_ridge_full,
-            "Final_Is_MLE": bool(final_is_mle),
-            "Used_Firth": used_firth_full,
+            "Final_Is_MLE": inference_type == "mle",
+            "Used_Firth": inference_type == "firth",
+            "Inference_Type": inference_type,
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
-            "Model_Notes": ";".join(model_notes)
+            "Model_Notes": ";".join(model_notes),
         }
-        final_cols_names = list(X_full_zv.columns)
-        final_cols_pos = [col_ix.get(c, -1) for c in final_cols_names]
 
         io.atomic_write_json(res_path, res_record)
         io.atomic_write_json(res_path + ".meta.json", {
@@ -1826,7 +2326,7 @@ def lrt_overall_worker(task):
             "final_cols_names": final_cols_names,
             "final_cols_pos": final_cols_pos,
             "full_llf": float(getattr(fit_full, "llf", np.nan)),
-            "full_is_mle": bool(final_is_mle),
+            "full_is_mle": bool(res_record.get("Final_Is_MLE", False)),
             "used_firth": used_firth_full,
             "used_ridge": used_ridge_full,
             "prune_recipe_version": "zv+greedy-rank-v1",
@@ -1838,7 +2338,7 @@ def lrt_overall_worker(task):
             "final_cols_names": final_cols_names,
             "final_cols_pos": final_cols_pos,
             "full_llf": float(getattr(fit_full, "llf", np.nan)),
-            "full_is_mle": bool(final_is_mle),
+            "full_is_mle": bool(res_record.get("Final_Is_MLE", False)),
             "used_firth": used_firth_full,
             "used_ridge": used_ridge_full,
             "prune_recipe_version": "zv+greedy-rank-v1",
@@ -2014,7 +2514,13 @@ def bootstrap_overall_worker(task):
         _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
 
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
-        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
+        target_ix_full = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
+        fit_full, reason_full = _fit_logit_ladder(
+            X_full_zv,
+            yb,
+            const_ix=const_ix_full,
+            target_ix=target_ix_full,
+        )
         beta_full, wald_p, ci95, or_val = np.nan, np.nan, None, np.nan
         final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
         used_firth_full = bool(getattr(fit_full, "_used_firth", False))
@@ -2102,7 +2608,17 @@ def lrt_followup_worker(task):
         y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base_df.index, dtype=np.int8)
 
         Xb, yb, note, skip = _apply_sex_restriction(X_base_df, y_series)
-        out = {'Phenotype': s_name, 'P_LRT_AncestryxDosage': np.nan, 'LRT_df': np.nan, 'LRT_Reason': "", "Model_Notes": note}
+        out = {
+            'Phenotype': s_name,
+            'P_LRT_AncestryxDosage': np.nan,
+            'P_Stage2_Valid': False,
+            'P_Method': None,
+            'P_Source': None,
+            'Inference_Type': 'none',
+            'LRT_df': np.nan,
+            'LRT_Reason': "",
+            'Model_Notes': note,
+        }
         used_index_fp = _index_fingerprint(Xb.index)
         sex_cfg = {
             "sex_restrict_mode": str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower(),
@@ -2180,8 +2696,14 @@ def lrt_followup_worker(task):
         const_ix_red = X_red_zv.columns.get_loc('const') if 'const' in X_red_zv.columns else None
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
 
-        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red, prefer_mle_first=bool(note))
-        fit_full, reason_full = _fit_logit_ladder(X_full_zv, yb, const_ix=const_ix_full, prefer_mle_first=bool(note))
+        fit_red, reason_red = _fit_logit_ladder(X_red_zv, yb, const_ix=const_ix_red)
+        target_ix_full = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
+        fit_full, reason_full = _fit_logit_ladder(
+            X_full_zv,
+            yb,
+            const_ix=const_ix_full,
+            target_ix=target_ix_full,
+        )
 
         if fit_red is not None:
             _print_fit_diag(
@@ -2211,65 +2733,266 @@ def lrt_followup_worker(task):
                 params=fit_full.params,
                 notes=[note] if note else []
             )
-        red_final_is_mle = bool(getattr(fit_red, "_final_is_mle", False))
-        full_final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
-        red_used_firth = bool(getattr(fit_red, "_used_firth", False))
-        full_used_firth = bool(getattr(fit_full, "_used_firth", False))
-        red_is_classic = red_final_is_mle and (not red_used_firth)
-        full_is_classic = full_final_is_mle and (not full_used_firth)
+        r_full, r_red = np.linalg.matrix_rank(X_full_zv.to_numpy()), np.linalg.matrix_rank(X_red_zv.to_numpy())
+        df_lrt = max(0, int(r_full - r_red))
+        inference_family = None
+        fit_full_use = None
+        fit_red_use = None
+        if df_lrt > 0:
+            full_is_mle = bool(getattr(fit_full, "_final_is_mle", False)) and not bool(getattr(fit_full, "_used_firth", False))
+            red_is_mle = bool(getattr(fit_red, "_final_is_mle", False)) and not bool(getattr(fit_red, "_used_firth", False))
+            if (
+                fit_full is not None
+                and fit_red is not None
+                and full_is_mle
+                and red_is_mle
+                and _ok_mle_fit(fit_full, X_full_zv, yb)
+                and _ok_mle_fit(fit_red, X_red_zv, yb)
+            ):
+                inference_family = "mle"
+                fit_full_use = fit_full
+                fit_red_use = fit_red
+            else:
+                fit_full_firth = fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_full_zv, yb)
+                fit_red_firth = fit_red if bool(getattr(fit_red, "_used_firth", False)) else _firth_refit(X_red_zv, yb)
+                if (fit_full_firth is not None) and (fit_red_firth is not None):
+                    inference_family = "firth"
+                    fit_full_use = fit_full_firth
+                    fit_red_use = fit_red_firth
 
-        if red_is_classic and full_is_classic and fit_full and fit_red and hasattr(fit_full, 'llf') and hasattr(fit_red, 'llf') and fit_full.llf >= fit_red.llf:
-            r_full, r_red = np.linalg.matrix_rank(X_full_zv.to_numpy()), np.linalg.matrix_rank(X_red_zv.to_numpy())
-            df_lrt = max(0, int(r_full - r_red))
-            if df_lrt > 0:
-                llr = 2 * (fit_full.llf - fit_red.llf)
-                out['P_LRT_AncestryxDosage'] = sp_stats.chi2.sf(llr, df_lrt)
+        if inference_family is not None:
+            ll_full = float(getattr(fit_full_use, "llf", np.nan))
+            ll_red = float(getattr(fit_red_use, "llf", np.nan))
+            if np.isfinite(ll_full) and np.isfinite(ll_red):
+                stat = max(0.0, 2.0 * (ll_full - ll_red))
+                p_stage2 = float(sp_stats.chi2.sf(stat, df_lrt))
+                out['P_LRT_AncestryxDosage'] = p_stage2
+                out['P_Stage2_Valid'] = np.isfinite(p_stage2)
+                out['P_Method'] = "lrt_mle" if inference_family == "mle" else "lrt_firth"
+                out['P_Source'] = out['P_Method']
+                out['Inference_Type'] = inference_family
                 out['LRT_df'] = df_lrt
-            else: out['LRT_Reason'] = "zero_df_lrt"
-        else: out['LRT_Reason'] = "penalized_or_firth_in_path"
+            else:
+                out['LRT_Reason'] = "fit_failed"
+        else:
+            out['LRT_Reason'] = "zero_df_lrt" if df_lrt == 0 else "fit_failed"
 
         for anc in levels_sorted:
             anc_mask = (anc_vec == anc).to_numpy()
             X_anc, y_anc = Xb[anc_mask], yb[anc_mask]
 
-            _, n_cases_anc, n_ctrls_anc, _ = _counts_from_y(y_anc)
-            out[f"{anc.upper()}_N"], out[f"{anc.upper()}_N_Cases"], out[f"{anc.upper()}_N_Controls"] = len(y_anc), n_cases_anc, n_ctrls_anc
+            anc_upper = anc.upper()
+            n_total_anc = len(y_anc)
+            n_cases_anc = int(y_anc.sum())
+            n_ctrls_anc = n_total_anc - n_cases_anc
+
+            out[f"{anc_upper}_N"] = n_total_anc
+            out[f"{anc_upper}_N_Cases"] = n_cases_anc
+            out[f"{anc_upper}_N_Controls"] = n_ctrls_anc
+            out[f"{anc_upper}_OR"] = np.nan
+            out[f"{anc_upper}_P"] = np.nan
+            out[f"{anc_upper}_P_Valid"] = False
+            out[f"{anc_upper}_P_Source"] = None
+            out[f"{anc_upper}_Inference_Type"] = "none"
+            out[f"{anc_upper}_CI_Method"] = None
+            out[f"{anc_upper}_CI_Sided"] = "two"
+            out[f"{anc_upper}_CI_Label"] = ""
+            out[f"{anc_upper}_CI_Valid"] = False
+            out[f"{anc_upper}_CI_LO_OR"] = np.nan
+            out[f"{anc_upper}_CI_HI_OR"] = np.nan
+            out[f"{anc_upper}_CI95"] = None
+            out[f"{anc_upper}_REASON"] = ""
 
             ok, reason, det = validate_min_counts_for_fit(
                 y_anc,
                 stage_tag=f"lrt_followup:{anc}",
                 extra_context={"phenotype": s_name, "ancestry": anc},
                 cases_key="PER_ANC_MIN_CASES",
-                controls_key="PER_ANC_MIN_CONTROLS"
+                controls_key="PER_ANC_MIN_CONTROLS",
             )
             if not ok:
-                print(f"[skip] name={s_name_safe} stage=LRT-Followup anc={anc} reason={reason} "
-                      f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
-                      f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}", flush=True)
-                out[f"{anc.upper()}_REASON"] = reason
+                print(
+                    f"[skip] name={s_name_safe} stage=LRT-Followup anc={anc} reason={reason} "
+                    f"N={det['N']}/{det['N_cases']}/{det['N_ctrls']} "
+                    f"min={det['min_cases']}/{det['min_ctrls']} neff={det['N_eff']:.1f}/{det['min_neff']:.1f}",
+                    flush=True,
+                )
+                out[f"{anc_upper}_REASON"] = reason
                 continue
 
-            X_anc_zv = _drop_zero_variance(X_anc, keep_cols=('const',), always_keep=(target,))
-            X_anc_zv = _drop_rank_deficient(X_anc_zv, keep_cols=('const',), always_keep=(target,))
-            const_ix_anc = X_anc_zv.columns.get_loc('const') if 'const' in X_anc_zv.columns else None
-            fit, _ = _fit_logit_ladder(X_anc_zv, y_anc, const_ix=const_ix_anc, prefer_mle_first=bool(note))
+            X_anc_zv = _drop_zero_variance(X_anc, keep_cols=("const",), always_keep=(target,))
+            X_anc_zv = _drop_rank_deficient(X_anc_zv, keep_cols=("const",), always_keep=(target,))
 
-            if fit and target in getattr(fit, "params", {}):
-                beta = float(fit.params[target])
-                out[f"{anc.upper()}_OR"] = float(np.exp(beta))
-                final_is_mle = bool(getattr(fit, "_final_is_mle", False))
-                used_firth = bool(getattr(fit, "_used_firth", False))
-                if (final_is_mle or used_firth) and hasattr(fit, "pvalues"):
-                    pval = float(fit.pvalues.get(target, np.nan))
-                    out[f"{anc.upper()}_P"] = pval
-                    se = float(getattr(fit, "bse", {}).get(target, np.nan)) if hasattr(fit, "bse") else np.nan
-                    if np.isfinite(se) and se > 0:
-                        lo, hi = np.exp(beta - 1.96 * se), np.exp(beta + 1.96 * se)
-                        out[f"{anc.upper()}_CI95"] = f"{lo:.3f},{hi:.3f}"
-                else:
-                    out[f"{anc.upper()}_REASON"] = "subset_fit_penalized"
+            if target not in X_anc_zv.columns:
+                out[f"{anc_upper}_REASON"] = "target_pruned"
+                continue
+
+            const_ix_anc = X_anc_zv.columns.get_loc('const') if 'const' in X_anc_zv.columns else None
+            target_ix_anc = X_anc_zv.columns.get_loc(target)
+
+            red_cols = [c for c in X_anc_zv.columns if c != target]
+            X_anc_red = X_anc_zv[red_cols]
+            const_ix_red = X_anc_red.columns.get_loc('const') if 'const' in X_anc_red.columns else None
+
+            fit_full, reason_full = _fit_logit_ladder(
+                X_anc_zv,
+                y_anc,
+                const_ix=const_ix_anc,
+                target_ix=target_ix_anc,
+            )
+            fit_red, reason_red = _fit_logit_ladder(
+                X_anc_red,
+                y_anc,
+                const_ix=const_ix_red,
+            )
+
+            if fit_full is not None:
+                _print_fit_diag(
+                    s_name_safe=s_name_safe,
+                    stage="LRT-Followup",
+                    model_tag=f"{anc}_full",
+                    N_total=n_total_anc,
+                    N_cases=n_cases_anc,
+                    N_ctrls=n_ctrls_anc,
+                    solver_tag=reason_full,
+                    X=X_anc_zv,
+                    y=y_anc,
+                    params=fit_full.params,
+                    notes=[note, f"anc={anc}"] if note else [f"anc={anc}"],
+                )
+            if fit_red is not None:
+                _print_fit_diag(
+                    s_name_safe=s_name_safe,
+                    stage="LRT-Followup",
+                    model_tag=f"{anc}_reduced",
+                    N_total=n_total_anc,
+                    N_cases=n_cases_anc,
+                    N_ctrls=n_ctrls_anc,
+                    solver_tag=reason_red,
+                    X=X_anc_red,
+                    y=y_anc,
+                    params=fit_red.params,
+                    notes=[note, f"anc={anc}"] if note else [f"anc={anc}"],
+                )
+
+            inference_family = None
+            fit_full_use = None
+            fit_red_use = None
+
+            if (
+                fit_full is not None
+                and fit_red is not None
+                and bool(getattr(fit_full, "_final_is_mle", False))
+                and not bool(getattr(fit_full, "_used_firth", False))
+                and bool(getattr(fit_red, "_final_is_mle", False))
+                and not bool(getattr(fit_red, "_used_firth", False))
+                and _ok_mle_fit(fit_full, X_anc_zv, y_anc, target_ix=target_ix_anc)
+                and _ok_mle_fit(fit_red, X_anc_red, y_anc)
+            ):
+                inference_family = "mle"
+                fit_full_use = fit_full
+                fit_red_use = fit_red
             else:
-                out[f"{anc.upper()}_REASON"] = "subset_fit_failed"
+                fit_full_firth = fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_anc_zv, y_anc)
+                fit_red_firth = fit_red if bool(getattr(fit_red, "_used_firth", False)) else _firth_refit(X_anc_red, y_anc)
+                if (fit_full_firth is not None) and (fit_red_firth is not None):
+                    inference_family = "firth"
+                    fit_full_use = fit_full_firth
+                    fit_red_use = fit_red_firth
+
+            p_val = np.nan
+            p_source = None
+            inference_type = "none"
+            ci_method = None
+            ci_sided = "two"
+            ci_label = ""
+            ci_valid = False
+            ci_lo_or = np.nan
+            ci_hi_or = np.nan
+            ci_str = None
+            beta_val = np.nan
+            or_val = np.nan
+
+            if inference_family is not None:
+                ll_full = float(getattr(fit_full_use, "llf", np.nan))
+                ll_red = float(getattr(fit_red_use, "llf", np.nan))
+                if np.isfinite(ll_full) and np.isfinite(ll_red):
+                    stat = max(0.0, 2.0 * (ll_full - ll_red))
+                    p_val = float(sp_stats.chi2.sf(stat, 1))
+                    p_source = "lrt_mle" if inference_family == "mle" else "lrt_firth"
+                    inference_type = inference_family
+                    ci_info = _profile_ci_beta(X_anc_zv, y_anc, target_ix_anc, fit_full_use, kind=inference_family)
+                    ci_method = ci_info.get("method")
+                    ci_sided = ci_info.get("sided", "two")
+                    ci_valid = bool(ci_info.get("valid", False))
+                    if ci_valid:
+                        lo_beta = ci_info.get("lo")
+                        hi_beta = ci_info.get("hi")
+                        if lo_beta == -np.inf:
+                            ci_lo_or = 0.0
+                        elif np.isfinite(lo_beta):
+                            ci_lo_or = float(np.exp(lo_beta))
+                        if hi_beta == np.inf:
+                            ci_hi_or = np.inf
+                        elif np.isfinite(hi_beta):
+                            ci_hi_or = float(np.exp(hi_beta))
+                        ci_str = _fmt_ci(ci_lo_or, ci_hi_or)
+                        if ci_sided == "one":
+                            ci_label = "one-sided (boundary)"
+                    params_full = getattr(fit_full_use, "params", None)
+                    if params_full is not None:
+                        try:
+                            beta_val = float(np.asarray(params_full, dtype=np.float64)[target_ix_anc])
+                            or_val = float(np.exp(beta_val))
+                        except Exception:
+                            beta_val = np.nan
+                            or_val = np.nan
+                else:
+                    inference_family = None
+
+            if inference_family is None:
+                x_target_vec = X_anc_zv.iloc[:, int(target_ix_anc)].to_numpy(dtype=np.float64, copy=False)
+                p_sc, _ = _score_test_from_reduced(
+                    X_anc_red,
+                    y_anc,
+                    x_target_vec,
+                    const_ix=const_ix_red,
+                )
+                if np.isfinite(p_sc):
+                    p_val = p_sc
+                    p_source = "score_chi2"
+                    inference_type = "score"
+                else:
+                    p_emp, _ = _score_bootstrap_from_reduced(
+                        X_anc_red,
+                        y_anc,
+                        x_target_vec,
+                        const_ix=const_ix_red,
+                    )
+                    if np.isfinite(p_emp):
+                        p_val = p_emp
+                        p_source = "score_boot"
+                        inference_type = "score_boot"
+
+            p_valid = bool(np.isfinite(p_val))
+            if not p_valid:
+                out[f"{anc_upper}_REASON"] = "subset_fit_failed"
+                continue
+
+            out[f"{anc_upper}_OR"] = or_val
+            out[f"{anc_upper}_P"] = float(p_val)
+            out[f"{anc_upper}_P_Valid"] = True
+            out[f"{anc_upper}_P_Source"] = p_source
+            out[f"{anc_upper}_Inference_Type"] = inference_type
+            out[f"{anc_upper}_CI_Method"] = ci_method
+            out[f"{anc_upper}_CI_Sided"] = ci_sided
+            out[f"{anc_upper}_CI_Label"] = ci_label
+            out[f"{anc_upper}_CI_Valid"] = bool(ci_valid)
+            out[f"{anc_upper}_CI_LO_OR"] = ci_lo_or
+            out[f"{anc_upper}_CI_HI_OR"] = ci_hi_or
+            out[f"{anc_upper}_CI95"] = ci_str
+            out[f"{anc_upper}_REASON"] = ""
+
 
 
         io.atomic_write_json(result_path, out)
