@@ -653,21 +653,29 @@ def test_lrt_overall_meta_idempotency(test_ctx):
         shm.close(); shm.unlink()
 
 def test_final_results_has_ci_and_ancestry_fields():
-    with temp_workspace() as tmpdir, preserve_run_globals(), \
-         patch('phewas.run.bigquery.Client'), \
-         patch('phewas.run.io.load_related_to_remove', return_value=set()), \
-         patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()):
+    with temp_workspace() as tmpdir, preserve_run_globals():
         core_data, phenos = make_synth_cohort()
         defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
         local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
-        run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]  # Now a list
-        run.MASTER_RESULTS_CSV = "master_results.csv"
-        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
-        run.FDR_ALPHA = run.LRT_SELECT_ALPHA = 0.4
-        run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
-        run.INVERSION_DOSAGES_FILE = "dummy.tsv"
-        write_tsv(run.INVERSION_DOSAGES_FILE, core_data["inversion_main"].reset_index().rename(columns={'person_id':'SampleID'}))
-        run.main()
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('phewas.run.bigquery.Client'))
+            stack.enter_context(patch('phewas.run.io.load_related_to_remove', return_value=set()))
+            stack.enter_context(patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()))
+            stack.enter_context(patch('phewas.run.io.load_pcs', lambda gcp_project, PCS_URI, NUM_PCS, _core=core_data: _core['pcs'].iloc[:, :NUM_PCS]))
+            stack.enter_context(patch('phewas.run.io.load_genetic_sex', lambda gcp_project, SEX_URI, _core=core_data: _core['sex']))
+            stack.enter_context(patch('phewas.run.io.load_ancestry_labels', lambda gcp_project, LABELS_URI, _core=core_data: _core['ancestry']))
+
+            run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]  # Now a list
+            run.MASTER_RESULTS_CSV = "master_results.csv"
+            run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
+            run.NUM_PCS = core_data['pcs'].shape[1]
+            run.FDR_ALPHA = run.LRT_SELECT_ALPHA = 0.4
+            run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
+            run.INVERSION_DOSAGES_FILE = "dummy.tsv"
+            write_tsv(run.INVERSION_DOSAGES_FILE, core_data["inversion_main"].reset_index().rename(columns={'person_id':'SampleID'}))
+            run.main()
+
         output_path = Path(run.MASTER_RESULTS_CSV)
         assert output_path.exists()
         df = pd.read_csv(output_path, sep='\t')
