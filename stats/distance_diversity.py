@@ -146,9 +146,12 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
     """Create plot for points within some number from edge."""
     print(f"\n=== Creating {metric} Plot (0-some number) ===")
     start_time = time.time()
-    plt.style.use('seaborn-v0_8-darkgrid')
+    plt.style.use('seaborn-v0_8-white')
     fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
+    for spine in ("top", "right"):
+        ax1.spines[spine].set_visible(False)
+    ax1.tick_params(axis='both', labelsize=14)
     
     if len(all_nz_dists) == 0:
         print("WARNING: No valid data to plot")
@@ -195,12 +198,11 @@ def create_plot(line_nz_data, line_zero_data, all_nz_dists, all_nz_vals, closest
                 ax1.plot(common_x[valid_idx], overall_line[valid_idx], color='black', lw=2, alpha=0.8, label='Overall Non-Zero')
         ax1.legend(loc='upper left')
     
-    ax1.set_title(f'{metric} vs. Distance from Edge (0-some number)', fontsize=16, fontweight='bold')
-    ax1.set_xlabel('Distance from Nearest Edge', fontsize=14)
-    ax1.set_ylabel(f'{metric} Value', fontsize=14)
-    ax2.set_ylabel('Zero-Density (Proportion)', fontsize=14, color='red')
-    ax1.grid(True, ls='--', alpha=0.4)
-    ax2.tick_params(axis='y', colors='red')
+    ax1.set_title(f'{metric} vs. Distance from Edge (0-some number)', fontsize=18, fontweight='bold')
+    ax1.set_xlabel('Distance from Nearest Edge', fontsize=16)
+    ax1.set_ylabel(f'{metric} Value', fontsize=16)
+    ax2.set_ylabel('Zero-Density (Proportion)', fontsize=16, color='red')
+    ax2.tick_params(axis='y', colors='red', labelsize=13)
     ax1.set_xlim(0, 5000)  # Restrict x-axis to 0-some number
     
     plot_path = Path.home() / f'distance_plot_{suffix}_some number.png'

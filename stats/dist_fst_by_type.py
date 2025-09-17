@@ -186,7 +186,7 @@ def create_bar_plot(categories):
             text = f"Permutation p={perm_p_value:.4g}\nNormality p={norm_p:.4g}"
         else:
             text = "Insufficient data"
-        ax.text(i, max_y, text, ha='center', va='bottom', fontsize=10, fontweight='bold')
+        ax.text(i, max_y, text, ha='center', va='bottom', fontsize=13, fontweight='bold')
 
     # Overall category
     all_seqs = sum(categories.values(), [])
@@ -227,7 +227,7 @@ def create_bar_plot(categories):
         text = f"Permutation p={overall_perm_p:.3g}\nNormality p={norm_p_overall:.3g}"
     else:
         text = "Insufficient data"
-    ax.text(len(labels) - 1, max_y, text, ha='center', va='bottom', fontsize=10, fontweight='bold')
+    ax.text(len(labels) - 1, max_y, text, ha='center', va='bottom', fontsize=15, fontweight='bold')
 
     # Plot bars with error bars
     x = np.arange(len(labels))
@@ -235,10 +235,11 @@ def create_bar_plot(categories):
     ax.bar(x + 0.2, middle_means, 0.4, yerr=middle_se, capsize=5, label='Middle Region', color='salmon')
 
     ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.set_ylabel('Mean Fst')
-    ax.set_title('Mean Fst: Flanking vs Middle Regions')
-    ax.legend(title="Regions")
+    ax.set_xticklabels(labels, fontsize=14)
+    ax.set_ylabel('Mean Fst', fontsize=16)
+    ax.set_title('Mean Fst: Flanking vs Middle Regions', fontsize=18)
+    ax.tick_params(axis='y', labelsize=13)
+    ax.legend(title="Regions", fontsize=13, title_fontsize=14)
     plt.tight_layout()
     plt.savefig(OUTPUT_PLOT, dpi=300)
     logger.info(f"Saved plot to {OUTPUT_PLOT}")

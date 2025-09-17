@@ -23,9 +23,6 @@ PAIRWISE_FILE = Path('all_pairwise_results.csv')
 INVERSION_FILE = Path('inv_info.tsv')
 OUTPUT_PLOT_PATH = Path('median_omega_distribution_standalone.png')
 
-# Plotting Style Adjustments
-plt.rcParams.update({'font.size': 14}) # base font size for better readability
-
 RECURRENT_COLOR = 'salmon'
 SINGLE_EVENT_COLOR = 'skyblue'
 RECURRENT_HATCH = '//'
@@ -552,13 +549,12 @@ def plot_median_omega_distribution(pairwise_df, output_plot_path, config):
             ax.hlines(y_val2, xmin=xmin2, xmax=xmax2, color=between_line_color,
                       linewidth=line_width, linestyle='--', zorder=zorder)
 
-    ax.set_ylabel('Percentage of Pairwise Comparisons (%)', fontsize=14)
-    ax.set_title('Distribution of Pairwise ω by Comparison Type and Inversion Class', fontsize=16, pad=15)
+    ax.set_ylabel('Percentage of Pairwise Comparisons (%)', fontsize=16)
+    ax.set_title('Distribution of Pairwise ω by Comparison Type and Inversion Class', fontsize=18, pad=15)
     ax.set_xticks(x)
-    ax.set_xticklabels(display_categories, fontsize=12)
-    ax.legend(fontsize=11, title='Comparison Type & Inversion Class', title_fontsize=12)
-
-    ax.grid(axis='y', linestyle='--', alpha=0.6)
+    ax.set_xticklabels(display_categories, fontsize=14)
+    ax.tick_params(axis='y', labelsize=13)
+    ax.legend(fontsize=13, title='Comparison Type & Inversion Class', title_fontsize=14)
     
     # Dynamically set Y-axis limit
     visible_percentages = []
