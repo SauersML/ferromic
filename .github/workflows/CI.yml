@@ -37,9 +37,6 @@ jobs:
             target: armv7
             openblas_target: ARMV7
           - runner: ubuntu-22.04
-            target: s390x
-            openblas_target: ZARCH_GENERIC
-          - runner: ubuntu-22.04
             target: ppc64le
             openblas_target: POWER9
     steps:
