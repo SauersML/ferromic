@@ -72,14 +72,19 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
                     rows.append({
                         "Phenotype": os.path.splitext(fn)[0],
                         "Inversion": inv,
-                        "P_LRT_Overall": pd.to_numeric(rec.get("P_LRT_Overall"), errors="coerce")
+                        "P_LRT_Overall": pd.to_numeric(rec.get("P_LRT_Overall"), errors="coerce"),
+                        "P_Overall_Valid": bool(rec.get("P_Overall_Valid", False)),
                     })
         if rows:
             lrt_df = pd.DataFrame(rows)
             df = df.merge(lrt_df, on=["Phenotype", "Inversion"], how="left")
         else:
             df["P_LRT_Overall"] = np.nan
-        mask = pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna()
+        if "P_Overall_Valid" in df.columns:
+            df["P_Overall_Valid"] = df["P_Overall_Valid"].fillna(False).astype(bool)
+        else:
+            df["P_Overall_Valid"] = False
+        mask = pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna() & df["P_Overall_Valid"]
         df["Q_GLOBAL"] = np.nan
 
         if int(mask.sum()) > 0:
@@ -141,7 +146,14 @@ def apply_followup_fdr(df, alpha_global, lrt_select_alpha):
     import pandas as pd
 
     pcol_overall = "P_LRT_Overall" if "P_LRT_Overall" in df.columns else ("P_EMP" if "P_EMP" in df.columns else None)
-    m_total = int(pd.to_numeric(df[pcol_overall], errors="coerce").notna().sum()) if pcol_overall else 0
+    if pcol_overall:
+        overall_mask = pd.to_numeric(df[pcol_overall], errors="coerce").notna()
+        if "P_Overall_Valid" in df.columns:
+            overall_mask &= df["P_Overall_Valid"].fillna(False).astype(bool)
+        m_total = int(overall_mask.sum())
+    else:
+        overall_mask = pd.Series([], dtype=bool)
+        m_total = 0
     R_selected = int(pd.to_numeric(df.get("Sig_Global"), errors="coerce").fillna(False).astype(bool).sum())
     alpha_within = (alpha_global * (R_selected / m_total)) if m_total > 0 else 0.0
 
@@ -149,7 +161,11 @@ def apply_followup_fdr(df, alpha_global, lrt_select_alpha):
         selected_idx = df.index[df["Sig_Global"] == True].tolist()
         for idx in selected_idx:
             p_lrt = df.at[idx, "P_LRT_AncestryxDosage"]
-            if (not pd.notna(p_lrt)) or (p_lrt >= lrt_select_alpha):
+            stage2_valid = True
+            if "P_Stage2_Valid" in df.columns:
+                val_stage2 = df.at[idx, "P_Stage2_Valid"]
+                stage2_valid = bool(val_stage2) if pd.notna(val_stage2) else False
+            if (not stage2_valid) or (not pd.notna(p_lrt)) or (p_lrt >= lrt_select_alpha):
                 continue
             levels_str = str(df.at[idx, "LRT_Ancestry_Levels"]) if "LRT_Ancestry_Levels" in df.columns else ""
             anc_levels = [s for s in levels_str.split(",") if s]
@@ -159,7 +175,12 @@ def apply_followup_fdr(df, alpha_global, lrt_select_alpha):
                 if pcol in df.columns:
                     pval = df.at[idx, pcol]
                     reason = df.at[idx, rcol] if rcol in df.columns else ""
-                    if pd.notna(pval) and reason not in ("insufficient_stratum_counts", "not_selected_by_LRT"):
+                    valid_col = f"{anc}_P_Valid"
+                    valid = pd.notna(pval)
+                    if valid_col in df.columns:
+                        val = df.at[idx, valid_col]
+                        valid = bool(val) if pd.notna(val) else False
+                    if valid and pd.notna(pval) and reason not in ("insufficient_stratum_counts", "not_selected_by_LRT"):
                         pvals.append(float(pval))
                         keys.append(anc)
             if pvals:
@@ -181,7 +202,17 @@ def apply_followup_fdr(df, alpha_global, lrt_select_alpha):
                 adj_col, rcol = f"{anc}_P_FDR", f"{anc}_REASON"
                 p_adj = df.at[idx, adj_col] if adj_col in df.columns else np.nan
                 reason = df.at[idx, rcol] if rcol in df.columns else ""
-                if pd.notna(p_adj) and p_adj < alpha_within and reason not in ("insufficient_stratum_counts", "not_selected_by_LRT"):
+                valid = True
+                valid_col = f"{anc}_P_Valid"
+                if valid_col in df.columns:
+                    val = df.at[idx, valid_col]
+                    valid = bool(val) if pd.notna(val) else False
+                if (
+                    valid
+                    and pd.notna(p_adj)
+                    and p_adj < alpha_within
+                    and reason not in ("insufficient_stratum_counts", "not_selected_by_LRT")
+                ):
                     sig_groups.append(anc)
             df.at[idx, "FINAL_INTERPRETATION"] = ",".join(sig_groups) if sig_groups else "unable to determine"
 
