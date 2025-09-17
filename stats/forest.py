@@ -48,17 +48,13 @@ TICK_OR_VALUES   = [0.2, 0.5, 0.9, 1.1, 1.5, 2.0]
 mpl.rcParams.update({
     "figure.dpi": 120,
     "savefig.dpi": 300,
-    "font.size": 12.0,
-    "axes.labelsize": 12.0,
+    "font.size": 14.0,
+    "axes.labelsize": 16.0,
     "axes.linewidth": 1.05,
-    "xtick.labelsize": 11.0,
-    "ytick.labelsize": 11.0,
+    "xtick.labelsize": 13.0,
+    "ytick.labelsize": 13.0,
     "axes.spines.top": False,
     "axes.spines.right": False,
-    "axes.grid": True,
-    "grid.linestyle": ":",
-    "grid.linewidth": 0.7,
-    "grid.alpha": GRID_ALPHA,
     "pdf.fonttype": 42,
     "ps.fonttype": 42,
 })
@@ -280,7 +276,7 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
 
     # Right panel styling
     axR.set_yticks([])
-    axR.set_xlabel("Odds ratio")
+    axR.set_xlabel("Odds ratio", fontsize=16)
 
     # Warped x-limits (not forced symmetric)
     x_left_warp  = float(warp_or_to_axis([x_or_left])[0])

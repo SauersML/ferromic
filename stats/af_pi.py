@@ -25,7 +25,7 @@ COORDINATE_TOLERANCE = 1
 COMBINED_PLOT_FILENAME = "scatter_af_vs_pi_combined.png"
 
 # Styling
-PLOT_STYLE = "whitegrid"
+PLOT_STYLE = "white"
 SCATTER_COLOR_DIRECT = "#377eb8" # Blue
 SCATTER_COLOR_INVERTED = "#ff7f00" # Orange
 SCATTER_ALPHA = 0.6
@@ -36,10 +36,10 @@ LOESS_COLOR = 'darkred'
 LOESS_LINEWIDTH = 2.0
 LOESS_LINESTYLE = '--'
 FIGURE_SIZE = (12, 6) # Width, Height for side-by-side plots
-TITLE_FONTSIZE = 16
-SUBPLOT_TITLE_FONTSIZE = 14
-AXIS_LABEL_FONTSIZE = 12
-CORR_TEXT_FONTSIZE = 10
+TITLE_FONTSIZE = 18
+SUBPLOT_TITLE_FONTSIZE = 16
+AXIS_LABEL_FONTSIZE = 15
+CORR_TEXT_FONTSIZE = 12
 
 
 # --- Logging Setup ---
@@ -120,6 +120,7 @@ def plot_subplot(ax, df, x_col, y_col, title, y_axis_label, scatter_color):
     ax.set_title(title, fontsize=SUBPLOT_TITLE_FONTSIZE, pad=10)
     ax.set_xlabel("Inversion Allele Frequency", fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylabel(y_axis_label, fontsize=AXIS_LABEL_FONTSIZE)
+    ax.tick_params(axis='both', labelsize=AXIS_LABEL_FONTSIZE - 2)
 
     # Add correlation text
     add_correlation_text(ax, rho, pval, n_pairs)

@@ -96,7 +96,7 @@ def plot_top_n_sequences(data_dict):
     start_time = time.time()
     print(f"INFO: Generating plot at {time.ctime()}")
     
-    plt.style.use('seaborn-v0_8-darkgrid')
+    plt.style.use('seaborn-v0_8-white')
     fig, ax = plt.subplots(figsize=(14, 8))
     
     for i, (header, (length, data)) in enumerate(data_dict.items()):
@@ -111,11 +111,11 @@ def plot_top_n_sequences(data_dict):
         ax.plot(positions, smoothed, color=color, label=header, lw=2)
         print(f"DEBUG: Plotted smoothed data for {header[:50]}... with {len(smoothed)} points")
     
-    ax.set_xlabel("Position (bp)", fontsize=12)
-    ax.set_ylabel("Smoothed Pi Value (1000 bp window)", fontsize=12)
-    ax.set_title(f"Top {len(data_dict)} Longest Filtered Pi Sequences", fontsize=14, fontweight='bold')
-    ax.legend(title="Filtered Pi Headers", loc='upper right', fontsize=8, title_fontsize=10)
-    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.set_xlabel("Position (bp)", fontsize=16)
+    ax.set_ylabel("Smoothed Pi Value (1000 bp window)", fontsize=16)
+    ax.set_title(f"Top {len(data_dict)} Longest Filtered Pi Sequences", fontsize=18, fontweight='bold')
+    ax.tick_params(axis='both', labelsize=13)
+    ax.legend(title="Filtered Pi Headers", loc='upper right', fontsize=12, title_fontsize=14)
     
     plot_path = Path.home() / "top_filtered_pi_smoothed.png"
     plt.tight_layout()

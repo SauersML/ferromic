@@ -232,7 +232,7 @@ def generate_percentile_plot(agg_df: pd.DataFrame):
         print("  Skipping plot generation: No data available.")
         return
 
-    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.style.use('seaborn-v0_8-white')
     fig, ax = plt.subplots(figsize=(14, 9))
     group_styles = {
         ('Recurrent', 'Direct'): {'color': 'royalblue', 'linestyle': '-', 'label': 'Recurrent Direct'},
@@ -259,14 +259,13 @@ def generate_percentile_plot(agg_df: pd.DataFrame):
                     color=style['color'], alpha=0.15
                 )
 
-    ax.set_xlabel(r"Percentile of Per-Sequence Median $\omega$ (within group)", fontsize=14)
-    ax.set_ylabel(r"Mean of Per-Sequence Median $\omega$ (within percentile bin)", fontsize=14)
-    ax.set_title(r"Distribution of Per-Sequence Median $\omega$ at High Percentiles", fontsize=16)
+    ax.set_xlabel(r"Percentile of Per-Sequence Median $\omega$ (within group)", fontsize=16)
+    ax.set_ylabel(r"Mean of Per-Sequence Median $\omega$ (within percentile bin)", fontsize=16)
+    ax.set_title(r"Distribution of Per-Sequence Median $\omega$ at High Percentiles", fontsize=18)
     ax.set_xlim(PERCENTILE_START, PERCENTILE_END)
-    ax.tick_params(axis='x', labelsize=10)
-    ax.tick_params(axis='y', labelsize=12)
-    ax.legend(fontsize=12, loc='upper left')
-    ax.grid(True, which='major', axis='y', linestyle='--', alpha=0.6)
+    ax.tick_params(axis='x', labelsize=13)
+    ax.tick_params(axis='y', labelsize=13)
+    ax.legend(fontsize=13, loc='upper left')
 
     plot_path = PLOTS_DIR / "omega_percentile_distribution.png"
     plt.tight_layout()
