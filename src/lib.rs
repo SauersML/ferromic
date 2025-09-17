@@ -14,6 +14,7 @@ pub mod pca;
 mod tests {
     mod filter_tests;
     mod hudson_fst_tests;
+    mod interval_tests;
 }
 
 /// PyO3 wrapper for count_segregating_sites
