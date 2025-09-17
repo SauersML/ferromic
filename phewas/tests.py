@@ -247,22 +247,60 @@ def test_should_skip_meta_equivalence(test_ctx):
         allowed_fp = "dummy_allowed_fp"
         # Define the metadata for the test
         meta = {
-            "model_columns": list(core_df.columns), "num_pcs": 10, "min_cases": 10, "min_ctrls": 10,
-            "target": TEST_TARGET_INVERSION, "category": "cat", "core_index_fp": models._index_fingerprint(core_df.index),
-            "case_idx_fp": "dummy_fp", "allowed_mask_fp": allowed_fp, "ridge_l2_base": 1.0
+            "model_columns": list(core_df.columns),
+            "num_pcs": 10,
+            "min_cases": test_ctx["MIN_CASES_FILTER"],
+            "min_ctrls": test_ctx["MIN_CONTROLS_FILTER"],
+            "min_neff": test_ctx["MIN_NEFF_FILTER"],
+            "target": TEST_TARGET_INVERSION,
+            "category": "cat",
+            "core_index_fp": models._index_fingerprint(core_df.index),
+            "case_idx_fp": "dummy_fp",
+            "allowed_mask_fp": allowed_fp,
+            "ridge_l2_base": test_ctx["RIDGE_L2_BASE"],
+            "ctx_tag": test_ctx["CTX_TAG"],
+            "cache_version_tag": test_ctx["CACHE_VERSION_TAG"],
         }
         # Write the metadata to a JSON file
         io.write_meta_json("test.meta.json", meta)
         models.CTX = test_ctx
         # Check that the skip function returns True when the context is the same
         core_index_fp = models._index_fingerprint(core_df.index)
-        assert models._should_skip("test.meta.json", core_df.columns, core_index_fp, "dummy_fp", "cat", TEST_TARGET_INVERSION, allowed_fp)
+        thresholds = {
+            "min_cases": test_ctx["MIN_CASES_FILTER"],
+            "min_ctrls": test_ctx["MIN_CONTROLS_FILTER"],
+            "min_neff": test_ctx["MIN_NEFF_FILTER"],
+        }
+        assert models._should_skip(
+            "test.meta.json",
+            core_df.columns,
+            core_index_fp,
+            "dummy_fp",
+            "cat",
+            TEST_TARGET_INVERSION,
+            allowed_fp,
+            thresholds=thresholds,
+        )
         # Change the context
         test_ctx_changed = test_ctx.copy()
         test_ctx_changed["MIN_CASES_FILTER"] = 11
         models.CTX = test_ctx_changed
         # Check that the skip function returns False when the context is different
-        assert not models._should_skip("test.meta.json", core_df.columns, core_index_fp, "dummy_fp", "cat", TEST_TARGET_INVERSION, allowed_fp)
+        thresholds_changed = {
+            "min_cases": test_ctx_changed["MIN_CASES_FILTER"],
+            "min_ctrls": test_ctx_changed["MIN_CONTROLS_FILTER"],
+            "min_neff": test_ctx_changed["MIN_NEFF_FILTER"],
+        }
+        assert not models._should_skip(
+            "test.meta.json",
+            core_df.columns,
+            core_index_fp,
+            "dummy_fp",
+            "cat",
+            TEST_TARGET_INVERSION,
+            allowed_fp,
+            thresholds=thresholds_changed,
+        )
 
 def test_pheno_cache_loader_returns_correct_indices():
     with temp_workspace():
