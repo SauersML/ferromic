@@ -49,7 +49,9 @@ jobs:
           python-version: 3.x
       - name: Work around missing s390x assembler support
         if: ${{ matrix.platform.target == 's390x' }}
-        run: echo "OPENSSL_NO_ASM=1" >> $GITHUB_ENV
+        run: |
+          echo "OPENSSL_NO_ASM=1" >> $GITHUB_ENV
+          echo "OPENSSL_SRC_CONFIGURE_ARGS=no-asm" >> $GITHUB_ENV
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         env:
