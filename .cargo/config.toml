@@ -2,3 +2,6 @@
 SSL_CERT_FILE = { value = "/etc/ssl/certs/ca-certificates.crt", force = true }
 SSL_CERT_DIR = { value = "/etc/ssl/certs", force = true }
 OPENSSL_NO_PKG_CONFIG = { value = "1", force = true }
+
+[target.s390x-unknown-linux-gnu.env]
+OPENSSL_NO_ASM = "1"
