@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import traceback
 import sys
 import atexit
+import math
 
 import numpy as np
 import pandas as pd
@@ -31,6 +32,11 @@ MLE_FRAC_P_EXTREME = 0.02
 EPV_MIN_FOR_MLE = 10.0
 TARGET_VAR_MIN_FOR_MLE = 1e-8
 PROFILE_MAX_ABS_BETA = 40.0
+BOOTSTRAP_DEFAULT_B = 2000
+BOOTSTRAP_MAX_B = 131072
+BOOTSTRAP_SEQ_ALPHA = 0.01
+BOOTSTRAP_CHUNK = 4096
+BOOTSTRAP_STREAM_TARGET_BYTES = 32 * 1024 * 1024  # ~32 MiB cap per chunk
 
 def safe_basename(name: str) -> str:
     """Allow only [-._a-zA-Z0-9], map others to '_'."""
@@ -100,6 +106,45 @@ def _fmt_num(x):
 
 def _fmt_ci(lo, hi):
     return f"{_fmt_num(lo)},{_fmt_num(hi)}"
+
+
+def _bootstrap_rng(seed_key):
+    seed_base = CTX.get("BOOT_SEED_BASE")
+    if not isinstance(seed_key, (tuple, list)):
+        seed_key = (seed_key,)
+    h = hashlib.blake2b(digest_size=16)
+    if seed_base is None:
+        h.update(b"default_boot_seed")
+    else:
+        h.update(str(seed_base).encode("utf-8"))
+    for item in seed_key:
+        if isinstance(item, (bytes, bytearray)):
+            h.update(item)
+        elif isinstance(item, (float, np.floating)):
+            h.update(np.float64(item).tobytes())
+        elif isinstance(item, (int, np.integer)):
+            h.update(int(item).to_bytes(8, byteorder="little", signed=True))
+        elif item is None:
+            h.update(b"None")
+        else:
+            h.update(str(item).encode("utf-8"))
+    seed_bytes = h.digest()[:8]
+    seed = int.from_bytes(seed_bytes, "little", signed=False)
+    return np.random.default_rng(seed)
+
+
+def _clopper_pearson_interval(successes, total, alpha=0.01):
+    if total <= 0:
+        return 0.0, 1.0
+    if successes <= 0:
+        lower = 0.0
+    else:
+        lower = float(sp_stats.beta.ppf(alpha / 2.0, successes, total - successes + 1))
+    if successes >= total:
+        upper = 1.0
+    else:
+        upper = float(sp_stats.beta.ppf(1.0 - alpha / 2.0, successes + 1, total - successes))
+    return lower, upper
 
 
 def _ok_mle_fit(fit, X, y, target_ix=None,
@@ -324,44 +369,88 @@ def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max
         return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False, "method": None}
     diff0 = base - crit
 
-    def find_root(direction):
-        step = 0.5
-        for _ in range(60):
-            candidate = beta_hat + direction * step
-            if abs(candidate) > max_abs_beta:
+    def bracket_toward_zero(beta_hat_val, direction):
+        a, b = (beta_hat_val, 0.0) if direction < 0 else (0.0, beta_hat_val)
+        if a > b:
+            a, b = b, a
+        fa = dev_at(a) - crit
+        fb = dev_at(b) - crit
+        if not (np.isfinite(fa) and np.isfinite(fb)):
+            return None, False
+        if fa * fb > 0:
+            return None, False
+        for _ in range(100):
+            m = 0.5 * (a + b)
+            fm = dev_at(m) - crit
+            if not np.isfinite(fm):
                 break
-            diff_c = dev_at(candidate) - crit
-            if not np.isfinite(diff_c):
-                step *= 2.0
-                continue
-            if (diff0 <= 0 and diff_c >= 0) or (diff0 >= 0 and diff_c <= 0):
+            if abs(fm) < 1e-6 or abs(b - a) < 1e-6:
+                return float(m), True
+            if fa * fm <= 0:
+                b, fb = m, fm
+            else:
+                a, fa = m, fm
+        return 0.5 * (a + b), True
+
+    def bracket_far_side(beta_hat_val, direction, max_abs=max_abs_beta, tries=5):
+        step = 0.5
+        for _ in range(int(tries)):
+            cand = beta_hat_val + direction * step
+            if abs(cand) > max_abs:
+                break
+            df = dev_at(cand) - crit
+            if np.isfinite(df) and np.isfinite(diff0) and diff0 * df <= 0:
                 if direction < 0:
-                    low, high = candidate, beta_hat
-                    dl, dh = diff_c, diff0
+                    a, b = cand, beta_hat_val
                 else:
-                    low, high = beta_hat, candidate
-                    dl, dh = diff0, diff_c
-                for _ in range(80):
-                    mid = 0.5 * (low + high)
-                    diff_mid = dev_at(mid) - crit
-                    if not np.isfinite(diff_mid):
+                    a, b = beta_hat_val, cand
+                fa = dev_at(a) - crit
+                fb = dev_at(b) - crit
+                if not (np.isfinite(fa) and np.isfinite(fb)):
+                    break
+                for _ in range(100):
+                    m = 0.5 * (a + b)
+                    fm = dev_at(m) - crit
+                    if not np.isfinite(fm):
                         break
-                    if abs(diff_mid) < 1e-6 or abs(high - low) < 1e-6:
-                        return mid, True
-                    if (dl <= 0 and diff_mid <= 0) or (dl >= 0 and diff_mid >= 0):
-                        low, dl = mid, diff_mid
+                    if abs(fm) < 1e-6 or abs(b - a) < 1e-6:
+                        return float(m), True
+                    if fa * fm <= 0:
+                        b, fb = m, fm
                     else:
-                        high, dh = mid, diff_mid
-                return 0.5 * (low + high), True
+                        a, fa = m, fm
             step *= 2.0
         return None, False
 
-    blo, ok_lo = find_root(-1)
-    bhi, ok_hi = find_root(+1)
-    sided = "two"
+    dev_zero = dev_at(0.0)
+    if not np.isfinite(dev_zero):
+        return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False,
+                "method": "profile" if kind == "mle" else "profile_penalized"}
+
+    blo = bhi = None
+    ok_lo = ok_hi = False
+    if dev_zero > crit:
+        if beta_hat > 0:
+            blo, ok_lo = bracket_toward_zero(beta_hat, direction=-1)
+            bhi, ok_hi = bracket_far_side(beta_hat, direction=+1)
+        elif beta_hat < 0:
+            bhi, ok_hi = bracket_toward_zero(beta_hat, direction=+1)
+            blo, ok_lo = bracket_far_side(beta_hat, direction=-1)
+        else:
+            return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False,
+                    "method": "profile" if kind == "mle" else "profile_penalized"}
+    else:
+        blo, ok_lo = bracket_far_side(beta_hat, direction=-1)
+        bhi, ok_hi = bracket_far_side(beta_hat, direction=+1)
+
     if not ok_lo and not ok_hi:
         return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False,
                 "method": "profile" if kind == "mle" else "profile_penalized"}
+    if dev_zero > crit and (not ok_lo or not ok_hi):
+        return {"lo": np.nan, "hi": np.nan, "sided": "two", "valid": False,
+                "method": "profile" if kind == "mle" else "profile_penalized"}
+
+    sided = "two"
     if not ok_lo:
         blo = -np.inf
         sided = "one"
@@ -369,12 +458,167 @@ def _profile_ci_beta(X_full, y, target_ix, fit_full, kind="mle", alpha=0.05, max
         bhi = np.inf
         sided = "one"
     return {
-        "lo": float(blo),
-        "hi": float(bhi),
+        "lo": float(blo) if blo is not None else np.nan,
+        "hi": float(bhi) if bhi is not None else np.nan,
         "sided": sided,
         "valid": True,
         "method": "profile" if kind == "mle" else "profile_penalized",
     }
+
+
+def _score_stat_at_beta(X_red, y, x_target, beta0, kind="mle"):
+    Xr = X_red.to_numpy(dtype=np.float64, copy=False) if hasattr(X_red, "to_numpy") else np.asarray(X_red, dtype=np.float64)
+    yv = np.asarray(y, dtype=np.float64)
+    xt = np.asarray(x_target, dtype=np.float64)
+    if Xr.ndim != 2 or yv.ndim != 1 or xt.ndim != 1 or Xr.shape[0] != yv.shape[0] or xt.shape[0] != yv.shape[0]:
+        return np.nan
+    offset = beta0 * xt
+    try:
+        if kind == "mle":
+            fit_red = _logit_mle_refit_offset(Xr, yv, offset=offset)
+        else:
+            fit_red = _firth_refit_offset(Xr, yv, offset=offset)
+    except Exception:
+        return np.nan
+    params = getattr(fit_red, "params", None)
+    if params is None:
+        return np.nan
+    coef_red = np.asarray(params, dtype=np.float64)
+    if coef_red.ndim != 1 or coef_red.shape[0] != Xr.shape[1]:
+        return np.nan
+    eta = np.clip(offset + Xr @ coef_red, -35.0, 35.0)
+    p_hat = np.clip(expit(eta), 1e-12, 1.0 - 1e-12)
+    W = p_hat * (1.0 - p_hat)
+    h, denom = _efficient_score_vector(xt, Xr, W)
+    if not (np.isfinite(denom) and denom > 0):
+        return np.nan
+    resid = yv - p_hat
+    S = float(h @ resid)
+    stat = (S * S) / denom
+    return float(stat) if np.isfinite(stat) else np.nan
+
+
+def _score_ci_beta(X_red, y, x_target, beta_hat, alpha=0.05, kind="mle", max_abs_beta=None):
+    max_abs_beta = float(CTX.get("PROFILE_MAX_ABS_BETA", PROFILE_MAX_ABS_BETA) if max_abs_beta is None else max_abs_beta)
+    Xr = X_red.to_numpy(dtype=np.float64, copy=False) if hasattr(X_red, "to_numpy") else np.asarray(X_red, dtype=np.float64)
+    yv = np.asarray(y, dtype=np.float64)
+    xt = np.asarray(x_target, dtype=np.float64)
+    if Xr.ndim != 2 or yv.ndim != 1 or xt.ndim != 1 or Xr.shape[0] != yv.shape[0] or xt.shape[0] != yv.shape[0]:
+        return {"lo": np.nan, "hi": np.nan, "valid": False, "method": "score_inversion", "sided": "two"}
+    if not np.isfinite(beta_hat):
+        return {"lo": np.nan, "hi": np.nan, "valid": False, "method": "score_inversion", "sided": "two"}
+    crit = float(sp_stats.chi2.ppf(1.0 - alpha, 1))
+    cache = {}
+
+    def stat_minus_crit(beta0):
+        key = float(beta0)
+        if key not in cache:
+            cache[key] = _score_stat_at_beta(Xr, yv, xt, key, kind=kind)
+        val = cache[key]
+        if not np.isfinite(val):
+            return np.nan
+        return val - crit
+
+    T0 = _score_stat_at_beta(Xr, yv, xt, 0.0, kind=kind)
+    if not np.isfinite(T0):
+        return {"lo": np.nan, "hi": np.nan, "valid": False, "method": "score_inversion", "sided": "two"}
+    diff_hat = stat_minus_crit(beta_hat)
+
+    def root_bracket(a, b):
+        fa = stat_minus_crit(a)
+        fb = stat_minus_crit(b)
+        if not (np.isfinite(fa) and np.isfinite(fb)):
+            return None, False
+        if fa * fb > 0:
+            return None, False
+        for _ in range(70):
+            mid = 0.5 * (a + b)
+            fm = stat_minus_crit(mid)
+            if not np.isfinite(fm):
+                break
+            if abs(fm) < 1e-6 or abs(b - a) < 1e-6:
+                return float(mid), True
+            if fa * fm <= 0:
+                b, fb = mid, fm
+            else:
+                a, fa = mid, fm
+        return 0.5 * (a + b), True
+
+    blo = bhi = None
+    ok_lo = ok_hi = False
+    step = 0.5
+
+    if T0 > crit:
+        if beta_hat > 0:
+            blo, ok_lo = root_bracket(0.0, beta_hat)
+            if np.isfinite(diff_hat):
+                b = beta_hat
+                prev = diff_hat
+                for _ in range(10):
+                    cand = b + step
+                    if abs(cand) > max_abs_beta:
+                        break
+                    diff_c = stat_minus_crit(cand)
+                    if np.isfinite(diff_c) and prev * diff_c <= 0:
+                        bhi, ok_hi = root_bracket(b, cand)
+                        break
+                    b = cand
+                    prev = diff_c
+                    step *= 2.0
+        elif beta_hat < 0:
+            bhi, ok_hi = root_bracket(beta_hat, 0.0)
+            if np.isfinite(diff_hat):
+                a = beta_hat
+                prev = diff_hat
+                step = 0.5
+                for _ in range(10):
+                    cand = a - step
+                    if abs(cand) > max_abs_beta:
+                        break
+                    diff_c = stat_minus_crit(cand)
+                    if np.isfinite(diff_c) and prev * diff_c <= 0:
+                        blo, ok_lo = root_bracket(cand, a)
+                        break
+                    a = cand
+                    prev = diff_c
+                    step *= 2.0
+        else:
+            return {"lo": np.nan, "hi": np.nan, "valid": False, "method": "score_inversion", "sided": "two"}
+    else:
+        if np.isfinite(diff_hat):
+            left = beta_hat
+            right = beta_hat
+            fa = diff_hat
+            fb = diff_hat
+            for _ in range(10):
+                left_candidate = left - step
+                right_candidate = right + step
+                if abs(left_candidate) <= max_abs_beta:
+                    fa2 = stat_minus_crit(left_candidate)
+                    if np.isfinite(fa2) and fa * fa2 <= 0:
+                        blo, ok_lo = root_bracket(left_candidate, left)
+                    left = left_candidate
+                    fa = fa2 if np.isfinite(fa2) else fa
+                if abs(right_candidate) <= max_abs_beta:
+                    fb2 = stat_minus_crit(right_candidate)
+                    if np.isfinite(fb2) and fb * fb2 <= 0:
+                        bhi, ok_hi = root_bracket(right, right_candidate)
+                    right = right_candidate
+                    fb = fb2 if np.isfinite(fb2) else fb
+                if ok_lo and ok_hi:
+                    break
+                step *= 2.0
+
+    if ok_lo and ok_hi:
+        return {
+            "lo": float(blo),
+            "hi": float(bhi),
+            "valid": True,
+            "method": "score_inversion",
+            "sided": "two",
+        }
+    return {"lo": np.nan, "hi": np.nan, "valid": False, "method": "score_inversion", "sided": "two"}
+
 
 def validate_min_counts_for_fit(y, stage_tag, extra_context=None, cases_key="MIN_CASES_FILTER", controls_key="MIN_CONTROLS_FILTER", neff_key="MIN_NEFF_FILTER"):
     """
@@ -866,6 +1110,12 @@ def _validate_ctx(ctx):
     missing = [k for k in REQUIRED_CTX_KEYS if k not in ctx]
     if missing:
         raise RuntimeError(f"[Worker-{os.getpid()}] Missing CTX keys: {', '.join(missing)}")
+    ctx.setdefault("BOOTSTRAP_B", BOOTSTRAP_DEFAULT_B)
+    ctx.setdefault("BOOTSTRAP_B_MAX", BOOTSTRAP_MAX_B)
+    ctx.setdefault("BOOTSTRAP_CHUNK", BOOTSTRAP_CHUNK)
+    ctx.setdefault("BOOTSTRAP_SEQ_ALPHA", BOOTSTRAP_SEQ_ALPHA)
+    ctx.setdefault("FDR_ALPHA", 0.05)
+    ctx.setdefault("BOOT_SEED_BASE", None)
 def _drop_zero_variance_np(X, keep_ix=(), eps=1e-12):
     """
     Drops columns with no or near-zero variance from a NumPy array.
@@ -1009,34 +1259,622 @@ def _score_test_from_reduced(X_red, y, x_target, const_ix=None):
     return p, T_obs
 
 
-def _score_bootstrap_from_reduced(X_red, y, x_target, const_ix=None, B=None, rng=None):
-    """Parametric bootstrap of the Rao score statistic under the reduced (null) model."""
-    B = int(CTX.get("FALLBACK_BOOTSTRAP_B", 500) if B is None else B)
+def _score_bootstrap_bits(Xr, yv, xt, beta0, kind="mle"):
+    if Xr.ndim != 2 or yv.ndim != 1 or xt.ndim != 1 or Xr.shape[0] != yv.shape[0] or xt.shape[0] != yv.shape[0]:
+        return None
+    offset = beta0 * xt
+    try:
+        if kind == "mle":
+            fit = _logit_mle_refit_offset(Xr, yv, offset=offset)
+        else:
+            fit = _firth_refit_offset(Xr, yv, offset=offset)
+    except Exception:
+        if kind == "mle":
+            try:
+                fit = _firth_refit_offset(Xr, yv, offset=offset)
+                kind = "firth"
+            except Exception:
+                return None
+        else:
+            return None
+    params = getattr(fit, "params", None)
+    if params is None:
+        return None
+    coef = np.asarray(params, dtype=np.float64)
+    if coef.ndim != 1 or coef.shape[0] != Xr.shape[1]:
+        return None
+    eta = np.clip(offset + Xr @ coef, -35.0, 35.0)
+    mu = np.clip(expit(eta), 1e-12, 1.0 - 1e-12)
+    W = mu * (1.0 - mu)
+    h_vec, denom = _efficient_score_vector(xt, Xr, W)
+    if not (np.isfinite(denom) and denom > 0.0):
+        return None
+    resid = yv - mu
+    S_obs = float(h_vec @ resid)
+    T_obs = (S_obs * S_obs) / denom
+    if not np.isfinite(T_obs):
+        return None
+    return {
+        "h_resid": np.asarray(h_vec * resid, dtype=np.float64),
+        "den": float(denom),
+        "T_obs": float(T_obs),
+        "fit_kind": kind,
+    }
+
+
+def _bootstrap_chunk_exceed(h_resid, threshold_val, rng, reps, *, target_bytes=BOOTSTRAP_STREAM_TARGET_BYTES):
+    reps = int(reps)
+    if reps <= 0:
+        return 0
+    n = int(h_resid.shape[0])
+    if n <= 0:
+        return 0
+    bytes_per_entry = 8.0  # float64
+    block_cols = max(1, int(target_bytes // (bytes_per_entry * max(1, reps))))
+    exceed = 0
+    multiplier_kind = str(CTX.get("BOOT_MULTIPLIER", "normal")).lower()
+    if multiplier_kind not in {"normal", "rademacher"}:
+        multiplier_kind = "normal"
+    sr = np.zeros(reps, dtype=np.float64)
+    for start in range(0, n, block_cols):
+        stop = min(n, start + block_cols)
+        width = stop - start
+        if width <= 0:
+            continue
+        if multiplier_kind == "rademacher":
+            g_block = rng.choice([-1.0, 1.0], size=(reps, width))
+        else:
+            g_block = rng.standard_normal(size=(reps, width))
+        sr += g_block @ h_resid[start:stop]
+    exceed = int(np.sum((sr * sr) >= threshold_val))
+    return exceed
+
+
+def _score_bootstrap_p_from_bits(
+    bits,
+    B=None,
+    B_max=None,
+    alpha=None,
+    rng=None,
+    *,
+    min_total=None,
+    initial_draws=0,
+    initial_exceed=0,
+    return_detail=False,
+):
+    if bits is None:
+        if return_detail:
+            return {"p": np.nan, "draws": 0, "exceed": 0}
+        return np.nan
+    den = float(bits.get("den", np.nan))
+    T_obs = float(bits.get("T_obs", np.nan))
+    if not (np.isfinite(den) and den > 0.0 and np.isfinite(T_obs)):
+        if return_detail:
+            return {"p": np.nan, "draws": 0, "exceed": 0}
+        return np.nan
+    h_resid = np.asarray(bits.get("h_resid"), dtype=np.float64)
+    if h_resid.ndim != 1:
+        if return_detail:
+            return {"p": np.nan, "draws": 0, "exceed": 0}
+        return np.nan
     rng = np.random.default_rng() if rng is None else rng
-    fit_red, _ = _fit_logit_ladder(X_red, y, const_ix=const_ix, prefer_mle_first=True)
-    if fit_red is None:
-        return np.nan, np.nan
+    base_B = int(B if B is not None else CTX.get("BOOTSTRAP_B", BOOTSTRAP_DEFAULT_B))
+    if base_B <= 0:
+        base_B = BOOTSTRAP_DEFAULT_B
+    base_B = max(32, base_B)
+    max_B = int(B_max if B_max is not None else CTX.get("BOOTSTRAP_B_MAX", BOOTSTRAP_MAX_B))
+    if max_B < base_B:
+        max_B = base_B
+    chunk_limit = int(CTX.get("BOOTSTRAP_CHUNK", BOOTSTRAP_CHUNK))
+    if chunk_limit <= 0:
+        chunk_limit = BOOTSTRAP_CHUNK
+    cp_alpha = float(CTX.get("BOOTSTRAP_SEQ_ALPHA", BOOTSTRAP_SEQ_ALPHA))
+    alpha_target = float(alpha) if alpha is not None else None
+    min_total = int(min_total) if min_total is not None else None
+    if min_total is not None:
+        if min_total <= 0:
+            min_total = None
+        else:
+            min_total = min(min_total, max_B)
+    total = int(initial_draws)
+    exceed = int(initial_exceed)
+    if total < 0:
+        total = 0
+    if exceed < 0:
+        exceed = 0
+    target = base_B if min_total is None else max(base_B, min_total)
+    if target < total:
+        target = total
+    threshold_val = T_obs * den
+    while True:
+        need_more = total < target and total < max_B
+        if need_more:
+            draw = min(chunk_limit, target - total, max_B - total)
+            if draw <= 0:
+                need_more = False
+            else:
+                exceed += _bootstrap_chunk_exceed(h_resid, threshold_val, rng, draw)
+                total += draw
+                continue
+        if total <= 0:
+            break
+        if alpha_target is not None and total < max_B:
+            lower, upper = _clopper_pearson_interval(exceed, total, alpha=cp_alpha)
+            if lower <= alpha_target <= upper:
+                next_target = min(max(target * 2, base_B), max_B)
+                if min_total is not None:
+                    next_target = max(next_target, min_total)
+                if next_target > total:
+                    target = next_target
+                    continue
+        break
+    if total <= 0:
+        result = np.nan
+    else:
+        result = float((1.0 + exceed) / (1.0 + total))
+    if return_detail:
+        return {"p": result, "draws": int(total), "exceed": int(exceed)}
+    return result
+
+
+def _score_bootstrap_from_reduced(
+    X_red,
+    y,
+    x_target,
+    B=None,
+    rng=None,
+    alpha=None,
+    seed_key=None,
+    kind="mle",
+    B_max=None,
+    min_total=None,
+):
+    """Multiplier (wild) bootstrap of the Rao score statistic under the reduced model."""
     Xr = X_red.to_numpy(dtype=np.float64, copy=False) if hasattr(X_red, "to_numpy") else np.asarray(X_red, dtype=np.float64)
     yv = np.asarray(y, dtype=np.float64)
-    beta = np.asarray(getattr(fit_red, "params", np.zeros(Xr.shape[1])), dtype=np.float64)
-    eta = np.clip(Xr @ beta, -35.0, 35.0)
-    p_hat = np.clip(expit(eta), 1e-12, 1 - 1e-12)
-    W = p_hat * (1.0 - p_hat)
-    x_tgt = np.asarray(x_target, dtype=np.float64)
-    h, denom = _efficient_score_vector(x_tgt, Xr, W)
-    S = float(h @ (yv - p_hat))
-    if not np.isfinite(denom) or denom <= 0.0:
+    xt = np.asarray(x_target, dtype=np.float64)
+    if Xr.ndim != 2 or yv.ndim != 1 or xt.ndim != 1 or Xr.shape[0] != yv.shape[0] or xt.shape[0] != yv.shape[0]:
         return np.nan, np.nan
-    T_obs = (S * S) / denom
-    if not np.isfinite(T_obs):
+    bits = _score_bootstrap_bits(Xr, yv, xt, 0.0, kind=kind)
+    if bits is None and kind == "mle":
+        bits = _score_bootstrap_bits(Xr, yv, xt, 0.0, kind="firth")
+    if bits is None:
         return np.nan, np.nan
-    U = rng.random((yv.size, B))
-    Y_star = (U < p_hat[:, None]).astype(np.float64, copy=False)
-    R = Y_star - p_hat[:, None]
-    Sb = h[:, None] * R
-    T_b = (np.sum(Sb, axis=0) ** 2) / denom
-    p_emp = float((1.0 + np.sum(T_b >= T_obs)) / (1.0 + B))
-    return p_emp, T_obs
+    alpha_target = float(alpha) if alpha is not None else float(CTX.get("FDR_ALPHA", 0.05))
+    base_key = seed_key if seed_key is not None else ("score_boot", Xr.shape[0], Xr.shape[1], float(np.sum(np.abs(xt))))
+    rng_local = rng if rng is not None else _bootstrap_rng((base_key, 0.0))
+    detail = _score_bootstrap_p_from_bits(
+        bits,
+        B=B,
+        B_max=B_max,
+        alpha=alpha_target,
+        rng=rng_local,
+        min_total=min_total,
+        return_detail=True,
+    )
+    return detail.get("p", np.nan), bits["T_obs"], detail.get("draws", 0), detail.get("exceed", 0)
+
+
+def _score_boot_ci_beta(
+    X_red,
+    y,
+    x_target,
+    beta_hat,
+    alpha=0.05,
+    kind="mle",
+    B=None,
+    B_max=None,
+    seed_key=None,
+    p_at_zero=None,
+    max_abs_beta=None,
+):
+    max_abs_beta = float(CTX.get("PROFILE_MAX_ABS_BETA", PROFILE_MAX_ABS_BETA) if max_abs_beta is None else max_abs_beta)
+    Xr = X_red.to_numpy(dtype=np.float64, copy=False) if hasattr(X_red, "to_numpy") else np.asarray(X_red, dtype=np.float64)
+    yv = np.asarray(y, dtype=np.float64)
+    xt = np.asarray(x_target, dtype=np.float64)
+    if Xr.ndim != 2 or yv.ndim != 1 or xt.ndim != 1 or Xr.shape[0] != yv.shape[0] or xt.shape[0] != yv.shape[0]:
+        return {
+            "lo": np.nan,
+            "hi": np.nan,
+            "valid": False,
+            "method": "score_boot_multiplier",
+            "sided": "two",
+            "evals": 0,
+        }
+    if not np.isfinite(beta_hat):
+        return {
+            "lo": np.nan,
+            "hi": np.nan,
+            "valid": False,
+            "method": "score_boot_multiplier",
+            "sided": "two",
+            "evals": 0,
+        }
+
+    base_key = seed_key if seed_key is not None else ("score_boot_ci", Xr.shape[0], Xr.shape[1], float(np.sum(np.abs(xt))))
+    base_B_local = int(B if B is not None else CTX.get("BOOTSTRAP_B", BOOTSTRAP_DEFAULT_B))
+    if base_B_local <= 0:
+        base_B_local = BOOTSTRAP_DEFAULT_B
+    base_B_local = max(32, base_B_local)
+    max_B_local = int(B_max if B_max is not None else CTX.get("BOOTSTRAP_B_MAX", BOOTSTRAP_MAX_B))
+    if max_B_local < base_B_local:
+        max_B_local = base_B_local
+
+    cache = {}
+    if p_at_zero is not None and np.isfinite(p_at_zero):
+        cache[0.0] = {
+            "p": float(p_at_zero),
+            "draws": 0,
+            "exceed": 0,
+            "bits": None,
+            "rng": None,
+            "fixed": True,
+        }
+
+    eval_counter = 0
+
+    def _ensure_entry(beta0):
+        key = float(beta0)
+        entry = cache.get(key)
+        if entry is None:
+            rng_local = _bootstrap_rng((base_key, key))
+            bits = _score_bootstrap_bits(Xr, yv, xt, key, kind=kind)
+            if bits is None and kind == "mle":
+                bits = _score_bootstrap_bits(Xr, yv, xt, key, kind="firth")
+            entry = {
+                "p": np.nan,
+                "draws": 0,
+                "exceed": 0,
+                "bits": bits,
+                "rng": rng_local,
+                "fixed": False,
+            }
+            cache[key] = entry
+        return entry
+
+    def p_eval(beta0, *, min_total=None):
+        key = float(beta0)
+        min_req = int(min_total) if min_total is not None else None
+        if min_req is not None:
+            if min_req <= 0:
+                min_req = None
+            else:
+                min_req = max(base_B_local, min_req)
+                min_req = min(min_req, max_B_local)
+        entry = cache.get(key)
+        if entry is None:
+            entry = _ensure_entry(key)
+        if entry.get("fixed"):
+            return float(entry.get("p", np.nan))
+        bits = entry.get("bits")
+        if bits is None:
+            entry["p"] = np.nan
+            return np.nan
+        target = min_req if min_req is not None else base_B_local
+        target = max(target, base_B_local)
+        target = min(target, max_B_local)
+        need_more = (entry.get("draws", 0) < target) or (not np.isfinite(entry.get("p", np.nan)))
+        if not need_more:
+            return float(entry.get("p", np.nan))
+        nonlocal eval_counter
+        eval_counter += 1
+        rng_local = entry.get("rng")
+        if rng_local is None:
+            rng_local = _bootstrap_rng((base_key, key, "resume"))
+            entry["rng"] = rng_local
+        detail = _score_bootstrap_p_from_bits(
+            bits,
+            B=base_B_local,
+            B_max=max_B_local,
+            alpha=alpha,
+            rng=rng_local,
+            min_total=target,
+            initial_draws=entry.get("draws", 0),
+            initial_exceed=entry.get("exceed", 0),
+            return_detail=True,
+        )
+        entry["p"] = float(detail.get("p", np.nan))
+        entry["draws"] = int(detail.get("draws", entry.get("draws", 0)))
+        entry["exceed"] = int(detail.get("exceed", entry.get("exceed", 0)))
+        return float(entry.get("p", np.nan))
+
+    def diff(beta0, *, min_total=None):
+        val = p_eval(beta0, min_total=min_total)
+        if not np.isfinite(val):
+            return np.nan
+        return val - alpha
+
+    p0 = p_eval(0.0)
+    if not np.isfinite(p0):
+        return {
+            "lo": np.nan,
+            "hi": np.nan,
+            "valid": False,
+            "method": "score_boot_multiplier",
+            "sided": "two",
+            "evals": eval_counter,
+        }
+
+    diff_hat = diff(beta_hat)
+
+    def _cache_draws(beta0):
+        entry = cache.get(float(beta0))
+        if isinstance(entry, dict):
+            draws_val = entry.get("draws")
+            if isinstance(draws_val, (int, np.integer)):
+                return int(draws_val)
+        return 0
+
+    def root_bracket(a, b):
+        a0 = float(a)
+        b0 = float(b)
+        if a0 == b0:
+            return None, False
+        for attempt in range(2):
+            fa = diff(a0)
+            fb = diff(b0)
+            if not (np.isfinite(fa) and np.isfinite(fb)):
+                return None, False
+            if fa * fb > 0:
+                return None, False
+            left, right = a0, b0
+            f_left, f_right = fa, fb
+            for _ in range(70):
+                mid = 0.5 * (left + right)
+                fm = diff(mid)
+                if not np.isfinite(fm):
+                    break
+                if abs(fm) < 1e-3 or abs(right - left) < 1e-3:
+                    return float(mid), True
+                if f_left * fm <= 0:
+                    right, f_right = mid, fm
+                else:
+                    left, f_left = mid, fm
+            if attempt == 0:
+                draw_a = _cache_draws(a0)
+                draw_b = _cache_draws(b0)
+                draw_mid = _cache_draws(0.5 * (a0 + b0))
+                best_draws = max(draw_a, draw_b, draw_mid)
+                if best_draws < max_B_local:
+                    min_req = max(best_draws * 2 if best_draws else base_B_local * 4, base_B_local * 4)
+                    min_req = min(min_req, max_B_local)
+                    diff(a0, min_total=min_req)
+                    diff(b0, min_total=min_req)
+                    diff(0.5 * (a0 + b0), min_total=min_req)
+                    continue
+            return 0.5 * (left + right), True
+        return 0.5 * (a0 + b0), True
+
+    def _solve_bounds(limit):
+        blo = bhi = None
+        ok_lo = ok_hi = False
+        hit_boundary = False
+
+        if p0 < alpha:
+            if beta_hat > 0:
+                blo, ok_lo = root_bracket(0.0, beta_hat)
+                step = 0.5
+                prev = diff_hat if np.isfinite(diff_hat) else diff(beta_hat)
+                b = beta_hat
+                for _ in range(12):
+                    cand = b + step
+                    if abs(cand) > limit:
+                        hit_boundary = True
+                        break
+                    diff_c = diff(cand)
+                    if np.isfinite(prev) and np.isfinite(diff_c) and prev * diff_c <= 0:
+                        bhi, ok_hi = root_bracket(b, cand)
+                        break
+                    b = cand
+                    prev = diff_c
+                    step *= 2.0
+            elif beta_hat < 0:
+                bhi, ok_hi = root_bracket(beta_hat, 0.0)
+                step = 0.5
+                prev = diff_hat if np.isfinite(diff_hat) else diff(beta_hat)
+                a = beta_hat
+                for _ in range(12):
+                    cand = a - step
+                    if abs(cand) > limit:
+                        hit_boundary = True
+                        break
+                    diff_c = diff(cand)
+                    if np.isfinite(prev) and np.isfinite(diff_c) and prev * diff_c <= 0:
+                        blo, ok_lo = root_bracket(cand, a)
+                        break
+                    a = cand
+                    prev = diff_c
+                    step *= 2.0
+            else:
+                return blo, bhi, ok_lo, ok_hi, hit_boundary
+        else:
+            step = 0.5
+            left = beta_hat
+            right = beta_hat
+            fa = diff_hat if np.isfinite(diff_hat) else diff(left)
+            fb = fa
+            for _ in range(12):
+                did_work = False
+                left_candidate = left - step
+                right_candidate = right + step
+                if abs(left_candidate) <= limit:
+                    fa2 = diff(left_candidate)
+                    if np.isfinite(fa2) and np.isfinite(fa) and fa * fa2 <= 0:
+                        blo, ok_lo = root_bracket(left_candidate, left)
+                    left = left_candidate
+                    fa = fa2 if np.isfinite(fa2) else fa
+                    did_work = True
+                else:
+                    hit_boundary = True
+                if abs(right_candidate) <= limit:
+                    fb2 = diff(right_candidate)
+                    if np.isfinite(fb2) and np.isfinite(fb) and fb * fb2 <= 0:
+                        bhi, ok_hi = root_bracket(right, right_candidate)
+                    right = right_candidate
+                    fb = fb2 if np.isfinite(fb2) else fb
+                    did_work = True
+                else:
+                    hit_boundary = True
+                if ok_lo and ok_hi:
+                    break
+                if not did_work:
+                    break
+                step *= 2.0
+        return blo, bhi, ok_lo, ok_hi, hit_boundary
+
+    expansion_cap = float(CTX.get("SCORE_BOOT_CI_EXPANSION_CAP", 160.0))
+    attempt = 0
+    blo = bhi = None
+    ok_lo = ok_hi = False
+    boundary_seen = False
+    current_limit = max_abs_beta
+    while True:
+        blo, bhi, ok_lo, ok_hi, hit_boundary = _solve_bounds(current_limit)
+        boundary_seen = boundary_seen or hit_boundary
+        if ok_lo and ok_hi:
+            break
+        if p0 < alpha and hit_boundary and current_limit < expansion_cap:
+            current_limit = min(current_limit * 2.0, expansion_cap)
+            attempt += 1
+            if attempt <= 3:
+                continue
+        break
+
+    result = {
+        "lo": np.nan,
+        "hi": np.nan,
+        "valid": False,
+        "method": "score_boot_multiplier",
+        "sided": "two",
+        "evals": eval_counter,
+    }
+
+    if ok_lo and ok_hi:
+        result.update({"lo": float(blo), "hi": float(bhi), "valid": True})
+    elif p0 < alpha:
+        if beta_hat > 0 and ok_lo:
+            hi_val = float(bhi) if ok_hi else np.inf
+            result.update({"lo": float(blo), "hi": hi_val, "valid": True})
+            result["sided"] = "two" if ok_hi else "one"
+            if not ok_hi:
+                result["label"] = "boundary"
+        elif beta_hat < 0 and ok_hi:
+            lo_val = float(blo) if ok_lo else -np.inf
+            result.update({"lo": lo_val, "hi": float(bhi), "valid": True})
+            result["sided"] = "two" if ok_lo else "one"
+            if not ok_lo:
+                result["label"] = "boundary"
+        else:
+            if boundary_seen:
+                result["label"] = "boundary_failed"
+    else:
+        if boundary_seen:
+            result["label"] = "boundary_failed"
+
+    draws_max = 0
+    draws_min = None
+    for entry in cache.values():
+        draws = int(entry.get("draws", 0)) if isinstance(entry, dict) else 0
+        if draws > draws_max:
+            draws_max = draws
+        if draws > 0:
+            draws_min = draws if draws_min is None else min(draws_min, draws)
+    result["draws_min"] = draws_min if draws_min is not None else 0
+    result["draws_max"] = draws_max
+
+    return result
+
+
+def plan_score_bootstrap_refinement(results_dir, ctx, *, safety_factor=8.0):
+    """Identify score-bootstrap results that need additional draws for BH stability."""
+    if not results_dir or not os.path.isdir(results_dir):
+        return []
+    try:
+        files = [
+            f
+            for f in os.listdir(results_dir)
+            if f.endswith(".json") and not f.endswith(".meta.json")
+        ]
+    except FileNotFoundError:
+        return []
+
+    alpha_global = float(ctx.get("FDR_ALPHA", 0.05))
+    if not np.isfinite(alpha_global) or alpha_global <= 0.0:
+        return []
+
+    all_pvals = []
+    boot_records = []
+    for fn in files:
+        path = os.path.join(results_dir, fn)
+        try:
+            rec = pd.read_json(path, typ="series")
+        except Exception:
+            continue
+        try:
+            p_val = float(rec.get("P_Value"))
+        except (TypeError, ValueError):
+            p_val = np.nan
+        if np.isfinite(p_val):
+            all_pvals.append(p_val)
+        inf_type = str(rec.get("Inference_Type", "")).lower()
+        if inf_type != "score_boot":
+            continue
+        try:
+            draws = float(rec.get("Boot_Total", np.nan))
+            exceed = float(rec.get("Boot_Exceed", np.nan))
+        except (TypeError, ValueError):
+            draws = np.nan
+            exceed = np.nan
+        if not np.isfinite(draws) or draws <= 0:
+            continue
+        if not np.isfinite(exceed) or exceed < 0:
+            continue
+        name = rec.get("Phenotype")
+        if not isinstance(name, str) or not name:
+            name = os.path.splitext(fn)[0]
+        boot_records.append({
+            "name": name,
+            "draws": int(draws),
+            "exceed": int(exceed),
+        })
+
+    m = len(all_pvals)
+    if m == 0:
+        return []
+
+    sorted_p = np.sort(np.asarray(all_pvals, dtype=float))
+    thresholds = alpha_global * (np.arange(1, m + 1, dtype=float) / m)
+    hits = sorted_p <= thresholds
+    if np.any(hits):
+        idx = int(np.max(np.nonzero(hits)[0]))
+        t_star = float(thresholds[idx])
+    else:
+        t_star = float(thresholds[0])
+
+    if not np.isfinite(t_star) or t_star <= 0.0:
+        return []
+
+    cp_alpha = float(ctx.get("BOOTSTRAP_SEQ_ALPHA", BOOTSTRAP_SEQ_ALPHA))
+    max_B = int(ctx.get("BOOTSTRAP_B_MAX", BOOTSTRAP_MAX_B))
+    plan = []
+    for rec in boot_records:
+        draws = rec["draws"]
+        exceed = rec["exceed"]
+        if draws <= 0 or draws >= max_B:
+            continue
+        lower, upper = _clopper_pearson_interval(exceed, draws, alpha=cp_alpha)
+        if lower <= t_star <= upper:
+            # Aim for roughly ``safety_factor`` expected exceedances at the BH threshold.
+            target = int(math.ceil(safety_factor / max(t_star, 1e-12)))
+            target = max(target, draws + 1)
+            target = min(target, max_B)
+            if target > draws:
+                plan.append({
+                    "name": rec["name"],
+                    "min_total": int(target),
+                    "alpha_target": float(t_star),
+                })
+    return plan
 
 # --- Worker globals ---
 # Populated by init_worker and read-only thereafter.
@@ -1662,6 +2500,14 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         ci_hi_or = np.nan
         ci_label = ""
         or_ci95_str = None
+        ci_eval_count = None
+        ci_draws_min = None
+        ci_draws_max = None
+        ci_aux_label = ""
+        boot_draws_used = 0
+        boot_exceed = 0
+        boot_alpha_target = float(CTX.get("FDR_ALPHA", 0.05))
+        boot_min_total = None
 
         full_is_mle_candidate = bool(getattr(fit, "_final_is_mle", False)) and not bool(getattr(fit, "_used_firth", False))
         if (
@@ -1700,6 +2546,10 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 ci_method = ci_info.get("method")
                 ci_sided = ci_info.get("sided", "two")
                 ci_valid = bool(ci_info.get("valid", False))
+                ci_eval_count = ci_info.get("evals")
+                ci_draws_min = ci_info.get("draws_min")
+                ci_draws_max = ci_info.get("draws_max")
+                ci_aux_label = ci_info.get("label") or ""
                 if ci_valid:
                     lo_beta = ci_info.get("lo")
                     hi_beta = ci_info.get("hi")
@@ -1733,6 +2583,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             and 0 <= int(target_ix_final) < X_work_fd.shape[1]
         ):
             x_target_vec = X_work_fd[:, int(target_ix_final)]
+            alpha_override = pheno_data.get("alpha_target")
+            min_total_override = pheno_data.get("min_total")
             p_sc, _ = _score_test_from_reduced(
                 X_reduced,
                 y_work,
@@ -1744,21 +2596,124 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 p_source = "score_chi2"
                 inference_family = "score"
             else:
-                p_emp, _ = _score_bootstrap_from_reduced(
+                p_emp, _, draws_used_boot, exceed_boot = _score_bootstrap_from_reduced(
                     X_reduced,
                     y_work,
                     x_target_vec,
-                    const_ix=const_ix_red,
+                    seed_key=("phewas", s_name_safe, target_inversion, "pval"),
+                    alpha=alpha_override,
+                    min_total=min_total_override,
                 )
                 if np.isfinite(p_emp):
                     p_value = p_emp
                     p_source = "score_boot"
                     inference_family = "score_boot"
+                    boot_draws_used = int(draws_used_boot)
+                    boot_exceed = int(exceed_boot)
+                    if isinstance(min_total_override, (int, float)) and np.isfinite(min_total_override):
+                        boot_min_total = int(min_total_override)
+                    if isinstance(alpha_override, (int, float)) and np.isfinite(alpha_override):
+                        boot_alpha_target = float(alpha_override)
 
         inference_type = inference_family if inference_family is not None else "none"
         final_is_mle = inference_type == "mle"
-        used_firth = inference_type == "firth"
+        used_firth = (inference_type == "firth") or bool(getattr(fit, "_used_firth", False))
         p_valid = bool(np.isfinite(p_value))
+
+        if inference_type == "score":
+            if (
+                X_reduced is not None
+                and target_ix_final is not None
+                and 0 <= int(target_ix_final) < X_work_fd.shape[1]
+                and np.isfinite(beta)
+            ):
+                x_target_vec_ci = X_work_fd[:, int(target_ix_final)]
+                ci_info = _score_ci_beta(
+                    X_reduced,
+                    y_work,
+                    x_target_vec_ci,
+                    beta,
+                    kind="mle",
+                )
+                ci_method = ci_info.get("method")
+                ci_sided = ci_info.get("sided", "two")
+                ci_valid = bool(ci_info.get("valid", False))
+                if ci_valid:
+                    lo_beta = ci_info.get("lo")
+                    hi_beta = ci_info.get("hi")
+                    if lo_beta == -np.inf:
+                        ci_lo_or = 0.0
+                    elif np.isfinite(lo_beta):
+                        ci_lo_or = float(np.exp(lo_beta))
+                    else:
+                        ci_lo_or = np.nan
+                    if hi_beta == np.inf:
+                        ci_hi_or = np.inf
+                    elif np.isfinite(hi_beta):
+                        ci_hi_or = float(np.exp(hi_beta))
+                    else:
+                        ci_hi_or = np.nan
+                    or_ci95_str = _fmt_ci(ci_lo_or, ci_hi_or)
+                else:
+                    ci_lo_or = np.nan
+                    ci_hi_or = np.nan
+                    or_ci95_str = None
+            else:
+                ci_valid = False
+                ci_lo_or = np.nan
+                ci_hi_or = np.nan
+                or_ci95_str = None
+                ci_method = None
+        elif inference_type == "score_boot":
+            if (
+                X_reduced is not None
+                and target_ix_final is not None
+                and 0 <= int(target_ix_final) < X_work_fd.shape[1]
+                and np.isfinite(beta)
+            ):
+                x_target_vec_ci = X_work_fd[:, int(target_ix_final)]
+                ci_info = _score_boot_ci_beta(
+                    X_reduced,
+                    y_work,
+                    x_target_vec_ci,
+                    beta,
+                    kind="mle",
+                    seed_key=("phewas", s_name_safe, target_inversion, "ci"),
+                    p_at_zero=p_value if p_valid else None,
+                )
+                ci_method = ci_info.get("method")
+                ci_sided = ci_info.get("sided", "two")
+                ci_valid = bool(ci_info.get("valid", False))
+                if ci_valid:
+                    lo_beta = ci_info.get("lo")
+                    hi_beta = ci_info.get("hi")
+                    if lo_beta == -np.inf:
+                        ci_lo_or = 0.0
+                    elif np.isfinite(lo_beta):
+                        ci_lo_or = float(np.exp(lo_beta))
+                    else:
+                        ci_lo_or = np.nan
+                    if hi_beta == np.inf:
+                        ci_hi_or = np.inf
+                    elif np.isfinite(hi_beta):
+                        ci_hi_or = float(np.exp(hi_beta))
+                    else:
+                        ci_hi_or = np.nan
+                    or_ci95_str = _fmt_ci(ci_lo_or, ci_hi_or)
+                    if ci_aux_label:
+                        ci_label = f"score bootstrap (inverted, {ci_aux_label})"
+                    else:
+                        ci_label = "score bootstrap (inverted)"
+                else:
+                    ci_lo_or = np.nan
+                    ci_hi_or = np.nan
+                    or_ci95_str = None
+            else:
+                ci_valid = False
+                ci_lo_or = np.nan
+                ci_hi_or = np.nan
+                or_ci95_str = None
+                ci_method = None
 
         dedup_tags = []
         seen_tags = set()
@@ -1773,6 +2728,38 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         dedup_tags.append(f"inference={inference_type}")
         if ci_method:
             dedup_tags.append(f"ci={ci_method}")
+        if ci_aux_label:
+            dedup_tags.append(f"ci_label={ci_aux_label}")
+        if isinstance(ci_eval_count, (int, np.integer)) and ci_eval_count >= 0:
+            dedup_tags.append(f"ci_evals={int(ci_eval_count)}")
+        if (
+            ci_draws_max is not None
+            and np.isfinite(ci_draws_max)
+            and ci_draws_max > 0
+            and inference_type != "score_boot"
+        ):
+            dedup_tags.append(f"ci_boot_draws={int(ci_draws_max)}")
+        refine_round = pheno_data.get("refine_round")
+        if isinstance(refine_round, (int, float)) and np.isfinite(refine_round) and refine_round > 0:
+            dedup_tags.append(f"refine_round={int(refine_round)}")
+        if inference_type == "score_boot":
+            seq_alpha = float(CTX.get("BOOTSTRAP_SEQ_ALPHA", BOOTSTRAP_SEQ_ALPHA))
+            multiplier_kind = str(CTX.get("BOOT_MULTIPLIER", "normal"))
+            seed_tag = "present" if CTX.get("BOOT_SEED_BASE") is not None else "absent"
+            dedup_tags.append(
+                "boot="
+                f"total:{int(boot_draws_used)},"
+                f"exceed:{int(boot_exceed)},"
+                f"alpha:{float(boot_alpha_target):.3e},"
+                f"Bmax:{int(CTX.get('BOOTSTRAP_B_MAX', BOOTSTRAP_MAX_B))}"
+            )
+            if boot_min_total is not None and np.isfinite(boot_min_total) and boot_min_total > 0:
+                dedup_tags.append(f"boot_min_total={int(boot_min_total)}")
+            dedup_tags.append(f"boot_seq_alpha={seq_alpha:.3g}")
+            dedup_tags.append(f"boot_multiplier={multiplier_kind}")
+            dedup_tags.append(f"boot_seed_base={seed_tag}")
+            if ci_draws_max is not None and np.isfinite(ci_draws_max) and ci_draws_max > 0:
+                dedup_tags.append(f"ci_boot_draws={int(ci_draws_max)}")
         model_notes_str = ";".join(dedup_tags)
         path_reason_str = "|".join(dedup_tags)
         result = {
@@ -1792,10 +2779,43 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             "CI_Valid": bool(ci_valid),
             "CI_LO_OR": ci_lo_or,
             "CI_HI_OR": ci_hi_or,
+            "CI_Draws_Min": int(ci_draws_min)
+            if isinstance(ci_draws_min, (int, np.integer)) or (isinstance(ci_draws_min, float) and np.isfinite(ci_draws_min))
+            else None,
+            "CI_Draws_Max": int(ci_draws_max)
+            if isinstance(ci_draws_max, (int, np.integer)) or (isinstance(ci_draws_max, float) and np.isfinite(ci_draws_max))
+            else None,
+            "CI_Evals": int(ci_eval_count)
+            if isinstance(ci_eval_count, (int, np.integer)) or (isinstance(ci_eval_count, float) and np.isfinite(ci_eval_count))
+            else None,
             "Used_Ridge": used_ridge,
             "Final_Is_MLE": bool(final_is_mle),
             "Used_Firth": used_firth,
         }
+        if inference_type == "score_boot":
+            result.update(
+                {
+                    "Boot_Total": int(boot_draws_used),
+                    "Boot_Exceed": int(boot_exceed),
+                    "Boot_Alpha_Target": float(boot_alpha_target),
+                    "Boot_Min_Total": int(boot_min_total)
+                    if isinstance(boot_min_total, int)
+                    else (
+                        int(boot_min_total)
+                        if isinstance(boot_min_total, float) and np.isfinite(boot_min_total)
+                        else None
+                    ),
+                }
+            )
+        else:
+            result.update(
+                {
+                    "Boot_Total": None,
+                    "Boot_Exceed": None,
+                    "Boot_Alpha_Target": None,
+                    "Boot_Min_Total": None,
+                }
+            )
         result.update({
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
@@ -2162,6 +3182,19 @@ def lrt_overall_worker(task):
         ci_lo_or = np.nan
         ci_hi_or = np.nan
         or_ci95 = None
+        ci_eval_count = None
+        ci_draws_min = None
+        ci_draws_max = None
+        ci_aux_label = ""
+        boot_draws_used = 0
+        boot_exceed = 0
+        boot_alpha_target = float(CTX.get("FDR_ALPHA", 0.05))
+        boot_min_total = task.get("min_total") if isinstance(task.get("min_total"), (int, float)) else None
+        if task.get("alpha_target") is not None:
+            try:
+                boot_alpha_target = float(task.get("alpha_target"))
+            except (TypeError, ValueError):
+                pass
         beta_full = np.nan
         or_val = np.nan
 
@@ -2227,19 +3260,144 @@ def lrt_overall_worker(task):
                 p_source = "score_chi2"
                 inference_family = "score"
             else:
-                p_emp, _ = _score_bootstrap_from_reduced(
+                p_emp, _, boot_draws_used, boot_exceed = _score_bootstrap_from_reduced(
                     X_red_zv,
                     yb,
                     x_target_vec,
-                    const_ix=const_ix_red,
+                    alpha=boot_alpha_target,
+                    seed_key=("lrt_overall", s_name_safe, target, "pval"),
+                    min_total=boot_min_total,
                 )
                 if np.isfinite(p_emp):
                     p_value = p_emp
                     p_source = "score_boot"
                     inference_family = "score_boot"
 
+        if (
+            (not np.isfinite(beta_full))
+            and fit_full is not None
+            and target_ix is not None
+            and target in X_full_zv.columns
+        ):
+            params_full = getattr(fit_full, "params", None)
+            if params_full is not None:
+                try:
+                    if hasattr(params_full, "__getitem__"):
+                        if hasattr(params_full, "index"):
+                            beta_full = float(params_full[target])
+                        else:
+                            beta_full = float(params_full[target_ix])
+                    else:
+                        beta_full = float(np.asarray(params_full)[target_ix])
+                    or_val = float(np.exp(beta_full))
+                except Exception:
+                    beta_full = np.nan
+                    or_val = np.nan
+
         inference_type = inference_family if inference_family is not None else "none"
         p_valid = bool(np.isfinite(p_value))
+
+        if inference_type == "score":
+            if (
+                target_ix is not None
+                and target in X_full_zv.columns
+                and np.isfinite(beta_full)
+            ):
+                x_target_vec_ci = X_full_zv.iloc[:, int(target_ix)].to_numpy(dtype=np.float64, copy=False)
+                ci_info = _score_ci_beta(
+                    X_red_zv,
+                    yb,
+                    x_target_vec_ci,
+                    beta_full,
+                    kind="mle",
+                )
+                ci_method = ci_info.get("method")
+                ci_sided = ci_info.get("sided", "two")
+                ci_valid = bool(ci_info.get("valid", False))
+                if ci_valid:
+                    lo_beta = ci_info.get("lo")
+                    hi_beta = ci_info.get("hi")
+                    if lo_beta == -np.inf:
+                        ci_lo_or = 0.0
+                    elif np.isfinite(lo_beta):
+                        ci_lo_or = float(np.exp(lo_beta))
+                    else:
+                        ci_lo_or = np.nan
+                    if hi_beta == np.inf:
+                        ci_hi_or = np.inf
+                    elif np.isfinite(hi_beta):
+                        ci_hi_or = float(np.exp(hi_beta))
+                    else:
+                        ci_hi_or = np.nan
+                    or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
+                else:
+                    ci_lo_or = np.nan
+                    ci_hi_or = np.nan
+                    or_ci95 = None
+            else:
+                ci_valid = False
+                ci_lo_or = np.nan
+                ci_hi_or = np.nan
+                or_ci95 = None
+                ci_method = None
+        elif inference_type == "score_boot":
+            if (
+                target_ix is not None
+                and target in X_full_zv.columns
+                and np.isfinite(beta_full)
+            ):
+                x_target_vec_ci = X_full_zv.iloc[:, int(target_ix)].to_numpy(dtype=np.float64, copy=False)
+                ci_info = _score_boot_ci_beta(
+                    X_red_zv,
+                    yb,
+                    x_target_vec_ci,
+                    beta_full,
+                    kind="mle",
+                    seed_key=("lrt_overall", s_name_safe, target, "ci"),
+                    p_at_zero=p_value if p_valid else None,
+                )
+                ci_method = ci_info.get("method")
+                ci_sided = ci_info.get("sided", "two")
+                ci_valid = bool(ci_info.get("valid", False))
+                ci_eval_count = ci_info.get("evals")
+                ci_draws_min = ci_info.get("draws_min")
+                ci_draws_max = ci_info.get("draws_max")
+                ci_aux_label = ci_info.get("label") or ""
+                if ci_valid:
+                    lo_beta = ci_info.get("lo")
+                    hi_beta = ci_info.get("hi")
+                    if lo_beta == -np.inf:
+                        ci_lo_or = 0.0
+                    elif np.isfinite(lo_beta):
+                        ci_lo_or = float(np.exp(lo_beta))
+                    else:
+                        ci_lo_or = np.nan
+                    if hi_beta == np.inf:
+                        ci_hi_or = np.inf
+                    elif np.isfinite(hi_beta):
+                        ci_hi_or = float(np.exp(hi_beta))
+                    else:
+                        ci_hi_or = np.nan
+                    or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
+                    if ci_aux_label:
+                        ci_label = f"score bootstrap (inverted, {ci_aux_label})"
+                    else:
+                        ci_label = "score bootstrap (inverted)"
+                else:
+                    ci_lo_or = np.nan
+                    ci_hi_or = np.nan
+                    or_ci95 = None
+            else:
+                ci_valid = False
+                ci_lo_or = np.nan
+                ci_hi_or = np.nan
+                or_ci95 = None
+                ci_method = None
+
+        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
+        used_firth_full = bool(getattr(fit_full, "_used_firth", False)) or (
+            inference_type == "firth"
+        )
 
         out = {
             "Phenotype": s_name,
@@ -2255,6 +3413,15 @@ def lrt_overall_worker(task):
             "CI_Valid": bool(ci_valid),
             "CI_LO_OR": ci_lo_or,
             "CI_HI_OR": ci_hi_or,
+            "CI_Draws_Min": int(ci_draws_min)
+            if isinstance(ci_draws_min, (int, np.integer)) or (isinstance(ci_draws_min, float) and np.isfinite(ci_draws_min))
+            else None,
+            "CI_Draws_Max": int(ci_draws_max)
+            if isinstance(ci_draws_max, (int, np.integer)) or (isinstance(ci_draws_max, float) and np.isfinite(ci_draws_max))
+            else None,
+            "CI_Evals": int(ci_eval_count)
+            if isinstance(ci_eval_count, (int, np.integer)) or (isinstance(ci_eval_count, float) and np.isfinite(ci_eval_count))
+            else None,
             "Model_Notes": note,
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
@@ -2262,6 +3429,29 @@ def lrt_overall_worker(task):
         }
         if not p_valid:
             out["LRT_Overall_Reason"] = "fit_failed"
+
+        if inference_type == "score_boot":
+            out.update(
+                {
+                    "Boot_Total": int(boot_draws_used),
+                    "Boot_Exceed": int(boot_exceed),
+                    "Boot_Alpha_Target": float(boot_alpha_target),
+                    "Boot_Min_Total": int(boot_min_total)
+                    if isinstance(boot_min_total, (int, np.integer)) or (
+                        isinstance(boot_min_total, float) and np.isfinite(boot_min_total)
+                    )
+                    else None,
+                }
+            )
+        else:
+            out.update(
+                {
+                    "Boot_Total": None,
+                    "Boot_Exceed": None,
+                    "Boot_Alpha_Target": None,
+                    "Boot_Min_Total": None,
+                }
+            )
 
         model_notes = [note] if note else []
         if isinstance(reason_full, str) and reason_full:
@@ -2271,8 +3461,36 @@ def lrt_overall_worker(task):
         model_notes.append(f"inference={inference_type}")
         if ci_method:
             model_notes.append(f"ci={ci_method}")
+        if ci_aux_label:
+            model_notes.append(f"ci_label={ci_aux_label}")
+        if isinstance(ci_eval_count, (int, np.integer)) and ci_eval_count >= 0:
+            model_notes.append(f"ci_evals={int(ci_eval_count)}")
+        if (
+            ci_draws_max is not None
+            and np.isfinite(ci_draws_max)
+            and ci_draws_max > 0
+            and inference_type != "score_boot"
+        ):
+            model_notes.append(f"ci_boot_draws={int(ci_draws_max)}")
+        if inference_type == "score_boot":
+            seq_alpha = float(CTX.get("BOOTSTRAP_SEQ_ALPHA", BOOTSTRAP_SEQ_ALPHA))
+            multiplier_kind = str(CTX.get("BOOT_MULTIPLIER", "normal"))
+            seed_tag = "present" if CTX.get("BOOT_SEED_BASE") is not None else "absent"
+            model_notes.append(
+                "boot="
+                f"total:{int(boot_draws_used)},"
+                f"exceed:{int(boot_exceed)},"
+                f"alpha:{float(boot_alpha_target):.3e},"
+                f"Bmax:{int(CTX.get('BOOTSTRAP_B_MAX', BOOTSTRAP_MAX_B))}"
+            )
+            if boot_min_total is not None and np.isfinite(boot_min_total) and boot_min_total > 0:
+                model_notes.append(f"boot_min_total={int(boot_min_total)}")
+            model_notes.append(f"boot_seq_alpha={seq_alpha:.3g}")
+            model_notes.append(f"boot_multiplier={multiplier_kind}")
+            model_notes.append(f"boot_seed_base={seed_tag}")
+            if ci_draws_max is not None and np.isfinite(ci_draws_max) and ci_draws_max > 0:
+                model_notes.append(f"ci_boot_draws={int(ci_draws_max)}")
 
-        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
         final_cols_names = list(X_full_zv.columns)
         final_cols_pos = [col_ix.get(c, -1) for c in final_cols_names]
 
@@ -2293,15 +3511,47 @@ def lrt_overall_worker(task):
             "CI_Valid": bool(ci_valid),
             "CI_LO_OR": ci_lo_or,
             "CI_HI_OR": ci_hi_or,
+            "CI_Draws_Min": int(ci_draws_min)
+            if isinstance(ci_draws_min, (int, np.integer)) or (isinstance(ci_draws_min, float) and np.isfinite(ci_draws_min))
+            else None,
+            "CI_Draws_Max": int(ci_draws_max)
+            if isinstance(ci_draws_max, (int, np.integer)) or (isinstance(ci_draws_max, float) and np.isfinite(ci_draws_max))
+            else None,
+            "CI_Evals": int(ci_eval_count)
+            if isinstance(ci_eval_count, (int, np.integer)) or (isinstance(ci_eval_count, float) and np.isfinite(ci_eval_count))
+            else None,
             "Used_Ridge": used_ridge_full,
             "Final_Is_MLE": inference_type == "mle",
-            "Used_Firth": inference_type == "firth",
+            "Used_Firth": used_firth_full,
             "Inference_Type": inference_type,
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
             "Model_Notes": ";".join(model_notes),
         }
+
+        if inference_type == "score_boot":
+            res_record.update(
+                {
+                    "Boot_Total": int(boot_draws_used),
+                    "Boot_Exceed": int(boot_exceed),
+                    "Boot_Alpha_Target": float(boot_alpha_target),
+                    "Boot_Min_Total": int(boot_min_total)
+                    if isinstance(boot_min_total, (int, np.integer)) or (
+                        isinstance(boot_min_total, float) and np.isfinite(boot_min_total)
+                    )
+                    else None,
+                }
+            )
+        else:
+            res_record.update(
+                {
+                    "Boot_Total": None,
+                    "Boot_Exceed": None,
+                    "Boot_Alpha_Target": None,
+                    "Boot_Min_Total": None,
+                }
+            )
 
         io.atomic_write_json(res_path, res_record)
         io.atomic_write_json(res_path + ".meta.json", {
@@ -2521,19 +3771,13 @@ def bootstrap_overall_worker(task):
             const_ix=const_ix_full,
             target_ix=target_ix_full,
         )
-        beta_full, wald_p, ci95, or_val = np.nan, np.nan, None, np.nan
+        beta_full, or_val = np.nan, np.nan
         final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
-        used_firth_full = bool(getattr(fit_full, "_used_firth", False))
+        used_firth_full = bool(getattr(fit_full, "_used_firth", False)) or (inference_type == "firth")
         used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
         if fit_full is not None and target in X_full_zv.columns:
             beta_full = float(getattr(fit_full, "params", pd.Series(np.nan, index=X_full_zv.columns))[target])
             or_val = float(np.exp(beta_full))
-            if (final_is_mle or used_firth_full) and hasattr(fit_full, "pvalues"):
-                wald_p = float(getattr(fit_full, "pvalues", pd.Series(np.nan, index=X_full_zv.columns))[target])
-                se = float(getattr(fit_full, "bse", pd.Series(np.nan, index=X_full_zv.columns))[target]) if hasattr(fit_full, "bse") else np.nan
-                if np.isfinite(se) and se > 0:
-                    lo, hi = np.exp(beta_full - 1.96*se), np.exp(beta_full + 1.96*se)
-                    ci95 = f"{lo:.3f},{hi:.3f}"
         io.atomic_write_json(res_path, {
             "Phenotype": s_name,
             "N_Total": n_total_pre,
@@ -2541,11 +3785,17 @@ def bootstrap_overall_worker(task):
             "N_Controls": n_ctrls_pre,
             "Beta": beta_full,
             "OR": or_val,
-            "P_Value": wald_p,
-            "OR_CI95": ci95,
+            "P_Value": p_emp,
+            "P_Source": "score_boot",
+            "OR_CI95": None,
+            "CI_Method": None,
+            "CI_Valid": False,
+            "CI_LO_OR": np.nan,
+            "CI_HI_OR": np.nan,
             "Used_Ridge": used_ridge_full,
             "Final_Is_MLE": bool(final_is_mle),
             "Used_Firth": used_firth_full,
+            "Inference_Type": "score_boot",
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
@@ -2963,16 +4213,121 @@ def lrt_followup_worker(task):
                     p_source = "score_chi2"
                     inference_type = "score"
                 else:
-                    p_emp, _ = _score_bootstrap_from_reduced(
+                    p_emp, _, _, _ = _score_bootstrap_from_reduced(
                         X_anc_red,
                         y_anc,
                         x_target_vec,
-                        const_ix=const_ix_red,
+                        seed_key=("lrt_followup", s_name_safe, anc, target, "pval"),
                     )
                     if np.isfinite(p_emp):
                         p_val = p_emp
                         p_source = "score_boot"
                         inference_type = "score_boot"
+
+            if (
+                (not np.isfinite(beta_val))
+                and fit_full is not None
+                and target_ix_anc is not None
+                and target in X_anc_zv.columns
+            ):
+                params_full = getattr(fit_full, "params", None)
+                if params_full is not None:
+                    try:
+                        beta_val = float(np.asarray(params_full, dtype=np.float64)[int(target_ix_anc)])
+                        or_val = float(np.exp(beta_val))
+                    except Exception:
+                        beta_val = np.nan
+                        or_val = np.nan
+
+            if inference_type == "score":
+                if (
+                    target_ix_anc is not None
+                    and target in X_anc_zv.columns
+                    and np.isfinite(beta_val)
+                ):
+                    x_target_vec_ci = X_anc_zv.iloc[:, int(target_ix_anc)].to_numpy(dtype=np.float64, copy=False)
+                    ci_info = _score_ci_beta(
+                        X_anc_red,
+                        y_anc,
+                        x_target_vec_ci,
+                        beta_val,
+                        kind="mle",
+                    )
+                    ci_method = ci_info.get("method")
+                    ci_sided = ci_info.get("sided", "two")
+                    ci_valid = bool(ci_info.get("valid", False))
+                    if ci_valid:
+                        lo_beta = ci_info.get("lo")
+                        hi_beta = ci_info.get("hi")
+                        if lo_beta == -np.inf:
+                            ci_lo_or = 0.0
+                        elif np.isfinite(lo_beta):
+                            ci_lo_or = float(np.exp(lo_beta))
+                        else:
+                            ci_lo_or = np.nan
+                        if hi_beta == np.inf:
+                            ci_hi_or = np.inf
+                        elif np.isfinite(hi_beta):
+                            ci_hi_or = float(np.exp(hi_beta))
+                        else:
+                            ci_hi_or = np.nan
+                        ci_str = _fmt_ci(ci_lo_or, ci_hi_or)
+                    else:
+                        ci_lo_or = np.nan
+                        ci_hi_or = np.nan
+                        ci_str = None
+                else:
+                    ci_valid = False
+                    ci_lo_or = np.nan
+                    ci_hi_or = np.nan
+                    ci_str = None
+                    ci_method = None
+            elif inference_type == "score_boot":
+                if (
+                    target_ix_anc is not None
+                    and target in X_anc_zv.columns
+                    and np.isfinite(beta_val)
+                ):
+                    x_target_vec_ci = X_anc_zv.iloc[:, int(target_ix_anc)].to_numpy(dtype=np.float64, copy=False)
+                    ci_info = _score_boot_ci_beta(
+                        X_anc_red,
+                        y_anc,
+                        x_target_vec_ci,
+                        beta_val,
+                        kind="mle",
+                        seed_key=("lrt_followup", s_name_safe, anc, target, "ci"),
+                        p_at_zero=p_val if np.isfinite(p_val) else None,
+                    )
+                    ci_method = ci_info.get("method")
+                    ci_sided = ci_info.get("sided", "two")
+                    ci_valid = bool(ci_info.get("valid", False))
+                    if ci_valid:
+                        lo_beta = ci_info.get("lo")
+                        hi_beta = ci_info.get("hi")
+                        if lo_beta == -np.inf:
+                            ci_lo_or = 0.0
+                        elif np.isfinite(lo_beta):
+                            ci_lo_or = float(np.exp(lo_beta))
+                        else:
+                            ci_lo_or = np.nan
+                        if hi_beta == np.inf:
+                            ci_hi_or = np.inf
+                        elif np.isfinite(hi_beta):
+                            ci_hi_or = float(np.exp(hi_beta))
+                        else:
+                            ci_hi_or = np.nan
+                        ci_str = _fmt_ci(ci_lo_or, ci_hi_or)
+                        ci_label = "score bootstrap (inverted)"
+                    else:
+                        ci_lo_or = np.nan
+                        ci_hi_or = np.nan
+                        ci_str = None
+                else:
+                    ci_valid = False
+                    ci_lo_or = np.nan
+                    ci_hi_or = np.nan
+                    ci_str = None
+                    ci_method = None
 
             p_valid = bool(np.isfinite(p_val))
             if not p_valid:
