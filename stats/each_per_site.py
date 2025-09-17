@@ -265,7 +265,7 @@ def _plot_one_inv(dist_edge: np.ndarray,
     sm = lowess(y, x, frac=LOWESS_FRAC, it=1, return_sorted=True)
     xs, ys = sm[:, 0], sm[:, 1]
 
-    plt.style.use("seaborn-v0_8-whitegrid")
+    plt.style.use("seaborn-v0_8-white")
     fig, ax = plt.subplots(figsize=(10.4, 6.4))
 
     ax.scatter(x, y, s=SCATTER_SIZE, alpha=SCATTER_ALPHA, color=COLOR_DOTS,
@@ -273,18 +273,18 @@ def _plot_one_inv(dist_edge: np.ndarray,
     ax.plot(xs, ys, lw=LINE_WIDTH, color=COLOR_LINE, label=f"LOWESS (f={LOWESS_FRAC})")
 
     ax.set_xlim(-0.05, 1.05)
-    ax.set_xlabel("Normalized distance from segment edge (0 = edge, 1 = center)")
-    ax.set_ylabel(y_label)
-    ax.set_title(title)
-    ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
-    ax.legend(loc="lower right", frameon=True, framealpha=0.92)
+    ax.set_xlabel("Normalized distance from segment edge (0 = edge, 1 = center)", fontsize=15)
+    ax.set_ylabel(y_label, fontsize=15)
+    ax.set_title(title, fontsize=17)
+    ax.tick_params(axis='both', labelsize=13)
+    ax.legend(loc="lower right", frameon=True, framealpha=0.92, fontsize=12)
 
     ax.text(0.98, 0.98,
             f"Spearman ρ = {_fmt_rho(rho)}\n"
             f"p-value = {_fmt_p(p_raw)}\n"
             f"FDR q = {_fmt_q(q_fdr)}",
             transform=ax.transAxes, ha="right", va="top",
-            fontsize=10, bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#CBD5E1", alpha=0.9))
+            fontsize=12, bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#CBD5E1", alpha=0.9))
 
     fig.tight_layout()
     out_png.parent.mkdir(parents=True, exist_ok=True)

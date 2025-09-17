@@ -488,12 +488,13 @@ def _plot_common_elements(ax, plot_data_for_current_col, analysis_column_name, p
     else:
         ax.text(0.5, 0.5, f"No numeric data for categories\n(Column: {analysis_column_name})", **err_style)
 
-    ax.set_ylabel(metric_name, fontsize=13)
-    ax.set_title(f'Comparison of {metric_name}', fontsize=15, pad=18)
+    ax.set_ylabel(metric_name, fontsize=16)
+    ax.set_title(f'Comparison of {metric_name}', fontsize=18, pad=18)
     xt_lbls_n = [f"{lbl}\n(N={meta[lbl]['n_points']})" for lbl in plot_labels]
-    ax.set_xticks(positions); ax.set_xticklabels(xt_lbls_n, fontsize=11)
+    ax.set_xticks(positions); ax.set_xticklabels(xt_lbls_n, fontsize=13)
     ax.set_xlabel(""); ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%.2f'))
-    ax.tick_params(axis='y', labelsize=10); ax.tick_params(axis='x', length=0)
+    ax.tick_params(axis='y', labelsize=13)
+    ax.tick_params(axis='x', labelsize=13, length=0)
     if all_vals_for_ylim:
         min_v, max_v = np.min(all_vals_for_ylim), np.max(all_vals_for_ylim); dr = max_v - min_v
         pad = 0.1 if dr == 0 and min_v == 0 else (np.abs(min_v * 0.1) if dr == 0 else max(dr * 0.08, 0.005))
@@ -501,7 +502,6 @@ def _plot_common_elements(ax, plot_data_for_current_col, analysis_column_name, p
     else: ax.set_ylim(-0.02, 0.1)
     ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
     ax.spines['bottom'].set_color('grey'); ax.spines['left'].set_color('grey')
-    ax.yaxis.grid(True, linestyle=':', which='major', color='lightgrey', alpha=0.7); ax.set_axisbelow(True)
 
 def _draw_violins(ax, valid_series, valid_pos, valid_colors):
     v_parts = ax.violinplot(valid_series, positions=valid_pos, showmedians=True, showextrema=False, widths=0.75)
@@ -609,7 +609,7 @@ def create_comparison_plot(plot_data_for_current_col, categorized_dfs_for_summar
         }
         returned_summary = current_fst_summary
         
-        ax.text(0.04,0.96,f"Mann-Whitney U\n{p_val_text}",transform=ax.transAxes,fontsize=10,va='top',ha='left',
+        ax.text(0.04,0.96,f"Mann-Whitney U\n{p_val_text}",transform=ax.transAxes,fontsize=12,va='top',ha='left',
                 bbox=dict(boxstyle='round,pad=0.3',fc='ghostwhite',alpha=0.7,ec='lightgrey'))
     
     plt.tight_layout(pad=1.5)
@@ -682,14 +682,22 @@ def create_fst_vs_attribute_scatterplot(summary_df_with_types, fst_col, attr_col
         plt.close(fig)
         return None
 
-    ax.set_xlabel(attr_name, fontsize=13)
-    ax.set_ylabel(fst_col_name_pretty, fontsize=13)
-    ax.set_title(title, fontsize=15, pad=18)
-    
-    ax.legend(title="Inversion Type", loc='best', frameon=True, fancybox=True, shadow=True, borderpad=1)
-    ax.grid(True, linestyle=':', which='major', color='lightgrey', alpha=0.7)
+    ax.set_xlabel(attr_name, fontsize=16)
+    ax.set_ylabel(fst_col_name_pretty, fontsize=16)
+    ax.set_title(title, fontsize=18, pad=18)
+
+    ax.legend(
+        title="Inversion Type",
+        loc='best',
+        frameon=True,
+        fancybox=True,
+        shadow=True,
+        borderpad=1,
+        fontsize=12,
+        title_fontsize=14,
+    )
     ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
-    ax.tick_params(axis='both', labelsize=10)
+    ax.tick_params(axis='both', labelsize=13)
     plt.tight_layout(pad=1.5)
     
     fst_col_safe = "".join(c if c.isalnum() else "_" for c in fst_col).lower()

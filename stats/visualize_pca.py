@@ -67,11 +67,11 @@ def plot_pca_for_chromosome(df, chromosome, output_folder, superpop_colors):
                                   ax, n_std=2.0, edgecolor=color, linestyle='--', 
                                   linewidth=1.5, alpha=0.6)
     
-    plt.title(f"PCA Plot - Chromosome {chromosome}", fontsize=14)
-    plt.xlabel("PC1", fontsize=12)
-    plt.ylabel("PC2", fontsize=12)
-    plt.legend(loc='best')
-    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.title(f"PCA Plot - Chromosome {chromosome}", fontsize=16)
+    plt.xlabel("PC1", fontsize=14)
+    plt.ylabel("PC2", fontsize=14)
+    ax.tick_params(axis='both', labelsize=12)
+    plt.legend(loc='best', fontsize=12)
     
     # Save the plot
     output_file = os.path.join(output_folder, f"pca_plot_chr_{chromosome}.png")
@@ -176,11 +176,10 @@ def main():
                                           ax, n_std=2.0, edgecolor=color, linestyle='--', 
                                           linewidth=1.0, alpha=0.6)
             
-            ax.set_title(f"Chr {chr_name}")
-            ax.set_xlabel("PC1", fontsize=9)
-            ax.set_ylabel("PC2", fontsize=9)
-            ax.grid(True, linestyle='--', alpha=0.4)
-            ax.tick_params(axis='both', which='major', labelsize=8)
+            ax.set_title(f"Chr {chr_name}", fontsize=16)
+            ax.set_xlabel("PC1", fontsize=13)
+            ax.set_ylabel("PC2", fontsize=13)
+            ax.tick_params(axis='both', which='major', labelsize=12)
             
         except Exception as e:
             print(f"Error adding {file_path} to combined plot: {e}")
@@ -199,10 +198,16 @@ def main():
         handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color, markersize=10))
         labels.append(sp)
     
-    fig.legend(handles, labels, loc='lower center', ncol=min(len(all_superpops), 5), 
-               bbox_to_anchor=(0.5, 0.02), fontsize='large')
+    fig.legend(
+        handles,
+        labels,
+        loc='lower center',
+        ncol=min(len(all_superpops), 5),
+        bbox_to_anchor=(0.5, 0.02),
+        fontsize=12,
+    )
     
-    plt.suptitle("PCA Plots for All Chromosomes (PC1 vs PC2)", fontsize=16, y=0.98)
+    plt.suptitle("PCA Plots for All Chromosomes (PC1 vs PC2)", fontsize=18, y=0.98)
     plt.tight_layout(rect=[0, 0.05, 1, 0.96])
     
     # Save combined plot

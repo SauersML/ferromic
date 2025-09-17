@@ -65,6 +65,7 @@ AX_TEXT        = "#333333"   # labels/ticks
 mpl.rcParams.update({
     "font.family": "sans-serif",
     "font.sans-serif": ["DejaVu Sans", "Noto Sans", "Liberation Sans", "Ubuntu", "Arial"],
+    "font.size": 14,
     "pdf.fonttype": 42,
     "ps.fonttype": 42,
     "mathtext.fontset": "dejavusans",
@@ -73,9 +74,9 @@ mpl.rcParams.update({
     "axes.labelcolor": AX_TEXT,
     "xtick.color": AX_TEXT,
     "ytick.color": AX_TEXT,
-    "axes.labelsize": 13,
-    "xtick.labelsize": 12,
-    "ytick.labelsize": 12,
+    "axes.labelsize": 15,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
     "legend.borderaxespad": 0.3,
 })
 
@@ -552,7 +553,6 @@ def _plot_multi(x_centers: np.ndarray,
     fig.subplots_adjust(right=0.76)  # reserve space for legend so it never overlaps
 
     # Axis formatting
-    ax.grid(axis="y", color="#e7e7e7", linewidth=0.8)
     ax.set_axisbelow(True)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)

@@ -149,7 +149,6 @@ def create_visualization(transcript_id, coordinates, stats, pickle_data, output_
     cmap_normal = sns.color_palette("viridis", as_cmap=True)
 
     # Create figure
-    plt.rcParams.update(plt.rcParamsDefault)
     fig = plt.figure(figsize=(20, 12))
 
     # GridSpec: 
@@ -168,7 +167,7 @@ def create_visualization(transcript_id, coordinates, stats, pickle_data, output_
     else:
         title_str = f'Transcript: {transcript_id}\n{coordinates}'
     
-    fig.suptitle(title_str, fontsize=24, fontweight='bold', y=0.98)
+    fig.suptitle(title_str, fontsize=26, fontweight='bold', y=0.98)
 
     def plot_matrices(ax, matrix, title_str):
         """
@@ -210,7 +209,7 @@ def create_visualization(transcript_id, coordinates, stats, pickle_data, output_
             xticklabels=False, yticklabels=False, mask=np.isnan(special_data_inv)
         )
 
-        ax.set_title(title_str, fontsize=18, pad=15)
+        ax.set_title(title_str, fontsize=20, pad=15)
         ax.tick_params(axis='both', which='both', length=0)
 
     # Plot Direct matrix (top row, first column)
@@ -240,17 +239,19 @@ def create_visualization(transcript_id, coordinates, stats, pickle_data, output_
     cbar.ax.yaxis.set_major_formatter(FixedFormatter(desired_labels))
     
     # Set the colorbar label and tick label size
-    cbar.set_label('Omega Value', fontsize=16)
-    cbar.ax.tick_params(labelsize=14)
+    cbar.set_label('Omega Value', fontsize=18)
+    cbar.ax.tick_params(labelsize=15)
 
     legend = ax1.legend(
         handles=special_patches,
         title='Special Values',
         loc='upper left',
         bbox_to_anchor=(0.0, -0.05),
-        ncol=1, frameon=True, fontsize=10
+        ncol=1,
+        frameon=True,
+        fontsize=13,
     )
-    legend.get_title().set_fontsize(10)
+    legend.get_title().set_fontsize(13)
 
     # Extract normal omega values for distribution plot
     values_direct = matrix_0[np.tril_indices_from(matrix_0, k=-1)]
