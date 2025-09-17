@@ -281,34 +281,34 @@ def load_stable_age() -> pd.DataFrame:
 #                 FAMILY RELATION PULL/PARSE
 # =========================================================
 
+# PFHH_ANY universe: anyone who reached PFHH family-history content
+_PFHH_ANY_UNIVERSE = """
+    SELECT DISTINCT person_id FROM `{CDR}.ds_survey`
+    WHERE question LIKE 'Have you or anyone in your family ever been diagnosed with%%'
+       OR question LIKE 'Including yourself, who in your family has had%%'
+"""
+
 PHENO_DEF = {
     "Breast Cancer": {
-        "universe": "SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%breast cancer%'",
+        "universe": _PFHH_ANY_UNIVERSE,
         "family_relation_questions": [
             "Including yourself, who in your family has had breast cancer%",
         ],
     },
     "Obesity": {
-        "universe": "SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%obesity%'",
+        "universe": _PFHH_ANY_UNIVERSE,
         "family_relation_questions": [
             "Including yourself, who in your family has had obesity%",
         ],
     },
     "Heart Failure": {
-        "universe": "SELECT DISTINCT person_id FROM `{CDR}.ds_survey` WHERE question LIKE '%congestive heart failure%'",
+        "universe": _PFHH_ANY_UNIVERSE,
         "family_relation_questions": [
             "Including yourself, who in your family has had congestive heart failure%",
         ],
     },
     "Cognitive Impairment": {
-        "universe": """
-            SELECT DISTINCT person_id FROM `{CDR}.ds_survey`
-            WHERE question LIKE '%dementia%'
-               OR question LIKE '%memory loss or impairment%'
-               OR question LIKE '%difficulty concentrating, remembering or making decisions%'
-               OR question LIKE '%difficulty doing errands alone%'
-               OR question LIKE '%difficulty dressing or bathing%'
-        """,
+        "universe": _PFHH_ANY_UNIVERSE,
         "family_relation_questions": [
             "Including yourself, who in your family has had dementia%",
             "Including yourself, who in your family has had memory loss or impairment%",
