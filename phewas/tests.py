@@ -10,6 +10,7 @@ import shutil
 import queue
 import platform
 import resource
+import math
 from unittest.mock import patch, MagicMock
 import warnings
 from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
@@ -133,6 +134,92 @@ def _init_lrt_worker_from_df(df, masks, anc_series, ctx):
     meta, shm = io.create_shared_from_ndarray(arr, readonly=True)
     models.init_lrt_worker(meta, list(df.columns), df.index.astype(str), masks, anc_series, ctx)
     return shm
+
+
+@contextlib.contextmanager
+def bootstrap_test_ctx(**overrides):
+    """Temporarily override bootstrap-related CTX keys for deterministic tests."""
+    original = models.CTX
+    snapshot = dict(original)
+    defaults = {
+        "BOOTSTRAP_B": 512,
+        "BOOTSTRAP_B_MAX": 8192,
+        "BOOTSTRAP_SEQ_ALPHA": 0.005,
+        "BOOTSTRAP_CHUNK": models.BOOTSTRAP_CHUNK,
+        "BOOTSTRAP_STREAM_TARGET_BYTES": models.BOOTSTRAP_STREAM_TARGET_BYTES,
+        "BOOT_MULTIPLIER": "normal",
+        "FDR_ALPHA": 0.05,
+        "PROFILE_MAX_ABS_BETA": models.PROFILE_MAX_ABS_BETA,
+        "BOOT_SEED_BASE": 1234,
+    }
+    temp = dict(snapshot)
+    temp.update(defaults)
+    temp.update(overrides)
+    models.CTX = temp
+    try:
+        yield models.CTX
+    finally:
+        models.CTX = original
+
+
+def make_bootstrap_inputs(beta=0.6, seed=0, n=240):
+    """Construct a simple dataset for score/bootstrap helper tests."""
+    rng = np.random.default_rng(seed)
+    x = rng.normal(size=n)
+    X_full = pd.DataFrame({"const": np.ones(n), "x": x})
+    eta = -0.3 + beta * x
+    p = sigmoid(eta)
+    y = pd.Series(rng.binomial(1, p))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fit = sm.Logit(y, X_full).fit(disp=0, maxiter=200)
+    X_red = X_full[["const"]]
+    x_target = X_full["x"].to_numpy(dtype=np.float64, copy=False)
+    beta_hat = float(fit.params["x"])
+    return X_full, X_red, y, x_target, beta_hat
+
+
+def _beta_to_or_bounds(lo, hi):
+    if lo == -np.inf:
+        lo_or = 0.0
+    elif np.isfinite(lo):
+        lo_or = float(np.exp(lo))
+    else:
+        lo_or = np.nan
+    if hi == np.inf:
+        hi_or = np.inf
+    elif np.isfinite(hi):
+        hi_or = float(np.exp(hi))
+    else:
+        hi_or = np.nan
+    return lo_or, hi_or
+
+
+def _bh_qvalues(p_values):
+    p = np.asarray(p_values, dtype=float)
+    m = p.size
+    if m == 0:
+        return np.array([], dtype=float)
+    order = np.argsort(p)
+    ranks = np.empty_like(order)
+    ranks[order] = np.arange(1, m + 1)
+    q = p * m / ranks
+    rev = order[::-1]
+    q[rev] = np.minimum.accumulate(q[rev])
+    return np.clip(q, 0.0, 1.0)
+
+
+def _bh_threshold(p_values, alpha):
+    p = np.sort(np.asarray(p_values, dtype=float))
+    m = p.size
+    if m == 0:
+        return float("nan")
+    thresholds = alpha * (np.arange(1, m + 1, dtype=float) / m)
+    hits = p <= thresholds
+    if np.any(hits):
+        idx = int(np.max(np.nonzero(hits)[0]))
+        return float(thresholds[idx])
+    return float(thresholds[0])
 
 def prime_all_caches_for_run(core_data, phenos, cdr_codename, target_inversion, cache_dir="./phewas_cache"):
     os.makedirs(cache_dir, exist_ok=True)
@@ -532,6 +619,52 @@ def test_lrt_followup_penalized_fit_omits_ci(test_ctx):
         shm.close(); shm.unlink()
 
 # --- Integration Tests ---
+
+
+def _run_multi_inversion_pipeline(tmpdir):
+    INV_A, INV_B = 'chr_test-A-INV-1', 'chr_test-B-INV-2'
+    with preserve_run_globals(), \
+         patch('phewas.run.bigquery.Client'), \
+         patch('phewas.run.io.load_related_to_remove', return_value=set()), \
+         patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()):
+        core_data, phenos = make_synth_cohort()
+        rng = np.random.default_rng(101)
+        core_data['inversion_A'] = pd.DataFrame({INV_A: np.clip(rng.normal(0.8, 0.5, 200), -2, 2)}, index=core_data['demographics'].index)
+        core_data['inversion_B'] = pd.DataFrame({INV_B: np.zeros(200)}, index=core_data['demographics'].index)
+
+        p_a = sigmoid(2.5 * core_data['inversion_A'][INV_A] + 0.02 * (core_data['demographics']['AGE'] - 50) - 0.2 * core_data['sex']['sex'])
+        cases_a = set(core_data['demographics'].index[rng.random(200) < p_a])
+        phenos['A_strong_signal']['cases'] = cases_a
+
+        defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, INV_A)
+        run.INVERSION_DOSAGES_FILE = str(Path(tmpdir) / "dummy_dosages.tsv")
+        dosages_resolved = os.path.abspath(run.INVERSION_DOSAGES_FILE)
+        inv_a_path = Path("./phewas_cache") / f"inversion_{models.safe_basename(INV_A)}_{run._source_key(dosages_resolved, INV_A)}.parquet"
+        inv_b_path = Path("./phewas_cache") / f"inversion_{models.safe_basename(INV_B)}_{run._source_key(dosages_resolved, INV_B)}.parquet"
+        write_parquet(inv_a_path, core_data['inversion_A'])
+        write_parquet(inv_b_path, core_data['inversion_B'])
+
+        local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
+        run.TARGET_INVERSIONS = [INV_A, INV_B]
+        run.MASTER_RESULTS_CSV = str(Path(tmpdir) / "multi_inversion_master.csv")
+        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
+        run.FDR_ALPHA = 0.9
+        run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
+
+        dummy_dosage_df = pd.DataFrame({
+            'SampleID': core_data['demographics'].index,
+            INV_A: core_data['inversion_A'][INV_A],
+            INV_B: core_data['inversion_B'][INV_B],
+        })
+        write_tsv(run.INVERSION_DOSAGES_FILE, dummy_dosage_df)
+
+        run.main()
+        output_path = Path(run.MASTER_RESULTS_CSV)
+        assert output_path.exists(), "Master CSV file was not created"
+        df = pd.read_csv(output_path, sep='\t')
+    return df, INV_A, INV_B
+
+
 def test_fetcher_producer_drains_cache_only():
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
@@ -665,78 +798,36 @@ def test_memory_envelope_relative():
             assert peak_delta_gb < envelope_gb, f"Peak memory delta {peak_delta_gb:.3f} GB exceeded envelope"
 
 def test_multi_inversion_pipeline_produces_master_file():
-    """
-    Integration test for the primary new feature: running two inversions, applying
-    a global FDR, and producing a single master result file.
-    """
-    with temp_workspace() as tmpdir, preserve_run_globals(), \
-         patch('phewas.run.bigquery.Client'), \
-         patch('phewas.run.io.load_related_to_remove', return_value=set()), \
-         patch('phewas.run.supervisor_main', lambda *a, **k: run._pipeline_once()):
-        # 1. Define two inversions and their synthetic data
-        INV_A, INV_B = 'chr_test-A-INV-1', 'chr_test-B-INV-2'
-        core_data, phenos = make_synth_cohort()
-        rng = np.random.default_rng(101)
-        core_data['inversion_A'] = pd.DataFrame({INV_A: np.clip(rng.normal(0.8, 0.5, 200), -2, 2)}, index=core_data['demographics'].index)
-        core_data['inversion_B'] = pd.DataFrame({INV_B: np.zeros(200)}, index=core_data['demographics'].index)
+    """Integration test to ensure two inversions flow through to a single master file."""
+    with temp_workspace() as tmpdir:
+        df, inv_a, inv_b = _run_multi_inversion_pipeline(tmpdir)
 
-        # Re-generate the 'strong signal' phenotype to be associated with INV_A
-        p_a = sigmoid(2.5 * core_data['inversion_A'][INV_A] + 0.02 * (core_data["demographics"]["AGE"] - 50) - 0.2 * core_data["sex"]["sex"])
-        cases_a = set(core_data["demographics"].index[rng.random(200) < p_a])
-        phenos['A_strong_signal']['cases'] = cases_a
+        assert (Path("./phewas_cache") / models.safe_basename(inv_a)).is_dir()
+        assert (Path("./phewas_cache") / models.safe_basename(inv_b)).is_dir()
 
-        # 2. Prime caches for both inversions
-        # Base caches (demographics, etc.)
-        defs_df = prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, INV_A) # target_inversion here is just a dummy
-        # Overwrite with specific inversion caches
-        run.INVERSION_DOSAGES_FILE = "dummy_dosages.tsv"
-        dosages_resolved = os.path.abspath(run.INVERSION_DOSAGES_FILE)
-        inv_a_path = Path("./phewas_cache") / f"inversion_{models.safe_basename(INV_A)}_{run._source_key(dosages_resolved, INV_A)}.parquet"
-        inv_b_path = Path("./phewas_cache") / f"inversion_{models.safe_basename(INV_B)}_{run._source_key(dosages_resolved, INV_B)}.parquet"
-        write_parquet(inv_a_path, core_data["inversion_A"])
-        write_parquet(inv_b_path, core_data["inversion_B"])
-
-        # 3. Configure and run the main pipeline
-        local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
-        run.TARGET_INVERSIONS = [INV_A, INV_B]
-        run.MASTER_RESULTS_CSV = "multi_inversion_master.csv"
-        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
-        run.FDR_ALPHA = 0.9  # High alpha to ensure we get some hits
-        run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
-        # Write dummy dosage files (needed for io.load_inversions)
-        dummy_dosage_df = pd.DataFrame({
-            'SampleID': core_data['demographics'].index,
-            INV_A: core_data['inversion_A'][INV_A],
-            INV_B: core_data['inversion_B'][INV_B],
-        })
-        write_tsv(run.INVERSION_DOSAGES_FILE, dummy_dosage_df)
-
-        run.main()
-
-        # 4. Assert correctness of outputs
-        output_path = Path(run.MASTER_RESULTS_CSV)
-        assert output_path.exists(), "Master CSV file was not created"
-
-        df = pd.read_csv(output_path, sep='\t')
-
-        # Assert per-inversion directories were created
-        assert (Path("./phewas_cache") / models.safe_basename(INV_A)).is_dir()
-        assert (Path("./phewas_cache") / models.safe_basename(INV_B)).is_dir()
-
-        # Assert results from both inversions are in the file
-        assert set(df['Inversion'].unique()) == {INV_A, INV_B}
-
-        # Assert global Q value was computed correctly
+        assert set(df['Inversion'].unique()) == {inv_a, inv_b}
         assert 'Q_GLOBAL' in df.columns
-        # All valid (non-NA) p-values should have been included in a single correction run
         valid_ps = df['P_LRT_Overall'].notna()
-        assert df.loc[valid_ps, 'Q_GLOBAL'].nunique() >= 1 # Should have some q-values
+        assert df.loc[valid_ps, 'Q_GLOBAL'].nunique() >= 1
 
-        # A_strong_signal should be a hit for INV_A but not INV_B
-        strong_hit_a = df[(df['Phenotype'] == 'A_strong_signal') & (df['Inversion'] == INV_A)]
-        strong_hit_b = df[(df['Phenotype'] == 'A_strong_signal') & (df['Inversion'] == INV_B)]
+        strong_hit_a = df[(df['Phenotype'] == 'A_strong_signal') & (df['Inversion'] == inv_a)]
+        strong_hit_b = df[(df['Phenotype'] == 'A_strong_signal') & (df['Inversion'] == inv_b)]
         assert strong_hit_a['P_LRT_Overall'].iloc[0] < 0.1
         assert pd.isna(strong_hit_b['P_LRT_Overall'].iloc[0]), "P-value for constant inversion should be NaN"
+
+
+def test_bh_matches_reference():
+    with temp_workspace() as tmpdir:
+        df, _, _ = _run_multi_inversion_pipeline(tmpdir)
+        valid_mask = df['P_LRT_Overall'].notna()
+        observed_q = df.loc[valid_mask, 'Q_GLOBAL'].to_numpy(dtype=float)
+        reference_q = _bh_qvalues(df.loc[valid_mask, 'P_LRT_Overall'])
+        assert np.allclose(observed_q, reference_q, rtol=0.0, atol=1e-12)
+
+        selected_observed = set(df.index[valid_mask][observed_q <= 0.05])
+        selected_reference = set(df.index[valid_mask][reference_q <= 0.05])
+        assert selected_observed == selected_reference
+
 
 def test_demographics_age_clipping():
     """Tests that age is correctly clipped to [0, 120] in io.load_demographics_with_stable_age."""
@@ -785,6 +876,378 @@ def test_ridge_seeded_refit_matches_mle():
         assert abs(fit.llf - fit_mle.llf) < 1e-3
     finally:
         models._logit_fit = orig
+
+
+def test_score_bootstrap_rng_determinism():
+    X_full, X_red, y, x_target, beta_hat = make_bootstrap_inputs()
+    with bootstrap_test_ctx(BOOT_SEED_BASE=2024, BOOTSTRAP_B=512, BOOTSTRAP_B_MAX=4096) as ctx:
+        p1, _, draws1, exceed1 = models._score_bootstrap_from_reduced(
+            X_red, y, x_target, seed_key=("unit", "p"), B=ctx["BOOTSTRAP_B"]
+        )
+        ci1 = models._score_boot_ci_beta(
+            X_red,
+            y,
+            x_target,
+            beta_hat,
+            seed_key=("unit", "ci"),
+            p_at_zero=p1,
+        )
+        p2, _, draws2, exceed2 = models._score_bootstrap_from_reduced(
+            X_red, y, x_target, seed_key=("unit", "p"), B=ctx["BOOTSTRAP_B"]
+        )
+        ci2 = models._score_boot_ci_beta(
+            X_red,
+            y,
+            x_target,
+            beta_hat,
+            seed_key=("unit", "ci"),
+            p_at_zero=p2,
+        )
+    assert np.isclose(p1, p2)
+    assert draws1 == draws2 and exceed1 == exceed2
+    assert ci1["draws_max"] == ci2["draws_max"]
+    assert ci1.get("lo") == ci2.get("lo") and ci1.get("hi") == ci2.get("hi")
+
+    with bootstrap_test_ctx(BOOT_SEED_BASE=3030, BOOTSTRAP_B=512, BOOTSTRAP_B_MAX=4096):
+        p3, _, _, _ = models._score_bootstrap_from_reduced(
+            X_red, y, x_target, seed_key=("unit", "p"), B=512
+        )
+    assert not np.isclose(p1, p3)
+
+
+def test_score_bootstrap_ci_coherence():
+    seeds = [101, 303]
+    for seed_base in seeds:
+        for beta in (0.7, 0.0):
+            X_full, X_red, y, x_target, beta_hat = make_bootstrap_inputs(beta=beta, seed=seed_base)
+            with bootstrap_test_ctx(BOOT_SEED_BASE=seed_base, BOOTSTRAP_B=768, BOOTSTRAP_B_MAX=8192):
+                p_val, _, _, _ = models._score_bootstrap_from_reduced(
+                    X_red, y, x_target, seed_key=("coherence", beta, "p"), B=768
+                )
+                ci = models._score_boot_ci_beta(
+                    X_red,
+                    y,
+                    x_target,
+                    beta_hat,
+                    seed_key=("coherence", beta, "ci"),
+                    p_at_zero=p_val,
+                )
+            lo_or, hi_or = _beta_to_or_bounds(ci.get("lo"), ci.get("hi"))
+            if np.isfinite(p_val) and p_val < 0.05:
+                assert ci.get("valid") is True
+                assert not (np.isfinite(lo_or) and np.isfinite(hi_or) and lo_or <= 1.0 <= hi_or)
+            else:
+                if ci.get("valid"):
+                    assert lo_or <= 1.0 <= hi_or or (lo_or == 0.0 and np.isinf(hi_or))
+
+
+def test_score_bootstrap_bits_magnitude():
+    rng = np.random.default_rng(7)
+    n = 180
+    x = rng.normal(size=n)
+    X_red = np.ones((n, 1))
+    xt = x.astype(np.float64)
+    eta_small = 0.2 * x
+    eta_big = 1.2 * x
+    y_small = rng.binomial(1, sigmoid(eta_small))
+    y_big = rng.binomial(1, sigmoid(eta_big))
+    bits_small = models._score_bootstrap_bits(X_red, y_small, xt, 0.0, kind="mle")
+    bits_big = models._score_bootstrap_bits(X_red, y_big, xt, 0.0, kind="mle")
+    assert bits_small is not None and bits_big is not None
+    assert np.isfinite(bits_small["T_obs"]) and np.isfinite(bits_big["T_obs"]) and bits_small["den"] > 0
+    assert bits_big["T_obs"] > bits_small["T_obs"]
+
+
+def test_score_bootstrap_variance_shrinkage():
+    X_full, X_red, y, x_target, _ = make_bootstrap_inputs(beta=0.5, seed=11)
+    bits = models._score_bootstrap_bits(X_red.to_numpy(dtype=np.float64), y.to_numpy(), x_target, 0.0, kind="mle")
+    with bootstrap_test_ctx(BOOT_SEED_BASE=909):
+        rng_small = models._bootstrap_rng(("var", "seed"))
+        detail_small = models._score_bootstrap_p_from_bits(bits, B=1024, rng=rng_small, return_detail=True)
+        rng_large = models._bootstrap_rng(("var", "seed"))
+        detail_large = models._score_bootstrap_p_from_bits(bits, B=32768, rng=rng_large, return_detail=True)
+    assert detail_large["draws"] > detail_small["draws"]
+    assert abs(detail_small["p"] - detail_large["p"]) < 0.02
+
+
+def test_score_boot_ci_boundary_label():
+    X_full, X_red, y, x_target, beta_hat = make_bootstrap_inputs(beta=1.1, seed=21)
+    with bootstrap_test_ctx(BOOT_SEED_BASE=505):
+        ci = models._score_boot_ci_beta(
+            X_red,
+            y,
+            x_target,
+            beta_hat,
+            max_abs_beta=0.25,
+            seed_key=("boundary", "ci"),
+        )
+    assert ci.get("valid") is True
+    assert ci.get("sided") == "one"
+    assert "boundary" in ci.get("label", "")
+
+
+def test_bootstrap_multiplier_modes():
+    h = np.ones(12)
+    threshold = 0.5
+
+    class RademacherRNG:
+        def __init__(self):
+            self.samples = []
+
+        def choice(self, values, size=None):
+            arr = np.random.default_rng(0).choice(values, size=size)
+            self.samples.append(arr)
+            return arr
+
+        def standard_normal(self, *_, **__):
+            raise AssertionError("standard_normal should not be used for rademacher")
+
+    with bootstrap_test_ctx(BOOT_MULTIPLIER="rademacher"):
+        rng = RademacherRNG()
+        models._bootstrap_chunk_exceed(h, threshold, rng, reps=4, target_bytes=256)
+        assert rng.samples, "Rademacher generator should have been used"
+        for arr in rng.samples:
+            assert np.isin(arr, [-1.0, 1.0]).all()
+
+    class NormalRNG:
+        def __init__(self):
+            self.called = False
+
+        def standard_normal(self, size=None):
+            self.called = True
+            return np.zeros(size, dtype=np.float64)
+
+        def choice(self, *args, **kwargs):
+            raise AssertionError("choice should not be used for normal multipliers")
+
+    with bootstrap_test_ctx(BOOT_MULTIPLIER="normal"):
+        rng = NormalRNG()
+        models._bootstrap_chunk_exceed(h, threshold, rng, reps=4, target_bytes=256)
+        assert rng.called is True
+
+
+def test_adaptive_bootstrap_planner_triggers_near_cutoff():
+    with temp_workspace():
+        results_dir = Path("./phewas_cache/results_atomic")
+        results_dir.mkdir(parents=True, exist_ok=True)
+        ctx = {
+            "FDR_ALPHA": 0.05,
+            "BOOTSTRAP_SEQ_ALPHA": 0.01,
+            "BOOTSTRAP_B_MAX": 64000,
+        }
+        records = [
+            {"Phenotype": "very_sig", "P_Value": 0.0005, "Inference_Type": "mle"},
+            {
+                "Phenotype": "borderline",
+                "P_Value": (1 + 34) / (2000 + 1),
+                "Inference_Type": "score_boot",
+                "Boot_Total": 2000,
+                "Boot_Exceed": 34,
+            },
+            {"Phenotype": "nullish", "P_Value": 0.3, "Inference_Type": "mle"},
+        ]
+        for rec in records:
+            payload = {**rec}
+            payload.setdefault("Boot_Total", None)
+            payload.setdefault("Boot_Exceed", None)
+            io.atomic_write_json(results_dir / f"{rec['Phenotype']}.json", payload)
+
+        plan = models.plan_score_bootstrap_refinement(str(results_dir), ctx, safety_factor=8.0)
+        assert plan, "Expected refinement plan to schedule at least one phenotype"
+        assert {entry["name"] for entry in plan} == {"borderline"}
+        entry = plan[0]
+        assert entry["min_total"] > records[1]["Boot_Total"]
+        assert entry["min_total"] <= ctx["BOOTSTRAP_B_MAX"]
+        lo, hi = models._clopper_pearson_interval(34, 2000, alpha=ctx["BOOTSTRAP_SEQ_ALPHA"])
+        assert lo < entry["alpha_target"] < hi
+        t_star = _bh_threshold([rec["P_Value"] for rec in records], ctx["FDR_ALPHA"])
+        assert math.isclose(entry["alpha_target"], t_star, rel_tol=0.0, abs_tol=1e-12)
+
+
+def test_adaptive_bootstrap_round_trip_updates_draws_and_keeps_CI_coherent(test_ctx):
+    test_ctx = test_ctx.copy()
+    test_ctx.update({"BOOTSTRAP_B": 256, "BOOTSTRAP_B_MAX": 4096, "BOOT_MULTIPLIER": "normal", "FDR_ALPHA": 0.05})
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort(N=160)
+        core_df = sm.add_constant(pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main'],
+        ], axis=1))
+        masks = {
+            "cardio": np.ones(len(core_df), dtype=bool),
+            "neuro": np.ones(len(core_df), dtype=bool),
+        }
+        shm = _init_worker_from_df(core_df, masks, test_ctx)
+        cat_map = {name: data["category"] for name, data in phenos.items()}
+
+        target_names = ["A_strong_signal", "C_moderate_signal"]
+        patchers = [
+            patch.object(models, "_ok_mle_fit", return_value=False),
+            patch.object(models, "_firth_refit", return_value=None),
+            patch.object(models, "_score_test_from_reduced", return_value=(np.nan, None)),
+        ]
+        try:
+            for p in patchers:
+                p.start()
+            for name in target_names:
+                case_idx = core_df.index.get_indexer(list(phenos[name]["cases"]))
+                pheno_data = {
+                    "name": name,
+                    "category": cat_map[name],
+                    "case_idx": case_idx[case_idx >= 0].astype(np.int32),
+                }
+                models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
+        finally:
+            for p in reversed(patchers):
+                p.stop()
+
+        results_dir = Path(test_ctx["RESULTS_CACHE_DIR"])
+        baseline = {}
+        for name in target_names:
+            with open(results_dir / f"{name}.json") as fh:
+                baseline[name] = json.load(fh)
+                assert baseline[name]["Inference_Type"] == "score_boot"
+
+        border_path = results_dir / f"{target_names[0]}.json"
+        border_record = baseline[target_names[0]]
+        border_record.update({
+            "P_Value": (1 + 20) / (1024 + 1),
+            "Boot_Total": 1024,
+            "Boot_Exceed": 20,
+        })
+        io.atomic_write_json(border_path, border_record)
+
+        plan_ctx = dict(test_ctx)
+        plan = models.plan_score_bootstrap_refinement(str(results_dir), plan_ctx, safety_factor=8.0)
+        assert plan, "Expected refinement plan"
+        planned = {entry["name"] for entry in plan}
+        assert target_names[0] in planned
+
+        before_totals = {name: baseline[name]["Boot_Total"] for name in target_names}
+        lookup = {entry["name"]: entry for entry in plan}
+        p_values = []
+        for name in target_names:
+            with open(results_dir / f"{name}.json") as fh:
+                rec = json.load(fh)
+                p_values.append(rec.get("P_Value", np.nan))
+        t_star = _bh_threshold(p_values, plan_ctx["FDR_ALPHA"])
+        assert math.isclose(lookup[target_names[0]]["alpha_target"], t_star, rel_tol=0.0, abs_tol=1e-12)
+
+        patchers = [
+            patch.object(models, "_ok_mle_fit", return_value=False),
+            patch.object(models, "_firth_refit", return_value=None),
+            patch.object(models, "_score_test_from_reduced", return_value=(np.nan, None)),
+        ]
+        try:
+            for p in patchers:
+                p.start()
+            for name in planned:
+                case_idx = core_df.index.get_indexer(list(phenos[name]["cases"]))
+                pheno_data = {
+                    "name": name,
+                    "category": cat_map[name],
+                    "case_idx": case_idx[case_idx >= 0].astype(np.int32),
+                    "min_total": lookup[name]["min_total"],
+                    "refine_round": 1,
+                }
+                models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
+        finally:
+            for p in reversed(patchers):
+                p.stop()
+
+        updated = {}
+        for name in target_names:
+            with open(results_dir / f"{name}.json") as fh:
+                updated[name] = json.load(fh)
+
+        for name in planned:
+            assert updated[name]["Boot_Total"] >= lookup[name]["min_total"]
+            assert updated[name]["Boot_Total"] > before_totals[name]
+        for name in set(target_names) - planned:
+            assert updated[name]["Boot_Total"] == before_totals[name]
+
+        for rec in updated.values():
+            if rec.get("P_Source") == "score_boot" and rec.get("P_Value", 1.0) < 0.05 and rec.get("CI_Valid"):
+                assert not (rec.get("CI_LO_OR") <= 1.0 <= rec.get("CI_HI_OR"))
+            if rec.get("P_Source") == "score_boot":
+                notes = rec.get("Model_Notes", "")
+                for token in [
+                    "inference=score_boot",
+                    "ci=score_boot_multiplier",
+                    "boot=",
+                    "boot_seq_alpha=",
+                    "boot_multiplier=",
+                ]:
+                    assert token in notes
+
+        shm.close()
+        shm.unlink()
+
+
+def test_empirical_fdr_control_at_alpha_point05():
+    rng = np.random.default_rng(12345)
+    m = 120
+    n = 350
+    alt_count = int(0.4 * m)
+    is_alt = np.zeros(m, dtype=bool)
+    is_alt[:alt_count] = True
+    rng.shuffle(is_alt)
+    intercept = -0.3
+    beta_alt = 0.7
+    datasets = []
+
+    with bootstrap_test_ctx(BOOTSTRAP_B=512, BOOTSTRAP_B_MAX=8192, BOOTSTRAP_SEQ_ALPHA=0.01, BOOT_SEED_BASE=2025, FDR_ALPHA=0.05) as ctx:
+        pvals = np.empty(m, dtype=float)
+        draws = np.zeros(m, dtype=int)
+        ones_col = np.ones((n, 1))
+        for idx in range(m):
+            x = rng.normal(size=n)
+            beta = beta_alt if is_alt[idx] else 0.0
+            eta = intercept + beta * x
+            p = sigmoid(eta)
+            y = rng.binomial(1, p)
+            datasets.append((x, y))
+            p_boot, _, draws_i, _ = models._score_bootstrap_from_reduced(
+                ones_col,
+                y,
+                x,
+                seed_key=("empirical_fdr", idx),
+                B=ctx["BOOTSTRAP_B"],
+                B_max=ctx["BOOTSTRAP_B_MAX"],
+            )
+            pvals[idx] = p_boot
+            draws[idx] = draws_i
+        assert np.all(np.isfinite(pvals))
+
+        t_star = _bh_threshold(pvals, ctx["FDR_ALPHA"])
+        refine_min = int(min(ctx["BOOTSTRAP_B_MAX"], math.ceil(8.0 / max(t_star, 1e-12))))
+        band_mask = (pvals >= max(0.5 * t_star, 1e-12)) & (pvals <= 2.0 * t_star)
+        for idx in np.where(band_mask)[0]:
+            x, y = datasets[idx]
+            p_refine, _, draws_ref, _ = models._score_bootstrap_from_reduced(
+                ones_col,
+                y,
+                x,
+                seed_key=("empirical_fdr", idx),
+                B=ctx["BOOTSTRAP_B"],
+                B_max=ctx["BOOTSTRAP_B_MAX"],
+                min_total=refine_min,
+            )
+            pvals[idx] = p_refine
+            draws[idx] = draws_ref
+            assert draws_ref >= refine_min
+
+    qvals = _bh_qvalues(pvals)
+    selected = np.where(qvals <= 0.05)[0]
+    assert selected.size > 0
+    V = int(np.sum(~is_alt[selected]))
+    S = int(np.sum(is_alt[selected]))
+    fdr_observed = V / selected.size
+    power = S / max(np.sum(is_alt), 1)
+    assert fdr_observed <= 0.08
+    assert power >= 0.60
 
 
 def test_lrt_allows_when_ridge_seeded_but_final_is_mle(test_ctx):

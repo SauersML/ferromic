@@ -384,6 +384,7 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                     _print_bar(queued, done)
 
             failed_tasks = []
+            submitted_lookup = {}
             def _err_cb(e):
                 nonlocal failed_tasks
                 print(f"[pool ERR] Worker failed: {e}", flush=True)
@@ -423,6 +424,8 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                                     pass
                 except Exception:
                     pass
+                task_copy = {k: v for k, v in item.items() if k != "case_idx"}
+                submitted_lookup[item["name"]] = task_copy
                 queued += 1
                 ar = pool.apply_async(worker_func, (item,), callback=_cb, error_callback=_err_cb)
                 inflight.append(ar)
@@ -434,6 +437,118 @@ def run_fits(pheno_queue, core_df_with_const, allowed_mask_by_cat, target_invers
                 ar.wait()
             pool.join()
             _print_bar(queued, done); print("")
+            pool = None
+
+            refinement_round = 0
+            max_refinement_rounds = 3
+            while refinement_round < max_refinement_rounds:
+                plan = models.plan_score_bootstrap_refinement(results_cache_dir, ctx)
+                if not plan:
+                    break
+                refine_tasks = []
+                seen = set()
+                for entry in plan:
+                    name = entry.get("name")
+                    if not name or name in seen:
+                        continue
+                    base_task = submitted_lookup.get(name)
+                    if not base_task:
+                        continue
+                    min_total = int(entry.get("min_total", 0))
+                    alpha_target = entry.get("alpha_target")
+                    task = dict(base_task)
+                    task["min_total"] = min_total if min_total > 0 else None
+                    if alpha_target is not None:
+                        task["alpha_target"] = float(alpha_target)
+                    task["refine_round"] = refinement_round + 1
+                    refine_tasks.append(task)
+                    seen.add(name)
+                if not refine_tasks:
+                    break
+                refinement_round += 1
+                target_alpha_display = plan[0].get("alpha_target")
+                if target_alpha_display is not None:
+                    try:
+                        alpha_str = f"{float(target_alpha_display):.3e}"
+                    except Exception:
+                        alpha_str = str(target_alpha_display)
+                else:
+                    alpha_str = "?"
+                print(
+                    f"\n[Adaptive-B] Round {refinement_round}: refining {len(refine_tasks)} score_boot tests (t*={alpha_str}).",
+                    flush=True,
+                )
+                bar_len_ref = 40
+                queued_ref = 0
+                done_ref = 0
+                lock_ref = threading.Lock()
+                inflight_ref = []
+
+                def _print_ref(q, d):
+                    q = int(q)
+                    d = int(d)
+                    pct = int((d * 100) / q) if q else 0
+                    filled = int(bar_len_ref * (d / q)) if q else 0
+                    bar = "[" + "#" * filled + "-" * (bar_len_ref - filled) + "]"
+                    mem_info = (
+                        f"| App≈{monitor.rss_gb:.2f}GB  "
+                        f"SysAvail≈{monitor.available_memory_gb:.2f}GB  "
+                        f"Budget≈{BUDGET.remaining_gb():.2f}GB"
+                    )
+                    PROGRESS.update(target_inversion, "Adaptive-B", d, q)
+                    print(f"\r[Adaptive-B] {bar} {d}/{q} ({pct}%) {mem_info}", end="", flush=True)
+
+                def _cb_ref(_):
+                    nonlocal done_ref, queued_ref
+                    with lock_ref:
+                        done_ref += 1
+                        _print_ref(queued_ref, done_ref)
+
+                pool = get_context(MP_CONTEXT).Pool(
+                    processes=n_procs,
+                    initializer=models.init_worker,
+                    initargs=(base_meta, core_cols, core_index, allowed_mask_by_cat, ctx),
+                    maxtasksperchild=500,
+                )
+                try:
+                    for task in refine_tasks:
+                        floor = _resolve_floor(min_available_memory_gb)
+                        while BUDGET.remaining_gb() < floor:
+                            print(
+                                f"\n[gov WARN] Budget low (remain: {BUDGET.remaining_gb():.2f}GB, floor: {floor:.2f}GB), pausing adaptive tasks...",
+                                flush=True,
+                            )
+                            time.sleep(2)
+                        res_path = os.path.join(results_cache_dir, f"{task['name']}.json")
+                        meta_path = os.path.join(results_cache_dir, f"{task['name']}.meta.json")
+                        for pth in (res_path, meta_path):
+                            try:
+                                if os.path.exists(pth):
+                                    os.remove(pth)
+                            except Exception:
+                                pass
+                        queued_ref += 1
+                        ar = pool.apply_async(worker_func, (task,), callback=_cb_ref, error_callback=_err_cb)
+                        inflight_ref.append(ar)
+                        _print_ref(queued_ref, done_ref)
+                    pool.close()
+                    for ar in inflight_ref:
+                        ar.wait()
+                    pool.join()
+                    _print_ref(queued_ref, done_ref)
+                    print("")
+                finally:
+                    try:
+                        if pool is not None:
+                            pool.close()
+                            pool.join()
+                    except Exception:
+                        try:
+                            if pool is not None:
+                                pool.terminate()
+                        except Exception:
+                            pass
+                    pool = None
         finally:
             base_shm.close()
             base_shm.unlink()
