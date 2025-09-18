@@ -11,6 +11,8 @@ import faulthandler
 import sys
 import traceback
 import json
+import importlib
+import importlib.util
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -21,7 +23,24 @@ except Exception:
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-from google.cloud import bigquery
+
+try:
+    _bigquery_spec = importlib.util.find_spec("google.cloud.bigquery")
+except ModuleNotFoundError:  # pragma: no cover - exercised in minimal environments
+    _bigquery_spec = None
+
+if _bigquery_spec is not None:
+    bigquery = importlib.import_module("google.cloud.bigquery")
+else:  # pragma: no cover - exercised in minimal environments
+    from types import SimpleNamespace
+
+    def _missing_bigquery_client(*args, **kwargs):
+        raise ModuleNotFoundError(
+            "google-cloud-bigquery is required to access remote cohort data. "
+            "Install google-cloud-bigquery or patch 'phewas.run.bigquery.Client' with a stub."
+        )
+
+    bigquery = SimpleNamespace(Client=_missing_bigquery_client)  # type: ignore
 from statsmodels.stats.multitest import multipletests
 from scipy import stats
 
