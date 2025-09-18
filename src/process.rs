@@ -3703,7 +3703,7 @@ pub fn process_variant(
                 chr, one_based_vcf_position.0
             )));
         }
-        let gq_str = gt_subfields[gq_index];
+        let gq_str = gt_subfields[gq_index].trim();
 
         // Attempt to parse GQ value as u16
         // Parse GQ value, treating '.' or empty string as 0
