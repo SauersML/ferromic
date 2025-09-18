@@ -725,6 +725,9 @@ def _pipeline_once():
                     "TARGET_INVERSION": target_inversion,
                     "CTX_TAG": ctx_tag_by_inversion.get(target_inversion),
                     "DATA_KEYS": data_keys,
+                    "STAGE1_REPORTS_FINAL": True,
+                    "STAGE1_MATCH_PHEWAS_DESIGN": True,
+                    "STAGE1_EMIT_PHEWAS_EXTRAS": True,
                 }
                 pheno.configure_from_ctx(ctx)
                 inversion_df = io.get_cached_or_generate(
@@ -1082,6 +1085,9 @@ def _pipeline_once():
                     "SELECTION": tctx.get("SELECTION"),
                     "TARGET_INVERSION": target_inversion,
                     "CTX_TAG": ctx_tag_by_inversion.get(target_inversion),
+                    "STAGE1_REPORTS_FINAL": True,
+                    "STAGE1_MATCH_PHEWAS_DESIGN": True,
+                    "STAGE1_EMIT_PHEWAS_EXTRAS": True,
                 }
 
                 pheno.configure_from_ctx(ctx)

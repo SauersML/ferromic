@@ -22,7 +22,6 @@ allowed_fp_by_cat = {}
 
 # --- inference behavior toggles ---
 DEFAULT_PREFER_FIRTH_ON_RIDGE = True
-DEFAULT_BACKFILL_P_FROM_STAGE1 = True
 DEFAULT_ALLOW_PENALIZED_WALD = False
 
 # Thresholds to detect unusable confidence intervals from penalized fits
@@ -1136,43 +1135,8 @@ def _validate_ctx(ctx):
     ctx.setdefault("BOOTSTRAP_SEQ_ALPHA", BOOTSTRAP_SEQ_ALPHA)
     ctx.setdefault("FDR_ALPHA", 0.05)
     ctx.setdefault("BOOT_SEED_BASE", None)
-def _drop_zero_variance_np(X, keep_ix=(), eps=1e-12):
-    """
-    Drops columns with no or near-zero variance from a NumPy array.
-    `keep_ix` is a set of column indices to always keep.
-    Returns the pruned array and the indices of the kept columns from the original array.
-    """
-    stds = np.nanstd(X, axis=0)
-    good_mask = (stds >= eps) & np.isfinite(stds)
-    for i in keep_ix:
-        if i < len(good_mask):
-            good_mask[i] = True
-    kept_original_indices = np.flatnonzero(good_mask)
-    return X[:, kept_original_indices], kept_original_indices
 
 
-def _drop_rank_deficiency_np(X, keep_ix=()):
-    """
-    Greedily removes columns from a NumPy design matrix until it achieves full column rank.
-    Columns listed in keep_ix are preserved whenever possible. Removal order is by ascending
-    column standard deviation among removable columns. This continues until the matrix is full rank
-    or no more columns can be removed.
-    Returns the pruned matrix and the kept column indices relative to the original X.
-    """
-    if X.shape[1] == 0: return X, np.array([], int)
-    keep_ix = set(int(i) for i in keep_ix)
-    cols = np.arange(X.shape[1])
-    while np.linalg.matrix_rank(X) < X.shape[1]:
-        removable_positions = [k for k, j in enumerate(cols) if j not in keep_ix]
-        if not removable_positions:
-            break
-        stds = np.nanstd(X, axis=0)
-        # Find the position of the column with the minimum standard deviation among those that can be removed.
-        # np.argmin operates on the filtered stds, so we need to map the index back to the original position.
-        min_std_removable_pos = removable_positions[int(np.argmin(stds[removable_positions]))]
-        X = np.delete(X, min_std_removable_pos, axis=1)
-        cols = np.delete(cols, min_std_removable_pos, axis=0)
-    return X, cols
 
 
 def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
@@ -1197,34 +1161,6 @@ def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
     return X.loc[keep].drop(columns=['sex']), y.loc[keep], f"sex_restricted_to_{int(dominant_sex)}", None
 
 
-def _apply_sex_restriction_np(X, y, sex_ix):
-    """
-    NumPy-based sex restriction with strict or majority gating.
-
-    Behavior is controlled via CTX:
-      - CTX['SEX_RESTRICT_MODE']: 'strict' or 'majority'.
-      - CTX['SEX_RESTRICT_PROP']: float in [0, 1] for majority.
-      - CTX['SEX_RESTRICT_MAX_OTHER_CASES']: int cap on stray other-sex cases.
-    Returns: (X_restr, y_restr, note:str, skip_reason:str|None, sex_col_dropped:bool)
-    """
-    if sex_ix is None:
-        return X, y, "", None, False
-
-    mode = str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower()
-    majority_prop = float(CTX.get("SEX_RESTRICT_PROP", DEFAULT_SEX_RESTRICT_PROP))
-    max_other = int(CTX.get("SEX_RESTRICT_MAX_OTHER_CASES", 0))
-
-    sex_col = X[:, sex_ix]
-    keep_mask, note, skip, restricted = _sex_keep_mask_numpy(sex_col, y, mode, majority_prop, max_other)
-    if skip:
-        return X, y, "", skip, False
-    if not restricted:
-        return X, y, note or "", None, False
-
-    cols_to_keep = np.arange(X.shape[1]) != sex_ix
-    X_restr = X[keep_mask][:, cols_to_keep]
-    y_restr = y[keep_mask]
-    return X_restr, y_restr, note or "", None, True
 
 
 # --- Bootstrap helpers ---
@@ -1845,65 +1781,8 @@ def _mask_fingerprint(mask: np.ndarray, index: pd.Index) -> str:
     return f"{h:016x}:{n}"
 
 
-def _subjects_fingerprint_from_indices(index: pd.Index, rows: np.ndarray) -> str:
-    """Fingerprint the analytic sample given positional indices into the core index."""
-    if rows is None or len(rows) == 0:
-        return _index_fingerprint(pd.Index([]))
-    rows = np.asarray(rows, dtype=int)
-    return _index_fingerprint(index[rows])
 
 
-def _sex_keep_mask_numpy(sex_vec: np.ndarray, y_vec: np.ndarray, mode: str, prop: float, max_other: int):
-    """Return row mask and notes for potential sex restriction using NumPy inputs."""
-    sex_arr = np.asarray(sex_vec, dtype=np.float64)
-    y_bool = np.asarray(y_vec, dtype=bool)
-
-    keep_mask = np.ones_like(y_bool, dtype=bool)
-    note = ""
-    skip_reason = None
-    restricted = False
-
-    total_cases = int(np.sum(y_bool))
-    if total_cases <= 0:
-        return keep_mask, note, skip_reason, restricted
-
-    n_f_case = int(np.sum((sex_arr == 0.0) & y_bool))
-    n_m_case = int(np.sum((sex_arr == 1.0) & y_bool))
-    n_f_ctrl = int(np.sum((sex_arr == 0.0) & (~y_bool)))
-    n_m_ctrl = int(np.sum((sex_arr == 1.0) & (~y_bool)))
-
-    mode = str(mode or "majority").lower()
-
-    if mode == "strict":
-        if (n_f_case > 0) ^ (n_m_case > 0):
-            s_dom = 0.0 if n_f_case > 0 else 1.0
-            share_dom = 1.0
-            other_cases = 0
-        else:
-            return keep_mask, note, skip_reason, restricted
-    else:
-        if n_f_case >= n_m_case:
-            s_dom = 0.0
-            share_dom = (n_f_case / total_cases) if total_cases > 0 else 0.0
-            other_cases = n_m_case
-        else:
-            s_dom = 1.0
-            share_dom = (n_m_case / total_cases) if total_cases > 0 else 0.0
-            other_cases = n_f_case
-        if not ((share_dom >= float(prop)) or (other_cases <= int(max_other))):
-            return keep_mask, note, skip_reason, restricted
-
-    if (s_dom == 0.0 and n_f_ctrl == 0) or (s_dom == 1.0 and n_m_ctrl == 0):
-        skip_reason = "sex_no_controls_in_case_sex"
-        return keep_mask, note, skip_reason, restricted
-
-    keep_mask = (sex_arr == s_dom)
-    restricted = True
-    if mode == "strict":
-        note = f"sex_restricted_to_{int(s_dom)}"
-    else:
-        note = f"sex_majority_restricted_to_{int(s_dom)}:prop={share_dom:.3f};other_cases={other_cases}"
-    return keep_mask, note, skip_reason, restricted
 
 def _should_skip(meta_path, core_df_cols, core_index_fp, case_idx_fp, category, target, allowed_fp, *,
                  used_index_fp=None, sex_cfg=None, thresholds=None):
@@ -1985,45 +1864,6 @@ def _pos_in_current(orig_ix, current_ix_array):
     return int(pos[0]) if pos.size else None
 
 
-def _backfill_p_from_stage1(s_name_safe):
-    # Prefer cached Stage-1 chi-square then bootstrap score tests.
-    lrt_dir = CTX.get("LRT_OVERALL_CACHE_DIR")
-    if lrt_dir:
-        pth = os.path.join(lrt_dir, f"{s_name_safe}.json")
-        if os.path.exists(pth):
-            rec = io.read_meta_json(pth)
-            if not rec:
-                try:
-                    rec = pd.read_json(pth, typ="series").to_dict()
-                except Exception:
-                    rec = None
-            if rec is not None:
-                try:
-                    p_val = float(rec.get("P_LRT_Overall"))
-                except (TypeError, ValueError):
-                    p_val = np.nan
-                if np.isfinite(p_val):
-                    return float(p_val), "lrt_chi2"
-
-    boot_dir = CTX.get("BOOT_OVERALL_CACHE_DIR")
-    if boot_dir:
-        pth = os.path.join(boot_dir, f"{s_name_safe}.json")
-        if os.path.exists(pth):
-            rec = io.read_meta_json(pth)
-            if not rec:
-                try:
-                    rec = pd.read_json(pth, typ="series").to_dict()
-                except Exception:
-                    rec = None
-            if rec is not None:
-                try:
-                    p_emp = float(rec.get("P_EMP"))
-                except (TypeError, ValueError):
-                    p_emp = np.nan
-                if np.isfinite(p_emp):
-                    return float(p_emp), "score_boot"
-
-    return np.nan, None
 
 
 def lrt_overall_worker(task):

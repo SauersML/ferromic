@@ -11,7 +11,8 @@ from . import models
 from . import iox as io
 import time
 import random
-import queue
+
+# PHEWAS main removed: Stage-1 (LRT/Bootstrap) is the only engine.
 
 
 def cgroup_available_gb():
