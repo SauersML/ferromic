@@ -2481,7 +2481,12 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         inference_type = inference_family if inference_family is not None else "none"
         final_is_mle = inference_type == "mle"
         used_firth = (inference_type == "firth") or bool(getattr(fit, "_used_firth", False))
-        used_ridge = bool(getattr(fit, "_used_ridge", False) or inference_type in {"firth", "score_boot"})
+        ridge_candidates = (fit, fit_full_use, fit_red_use)
+        used_ridge = any(
+            bool(getattr(candidate, "_used_ridge", False))
+            for candidate in ridge_candidates
+            if candidate is not None
+        )
         if used_ridge:
             p_value = np.nan
             p_source = None
