@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+version = "0.1.0"
+name = "ferromic"
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "numpy",
+    "scikit-allel",
+]
+
+[tool.maturin]
+bindings = "pyo3"
