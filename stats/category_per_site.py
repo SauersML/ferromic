@@ -26,18 +26,18 @@ OUTDIR         = Path("length_norm_trend_fast")
 MIN_LEN_PI     = 100_000
 MIN_LEN_FST    = 100_000
 
+MAX_BP         = 100_000          # cap distance from inversion edge
+
 # Proportion mode
-NUM_BINS_PROP  = 100
+NUM_BINS_PROP  = 50
 
 # Base-pair mode 
-MAX_BP         = 1_000_000          # cap distance from inversion edge at 2 Mbp
-NUM_BINS_BP    = 50                # number of bins between 0..MAX_BP
+NUM_BINS_BP    = 50               # number of bins between 0..MAX_BP
 
 # Plotting/analysis rules
 LOWESS_FRAC     = 0.4
-MIN_INV_PER_BIN = 5                 # if <5 inversions in a bin → don't plot that bin
+MIN_INV_PER_BIN = 5               # if <5 inversions in a bin → don't plot that bin
 
-# Visual
 # Visual
 SCATTER_SIZE   = 34
 SCATTER_ALPHA  = 0.10   # transparent dots
@@ -288,7 +288,7 @@ def _pool_init(mode: str, num_bins: int, max_bp: Optional[int]):
 def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
     """
     Map one sequence to distance-from-inversion-edge based on global _MODE, then bin.
-    Returns per-bin MEANS (length _NUM_BINS_, NaN where empty).
+    Returns per-bin MEANS (within-sequence means; length _NUM_BINS_, NaN where empty).
     """
     global _BIN_EDGES, _NUM_BINS, _MODE, _MAX_BP
     if _BIN_EDGES is None or _NUM_BINS is None or _MODE is None:
@@ -302,26 +302,34 @@ def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
     if not np.any(valid):
         return None
 
-    vv = seq[valid].astype(np.float64)
+    # distance in bp to nearest inversion edge (0 at edges, ~L/2 at center)
+    dist_bp_full = np.minimum(idx, (L - 1) - idx)
 
     if _MODE == "proportion":
         # normalized distance-from-center (0 = center, 1 = edge)
         halfspan = (L - 1) / 2.0
-        dc_center = np.abs(idx - halfspan) / halfspan
+        dc_center = np.abs(idx - halfspan) / max(halfspan, 1e-9)
         dc_center = np.clip(dc_center, 0.0, 1.0)
-    
-        #  internal variable (0=center→1=edge):
-        xvals = dc_center[valid]
+
+        # Apply base-pair cap here too (positions farther than MAX_BP from edge are excluded)
+        use = valid
+        if _MAX_BP is not None:
+            use = valid & (dist_bp_full <= float(_MAX_BP))
+        if not np.any(use):
+            return None
+
+        xvals = dc_center[use]        # 0=center → 1=edge
+        vv    = seq[use].astype(np.float64)
 
     elif _MODE == "bp":
-        # distance in bp to nearest inversion edge
-        dist_bp = np.minimum(idx, (L - 1) - idx)  # 0 at edges, ~L/2 at center
-        dist_bp = dist_bp[valid]
-        keep = dist_bp <= float(_MAX_BP)
-        if not np.any(keep):
+        use = valid
+        if _MAX_BP is not None:
+            use = valid & (dist_bp_full <= float(_MAX_BP))
+        if not np.any(use):
             return None
-        xvals = dist_bp[keep]
-        vv = vv[keep]
+
+        xvals = dist_bp_full[use]     # bp from edge
+        vv    = seq[use].astype(np.float64)
     else:
         raise RuntimeError("Unknown mode in _bin_one_sequence")
 
@@ -337,7 +345,7 @@ def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
 
 # --------------------- AGGREGATION --------------------------
 
-def _aggregate_unweighted(per_seq_means: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _aggregate_unweighted_mean(per_seq_means: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Mean across sequences per bin; SEM across sequences; n_seq per bin.
     """
@@ -350,6 +358,20 @@ def _aggregate_unweighted(per_seq_means: List[np.ndarray]) -> Tuple[np.ndarray, 
         if np.any(mask):
             se_per[mask] = sem(M[:, mask], axis=0, nan_policy="omit")
     return mean_per, se_per, n_seq_per
+
+def _aggregate_unweighted_median(per_seq_means: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Median across sequences per bin (median of per-sequence means); SEM computed as in mean case.
+    """
+    M = np.vstack(per_seq_means)  # [n_seq, num_bins]
+    n_seq_per = np.sum(~np.isnan(M), axis=0)
+    with np.errstate(invalid="ignore"):
+        median_per = np.nanmedian(M, axis=0)
+        se_per     = np.full(M.shape[1], np.nan, dtype=np.float64)
+        mask = n_seq_per > 1
+        if np.any(mask):
+            se_per[mask] = sem(M[:, mask], axis=0, nan_policy="omit")
+    return median_per, se_per, n_seq_per
 
 def _spearman(x: np.ndarray, y: np.ndarray) -> Tuple[Optional[float], Optional[float]]:
     ok = ~np.isnan(x) & ~np.isnan(y)
@@ -468,12 +490,12 @@ class AltPatternHandler(HandlerBase):
         return artists
 
 def _legend_label_for(group_key: str, N: int, rho: Optional[float], p: Optional[float]) -> str:
-    def ptxt(p):
-        if p is None or np.isnan(p): return "N/A"
-        return "<0.001" if p < 1e-3 else f"{p:.3g}"
-    def rtxt(r):
-        if r is None or np.isnan(r): return "N/A"
-        return f"{r:.3f}"
+    def ptxt(p_):
+        if p_ is None or np.isnan(p_): return "N/A"
+        return "<0.001" if p_ < 1e-3 else f"{p_:.3g}"
+    def rtxt(r_):
+        if r_ is None or np.isnan(r_): return "N/A"
+        return f"{r_:.3f}"
     name_map = {
         "direct-single-event":   "Direct — single-event",
         "direct-recurrent":      "Direct — recurrent",
@@ -746,9 +768,12 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       max_bp: Optional[int],
                       y_label: str,
                       out_path: Path,
-                      out_tsv: Path):
+                      out_tsv: Path,
+                      agg_kind: str):
     """
     Build tables, compute stats, and plot for given mode.
+
+    agg_kind ∈ {'mean','median'} controls whether we aggregate across inversions by mean or median.
     """
     # Build x-axis centers for this mode
     if mode == "proportion":
@@ -777,7 +802,6 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
         group_iter = ["direct-recurrent","direct-single-event",
                       "inverted-recurrent","inverted-single-event","overall"]
     else:
-        # FST: alternate colors in the line itself; the 'color' below tints scatter/band only
         color_map = {
             "recurrent": COLOR_DIRECT,     # band/scatter tint
             "single-event": COLOR_INVERTED,
@@ -788,11 +812,13 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
     group_stats: Dict[str, dict] = {}
     all_rows = []
 
+    aggregator = _aggregate_unweighted_mean if agg_kind == "mean" else _aggregate_unweighted_median
+
     for grp in group_iter:
         seqs = per_group_means.get(grp, [])
         if not seqs:
             continue
-        mean_per, se_per, nseq_per = _aggregate_unweighted(seqs)
+        mean_per, se_per, nseq_per = aggregator(seqs)
 
         plot_mask = (nseq_per >= MIN_INV_PER_BIN)
 
@@ -818,7 +844,7 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                 "group": grp,
                 "bin_index": bi,
                 "x_center": x_centers[bi],
-                "mean_value": mean_per[bi],
+                "mean_value": mean_per[bi],              # (median when agg_kind=='median')
                 "stderr_value": se_per[bi],
                 "n_sequences_in_bin": int(nseq_per[bi]),
                 "plotting_allowed": bool(plot_mask[bi]),
@@ -827,6 +853,7 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                 "spearman_p_over_allowed_bins": group_stats[grp]["p"],
                 "mode": mode,
                 "metric": which,
+                "aggregate": agg_kind,
             })
 
     # Save table (combined)
@@ -834,7 +861,6 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_tsv, sep="\t", index=False, float_format="%.6g")
     log.info(f"Saved table → {out_tsv}")
-
 
     # Plot (grouped)
     _plot_multi(x_centers, group_stats, y_label, out_path, x_label, metric=which)
@@ -854,10 +880,15 @@ def run_metric(which: str,
                out_tsv_prop: Path,
                # bp mode outputs
                out_plot_bp: Path,
-               out_tsv_bp: Path):
+               out_tsv_bp: Path,
+               agg_kind: str):
+    """
+    Run a metric ('pi' or 'hudson') end-to-end for both proportion and bp modes
+    using aggregation agg_kind ∈ {'mean','median'} across inversions.
+    """
     t0 = time.time()
 
-    # ---------- PROPORTION MODE ----------
+    # ---------- PROPORTION MODE (apply base-pair cap here too) ----------
     per_group_means_prop, per_group_counts_prop = _collect_grouped_means(
         which=which,
         falsta=falsta,
@@ -865,18 +896,19 @@ def run_metric(which: str,
         fuzzy_map=fuzzy_map,
         mode="proportion",
         num_bins=NUM_BINS_PROP,
-        max_bp=None,
+        max_bp=MAX_BP,     # cap for proportion mode too
     )
     total_loaded_prop = sum(per_group_counts_prop.values())
     if total_loaded_prop == 0:
-        log.error(f"[{which}/proportion] No sequences loaded from {falsta}.")
+        log.error(f"[{which}/proportion/{agg_kind}] No sequences loaded from {falsta}.")
     else:
         _assemble_outputs(
             per_group_means_prop, per_group_counts_prop,
-            which=which, mode="proportion", num_bins=NUM_BINS_PROP, max_bp=None,
+            which=which, mode="proportion", num_bins=NUM_BINS_PROP, max_bp=MAX_BP,
             y_label=y_label,
             out_path=out_plot_prop,
             out_tsv=out_tsv_prop,
+            agg_kind=agg_kind,
         )
 
     # ---------- BASE-PAIR MODE  ----------
@@ -891,7 +923,7 @@ def run_metric(which: str,
     )
     total_loaded_bp = sum(per_group_counts_bp.values())
     if total_loaded_bp == 0:
-        log.error(f"[{which}/bp] No sequences loaded from {falsta}.")
+        log.error(f"[{which}/bp/{agg_kind}] No sequences loaded from {falsta}.")
     else:
         _assemble_outputs(
             per_group_means_bp, per_group_counts_bp,
@@ -899,9 +931,10 @@ def run_metric(which: str,
             y_label=y_label,
             out_path=out_plot_bp,
             out_tsv=out_tsv_bp,
+            agg_kind=agg_kind,
         )
 
-    log.info(f"[{which}] done in {time.time() - t0:.2f}s\n")
+    log.info(f"[{which}/{agg_kind}] done in {time.time() - t0:.2f}s\n")
 
 # --------------------------- MAIN --------------------------
 
@@ -912,7 +945,23 @@ def main():
     inv_df = _load_inv_mapping(INV_TSV)
     fuzzy_map = _build_fuzzy_lookup(inv_df) if not inv_df.empty else {}
 
-    # π (diversity) — Direct (blue) / Inverted (purple), with REAL gaps + tiny markers for recurrence
+    # π (diversity): produce MEAN-suffixed originals and MEDIAN-suffixed additions
+    # --- MEAN ---
+    run_metric(
+        which="pi",
+        falsta=DIVERSITY_FILE,
+        min_len=MIN_LEN_PI,
+        fuzzy_map=fuzzy_map,
+        y_label="Mean nucleotide diversity (π per site)",
+        # proportion mode outputs (now capped by MAX_BP too)
+        out_plot_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_mean.pdf",
+        out_tsv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_mean.tsv",
+        # bp mode outputs
+        out_plot_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean.pdf",
+        out_tsv_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean.tsv",
+        agg_kind="mean",
+    )
+    # --- MEDIAN ---
     run_metric(
         which="pi",
         falsta=DIVERSITY_FILE,
@@ -920,14 +969,31 @@ def main():
         fuzzy_map=fuzzy_map,
         y_label="Mean nucleotide diversity (π per site)",
         # proportion mode outputs
-        out_plot_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.pdf",
-        out_tsv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped.tsv",
+        out_plot_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_median.pdf",
+        out_tsv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_median.tsv",
         # bp mode outputs
-        out_plot_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.pdf",
-        out_tsv_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.tsv",
+        out_plot_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median.pdf",
+        out_tsv_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median.tsv",
+        agg_kind="median",
     )
 
-    # Hudson FST — lines alternate blue/purple with REAL gaps + tiny markers for recurrence
+    # Hudson FST — produce MEAN and MEDIAN versions
+    # --- MEAN ---
+    run_metric(
+        which="hudson",
+        falsta=FST_FILE,
+        min_len=MIN_LEN_FST,
+        fuzzy_map=fuzzy_map,
+        y_label="Mean Hudson FST (per site)",
+        # proportion mode outputs (now capped by MAX_BP too)
+        out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_mean.pdf",
+        out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_mean.tsv",
+        # bp mode outputs
+        out_plot_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean.pdf",
+        out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean.tsv",
+        agg_kind="mean",
+    )
+    # --- MEDIAN ---
     run_metric(
         which="hudson",
         falsta=FST_FILE,
@@ -935,11 +1001,12 @@ def main():
         fuzzy_map=fuzzy_map,
         y_label="Mean Hudson FST (per site)",
         # proportion mode outputs
-        out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.pdf",
-        out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped.tsv",
+        out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_median.pdf",
+        out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_median.tsv",
         # bp mode outputs
-        out_plot_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.pdf",
-        out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped.tsv",
+        out_plot_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median.pdf",
+        out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median.tsv",
+        agg_kind="median",
     )
 
 if __name__ == "__main__":
