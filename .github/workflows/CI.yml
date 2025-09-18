@@ -44,7 +44,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
-        platform: ${{ fromJson(env.RUN_ALL_MACHINES == 'true' ? env.LINUX_MATRIX_ALL : env.LINUX_MATRIX_DEFAULT) }}
+        platform: ${{ fromJson((env.RUN_ALL_MACHINES == 'true' && env.LINUX_MATRIX_ALL) || env.LINUX_MATRIX_DEFAULT) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
