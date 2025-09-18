@@ -133,9 +133,10 @@ Generated for each transcript that overlaps with the query region:
 
 ## Python bindings with PyO3
 
-Ferromic ships with a small set of Python bindings powered by [PyO3](https://pyo3.rs/). The
-bindings make it possible to call the high-performance Rust implementations of the core
-population genetics statistics directly from Python scripts or notebooks.
+Ferromic now ships with a rich, Python-first API powered by
+[PyO3](https://pyo3.rs/). You can compute the same high-performance statistics
+that drive the Rust binaries directly from notebooks or scripts using familiar
+Python data structures.
 
 ### Building the extension module
 
@@ -155,52 +156,79 @@ population genetics statistics directly from Python scripts or notebooks.
 After `maturin develop` completes successfully, you can import the module with `import ferromic`
 inside Python.
 
-### Available Python functions
+### Ergonomic Python API
 
-The Python module exposes three functions that closely match their Rust counterparts:
+All functions accept plain Python collections. Variants can be dictionaries,
+dataclasses, namedtuples or any object exposing a ``position`` attribute and a
+``genotypes`` iterable (with allele integers or ``None``). Haplotype entries are
+interpreted from tuples like ``(sample_index, "L")`` or ``(sample_index, 1)``.
 
-| Function | Purpose | Key arguments |
-| --- | --- | --- |
-| `ferromic.count_segregating_sites_py` | Count polymorphic sites in a list of variants. | `variants`: iterable of objects with a `.position` integer and a `.genotypes` iterable containing per-sample allele indices or `None` for missing calls. |
-| `ferromic.calculate_pi_py` | Compute nucleotide diversity (π). | `variants`: same structure as above; `haplotypes`: iterable of `(sample_index, side)` pairs where `side` is `0` (left) or `1` (right); `seq_length`: total number of sites in the analyzed region. |
-| `ferromic.calculate_watterson_theta_py` | Compute Watterson's θ estimator. | `seg_sites`: output of `count_segregating_sites_py`; `n`: number of haplotypes; `seq_length`: region length. |
+| Function or class | Description |
+| --- | --- |
+| `ferromic.segregating_sites(variants)` | Count polymorphic sites. |
+| `ferromic.nucleotide_diversity(variants, haplotypes, sequence_length)` | Compute π (nucleotide diversity). |
+| `ferromic.watterson_theta(segregating_sites, sample_count, sequence_length)` | Watterson's θ estimator. |
+| `ferromic.pairwise_differences(variants, sample_count)` | List of `PairwiseDifference` objects containing counts for every sample pair. |
+| `ferromic.per_site_diversity(variants, haplotypes, region=None)` | Per-position π and θ as `DiversitySite` objects. |
+| `ferromic.Population` | Reusable container for Hudson-style statistics. Pass either a haplotype group (0/1) or a custom label. |
+| `ferromic.hudson_dxy(pop1, pop2)` | Between-population nucleotide diversity. |
+| `ferromic.hudson_fst(pop1, pop2)` | Hudson FST with rich metadata. |
+| `ferromic.hudson_fst_sites(pop1, pop2, region)` | Per-site Hudson components across a region. |
+| `ferromic.hudson_fst_with_sites(pop1, pop2, region)` | Tuple ``(HudsonFstResult, [HudsonFstSite, ...])``. |
+| `ferromic.wc_fst(variants, sample_names, sample_to_group, region)` | Weir & Cockerham FST with pairwise and per-site summaries. |
+| `ferromic.wc_fst_components(fst_estimate)` | Extract `(value, sum_a, sum_b, sites)` from any `FstEstimate`. |
+| `ferromic.adjusted_sequence_length(start, end, allow=None, mask=None)` | Apply BED-style masks to a region length. |
+| `ferromic.inversion_allele_frequency(sample_map)` | Frequency of allele ``1`` across haplotypes. |
 
-The conversion layer is intentionally lightweight—you can pass simple `dataclass` instances,
-namedtuples, or dictionaries as long as they provide the expected attributes.
+Every result type is a tiny Python class with descriptive attributes and a
+readable ``repr`` making it pleasant to explore interactively.
 
-### Minimal usage example
+### End-to-end example
 
 ```python
 from dataclasses import dataclass
 
-from ferromic import (
-    count_segregating_sites_py,
-    calculate_pi_py,
-    calculate_watterson_theta_py,
-)
+import ferromic
 
 
 @dataclass
 class Variant:
+    # Positions are zero-based and inclusive to match Ferromic's internal representation.
     position: int
     genotypes: list
 
 
 variants = [
-    Variant(position=1_000, genotypes=[(0, 0), (0, 1), None]),
-    Variant(position=1_010, genotypes=[(0, 0), (0, 0), (1, 1)]),
+    Variant(position=999, genotypes=[(0, 0), (0, 1), None]),
+    Variant(position=1_009, genotypes=[(0, 0), (0, 0), (1, 1)]),
 ]
 
-# Treat both haplotypes of the first two samples and the left haplotype of the third sample
-haplotypes = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0)]
+haplotypes = [(0, "L"), (0, "R"), (1, 0), (1, 1), (2, "L")]
 
-seg_sites = count_segregating_sites_py(variants)
-pi = calculate_pi_py(variants, haplotypes, seq_length=100)
-theta = calculate_watterson_theta_py(seg_sites, n=len(haplotypes), seq_length=100)
+pi = ferromic.nucleotide_diversity(variants, haplotypes, sequence_length=100)
+theta = ferromic.watterson_theta(ferromic.segregating_sites(variants), len(haplotypes), 100)
 
-print(pi, theta)
+group0 = ferromic.Population(0, variants, haplotypes, sequence_length=100)
+group1 = ferromic.Population("inversion", variants, haplotypes, sequence_length=100)
+
+hudson = ferromic.hudson_fst(group0, group1)
+sites = ferromic.hudson_fst_sites(group0, group1, region=(990, 1_020))
+
+wc = ferromic.wc_fst(
+    variants,
+    sample_names=["S0", "S1", "S2"],
+    sample_to_group={"S0": (0, 0), "S1": (0, 1), "S2": (1, 1)},
+    region=(990, 1_020),
+)
+
+print(f"π={pi:.6f}, θ={theta:.6f}")
+print(hudson)
+print(sites[0])
+print(wc.overall_fst)
 ```
 
-In the example above, `None` entries inside a genotype list are treated as missing data, and each
-tuple of integers represents allele indices from the VCF (0 for reference, 1 for alternate).
+The example demonstrates how the Python API mirrors Ferromic's Rust types while
+remaining easy to use from high-level workflows. Variants and haplotypes can be
+assembled from pandas data frames, NumPy arrays, or plain Python lists—Ferromic
+only inspects the fields it needs.
 
