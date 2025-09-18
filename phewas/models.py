@@ -2496,7 +2496,8 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             for candidate in ridge_candidates
             if candidate is not None
         )
-        if used_ridge:
+        penalized_path = used_ridge and not (final_is_mle or used_firth)
+        if penalized_path:
             p_value = np.nan
             p_source = None
             ci_method = None
@@ -3283,7 +3284,7 @@ def lrt_overall_worker(task):
             "Model_Notes": ";".join(model_notes),
         }
 
-        penalized = used_ridge_full
+        penalized = used_ridge_full and not (inference_type == "mle" or used_firth_full)
         if penalized:
             out.update(
                 {
