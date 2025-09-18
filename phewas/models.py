@@ -2077,7 +2077,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         case_ids_for_fp = worker_core_df_index[case_idx_global] if case_idx_global.size > 0 else pd.Index([])
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(results_cache_dir, f"{s_name_safe}.json")
-    meta_path = result_path + ".meta.json"
+    meta_path = os.path.join(results_cache_dir, f"{s_name_safe}.meta.json")
 
     try:
         # Prefer precomputed fingerprint if provided
@@ -2678,8 +2678,9 @@ def lrt_overall_worker(task):
     s_name, cat, target = task["name"], task["category"], task["target"]
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name_safe}.json")
-    meta_path = result_path + ".meta.json"
+    meta_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name_safe}.meta.json")
     res_path = os.path.join(CTX["RESULTS_CACHE_DIR"], f"{s_name_safe}.json")
+    res_meta_path = os.path.join(CTX["RESULTS_CACHE_DIR"], f"{s_name_safe}.meta.json")
     os.makedirs(CTX["RESULTS_CACHE_DIR"], exist_ok=True)
     try:
         pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
@@ -2790,26 +2791,24 @@ def lrt_overall_worker(task):
                 "Model_Notes": note or "",
                 "Skip_Reason": skip
             })
-            io.atomic_write_json(res_path + ".meta.json", {
-                "kind": "phewas_result",
-                "s_name": s_name,
-                "category": cat,
-                "model_columns": list(worker_core_df_cols),
-                "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"],
-                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-                "target": target,
-                "core_index_fp": _index_fingerprint(worker_core_df_index),
-                "case_idx_fp": case_fp,
-                "allowed_mask_fp": allowed_fp,
-                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                "used_index_fp": used_index_fp,
-                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-                "created_at": datetime.now(timezone.utc).isoformat()
+            meta_extra_result = dict(meta_extra_common)
+            meta_extra_result["skip_reason"] = skip
+            meta_extra_result.update({
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
             })
+            _write_meta(
+                res_meta_path,
+                "phewas_result",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra_result,
+            )
             return
 
         ok, reason, det = validate_min_counts_for_fit(yb, stage_tag="lrt_stage1", extra_context={"phenotype": s_name})
@@ -2830,38 +2829,37 @@ def lrt_overall_worker(task):
             _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
 
             # Emit a PheWAS-style skip result to keep downstream shape identical
-            io.atomic_write_json(res_path, {
-                "Phenotype": s_name,
-                "N_Total": n_total_pre,
-                "N_Cases": n_cases_pre,
-                "N_Controls": n_ctrls_pre,
-                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
-                "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
-                "Model_Notes": note or "",
-                "Skip_Reason": reason
-            })
-            io.atomic_write_json(res_path + ".meta.json", {
-                "kind": "phewas_result",
-                "s_name": s_name,
-                "category": cat,
-                "model_columns": list(worker_core_df_cols),
-                "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"],
-                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-                "target": target,
-                "core_index_fp": _index_fingerprint(worker_core_df_index),
-                "case_idx_fp": case_fp,
-                "allowed_mask_fp": allowed_fp,
-                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                "used_index_fp": used_index_fp,
-                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-                "created_at": datetime.now(timezone.utc).isoformat()
-            })
-            return
+        io.atomic_write_json(res_path, {
+            "Phenotype": s_name,
+            "N_Total": n_total_pre,
+            "N_Cases": n_cases_pre,
+            "N_Controls": n_ctrls_pre,
+            "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
+            "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
+            "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
+            "Model_Notes": note or "",
+            "Skip_Reason": reason
+        })
+        meta_extra_result = dict(meta_extra_common)
+        meta_extra_result.update({
+            "skip_reason": reason,
+            "counts": det,
+            "N_Total_Used": det['N'],
+            "N_Cases_Used": det['N_cases'],
+            "N_Controls_Used": det['N_ctrls'],
+        })
+        _write_meta(
+            res_meta_path,
+            "phewas_result",
+            s_name,
+            cat,
+            target,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_fp,
+            extra=meta_extra_result,
+        )
+        return
 
         X_full_df = Xb
 
@@ -2881,58 +2879,56 @@ def lrt_overall_worker(task):
                 "N_Cases_Used": n_cases_used,
                 "N_Controls_Used": n_ctrls_used,
             })
-            io.atomic_write_json(res_path, {
-                "Phenotype": s_name,
-                "N_Total": n_total_pre,
-                "N_Cases": n_cases_pre,
-                "N_Controls": n_ctrls_pre,
-                "Beta": np.nan,
-                "OR": np.nan,
-                "P_Value": np.nan,
-                "OR_CI95": None,
-                "Used_Ridge": False,
-                "Final_Is_MLE": False,
-                "Used_Firth": False,
-                "N_Total_Used": n_total_used,
-                "N_Cases_Used": n_cases_used,
-                "N_Controls_Used": n_ctrls_used,
-                "Model_Notes": note or "",
-                "Skip_Reason": skip_reason,
-            })
-            io.atomic_write_json(res_path + ".meta.json", {
-                "kind": "phewas_result",
-                "s_name": s_name,
-                "category": cat,
-                "model_columns": list(worker_core_df_cols),
-                "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"],
-                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-                "target": target,
-                "core_index_fp": _index_fingerprint(worker_core_df_index),
-                "case_idx_fp": case_fp,
-                "allowed_mask_fp": allowed_fp,
-                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                "used_index_fp": used_index_fp,
-                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-            meta_extra = dict(meta_extra_common)
-            meta_extra["skip_reason"] = skip_reason
-            _write_meta(
-                meta_path,
-                "lrt_overall",
-                s_name,
-                cat,
-                target,
-                worker_core_df_cols,
-                _index_fingerprint(worker_core_df_index),
-                case_fp,
-                extra=meta_extra,
-            )
-            return
+        io.atomic_write_json(res_path, {
+            "Phenotype": s_name,
+            "N_Total": n_total_pre,
+            "N_Cases": n_cases_pre,
+            "N_Controls": n_ctrls_pre,
+            "Beta": np.nan,
+            "OR": np.nan,
+            "P_Value": np.nan,
+            "OR_CI95": None,
+            "Used_Ridge": False,
+            "Final_Is_MLE": False,
+            "Used_Firth": False,
+            "N_Total_Used": n_total_used,
+            "N_Cases_Used": n_cases_used,
+            "N_Controls_Used": n_ctrls_used,
+            "Model_Notes": note or "",
+            "Skip_Reason": skip_reason,
+        })
+        meta_extra = dict(meta_extra_common)
+        meta_extra["skip_reason"] = skip_reason
+        _write_meta(
+            meta_path,
+            "lrt_overall",
+            s_name,
+            cat,
+            target,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_fp,
+            extra=meta_extra,
+        )
+        meta_extra_result = dict(meta_extra_common)
+        meta_extra_result.update({
+            "skip_reason": skip_reason,
+            "N_Total_Used": n_total_used,
+            "N_Cases_Used": n_cases_used,
+            "N_Controls_Used": n_ctrls_used,
+        })
+        _write_meta(
+            res_meta_path,
+            "phewas_result",
+            s_name,
+            cat,
+            target,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_fp,
+            extra=meta_extra_result,
+        )
+        return
 
         # The reduced model MUST be a subset of the pruned full model for the LRT to be valid.
         # Construct it by dropping the target column from the *already pruned* full model columns.
@@ -3308,25 +3304,8 @@ def lrt_overall_worker(task):
             res_record["Model_Notes"] = f"{rec_notes};{reason_tag}" if rec_notes else reason_tag
 
         io.atomic_write_json(res_path, res_record)
-        io.atomic_write_json(res_path + ".meta.json", {
-            "kind": "phewas_result",
-            "s_name": s_name,
-            "category": cat,
-            "model_columns": list(worker_core_df_cols),
-            "num_pcs": CTX["NUM_PCS"],
-            "min_cases": CTX["MIN_CASES_FILTER"],
-            "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-            "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-            "target": target,
-            "core_index_fp": _index_fingerprint(worker_core_df_index),
-            "case_idx_fp": case_fp,
-            "allowed_mask_fp": allowed_fp,
-            "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-            "used_index_fp": used_index_fp,
-            "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-            "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-            "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+        meta_extra_result = dict(meta_extra_common)
+        meta_extra_result.update({
             "final_cols_names": final_cols_names,
             "final_cols_pos": final_cols_pos,
             "full_llf": float(getattr(fit_full, "llf", np.nan)),
@@ -3335,6 +3314,17 @@ def lrt_overall_worker(task):
             "used_ridge": used_ridge_full,
             "prune_recipe_version": "zv+greedy-rank-v1",
         })
+        _write_meta(
+            res_meta_path,
+            "phewas_result",
+            s_name,
+            cat,
+            target,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_fp,
+            extra=meta_extra_result,
+        )
 
         io.atomic_write_json(result_path, out)
         meta_extra = dict(meta_extra_common)
@@ -3364,7 +3354,7 @@ def bootstrap_overall_worker(task):
     tnull_dir = os.path.join(boot_dir, "t_null")
     os.makedirs(tnull_dir, exist_ok=True)
     result_path = os.path.join(boot_dir, f"{s_name_safe}.json")
-    meta_path = result_path + ".meta.json"
+    meta_path = os.path.join(boot_dir, f"{s_name_safe}.meta.json")
     res_dir = CTX["RESULTS_CACHE_DIR"]
     os.makedirs(res_dir, exist_ok=True)
     res_path = os.path.join(res_dir, f"{s_name_safe}.json")
@@ -3567,7 +3557,7 @@ def lrt_followup_worker(task):
     s_name, category, target = task["name"], task["category"], task["target"]
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_FOLLOWUP_CACHE_DIR"], f"{s_name_safe}.json")
-    meta_path = result_path + ".meta.json"
+    meta_path = os.path.join(CTX["LRT_FOLLOWUP_CACHE_DIR"], f"{s_name_safe}.meta.json")
     try:
         pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
         if not os.path.exists(pheno_path):
