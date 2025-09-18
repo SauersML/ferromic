@@ -1,27 +1,30 @@
-//! Python bindings for Ferromic's population genetics statistics.
+//! Ergonomic Python bindings for Ferromic's population genetics toolkit.
 //!
-//! The functions exported in this module focus on providing a lightweight bridge between
-//! Python data structures and the underlying Rust implementations. The interface mirrors the
-//! internal APIs: callers supply iterables describing variants and haplotypes, and Ferromic
-//! returns the same statistics that power the command-line application.
+//! The bindings expose a high-level, well-documented API that mirrors the core
+//! Rust statistics while embracing Python conventions. Most functions accept
+//! plain Python data structures (dictionaries, lists, tuples, dataclasses), and
+//! the returned values are lightweight Python classes with useful
+//! introspection-friendly attributes. The goal is to make Ferromic feel like a
+//! native Python library while retaining Rust's performance.
 
 use std::collections::HashMap;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyAny, PyDict, PyIterator, PyList, PyTuple};
+use pyo3::IntoPy;
 
 use crate::process::{HaplotypeSide, QueryRegion, Variant, VcfError};
 use crate::stats::{
     calculate_adjusted_sequence_length, calculate_d_xy_hudson, calculate_fst_wc_haplotype_groups,
     calculate_hudson_fst_for_pair, calculate_hudson_fst_for_pair_with_sites,
-    calculate_hudson_fst_per_site, calculate_pairwise_differences, calculate_per_site_diversity,
-    calculate_pi, calculate_watterson_theta, count_segregating_sites, DxyHudsonResult, FstEstimate,
-    FstWcResults, HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity, SiteFstHudson,
-    SiteFstWc,
+    calculate_hudson_fst_per_site, calculate_inversion_allele_frequency,
+    calculate_pairwise_differences, calculate_per_site_diversity, calculate_pi,
+    calculate_watterson_theta, count_segregating_sites, DxyHudsonResult, FstEstimate, FstWcResults,
+    HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity, SiteFstHudson, SiteFstWc,
 };
 
-// Module declarations
+// Module declarations so that cargo exposes the command line utilities as well.
 pub mod parse;
 pub mod pca;
 pub mod process;
@@ -36,421 +39,525 @@ mod tests {
     mod interval_tests;
 }
 
-/// PyO3 wrapper for count_segregating_sites
-///
-/// Counts the number of segregating sites (polymorphic positions) in a collection of variants.
-///
-/// # Arguments
-/// * `variants_obj` - An iterable of Python objects describing variants.
-///   Each object must expose a `.position` attribute (integer) and a
-///   `.genotypes` iterable. Elements inside `.genotypes` are either
-///   `None` (missing data) or iterables of allele indices (`0` for reference,
-///   `1` for the first alternate, etc.).
-///
-/// # Returns
-/// * Number of segregating sites as usize
-///
-/// ## Python example
-/// ```python
-/// import ferromic
-///
-///
-/// class Variant:
-///     def __init__(self, position, genotypes):
-///         self.position = position
-///         self.genotypes = genotypes
-///
-/// variants = [
-///     Variant(1000, [(0, 0), (0, 1), None]),
-/// ]
-///
-/// count = ferromic.count_segregating_sites_py(variants)
-/// ```
-#[pyfunction]
-fn count_segregating_sites_py(_py: Python, variants_obj: &PyAny) -> PyResult<usize> {
-    // Convert Python variant objects to Rust Variant structs
-    let rust_variants = extract_variants_from_python(variants_obj)?;
-
-    // Call the Rust implementation
-    Ok(count_segregating_sites(&rust_variants))
+/// Rich description of an FST estimate, exposed as ``ferromic.FstEstimate``.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct FstEstimateInfo {
+    #[pyo3(get)]
+    state: String,
+    #[pyo3(get)]
+    value: Option<f64>,
+    #[pyo3(get)]
+    sum_a: Option<f64>,
+    #[pyo3(get)]
+    sum_b: Option<f64>,
+    #[pyo3(get)]
+    sites: Option<usize>,
 }
 
-/// PyO3 wrapper for calculate_pi (nucleotide diversity)
-///
-/// Calculates π, the average number of nucleotide differences per site between sequences.
-///
-/// # Arguments
-/// * `variants_obj` - Same structure as `count_segregating_sites_py`.
-/// * `haplotypes_obj` - Iterable of two-item sequences `(sample_index, side)`.
-///   `sample_index` must be a `usize` and `side` should be `0` (left) or `1`
-///   (right), matching [`HaplotypeSide`].
-/// * `seq_length` - The sequence length (number of sites) to normalize by.
-///
-/// # Returns
-/// * Nucleotide diversity (π) as f64
-///
-/// ## Python example
-/// ```python
-/// import ferromic
-///
-/// haplotypes = [(0, 0), (0, 1), (1, 0)]
-/// pi = ferromic.calculate_pi_py(variants, haplotypes, seq_length=500)
-/// ```
-#[pyfunction]
-fn calculate_pi_py(
-    _py: Python,
-    variants_obj: &PyAny,
-    haplotypes_obj: &PyAny,
-    seq_length: i64,
-) -> PyResult<f64> {
-    // Convert Python variant objects to Rust Variant structs
-    let rust_variants = extract_variants_from_python(variants_obj)?;
-
-    // Convert Python haplotype objects to Rust (usize, HaplotypeSide) tuples
-    let rust_haplotypes = extract_haplotypes_from_python(haplotypes_obj)?;
-
-    // Validate the sequence length
-    if seq_length <= 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "Sequence length must be positive",
-        ));
+#[pymethods]
+impl FstEstimateInfo {
+    /// Return the tuple ``(value, sum_a, sum_b, sites)``.
+    fn components(&self) -> (Option<f64>, Option<f64>, Option<f64>, Option<usize>) {
+        (self.value, self.sum_a, self.sum_b, self.sites)
     }
 
-    // Call the Rust implementation
-    Ok(calculate_pi(&rust_variants, &rust_haplotypes, seq_length))
-}
-
-/// PyO3 wrapper for calculate_watterson_theta
-///
-/// Calculates Watterson's estimator of population mutation rate (θ).
-///
-/// # Arguments
-/// * `seg_sites` - Number of segregating sites (e.g., from `count_segregating_sites_py`).
-/// * `n` - Number of sequences/haplotypes included in the analysis.
-/// * `seq_length` - The sequence length (number of sites) to normalize by.
-///
-/// # Returns
-/// * Watterson's θ as f64
-///
-/// ## Python example
-/// ```python
-/// import ferromic
-///
-/// theta = ferromic.calculate_watterson_theta_py(seg_sites, n=len(haplotypes), seq_length=500)
-/// ```
-#[pyfunction]
-fn calculate_watterson_theta_py(seg_sites: usize, n: usize, seq_length: i64) -> PyResult<f64> {
-    // Validate inputs
-    if n <= 1 {
-        return Err(PyValueError::new_err(
-            "Number of sequences (n) must be greater than 1",
-        ));
-    }
-
-    if seq_length <= 0 {
-        return Err(PyValueError::new_err("Sequence length must be positive"));
-    }
-
-    // Call the Rust implementation
-    Ok(calculate_watterson_theta(seg_sites, n, seq_length))
-}
-
-/// PyO3 wrapper for `calculate_pairwise_differences`.
-///
-/// Returns a list of tuples `(sample_i, sample_j, differences, comparable_sites)`.
-#[pyfunction]
-fn calculate_pairwise_differences_py(
-    _py: Python,
-    variants_obj: &PyAny,
-    number_of_samples: usize,
-) -> PyResult<Vec<(usize, usize, usize, usize)>> {
-    let rust_variants = extract_variants_from_python(variants_obj)?;
-
-    let differences = calculate_pairwise_differences(&rust_variants, number_of_samples)
-        .into_iter()
-        .map(|((i, j), diff, comparable)| (i, j, diff, comparable))
-        .collect();
-
-    Ok(differences)
-}
-
-/// PyO3 wrapper for `calculate_per_site_diversity`.
-///
-/// Returns a list of dictionaries with keys: `position`, `pi`, `watterson_theta`.
-#[pyfunction]
-fn calculate_per_site_diversity_py(
-    py: Python,
-    variants_obj: &PyAny,
-    haplotypes_obj: &PyAny,
-    region_start: i64,
-    region_end: i64,
-) -> PyResult<PyObject> {
-    if region_end < region_start {
-        return Err(PyValueError::new_err(
-            "region_end must be greater than or equal to region_start",
-        ));
-    }
-
-    let rust_variants = extract_variants_from_python(variants_obj)?;
-    let rust_haplotypes = extract_haplotypes_from_python(haplotypes_obj)?;
-    let region = QueryRegion {
-        start: region_start,
-        end: region_end,
-    };
-
-    let sites: Vec<SiteDiversity> =
-        calculate_per_site_diversity(&rust_variants, &rust_haplotypes, region);
-
-    let py_list = PyList::empty(py);
-    for site in &sites {
-        py_list.append(site_diversity_to_py(py, site)?)?;
-    }
-
-    Ok(py_list.into())
-}
-
-/// PyO3 wrapper for `calculate_d_xy_hudson`.
-#[pyfunction]
-fn calculate_dxy_hudson_py(py: Python, pop1_obj: &PyAny, pop2_obj: &PyAny) -> PyResult<PyObject> {
-    let pop1_owned = parse_population_context(pop1_obj)?;
-    let pop2_owned = parse_population_context(pop2_obj)?;
-
-    let pop1_ctx = pop1_owned.as_population_context();
-    let pop2_ctx = pop2_owned.as_population_context();
-
-    let result = calculate_d_xy_hudson(&pop1_ctx, &pop2_ctx).map_err(vcf_error_to_pyerr)?;
-
-    Ok(dxy_result_to_py(py, &result)?)
-}
-
-/// PyO3 wrapper for `calculate_hudson_fst_per_site`.
-#[pyfunction]
-fn calculate_hudson_fst_per_site_py(
-    py: Python,
-    pop1_obj: &PyAny,
-    pop2_obj: &PyAny,
-    region_start: i64,
-    region_end: i64,
-) -> PyResult<PyObject> {
-    if region_end < region_start {
-        return Err(PyValueError::new_err(
-            "region_end must be greater than or equal to region_start",
-        ));
-    }
-
-    let pop1_owned = parse_population_context(pop1_obj)?;
-    let pop2_owned = parse_population_context(pop2_obj)?;
-    let pop1_ctx = pop1_owned.as_population_context();
-    let pop2_ctx = pop2_owned.as_population_context();
-
-    let region = QueryRegion {
-        start: region_start,
-        end: region_end,
-    };
-
-    let sites = calculate_hudson_fst_per_site(&pop1_ctx, &pop2_ctx, region);
-
-    let py_list = PyList::empty(py);
-    for site in &sites {
-        py_list.append(site_fst_hudson_to_py(py, site)?)?;
-    }
-
-    Ok(py_list.into())
-}
-
-/// PyO3 wrapper for `calculate_hudson_fst_for_pair`.
-#[pyfunction]
-fn calculate_hudson_fst_for_pair_py(
-    py: Python,
-    pop1_obj: &PyAny,
-    pop2_obj: &PyAny,
-) -> PyResult<PyObject> {
-    let pop1_owned = parse_population_context(pop1_obj)?;
-    let pop2_owned = parse_population_context(pop2_obj)?;
-    let pop1_ctx = pop1_owned.as_population_context();
-    let pop2_ctx = pop2_owned.as_population_context();
-
-    let outcome =
-        calculate_hudson_fst_for_pair(&pop1_ctx, &pop2_ctx).map_err(vcf_error_to_pyerr)?;
-
-    Ok(hudson_outcome_to_py(py, &outcome)?)
-}
-
-/// PyO3 wrapper for `calculate_hudson_fst_for_pair_with_sites`.
-#[pyfunction]
-fn calculate_hudson_fst_for_pair_with_sites_py(
-    py: Python,
-    pop1_obj: &PyAny,
-    pop2_obj: &PyAny,
-    region_start: i64,
-    region_end: i64,
-) -> PyResult<PyObject> {
-    if region_end < region_start {
-        return Err(PyValueError::new_err(
-            "region_end must be greater than or equal to region_start",
-        ));
-    }
-
-    let pop1_owned = parse_population_context(pop1_obj)?;
-    let pop2_owned = parse_population_context(pop2_obj)?;
-    let pop1_ctx = pop1_owned.as_population_context();
-    let pop2_ctx = pop2_owned.as_population_context();
-
-    let region = QueryRegion {
-        start: region_start,
-        end: region_end,
-    };
-
-    let (outcome, sites) = calculate_hudson_fst_for_pair_with_sites(&pop1_ctx, &pop2_ctx, region)
-        .map_err(vcf_error_to_pyerr)?;
-
-    let output = PyDict::new(py);
-    output.set_item("outcome", hudson_outcome_to_py(py, &outcome)?)?;
-
-    let py_sites = PyList::empty(py);
-    for site in &sites {
-        py_sites.append(site_fst_hudson_to_py(py, site)?)?;
-    }
-    output.set_item("sites", py_sites)?;
-
-    Ok(output.into())
-}
-
-/// PyO3 wrapper for `calculate_fst_wc_haplotype_groups`.
-#[pyfunction]
-fn calculate_fst_wc_haplotype_groups_py(
-    py: Python,
-    variants_obj: &PyAny,
-    sample_names_obj: &PyAny,
-    sample_to_group_obj: &PyAny,
-    region_start: i64,
-    region_end: i64,
-) -> PyResult<PyObject> {
-    if region_end < region_start {
-        return Err(PyValueError::new_err(
-            "region_end must be greater than or equal to region_start",
-        ));
-    }
-
-    let variants = extract_variants_from_python(variants_obj)?;
-    let sample_names = extract_sample_names_from_python(sample_names_obj)?;
-    let sample_to_group = extract_sample_group_map(sample_to_group_obj)?;
-    let region = QueryRegion {
-        start: region_start,
-        end: region_end,
-    };
-
-    let results =
-        calculate_fst_wc_haplotype_groups(&variants, &sample_names, &sample_to_group, region);
-
-    Ok(fst_wc_results_to_py(py, &results)?)
-}
-
-/// PyO3 wrapper for `calculate_adjusted_sequence_length`.
-#[pyfunction]
-fn calculate_adjusted_sequence_length_py(
-    region_start: i64,
-    region_end: i64,
-    allow_regions: Option<&PyAny>,
-    mask_regions: Option<&PyAny>,
-) -> PyResult<i64> {
-    if region_end < region_start {
-        return Err(PyValueError::new_err(
-            "region_end must be greater than or equal to region_start",
-        ));
-    }
-
-    let allow_vec = extract_interval_list(allow_regions)?;
-    let mask_vec = extract_interval_list(mask_regions)?;
-
-    Ok(calculate_adjusted_sequence_length(
-        region_start,
-        region_end,
-        allow_vec.as_ref(),
-        mask_vec.as_ref(),
-    ))
-}
-
-/// Helper function to extract [`Variant`] structs from Python variant objects.
-///
-/// The conversion layer accepts any Python object that exposes a `position`
-/// attribute and an iterable `genotypes` attribute. Genotypes may be `None`
-/// to represent missing calls or any iterable of integers describing the
-/// called alleles for a sample.
-fn extract_variants_from_python(variants_obj: &PyAny) -> PyResult<Vec<Variant>> {
-    let mut rust_variants = Vec::new();
-
-    // Iterate through Python list of variants
-    for py_variant in variants_obj.iter()? {
-        let py_variant = py_variant?;
-
-        // Extract position
-        let position = py_variant.getattr("position")?.extract::<i64>()?;
-
-        // Extract genotypes
-        let py_genotypes = py_variant.getattr("genotypes")?;
-        let mut genotypes = Vec::new();
-
-        // Process each genotype
-        for py_gt in py_genotypes.iter()? {
-            let py_gt = py_gt?;
-
-            // Handle None genotypes
-            if py_gt.is_none() {
-                genotypes.push(None);
-                continue;
+    fn __repr__(&self) -> String {
+        match (self.state.as_str(), self.value) {
+            (state, Some(value)) => {
+                format!(
+                    "FstEstimate(state='{state}', value={value:.6}, sum_a={:?}, sum_b={:?}, sites={:?})",
+                    self.sum_a, self.sum_b, self.sites
+                )
             }
+            (state, None) => format!(
+                "FstEstimate(state='{state}', value=None, sum_a={:?}, sum_b={:?}, sites={:?})",
+                self.sum_a, self.sum_b, self.sites
+            ),
+        }
+    }
+}
 
-            // Extract alleles for this genotype
-            let mut alleles = Vec::new();
-            for py_allele in py_gt.iter()? {
-                let py_allele = py_allele?;
-                let allele = py_allele.extract::<u8>()?;
-                alleles.push(allele);
-            }
+impl FstEstimateInfo {
+    fn from_estimate(py: Python, estimate: &FstEstimate) -> PyResult<Py<Self>> {
+        let info = match estimate {
+            FstEstimate::Calculable {
+                value,
+                sum_a,
+                sum_b,
+                num_informative_sites,
+            } => FstEstimateInfo {
+                state: "calculable".to_string(),
+                value: Some(*value),
+                sum_a: Some(*sum_a),
+                sum_b: Some(*sum_b),
+                sites: Some(*num_informative_sites),
+            },
+            FstEstimate::ComponentsYieldIndeterminateRatio {
+                sum_a,
+                sum_b,
+                num_informative_sites,
+            } => FstEstimateInfo {
+                state: "components_yield_indeterminate_ratio".to_string(),
+                value: None,
+                sum_a: Some(*sum_a),
+                sum_b: Some(*sum_b),
+                sites: Some(*num_informative_sites),
+            },
+            FstEstimate::NoInterPopulationVariance {
+                sum_a,
+                sum_b,
+                sites_evaluated,
+            } => FstEstimateInfo {
+                state: "no_inter_population_variance".to_string(),
+                value: None,
+                sum_a: Some(*sum_a),
+                sum_b: Some(*sum_b),
+                sites: Some(*sites_evaluated),
+            },
+            FstEstimate::InsufficientDataForEstimation {
+                sum_a,
+                sum_b,
+                sites_attempted,
+            } => FstEstimateInfo {
+                state: "insufficient_data_for_estimation".to_string(),
+                value: None,
+                sum_a: Some(*sum_a),
+                sum_b: Some(*sum_b),
+                sites: Some(*sites_attempted),
+            },
+        };
+        Py::new(py, info)
+    }
+}
 
-            genotypes.push(Some(alleles));
+/// Difference counts between two samples.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct PairwiseDifference {
+    #[pyo3(get)]
+    sample_i: usize,
+    #[pyo3(get)]
+    sample_j: usize,
+    #[pyo3(get)]
+    differences: usize,
+    #[pyo3(get)]
+    comparable_sites: usize,
+}
+
+#[pymethods]
+impl PairwiseDifference {
+    fn __repr__(&self) -> String {
+        format!(
+            "PairwiseDifference(sample_i={}, sample_j={}, differences={}, comparable_sites={})",
+            self.sample_i, self.sample_j, self.differences, self.comparable_sites
+        )
+    }
+}
+
+/// Per-site diversity summary containing π and Watterson's θ.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct DiversitySite {
+    #[pyo3(get)]
+    position: i64,
+    #[pyo3(get)]
+    pi: f64,
+    #[pyo3(get)]
+    watterson_theta: f64,
+}
+
+#[pymethods]
+impl DiversitySite {
+    fn __repr__(&self) -> String {
+        format!(
+            "DiversitySite(position={}, pi={:.6}, watterson_theta={:.6})",
+            self.position, self.pi, self.watterson_theta
+        )
+    }
+}
+
+/// Result of Hudson's Dxy statistic.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct HudsonDxyResultPy {
+    #[pyo3(get)]
+    d_xy: Option<f64>,
+}
+
+#[pymethods]
+impl HudsonDxyResultPy {
+    fn __repr__(&self) -> String {
+        match self.d_xy {
+            Some(value) => format!("HudsonDxyResult(d_xy={value:.6})"),
+            None => "HudsonDxyResult(d_xy=None)".to_string(),
+        }
+    }
+}
+
+impl HudsonDxyResultPy {
+    fn from_result(py: Python, result: &DxyHudsonResult) -> PyResult<Py<Self>> {
+        Py::new(py, HudsonDxyResultPy { d_xy: result.d_xy })
+    }
+}
+
+/// Per-site Hudson FST values and supporting components.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct HudsonFstSitePy {
+    #[pyo3(get)]
+    position: i64,
+    #[pyo3(get)]
+    fst: Option<f64>,
+    #[pyo3(get)]
+    d_xy: Option<f64>,
+    #[pyo3(get)]
+    pi_pop1: Option<f64>,
+    #[pyo3(get)]
+    pi_pop2: Option<f64>,
+    #[pyo3(get)]
+    n1_called: usize,
+    #[pyo3(get)]
+    n2_called: usize,
+    #[pyo3(get)]
+    numerator_component: Option<f64>,
+    #[pyo3(get)]
+    denominator_component: Option<f64>,
+}
+
+#[pymethods]
+impl HudsonFstSitePy {
+    fn __repr__(&self) -> String {
+        format!(
+            "HudsonFstSite(position={}, fst={}, d_xy={}, pi_pop1={}, pi_pop2={}, n1_called={}, n2_called={})",
+            self.position,
+            optional_float_display(self.fst),
+            optional_float_display(self.d_xy),
+            optional_float_display(self.pi_pop1),
+            optional_float_display(self.pi_pop2),
+            self.n1_called,
+            self.n2_called,
+        )
+    }
+}
+
+impl HudsonFstSitePy {
+    fn from_site(py: Python, site: &SiteFstHudson) -> PyResult<Py<Self>> {
+        Py::new(
+            py,
+            HudsonFstSitePy {
+                position: site.position,
+                fst: site.fst,
+                d_xy: site.d_xy,
+                pi_pop1: site.pi_pop1,
+                pi_pop2: site.pi_pop2,
+                n1_called: site.n1_called,
+                n2_called: site.n2_called,
+                numerator_component: site.num_component,
+                denominator_component: site.den_component,
+            },
+        )
+    }
+}
+
+/// Aggregated Hudson FST result with friendly labels.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct HudsonFstResultPy {
+    #[pyo3(get)]
+    fst: Option<f64>,
+    #[pyo3(get)]
+    d_xy: Option<f64>,
+    #[pyo3(get)]
+    pi_pop1: Option<f64>,
+    #[pyo3(get)]
+    pi_pop2: Option<f64>,
+    #[pyo3(get)]
+    pi_xy_avg: Option<f64>,
+    #[pyo3(get)]
+    population1_label: Option<String>,
+    #[pyo3(get)]
+    population1_haplotype_group: Option<u8>,
+    #[pyo3(get)]
+    population2_label: Option<String>,
+    #[pyo3(get)]
+    population2_haplotype_group: Option<u8>,
+}
+
+#[pymethods]
+impl HudsonFstResultPy {
+    fn __repr__(&self) -> String {
+        format!(
+            "HudsonFstResult(fst={}, d_xy={}, pi_pop1={}, pi_pop2={}, pi_xy_avg={}, pop1={}, pop2={})",
+            optional_float_display(self.fst),
+            optional_float_display(self.d_xy),
+            optional_float_display(self.pi_pop1),
+            optional_float_display(self.pi_pop2),
+            optional_float_display(self.pi_xy_avg),
+            self.population1_label
+                .clone()
+                .unwrap_or_else(|| "<unknown>".to_string()),
+            self.population2_label
+                .clone()
+                .unwrap_or_else(|| "<unknown>".to_string())
+        )
+    }
+}
+
+impl HudsonFstResultPy {
+    fn from_outcome(py: Python, outcome: &HudsonFSTOutcome) -> PyResult<Py<Self>> {
+        let (pop1_label, pop1_group) = outcome
+            .pop1_id
+            .as_ref()
+            .map(population_label)
+            .unwrap_or((None, None));
+        let (pop2_label, pop2_group) = outcome
+            .pop2_id
+            .as_ref()
+            .map(population_label)
+            .unwrap_or((None, None));
+
+        Py::new(
+            py,
+            HudsonFstResultPy {
+                fst: outcome.fst,
+                d_xy: outcome.d_xy,
+                pi_pop1: outcome.pi_pop1,
+                pi_pop2: outcome.pi_pop2,
+                pi_xy_avg: outcome.pi_xy_avg,
+                population1_label: pop1_label,
+                population1_haplotype_group: pop1_group,
+                population2_label: pop2_label,
+                population2_haplotype_group: pop2_group,
+            },
+        )
+    }
+}
+
+/// Per-site Weir & Cockerham FST summary.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct WcFstSitePy {
+    #[pyo3(get)]
+    position: i64,
+    #[pyo3(get)]
+    overall_fst: Py<FstEstimateInfo>,
+    #[pyo3(get)]
+    pairwise_fst: HashMap<String, Py<FstEstimateInfo>>,
+    #[pyo3(get)]
+    variance_components_a: f64,
+    #[pyo3(get)]
+    variance_components_b: f64,
+    #[pyo3(get)]
+    population_sizes: HashMap<String, usize>,
+    #[pyo3(get)]
+    pairwise_variance_components: HashMap<String, (f64, f64)>,
+}
+
+#[pymethods]
+impl WcFstSitePy {
+    fn variance_components(&self) -> (f64, f64) {
+        (self.variance_components_a, self.variance_components_b)
+    }
+
+    fn __repr__(&self, py: Python) -> PyResult<String> {
+        let overall = self.overall_fst.borrow(py);
+        Ok(format!(
+            "WcFstSite(position={}, overall_fst={})",
+            self.position,
+            overall.__repr__()
+        ))
+    }
+}
+
+impl WcFstSitePy {
+    fn from_site(py: Python, site: &SiteFstWc) -> PyResult<Py<Self>> {
+        let mut pairwise = HashMap::with_capacity(site.pairwise_fst.len());
+        for (key, value) in &site.pairwise_fst {
+            pairwise.insert(key.clone(), FstEstimateInfo::from_estimate(py, value)?);
+        }
+        let mut pairwise_components =
+            HashMap::with_capacity(site.pairwise_variance_components.len());
+        for (key, value) in &site.pairwise_variance_components {
+            pairwise_components.insert(key.clone(), *value);
+        }
+        Py::new(
+            py,
+            WcFstSitePy {
+                position: site.position,
+                overall_fst: FstEstimateInfo::from_estimate(py, &site.overall_fst)?,
+                pairwise_fst: pairwise,
+                variance_components_a: site.variance_components.0,
+                variance_components_b: site.variance_components.1,
+                population_sizes: site.population_sizes.clone(),
+                pairwise_variance_components: pairwise_components,
+            },
+        )
+    }
+}
+
+/// Aggregated Weir & Cockerham FST result.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct WcFstResultPy {
+    #[pyo3(get)]
+    overall_fst: Py<FstEstimateInfo>,
+    #[pyo3(get)]
+    pairwise_fst: HashMap<String, Py<FstEstimateInfo>>,
+    #[pyo3(get)]
+    pairwise_variance_components: HashMap<String, (f64, f64)>,
+    #[pyo3(get)]
+    site_fst: Vec<Py<WcFstSitePy>>,
+    #[pyo3(get)]
+    fst_type: String,
+}
+
+#[pymethods]
+impl WcFstResultPy {
+    fn __repr__(&self, py: Python) -> PyResult<String> {
+        let overall = self.overall_fst.borrow(py);
+        Ok(format!("WcFstResult(overall_fst={})", overall.__repr__()))
+    }
+}
+
+impl WcFstResultPy {
+    fn from_results(py: Python, results: &FstWcResults) -> PyResult<Py<Self>> {
+        let mut pairwise = HashMap::with_capacity(results.pairwise_fst.len());
+        for (key, value) in &results.pairwise_fst {
+            pairwise.insert(key.clone(), FstEstimateInfo::from_estimate(py, value)?);
+        }
+        let mut sites = Vec::with_capacity(results.site_fst.len());
+        for site in &results.site_fst {
+            sites.push(WcFstSitePy::from_site(py, site)?);
+        }
+        Py::new(
+            py,
+            WcFstResultPy {
+                overall_fst: FstEstimateInfo::from_estimate(py, &results.overall_fst)?,
+                pairwise_fst: pairwise,
+                pairwise_variance_components: results.pairwise_variance_components.clone(),
+                site_fst: sites,
+                fst_type: results.fst_type.clone(),
+            },
+        )
+    }
+}
+
+/// In-memory representation of a population to be reused across statistics calls.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct Population {
+    inner: OwnedPopulationContext,
+}
+
+#[pymethods]
+impl Population {
+    #[new]
+    #[pyo3(signature = (id, variants, haplotypes, sequence_length, sample_names=None))]
+    fn new(
+        id: PopulationIdInput,
+        variants: Vec<VariantInput>,
+        haplotypes: Vec<HaplotypeInput>,
+        sequence_length: i64,
+        sample_names: Option<Vec<String>>,
+    ) -> PyResult<Self> {
+        if sequence_length <= 0 {
+            return Err(PyValueError::new_err(
+                "sequence_length must be a positive integer",
+            ));
         }
 
-        // Create and add the Rust Variant
-        rust_variants.push(Variant {
-            position,
-            genotypes,
-        });
+        Ok(Population {
+            inner: OwnedPopulationContext {
+                id: id.0,
+                haplotypes: haplotypes.into_iter().map(|h| h.into_pair()).collect(),
+                variants: variants.into_iter().map(VariantInput::into_inner).collect(),
+                sample_names: sample_names.unwrap_or_default(),
+                sequence_length,
+            },
+        })
     }
 
-    Ok(rust_variants)
-}
+    /// Identifier for the population. Haplotype groups are returned as integers, custom
+    /// labels as strings.
+    #[getter]
+    fn id(&self) -> PyObject {
+        Python::with_gil(|py| match &self.inner.id {
+            PopulationId::HaplotypeGroup(group) => (*group).into_py(py),
+            PopulationId::Named(name) => name.clone().into_py(py),
+        })
+    }
 
-/// Helper function to extract haplotype information from Python objects.
-///
-/// Each element in `haplotypes_obj` must be indexable with `[0]` for the
-/// sample index and `[1]` for the side flag (`0` = left, `1` = right).
-fn extract_haplotypes_from_python(haplotypes_obj: &PyAny) -> PyResult<Vec<(usize, HaplotypeSide)>> {
-    let mut rust_haplotypes = Vec::new();
+    /// When the identifier is a haplotype group, this returns its numeric value.
+    #[getter]
+    fn haplotype_group(&self) -> Option<u8> {
+        match self.inner.id {
+            PopulationId::HaplotypeGroup(group) => Some(group),
+            PopulationId::Named(_) => None,
+        }
+    }
 
-    // Iterate through Python list of haplotypes
-    for py_hap in haplotypes_obj.iter()? {
-        let py_hap = py_hap?;
+    /// Optional descriptive label for named populations.
+    #[getter]
+    fn label(&self) -> Option<String> {
+        match &self.inner.id {
+            PopulationId::HaplotypeGroup(_) => None,
+            PopulationId::Named(name) => Some(name.clone()),
+        }
+    }
 
-        // Extract sample index
-        let index = py_hap.get_item(0)?.extract::<usize>()?;
+    /// Sequence length used when normalising statistics.
+    #[getter]
+    fn sequence_length(&self) -> i64 {
+        self.inner.sequence_length
+    }
 
-        // Extract and convert haplotype side
-        let side_int = py_hap.get_item(1)?.extract::<u8>()?;
+    /// Number of stored variants.
+    #[getter]
+    fn variant_count(&self) -> usize {
+        self.inner.variants.len()
+    }
 
-        let side = match side_int {
-            0 => HaplotypeSide::Left,
-            1 => HaplotypeSide::Right,
-            _ => return Err(PyValueError::new_err("Side must be 0 (Left) or 1 (Right)")),
+    /// Names of the samples backing this population.
+    #[getter]
+    fn sample_names(&self) -> Vec<String> {
+        self.inner.sample_names.clone()
+    }
+
+    /// Haplotypes represented as ``(sample_index, side)`` where side is 0 for left and 1 for right.
+    #[getter]
+    fn haplotypes(&self) -> Vec<(usize, u8)> {
+        self.inner
+            .haplotypes
+            .iter()
+            .map(|(idx, side)| {
+                (
+                    *idx,
+                    match side {
+                        HaplotypeSide::Left => 0,
+                        HaplotypeSide::Right => 1,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn __repr__(&self) -> String {
+        let label = match &self.inner.id {
+            PopulationId::HaplotypeGroup(group) => format!("haplotype_group {group}"),
+            PopulationId::Named(name) => format!("named '{name}'"),
         };
-
-        rust_haplotypes.push((index, side));
+        format!(
+            "Population({label}, haplotypes={}, variants={}, sequence_length={})",
+            self.inner.haplotypes.len(),
+            self.inner.variants.len(),
+            self.inner.sequence_length
+        )
     }
-
-    Ok(rust_haplotypes)
 }
 
+/// Internal owned representation of a population used to build [`PopulationContext`].
+#[derive(Clone)]
 struct OwnedPopulationContext {
     id: PopulationId,
     haplotypes: Vec<(usize, HaplotypeSide)>,
@@ -471,303 +578,758 @@ impl OwnedPopulationContext {
     }
 }
 
-fn parse_population_context(obj: &PyAny) -> PyResult<OwnedPopulationContext> {
-    let id_obj = get_required_field(obj, "id")?;
-    let haplotypes_obj = get_required_field(obj, "haplotypes")?;
-    let variants_obj = get_required_field(obj, "variants")?;
-    let sequence_length_obj = get_required_field(obj, "sequence_length")?;
+/// Simple helper that formats optional floats for ``__repr__`` implementations.
+fn optional_float_display(value: Option<f64>) -> String {
+    match value {
+        Some(v) if v.is_finite() => format!("{v:.6}"),
+        Some(v) => v.to_string(),
+        None => "None".to_string(),
+    }
+}
 
-    let id = parse_population_id(id_obj)?;
-    let haplotypes = extract_haplotypes_from_python(haplotypes_obj)?;
-    let variants = extract_variants_from_python(variants_obj)?;
-    let sequence_length = sequence_length_obj.extract::<i64>()?;
+#[derive(Clone)]
+struct VariantInput(Variant);
 
-    let sample_names = match get_field(obj, "sample_names")? {
-        Some(value) => extract_sample_names_from_python(value)?,
+impl VariantInput {
+    fn into_inner(self) -> Variant {
+        self.0
+    }
+}
+
+impl<'source> FromPyObject<'source> for VariantInput {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        if let Ok(tuple) = obj.downcast::<PyTuple>() {
+            if tuple.len() != 2 {
+                return Err(PyValueError::new_err(
+                    "variant tuples must have length 2: (position, genotypes)",
+                ));
+            }
+            let position = tuple.get_item(0)?.extract::<i64>()?;
+            let genotypes = parse_genotypes(tuple.get_item(1)?)?;
+            return Ok(VariantInput(Variant {
+                position,
+                genotypes,
+            }));
+        }
+
+        if let Ok(mapping) = obj.downcast::<PyDict>() {
+            let position =
+                extract_from_mapping(mapping, &["position", "pos", "site"])?.extract::<i64>()?;
+            let genotypes =
+                parse_genotypes(extract_from_mapping(mapping, &["genotypes", "calls"])?)?;
+            return Ok(VariantInput(Variant {
+                position,
+                genotypes,
+            }));
+        }
+
+        let position = extract_optional_field(obj, &["position", "pos", "site"])
+            .ok_or_else(|| PyValueError::new_err("variant is missing a position"))?
+            .extract::<i64>()?;
+        let genotypes_obj = extract_optional_field(obj, &["genotypes", "calls"])
+            .ok_or_else(|| PyValueError::new_err("variant is missing genotypes"))?;
+        let genotypes = parse_genotypes(genotypes_obj)?;
+
+        Ok(VariantInput(Variant {
+            position,
+            genotypes,
+        }))
+    }
+}
+
+#[derive(Clone)]
+struct HaplotypeInput {
+    sample_index: usize,
+    side: HaplotypeSide,
+}
+
+impl HaplotypeInput {
+    fn into_pair(self) -> (usize, HaplotypeSide) {
+        (self.sample_index, self.side)
+    }
+}
+
+impl<'source> FromPyObject<'source> for HaplotypeInput {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        if let Ok(tuple) = obj.downcast::<PyTuple>() {
+            if tuple.len() < 2 {
+                return Err(PyValueError::new_err(
+                    "haplotypes must contain (sample_index, side)",
+                ));
+            }
+            return Ok(HaplotypeInput {
+                sample_index: tuple.get_item(0)?.extract::<usize>()?,
+                side: parse_side(tuple.get_item(1)?)?,
+            });
+        }
+
+        if let Ok(list) = obj.downcast::<PyList>() {
+            if list.len() < 2 {
+                return Err(PyValueError::new_err(
+                    "haplotypes must contain (sample_index, side)",
+                ));
+            }
+            return Ok(HaplotypeInput {
+                sample_index: list.get_item(0)?.extract::<usize>()?,
+                side: parse_side(list.get_item(1)?)?,
+            });
+        }
+
+        let index_obj = extract_optional_field(obj, &["sample_index", "sample", "index"])
+            .ok_or_else(|| PyValueError::new_err("haplotype missing sample index"))?;
+        let side_obj = extract_optional_field(obj, &["side", "haplotype", "haplotype_side"])
+            .ok_or_else(|| PyValueError::new_err("haplotype missing side"))?;
+
+        Ok(HaplotypeInput {
+            sample_index: index_obj.extract::<usize>()?,
+            side: parse_side(side_obj)?,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct PopulationIdInput(PopulationId);
+
+impl<'source> FromPyObject<'source> for PopulationIdInput {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        if let Ok(dict) = obj.downcast::<PyDict>() {
+            if let Some(value) = dict.get_item("haplotype_group") {
+                return Ok(PopulationIdInput(PopulationId::HaplotypeGroup(
+                    value.extract::<u8>()?,
+                )));
+            }
+            if let Some(value) = dict.get_item("named") {
+                return Ok(PopulationIdInput(PopulationId::Named(
+                    value.extract::<String>()?,
+                )));
+            }
+            return Err(PyValueError::new_err(
+                "population id dictionaries must provide 'haplotype_group' or 'named'",
+            ));
+        }
+
+        if let Ok(group) = obj.extract::<u8>() {
+            return Ok(PopulationIdInput(PopulationId::HaplotypeGroup(group)));
+        }
+
+        if let Ok(group) = obj.extract::<usize>() {
+            if group > u8::MAX as usize {
+                return Err(PyValueError::new_err("haplotype_group ids must be <= 255"));
+            }
+            return Ok(PopulationIdInput(PopulationId::HaplotypeGroup(group as u8)));
+        }
+
+        if let Ok(name) = obj.extract::<String>() {
+            return Ok(PopulationIdInput(PopulationId::Named(name)));
+        }
+
+        Err(PyValueError::new_err(
+            "could not interpret population id; pass an int, string, or mapping",
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct PopulationInput {
+    inner: OwnedPopulationContext,
+}
+
+impl PopulationInput {
+    fn as_context(&self) -> PopulationContext<'_> {
+        self.inner.as_population_context()
+    }
+}
+
+impl<'source> FromPyObject<'source> for PopulationInput {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        if let Ok(pop) = obj.extract::<PyRef<Population>>() {
+            return Ok(PopulationInput {
+                inner: pop.inner.clone(),
+            });
+        }
+
+        if let Ok(dict) = obj.downcast::<PyDict>() {
+            return parse_population_like_dict(dict);
+        }
+
+        parse_population_like_object(obj)
+    }
+}
+
+fn parse_population_like_dict(mapping: &PyDict) -> PyResult<PopulationInput> {
+    let id = extract_from_mapping(mapping, &["id", "population_id", "name"])?
+        .extract::<PopulationIdInput>()?
+        .0;
+    let variants: Vec<Variant> = mapping
+        .get_item("variants")
+        .ok_or_else(|| PyValueError::new_err("population requires 'variants'"))?
+        .extract::<Vec<VariantInput>>()?
+        .into_iter()
+        .map(VariantInput::into_inner)
+        .collect();
+    let haplotypes: Vec<(usize, HaplotypeSide)> = mapping
+        .get_item("haplotypes")
+        .ok_or_else(|| PyValueError::new_err("population requires 'haplotypes'"))?
+        .extract::<Vec<HaplotypeInput>>()?
+        .into_iter()
+        .map(|h| h.into_pair())
+        .collect();
+    let sequence_length =
+        extract_from_mapping(mapping, &["sequence_length", "length", "L"])?.extract::<i64>()?;
+    if sequence_length <= 0 {
+        return Err(PyValueError::new_err(
+            "sequence_length must be a positive integer",
+        ));
+    }
+    let sample_names = match mapping.get_item("sample_names") {
+        Some(value) => value.extract::<Vec<String>>()?,
         None => Vec::new(),
     };
 
-    Ok(OwnedPopulationContext {
-        id,
-        haplotypes,
-        variants,
-        sample_names,
-        sequence_length,
+    Ok(PopulationInput {
+        inner: OwnedPopulationContext {
+            id,
+            haplotypes,
+            variants,
+            sample_names,
+            sequence_length,
+        },
     })
 }
 
-fn get_field<'a>(obj: &'a PyAny, name: &str) -> PyResult<Option<&'a PyAny>> {
-    if let Ok(value) = obj.get_item(name) {
-        return Ok(Some(value));
+fn parse_population_like_object(obj: &PyAny) -> PyResult<PopulationInput> {
+    let id = extract_optional_field(obj, &["id", "population_id", "name"])
+        .ok_or_else(|| PyValueError::new_err("population-like object missing 'id'"))?
+        .extract::<PopulationIdInput>()?
+        .0;
+    let variants: Vec<Variant> = extract_optional_field(obj, &["variants"])
+        .ok_or_else(|| PyValueError::new_err("population-like object missing 'variants'"))?
+        .extract::<Vec<VariantInput>>()?
+        .into_iter()
+        .map(VariantInput::into_inner)
+        .collect();
+    let haplotypes: Vec<(usize, HaplotypeSide)> = extract_optional_field(obj, &["haplotypes"])
+        .ok_or_else(|| PyValueError::new_err("population-like object missing 'haplotypes'"))?
+        .extract::<Vec<HaplotypeInput>>()?
+        .into_iter()
+        .map(|h| h.into_pair())
+        .collect();
+    let sequence_length = extract_optional_field(obj, &["sequence_length", "length", "L"])
+        .ok_or_else(|| PyValueError::new_err("population-like object missing 'sequence_length'"))?
+        .extract::<i64>()?;
+    if sequence_length <= 0 {
+        return Err(PyValueError::new_err(
+            "sequence_length must be a positive integer",
+        ));
     }
+    let sample_names = extract_optional_field(obj, &["sample_names", "samples"])
+        .map(|value| value.extract::<Vec<String>>())
+        .transpose()?
+        .unwrap_or_default();
 
-    if let Ok(value) = obj.getattr(name) {
-        return Ok(Some(value));
-    }
-
-    Ok(None)
-}
-
-fn get_required_field<'a>(obj: &'a PyAny, name: &str) -> PyResult<&'a PyAny> {
-    get_field(obj, name)?.ok_or_else(|| {
-        PyValueError::new_err(format!(
-            "Population context missing required field '{name}'"
-        ))
+    Ok(PopulationInput {
+        inner: OwnedPopulationContext {
+            id,
+            haplotypes,
+            variants,
+            sample_names,
+            sequence_length,
+        },
     })
 }
 
-fn parse_population_id(obj: &PyAny) -> PyResult<PopulationId> {
-    if let Ok(dict) = obj.downcast::<PyDict>() {
-        if let Some(value) = dict.get_item("haplotype_group") {
-            return Ok(PopulationId::HaplotypeGroup(value.extract::<u8>()?));
+fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<Vec<Option<Vec<u8>>>> {
+    let mut genotypes = Vec::new();
+    let iterator = PyIterator::from_object(genotypes_obj.py(), genotypes_obj)?;
+    for entry in iterator {
+        let entry = entry?;
+        if entry.is_none() {
+            genotypes.push(None);
+            continue;
         }
 
-        if let Some(value) = dict.get_item("named") {
-            return Ok(PopulationId::Named(value.extract::<String>()?));
+        if let Ok(value) = entry.extract::<u8>() {
+            genotypes.push(Some(vec![value]));
+            continue;
+        }
+
+        if let Ok(seq) = PyIterator::from_object(entry.py(), entry) {
+            let mut alleles = Vec::new();
+            for allele in seq {
+                alleles.push(allele?.extract::<u8>()?);
+            }
+            genotypes.push(Some(alleles));
+            continue;
         }
 
         return Err(PyValueError::new_err(
-            "Population id dict must contain 'haplotype_group' or 'named'",
+            "genotypes must be sequences of allele integers or None",
         ));
     }
+    Ok(genotypes)
+}
 
-    if let Ok(group) = obj.extract::<u8>() {
-        return Ok(PopulationId::HaplotypeGroup(group));
+fn parse_side(obj: &PyAny) -> PyResult<HaplotypeSide> {
+    if let Ok(value) = obj.extract::<u8>() {
+        return match value {
+            0 => Ok(HaplotypeSide::Left),
+            1 => Ok(HaplotypeSide::Right),
+            _ => Err(PyValueError::new_err("haplotype side must be 0 or 1")),
+        };
     }
 
-    if let Ok(name) = obj.extract::<String>() {
-        return Ok(PopulationId::Named(name));
+    if let Ok(value) = obj.extract::<usize>() {
+        return match value {
+            0 => Ok(HaplotypeSide::Left),
+            1 => Ok(HaplotypeSide::Right),
+            _ => Err(PyValueError::new_err("haplotype side must be 0 or 1")),
+        };
+    }
+
+    if let Ok(text) = obj.extract::<String>() {
+        let lower = text.to_lowercase();
+        return match lower.as_str() {
+            "l" | "left" => Ok(HaplotypeSide::Left),
+            "r" | "right" => Ok(HaplotypeSide::Right),
+            "0" => Ok(HaplotypeSide::Left),
+            "1" => Ok(HaplotypeSide::Right),
+            _ => Err(PyValueError::new_err(
+                "haplotype side must be one of 0, 1, 'L', 'R', 'left', 'right'",
+            )),
+        };
     }
 
     Err(PyValueError::new_err(
-        "Unable to interpret population id; expected int, string, or mapping",
+        "haplotype side must be 0/1 or a left/right string",
     ))
 }
 
-fn extract_sample_names_from_python(sample_names_obj: &PyAny) -> PyResult<Vec<String>> {
-    let mut names = Vec::new();
-    for item in sample_names_obj.iter()? {
-        names.push(item?.extract::<String>()?);
+fn extract_optional_field<'a>(obj: &'a PyAny, names: &[&str]) -> Option<&'a PyAny> {
+    for name in names {
+        if let Ok(value) = obj.get_item(*name) {
+            return Some(value);
+        }
+        if let Ok(value) = obj.getattr(*name) {
+            return Some(value);
+        }
     }
-    Ok(names)
+    None
 }
 
-fn extract_sample_group_map(sample_to_group_obj: &PyAny) -> PyResult<HashMap<String, (u8, u8)>> {
-    let mapping: &PyDict = sample_to_group_obj
-        .downcast::<PyDict>()
-        .map_err(|_| PyValueError::new_err("sample_to_group_map must be a dict"))?;
+fn extract_from_mapping<'a>(mapping: &'a PyDict, names: &[&str]) -> PyResult<&'a PyAny> {
+    for name in names {
+        if let Some(value) = mapping.get_item(*name) {
+            return Ok(value);
+        }
+    }
+    Err(PyValueError::new_err(format!(
+        "mapping missing required field: {}",
+        names.join(" / ")
+    )))
+}
 
-    let mut result = HashMap::with_capacity(mapping.len());
-    for (key, value) in mapping.iter() {
-        let sample = key.extract::<String>()?;
-        let left = value.get_item(0)?.extract::<u8>()?;
-        let right = value.get_item(1)?.extract::<u8>()?;
-        result.insert(sample, (left, right));
+fn population_label(id: &PopulationId) -> (Option<String>, Option<u8>) {
+    match id {
+        PopulationId::HaplotypeGroup(group) => {
+            (Some(format!("haplotype_group_{group}")), Some(*group))
+        }
+        PopulationId::Named(name) => (Some(name.clone()), None),
+    }
+}
+
+fn build_region(region: (i64, i64)) -> PyResult<QueryRegion> {
+    let (start, end) = region;
+    if end < start {
+        return Err(PyValueError::new_err(
+            "region end must be greater than or equal to region start",
+        ));
+    }
+    Ok(QueryRegion { start, end })
+}
+
+fn build_optional_region(
+    region: Option<(i64, i64)>,
+    variants: &[Variant],
+) -> PyResult<QueryRegion> {
+    if let Some(region) = region {
+        return build_region(region);
     }
 
-    Ok(result)
+    if variants.is_empty() {
+        return Err(PyValueError::new_err(
+            "region must be provided when no variants are supplied",
+        ));
+    }
+
+    let mut min_pos = variants[0].position;
+    let mut max_pos = variants[0].position;
+    for variant in &variants[1..] {
+        if variant.position < min_pos {
+            min_pos = variant.position;
+        }
+        if variant.position > max_pos {
+            max_pos = variant.position;
+        }
+    }
+
+    Ok(QueryRegion {
+        start: min_pos,
+        end: max_pos,
+    })
+}
+
+fn hudson_sites_to_py(py: Python, sites: &[SiteFstHudson]) -> PyResult<Vec<Py<HudsonFstSitePy>>> {
+    let mut out = Vec::with_capacity(sites.len());
+    for site in sites {
+        out.push(HudsonFstSitePy::from_site(py, site)?);
+    }
+    Ok(out)
+}
+
+fn diversity_sites_to_py(py: Python, sites: &[SiteDiversity]) -> PyResult<Vec<Py<DiversitySite>>> {
+    let mut out = Vec::with_capacity(sites.len());
+    for site in sites {
+        out.push(Py::new(
+            py,
+            DiversitySite {
+                position: site.position,
+                pi: site.pi,
+                watterson_theta: site.watterson_theta,
+            },
+        )?);
+    }
+    Ok(out)
+}
+
+fn pairwise_differences_to_py(
+    py: Python,
+    diffs: Vec<((usize, usize), usize, usize)>,
+) -> PyResult<Vec<Py<PairwiseDifference>>> {
+    let mut out = Vec::with_capacity(diffs.len());
+    for ((sample_i, sample_j), differences, comparable_sites) in diffs {
+        out.push(Py::new(
+            py,
+            PairwiseDifference {
+                sample_i,
+                sample_j,
+                differences,
+                comparable_sites,
+            },
+        )?);
+    }
+    Ok(out)
+}
+
+fn extract_sample_group_map(obj: &PyAny) -> PyResult<HashMap<String, (u8, u8)>> {
+    let dict = obj.downcast::<PyDict>().map_err(|_| {
+        PyValueError::new_err("sample_to_group must be a dict mapping sample -> (left, right)")
+    })?;
+
+    let mut map = HashMap::with_capacity(dict.len());
+    for (key, value) in dict.iter() {
+        let sample = key.extract::<String>()?;
+        let left = value
+            .get_item(0)
+            .map_err(|_| PyValueError::new_err("group tuples must contain two entries"))?
+            .extract::<u8>()?;
+        let right = value
+            .get_item(1)
+            .map_err(|_| PyValueError::new_err("group tuples must contain two entries"))?
+            .extract::<u8>()?;
+        map.insert(sample, (left, right));
+    }
+
+    Ok(map)
 }
 
 fn extract_interval_list(obj: Option<&PyAny>) -> PyResult<Option<Vec<(i64, i64)>>> {
-    if let Some(seq_obj) = obj {
-        let mut intervals = Vec::new();
-        for entry in seq_obj.iter()? {
-            let entry = entry?;
-            let start = entry.get_item(0)?.extract::<i64>()?;
-            let end = entry.get_item(1)?.extract::<i64>()?;
-            intervals.push((start, end));
+    let Some(obj) = obj else { return Ok(None) };
+    let mut intervals = Vec::new();
+    let iterator = PyIterator::from_object(obj.py(), obj)?;
+    for entry in iterator {
+        let entry = entry?;
+        let start = entry
+            .get_item(0)
+            .map_err(|_| PyValueError::new_err("intervals must be (start, end)"))?
+            .extract::<i64>()?;
+        let end = entry
+            .get_item(1)
+            .map_err(|_| PyValueError::new_err("intervals must be (start, end)"))?
+            .extract::<i64>()?;
+        if end < start {
+            return Err(PyValueError::new_err(
+                "interval end must be greater than or equal to start",
+            ));
         }
-        Ok(Some(intervals))
-    } else {
-        Ok(None)
+        intervals.push((start, end));
     }
+    Ok(Some(intervals))
 }
 
 fn vcf_error_to_pyerr(err: VcfError) -> PyErr {
-    PyValueError::new_err(format!("VCF error: {:?}", err))
+    PyValueError::new_err(format!("VCF error: {err:?}"))
 }
 
-fn site_diversity_to_py(py: Python, site: &SiteDiversity) -> PyResult<PyObject> {
-    let entry = PyDict::new(py);
-    entry.set_item("position", site.position)?;
-    entry.set_item("pi", site.pi)?;
-    entry.set_item("watterson_theta", site.watterson_theta)?;
-    Ok(entry.into())
+/// Count the number of segregating (polymorphic) sites.
+#[pyfunction(name = "segregating_sites", text_signature = "(variants, /)")]
+fn segregating_sites_py(variants: Vec<VariantInput>) -> PyResult<usize> {
+    let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
+    Ok(count_segregating_sites(&variants))
 }
 
-fn dxy_result_to_py(py: Python, result: &DxyHudsonResult) -> PyResult<PyObject> {
-    let entry = PyDict::new(py);
-    entry.set_item("d_xy", result.d_xy)?;
-    Ok(entry.into())
-}
-
-fn population_id_to_py(py: Python, id: &PopulationId) -> PyResult<PyObject> {
-    let entry = PyDict::new(py);
-    match id {
-        PopulationId::HaplotypeGroup(group) => entry.set_item("haplotype_group", *group)?,
-        PopulationId::Named(name) => entry.set_item("named", name.clone())?,
+/// Compute nucleotide diversity (π) for the provided haplotypes and region length.
+#[pyfunction(
+    name = "nucleotide_diversity",
+    text_signature = "(variants, haplotypes, sequence_length, /)"
+)]
+fn nucleotide_diversity_py(
+    variants: Vec<VariantInput>,
+    haplotypes: Vec<HaplotypeInput>,
+    sequence_length: i64,
+) -> PyResult<f64> {
+    if sequence_length <= 0 {
+        return Err(PyValueError::new_err(
+            "sequence_length must be a positive integer",
+        ));
     }
-    Ok(entry.into())
+
+    let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
+    let haplotypes: Vec<(usize, HaplotypeSide)> =
+        haplotypes.into_iter().map(|h| h.into_pair()).collect();
+
+    Ok(calculate_pi(&variants, &haplotypes, sequence_length))
 }
 
-fn hudson_outcome_to_py(py: Python, outcome: &HudsonFSTOutcome) -> PyResult<PyObject> {
-    let entry = PyDict::new(py);
-    let pop1 = match &outcome.pop1_id {
-        Some(id) => population_id_to_py(py, id)?,
-        None => py.None(),
-    };
-    let pop2 = match &outcome.pop2_id {
-        Some(id) => population_id_to_py(py, id)?,
-        None => py.None(),
-    };
-    entry.set_item("pop1_id", pop1)?;
-    entry.set_item("pop2_id", pop2)?;
-    entry.set_item("fst", outcome.fst)?;
-    entry.set_item("d_xy", outcome.d_xy)?;
-    entry.set_item("pi_pop1", outcome.pi_pop1)?;
-    entry.set_item("pi_pop2", outcome.pi_pop2)?;
-    entry.set_item("pi_xy_avg", outcome.pi_xy_avg)?;
-    Ok(entry.into())
+/// Compute Watterson's θ estimator.
+#[pyfunction(
+    name = "watterson_theta",
+    text_signature = "(segregating_sites, sample_count, sequence_length, /)"
+)]
+fn watterson_theta_py(
+    segregating_sites: usize,
+    sample_count: usize,
+    sequence_length: i64,
+) -> PyResult<f64> {
+    if sample_count <= 1 {
+        return Err(PyValueError::new_err(
+            "sample_count must be greater than 1 for Watterson's theta",
+        ));
+    }
+    if sequence_length <= 0 {
+        return Err(PyValueError::new_err(
+            "sequence_length must be a positive integer",
+        ));
+    }
+    Ok(calculate_watterson_theta(
+        segregating_sites,
+        sample_count,
+        sequence_length,
+    ))
 }
 
-fn site_fst_hudson_to_py(py: Python, site: &SiteFstHudson) -> PyResult<PyObject> {
-    let entry = PyDict::new(py);
-    entry.set_item("position", site.position)?;
-    entry.set_item("fst", site.fst)?;
-    entry.set_item("d_xy", site.d_xy)?;
-    entry.set_item("pi_pop1", site.pi_pop1)?;
-    entry.set_item("pi_pop2", site.pi_pop2)?;
-    entry.set_item("n1_called", site.n1_called)?;
-    entry.set_item("n2_called", site.n2_called)?;
-    entry.set_item("num_component", site.num_component)?;
-    entry.set_item("den_component", site.den_component)?;
-    Ok(entry.into())
+/// Compute pairwise nucleotide differences between samples.
+#[pyfunction(
+    name = "pairwise_differences",
+    text_signature = "(variants, sample_count, /)"
+)]
+fn pairwise_differences_py(
+    py: Python,
+    variants: Vec<VariantInput>,
+    sample_count: usize,
+) -> PyResult<Vec<Py<PairwiseDifference>>> {
+    let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
+    let diffs = calculate_pairwise_differences(&variants, sample_count);
+    pairwise_differences_to_py(py, diffs)
 }
 
-fn fst_estimate_to_py(py: Python, estimate: &FstEstimate) -> PyResult<PyObject> {
-    let entry = PyDict::new(py);
-    match estimate {
-        FstEstimate::Calculable {
-            value,
-            sum_a,
-            sum_b,
-            num_informative_sites,
-        } => {
-            entry.set_item("state", "calculable")?;
-            entry.set_item("value", *value)?;
-            entry.set_item("sum_a", *sum_a)?;
-            entry.set_item("sum_b", *sum_b)?;
-            entry.set_item("sites", *num_informative_sites)?;
-        }
-        FstEstimate::ComponentsYieldIndeterminateRatio {
-            sum_a,
-            sum_b,
-            num_informative_sites,
-        } => {
-            entry.set_item("state", "components_yield_indeterminate_ratio")?;
-            entry.set_item("value", Option::<f64>::None)?;
-            entry.set_item("sum_a", *sum_a)?;
-            entry.set_item("sum_b", *sum_b)?;
-            entry.set_item("sites", *num_informative_sites)?;
-        }
-        FstEstimate::NoInterPopulationVariance {
-            sum_a,
-            sum_b,
-            sites_evaluated,
-        } => {
-            entry.set_item("state", "no_inter_population_variance")?;
-            entry.set_item("value", Option::<f64>::None)?;
-            entry.set_item("sum_a", *sum_a)?;
-            entry.set_item("sum_b", *sum_b)?;
-            entry.set_item("sites", *sites_evaluated)?;
-        }
-        FstEstimate::InsufficientDataForEstimation {
-            sum_a,
-            sum_b,
-            sites_attempted,
-        } => {
-            entry.set_item("state", "insufficient_data_for_estimation")?;
-            entry.set_item("value", Option::<f64>::None)?;
-            entry.set_item("sum_a", *sum_a)?;
-            entry.set_item("sum_b", *sum_b)?;
-            entry.set_item("sites", *sites_attempted)?;
-        }
+/// Calculate per-site diversity statistics (π and Watterson's θ).
+#[pyfunction(
+    name = "per_site_diversity",
+    signature = (variants, haplotypes, region=None),
+    text_signature = "(variants, haplotypes, region=None, /)"
+)]
+fn per_site_diversity_py(
+    py: Python,
+    variants: Vec<VariantInput>,
+    haplotypes: Vec<HaplotypeInput>,
+    region: Option<(i64, i64)>,
+) -> PyResult<Vec<Py<DiversitySite>>> {
+    let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
+    let haplotypes: Vec<(usize, HaplotypeSide)> =
+        haplotypes.into_iter().map(|h| h.into_pair()).collect();
+    if haplotypes.len() < 2 {
+        return Err(PyValueError::new_err(
+            "at least two haplotypes are required for diversity calculations",
+        ));
     }
-    Ok(entry.into())
+
+    let region = build_optional_region(region, &variants)?;
+    let sites = calculate_per_site_diversity(&variants, &haplotypes, region);
+    diversity_sites_to_py(py, &sites)
 }
 
-fn site_fst_wc_to_py(py: Python, site: &SiteFstWc) -> PyResult<PyObject> {
-    let entry = PyDict::new(py);
-    entry.set_item("position", site.position)?;
-    entry.set_item("overall_fst", fst_estimate_to_py(py, &site.overall_fst)?)?;
-
-    let pairwise = PyDict::new(py);
-    for (key, value) in &site.pairwise_fst {
-        pairwise.set_item(key, fst_estimate_to_py(py, value)?)?;
-    }
-    entry.set_item("pairwise_fst", pairwise)?;
-
-    entry.set_item("variance_components", site.variance_components)?;
-
-    let pop_sizes = PyDict::new(py);
-    for (key, value) in &site.population_sizes {
-        pop_sizes.set_item(key, *value)?;
-    }
-    entry.set_item("population_sizes", pop_sizes)?;
-
-    let pairwise_var = PyDict::new(py);
-    for (key, value) in &site.pairwise_variance_components {
-        pairwise_var.set_item(key, value)?;
-    }
-    entry.set_item("pairwise_variance_components", pairwise_var)?;
-
-    Ok(entry.into())
+/// Compute Hudson's Dxy between two populations.
+#[pyfunction(name = "hudson_dxy", text_signature = "(population1, population2, /)")]
+fn hudson_dxy_py(
+    py: Python,
+    population1: PopulationInput,
+    population2: PopulationInput,
+) -> PyResult<Py<HudsonDxyResultPy>> {
+    let pop1_ctx = population1.as_context();
+    let pop2_ctx = population2.as_context();
+    let result = calculate_d_xy_hudson(&pop1_ctx, &pop2_ctx).map_err(vcf_error_to_pyerr)?;
+    HudsonDxyResultPy::from_result(py, &result)
 }
 
-fn fst_wc_results_to_py(py: Python, results: &FstWcResults) -> PyResult<PyObject> {
-    let entry = PyDict::new(py);
-    entry.set_item("overall_fst", fst_estimate_to_py(py, &results.overall_fst)?)?;
-
-    let pairwise = PyDict::new(py);
-    for (key, value) in &results.pairwise_fst {
-        pairwise.set_item(key, fst_estimate_to_py(py, value)?)?;
-    }
-    entry.set_item("pairwise_fst", pairwise)?;
-
-    let pairwise_var = PyDict::new(py);
-    for (key, value) in &results.pairwise_variance_components {
-        pairwise_var.set_item(key, value)?;
-    }
-    entry.set_item("pairwise_variance_components", pairwise_var)?;
-
-    let site_list = PyList::empty(py);
-    for site in &results.site_fst {
-        site_list.append(site_fst_wc_to_py(py, site)?)?;
-    }
-    entry.set_item("site_fst", site_list)?;
-    entry.set_item("fst_type", results.fst_type.clone())?;
-
-    Ok(entry.into())
+/// Compute Hudson's FST and its components for two populations.
+#[pyfunction(name = "hudson_fst", text_signature = "(population1, population2, /)")]
+fn hudson_fst_py(
+    py: Python,
+    population1: PopulationInput,
+    population2: PopulationInput,
+) -> PyResult<Py<HudsonFstResultPy>> {
+    let pop1_ctx = population1.as_context();
+    let pop2_ctx = population2.as_context();
+    let outcome =
+        calculate_hudson_fst_for_pair(&pop1_ctx, &pop2_ctx).map_err(vcf_error_to_pyerr)?;
+    HudsonFstResultPy::from_outcome(py, &outcome)
 }
 
-/// PyO3 module definition.
+/// Compute per-site Hudson FST values across a region.
+#[pyfunction(
+    name = "hudson_fst_sites",
+    text_signature = "(population1, population2, region, /)"
+)]
+fn hudson_fst_sites_py(
+    py: Python,
+    population1: PopulationInput,
+    population2: PopulationInput,
+    region: (i64, i64),
+) -> PyResult<Vec<Py<HudsonFstSitePy>>> {
+    let pop1_ctx = population1.as_context();
+    let pop2_ctx = population2.as_context();
+    let region = build_region(region)?;
+    let sites = calculate_hudson_fst_per_site(&pop1_ctx, &pop2_ctx, region);
+    hudson_sites_to_py(py, &sites)
+}
+
+/// Compute Hudson's FST together with per-site contributions.
+#[pyfunction(
+    name = "hudson_fst_with_sites",
+    text_signature = "(population1, population2, region, /)"
+)]
+fn hudson_fst_with_sites_py(
+    py: Python,
+    population1: PopulationInput,
+    population2: PopulationInput,
+    region: (i64, i64),
+) -> PyResult<(Py<HudsonFstResultPy>, Vec<Py<HudsonFstSitePy>>)> {
+    let pop1_ctx = population1.as_context();
+    let pop2_ctx = population2.as_context();
+    let region = build_region(region)?;
+    let (outcome, sites) = calculate_hudson_fst_for_pair_with_sites(&pop1_ctx, &pop2_ctx, region)
+        .map_err(vcf_error_to_pyerr)?;
+    let outcome_py = HudsonFstResultPy::from_outcome(py, &outcome)?;
+    let sites_py = hudson_sites_to_py(py, &sites)?;
+    Ok((outcome_py, sites_py))
+}
+
+/// Compute Weir & Cockerham FST across haplotype groups.
+#[pyfunction(
+    name = "wc_fst",
+    text_signature = "(variants, sample_names, sample_to_group, region, /)"
+)]
+fn wc_fst_py(
+    py: Python,
+    variants: Vec<VariantInput>,
+    sample_names: Vec<String>,
+    sample_to_group: &PyAny,
+    region: (i64, i64),
+) -> PyResult<Py<WcFstResultPy>> {
+    if sample_names.is_empty() {
+        return Err(PyValueError::new_err(
+            "sample_names must contain at least one sample",
+        ));
+    }
+
+    let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
+    let sample_group_map = extract_sample_group_map(sample_to_group)?;
+    let region = build_region(region)?;
+    let results =
+        calculate_fst_wc_haplotype_groups(&variants, &sample_names, &sample_group_map, region);
+    WcFstResultPy::from_results(py, &results)
+}
+
+/// Convenience helper to read the variance components from an ``FstEstimate`` object.
+#[pyfunction(name = "wc_fst_components", text_signature = "(estimate, /)")]
+fn wc_fst_components_py(
+    estimate: PyRef<FstEstimateInfo>,
+) -> (Option<f64>, Option<f64>, Option<f64>, Option<usize>) {
+    estimate.components()
+}
+
+/// Adjust the effective sequence length by applying allow and mask intervals.
+#[pyfunction(
+    name = "adjusted_sequence_length",
+    signature = (start, end, allow=None, mask=None),
+    text_signature = "(start, end, allow=None, mask=None, /)"
+)]
+fn adjusted_sequence_length_py(
+    start: i64,
+    end: i64,
+    allow: Option<&PyAny>,
+    mask: Option<&PyAny>,
+) -> PyResult<i64> {
+    if end < start {
+        return Err(PyValueError::new_err(
+            "end must be greater than or equal to start",
+        ));
+    }
+    let allow = extract_interval_list(allow)?;
+    let mask = extract_interval_list(mask)?;
+    Ok(calculate_adjusted_sequence_length(
+        start,
+        end,
+        allow.as_ref(),
+        mask.as_ref(),
+    ))
+}
+
+/// Calculate the frequency of allele 1 (e.g. inversion allele) across haplotypes.
+#[pyfunction(
+    name = "inversion_allele_frequency",
+    text_signature = "(sample_map, /)"
+)]
+fn inversion_allele_frequency_py(sample_map: &PyAny) -> PyResult<Option<f64>> {
+    let map = extract_sample_group_map(sample_map)?;
+    Ok(calculate_inversion_allele_frequency(&map))
+}
+
 #[pymodule]
 fn ferromic(_py: Python, m: &PyModule) -> PyResult<()> {
-    // Register Python functions
-    m.add_function(wrap_pyfunction!(count_segregating_sites_py, m)?)?;
-    m.add_function(wrap_pyfunction!(calculate_pi_py, m)?)?;
-    m.add_function(wrap_pyfunction!(calculate_watterson_theta_py, m)?)?;
-    m.add_function(wrap_pyfunction!(calculate_pairwise_differences_py, m)?)?;
-    m.add_function(wrap_pyfunction!(calculate_per_site_diversity_py, m)?)?;
-    m.add_function(wrap_pyfunction!(calculate_dxy_hudson_py, m)?)?;
-    m.add_function(wrap_pyfunction!(calculate_hudson_fst_per_site_py, m)?)?;
-    m.add_function(wrap_pyfunction!(calculate_hudson_fst_for_pair_py, m)?)?;
-    m.add_function(wrap_pyfunction!(
-        calculate_hudson_fst_for_pair_with_sites_py,
-        m
-    )?)?;
-    m.add_function(wrap_pyfunction!(calculate_fst_wc_haplotype_groups_py, m)?)?;
-    m.add_function(wrap_pyfunction!(calculate_adjusted_sequence_length_py, m)?)?;
+    m.add_class::<Population>()?;
+    m.add_class::<PairwiseDifference>()?;
+    m.add_class::<DiversitySite>()?;
+    m.add_class::<HudsonDxyResultPy>()?;
+    m.add_class::<HudsonFstSitePy>()?;
+    m.add_class::<HudsonFstResultPy>()?;
+    m.add_class::<FstEstimateInfo>()?;
+    m.add_class::<WcFstSitePy>()?;
+    m.add_class::<WcFstResultPy>()?;
+
+    m.add_function(wrap_pyfunction!(segregating_sites_py, m)?)?;
+    m.add_function(wrap_pyfunction!(nucleotide_diversity_py, m)?)?;
+    m.add_function(wrap_pyfunction!(watterson_theta_py, m)?)?;
+    m.add_function(wrap_pyfunction!(pairwise_differences_py, m)?)?;
+    m.add_function(wrap_pyfunction!(per_site_diversity_py, m)?)?;
+    m.add_function(wrap_pyfunction!(hudson_dxy_py, m)?)?;
+    m.add_function(wrap_pyfunction!(hudson_fst_py, m)?)?;
+    m.add_function(wrap_pyfunction!(hudson_fst_sites_py, m)?)?;
+    m.add_function(wrap_pyfunction!(hudson_fst_with_sites_py, m)?)?;
+    m.add_function(wrap_pyfunction!(wc_fst_py, m)?)?;
+    m.add_function(wrap_pyfunction!(wc_fst_components_py, m)?)?;
+    m.add_function(wrap_pyfunction!(adjusted_sequence_length_py, m)?)?;
+    m.add_function(wrap_pyfunction!(inversion_allele_frequency_py, m)?)?;
 
     Ok(())
 }
