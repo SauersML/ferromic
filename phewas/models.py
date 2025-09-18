@@ -1487,8 +1487,7 @@ def _score_boot_ci_beta(
             return 0
         if isinstance(entry, dict):
             return int(entry.get("draws", 0))
-        # legacy float entries
-        return base_B_local
+        return 0
 
     def p_eval(beta0, *, min_total=None):
         key = float(beta0)
@@ -1500,10 +1499,9 @@ def _score_boot_ci_beta(
                 min_req = max(base_B_local, min_req)
                 min_req = min(min_req, max_B_local)
         entry = cache.get(key)
-        if entry is not None:
-            entry_draws = entry if isinstance(entry, dict) else {"p": entry, "draws": base_B_local}
-            if min_req is None or entry_draws.get("draws", 0) >= min_req:
-                return float(entry_draws.get("p", np.nan))
+        if isinstance(entry, dict):
+            if min_req is None or entry.get("draws", 0) >= min_req:
+                return float(entry.get("p", np.nan))
         draw_key = min_req if min_req is not None else base_B_local
         rng_local = _bootstrap_rng((base_key, draw_key))
         bits = _score_bootstrap_bits(Xr, yv, xt, key, kind=kind)
@@ -2459,7 +2457,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 p_source = "score_chi2"
                 inference_family = "score"
             else:
-                p_emp, _, draws_used_boot, exceed_boot = _score_bootstrap_from_reduced(
+                boot_res = _score_bootstrap_from_reduced(
                     X_reduced,
                     y_work,
                     x_target_vec,
@@ -2467,6 +2465,14 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                     alpha=alpha_override,
                     min_total=min_total_override,
                 )
+                if isinstance(boot_res, tuple):
+                    p_emp = boot_res[0]
+                    draws_used_boot = boot_res[2] if len(boot_res) > 2 else 0
+                    exceed_boot = boot_res[3] if len(boot_res) > 3 else 0
+                else:
+                    p_emp = np.nan
+                    draws_used_boot = 0
+                    exceed_boot = 0
                 if np.isfinite(p_emp):
                     p_value = p_emp
                     p_source = "score_boot"
@@ -2834,37 +2840,37 @@ def lrt_overall_worker(task):
             _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
 
             # Emit a PheWAS-style skip result to keep downstream shape identical
-        io.atomic_write_json(res_path, {
-            "Phenotype": s_name,
-            "N_Total": n_total_pre,
-            "N_Cases": n_cases_pre,
-            "N_Controls": n_ctrls_pre,
-            "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
-            "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
-            "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
-            "Model_Notes": note or "",
-            "Skip_Reason": reason
-        })
-        meta_extra_result = dict(meta_extra_common)
-        meta_extra_result.update({
-            "skip_reason": reason,
-            "counts": det,
-            "N_Total_Used": det['N'],
-            "N_Cases_Used": det['N_cases'],
-            "N_Controls_Used": det['N_ctrls'],
-        })
-        _write_meta(
-            res_meta_path,
-            "phewas_result",
-            s_name,
-            cat,
-            target,
-            worker_core_df_cols,
-            _index_fingerprint(worker_core_df_index),
-            case_fp,
-            extra=meta_extra_result,
-        )
-        return
+            io.atomic_write_json(res_path, {
+                "Phenotype": s_name,
+                "N_Total": n_total_pre,
+                "N_Cases": n_cases_pre,
+                "N_Controls": n_ctrls_pre,
+                "Beta": np.nan, "OR": np.nan, "P_Value": np.nan, "OR_CI95": None,
+                "Used_Ridge": False, "Final_Is_MLE": False, "Used_Firth": False,
+                "N_Total_Used": det['N'], "N_Cases_Used": det['N_cases'], "N_Controls_Used": det['N_ctrls'],
+                "Model_Notes": note or "",
+                "Skip_Reason": reason
+            })
+            meta_extra_result = dict(meta_extra_common)
+            meta_extra_result.update({
+                "skip_reason": reason,
+                "counts": det,
+                "N_Total_Used": det['N'],
+                "N_Cases_Used": det['N_cases'],
+                "N_Controls_Used": det['N_ctrls'],
+            })
+            _write_meta(
+                res_meta_path,
+                "phewas_result",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra_result,
+            )
+            return
 
         X_full_df = Xb
 
@@ -2884,56 +2890,56 @@ def lrt_overall_worker(task):
                 "N_Cases_Used": n_cases_used,
                 "N_Controls_Used": n_ctrls_used,
             })
-        io.atomic_write_json(res_path, {
-            "Phenotype": s_name,
-            "N_Total": n_total_pre,
-            "N_Cases": n_cases_pre,
-            "N_Controls": n_ctrls_pre,
-            "Beta": np.nan,
-            "OR": np.nan,
-            "P_Value": np.nan,
-            "OR_CI95": None,
-            "Used_Ridge": False,
-            "Final_Is_MLE": False,
-            "Used_Firth": False,
-            "N_Total_Used": n_total_used,
-            "N_Cases_Used": n_cases_used,
-            "N_Controls_Used": n_ctrls_used,
-            "Model_Notes": note or "",
-            "Skip_Reason": skip_reason,
-        })
-        meta_extra = dict(meta_extra_common)
-        meta_extra["skip_reason"] = skip_reason
-        _write_meta(
-            meta_path,
-            "lrt_overall",
-            s_name,
-            cat,
-            target,
-            worker_core_df_cols,
-            _index_fingerprint(worker_core_df_index),
-            case_fp,
-            extra=meta_extra,
-        )
-        meta_extra_result = dict(meta_extra_common)
-        meta_extra_result.update({
-            "skip_reason": skip_reason,
-            "N_Total_Used": n_total_used,
-            "N_Cases_Used": n_cases_used,
-            "N_Controls_Used": n_ctrls_used,
-        })
-        _write_meta(
-            res_meta_path,
-            "phewas_result",
-            s_name,
-            cat,
-            target,
-            worker_core_df_cols,
-            _index_fingerprint(worker_core_df_index),
-            case_fp,
-            extra=meta_extra_result,
-        )
-        return
+            io.atomic_write_json(res_path, {
+                "Phenotype": s_name,
+                "N_Total": n_total_pre,
+                "N_Cases": n_cases_pre,
+                "N_Controls": n_ctrls_pre,
+                "Beta": np.nan,
+                "OR": np.nan,
+                "P_Value": np.nan,
+                "OR_CI95": None,
+                "Used_Ridge": False,
+                "Final_Is_MLE": False,
+                "Used_Firth": False,
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+                "Model_Notes": note or "",
+                "Skip_Reason": skip_reason,
+            })
+            meta_extra = dict(meta_extra_common)
+            meta_extra["skip_reason"] = skip_reason
+            _write_meta(
+                meta_path,
+                "lrt_overall",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra,
+            )
+            meta_extra_result = dict(meta_extra_common)
+            meta_extra_result.update({
+                "skip_reason": skip_reason,
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+            })
+            _write_meta(
+                res_meta_path,
+                "phewas_result",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra_result,
+            )
+            return
 
         # The reduced model MUST be a subset of the pruned full model for the LRT to be valid.
         # Construct it by dropping the target column from the *already pruned* full model columns.
@@ -3081,12 +3087,16 @@ def lrt_overall_worker(task):
                 p_source = "score_chi2"
                 inference_family = "score"
             else:
-                p_emp, _, boot_draws_used, boot_exceed = _score_bootstrap_from_reduced(
+                boot_res = _score_bootstrap_from_reduced(
                     X_red_zv,
                     yb,
                     x_target_vec,
                     seed_key=("lrt_overall", s_name_safe, target, "pval"),
                 )
+                if isinstance(boot_res, tuple):
+                    p_emp = boot_res[0]
+                else:
+                    p_emp = np.nan
                 if np.isfinite(p_emp):
                     p_value = p_emp
                     p_source = "score_boot"
@@ -3206,7 +3216,7 @@ def lrt_overall_worker(task):
                 or_ci95 = None
                 ci_method = None
 
-        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False) or inference_type in {"firth", "score_boot"})
+        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
         used_firth_full = bool(getattr(fit_full, "_used_firth", False)) or (inference_type == "firth")
 
         out = {
@@ -3270,7 +3280,7 @@ def lrt_overall_worker(task):
             "Model_Notes": ";".join(model_notes),
         }
 
-        penalized = used_ridge_full or used_firth_full
+        penalized = used_ridge_full
         if penalized:
             out.update(
                 {
@@ -3963,12 +3973,16 @@ def lrt_followup_worker(task):
                     p_source = "score_chi2"
                     inference_type = "score"
                 else:
-                    p_emp, _, _, _ = _score_bootstrap_from_reduced(
+                    boot_res = _score_bootstrap_from_reduced(
                         X_anc_red,
                         y_anc,
                         x_target_vec,
                         seed_key=("lrt_followup", s_name_safe, anc, target, "pval"),
                     )
+                    if isinstance(boot_res, tuple):
+                        p_emp = boot_res[0]
+                    else:
+                        p_emp = np.nan
                     if np.isfinite(p_emp):
                         p_val = p_emp
                         p_source = "score_boot"
