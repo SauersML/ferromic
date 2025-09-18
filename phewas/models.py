@@ -738,6 +738,9 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer
             return None
         tags = list(path_tags)
         tags.append("firth_refit")
+        # Firth refits triggered from the ridge pathway are still penalized fits.
+        # Mark the result accordingly so downstream consumers suppress inference.
+        setattr(firth_res, "_used_ridge", True)
         setattr(firth_res, "_path_reasons", tags)
         return firth_res, "firth_refit"
 
