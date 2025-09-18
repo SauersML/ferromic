@@ -10,7 +10,7 @@ mod tests {
 
     use crate::transcripts::CdsRegion;
     use crate::parse::{parse_region, validate_vcf_header, read_reference_sequence, parse_config_file, find_vcf_file, open_vcf_reader};
-    use crate::process::{MissingDataInfo, FilteringStats, process_variants, process_variant, ZeroBasedHalfOpen, Variant, VcfError, HaplotypeSide};
+    use crate::process::{MissingDataInfo, FilteringStats, process_config_entries, process_variants, process_variant, ZeroBasedHalfOpen, Variant, VcfError, HaplotypeSide, Args};
     use crate::stats::{count_segregating_sites, calculate_pairwise_differences, calculate_watterson_theta, calculate_pi, harmonic, calculate_inversion_allele_frequency};
 
     // Helper function to create a Variant for testing
@@ -1496,5 +1496,172 @@ mod tests {
             expected_freq_global,
             allele_frequency_global.unwrap_or(0.0)
         );
+    }
+
+    #[test]
+    fn test_per_site_falsta_includes_hudson_components() {
+        struct DirGuard {
+            original: PathBuf,
+        }
+
+        impl Drop for DirGuard {
+            fn drop(&mut self) {
+                std::env::set_current_dir(&self.original)
+                    .expect("failed to restore working directory");
+            }
+        }
+
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let original_dir = std::env::current_dir().expect("failed to get current dir");
+        std::env::set_current_dir(temp_dir.path()).expect("failed to change working directory");
+        let _dir_guard = DirGuard {
+            original: original_dir,
+        };
+
+        let vcf_dir = temp_dir.path().join("vcf");
+        std::fs::create_dir_all(&vcf_dir).expect("failed to create vcf dir");
+        let vcf_path = vcf_dir.join("chr1.vcf");
+        let mut vcf_file = File::create(&vcf_path).expect("failed to create vcf");
+        writeln!(vcf_file, "##fileformat=VCFv4.2").unwrap();
+        writeln!(
+            vcf_file,
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSampleA\tSampleB"
+        )
+        .unwrap();
+        writeln!(
+            vcf_file,
+            "chr1\t1\t.\tA\tG\t.\tPASS\t.\tGT:GQ\t0|0:99\t1|1:99"
+        )
+        .unwrap();
+        writeln!(
+            vcf_file,
+            "chr1\t2\t.\tC\tT\t.\tPASS\t.\tGT:GQ\t0|1:99\t1|0:99"
+        )
+        .unwrap();
+        writeln!(
+            vcf_file,
+            "chr1\t3\t.\tG\tA\t.\tPASS\t.\tGT:GQ\t1|1:99\t0|0:99"
+        )
+        .unwrap();
+
+        let fasta_path = temp_dir.path().join("reference.fa");
+        let mut fasta_file = File::create(&fasta_path).expect("failed to create fasta");
+        writeln!(fasta_file, ">chr1").unwrap();
+        writeln!(fasta_file, "ACGTACGTACGT").unwrap();
+        drop(fasta_file);
+
+        let fai_path = temp_dir.path().join("reference.fa.fai");
+        let mut fai_file = File::create(&fai_path).expect("failed to create fai");
+        writeln!(fai_file, "chr1\t12\t6\t12\t13").unwrap();
+
+        let gtf_path = temp_dir.path().join("annotations.gtf");
+        let mut gtf_file = File::create(&gtf_path).expect("failed to create gtf");
+        writeln!(
+            gtf_file,
+            "chr1\tsource\tCDS\t1\t3\t.\t+\t0\tgene_id \"GENE1\"; transcript_id \"TRANS1\"; gene_name \"GENE1\";"
+        )
+        .unwrap();
+
+        let config_path = temp_dir.path().join("config.tsv");
+        let mut config_file = File::create(&config_path).expect("failed to create config");
+        writeln!(
+            config_file,
+            "seqnames\tstart\tend\tPOS\torig_ID\tverdict\tcateg\tSampleA\tSampleB"
+        )
+        .unwrap();
+        writeln!(config_file, "chr1\t1\t3\t1\tid1\tpass\tinv\t0|0\t1|1").unwrap();
+
+        let config_entries = parse_config_file(&config_path).expect("failed to parse config");
+
+        struct ProgressGuard;
+
+        impl Drop for ProgressGuard {
+            fn drop(&mut self) {
+                crate::progress::finish_all();
+            }
+        }
+
+        crate::progress::init_global_progress(config_entries.len());
+        let _progress_guard = ProgressGuard;
+
+        let args = Args {
+            vcf_folder: vcf_dir.to_string_lossy().into_owned(),
+            chr: None,
+            region: None,
+            config_file: None,
+            output_file: None,
+            min_gq: 30,
+            mask_file: None,
+            allow_file: None,
+            reference_path: fasta_path.to_string_lossy().into_owned(),
+            gtf_path: gtf_path.to_string_lossy().into_owned(),
+            enable_pca: false,
+            pca_components: 10,
+            pca_output: "pca_results.tsv".to_string(),
+            enable_fst: true,
+            fst_populations: None,
+        };
+
+        let output_csv = temp_dir.path().join("results.csv");
+        process_config_entries(
+            &config_entries,
+            &args.vcf_folder,
+            &output_csv,
+            args.min_gq,
+            None,
+            None,
+            &args,
+        )
+        .expect("process_config_entries failed");
+
+        let falsta_path = temp_dir
+            .path()
+            .join("per_site_fst_output.falsta");
+        assert!(falsta_path.exists(), "per-site falsta was not created");
+        let contents = std::fs::read_to_string(&falsta_path)
+            .expect("failed to read per-site falsta");
+        let lines: Vec<&str> = contents.lines().collect();
+
+        let fst_header = ">hudson_pairwise_fst_hap_0v1_chr_1_start_1_end_3";
+        let fst_index = lines
+            .iter()
+            .position(|line| *line == fst_header)
+            .expect("missing hudson per-site fst header");
+        let fst_values: Vec<f64> = lines[fst_index + 1]
+            .split(',')
+            .map(|v| v.parse::<f64>().expect("invalid FST value"))
+            .collect();
+        assert_eq!(fst_values.len(), 3);
+        assert!((fst_values[0] - 1.0).abs() < 1e-6);
+        assert!((fst_values[1] + 1.0).abs() < 1e-6, "FST should retain negative values");
+        assert!((fst_values[2] - 1.0).abs() < 1e-6);
+
+        let numerator_header = ">hudson_pairwise_fst_hap_0v1_numerator_chr_1_start_1_end_3";
+        let numerator_index = lines
+            .iter()
+            .position(|line| *line == numerator_header)
+            .expect("missing hudson numerator header");
+        let numerator_values: Vec<f64> = lines[numerator_index + 1]
+            .split(',')
+            .map(|v| v.parse::<f64>().expect("invalid numerator value"))
+            .collect();
+        assert_eq!(numerator_values.len(), 3);
+        assert!((numerator_values[0] - 1.0).abs() < 1e-6);
+        assert!((numerator_values[1] + 0.5).abs() < 1e-6);
+        assert!((numerator_values[2] - 1.0).abs() < 1e-6);
+
+        let denominator_header = ">hudson_pairwise_fst_hap_0v1_denominator_chr_1_start_1_end_3";
+        let denominator_index = lines
+            .iter()
+            .position(|line| *line == denominator_header)
+            .expect("missing hudson denominator header");
+        let denominator_values: Vec<f64> = lines[denominator_index + 1]
+            .split(',')
+            .map(|v| v.parse::<f64>().expect("invalid denominator value"))
+            .collect();
+        assert_eq!(denominator_values.len(), 3);
+        assert!((denominator_values[0] - 1.0).abs() < 1e-6);
+        assert!((denominator_values[1] - 0.5).abs() < 1e-6);
+        assert!((denominator_values[2] - 1.0).abs() < 1e-6);
     }
 }
