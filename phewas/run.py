@@ -11,6 +11,8 @@ import faulthandler
 import sys
 import traceback
 import json
+import importlib
+import importlib.util
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -21,7 +23,24 @@ except Exception:
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-from google.cloud import bigquery
+
+try:
+    _bigquery_spec = importlib.util.find_spec("google.cloud.bigquery")
+except ModuleNotFoundError:  # pragma: no cover - exercised in minimal environments
+    _bigquery_spec = None
+
+if _bigquery_spec is not None:
+    bigquery = importlib.import_module("google.cloud.bigquery")
+else:  # pragma: no cover - exercised in minimal environments
+    from types import SimpleNamespace
+
+    def _missing_bigquery_client(*args, **kwargs):
+        raise ModuleNotFoundError(
+            "google-cloud-bigquery is required to access remote cohort data. "
+            "Install google-cloud-bigquery or patch 'phewas.run.bigquery.Client' with a stub."
+        )
+
+    bigquery = SimpleNamespace(Client=_missing_bigquery_client)  # type: ignore
 from statsmodels.stats.multitest import multipletests
 from scipy import stats
 
@@ -202,10 +221,17 @@ class ResourceSnapshot:
     app_cpu_percent: float
 
 class ResourceGovernor:
-    def __init__(self, monitor: SystemMonitor, history_sec: int = 30):
+    def __init__(self, monitor: SystemMonitor | None, history_sec: int = 30):
         self._monitor = monitor
         self._lock = threading.Lock()
-        self._history = deque(maxlen=history_sec // (monitor.interval or 1))
+        interval = 1
+        if monitor is not None:
+            try:
+                interval = int(getattr(monitor, "interval", 1) or 1)
+            except Exception:
+                interval = 1
+        maxlen = max(1, history_sec // interval) if history_sec else None
+        self._history = deque(maxlen=maxlen)
         self.observed_core_df_gb = []
         self.observed_steady_state_gb = []
         self.mem_guard_gb = 4.0
