@@ -901,6 +901,18 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer
     except Exception as e:
         return None, f"ridge_exception:{type(e).__name__}"
 
+
+def _is_ridge_fit(fit):
+    """Returns True when the provided fit corresponds to a ridge solution."""
+    if fit is None:
+        return False
+    used_ridge = bool(getattr(fit, "_used_ridge", False))
+    if not used_ridge:
+        return False
+    if bool(getattr(fit, "_used_firth", False)):
+        return False
+    return True
+
 def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), eps=1e-12):
     """Drops columns with no or near-zero variance, keeping specified columns."""
     keep = set(keep_cols) | set(always_keep)
@@ -2491,12 +2503,22 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         final_is_mle = inference_type == "mle"
         used_firth = (inference_type == "firth") or bool(getattr(fit, "_used_firth", False))
         ridge_candidates = (fit, fit_full_use, fit_red_use)
-        used_ridge = any(
+        ridge_in_path = any(
             bool(getattr(candidate, "_used_ridge", False))
             for candidate in ridge_candidates
             if candidate is not None
         )
-        if used_ridge:
+        if inference_type == "mle":
+            suppress_for_ridge = any(
+                _is_ridge_fit(candidate) for candidate in (fit_full_use, fit_red_use)
+            )
+        elif inference_type == "firth":
+            suppress_for_ridge = False
+        elif inference_type in {"score", "score_boot"}:
+            suppress_for_ridge = False
+        else:
+            suppress_for_ridge = _is_ridge_fit(fit)
+        if suppress_for_ridge:
             p_value = np.nan
             p_source = None
             ci_method = None
@@ -2506,6 +2528,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
             ci_lo_or = np.nan
             ci_hi_or = np.nan
             or_ci95_str = None
+        used_ridge = ridge_in_path
         p_valid = bool(np.isfinite(p_value))
 
         if inference_type == "score":
@@ -3219,7 +3242,7 @@ def lrt_overall_worker(task):
                 or_ci95 = None
                 ci_method = None
 
-        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
+        ridge_in_path_full = bool(getattr(fit_full, "_used_ridge", False))
         used_firth_full = bool(getattr(fit_full, "_used_firth", False)) or (inference_type == "firth")
 
         out = {
@@ -3273,7 +3296,7 @@ def lrt_overall_worker(task):
             "CI_Valid": bool(ci_valid),
             "CI_LO_OR": ci_lo_or,
             "CI_HI_OR": ci_hi_or,
-            "Used_Ridge": used_ridge_full,
+            "Used_Ridge": ridge_in_path_full,
             "Final_Is_MLE": inference_type == "mle",
             "Used_Firth": used_firth_full,
             "Inference_Type": inference_type,
@@ -3283,7 +3306,14 @@ def lrt_overall_worker(task):
             "Model_Notes": ";".join(model_notes),
         }
 
-        penalized = used_ridge_full
+        if inference_type == "mle":
+            penalized = any(_is_ridge_fit(candidate) for candidate in (fit_full_use, fit_red_use))
+        elif inference_type == "firth":
+            penalized = False
+        elif inference_type in {"score", "score_boot"}:
+            penalized = False
+        else:
+            penalized = _is_ridge_fit(fit_full)
         if penalized:
             out.update(
                 {
@@ -3329,7 +3359,7 @@ def lrt_overall_worker(task):
             "full_llf": float(getattr(fit_full, "llf", np.nan)),
             "full_is_mle": bool(res_record.get("Final_Is_MLE", False)),
             "used_firth": used_firth_full,
-            "used_ridge": used_ridge_full,
+            "used_ridge": ridge_in_path_full,
             "prune_recipe_version": "zv+greedy-rank-v1",
         })
         _write_meta(
@@ -3352,7 +3382,7 @@ def lrt_overall_worker(task):
             "full_llf": float(getattr(fit_full, "llf", np.nan)),
             "full_is_mle": bool(res_record.get("Final_Is_MLE", False)),
             "used_firth": used_firth_full,
-            "used_ridge": used_ridge_full,
+            "used_ridge": ridge_in_path_full,
             "prune_recipe_version": "zv+greedy-rank-v1",
         })
         _write_meta(meta_path, "lrt_overall", s_name, cat, target, worker_core_df_cols,
@@ -4096,9 +4126,35 @@ def lrt_followup_worker(task):
                     ci_str = None
                     ci_method = None
 
+            if inference_type == "mle":
+                ridge_inference = any(
+                    _is_ridge_fit(candidate) for candidate in (fit_full_use, fit_red_use)
+                )
+            elif inference_type == "firth":
+                ridge_inference = False
+            elif inference_type in {"score", "score_boot"}:
+                ridge_inference = False
+            else:
+                ridge_inference = any(
+                    _is_ridge_fit(candidate) for candidate in (fit_full, fit_red)
+                )
+            if ridge_inference:
+                p_val = np.nan
+                p_source = None
+                ci_method = None
+                ci_sided = None
+                ci_label = ""
+                ci_valid = False
+                ci_lo_or = np.nan
+                ci_hi_or = np.nan
+                ci_str = None
+                if not out[f"{anc_upper}_REASON"]:
+                    out[f"{anc_upper}_REASON"] = "penalized_fit"
+
             p_valid = bool(np.isfinite(p_val))
             if not p_valid:
-                out[f"{anc_upper}_REASON"] = "subset_fit_failed"
+                if not out[f"{anc_upper}_REASON"]:
+                    out[f"{anc_upper}_REASON"] = "subset_fit_failed"
                 continue
 
             out[f"{anc_upper}_OR"] = or_val
@@ -4114,40 +4170,6 @@ def lrt_followup_worker(task):
             out[f"{anc_upper}_CI_HI_OR"] = ci_hi_or
             out[f"{anc_upper}_CI95"] = ci_str
             out[f"{anc_upper}_REASON"] = ""
-
-            penalized_candidate = (
-                inference_type in {"firth", "score_boot"}
-                or bool(getattr(fit_full_use, "_used_firth", False))
-                or bool(getattr(fit_red_use, "_used_firth", False))
-                or bool(getattr(fit_full_use, "_used_ridge", False))
-                or bool(getattr(fit_red_use, "_used_ridge", False))
-            )
-            suppress_ci = False
-            if penalized_candidate:
-                lo = ci_lo_or
-                hi = ci_hi_or
-                ratio = None
-                if np.isfinite(lo) and lo > 0 and np.isfinite(hi) and hi > 0:
-                    ratio = hi / lo if lo > 0 else np.inf
-                if (
-                    not np.isfinite(lo)
-                    or not np.isfinite(hi)
-                    or (np.isfinite(lo) and lo > 0 and lo < PENALIZED_CI_LO_OR_MAX)
-                    or (np.isfinite(hi) and hi > PENALIZED_CI_HI_OR_MIN)
-                    or (ratio is not None and ratio > PENALIZED_CI_SPAN_RATIO)
-                ):
-                    suppress_ci = True
-
-            if suppress_ci:
-                out[f"{anc_upper}_CI_Method"] = None
-                out[f"{anc_upper}_CI_Sided"] = None
-                out[f"{anc_upper}_CI_Label"] = ""
-                out[f"{anc_upper}_CI_Valid"] = False
-                out[f"{anc_upper}_CI_LO_OR"] = np.nan
-                out[f"{anc_upper}_CI_HI_OR"] = np.nan
-                out.pop(f"{anc_upper}_CI95", None)
-                if not out[f"{anc_upper}_REASON"]:
-                    out[f"{anc_upper}_REASON"] = "penalized_fit"
 
             if not out.get(f"{anc_upper}_REASON"):
                 out.pop(f"{anc_upper}_REASON", None)

@@ -321,7 +321,36 @@ def test_worker_constant_dosage_emits_nan(test_ctx):
         shm = _init_worker_from_df(core_df_with_const, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
         case_idx = core_df_with_const.index.get_indexer(list(phenos["A_strong_signal"]["cases"]))
         pheno_data = {"name": "A_strong_signal", "category": "cardio", "case_idx": case_idx[case_idx >= 0].astype(np.int32)}
-        models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
+        def fake_ladder(X, y, **kwargs):
+            class _Dummy:
+                pass
+
+            res = _Dummy()
+            if hasattr(X, "columns"):
+                res.params = pd.Series(np.zeros(len(X.columns)), index=X.columns)
+            else:
+                res.params = np.zeros(X.shape[1])
+            setattr(res, "_used_ridge", True)
+            setattr(res, "_used_firth", False)
+            setattr(res, "_final_is_mle", False)
+            setattr(res, "llf", np.nan)
+            return res, "ridge_only"
+
+        orig_fit = models._fit_logit_ladder
+        orig_firth = models._firth_refit
+        orig_score = models._score_test_from_reduced
+        orig_score_boot = models._score_bootstrap_from_reduced
+        try:
+            models._fit_logit_ladder = fake_ladder
+            models._firth_refit = lambda *args, **kwargs: None
+            models._score_test_from_reduced = lambda *args, **kwargs: (np.nan, np.nan)
+            models._score_bootstrap_from_reduced = lambda *args, **kwargs: np.nan
+            models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
+        finally:
+            models._fit_logit_ladder = orig_fit
+            models._firth_refit = orig_firth
+            models._score_test_from_reduced = orig_score
+            models._score_bootstrap_from_reduced = orig_score_boot
         result_path = Path(test_ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json"
         assert result_path.exists()
         with open(result_path) as f: res = json.load(f)
@@ -447,14 +476,88 @@ def test_penalized_fit_ci_and_pval_suppression(test_ctx):
         core_data['pcs'].loc[cases, 'PC1'] = 1000
         core_data['pcs'].loc[~core_data['pcs'].index.isin(cases), 'PC1'] = -1000
         core_df = sm.add_constant(pd.concat([core_data['demographics'][['AGE_c']], core_data['pcs'], core_data['inversion_main']], axis=1))
+        models.CTX = test_ctx
         shm = _init_worker_from_df(core_df, {"cardio": np.ones(len(core_df), dtype=bool)}, test_ctx)
         case_idx = core_df.index.get_indexer(cases)
         pheno_data = {"name": "A_strong_signal", "category": "cardio", "case_idx": case_idx[case_idx >= 0]}
-        models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
+        def fake_ladder(X, y, **kwargs):
+            class _Dummy:
+                pass
+
+            res = _Dummy()
+            n_params = X.shape[1] if hasattr(X, "shape") else len(X[0])
+            res.params = np.zeros(n_params, dtype=float)
+            res._used_ridge = True
+            res._used_firth = False
+            res._final_is_mle = False
+            res._path_reasons = ["ridge_only"]
+            res.llf = np.nan
+            return res, "ridge_only"
+
+        orig_fit = models._fit_logit_ladder
+        orig_firth = models._firth_refit
+        orig_score = models._score_test_from_reduced
+        orig_score_boot = models._score_bootstrap_from_reduced
+        try:
+            models._fit_logit_ladder = fake_ladder
+            models._firth_refit = lambda *args, **kwargs: None
+            models._score_test_from_reduced = lambda *args, **kwargs: (np.nan, np.nan)
+            models._score_bootstrap_from_reduced = lambda *args, **kwargs: np.nan
+            models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, test_ctx["RESULTS_CACHE_DIR"])
+        finally:
+            models._fit_logit_ladder = orig_fit
+            models._firth_refit = orig_firth
+            models._score_test_from_reduced = orig_score
+            models._score_bootstrap_from_reduced = orig_score_boot
         res = json.load(open(Path(test_ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json"))
         assert res['Used_Ridge'] is True
+        assert res['Inference_Type'] == 'none'
         assert res['OR_CI95'] is None
         assert pd.isna(res['P_Value'])
+        shm.close(); shm.unlink()
+
+def test_firth_fit_keeps_inference(test_ctx):
+    """Firth fits triggered by ridge should retain valid inference."""
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort()
+        cases = list(phenos["A_strong_signal"]["cases"])
+        # Force a separation scenario that promotes the ridge ladder to use Firth.
+        core_data['pcs'].loc[cases, 'PC1'] = 1000
+        core_data['pcs'].loc[~core_data['pcs'].index.isin(cases), 'PC1'] = -1000
+        core_df = sm.add_constant(pd.concat([
+            core_data['demographics'][['AGE_c']],
+            core_data['pcs'],
+            core_data['inversion_main'],
+        ], axis=1))
+
+        ctx = test_ctx.copy()
+        # Ensure cache directories exist within the workspace.
+        for key in [
+            "RESULTS_CACHE_DIR",
+            "LRT_OVERALL_CACHE_DIR",
+            "LRT_FOLLOWUP_CACHE_DIR",
+            "BOOT_OVERALL_CACHE_DIR",
+        ]:
+            Path(ctx[key]).mkdir(parents=True, exist_ok=True)
+
+        models.CTX = ctx
+        shm = _init_worker_from_df(core_df, {"cardio": np.ones(len(core_df), dtype=bool)}, ctx)
+        case_idx = core_df.index.get_indexer(cases)
+        pheno_data = {"name": "A_strong_signal", "category": "cardio", "case_idx": case_idx[case_idx >= 0]}
+
+        models.run_single_model_worker(pheno_data, TEST_TARGET_INVERSION, ctx["RESULTS_CACHE_DIR"])
+
+        result_path = Path(ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json"
+        assert result_path.exists()
+        with open(result_path) as f:
+            res = json.load(f)
+
+        assert res['Inference_Type'] == 'firth'
+        assert res['Used_Ridge'] is True  # Ridge was used in the ladder, but inference should remain valid
+        assert np.isfinite(res['P_Value']) and res['P_Value'] > 0
+        assert res['P_Valid'] is True
+        assert res['OR_CI95'] is not None
+        assert res['CI_Valid'] is True
         shm.close(); shm.unlink()
 
 def test_perfect_separation_promoted_to_ridge(test_ctx):
@@ -501,8 +604,8 @@ def test_worker_reports_n_used_after_sex_restriction(test_ctx):
         assert res['N_Controls_Used'] == len(male_ids) - len(cases)
         shm.close(); shm.unlink()
 
-def test_lrt_overall_invalidated_by_penalized_fit(test_ctx):
-    """Verifies Stage-1 LRT is skipped if a penalized fit is required."""
+def test_lrt_overall_firth_fit_keeps_inference(test_ctx):
+    """Stage-1 Firth refits triggered by ridge should retain valid inference."""
     with temp_workspace():
         core_data, phenos = make_synth_cohort(N=100)
         cases = list(phenos["A_strong_signal"]["cases"])
@@ -528,12 +631,23 @@ def test_lrt_overall_invalidated_by_penalized_fit(test_ctx):
         with open(result_path) as f:
             res = json.load(f)
 
-        assert res['LRT_Overall_Reason'] == 'penalized_fit_in_path'
-        assert pd.isna(res['P_LRT_Overall'])
+        assert res['Inference_Type'] == 'firth'
+        assert np.isfinite(res['P_LRT_Overall'])
+        assert res['P_Overall_Valid'] is True
+        assert res.get('LRT_Overall_Reason') in (None, '',)
+
+        atomic_path = Path(test_ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json"
+        assert atomic_path.exists()
+        with open(atomic_path) as f:
+            atomic_res = json.load(f)
+
+        assert atomic_res['Inference_Type'] == 'firth'
+        assert atomic_res['Used_Ridge'] is True
+        assert np.isfinite(atomic_res['P_Value'])
         shm.close(); shm.unlink()
 
-def test_lrt_followup_penalized_fit_omits_ci(test_ctx):
-    """Verifies Stage-2 per-ancestry CI is omitted for penalized fits."""
+def test_lrt_followup_firth_fit_keeps_ci(test_ctx):
+    """Stage-2 per-ancestry Firth refits should emit valid inference outputs."""
     with temp_workspace():
         rng = np.random.default_rng(42)
         N=300
@@ -564,10 +678,13 @@ def test_lrt_followup_penalized_fit_omits_ci(test_ctx):
         with open(result_path) as f:
             res = json.load(f)
 
-        assert 'AFR_CI95' not in res
+        assert res['AFR_Inference_Type'] == 'firth'
+        assert np.isfinite(res['AFR_P'])
+        assert res['AFR_P_Valid'] is True
+        assert res['AFR_CI95'] is not None
         assert 'EUR_CI95' in res
         assert 'AMR_CI95' in res
-        assert 'EUR_REASON' not in res
+        assert res.get('AFR_REASON') in (None, '')
         shm.close(); shm.unlink()
 
 # --- Integration Tests ---
