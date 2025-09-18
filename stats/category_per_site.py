@@ -967,7 +967,7 @@ def main():
         falsta=DIVERSITY_FILE,
         min_len=MIN_LEN_PI,
         fuzzy_map=fuzzy_map,
-        y_label="Mean nucleotide diversity (π per site)",
+        y_label="Median nucleotide diversity (π per site)",
         # proportion mode outputs
         out_plot_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_median.pdf",
         out_tsv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_median.tsv",
@@ -999,7 +999,7 @@ def main():
         falsta=FST_FILE,
         min_len=MIN_LEN_FST,
         fuzzy_map=fuzzy_map,
-        y_label="Mean Hudson FST (per site)",
+        y_label="Median Hudson FST (per site)",
         # proportion mode outputs
         out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_median.pdf",
         out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_median.tsv",
