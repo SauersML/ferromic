@@ -23,6 +23,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build
         run: cargo build --verbose --release
+      - name: Test
+        run: cargo test --verbose --release
 
   create_release:
     name: Create Release
