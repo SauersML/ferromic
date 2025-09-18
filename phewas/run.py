@@ -202,10 +202,17 @@ class ResourceSnapshot:
     app_cpu_percent: float
 
 class ResourceGovernor:
-    def __init__(self, monitor: SystemMonitor, history_sec: int = 30):
+    def __init__(self, monitor: SystemMonitor | None, history_sec: int = 30):
         self._monitor = monitor
         self._lock = threading.Lock()
-        self._history = deque(maxlen=history_sec // (monitor.interval or 1))
+        interval = 1
+        if monitor is not None:
+            try:
+                interval = int(getattr(monitor, "interval", 1) or 1)
+            except Exception:
+                interval = 1
+        maxlen = max(1, history_sec // interval) if history_sec else None
+        self._history = deque(maxlen=maxlen)
         self.observed_core_df_gb = []
         self.observed_steady_state_gb = []
         self.mem_guard_gb = 4.0
