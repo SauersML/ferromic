@@ -25,6 +25,11 @@ DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_BACKFILL_P_FROM_STAGE1 = True
 DEFAULT_ALLOW_PENALIZED_WALD = False
 
+# Thresholds to detect unusable confidence intervals from penalized fits
+PENALIZED_CI_SPAN_RATIO = 1e3
+PENALIZED_CI_LO_OR_MAX = 1e-3
+PENALIZED_CI_HI_OR_MIN = 1e3
+
 MLE_SE_MAX_ALL = 10.0
 MLE_SE_MAX_TARGET = 5.0
 MLE_MAX_ABS_XB = 15.0
@@ -2330,7 +2335,6 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
 
         beta = float(fit.params[target_ix_final])
         or_val = float(np.exp(beta)) if np.isfinite(beta) else np.nan
-        used_ridge = bool(getattr(fit, "_used_ridge", False))
 
         if isinstance(notes, list) and notes:
             path_tags = list(notes)
@@ -2477,6 +2481,17 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         inference_type = inference_family if inference_family is not None else "none"
         final_is_mle = inference_type == "mle"
         used_firth = (inference_type == "firth") or bool(getattr(fit, "_used_firth", False))
+        used_ridge = bool(getattr(fit, "_used_ridge", False) or inference_type in {"firth", "score_boot"})
+        if used_ridge:
+            p_value = np.nan
+            p_source = None
+            ci_method = None
+            ci_sided = None
+            ci_label = ""
+            ci_valid = False
+            ci_lo_or = np.nan
+            ci_hi_or = np.nan
+            or_ci95_str = None
         p_valid = bool(np.isfinite(p_value))
 
         if inference_type == "score":
@@ -3190,7 +3205,7 @@ def lrt_overall_worker(task):
                 or_ci95 = None
                 ci_method = None
 
-        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
+        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False) or inference_type in {"firth", "score_boot"})
         used_firth_full = bool(getattr(fit_full, "_used_firth", False)) or (inference_type == "firth")
 
         out = {
@@ -3253,6 +3268,44 @@ def lrt_overall_worker(task):
             "N_Controls_Used": n_ctrls_used,
             "Model_Notes": ";".join(model_notes),
         }
+
+        penalized = used_ridge_full or used_firth_full
+        if penalized:
+            out.update(
+                {
+                    "P_LRT_Overall": np.nan,
+                    "P_Overall_Valid": False,
+                    "P_Source": None,
+                    "P_Method": None,
+                    "LRT_df_Overall": np.nan,
+                    "LRT_Overall_Reason": "penalized_fit_in_path",
+                    "CI_Method": None,
+                    "CI_Sided": None,
+                    "CI_Label": "",
+                    "CI_Valid": False,
+                    "CI_LO_OR": np.nan,
+                    "CI_HI_OR": np.nan,
+                }
+            )
+            reason_tag = "penalized_fit_in_path"
+            res_record.update(
+                {
+                    "P_Value": np.nan,
+                    "P_Valid": False,
+                    "P_Source": None,
+                    "OR_CI95": None,
+                    "CI_Method": None,
+                    "CI_Sided": None,
+                    "CI_Label": "",
+                    "CI_Valid": False,
+                    "CI_LO_OR": np.nan,
+                    "CI_HI_OR": np.nan,
+                }
+            )
+            out_notes = out.get("Model_Notes")
+            out["Model_Notes"] = f"{out_notes};{reason_tag}" if out_notes else reason_tag
+            rec_notes = res_record.get("Model_Notes")
+            res_record["Model_Notes"] = f"{rec_notes};{reason_tag}" if rec_notes else reason_tag
 
         io.atomic_write_json(res_path, res_record)
         io.atomic_write_json(res_path + ".meta.json", {
@@ -3684,7 +3737,8 @@ def lrt_followup_worker(task):
                 params=fit_full.params,
                 notes=[note] if note else []
             )
-        r_full, r_red = np.linalg.matrix_rank(X_full_zv.to_numpy()), np.linalg.matrix_rank(X_red_zv.to_numpy())
+        r_full = np.linalg.matrix_rank(X_full_zv.to_numpy(dtype=np.float64, copy=False))
+        r_red = np.linalg.matrix_rank(X_red_zv.to_numpy(dtype=np.float64, copy=False))
         df_lrt = max(0, int(r_full - r_red))
         inference_family = None
         fit_full_use = None
@@ -4048,6 +4102,43 @@ def lrt_followup_worker(task):
             out[f"{anc_upper}_CI_HI_OR"] = ci_hi_or
             out[f"{anc_upper}_CI95"] = ci_str
             out[f"{anc_upper}_REASON"] = ""
+
+            penalized_candidate = (
+                inference_type in {"firth", "score_boot"}
+                or bool(getattr(fit_full_use, "_used_firth", False))
+                or bool(getattr(fit_red_use, "_used_firth", False))
+                or bool(getattr(fit_full_use, "_used_ridge", False))
+                or bool(getattr(fit_red_use, "_used_ridge", False))
+            )
+            suppress_ci = False
+            if penalized_candidate:
+                lo = ci_lo_or
+                hi = ci_hi_or
+                ratio = None
+                if np.isfinite(lo) and lo > 0 and np.isfinite(hi) and hi > 0:
+                    ratio = hi / lo if lo > 0 else np.inf
+                if (
+                    not np.isfinite(lo)
+                    or not np.isfinite(hi)
+                    or (np.isfinite(lo) and lo > 0 and lo < PENALIZED_CI_LO_OR_MAX)
+                    or (np.isfinite(hi) and hi > PENALIZED_CI_HI_OR_MIN)
+                    or (ratio is not None and ratio > PENALIZED_CI_SPAN_RATIO)
+                ):
+                    suppress_ci = True
+
+            if suppress_ci:
+                out[f"{anc_upper}_CI_Method"] = None
+                out[f"{anc_upper}_CI_Sided"] = None
+                out[f"{anc_upper}_CI_Label"] = ""
+                out[f"{anc_upper}_CI_Valid"] = False
+                out[f"{anc_upper}_CI_LO_OR"] = np.nan
+                out[f"{anc_upper}_CI_HI_OR"] = np.nan
+                out.pop(f"{anc_upper}_CI95", None)
+                if not out[f"{anc_upper}_REASON"]:
+                    out[f"{anc_upper}_REASON"] = "penalized_fit"
+
+            if not out.get(f"{anc_upper}_REASON"):
+                out.pop(f"{anc_upper}_REASON", None)
 
 
 
