@@ -219,6 +219,11 @@ interpreted from tuples like ``(sample_index, "L")`` or ``(sample_index, 1)``.
 | `ferromic.hudson_fst_with_sites(pop1, pop2, region)` | Tuple ``(HudsonFstResult, [HudsonFstSite, ...])``. |
 | `ferromic.wc_fst(variants, sample_names, sample_to_group, region)` | Weir & Cockerham FST with pairwise and per-site summaries. |
 | `ferromic.wc_fst_components(fst_estimate)` | Extract `(value, sum_a, sum_b, sites)` from any `FstEstimate`. |
+| `ferromic.chromosome_pca(variants, sample_names, n_components=10)` | Run PCA for a single chromosome and return a `ChromosomePcaResult`. |
+| `ferromic.chromosome_pca_to_file(variants, sample_names, chromosome, output_dir, n_components=10)` | Convenience helper that writes a TSV with PCA coordinates for one chromosome. |
+| `ferromic.per_chromosome_pca(variants_by_chromosome, sample_names, output_dir, n_components=10)` | Batch PCA analysis across chromosomes, emitting one TSV per chromosome. |
+| `ferromic.global_pca(variants_by_chromosome, sample_names, output_dir, n_components=10)` | Memory-efficient pipeline that runs per-chromosome PCA and produces a combined summary table. |
+| `ferromic.ChromosomePcaResult` | Light-weight container exposing `haplotype_labels`, `coordinates`, and `positions`. |
 | `ferromic.adjusted_sequence_length(start, end, allow=None, mask=None)` | Apply BED-style masks to a region length. |
 | `ferromic.inversion_allele_frequency(sample_map)` | Frequency of allele ``1`` across haplotypes. |
 
@@ -263,10 +268,14 @@ wc = ferromic.wc_fst(
     region=(990, 1_020),
 )
 
+pca_result = ferromic.chromosome_pca(variants, ["S0", "S1", "S2"], n_components=3)
+ferromic.chromosome_pca_to_file(variants, ["S0", "S1", "S2"], "2L", "./pca_outputs")
+
 print(f"π={pi:.6f}, θ={theta:.6f}")
 print(hudson)
 print(sites[0])
 print(wc.overall_fst)
+print(pca_result.coordinates[0][:3])
 ```
 
 The example demonstrates how the Python API mirrors Ferromic's Rust types while

@@ -1177,7 +1177,7 @@ pub fn process_config_entries(
             CsvRowData,
             Vec<(i64, f64, f64, u8, bool)>,
             Vec<(i64, f64, f64)>,
-            Vec<(i64, f64)>,
+            Vec<(i64, f64, f64, f64)>,
         )>,
         Vec<RegionalHudsonFSTOutcome>,
     )> = grouped
@@ -1523,7 +1523,7 @@ fn process_chromosome_entries(
             CsvRowData,
             Vec<(i64, f64, f64, u8, bool)>,
             Vec<(i64, f64, f64)>,
-            Vec<(i64, f64)>,
+            Vec<(i64, f64, f64, f64)>,
         )>,
         Vec<RegionalHudsonFSTOutcome>,
     ),
@@ -1623,7 +1623,7 @@ fn process_chromosome_entries(
         CsvRowData,
         Vec<(i64, f64, f64, u8, bool)>,
         Vec<(i64, f64, f64)>,
-        Vec<(i64, f64)>,
+        Vec<(i64, f64, f64, f64)>,
     )> = Vec::with_capacity(entries.len());
     // Stores RegionalHudsonFSTOutcome for the dedicated Hudson FST output file for this chromosome
     let mut chromosome_hudson_fst_results: Vec<RegionalHudsonFSTOutcome> = Vec::new();
@@ -1987,7 +1987,7 @@ fn process_single_config_entry(
         CsvRowData, // Data for the main CSV output (W&C FST, diversity stats, etc.)
         Vec<(i64, f64, f64, u8, bool)>, // Per-site diversity data (pos, pi, theta, group_id, is_filtered) for falsta output
         Vec<(i64, f64, f64)>, // Per-site W&C FST data (pos, overall_wc_fst, pairwise_wc_fst_0vs1) for falsta output
-        Vec<(i64, f64)>, // Per-site Hudson FST data (pos_1based, fst) for haplotype groups
+        Vec<(i64, f64, f64, f64)>, // Per-site Hudson data (pos_1based, fst, numerator, denominator) for haplotype groups
         Vec<RegionalHudsonFSTOutcome>, // Hudson FST results specific to this config entry
     )>,
     VcfError,
@@ -2492,7 +2492,8 @@ fn process_single_config_entry(
     let mut hudson_pi_avg_hap_group_0v1_val: Option<f64> = None;
 
     let mut local_regional_hudson_outcomes: Vec<RegionalHudsonFSTOutcome> = Vec::new();
-    let mut per_site_hudson_fst_records: Vec<(i64, f64)> = Vec::new();
+    // (pos_1based, fst, hudson numerator, hudson denominator)
+    let mut per_site_hudson_fst_records: Vec<(i64, f64, f64, f64)> = Vec::new();
 
     if args.enable_fst {
         log(
@@ -2543,9 +2544,11 @@ fn process_single_config_entry(
                                 outcome: outcome.clone(),
                             });
                             for site in site_values {
-                                if let Some(fst_val) = site.fst {
-                                    per_site_hudson_fst_records.push((site.position, fst_val));
-                                }
+                                let fst_val = site.fst.unwrap_or(f64::NAN);
+                                let numerator = site.num_component.unwrap_or(f64::NAN);
+                                let denominator = site.den_component.unwrap_or(f64::NAN);
+                                per_site_hudson_fst_records
+                                    .push((site.position, fst_val, numerator, denominator));
                             }
                             hudson_fst_hap_group_0v1_val = outcome.fst;
                             hudson_dxy_hap_group_0v1_val = outcome.d_xy;
@@ -2805,7 +2808,7 @@ fn process_single_config_entry(
         row_data,
         per_site_diversity_records,
         per_site_fst_records, // Vec<(i64, FstEstimate, FstEstimate)> containing only haplotype group FSTs
-        per_site_hudson_fst_records,
+        per_site_hudson_fst_records, // Vec<(i64, fst, numerator, denominator)> for Hudson haplotype groups
         local_regional_hudson_outcomes,
     )))
 }
@@ -2934,12 +2937,12 @@ fn append_diversity_falsta<P: AsRef<std::path::Path>>(
 }
 
 // per-site WC FST: (pos_1based, overall_wc, pairwise_0v1_wc)
-// and Hudson hap FST: (pos_1based, fst)
+// and Hudson hap FST components: (pos_1based, fst, numerator, denominator)
 fn append_fst_falsta<P: AsRef<std::path::Path>>(
     path: P,
     row: &CsvRowData,
     wc_sites: &[(i64, f64, f64)],
-    hudson_sites: &[(i64, f64)],
+    hudson_sites: &[(i64, f64, f64, f64)],
 ) -> Result<(), VcfError> {
     let mut w = open_append(path.as_ref()).map_err(VcfError::Io)?;
     let region = ZeroBasedHalfOpen::from_1based_inclusive(row.region_start, row.region_end);
@@ -2989,6 +2992,22 @@ fn append_fst_falsta<P: AsRef<std::path::Path>>(
 
     // Hudson per-site hap FST 0v1
     if !hudson_sites.is_empty() {
+        let format_value = |value: f64| -> String {
+            if value.is_nan() {
+                "NA".into()
+            } else if value.is_infinite() {
+                if value.is_sign_positive() {
+                    "Infinity".into()
+                } else {
+                    "-Infinity".into()
+                }
+            } else if value == 0.0 {
+                "0".into()
+            } else {
+                format!("{:.6}", value)
+            }
+        };
+
         writeln!(
             w,
             ">hudson_pairwise_fst_hap_0v1_chr_{}_start_{}_end_{}",
@@ -2996,17 +3015,43 @@ fn append_fst_falsta<P: AsRef<std::path::Path>>(
         )
         .map_err(VcfError::Io)?;
         let mut hv = vec![String::from("NA"); n];
-        for &(p1, fst) in hudson_sites {
+        for &(p1, fst, _, _) in hudson_sites {
             if let Some(rel1) = region.relative_position_1based_inclusive(p1) {
                 let i = (rel1 - 1) as usize;
-                hv[i] = if fst.is_nan() {
-                    "NA".into()
-                } else {
-                    format!("{:.6}", fst)
-                };
+                hv[i] = format_value(fst);
             }
         }
         writeln!(w, "{}", hv.join(",")).map_err(VcfError::Io)?;
+
+        writeln!(
+            w,
+            ">hudson_pairwise_fst_hap_0v1_numerator_chr_{}_start_{}_end_{}",
+            row.seqname, row.region_start, row.region_end
+        )
+        .map_err(VcfError::Io)?;
+        let mut numerators = vec![String::from("NA"); n];
+        for &(p1, _, numerator, _) in hudson_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(p1) {
+                let i = (rel1 - 1) as usize;
+                numerators[i] = format_value(numerator);
+            }
+        }
+        writeln!(w, "{}", numerators.join(",")).map_err(VcfError::Io)?;
+
+        writeln!(
+            w,
+            ">hudson_pairwise_fst_hap_0v1_denominator_chr_{}_start_{}_end_{}",
+            row.seqname, row.region_start, row.region_end
+        )
+        .map_err(VcfError::Io)?;
+        let mut denominators = vec![String::from("NA"); n];
+        for &(p1, _, _, denominator) in hudson_sites {
+            if let Some(rel1) = region.relative_position_1based_inclusive(p1) {
+                let i = (rel1 - 1) as usize;
+                denominators[i] = format_value(denominator);
+            }
+        }
+        writeln!(w, "{}", denominators.join(",")).map_err(VcfError::Io)?;
     }
 
     w.flush().map_err(VcfError::Io)
@@ -3658,7 +3703,7 @@ pub fn process_variant(
                 chr, one_based_vcf_position.0
             )));
         }
-        let gq_str = gt_subfields[gq_index];
+        let gq_str = gt_subfields[gq_index].trim();
 
         // Attempt to parse GQ value as u16
         // Parse GQ value, treating '.' or empty string as 0

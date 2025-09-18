@@ -8,12 +8,17 @@
 //! native Python library while retaining Rust's performance.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyIterator, PyList, PyTuple};
 use pyo3::IntoPy;
 
+use crate::pca::{
+    compute_chromosome_pca, run_chromosome_pca_analysis, run_global_pca_analysis,
+    write_chromosome_pca_to_file, PcaResult,
+};
 use crate::process::{HaplotypeSide, QueryRegion, Variant, VcfError};
 use crate::stats::{
     calculate_adjusted_sequence_length, calculate_d_xy_hudson, calculate_fst_wc_haplotype_groups,
@@ -151,6 +156,49 @@ impl PairwiseDifference {
         format!(
             "PairwiseDifference(sample_i={}, sample_j={}, differences={}, comparable_sites={})",
             self.sample_i, self.sample_j, self.differences, self.comparable_sites
+        )
+    }
+}
+
+/// Principal component coordinates for a single chromosome.
+#[pyclass(module = "ferromic")]
+#[derive(Clone)]
+struct ChromosomePcaResult {
+    #[pyo3(get)]
+    haplotype_labels: Vec<String>,
+    #[pyo3(get)]
+    coordinates: Vec<Vec<f64>>,
+    #[pyo3(get)]
+    positions: Vec<i64>,
+}
+
+#[pymethods]
+impl ChromosomePcaResult {
+    fn __repr__(&self) -> String {
+        format!(
+            "ChromosomePcaResult(haplotypes={}, components={}, variants={})",
+            self.haplotype_labels.len(),
+            self.coordinates.first().map(|row| row.len()).unwrap_or(0),
+            self.positions.len()
+        )
+    }
+}
+
+impl ChromosomePcaResult {
+    fn from_result(py: Python, result: &PcaResult) -> PyResult<Py<Self>> {
+        let coordinates = result
+            .pca_coordinates
+            .outer_iter()
+            .map(|row| row.to_vec())
+            .collect();
+
+        Py::new(
+            py,
+            ChromosomePcaResult {
+                haplotype_labels: result.haplotype_labels.clone(),
+                coordinates,
+                positions: result.positions.clone(),
+            },
         )
     }
 }
@@ -491,8 +539,8 @@ impl Population {
     /// When the identifier is a haplotype group, this returns its numeric value.
     #[getter]
     fn haplotype_group(&self) -> Option<u8> {
-        match self.inner.id {
-            PopulationId::HaplotypeGroup(group) => Some(group),
+        match &self.inner.id {
+            PopulationId::HaplotypeGroup(group) => Some(*group),
             PopulationId::Named(_) => None,
         }
     }
@@ -1042,6 +1090,26 @@ fn extract_sample_group_map(obj: &PyAny) -> PyResult<HashMap<String, (u8, u8)>> 
     Ok(map)
 }
 
+fn extract_variants_by_chromosome(obj: &PyAny) -> PyResult<HashMap<String, Vec<Variant>>> {
+    let dict = obj.downcast::<PyDict>().map_err(|_| {
+        PyValueError::new_err(
+            "variants_by_chromosome must be a dict mapping chromosome -> sequence of variants",
+        )
+    })?;
+
+    let mut map = HashMap::with_capacity(dict.len());
+    for (key, value) in dict.iter() {
+        let chromosome = key.extract::<String>()?;
+        let variants: Vec<VariantInput> = value.extract()?;
+        map.insert(
+            chromosome,
+            variants.into_iter().map(VariantInput::into_inner).collect(),
+        );
+    }
+
+    Ok(map)
+}
+
 fn extract_interval_list(obj: Option<&PyAny>) -> PyResult<Option<Vec<(i64, i64)>>> {
     let Some(obj) = obj else { return Ok(None) };
     let mut intervals = Vec::new();
@@ -1268,6 +1336,125 @@ fn wc_fst_components_py(
     estimate.components()
 }
 
+/// Compute principal components for variants on a single chromosome.
+#[pyfunction(
+    name = "chromosome_pca",
+    signature = (variants, sample_names, n_components=10),
+    text_signature = "(variants, sample_names, n_components=10, /)"
+)]
+fn chromosome_pca_py(
+    py: Python,
+    variants: Vec<VariantInput>,
+    sample_names: Vec<String>,
+    n_components: usize,
+) -> PyResult<Py<ChromosomePcaResult>> {
+    if sample_names.is_empty() {
+        return Err(PyValueError::new_err(
+            "sample_names must contain at least one sample",
+        ));
+    }
+    if n_components == 0 {
+        return Err(PyValueError::new_err(
+            "n_components must be greater than or equal to 1",
+        ));
+    }
+
+    let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
+    let result = compute_chromosome_pca(&variants, &sample_names, n_components)
+        .map_err(vcf_error_to_pyerr)?;
+    ChromosomePcaResult::from_result(py, &result)
+}
+
+/// Compute principal components for a chromosome and write them to a TSV file.
+#[pyfunction(
+    name = "chromosome_pca_to_file",
+    signature = (variants, sample_names, chromosome, output_dir, n_components=10),
+    text_signature = "(variants, sample_names, chromosome, output_dir, n_components=10, /)"
+)]
+fn chromosome_pca_to_file_py(
+    variants: Vec<VariantInput>,
+    sample_names: Vec<String>,
+    chromosome: &str,
+    output_dir: &str,
+    n_components: usize,
+) -> PyResult<()> {
+    if sample_names.is_empty() {
+        return Err(PyValueError::new_err(
+            "sample_names must contain at least one sample",
+        ));
+    }
+    if n_components == 0 {
+        return Err(PyValueError::new_err(
+            "n_components must be greater than or equal to 1",
+        ));
+    }
+
+    let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
+    let result = compute_chromosome_pca(&variants, &sample_names, n_components)
+        .map_err(vcf_error_to_pyerr)?;
+    let output_dir = PathBuf::from(output_dir);
+    write_chromosome_pca_to_file(&result, chromosome, output_dir.as_path())
+        .map_err(vcf_error_to_pyerr)
+}
+
+/// Run per-chromosome PCA for a dictionary of chromosomes -> variants.
+#[pyfunction(
+    name = "per_chromosome_pca",
+    signature = (variants_by_chromosome, sample_names, output_dir, n_components=10),
+    text_signature = "(variants_by_chromosome, sample_names, output_dir, n_components=10, /)"
+)]
+fn per_chromosome_pca_py(
+    variants_by_chromosome: &PyAny,
+    sample_names: Vec<String>,
+    output_dir: &str,
+    n_components: usize,
+) -> PyResult<()> {
+    if sample_names.is_empty() {
+        return Err(PyValueError::new_err(
+            "sample_names must contain at least one sample",
+        ));
+    }
+    if n_components == 0 {
+        return Err(PyValueError::new_err(
+            "n_components must be greater than or equal to 1",
+        ));
+    }
+
+    let variants = extract_variants_by_chromosome(variants_by_chromosome)?;
+    let output_dir = PathBuf::from(output_dir);
+    run_chromosome_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
+        .map_err(vcf_error_to_pyerr)
+}
+
+/// Execute the memory-efficient multi-chromosome PCA pipeline.
+#[pyfunction(
+    name = "global_pca",
+    signature = (variants_by_chromosome, sample_names, output_dir, n_components=10),
+    text_signature = "(variants_by_chromosome, sample_names, output_dir, n_components=10, /)"
+)]
+fn global_pca_py(
+    variants_by_chromosome: &PyAny,
+    sample_names: Vec<String>,
+    output_dir: &str,
+    n_components: usize,
+) -> PyResult<()> {
+    if sample_names.is_empty() {
+        return Err(PyValueError::new_err(
+            "sample_names must contain at least one sample",
+        ));
+    }
+    if n_components == 0 {
+        return Err(PyValueError::new_err(
+            "n_components must be greater than or equal to 1",
+        ));
+    }
+
+    let variants = extract_variants_by_chromosome(variants_by_chromosome)?;
+    let output_dir = PathBuf::from(output_dir);
+    run_global_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
+        .map_err(vcf_error_to_pyerr)
+}
+
 /// Adjust the effective sequence length by applying allow and mask intervals.
 #[pyfunction(
     name = "adjusted_sequence_length",
@@ -1309,6 +1496,7 @@ fn inversion_allele_frequency_py(sample_map: &PyAny) -> PyResult<Option<f64>> {
 fn ferromic(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Population>()?;
     m.add_class::<PairwiseDifference>()?;
+    m.add_class::<ChromosomePcaResult>()?;
     m.add_class::<DiversitySite>()?;
     m.add_class::<HudsonDxyResultPy>()?;
     m.add_class::<HudsonFstSitePy>()?;
@@ -1328,6 +1516,10 @@ fn ferromic(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(hudson_fst_with_sites_py, m)?)?;
     m.add_function(wrap_pyfunction!(wc_fst_py, m)?)?;
     m.add_function(wrap_pyfunction!(wc_fst_components_py, m)?)?;
+    m.add_function(wrap_pyfunction!(chromosome_pca_py, m)?)?;
+    m.add_function(wrap_pyfunction!(chromosome_pca_to_file_py, m)?)?;
+    m.add_function(wrap_pyfunction!(per_chromosome_pca_py, m)?)?;
+    m.add_function(wrap_pyfunction!(global_pca_py, m)?)?;
     m.add_function(wrap_pyfunction!(adjusted_sequence_length_py, m)?)?;
     m.add_function(wrap_pyfunction!(inversion_allele_frequency_py, m)?)?;
 
