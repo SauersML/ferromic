@@ -46,6 +46,11 @@ cargo run --release --bin run_vcf -- [OPTIONS]
 - `--min_gq <INT>`: Minimum genotype quality threshold (default: 30)
 - `--mask_file <FILE>`: BED file of regions to exclude
 - `--allow_file <FILE>`: BED file of regions to include
+- `--pca`: Perform principal component analysis on filtered haplotypes (writes per-chromosome TSV files under `pca_per_chr_outputs/`)
+- `--pca_components <INT>`: Number of principal components to compute (default: 10)
+- `--pca_output <FILE>`: Desired filename for the combined PCA summary table produced by Ferromic's PCA utilities (default: `pca_results.tsv`)
+- `--fst`: Enable haplotype FST calculations (required for Weir & Cockerham and Hudson outputs)
+- `--fst_populations <FILE>`: Optional CSV (population name followed by comma-separated sample IDs) describing named populations for additional FST comparisons
 
 ## Example Command
 
@@ -68,12 +73,17 @@ Ferromic handles different coordinate systems:
 
 ## Configuration File Format
 
-The configuration file should be tab-delimited with these columns:
+The configuration file must be tab-delimited. Ferromic expects the header to begin with seven metadata columns followed by one column per sample:
+
 1. `seqnames`: Chromosome (with or without "chr" prefix)
 2. `start`: Region start position (1-based, inclusive)
 3. `end`: Region end position (1-based, inclusive)
-4. `POS` and other columns: Additional information (ignored)
-5. Sample columns: Each sample has a column with a genotype string in the format "0|0", "0|1", "1|0", or "1|1"
+4. `POS`: Representative variant position within the region (retained for bookkeeping)
+5. `orig_ID`: Region identifier
+6. `verdict`: Manual/automated review verdict
+7. `categ`: Category label for the region
+
+Columns eight onward must be sample names. Each cell in these sample columns stores a genotype string such as `"0|0"`, `"0|1"`, `"1|0"`, or `"1|1"` that assigns both haplotypes to group 0 or group 1.
 
 Where:
 - "0" and "1" represent the two haplotype groups to be analyzed separately
@@ -86,7 +96,17 @@ Where:
 
 Contains summary statistics for each region with columns:
 ```
-chr,region_start,region_end,0_sequence_length,1_sequence_length,0_sequence_length_adjusted,1_sequence_length_adjusted,0_segregating_sites,1_segregating_sites,0_w_theta,1_w_theta,0_pi,1_pi,0_segregating_sites_filtered,1_segregating_sites_filtered,0_w_theta_filtered,1_w_theta_filtered,0_pi_filtered,1_pi_filtered,0_num_hap_no_filter,1_num_hap_no_filter,0_num_hap_filter,1_num_hap_filter,inversion_freq_no_filter,inversion_freq_filter
+chr,region_start,region_end,0_sequence_length,1_sequence_length,
+0_sequence_length_adjusted,1_sequence_length_adjusted,
+0_segregating_sites,1_segregating_sites,0_w_theta,1_w_theta,
+0_pi,1_pi,0_segregating_sites_filtered,1_segregating_sites_filtered,
+0_w_theta_filtered,1_w_theta_filtered,0_pi_filtered,1_pi_filtered,
+0_num_hap_no_filter,1_num_hap_no_filter,0_num_hap_filter,1_num_hap_filter,
+inversion_freq_no_filter,inversion_freq_filter,
+haplotype_overall_fst_wc,haplotype_between_pop_variance_wc,
+haplotype_within_pop_variance_wc,haplotype_num_informative_sites_wc,
+hudson_fst_hap_group_0v1,hudson_dxy_hap_group_0v1,
+hudson_pi_hap_group_0,hudson_pi_hap_group_1,hudson_pi_avg_hap_group_0v1
 ```
 
 Where:
@@ -96,17 +116,39 @@ Where:
 - "sequence_length_adjusted" accounts for masked regions
 - "num_hap" columns indicate the number of haplotypes in each group
 - Statistics with "_filtered" are calculated from strictly filtered data
+- Columns prefixed with `haplotype_` contain Weir & Cockerham FST outputs; they are
+  populated when haplotype FST analysis is enabled and `NA` when insufficient data
+  are available
+- Columns prefixed with `hudson_` summarise Hudson-style FST components for the
+  haplotype 0 vs. 1 comparison and are likewise `NA` when FST statistics cannot be
+  computed
 
-### Per-site CSV Output
+### Per-site FASTA-style outputs
 
-Contains position-specific diversity metrics:
-```
-relative_position,filtered_pi_chr_X_start_Y_end_Z_group_0,filtered_pi_chr_X_start_Y_end_Z_group_1,unfiltered_pi_chr_X_start_Y_end_Z_group_0,...
-```
+Two FASTA-like files are produced in the working directory to capture
+position-specific metrics:
 
-Where:
-- "relative_position" is the 1-based position relative to the start of the region
-- Column headers combine the statistic type, region, and haplotype group
+- `per_site_diversity_output.falsta` – per-haplotype π and θ values. Each record is
+  emitted with a FASTA-style header such as
+  `>filtered_pi_chr_X_start_Y_end_Z_group_0` followed by a comma-separated vector of
+  site-wise values (one entry per base in the region). `NA` marks positions without
+  data and `0` marks zero-valued statistics.
+- `per_site_fst_output.falsta` – per-site summaries for Weir & Cockerham and Hudson
+  FST. Headers identify the statistic (overall FST, pairwise 0 vs 1, or Hudson
+  haplotype FST) and the associated region, with comma-separated values mirroring the
+  region length.
+
+Both files encode positions implicitly by index: the first entry corresponds to the
+region start (1-based), the second to start + 1, and so on.
+
+### Hudson FST TSV (optional)
+
+When run with `--fst`, Ferromic writes `hudson_fst_results.tsv` alongside the main
+CSV. The TSV header is: `chr`, `region_start_0based`, `region_end_0based`,
+`pop1_id_type`, `pop1_id_name`, `pop2_id_type`, `pop2_id_name`, `Dxy`, `pi_pop1`,
+`pi_pop2`, `pi_xy_avg`, `FST`. Region coordinates are 0-based inclusive and the
+population columns capture the identifier type (haplotype group or named
+population) alongside the label for each comparison.
 
 ### PHYLIP Files
 
@@ -148,10 +190,10 @@ Python data structures.
    ```bash
    maturin develop --release
    ```
-   The command compiles the `ferromic` shared library and makes it importable from Python. Use
-   the `--target` flag if you need to build for a different Python interpreter (e.g., a conda
-   environment) and set the `PYO3_PYTHON` environment variable when a non-default interpreter is
-   required.
+   The command compiles the `ferromic` shared library and makes it importable from Python. To
+   target a specific interpreter (for example, one provided by Conda), pass
+   `--python /path/to/python` or set the `PYO3_PYTHON` environment variable before invoking
+   `maturin`.
 
 After `maturin develop` completes successfully, you can import the module with `import ferromic`
 inside Python.
