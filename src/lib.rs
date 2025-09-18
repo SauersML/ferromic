@@ -45,7 +45,7 @@ mod tests {
 }
 
 /// Rich description of an FST estimate, exposed as ``ferromic.FstEstimate``.
-#[pyclass(module = "ferromic")]
+#[pyclass(module = "ferromic", name = "FstEstimate")]
 #[derive(Clone)]
 struct FstEstimateInfo {
     #[pyo3(get)]
@@ -225,8 +225,8 @@ impl DiversitySite {
     }
 }
 
-/// Result of Hudson's Dxy statistic.
-#[pyclass(module = "ferromic")]
+/// Result of Hudson's Dxy statistic, exposed as ``ferromic.HudsonDxyResult``.
+#[pyclass(module = "ferromic", name = "HudsonDxyResult")]
 #[derive(Clone)]
 struct HudsonDxyResultPy {
     #[pyo3(get)]
@@ -249,8 +249,8 @@ impl HudsonDxyResultPy {
     }
 }
 
-/// Per-site Hudson FST values and supporting components.
-#[pyclass(module = "ferromic")]
+/// Per-site Hudson FST values and supporting components, exposed as ``ferromic.HudsonFstSite``.
+#[pyclass(module = "ferromic", name = "HudsonFstSite")]
 #[derive(Clone)]
 struct HudsonFstSitePy {
     #[pyo3(get)]
@@ -308,8 +308,8 @@ impl HudsonFstSitePy {
     }
 }
 
-/// Aggregated Hudson FST result with friendly labels.
-#[pyclass(module = "ferromic")]
+/// Aggregated Hudson FST result with friendly labels, exposed as ``ferromic.HudsonFstResult``.
+#[pyclass(module = "ferromic", name = "HudsonFstResult")]
 #[derive(Clone)]
 struct HudsonFstResultPy {
     #[pyo3(get)]
@@ -382,8 +382,8 @@ impl HudsonFstResultPy {
     }
 }
 
-/// Per-site Weir & Cockerham FST summary.
-#[pyclass(module = "ferromic")]
+/// Per-site Weir & Cockerham FST summary, exposed as ``ferromic.WcFstSite``.
+#[pyclass(module = "ferromic", name = "WcFstSite")]
 #[derive(Clone)]
 struct WcFstSitePy {
     #[pyo3(get)]
@@ -444,8 +444,8 @@ impl WcFstSitePy {
     }
 }
 
-/// Aggregated Weir & Cockerham FST result.
-#[pyclass(module = "ferromic")]
+/// Aggregated Weir & Cockerham FST result, exposed as ``ferromic.WcFstResult``.
+#[pyclass(module = "ferromic", name = "WcFstResult")]
 #[derive(Clone)]
 struct WcFstResultPy {
     #[pyo3(get)]
