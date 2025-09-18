@@ -14,6 +14,27 @@ on:
       - '*'
   pull_request:
   workflow_dispatch:
+    inputs:
+      ci_targets:
+        description: Select which platforms to build
+        type: choice
+        default: default
+        options:
+          - default
+          - all
+
+env:
+  RUN_ALL_MACHINES: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.ci_targets == 'all') }}
+  LINUX_MATRIX_DEFAULT: >-
+    [{"runner":"ubuntu-22.04","target":"x86_64","openblas_target":"SANDYBRIDGE"}]
+  LINUX_MATRIX_ALL: >-
+    [{"runner":"ubuntu-22.04","target":"x86_64","openblas_target":"SANDYBRIDGE"},{"runner":"ubuntu-22.04","target":"x86","openblas_target":"ATOM"},{"runner":"ubuntu-22.04","target":"aarch64","openblas_target":"ARMV8"},{"runner":"ubuntu-22.04","target":"armv7","openblas_target":"ARMV7"},{"runner":"ubuntu-22.04","target":"ppc64le","openblas_target":"POWER9"}]
+  MUSLLINUX_MATRIX_ALL: >-
+    [{"runner":"ubuntu-22.04","target":"x86_64","openblas_target":"SANDYBRIDGE"},{"runner":"ubuntu-22.04","target":"x86","openblas_target":"ATOM"},{"runner":"ubuntu-22.04","target":"aarch64","openblas_target":"ARMV8"},{"runner":"ubuntu-22.04","target":"armv7","openblas_target":"ARMV7"}]
+  WINDOWS_MATRIX_ALL: >-
+    [{"runner":"windows-latest","target":"x64","vcpkg_triplet":"x64-windows"},{"runner":"windows-latest","target":"x86","vcpkg_triplet":"x86-windows"}]
+  MACOS_MATRIX_ALL: >-
+    [{"runner":"macos-13","target":"x86_64"},{"runner":"macos-14","target":"aarch64"}]
 
 permissions:
   contents: read
@@ -23,22 +44,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
-        platform:
-          - runner: ubuntu-22.04
-            target: x86_64
-            openblas_target: SANDYBRIDGE
-          - runner: ubuntu-22.04
-            target: x86
-            openblas_target: ATOM
-          - runner: ubuntu-22.04
-            target: aarch64
-            openblas_target: ARMV8
-          - runner: ubuntu-22.04
-            target: armv7
-            openblas_target: ARMV7
-          - runner: ubuntu-22.04
-            target: ppc64le
-            openblas_target: POWER9
+        platform: ${{ fromJson(env.RUN_ALL_MACHINES == 'true' ? env.LINUX_MATRIX_ALL : env.LINUX_MATRIX_DEFAULT) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -82,22 +88,11 @@ jobs:
           path: dist
 
   musllinux:
+    if: ${{ env.RUN_ALL_MACHINES == 'true' }}
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
-        platform:
-          - runner: ubuntu-22.04
-            target: x86_64
-            openblas_target: SANDYBRIDGE
-          - runner: ubuntu-22.04
-            target: x86
-            openblas_target: ATOM
-          - runner: ubuntu-22.04
-            target: aarch64
-            openblas_target: ARMV8
-          - runner: ubuntu-22.04
-            target: armv7
-            openblas_target: ARMV7
+        platform: ${{ fromJson(env.MUSLLINUX_MATRIX_ALL) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -135,16 +130,11 @@ jobs:
           path: dist
 
   windows:
+    if: ${{ env.RUN_ALL_MACHINES == 'true' }}
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
-        platform:
-          - runner: windows-latest
-            target: x64
-            vcpkg_triplet: x64-windows
-          - runner: windows-latest
-            target: x86
-            vcpkg_triplet: x86-windows
+        platform: ${{ fromJson(env.WINDOWS_MATRIX_ALL) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -175,14 +165,11 @@ jobs:
           path: dist
 
   macos:
+    if: ${{ env.RUN_ALL_MACHINES == 'true' }}
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
-        platform:
-          - runner: macos-13
-            target: x86_64
-          - runner: macos-14
-            target: aarch64
+        platform: ${{ fromJson(env.MACOS_MATRIX_ALL) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
