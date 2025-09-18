@@ -539,8 +539,8 @@ impl Population {
     /// When the identifier is a haplotype group, this returns its numeric value.
     #[getter]
     fn haplotype_group(&self) -> Option<u8> {
-        match self.inner.id {
-            PopulationId::HaplotypeGroup(group) => Some(group),
+        match &self.inner.id {
+            PopulationId::HaplotypeGroup(group) => Some(*group),
             PopulationId::Named(_) => None,
         }
     }
