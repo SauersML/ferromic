@@ -738,6 +738,9 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer
             return None
         tags = list(path_tags)
         tags.append("firth_refit")
+        # Firth refits triggered from the ridge pathway are still penalized fits.
+        # Mark the result accordingly so downstream consumers suppress inference.
+        setattr(firth_res, "_used_ridge", True)
         setattr(firth_res, "_path_reasons", tags)
         return firth_res, "firth_refit"
 
@@ -1487,8 +1490,7 @@ def _score_boot_ci_beta(
             return 0
         if isinstance(entry, dict):
             return int(entry.get("draws", 0))
-        # legacy float entries
-        return base_B_local
+        return 0
 
     def p_eval(beta0, *, min_total=None):
         key = float(beta0)
@@ -1500,10 +1502,9 @@ def _score_boot_ci_beta(
                 min_req = max(base_B_local, min_req)
                 min_req = min(min_req, max_B_local)
         entry = cache.get(key)
-        if entry is not None:
-            entry_draws = entry if isinstance(entry, dict) else {"p": entry, "draws": base_B_local}
-            if min_req is None or entry_draws.get("draws", 0) >= min_req:
-                return float(entry_draws.get("p", np.nan))
+        if isinstance(entry, dict):
+            if min_req is None or entry.get("draws", 0) >= min_req:
+                return float(entry.get("p", np.nan))
         draw_key = min_req if min_req is not None else base_B_local
         rng_local = _bootstrap_rng((base_key, draw_key))
         bits = _score_bootstrap_bits(Xr, yv, xt, key, kind=kind)
@@ -2077,7 +2078,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         case_ids_for_fp = worker_core_df_index[case_idx_global] if case_idx_global.size > 0 else pd.Index([])
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(results_cache_dir, f"{s_name_safe}.json")
-    meta_path = result_path + ".meta.json"
+    meta_path = os.path.join(results_cache_dir, f"{s_name_safe}.meta.json")
 
     try:
         # Prefer precomputed fingerprint if provided
@@ -2459,7 +2460,7 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                 p_source = "score_chi2"
                 inference_family = "score"
             else:
-                p_emp, _, draws_used_boot, exceed_boot = _score_bootstrap_from_reduced(
+                boot_res = _score_bootstrap_from_reduced(
                     X_reduced,
                     y_work,
                     x_target_vec,
@@ -2467,6 +2468,14 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
                     alpha=alpha_override,
                     min_total=min_total_override,
                 )
+                if isinstance(boot_res, tuple):
+                    p_emp = boot_res[0]
+                    draws_used_boot = boot_res[2] if len(boot_res) > 2 else 0
+                    exceed_boot = boot_res[3] if len(boot_res) > 3 else 0
+                else:
+                    p_emp = np.nan
+                    draws_used_boot = 0
+                    exceed_boot = 0
                 if np.isfinite(p_emp):
                     p_value = p_emp
                     p_source = "score_boot"
@@ -2481,7 +2490,12 @@ def run_single_model_worker(pheno_data, target_inversion, results_cache_dir):
         inference_type = inference_family if inference_family is not None else "none"
         final_is_mle = inference_type == "mle"
         used_firth = (inference_type == "firth") or bool(getattr(fit, "_used_firth", False))
-        used_ridge = bool(getattr(fit, "_used_ridge", False) or inference_type in {"firth", "score_boot"})
+        ridge_candidates = (fit, fit_full_use, fit_red_use)
+        used_ridge = any(
+            bool(getattr(candidate, "_used_ridge", False))
+            for candidate in ridge_candidates
+            if candidate is not None
+        )
         if used_ridge:
             p_value = np.nan
             p_source = None
@@ -2678,8 +2692,9 @@ def lrt_overall_worker(task):
     s_name, cat, target = task["name"], task["category"], task["target"]
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name_safe}.json")
-    meta_path = result_path + ".meta.json"
+    meta_path = os.path.join(CTX["LRT_OVERALL_CACHE_DIR"], f"{s_name_safe}.meta.json")
     res_path = os.path.join(CTX["RESULTS_CACHE_DIR"], f"{s_name_safe}.json")
+    res_meta_path = os.path.join(CTX["RESULTS_CACHE_DIR"], f"{s_name_safe}.meta.json")
     os.makedirs(CTX["RESULTS_CACHE_DIR"], exist_ok=True)
     try:
         pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
@@ -2790,26 +2805,24 @@ def lrt_overall_worker(task):
                 "Model_Notes": note or "",
                 "Skip_Reason": skip
             })
-            io.atomic_write_json(res_path + ".meta.json", {
-                "kind": "phewas_result",
-                "s_name": s_name,
-                "category": cat,
-                "model_columns": list(worker_core_df_cols),
-                "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"],
-                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-                "target": target,
-                "core_index_fp": _index_fingerprint(worker_core_df_index),
-                "case_idx_fp": case_fp,
-                "allowed_mask_fp": allowed_fp,
-                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                "used_index_fp": used_index_fp,
-                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-                "created_at": datetime.now(timezone.utc).isoformat()
+            meta_extra_result = dict(meta_extra_common)
+            meta_extra_result["skip_reason"] = skip
+            meta_extra_result.update({
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
             })
+            _write_meta(
+                res_meta_path,
+                "phewas_result",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra_result,
+            )
             return
 
         ok, reason, det = validate_min_counts_for_fit(yb, stage_tag="lrt_stage1", extra_context={"phenotype": s_name})
@@ -2841,26 +2854,25 @@ def lrt_overall_worker(task):
                 "Model_Notes": note or "",
                 "Skip_Reason": reason
             })
-            io.atomic_write_json(res_path + ".meta.json", {
-                "kind": "phewas_result",
-                "s_name": s_name,
-                "category": cat,
-                "model_columns": list(worker_core_df_cols),
-                "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"],
-                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-                "target": target,
-                "core_index_fp": _index_fingerprint(worker_core_df_index),
-                "case_idx_fp": case_fp,
-                "allowed_mask_fp": allowed_fp,
-                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                "used_index_fp": used_index_fp,
-                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-                "created_at": datetime.now(timezone.utc).isoformat()
+            meta_extra_result = dict(meta_extra_common)
+            meta_extra_result.update({
+                "skip_reason": reason,
+                "counts": det,
+                "N_Total_Used": det['N'],
+                "N_Cases_Used": det['N_cases'],
+                "N_Controls_Used": det['N_ctrls'],
             })
+            _write_meta(
+                res_meta_path,
+                "phewas_result",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra_result,
+            )
             return
 
         X_full_df = Xb
@@ -2899,26 +2911,6 @@ def lrt_overall_worker(task):
                 "Model_Notes": note or "",
                 "Skip_Reason": skip_reason,
             })
-            io.atomic_write_json(res_path + ".meta.json", {
-                "kind": "phewas_result",
-                "s_name": s_name,
-                "category": cat,
-                "model_columns": list(worker_core_df_cols),
-                "num_pcs": CTX["NUM_PCS"],
-                "min_cases": CTX["MIN_CASES_FILTER"],
-                "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-                "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-                "target": target,
-                "core_index_fp": _index_fingerprint(worker_core_df_index),
-                "case_idx_fp": case_fp,
-                "allowed_mask_fp": allowed_fp,
-                "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-                "used_index_fp": used_index_fp,
-                "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-                "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-                "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
             meta_extra = dict(meta_extra_common)
             meta_extra["skip_reason"] = skip_reason
             _write_meta(
@@ -2931,6 +2923,24 @@ def lrt_overall_worker(task):
                 _index_fingerprint(worker_core_df_index),
                 case_fp,
                 extra=meta_extra,
+            )
+            meta_extra_result = dict(meta_extra_common)
+            meta_extra_result.update({
+                "skip_reason": skip_reason,
+                "N_Total_Used": n_total_used,
+                "N_Cases_Used": n_cases_used,
+                "N_Controls_Used": n_ctrls_used,
+            })
+            _write_meta(
+                res_meta_path,
+                "phewas_result",
+                s_name,
+                cat,
+                target,
+                worker_core_df_cols,
+                _index_fingerprint(worker_core_df_index),
+                case_fp,
+                extra=meta_extra_result,
             )
             return
 
@@ -3080,12 +3090,16 @@ def lrt_overall_worker(task):
                 p_source = "score_chi2"
                 inference_family = "score"
             else:
-                p_emp, _, boot_draws_used, boot_exceed = _score_bootstrap_from_reduced(
+                boot_res = _score_bootstrap_from_reduced(
                     X_red_zv,
                     yb,
                     x_target_vec,
                     seed_key=("lrt_overall", s_name_safe, target, "pval"),
                 )
+                if isinstance(boot_res, tuple):
+                    p_emp = boot_res[0]
+                else:
+                    p_emp = np.nan
                 if np.isfinite(p_emp):
                     p_value = p_emp
                     p_source = "score_boot"
@@ -3205,7 +3219,7 @@ def lrt_overall_worker(task):
                 or_ci95 = None
                 ci_method = None
 
-        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False) or inference_type in {"firth", "score_boot"})
+        used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
         used_firth_full = bool(getattr(fit_full, "_used_firth", False)) or (inference_type == "firth")
 
         out = {
@@ -3269,7 +3283,7 @@ def lrt_overall_worker(task):
             "Model_Notes": ";".join(model_notes),
         }
 
-        penalized = used_ridge_full or used_firth_full
+        penalized = used_ridge_full
         if penalized:
             out.update(
                 {
@@ -3308,25 +3322,8 @@ def lrt_overall_worker(task):
             res_record["Model_Notes"] = f"{rec_notes};{reason_tag}" if rec_notes else reason_tag
 
         io.atomic_write_json(res_path, res_record)
-        io.atomic_write_json(res_path + ".meta.json", {
-            "kind": "phewas_result",
-            "s_name": s_name,
-            "category": cat,
-            "model_columns": list(worker_core_df_cols),
-            "num_pcs": CTX["NUM_PCS"],
-            "min_cases": CTX["MIN_CASES_FILTER"],
-            "min_ctrls": CTX["MIN_CONTROLS_FILTER"],
-            "min_neff": CTX.get("MIN_NEFF_FILTER", DEFAULT_MIN_NEFF),
-            "target": target,
-            "core_index_fp": _index_fingerprint(worker_core_df_index),
-            "case_idx_fp": case_fp,
-            "allowed_mask_fp": allowed_fp,
-            "ridge_l2_base": CTX["RIDGE_L2_BASE"],
-            "used_index_fp": used_index_fp,
-            "sex_restrict_mode": sex_cfg["sex_restrict_mode"],
-            "sex_restrict_prop": sex_cfg["sex_restrict_prop"],
-            "sex_restrict_max_other": sex_cfg["sex_restrict_max_other"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+        meta_extra_result = dict(meta_extra_common)
+        meta_extra_result.update({
             "final_cols_names": final_cols_names,
             "final_cols_pos": final_cols_pos,
             "full_llf": float(getattr(fit_full, "llf", np.nan)),
@@ -3335,6 +3332,17 @@ def lrt_overall_worker(task):
             "used_ridge": used_ridge_full,
             "prune_recipe_version": "zv+greedy-rank-v1",
         })
+        _write_meta(
+            res_meta_path,
+            "phewas_result",
+            s_name,
+            cat,
+            target,
+            worker_core_df_cols,
+            _index_fingerprint(worker_core_df_index),
+            case_fp,
+            extra=meta_extra_result,
+        )
 
         io.atomic_write_json(result_path, out)
         meta_extra = dict(meta_extra_common)
@@ -3364,7 +3372,7 @@ def bootstrap_overall_worker(task):
     tnull_dir = os.path.join(boot_dir, "t_null")
     os.makedirs(tnull_dir, exist_ok=True)
     result_path = os.path.join(boot_dir, f"{s_name_safe}.json")
-    meta_path = result_path + ".meta.json"
+    meta_path = os.path.join(boot_dir, f"{s_name_safe}.meta.json")
     res_dir = CTX["RESULTS_CACHE_DIR"]
     os.makedirs(res_dir, exist_ok=True)
     res_path = os.path.join(res_dir, f"{s_name_safe}.json")
@@ -3567,7 +3575,7 @@ def lrt_followup_worker(task):
     s_name, category, target = task["name"], task["category"], task["target"]
     s_name_safe = safe_basename(s_name)
     result_path = os.path.join(CTX["LRT_FOLLOWUP_CACHE_DIR"], f"{s_name_safe}.json")
-    meta_path = result_path + ".meta.json"
+    meta_path = os.path.join(CTX["LRT_FOLLOWUP_CACHE_DIR"], f"{s_name_safe}.meta.json")
     try:
         pheno_path = os.path.join(CTX["CACHE_DIR"], f"pheno_{s_name}_{task['cdr_codename']}.parquet")
         if not os.path.exists(pheno_path):
@@ -3968,12 +3976,16 @@ def lrt_followup_worker(task):
                     p_source = "score_chi2"
                     inference_type = "score"
                 else:
-                    p_emp, _, _, _ = _score_bootstrap_from_reduced(
+                    boot_res = _score_bootstrap_from_reduced(
                         X_anc_red,
                         y_anc,
                         x_target_vec,
                         seed_key=("lrt_followup", s_name_safe, anc, target, "pval"),
                     )
+                    if isinstance(boot_res, tuple):
+                        p_emp = boot_res[0]
+                    else:
+                        p_emp = np.nan
                     if np.isfinite(p_emp):
                         p_val = p_emp
                         p_source = "score_boot"

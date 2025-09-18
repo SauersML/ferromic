@@ -86,7 +86,6 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
             df["P_Overall_Valid"] = False
         mask = pd.to_numeric(df["P_LRT_Overall"], errors="coerce").notna() & df["P_Overall_Valid"]
         df["Q_GLOBAL"] = np.nan
-
         if int(mask.sum()) > 0:
             _, q, _, _ = multipletests(df.loc[mask, "P_LRT_Overall"], alpha=alpha, method="fdr_bh")
             df.loc[mask, "Q_GLOBAL"] = q
