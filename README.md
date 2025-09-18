@@ -83,7 +83,7 @@ The configuration file must be tab-delimited. Ferromic expects the header to beg
 6. `verdict`: Manual/automated review verdict
 7. `categ`: Category label for the region
 
-Columns eight onward must be sample names. Each cell in these sample columns stores a genotype string such as `"0|0"`, `"0|1"`, `"1|0"`, or `"1|1"` that assigns both haplotypes to group 0 or group 1.
+Columns eight onward must be sample names. Each cell in these sample columns stores a genotype string such as `"0|0"`, `"0|1"`, `"1|0"`, or `"1|1"` that assigns both haplotypes to group 0 or group 1.
 
 Where:
 - "0" and "1" represent the two haplotype groups to be analyzed separately
