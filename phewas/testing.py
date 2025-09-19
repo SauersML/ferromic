@@ -66,6 +66,11 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
 
         beta_series = pd.to_numeric(df_in["Beta"], errors="coerce")
         p_series = pd.to_numeric(df_in[pcol], errors="coerce")
+        if "P_Source" in df_in.columns:
+            allowed_sources = {"lrt_mle", "lrt_firth", "score_chi2"}
+            source_allowed = df_in["P_Source"].isin(allowed_sources) | df_in["P_Source"].isna()
+        else:
+            source_allowed = pd.Series(True, index=df_in.index, dtype=bool)
         ci_valid_vals = (
             df_in["CI_Valid"].fillna(False).astype(bool)
             if "CI_Valid" in df_in.columns
@@ -94,6 +99,7 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
             & p_finite
             & (p_series > 0)
             & (p_series < 1)
+            & source_allowed
         )
 
         if bool(needs_patch.any()):

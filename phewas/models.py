@@ -2451,7 +2451,12 @@ def lrt_overall_worker(task):
         if (not ci_valid) and (target_ix is not None):
             cand_fit_for_wald = fit_full_use if (fit_full_use is not None) else fit_full
             if cand_fit_for_wald is not None:
-                wald = _wald_ci_or_from_fit(cand_fit_for_wald, target_ix, alpha=0.05, penalized=False)
+                wald = _wald_ci_or_from_fit(
+                    cand_fit_for_wald,
+                    target_ix,
+                    alpha=0.05,
+                    penalized=bool(getattr(cand_fit_for_wald, "_used_ridge", False)),
+                )
             else:
                 wald = {"valid": False}
             if wald.get("valid", False):
@@ -2463,7 +2468,11 @@ def lrt_overall_worker(task):
                 or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
 
         ridge_in_path_full = bool(getattr(fit_full, "_used_ridge", False))
-        used_firth_full = bool(getattr(fit_full, "_used_firth", False))
+        used_firth_full = (
+            bool(getattr(fit_full, "_used_firth", False))
+            or bool(getattr(fit_full_use, "_used_firth", False))
+            or (inference_type == "firth")
+        )
 
         out = {
             "Phenotype": s_name,
@@ -2829,7 +2838,7 @@ def bootstrap_overall_worker(task):
         )
         beta_full, or_val = np.nan, np.nan
         final_is_mle = bool(getattr(fit_full, "_final_is_mle", False))
-        used_firth_full = bool(getattr(fit_full, "_used_firth", False)) or (inference_type == "firth")
+        used_firth_full = bool(getattr(fit_full, "_used_firth", False))
         used_ridge_full = bool(getattr(fit_full, "_used_ridge", False))
         if fit_full is not None and target in X_full_zv.columns:
             beta_full = float(getattr(fit_full, "params", pd.Series(np.nan, index=X_full_zv.columns))[target])
@@ -3455,6 +3464,8 @@ def lrt_followup_worker(task):
                             ci_hi_or = float(wald["hi_or"])
                             ci_str = _fmt_ci(ci_lo_or, ci_hi_or)
                             ci_label = "fallback (no p-value)"
+                if ci_valid and (not np.isfinite(p_val)):
+                    out[f"{anc_upper}_REASON"] = ""
                 if not out[f"{anc_upper}_REASON"]:
                     out[f"{anc_upper}_REASON"] = "penalized_fit"
 
