@@ -18,7 +18,7 @@ use std::sync::Arc;
 /// Epsilon threshold for numerical stability in FST calculations.
 /// Used consistently across per-site and aggregation functions to handle
 /// near-zero denominators and floating-point precision issues.
-/// 
+///
 /// Usage Guidelines:
 /// - FST_EPSILON (1e-12): For Hudson FST denominators and component sums
 /// - 1e-9: For Weir-Cockerham calculations and general float comparisons
@@ -431,12 +431,46 @@ pub fn calculate_fst_wc_haplotype_groups(
     // Map each VCF sample's haplotypes to their assigned groups (e.g., group "0" or "1").
     let haplotype_to_group = map_samples_to_haplotype_groups(sample_names, sample_to_group_map);
 
-    // Create a lookup map for quick access to variants by their genomic position.
-    // This improves performance when iterating through positions in the region.
-    let variant_map: HashMap<i64, &Variant> = variants.iter().map(|v| (v.position, v)).collect();
+    // Pre-compute constant data for monomorphic positions so that we do not rebuild the
+    // same HashMaps for every base in large windows. These values only depend on the
+    // grouping configuration and therefore remain unchanged across the region.
+    let mut group_counts: HashMap<String, usize> = HashMap::new();
+    for group_id_str in haplotype_to_group.values() {
+        *group_counts.entry(group_id_str.clone()).or_insert(0) += 1;
+    }
+
+    let mut monomorphic_population_sizes = HashMap::new();
+    monomorphic_population_sizes.insert("0".to_string(), *group_counts.get("0").unwrap_or(&0));
+    monomorphic_population_sizes.insert("1".to_string(), *group_counts.get("1").unwrap_or(&0));
+
+    let monomorphic_overall_estimate = FstEstimate::NoInterPopulationVariance {
+        sum_a: 0.0,
+        sum_b: 0.0,
+        sites_evaluated: 1,
+    };
+
+    let mut monomorphic_pairwise_fst = HashMap::new();
+    let mut monomorphic_pairwise_var_comps = HashMap::new();
+    if monomorphic_population_sizes
+        .get("0")
+        .map_or(false, |&count| count > 0)
+        && monomorphic_population_sizes
+            .get("1")
+            .map_or(false, |&count| count > 0)
+    {
+        let pair_key = "0_vs_1".to_string();
+        monomorphic_pairwise_fst.insert(pair_key.clone(), monomorphic_overall_estimate);
+        monomorphic_pairwise_var_comps.insert(pair_key, (0.0, 0.0));
+    }
 
     let mut site_fst_values = Vec::with_capacity(region.len() as usize);
     let position_count = region.len() as usize; // Total number of base pairs in the region.
+
+    // Iterate through the variants in lockstep with the genomic positions instead of
+    // building a HashMap keyed by position. The variants slice is derived from the VCF
+    // and is already sorted by position, so a streaming iterator keeps the loop O(n)
+    // with minimal constant factors.
+    let mut variant_iter = variants.iter().peekable();
 
     init_step_progress(
         &format!(
@@ -461,68 +495,43 @@ pub fn calculate_fst_wc_haplotype_groups(
             );
         }
 
-        if let Some(variant) = variant_map.get(&pos) {
-            // If a variant exists at this position, calculate its FST.
-            let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
-                calculate_fst_wc_at_site_by_haplotype_group(variant, &haplotype_to_group);
-
-            site_fst_values.push(SiteFstWc {
-                position: ZeroBasedPosition(pos).to_one_based(), // Store position as 1-based for output consistency.
-                overall_fst,
-                pairwise_fst,
-                variance_components: var_comps, // Store the raw (a,b) components for this site.
-                population_sizes: pop_sizes,
-                pairwise_variance_components: pairwise_var_comps,
-            });
-        } else {
-            // If no variant is found at this position in the input `variants` slice,
-            // the site is considered monomorphic across all samples for this analysis.
-            // For such sites, there's no genetic variation to partition, so FST components 'a' and 'b' are zero.
-            let mut actual_pop_sizes = HashMap::new();
-            let mut group_counts: HashMap<String, usize> = HashMap::new();
-            for group_id_str in haplotype_to_group.values() {
-                *group_counts.entry(group_id_str.clone()).or_insert(0) += 1;
+        // Advance the iterator until the current variant position is >= the genomic
+        // position under consideration. This preserves behaviour when variants fall
+        // outside the requested interval or if there are duplicate entries.
+        while let Some(next_variant) = variant_iter.peek() {
+            if next_variant.position < pos {
+                variant_iter.next();
+            } else {
+                break;
             }
-            // Ensure "0" and "1" group sizes are recorded, even if zero.
-            actual_pop_sizes.insert("0".to_string(), *group_counts.get("0").unwrap_or(&0));
-            actual_pop_sizes.insert("1".to_string(), *group_counts.get("1").unwrap_or(&0));
-
-            // Overall FST for a monomorphic site results in NoInterPopulationVariance.
-            let site_is_monomorphic_overall_estimate = FstEstimate::NoInterPopulationVariance {
-                sum_a: 0.0,
-                sum_b: 0.0,
-                sites_evaluated: 1, // This single site was evaluated as monomorphic.
-            };
-
-            let mut populated_pairwise_fst = HashMap::new();
-            let mut populated_pairwise_var_comps = HashMap::new();
-
-            // For haplotype group comparisons (typically "0" vs "1"), if both groups
-            // have members, their pairwise FST at this monomorphic site is also NoInterPopulationVariance.
-            if actual_pop_sizes.get("0").map_or(false, |&count| count > 0)
-                && actual_pop_sizes.get("1").map_or(false, |&count| count > 0)
-            {
-                let site_is_monomorphic_pairwise_estimate =
-                    FstEstimate::NoInterPopulationVariance {
-                        sum_a: 0.0,
-                        sum_b: 0.0,
-                        sites_evaluated: 1, // This site was evaluated for this specific pair.
-                    };
-                populated_pairwise_fst
-                    .insert("0_vs_1".to_string(), site_is_monomorphic_pairwise_estimate);
-                // Pairwise variance components (a_xy, b_xy) for a monomorphic site are (0.0, 0.0).
-                populated_pairwise_var_comps.insert("0_vs_1".to_string(), (0.0, 0.0));
-            }
-
-            site_fst_values.push(SiteFstWc {
-                position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: site_is_monomorphic_overall_estimate,
-                pairwise_fst: populated_pairwise_fst,
-                variance_components: (0.0, 0.0), // Overall (a,b) for this monomorphic site are zero.
-                population_sizes: actual_pop_sizes,
-                pairwise_variance_components: populated_pairwise_var_comps,
-            });
         }
+
+        if let Some(next_variant) = variant_iter.peek() {
+            if next_variant.position == pos {
+                let variant = variant_iter.next().expect("peeked variant must exist");
+                let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
+                    calculate_fst_wc_at_site_by_haplotype_group(variant, &haplotype_to_group);
+
+                site_fst_values.push(SiteFstWc {
+                    position: ZeroBasedPosition(pos).to_one_based(),
+                    overall_fst,
+                    pairwise_fst,
+                    variance_components: var_comps,
+                    population_sizes: pop_sizes,
+                    pairwise_variance_components: pairwise_var_comps,
+                });
+                continue;
+            }
+        }
+
+        site_fst_values.push(SiteFstWc {
+            position: ZeroBasedPosition(pos).to_one_based(),
+            overall_fst: monomorphic_overall_estimate,
+            pairwise_fst: monomorphic_pairwise_fst.clone(),
+            variance_components: (0.0, 0.0),
+            population_sizes: monomorphic_population_sizes.clone(),
+            pairwise_variance_components: monomorphic_pairwise_var_comps.clone(),
+        });
     }
     finish_step_progress("Completed per-site FST calculations for haplotype groups");
 
@@ -609,10 +618,43 @@ pub fn calculate_fst_wc_csv_populations(
     let population_assignments = parse_population_csv(csv_path)?;
     let sample_to_pop = map_samples_to_populations(sample_names, &population_assignments);
 
-    let variant_map: HashMap<i64, &Variant> = variants.iter().map(|v| (v.position, v)).collect();
+    // Pre-compute monomorphic templates so that the hot loop over genomic positions
+    // performs only cheap clones when no variant is present. This drastically reduces
+    // overhead for long regions dominated by monomorphic sites.
+    let mut monomorphic_population_sizes: HashMap<String, usize> = HashMap::new();
+    for pop_id_str in sample_to_pop.values() {
+        *monomorphic_population_sizes
+            .entry(pop_id_str.clone())
+            .or_insert(0) += 1;
+    }
+
+    let monomorphic_overall_estimate = FstEstimate::NoInterPopulationVariance {
+        sum_a: 0.0,
+        sum_b: 0.0,
+        sites_evaluated: 1,
+    };
+
+    let mut monomorphic_pairwise_fst = HashMap::new();
+    let mut monomorphic_pairwise_var_comps = HashMap::new();
+    let mut non_empty_pop_ids: Vec<_> = monomorphic_population_sizes
+        .iter()
+        .filter_map(|(pop, &count)| if count > 0 { Some(pop.clone()) } else { None })
+        .collect();
+    non_empty_pop_ids.sort();
+    for i in 0..non_empty_pop_ids.len() {
+        for j in (i + 1)..non_empty_pop_ids.len() {
+            let key_pop1 = &non_empty_pop_ids[i];
+            let key_pop2 = &non_empty_pop_ids[j];
+            let pair_key = format!("{}_vs_{}", key_pop1, key_pop2);
+            monomorphic_pairwise_fst.insert(pair_key.clone(), monomorphic_overall_estimate);
+            monomorphic_pairwise_var_comps.insert(pair_key, (0.0, 0.0));
+        }
+    }
 
     let mut site_fst_values = Vec::with_capacity(region.len() as usize);
     let position_count = region.len() as usize;
+
+    let mut variant_iter = variants.iter().peekable();
 
     init_step_progress(
         &format!(
@@ -635,70 +677,40 @@ pub fn calculate_fst_wc_csv_populations(
             );
         }
 
-        if let Some(variant) = variant_map.get(&pos) {
-            let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
-                calculate_fst_wc_at_site_by_population(variant, &sample_to_pop);
-
-            site_fst_values.push(SiteFstWc {
-                position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst,
-                pairwise_fst,
-                variance_components: var_comps,
-                population_sizes: pop_sizes,
-                pairwise_variance_components: pairwise_var_comps,
-            });
-        } else {
-            // Site is not in variant_map, thus considered globally monomorphic for this region.
-            // FST is undefined because variance components a and b are zero.
-            let mut pop_counts_for_site: HashMap<String, usize> = HashMap::new();
-            for pop_id_str in sample_to_pop.values() {
-                *pop_counts_for_site.entry(pop_id_str.clone()).or_insert(0) += 1;
+        while let Some(next_variant) = variant_iter.peek() {
+            if next_variant.position < pos {
+                variant_iter.next();
+            } else {
+                break;
             }
-            // These are haplotype counts per population.
-
-            let site_is_monomorphic_estimate = FstEstimate::NoInterPopulationVariance {
-                sum_a: 0.0,
-                sum_b: 0.0,
-                sites_evaluated: 1, // This one site was evaluated as monomorphic
-            };
-
-            let mut site_pairwise_fst = HashMap::new();
-            let mut site_pairwise_var_comps = HashMap::new();
-            let pop_ids: Vec<_> = pop_counts_for_site.keys().cloned().collect();
-            // Create pairwise entries if there are at least two populations defined for this site
-            if pop_ids.len() >= 2 {
-                for i in 0..pop_ids.len() {
-                    for j in (i + 1)..pop_ids.len() {
-                        if pop_counts_for_site
-                            .get(&pop_ids[i])
-                            .map_or(false, |&count| count > 0)
-                            && pop_counts_for_site
-                                .get(&pop_ids[j])
-                                .map_or(false, |&count| count > 0)
-                        {
-                            let (key_pop1, key_pop2) = if pop_ids[i] < pop_ids[j] {
-                                (&pop_ids[i], &pop_ids[j])
-                            } else {
-                                (&pop_ids[j], &pop_ids[i])
-                            };
-                            let pair_key = format!("{}_vs_{}", key_pop1, key_pop2);
-                            site_pairwise_fst
-                                .insert(pair_key.clone(), site_is_monomorphic_estimate);
-                            site_pairwise_var_comps.insert(pair_key, (0.0, 0.0));
-                        }
-                    }
-                }
-            }
-
-            site_fst_values.push(SiteFstWc {
-                position: ZeroBasedPosition(pos).to_one_based(),
-                overall_fst: site_is_monomorphic_estimate,
-                pairwise_fst: site_pairwise_fst,
-                variance_components: (0.0, 0.0),
-                population_sizes: pop_counts_for_site,
-                pairwise_variance_components: site_pairwise_var_comps,
-            });
         }
+
+        if let Some(next_variant) = variant_iter.peek() {
+            if next_variant.position == pos {
+                let variant = variant_iter.next().expect("peeked variant must exist");
+                let (overall_fst, pairwise_fst, var_comps, pop_sizes, pairwise_var_comps) =
+                    calculate_fst_wc_at_site_by_population(variant, &sample_to_pop);
+
+                site_fst_values.push(SiteFstWc {
+                    position: ZeroBasedPosition(pos).to_one_based(),
+                    overall_fst,
+                    pairwise_fst,
+                    variance_components: var_comps,
+                    population_sizes: pop_sizes,
+                    pairwise_variance_components: pairwise_var_comps,
+                });
+                continue;
+            }
+        }
+
+        site_fst_values.push(SiteFstWc {
+            position: ZeroBasedPosition(pos).to_one_based(),
+            overall_fst: monomorphic_overall_estimate,
+            pairwise_fst: monomorphic_pairwise_fst.clone(),
+            variance_components: (0.0, 0.0),
+            population_sizes: monomorphic_population_sizes.clone(),
+            pairwise_variance_components: monomorphic_pairwise_var_comps.clone(),
+        });
     }
 
     finish_step_progress("Completed per-site FST calculations for CSV populations");
@@ -837,8 +849,14 @@ mod core_sample_id_tests {
         assert_eq!(core_sample_id("SAMP_01_L"), "SAMP_01");
         assert_eq!(core_sample_id("SAMP_01_R"), "SAMP_01");
         assert_eq!(core_sample_id("NoSuffix"), "NoSuffix");
-        assert_eq!(core_sample_id("Sample_With_Underscores_L"), "Sample_With_Underscores");
-        assert_eq!(core_sample_id("Sample_With_Underscores_R"), "Sample_With_Underscores");
+        assert_eq!(
+            core_sample_id("Sample_With_Underscores_L"),
+            "Sample_With_Underscores"
+        );
+        assert_eq!(
+            core_sample_id("Sample_With_Underscores_R"),
+            "Sample_With_Underscores"
+        );
     }
 }
 
@@ -851,8 +869,8 @@ fn map_samples_to_haplotype_groups(
     let mut sample_id_to_index = HashMap::new();
     for (idx, name) in sample_names.iter().enumerate() {
         let core = core_sample_id(name);
-        sample_id_to_index.insert(core.to_string(), idx);     // core id
-        sample_id_to_index.insert(name.clone(), idx);         // exact id (defensive)
+        sample_id_to_index.insert(core.to_string(), idx); // core id
+        sample_id_to_index.insert(name.clone(), idx); // exact id (defensive)
     }
 
     for (config_sample_name, &(left_group, right_group)) in sample_to_group_map {
@@ -1689,10 +1707,13 @@ pub fn calculate_d_xy_hudson<'a>(
     let d_xy_value = if effective_sequence_length > 0.0 {
         Some(sum_dxy / effective_sequence_length)
     } else {
-        log(LogLevel::Warning, &format!(
-            "Invalid sequence length for Dxy calculation: {}",
-            effective_sequence_length
-        ));
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Invalid sequence length for Dxy calculation: {}",
+                effective_sequence_length
+            ),
+        );
         None
     };
 
@@ -1769,10 +1790,7 @@ impl AlleleCountSummary {
     }
 }
 
-fn freq_map_for_pop(
-    variant: &Variant,
-    haps: &[(usize, HaplotypeSide)],
-) -> AlleleCountSummary {
+fn freq_map_for_pop(variant: &Variant, haps: &[(usize, HaplotypeSide)]) -> AlleleCountSummary {
     let mut summary = AlleleCountSummary::with_capacity(haps.len());
     for &(s, side) in haps {
         if let Some(Some(g)) = variant.genotypes.get(s) {
@@ -2039,33 +2057,41 @@ pub fn calculate_hudson_fst_per_site(
         );
     }
 
-    let variant_map: HashMap<i64, &Variant> = pop1_context
-        .variants
-        .iter()
-        .map(|v| (v.position, v))
-        .collect();
     let mut sites = Vec::with_capacity(region.len() as usize);
+    let mut variant_iter = pop1_context.variants.iter().peekable();
 
     for pos in region.start..=region.end {
-        if let Some(variant) = variant_map.get(&pos) {
-            sites.push(hudson_site_from_variant(
-                variant,
-                &pop1_context.haplotypes,
-                &pop2_context.haplotypes,
-            ));
-        } else {
-            sites.push(SiteFstHudson {
-                position: ZeroBasedPosition(pos).to_one_based(),
-                fst: None,
-                d_xy: None,
-                pi_pop1: None,
-                pi_pop2: None,
-                n1_called: 0,
-                n2_called: 0,
-                num_component: None,
-                den_component: None,
-            });
+        while let Some(next_variant) = variant_iter.peek() {
+            if next_variant.position < pos {
+                variant_iter.next();
+            } else {
+                break;
+            }
         }
+
+        if let Some(next_variant) = variant_iter.peek() {
+            if next_variant.position == pos {
+                let variant = variant_iter.next().expect("peeked variant must exist");
+                sites.push(hudson_site_from_variant(
+                    variant,
+                    &pop1_context.haplotypes,
+                    &pop2_context.haplotypes,
+                ));
+                continue;
+            }
+        }
+
+        sites.push(SiteFstHudson {
+            position: ZeroBasedPosition(pos).to_one_based(),
+            fst: None,
+            d_xy: None,
+            pi_pop1: None,
+            pi_pop2: None,
+            n1_called: 0,
+            n2_called: 0,
+            num_component: None,
+            den_component: None,
+        });
     }
 
     sites
@@ -2245,7 +2271,8 @@ fn calculate_hudson_fst_for_pair_core<'a>(
 ) -> Result<(HudsonFSTOutcome, Vec<SiteFstHudson>), VcfError> {
     if pop1_context.sequence_length != pop2_context.sequence_length {
         return Err(VcfError::Parse(
-            "Sequence length mismatch between population contexts for Hudson FST calculation.".to_string(),
+            "Sequence length mismatch between population contexts for Hudson FST calculation."
+                .to_string(),
         ));
     }
     if !variants_compatible(pop1_context.variants, pop2_context.variants) {
@@ -2263,13 +2290,17 @@ fn calculate_hudson_fst_for_pair_core<'a>(
             Vec::new()
         } else {
             // Process only variant positions instead of creating a full region
-            pop1_context.variants.iter().map(|variant| {
-                hudson_site_from_variant(
-                    variant,
-                    &pop1_context.haplotypes,
-                    &pop2_context.haplotypes,
-                )
-            }).collect()
+            pop1_context
+                .variants
+                .iter()
+                .map(|variant| {
+                    hudson_site_from_variant(
+                        variant,
+                        &pop1_context.haplotypes,
+                        &pop2_context.haplotypes,
+                    )
+                })
+                .collect()
         }
     };
 
@@ -2411,7 +2442,8 @@ pub fn calculate_adjusted_sequence_length(
     }
 
     // Subtract any masked regions from the allowed intervals to get the final unmasked intervals
-    let unmasked_intervals = subtract_regions(&allowed_intervals, mask_regions_chr.map(|v| v.as_slice()));
+    let unmasked_intervals =
+        subtract_regions(&allowed_intervals, mask_regions_chr.map(|v| v.as_slice()));
 
     // Calculate the total length of all unmasked intervals
     let adjusted_length: i64 = unmasked_intervals
@@ -2447,11 +2479,10 @@ pub fn calculate_adjusted_sequence_length(
 }
 
 // Helper function to subtract masked regions from a set of intervals
-fn subtract_regions(
-    intervals: &[(i64, i64)],
-    masks: Option<&[(i64, i64)]>,
-) -> Vec<(i64, i64)> {
-    let Some(masks) = masks else { return intervals.to_vec() };
+fn subtract_regions(intervals: &[(i64, i64)], masks: Option<&[(i64, i64)]>) -> Vec<(i64, i64)> {
+    let Some(masks) = masks else {
+        return intervals.to_vec();
+    };
     let mut out = Vec::new();
 
     for &(a_start, a_end) in intervals {
@@ -2493,7 +2524,7 @@ pub fn calculate_inversion_allele_frequency(
     // Returns Some(frequency) or None if no haplotypes are present
     let mut num_ones = 0; // Counter for haplotypes with allele 1
     let mut total_haplotypes = 0; // Total number of haplotypes (with allele 0 or 1)
-    
+
     for (_sample, &(hap1, hap2)) in sample_filter.iter() {
         // Count each haplotype exactly once if it's 0 or 1
         for allele in [hap1, hap2] {
@@ -2506,7 +2537,7 @@ pub fn calculate_inversion_allele_frequency(
             // Alleles other than 0 or 1 (e.g., missing or bad data) are ignored
         }
     }
-    
+
     if total_haplotypes > 0 {
         // Calculate frequency as the proportion of allele 1 among all counted haplotypes
         Some(num_ones as f64 / total_haplotypes as f64)
@@ -2740,7 +2771,7 @@ pub fn calculate_pi(
         );
         return 0.0;
     }
-    
+
     if seq_length == 0 {
         log(
             LogLevel::Warning,
