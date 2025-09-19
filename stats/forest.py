@@ -16,17 +16,17 @@ OUT_PDF          = "phewas_forest.pdf"
 OUT_PNG          = "phewas_forest.png"
 
 # Layout: explicit box model (data-units on the y-axis)
-HEADER_BOX_H     = 1.80   # height of the header box per inversion
+HEADER_BOX_H     = 3.80   # height of the header box per inversion
 ROW_BOX_H        = 2.60   # height of each phenotype row box
-BLOCK_GAP_H      = 0.50   # vertical gap after a section (breathing room)
+BLOCK_GAP_H      = 0.80   # vertical gap after a section (breathing room)
 
 # Panel widths: [label panel, main plot panel]
 LEFT_RIGHT       = (0.4, 0.6)
 
 # Text & styling
-WRAP_WIDTH       = 42      # phenotype label wrapping width (characters)
-POINT_SIZE_PT2   = 14.0    # tiny, uniform point size (pt^2)
-POINT_EDGE_LW    = 0.55
+WRAP_WIDTH       = 37      # phenotype label wrapping width (characters)
+POINT_SIZE_PT2   = 34.0    # tiny, uniform point size (pt^2)
+POINT_EDGE_LW    = 0.85
 GRID_ALPHA       = 0.28
 BAND_ALPHA       = 0.06
 HEADER_UL_ALPHA  = 0.16
@@ -320,10 +320,10 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     # Figure sizing
     n_rows_total = sum(len(sec["rows"]) for sec in sections)
     
-    row_height_inches = (ROW_BOX_H / 1.70) * 0.24
+    row_height_inches = (ROW_BOX_H / 1.70) * 0.4
     
-    fig_h = max(8.0, min(28.0, 2.3 + n_rows_total * row_height_inches + len(sections) * 0.70))
-    fig_w = 17.0
+    fig_h = max(8.0, min(150.0, 2.3 + n_rows_total * row_height_inches + len(sections) * 0.90))
+    fig_w = 20.0
 
     # Panels
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -420,8 +420,8 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
             x_pt  = float(warp_or_to_axis([or_pt])[0])
 
             axR.hlines(y=yc, xmin=x_lo, xmax=x_hi, color=c, linewidth=2.0, alpha=0.95, zorder=2.2)
-            axR.plot([x_lo, x_lo], [yc-0.12, yc+0.12], color=c, linewidth=1.6, alpha=0.95, zorder=2.25)
-            axR.plot([x_hi, x_hi], [yc-0.12, yc+0.12], color=c, linewidth=1.6, alpha=0.95, zorder=2.25)
+            axR.plot([x_lo, x_lo], [yc-0.22, yc+0.22], color=c, linewidth=1.6, alpha=0.95, zorder=2.25)
+            axR.plot([x_hi, x_hi], [yc-0.22, yc+0.22], color=c, linewidth=1.6, alpha=0.95, zorder=2.25)
             axR.scatter([x_pt], [yc], s=POINT_SIZE_PT2, facecolor=c, edgecolor="black",
                         linewidth=POINT_EDGE_LW, alpha=0.97, zorder=3.0)
 
