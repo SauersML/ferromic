@@ -844,7 +844,7 @@ const INVALID_GROUP: u16 = u16::MAX;
 struct PairDescriptor {
     left: u16,
     right: u16,
-    key: String,
+
 }
 
 #[derive(Clone)]
@@ -857,6 +857,7 @@ struct SubpopulationMembership {
     /// regardless of which comparisons had sufficient data.
     pair_keys: Vec<PairDescriptor>,
 }
+
 
 impl SubpopulationMembership {
     fn from_map(sample_count: usize, map_subpop: &HashMap<(usize, HaplotypeSide), String>) -> Self {
@@ -996,6 +997,29 @@ impl HapMembership {
     }
 }
 
+/// General function to calculate Weir & Cockerham FST components and estimates at a single site.
+///
+/// This function takes a variant and a mapping of haplotypes to subpopulation identifiers.
+/// It calculates allele frequencies per subpopulation, then computes Weir & Cockerham's
+/// variance components 'a' (among populations) and 'b' (within populations).
+/// From these, it derives overall and pairwise FST estimates for the site.
+///
+/// LIMITATION: This implementation is effectively biallelic only. Multi-allelic sites
+/// are collapsed by treating all non-reference alleles (allele_code != 0) as "alternate".
+/// This distorts allele frequencies at truly multi-allelic sites.
+///
+/// # Arguments
+/// * `variant`: The `Variant` data for the site.
+/// * `map_subpop`: A `HashMap` where keys are `(vcf_sample_index, HaplotypeSide)` identifying a haplotype,
+///   and values are `String` identifiers for the subpopulation that haplotype belongs to.
+///
+/// # Returns
+/// A tuple:
+///   - `overall_fst_at_site` (`FstEstimate`): The overall FST estimate for this site across all defined subpopulations.
+///   - `pairwise_fst_estimate_map` (`HashMap<String, FstEstimate>`): Pairwise FST estimates between all pairs of subpopulations.
+///   - `(overall_a, overall_b)` (`(f64, f64)`): The overall variance components 'a' and 'b' for the site.
+///   - `pop_sizes` (`HashMap<String, usize>`): The number of haplotypes sampled per subpopulation at this site.
+///   - `pairwise_variance_components_map` (`HashMap<String, (f64, f64)>`): The (a_xy, b_xy) components for each pair of subpopulations.
 fn fst_estimate_from_components(site_a: f64, site_b: f64) -> FstEstimate {
     let denominator = site_a + site_b;
     let eps = 1e-9;
@@ -1174,6 +1198,7 @@ fn calculate_fst_wc_at_site_with_membership(
 
     workspace.stats.clear();
 
+
     (
         overall_fst_at_site,
         pairwise_fst_estimate_map,
@@ -1182,6 +1207,7 @@ fn calculate_fst_wc_at_site_with_membership(
         pairwise_variance_components_map,
     )
 }
+
 
 fn calculate_variance_components(
     pop_stats: &[PopSiteStat], // (n_i, p_i)
