@@ -262,17 +262,21 @@ _BIN_EDGES: Optional[np.ndarray] = None
 _NUM_BINS: Optional[int] = None
 _MODE: Optional[str] = None   # 'proportion' or 'bp'
 _MAX_BP: Optional[int] = None
+_BIN_RETURN_SUMS: Optional[bool] = None
+_HUDSON_SUMS: Optional[dict] = None
 
-def _pool_init(mode: str, num_bins: int, max_bp: Optional[int]):
+def _pool_init(mode: str, num_bins: int, max_bp: Optional[int], return_sums: bool = False):
     """
     Initializer for workers: set global bin edges and mode.
     - proportion: bins across [0, 1]
     - bp:         bins across [0, MAX_BP]
+    When return_sums is True, the binning kernel returns per-bin sums instead of means.
     """
-    global _BIN_EDGES, _NUM_BINS, _MODE, _MAX_BP
+    global _BIN_EDGES, _NUM_BINS, _MODE, _MAX_BP, _BIN_RETURN_SUMS
     _MODE = mode
     _NUM_BINS = int(num_bins)
     _MAX_BP = int(max_bp) if max_bp is not None else None
+    _BIN_RETURN_SUMS = bool(return_sums)
 
     if mode == "proportion":
         _BIN_EDGES = np.linspace(0.0, 1.0, _NUM_BINS + 1, dtype=np.float64)
@@ -288,9 +292,10 @@ def _pool_init(mode: str, num_bins: int, max_bp: Optional[int]):
 def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
     """
     Map one sequence to distance-from-inversion-edge based on global _MODE, then bin.
-    Returns per-bin MEANS (within-sequence means; length _NUM_BINS_, NaN where empty).
+    When _BIN_RETURN_SUMS is True, returns per-bin sums of values. Otherwise returns per-bin means.
+    Length is _NUM_BINS_. Bins with no data are NaN for means, and 0.0 for sums.
     """
-    global _BIN_EDGES, _NUM_BINS, _MODE, _MAX_BP
+    global _BIN_EDGES, _NUM_BINS, _MODE, _MAX_BP, _BIN_RETURN_SUMS
     if _BIN_EDGES is None or _NUM_BINS is None or _MODE is None:
         raise RuntimeError("Worker not initialized with _pool_init.")
     L = int(seq.shape[0])
@@ -302,23 +307,20 @@ def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
     if not np.any(valid):
         return None
 
-    # distance in bp to nearest inversion edge (0 at edges, ~L/2 at center)
     dist_bp_full = np.minimum(idx, (L - 1) - idx)
 
     if _MODE == "proportion":
-        # normalized distance-from-center (0 = center, 1 = edge)
         halfspan = (L - 1) / 2.0
         dc_center = np.abs(idx - halfspan) / max(halfspan, 1e-9)
         dc_center = np.clip(dc_center, 0.0, 1.0)
 
-        # Apply base-pair cap here too (positions farther than MAX_BP from edge are excluded)
         use = valid
         if _MAX_BP is not None:
             use = valid & (dist_bp_full <= float(_MAX_BP))
         if not np.any(use):
             return None
 
-        xvals = dc_center[use]        # 0=center → 1=edge
+        xvals = dc_center[use]
         vv    = seq[use].astype(np.float64)
 
     elif _MODE == "bp":
@@ -328,7 +330,7 @@ def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
         if not np.any(use):
             return None
 
-        xvals = dist_bp_full[use]     # bp from edge
+        xvals = dist_bp_full[use]
         vv    = seq[use].astype(np.float64)
     else:
         raise RuntimeError("Unknown mode in _bin_one_sequence")
@@ -338,10 +340,14 @@ def _bin_one_sequence(seq: np.ndarray) -> Optional[np.ndarray]:
     sums   = np.bincount(bi, weights=vv, minlength=_NUM_BINS).astype(np.float64)
     counts = np.bincount(bi, minlength=_NUM_BINS).astype(np.int32)
 
+    if _BIN_RETURN_SUMS:
+        return sums
+
     means = np.full(_NUM_BINS, np.nan, dtype=np.float64)
     nz = counts > 0
     means[nz] = sums[nz] / counts[nz]
     return means
+
 
 # --------------------- AGGREGATION --------------------------
 
@@ -702,29 +708,94 @@ def _collect_grouped_means(which: str,
     """
     Iterate falsta, assign each record to a group using fuzzy_map (±1 bp),
     and compute per-sequence binned means for the requested mode ('proportion' or 'bp').
-
+    For Hudson FST, uses numerator/denominator records to compute ratio-of-sums per bin.
     Returns:
-       per_group_means: group -> list of per-seq means
+       per_group_means: group -> list of per-seq values (means for π; per-seq ratios for FST)
        per_group_counts: group -> number of sequences contributing
     """
+    global _HUDSON_SUMS
     per_group_means = defaultdict(list)
     per_group_counts = Counter()
 
     log.info(f"[{which}/{mode}] scanning sequences and assigning groups...")
-    seqs_with_meta: List[Tuple[str, Optional[str], np.ndarray]] = []
 
+    if which == "hudson":
+        by_coords: Dict[Tuple[str,int,int], dict] = {}
+        for rec in _iter_falsta(falsta, which=which, min_len=min_len):
+            c = rec["coords"]
+            key = (c["chrom"], c["start"], c["end"])
+            recur = fuzzy_map.get(key, "uncategorized")
+            d = by_coords.setdefault(key, {"recur": recur, "num": None, "den": None, "header": rec.get("header", "")})
+            h = rec.get("header", "")
+            hl = h.lower()
+            if "numerator" in hl:
+                d["num"] = rec["data"]
+            elif "denominator" in hl:
+                d["den"] = rec["data"]
+            else:
+                pass
+
+        pairs = [(k, v) for k, v in by_coords.items() if v["num"] is not None and v["den"] is not None]
+        if not pairs:
+            log.warning(f"[{which}/{mode}] No numerator/denominator pairs found.")
+            _HUDSON_SUMS = None
+            return per_group_means, per_group_counts
+
+        groups = []
+        nums = []
+        dens = []
+        for (chrom, s, e), v in pairs:
+            gkey = v["recur"] if v["recur"] in ("single-event", "recurrent") else "uncategorized"
+            groups.append(gkey)
+            nums.append(v["num"])
+            dens.append(v["den"])
+
+        with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(mode, num_bins, max_bp, True)) as pool:
+            binned_num_sums = pool.map(_bin_one_sequence, nums, chunksize=max(1, len(nums)//(N_CORES*4) if nums else 1))
+        with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(mode, num_bins, max_bp, True)) as pool:
+            binned_den_sums = pool.map(_bin_one_sequence, dens, chunksize=max(1, len(dens)//(N_CORES*4) if dens else 1))
+
+        hud_num_tot = defaultdict(lambda: np.zeros(num_bins, dtype=float))
+        hud_den_tot = defaultdict(lambda: np.zeros(num_bins, dtype=float))
+
+        for gkey, nsum, dsum in zip(groups, binned_num_sums, binned_den_sums):
+            if nsum is None or dsum is None:
+                continue
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratio = np.where(dsum > 0, nsum / dsum, np.nan)
+            per_group_means[gkey].append(ratio)
+            per_group_counts[gkey] += 1
+            if gkey != "uncategorized":
+                per_group_means["overall"].append(ratio)
+                per_group_counts["overall"] += 1
+
+            hud_num_tot[gkey] += np.nan_to_num(nsum, nan=0.0)
+            hud_den_tot[gkey] += np.nan_to_num(dsum, nan=0.0)
+            if gkey != "uncategorized":
+                hud_num_tot["overall"] += np.nan_to_num(nsum, nan=0.0)
+                hud_den_tot["overall"] += np.nan_to_num(dsum, nan=0.0)
+
+        _HUDSON_SUMS = {"num": hud_num_tot, "den": hud_den_tot}
+
+        for g in ["recurrent", "single-event", "uncategorized", "overall"]:
+            if per_group_counts.get(g, 0):
+                log.info(f"[{which}/{mode}] N {g:>22} = {per_group_counts[g]}")
+
+        return per_group_means, per_group_counts
+
+    seqs_with_meta: List[Tuple[str, Optional[str], np.ndarray]] = []
     for rec in _iter_falsta(falsta, which=which, min_len=min_len):
         c = rec["coords"]
         key = (c["chrom"], c["start"], c["end"])
         recur = fuzzy_map.get(key, "uncategorized")
-        orient = rec.get("orient", None)  # 'direct'/'inverted' for pi; None for hudson
+        orient = rec.get("orient", None)
         seqs_with_meta.append((recur, orient, rec["data"]))
 
     if not seqs_with_meta:
         log.warning(f"[{which}/{mode}] No sequences to bin.")
         return per_group_means, per_group_counts
 
-    with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(mode, num_bins, max_bp)) as pool:
+    with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(mode, num_bins, max_bp, False)) as pool:
         per_means = pool.map(
             _bin_one_sequence,
             [x[2] for x in seqs_with_meta],
@@ -745,20 +816,20 @@ def _collect_grouped_means(which: str,
 
         per_group_means[gkey].append(m)
         per_group_counts[gkey] += 1
-        # Only include categorized sequences in 'overall' (exclude uncategorized)
         if gkey != "uncategorized":
             per_group_means["overall"].append(m)
             per_group_counts["overall"] += 1
 
-    log_groups = (["direct-recurrent","direct-single-event",
-                   "inverted-recurrent","inverted-single-event"]
-                  if which == "pi" else ["recurrent","single-event"])
-    log_groups += ["uncategorized","overall"]
+    log_groups = (["direct-recurrent", "direct-single-event",
+                   "inverted-recurrent", "inverted-single-event"]
+                  if which == "pi" else ["recurrent", "single-event"])
+    log_groups += ["uncategorized", "overall"]
     for g in log_groups:
         if per_group_counts.get(g, 0):
             log.info(f"[{which}/{mode}] N {g:>22} = {per_group_counts[g]}")
 
     return per_group_means, per_group_counts
+
 
 def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       per_group_counts: Dict[str,int],
@@ -772,25 +843,25 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       agg_kind: str):
     """
     Build tables, compute stats, and plot for given mode.
-
-    agg_kind ∈ {'mean','median'} controls whether we aggregate across inversions by mean or median.
+    For Hudson FST, the plotted central tendency per bin is the ratio of summed numerators to summed denominators across sequences.
+    agg_kind ∈ {'mean','median'} controls whether we aggregate across inversions by mean or median for the per-sequence values used in SEM.
     """
-    # Build x-axis centers for this mode
+    global _HUDSON_SUMS
+
     if mode == "proportion":
         edges = np.linspace(0.0, 1.0, num_bins + 1, dtype=np.float64)
-        centers_dc = (edges[:-1] + edges[1:]) / 2.0  # distance-from-center (0=center,1=edge)
-        dist_edge = 1.0 - centers_dc                  # 0=edge → 1=center (as label)
+        centers_dc = (edges[:-1] + edges[1:]) / 2.0
+        dist_edge = 1.0 - centers_dc
         x_centers = dist_edge
         x_label   = "Normalized distance from inversion edge (0 = edge, 1 = center)"
     elif mode == "bp":
         assert max_bp is not None and max_bp > 0
         edges = np.linspace(0.0, float(max_bp), num_bins + 1, dtype=np.float64)
-        x_centers = (edges[:-1] + edges[1:]) / 2.0  # bp from inversion edge
+        x_centers = (edges[:-1] + edges[1:]) / 2.0
         x_label   = f"Distance from inversion edge (bp; capped at {max_bp:,})"
     else:
         raise ValueError("mode must be 'proportion' or 'bp'")
 
-    # Aggregate per group
     if which == "pi":
         color_map = {
             "direct-recurrent":      COLOR_DIRECT,
@@ -803,7 +874,7 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       "inverted-recurrent","inverted-single-event","overall"]
     else:
         color_map = {
-            "recurrent": COLOR_DIRECT,     # band/scatter tint
+            "recurrent": COLOR_DIRECT,
             "single-event": COLOR_INVERTED,
             "overall": COLOR_OVERALL,
         }
@@ -819,6 +890,14 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
         if not seqs:
             continue
         mean_per, se_per, nseq_per = aggregator(seqs)
+
+        if which == "hudson" and _HUDSON_SUMS is not None:
+            num_tot = _HUDSON_SUMS["num"].get(grp) if isinstance(_HUDSON_SUMS.get("num"), dict) else None  # type: ignore[attr-defined]
+            den_tot = _HUDSON_SUMS["den"].get(grp) if isinstance(_HUDSON_SUMS.get("den"), dict) else None  # type: ignore[attr-defined]
+            if num_tot is not None and den_tot is not None:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    weighted = np.where(den_tot > 0, num_tot / den_tot, np.nan)
+                mean_per = weighted
 
         plot_mask = (nseq_per >= MIN_INV_PER_BIN)
 
@@ -844,7 +923,7 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                 "group": grp,
                 "bin_index": bi,
                 "x_center": x_centers[bi],
-                "mean_value": mean_per[bi],              # (median when agg_kind=='median')
+                "mean_value": mean_per[bi],
                 "stderr_value": se_per[bi],
                 "n_sequences_in_bin": int(nseq_per[bi]),
                 "plotting_allowed": bool(plot_mask[bi]),

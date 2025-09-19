@@ -2,6 +2,7 @@ import os
 import json
 import pandas as pd
 import numpy as np
+from scipy.stats import chi2
 from statsmodels.stats.multitest import multipletests
 from . import models
 from . import iox as io
@@ -49,6 +50,165 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
     ctx_tags = ctx_tags or {}
     mode = (mode or DEFAULTS["MODE"]).lower()
     selection = (selection or DEFAULTS["SELECTION"]).lower()
+
+    def _attach_ci_display(df_in):
+        if not isinstance(df_in, pd.DataFrame) or df_in.empty:
+            return df_in
+        if "Beta" not in df_in.columns:
+            return df_in
+        pcol = None
+        for c in ["P_Value", "P_LRT_Overall", "P_EMP"]:
+            if c in df_in.columns:
+                pcol = c
+                break
+        if pcol is None:
+            raise RuntimeError("No p-value column found to build Wald fallbacks.")
+
+        beta_series = pd.to_numeric(df_in["Beta"], errors="coerce")
+        p_series = pd.to_numeric(df_in[pcol], errors="coerce")
+        if "P_Source" in df_in.columns:
+            allowed_sources = {"lrt_mle", "lrt_firth", "score_chi2"}
+            source_allowed = df_in["P_Source"].isin(allowed_sources) | df_in["P_Source"].isna()
+        else:
+            source_allowed = pd.Series(True, index=df_in.index, dtype=bool)
+        ci_valid_vals = (
+            df_in["CI_Valid"].fillna(False).astype(bool)
+            if "CI_Valid" in df_in.columns
+            else pd.Series(False, index=df_in.index, dtype=bool)
+        )
+        p_valid_vals = (
+            df_in["P_Valid"].fillna(False).astype(bool)
+            if "P_Valid" in df_in.columns
+            else pd.Series(True, index=df_in.index, dtype=bool)
+        )
+        beta_finite = beta_series.replace([np.inf, -np.inf], np.nan).notna()
+        p_finite = p_series.replace([np.inf, -np.inf], np.nan).notna()
+
+        df_in["CI_Method_Patch"] = df_in.get("CI_Method")
+        df_in["CI_Label_Patch"] = df_in.get("CI_Label")
+        df_in["CI_Sided_Patch"] = df_in.get("CI_Sided")
+        df_in["CI_Valid_Patch"] = df_in.get("CI_Valid")
+        df_in["CI_LO_OR_Patch"] = df_in.get("CI_LO_OR")
+        df_in["CI_HI_OR_Patch"] = df_in.get("CI_HI_OR")
+        df_in["OR_CI95_Patch"] = df_in.get("OR_CI95")
+
+        needs_patch = (
+            (~ci_valid_vals)
+            & p_valid_vals
+            & beta_finite
+            & p_finite
+            & (p_series > 0)
+            & (p_series < 1)
+            & source_allowed
+        )
+
+        if bool(needs_patch.any()):
+            pvals = p_series.loc[needs_patch].astype(float).clip(1e-300, 1 - 1e-16)
+            betas = beta_series.loc[needs_patch].astype(float)
+            z = np.sqrt(chi2.isf(pvals, df=1))
+            se = betas.abs() / np.maximum(z, 1e-12)
+            lo_beta = betas - 1.96 * se
+            hi_beta = betas + 1.96 * se
+            lo_or = np.exp(lo_beta)
+            hi_or = np.exp(hi_beta)
+
+            df_in.loc[needs_patch, "CI_Method_Patch"] = "wald_from_p"
+            df_in.loc[needs_patch, "CI_Label_Patch"] = "posthoc (no refit)"
+            df_in.loc[needs_patch, "CI_Sided_Patch"] = "two"
+            df_in.loc[needs_patch, "CI_Valid_Patch"] = True
+            df_in.loc[needs_patch, "CI_LO_OR_Patch"] = lo_or
+            df_in.loc[needs_patch, "CI_HI_OR_Patch"] = hi_or
+            df_in.loc[needs_patch, "OR_CI95_Patch"] = [
+                models._fmt_ci(lo, hi) for lo, hi in zip(lo_or, hi_or)
+            ]
+
+        ci_valid_orig = (
+            df_in["CI_Valid"].fillna(False).astype(bool)
+            if "CI_Valid" in df_in.columns
+            else pd.Series(False, index=df_in.index, dtype=bool)
+        )
+        ci_valid_patch = (
+            df_in["CI_Valid_Patch"].fillna(False).astype(bool)
+            if "CI_Valid_Patch" in df_in.columns
+            else pd.Series(False, index=df_in.index, dtype=bool)
+        )
+        ci_method_orig = (
+            df_in["CI_Method"]
+            if "CI_Method" in df_in.columns
+            else pd.Series([None] * len(df_in), index=df_in.index, dtype=object)
+        )
+        ci_method_patch = (
+            df_in["CI_Method_Patch"]
+            if "CI_Method_Patch" in df_in.columns
+            else pd.Series([None] * len(df_in), index=df_in.index, dtype=object)
+        )
+        or_ci95_orig = (
+            df_in["OR_CI95"]
+            if "OR_CI95" in df_in.columns
+            else pd.Series([None] * len(df_in), index=df_in.index, dtype=object)
+        )
+        or_ci95_patch = (
+            df_in["OR_CI95_Patch"]
+            if "OR_CI95_Patch" in df_in.columns
+            else pd.Series([None] * len(df_in), index=df_in.index, dtype=object)
+        )
+        ci_lo_or_orig = (
+            df_in["CI_LO_OR"]
+            if "CI_LO_OR" in df_in.columns
+            else pd.Series(np.nan, index=df_in.index, dtype=float)
+        )
+        ci_lo_or_patch = (
+            df_in["CI_LO_OR_Patch"]
+            if "CI_LO_OR_Patch" in df_in.columns
+            else pd.Series(np.nan, index=df_in.index, dtype=float)
+        )
+        ci_hi_or_orig = (
+            df_in["CI_HI_OR"]
+            if "CI_HI_OR" in df_in.columns
+            else pd.Series(np.nan, index=df_in.index, dtype=float)
+        )
+        ci_hi_or_patch = (
+            df_in["CI_HI_OR_Patch"]
+            if "CI_HI_OR_Patch" in df_in.columns
+            else pd.Series(np.nan, index=df_in.index, dtype=float)
+        )
+
+        ci_valid_orig_np = ci_valid_orig.to_numpy(dtype=bool)
+        ci_valid_patch_np = ci_valid_patch.to_numpy(dtype=bool)
+        df_in["CI_Valid_DISPLAY"] = np.where(
+            ci_valid_orig_np,
+            True,
+            np.where(ci_valid_patch_np, True, False),
+        )
+        df_in["CI_Method_DISPLAY"] = np.where(
+            ci_valid_orig_np,
+            ci_method_orig.astype(object).to_numpy(),
+            np.where(ci_valid_patch_np, ci_method_patch.astype(object).to_numpy(), None),
+        )
+        df_in["OR_CI95_DISPLAY"] = np.where(
+            ci_valid_orig_np,
+            or_ci95_orig.astype(object).to_numpy(),
+            np.where(ci_valid_patch_np, or_ci95_patch.astype(object).to_numpy(), None),
+        )
+        df_in["CI_LO_OR_DISPLAY"] = np.where(
+            ci_valid_orig_np,
+            pd.to_numeric(ci_lo_or_orig, errors="coerce").to_numpy(),
+            np.where(
+                ci_valid_patch_np,
+                pd.to_numeric(ci_lo_or_patch, errors="coerce").to_numpy(),
+                np.nan,
+            ),
+        )
+        df_in["CI_HI_OR_DISPLAY"] = np.where(
+            ci_valid_orig_np,
+            pd.to_numeric(ci_hi_or_orig, errors="coerce").to_numpy(),
+            np.where(
+                ci_valid_patch_np,
+                pd.to_numeric(ci_hi_or_patch, errors="coerce").to_numpy(),
+                np.nan,
+            ),
+        )
+        return df_in
     if mode == "lrt_bh":
         rows = []
         for inv in inversions:
@@ -90,6 +250,7 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
             _, q, _, _ = multipletests(df.loc[mask, "P_LRT_Overall"], alpha=alpha, method="fdr_bh")
             df.loc[mask, "Q_GLOBAL"] = q
         df["Sig_Global"] = df["Q_GLOBAL"] < alpha
+        df = _attach_ci_display(df)
         return df, {}
 
     if selection != "bh_empirical":
@@ -135,6 +296,7 @@ def consolidate_and_select(df, inversions, cache_root, alpha=0.05,
         _, q, _, _ = multipletests(df.loc[mask, "P_EMP"], alpha=alpha, method="fdr_bh")
         df.loc[mask, "Q_GLOBAL"] = q
     df["Sig_Global"] = df["Q_GLOBAL"] < alpha
+    df = _attach_ci_display(df)
     return df, {}
 
 
