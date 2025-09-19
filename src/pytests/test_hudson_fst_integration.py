@@ -91,6 +91,14 @@ def test_hudson_fst_matches_scikit_allel_ratio_of_sums(hudson_dataset):
     expected_fst = float(numerator.sum() / denominator.sum())
     expected_dxy = float(denominator.sum() / SEQUENCE_LENGTH)
 
+    print(
+        "hudson_fst aggregate:",
+        {
+            "fst": {"actual": result.fst, "expected": expected_fst},
+            "d_xy": {"actual": result.d_xy, "expected": expected_dxy},
+        },
+    )
+
     assert result.fst == pytest.approx(expected_fst, rel=1e-12)
     assert result.d_xy == pytest.approx(expected_dxy, rel=1e-12)
 
@@ -106,6 +114,11 @@ def test_hudson_fst_site_components_align_with_scikit_allel(hudson_dataset):
     numerator = hudson_dataset["numerator"]
     denominator = hudson_dataset["denominator"]
     expected_fst = float(numerator.sum() / denominator.sum())
+    print(
+        "hudson_fst_with_sites aggregate:",
+        {"fst": {"actual": result.fst, "expected": expected_fst}},
+    )
+
     assert result.fst == pytest.approx(expected_fst, rel=1e-12)
 
     informative_sites = [
@@ -122,6 +135,18 @@ def test_hudson_fst_site_components_align_with_scikit_allel(hudson_dataset):
         expected_site_fst = expected_num / expected_den
 
         assert site.position == position
+        print(
+            "hudson_fst_with_sites site:",
+            {
+                "position": position,
+                "numerator": {"actual": site.numerator_component, "expected": expected_num},
+                "denominator": {
+                    "actual": site.denominator_component,
+                    "expected": expected_den,
+                },
+                "fst": {"actual": site.fst, "expected": expected_site_fst},
+            },
+        )
         assert site.numerator_component == pytest.approx(expected_num, rel=1e-12)
         assert site.denominator_component == pytest.approx(expected_den, rel=1e-12)
         assert site.fst == pytest.approx(expected_site_fst, rel=1e-12)

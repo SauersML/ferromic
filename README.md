@@ -182,9 +182,10 @@ Python data structures.
 
 ### Building the extension module
 
-1. Install Python 3.8+ and the [maturin](https://github.com/PyO3/maturin) build tool:
+1. Install Python 3.8+ and the [maturin](https://github.com/PyO3/maturin) build tool
+   (include the optional `patchelf` dependency on Linux to enable rpath fixing):
    ```bash
-   python -m pip install maturin
+   python -m pip install "maturin[patchelf]"
    ```
 2. Compile and install the extension into your active virtual environment:
    ```bash
