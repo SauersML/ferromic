@@ -7,6 +7,7 @@ use crate::progress::{
 };
 use rayon::iter::IntoParallelIterator;
 use rayon::prelude::*;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs::File;
@@ -1663,11 +1664,11 @@ pub fn calculate_d_xy_hudson<'a>(
 
     for variant in pop1_context.variants {
         // Get allele counts for both populations at this variant
-        let (n1, counts1) = freq_map_for_pop(variant, &pop1_context.haplotypes);
-        let (n2, counts2) = freq_map_for_pop(variant, &pop2_context.haplotypes);
+        let counts1 = freq_map_for_pop(variant, &pop1_context.haplotypes);
+        let counts2 = freq_map_for_pop(variant, &pop2_context.haplotypes);
 
         // Calculate per-site Dxy using existing helper
-        if let Some(dxy_site) = dxy_from_counts(n1, &counts1, n2, &counts2) {
+        if let Some(dxy_site) = dxy_from_counts(&counts1, &counts2) {
             sum_dxy += dxy_site;
             variant_count += 1;
         }
@@ -1704,8 +1705,8 @@ pub fn calculate_d_xy_hudson<'a>(
 /// This function implements the "complete case analysis" approach for missing data:
 /// - Only counts haplotypes with called genotypes at this site
 /// - Missing genotypes (None) are excluded from frequency calculations
-/// - Returns the number of successfully called haplotypes (n_called)
-/// - Allele frequencies are computed as count/n_called using only available data
+/// - Returns an [`AlleleCountSummary`] capturing the number of called haplotypes,
+///   per-allele tallies, and Σ count² for downstream calculations
 ///
 /// Why This Approach:
 /// 1. Unbiased estimation: Using only called haplotypes gives unbiased allele frequencies
@@ -1716,21 +1717,76 @@ pub fn calculate_d_xy_hudson<'a>(
 /// Mathematical Impact:
 /// The resulting frequencies {p_a} are computed from n_called haplotypes, making
 /// the downstream π and D_xy calculations appropriate for the actual available data.
-fn freq_map_for_pop(
-    variant: &Variant,
-    haps: &[(usize, HaplotypeSide)],
-) -> (usize, HashMap<i32, usize>) {
-    let mut n_called = 0usize;
-    let mut counts: HashMap<i32, usize> = HashMap::new();
-    for &(s, side) in haps {
-        if let Some(Some(g)) = variant.genotypes.get(s) {
-            if let Some(&a) = g.get(side as usize) {
-                n_called += 1;
-                *counts.entry(a as i32).or_insert(0) += 1;
+#[derive(Clone, Debug)]
+struct AlleleCountSummary {
+    total_called: usize,
+    sum_counts_sq: f64,
+    counts: Vec<(i32, usize)>,
+}
+
+impl AlleleCountSummary {
+    #[inline]
+    fn with_capacity(capacity_hint: usize) -> Self {
+        Self {
+            total_called: 0,
+            sum_counts_sq: 0.0,
+            counts: Vec::with_capacity(capacity_hint.min(8)),
+        }
+    }
+
+    #[inline]
+    fn record(&mut self, allele: i32) {
+        self.total_called += 1;
+        match self
+            .counts
+            .binary_search_by_key(&allele, |&(stored, _)| stored)
+        {
+            Ok(idx) => {
+                let entry = &mut self.counts[idx];
+                self.sum_counts_sq += (2 * entry.1 + 1) as f64;
+                entry.1 += 1;
+            }
+            Err(idx) => {
+                self.counts.insert(idx, (allele, 1));
+                self.sum_counts_sq += 1.0;
             }
         }
     }
-    (n_called, counts)
+
+    #[inline]
+    fn total_called(&self) -> usize {
+        self.total_called
+    }
+
+    #[inline]
+    fn distinct_alleles(&self) -> usize {
+        self.counts.len()
+    }
+
+    #[inline]
+    fn sum_counts_sq(&self) -> f64 {
+        self.sum_counts_sq
+    }
+
+    #[inline]
+    fn entries(&self) -> &[(i32, usize)] {
+        &self.counts
+    }
+}
+
+fn freq_map_for_pop(
+    variant: &Variant,
+    haps: &[(usize, HaplotypeSide)],
+) -> AlleleCountSummary {
+    let mut summary = AlleleCountSummary::with_capacity(haps.len());
+    for &(s, side) in haps {
+        if let Some(Some(g)) = variant.genotypes.get(s) {
+            if let Some(&a) = g.get(side as usize) {
+                summary.record(a as i32);
+            }
+        }
+    }
+    summary
 }
 
 /// Compute per-site nucleotide diversity (π) using the unbiased estimator.
@@ -1752,18 +1808,18 @@ fn freq_map_for_pop(
 ///
 /// Missing Data Handling:
 /// Only uses called haplotypes at this site; n and {p_a} are computed from available data.
-fn pi_from_counts(n: usize, counts: &HashMap<i32, usize>) -> Option<f64> {
+#[inline]
+fn pi_from_summary(summary: &AlleleCountSummary) -> Option<f64> {
+    let n = summary.total_called();
     if n < 2 {
         return None;
     }
-    let sum_p2 = counts
-        .values()
-        .map(|&c| {
-            let p = c as f64 / n as f64;
-            p * p
-        })
-        .sum::<f64>();
-    Some((n as f64) / (n as f64 - 1.0) * (1.0 - sum_p2))
+
+    let n_f64 = n as f64;
+    let inv_n = 1.0 / n_f64;
+    let sum_p2 = summary.sum_counts_sq() * inv_n * inv_n;
+
+    Some(n_f64 / (n_f64 - 1.0) * (1.0 - sum_p2))
 }
 
 /// Compute between-population diversity (D_xy) from allele counts.
@@ -1784,19 +1840,29 @@ fn pi_from_counts(n: usize, counts: &HashMap<i32, usize>) -> Option<f64> {
 ///
 /// Missing Data Handling:
 /// Uses only called haplotypes from each population at this site to compute frequencies.
-fn dxy_from_counts(
-    n1: usize,
-    c1: &HashMap<i32, usize>,
-    n2: usize,
-    c2: &HashMap<i32, usize>,
-) -> Option<f64> {
+fn dxy_from_counts(c1: &AlleleCountSummary, c2: &AlleleCountSummary) -> Option<f64> {
+    let n1 = c1.total_called();
+    let n2 = c2.total_called();
     if n1 == 0 || n2 == 0 {
         return None;
     }
     let mut dot = 0.0_f64;
-    for (allele, &k1) in c1.iter() {
-        if let Some(&k2) = c2.get(allele) {
-            dot += (k1 as f64 / n1 as f64) * (k2 as f64 / n2 as f64);
+    let entries1 = c1.entries();
+    let entries2 = c2.entries();
+    let mut i = 0usize;
+    let mut j = 0usize;
+    let inv1 = 1.0 / n1 as f64;
+    let inv2 = 1.0 / n2 as f64;
+
+    while i < entries1.len() && j < entries2.len() {
+        match entries1[i].0.cmp(&entries2[j].0) {
+            Ordering::Less => i += 1,
+            Ordering::Greater => j += 1,
+            Ordering::Equal => {
+                dot += (entries1[i].1 as f64 * inv1) * (entries2[j].1 as f64 * inv2);
+                i += 1;
+                j += 1;
+            }
         }
     }
     // Clamp to [0,1] to handle floating-point errors in multi-allelic tallies
@@ -1841,12 +1907,15 @@ fn hudson_site_from_variant(
     pop1_haps: &[(usize, HaplotypeSide)],
     pop2_haps: &[(usize, HaplotypeSide)],
 ) -> SiteFstHudson {
-    let (n1, counts1) = freq_map_for_pop(variant, pop1_haps);
-    let (n2, counts2) = freq_map_for_pop(variant, pop2_haps);
+    let counts1 = freq_map_for_pop(variant, pop1_haps);
+    let counts2 = freq_map_for_pop(variant, pop2_haps);
 
-    let pi1 = pi_from_counts(n1, &counts1);
-    let pi2 = pi_from_counts(n2, &counts2);
-    let dxy = dxy_from_counts(n1, &counts1, n2, &counts2);
+    let n1 = counts1.total_called();
+    let n2 = counts2.total_called();
+
+    let pi1 = pi_from_summary(&counts1);
+    let pi2 = pi_from_summary(&counts2);
+    let dxy = dxy_from_counts(&counts1, &counts2);
 
     let (fst, num_c, den_c) = match (dxy, pi1, pi2) {
         (Some(d), Some(p1), Some(p2)) => {
@@ -2627,21 +2696,20 @@ pub fn calculate_pi(
         seq_length
     ));
 
-    // Use unbiased per-site aggregation approach
-    let mut sum_pi = 0.0;
-    let mut variant_count = 0;
-
-    for variant in variants {
-        // Get allele counts for this variant using existing helper
-        let (n_called, allele_counts) = freq_map_for_pop(variant, haplotypes_in_group);
-
-        // Calculate per-site π using existing helper
-        if let Some(pi_site) = pi_from_counts(n_called, &allele_counts) {
-            sum_pi += pi_site;
-            variant_count += 1;
-        }
-        // Monomorphic sites contribute 0 implicitly (not added to sum_pi)
-    }
+    // Use unbiased per-site aggregation approach with parallel processing for large variant sets
+    let (sum_pi, variant_count) = variants
+        .par_iter()
+        .map(|variant| {
+            let summary = freq_map_for_pop(variant, haplotypes_in_group);
+            match pi_from_summary(&summary) {
+                Some(pi_site) => (pi_site, 1usize),
+                None => (0.0, 0usize),
+            }
+        })
+        .reduce(
+            || (0.0, 0usize),
+            |(sum_a, count_a), (sum_b, count_b)| (sum_a + sum_b, count_a + count_b),
+        );
 
     // Final π = sum of per-site π values divided by sequence length
     // Monomorphic sites (including those not in variants list) contribute 0
@@ -2764,40 +2832,26 @@ pub fn calculate_per_site_diversity(
         // Process the current position
         if let Some(var) = variant_map.get(&pos) {
             // Variant exists at this position; compute diversity metrics
-            let mut allele_counts = HashMap::new(); // Map to count occurrences of each allele
-            let mut total_called = 0; // Number of haplotypes with non-missing alleles
+            let mut summary = AlleleCountSummary::with_capacity(haplotypes_in_group.len());
 
             for &(sample_index, side) in haplotypes_in_group {
                 if let Some(gt_opt) = var.genotypes.get(sample_index) {
                     if let Some(gt) = gt_opt {
                         if let Some(&allele) = gt.get(side as usize) {
-                            // Increment count for this allele and total called haplotypes
-                            allele_counts
-                                .entry(allele)
-                                .and_modify(|count| *count += 1)
-                                .or_insert(1);
-                            total_called += 1;
+                            summary.record(allele as i32);
                         }
                     }
                 }
             }
 
+            let total_called = summary.total_called();
+
             let (pi_value, watterson_value) = if total_called < 2 {
                 // Fewer than 2 haplotypes with data; diversity is 0
                 (0.0, 0.0)
             } else {
-                // Compute sum of squared allele frequencies for π calculation
-                let mut freq_sq_sum = 0.0;
-                for count in allele_counts.values() {
-                    let freq = *count as f64 / total_called as f64;
-                    freq_sq_sum += freq * freq;
-                }
-                // Calculate π with the unbiased estimator: (n / (n-1)) * (1 - Σ p_i^2)
-                let pi_value =
-                    (total_called as f64 / (total_called as f64 - 1.0)) * (1.0 - freq_sq_sum);
-
                 // Calculate Watterson's θ for this site
-                let distinct_alleles = allele_counts.len();
+                let distinct_alleles = summary.distinct_alleles();
                 let watterson_value = if distinct_alleles > 1 {
                     // Site is polymorphic; θ_w = 1 / H_{n-1}
                     let denom = harmonic(total_called - 1);
@@ -2809,6 +2863,7 @@ pub fn calculate_per_site_diversity(
                 } else {
                     0.0 // Monomorphic site; θ_w = 0
                 };
+                let pi_value = pi_from_summary(&summary).unwrap_or(0.0);
                 (pi_value, watterson_value)
             };
 
@@ -2923,8 +2978,8 @@ pub fn calculate_per_site_diversity(
 // - The factor n / (n - 1) adjusts for the fact that sample variance underestimates population variance.
 //
 // Implementation in Code:
-// - freq_sq_sum computes Σ p_i^2 by summing the squared frequencies of each allele.
-// - pi_value = (total_called / (total_called - 1)) * (1 - freq_sq_sum) applies the unbiased formula.
+// - `AlleleCountSummary` accumulates Σ count_i² during tallying so no extra pass is needed.
+// - `pi_from_summary` converts those tallies into π using the unbiased estimator.
 //
 // Why the Correction?: Without the n / (n - 1) factor, π would be downwardly biased, especially
 // for small n. For example, with n = 2, if one haplotype has allele A and the other T:
