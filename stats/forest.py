@@ -319,11 +319,15 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
 
     # Figure sizing
     n_rows_total = sum(len(sec["rows"]) for sec in sections)
-    fig_h = max(8.0, min(28.0, 2.3 + n_rows_total * 0.24 + len(sections) * 0.70))
+    
+    row_height_inches = (ROW_BOX_H / 1.70) * 0.24
+    
+    fig_h = max(8.0, min(28.0, 2.3 + n_rows_total * row_height_inches + len(sections) * 0.70))
     fig_w = 17.0
 
     # Panels
     fig = plt.figure(figsize=(fig_w, fig_h))
+
     gs = fig.add_gridspec(nrows=1, ncols=2, width_ratios=LEFT_RIGHT, wspace=0.05)
     axL = fig.add_subplot(gs[0, 0])  # label panel
     axR = fig.add_subplot(gs[0, 1])  # main plot panel
