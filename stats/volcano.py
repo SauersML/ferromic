@@ -285,8 +285,13 @@ def plot_volcano(df, out_pdf):
     y_fdr = -np.log10(p_cut) if (isinstance(p_cut, (int, float)) and np.isfinite(p_cut) and p_cut > 0) else np.nan
     fdr_label = f"BH FDR 0.05 (p ≤ {p_cut:.2e})" if np.isfinite(y_fdr) else "BH FDR 0.05"
 
-    # Minimum -log10(p) required for both plotting and labeling
-    LABEL_MIN_Y = 2.0
+    # Dynamically set the labeling threshold to a q-value alpha
+    p_cut_labeling = bh_fdr_cutoff(df["P_LRT_Overall"].to_numpy(), alpha=0.06)
+    if p_cut_labeling is not None and np.isfinite(p_cut_labeling) and p_cut_labeling > 0:
+        LABEL_MIN_Y = -np.log10(p_cut_labeling)
+    else:
+        # If no points meet the threshold, set an impossibly high value to label nothing.
+        LABEL_MIN_Y = np.inf
 
     # X-limits: show ALL data (entirely in log space via lnOR; symmetric around 0 == OR 1)
     xabs = np.abs(df["lnOR"].to_numpy())
@@ -373,9 +378,6 @@ def plot_volcano(df, out_pdf):
     except Exception:
         rk = pd.Series(abs_ln).rank(method="average", pct=True).to_numpy()
         df["bin10"] = (10 - np.ceil(rk * 10).astype(int)) + 1
-
-    # Do not attempt to label below threshold
-    LABEL_MIN_Y = 2.0  # Only keep points with -log10(p) >= 2
 
     DX_LABEL_PX = 8.0
     DY_LABEL_PX = 2.0
