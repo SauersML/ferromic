@@ -9,6 +9,8 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import FancyArrowPatch
 from matplotlib import colors as mcolors
 
+from _inv_common import map_inversion_series
+
 INPUT_FILE = "phewas_results.tsv"
 OUTPUT_PDF = "phewas_volcano.pdf"
 
@@ -72,6 +74,7 @@ def load_and_prepare(path):
             raise SystemExit(f"ERROR: missing required column '{c}' in {path}")
 
     df["Inversion"] = df.get("Inversion", "Unknown").fillna("Unknown").astype(str)
+    df["Inversion"] = map_inversion_series(df["Inversion"])
     df["Phenotype"] = df.get("Phenotype", "").fillna("").astype(str)
 
     df["OR"] = pd.to_numeric(df["OR"], errors="coerce")
