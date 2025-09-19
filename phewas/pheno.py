@@ -35,6 +35,10 @@ SHARE_THRESHOLD = 0.70
 PHENO_PROTECT: Set[str] = set()
 PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = 64
 
+# --- Prevalence cap ---
+# Drop phenotypes with extremely high absolute case counts before pairwise deduplication.
+EXCLUDE_ABS_CASES = 90_000
+
 _CASE_CACHE_MAX = int(os.environ.get("PHENO_CASE_CACHE_MAX", "512"))
 
 
@@ -940,6 +944,9 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
     cases_by_pheno: Dict[str, np.ndarray] = {}
     n1_map: Dict[str, int] = {}
     n_codes_map: Dict[str, int] = {}
+    kept: Set[str] = set()
+    dropped_names: Set[str] = set()
+    dropped_records: List[dict] = []
 
     for s_name in pheno_defs_df["sanitized_name"]:
         try:
@@ -953,6 +960,21 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
         n1 = int(idx.size)
         if n1 < int(min_cases):
             continue
+        # Prevalence cap: exclude ultra-common phenotypes up front
+        if n1 >= EXCLUDE_ABS_CASES:
+            print(f"Dropped '{s_name}' due to prevalence cap: n1={n1} >= {EXCLUDE_ABS_CASES} of N={N}")
+            dropped_records.append({
+                "name": s_name,
+                "reason": "prevalence_cap",
+                "with": None,
+                "k": 0,
+                "n1_self": n1,
+                "n1_other": N,
+                "share_self": (n1 / float(N)) if N else 0.0,
+                "share_other": None
+            })
+            dropped_names.add(s_name)
+            continue
         cases_by_pheno[s_name] = np.sort(idx, kind="mergesort")
         n1_map[s_name] = n1
         n_codes_map[s_name] = len(all_codes_map.get(s_name) or [])
@@ -961,10 +983,10 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
         manifest = {
             "config": {"min_cases": min_cases, "phi_threshold": phi_threshold, "share_threshold": share_threshold, "N": N},
             "kept": [],
-            "dropped": []
+            "dropped": dropped_records
         }
         _write_dedup_manifest(manifest_path, manifest)
-        return {"kept": set(), "dropped": []}
+        return {"kept": set(), "dropped": dropped_records}
 
     # 2) Build sparse overlap counts only for co-occurring pairs
     pair_k = _build_pair_overlap_counts(cases_by_pheno, cap_per_person=PHENO_DEDUP_CAP_PER_PERSON)
@@ -978,10 +1000,6 @@ def deduplicate_phenotypes(pheno_defs_df: pd.DataFrame,
     for (a, b), _k in pair_k.items():
         neighbors[a].add(b)
         neighbors[b].add(a)
-
-    kept: Set[str] = set()
-    dropped_names: Set[str] = set()
-    dropped_records: List[dict] = []
 
     # Helper to form a consistent pair key
     def _pair_key(x: str, y: str) -> Tuple[str, str]:
