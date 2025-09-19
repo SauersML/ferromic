@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.legend_handler import HandlerBase
 from scipy.stats import spearmanr, sem
-from statsmodels.nonparametric.smoothers_lowess import lowess
 
 # ------------------------- CONFIG -------------------------
 
@@ -29,10 +28,10 @@ MIN_LEN_FST    = 100_000
 MAX_BP         = 100_000          # cap distance from inversion edge
 
 # Proportion mode
-NUM_BINS_PROP  = 50
+NUM_BINS_PROP  = 100
 
 # Base-pair mode 
-NUM_BINS_BP    = 50               # number of bins between 0..MAX_BP
+NUM_BINS_BP    = 100               # number of bins between 0..MAX_BP
 
 # Plotting/analysis rules
 LOWESS_FRAC     = 0.4
@@ -260,6 +259,94 @@ def _iter_falsta(file_path: Path, which: str, min_len: int):
 
     log.info(f"[{which}] headers={total}, loaded={loaded}, skipped_len={skip_len}")
 
+# --- Gaussian KDE-style smoothing across bins (kernel regression) ---
+def _kernel_regress_1d(
+    x: np.ndarray,
+    y: np.ndarray,
+    x_eval: Optional[np.ndarray] = None,
+    frac: Optional[float] = None,          # SINGLE knob (0..1-ish). If None, uses 0.4.
+    bw_bins: Optional[float] = None        # ignored (kept only for call-compat)
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Gaussian kernel regression with a *single* smoothness knob `frac`.
+    - Local bandwidth widens near the edges to avoid boundary bias (no KNN).
+    - `bw_bins` is ignored on purpose (kept to avoid changing callers).
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    ok = np.isfinite(x) & np.isfinite(y)
+    if ok.sum() < 5:
+        xe = np.asarray(x_eval, float) if x_eval is not None else x[ok]
+        if xe is None or xe.size == ok.sum():
+            return x[ok], y[ok]
+        out = np.interp(xe, x[ok], y[ok], left=np.nan, right=np.nan)
+        return xe, out
+
+    xs = x[ok]
+    ys = y[ok]
+    order = np.argsort(xs)
+    xs = xs[order]
+    ys = ys[order]
+
+    xe = xs if x_eval is None else np.asarray(x_eval, dtype=float)
+
+    # median spacing → convert “bin units” to x-scale
+    if xs.size > 1:
+        dx = float(np.median(np.diff(np.unique(xs))))
+    else:
+        dx = 1.0
+
+    # ----- single knob → base sigma in *bin units* -----
+    f = 0.4 if (frac is None or not np.isfinite(float(frac))) else float(frac)
+    # map 'frac' to σ so ~95% mass spans ≈ frac * n_points bins
+    base_sigma_bins = max(0.5, (f * max(xs.size, 1.0)) / 4.0)
+
+    # ----- local edge-aware boost (no extra knobs) -----
+    # normalize eval positions to [0,1]
+    xmin, xmax = float(xs.min()), float(xs.max())
+    span = max(xmax - xmin, 1e-12)
+    r = (xe - xmin) / span
+    # parabola: 4r(1-r) peaks at center=1, 0 at edges → invert to boost edges
+    edge_boost = 1.0 + (1.0 - 4.0 * r * (1.0 - r))   # 1.0 (center) → 2.0 (edges)
+
+    sigma_bins = np.maximum(0.5, base_sigma_bins * edge_boost)  # floor to avoid degeneracy
+    h = np.maximum(1e-12, sigma_bins * dx)                      # convert to x-scale
+
+    # Gaussian weights with per-eval bandwidth
+    d = (xe[:, None] - xs[None, :]) / h[:, None]
+    W = np.exp(-0.5 * d * d)
+
+    num = W @ ys
+    den = W.sum(axis=1)
+
+    ye = np.full_like(xe, np.nan, dtype=float)
+    nz = den > 0
+    ye[nz] = num[nz] / den[nz]
+    return xe, ye
+
+
+def _smooth_series(x: np.ndarray, y: np.ndarray, frac: float = LOWESS_FRAC) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    KDE-style smoothing across bins (Gaussian kernel regression).
+    Returns xs (sorted finite x) and smoothed y on that same grid.
+    """
+    return _kernel_regress_1d(x, y, x_eval=None, frac=frac)
+
+
+def _smooth_sem_to(xs_target: np.ndarray,
+                   x_raw: np.ndarray,
+                   e_raw: np.ndarray,
+                   frac: float = LOWESS_FRAC * 0.8) -> np.ndarray:
+    """
+    Smooth SEM across bins with the same Gaussian kernel approach,
+    then evaluate on xs_target. Clips negatives to 0.
+    """
+    _, es = _kernel_regress_1d(x_raw, e_raw, x_eval=xs_target, frac=frac)
+    if es.size:
+        es = np.where(es < 0, 0, es)
+    return es
+
+
 # --------------- BIN EDGES (shared in workers) --------------
 
 _BIN_EDGES: Optional[np.ndarray] = None
@@ -409,30 +496,6 @@ def _maybe_open_path(path: Path):
             )
     except Exception as e:
         log.warning(f"Could not auto-open {path}: {e}")
-
-def _smooth_series(x: np.ndarray, y: np.ndarray, frac: float = LOWESS_FRAC) -> Tuple[np.ndarray, np.ndarray]:
-    """LOWESS smoothing that returns sorted x and smoothed y on the same grid."""
-    ok = ~np.isnan(x) & ~np.isnan(y)
-    xs, ys = x[ok], y[ok]
-    if xs.size < 5:
-        return x[ok], y[ok]
-    sm = lowess(ys, xs, frac=frac, it=1, return_sorted=True)
-    return sm[:, 0], sm[:, 1]
-
-def _smooth_sem_to(xs_target: np.ndarray, x_raw: np.ndarray, e_raw: np.ndarray, frac: float = LOWESS_FRAC*0.8) -> np.ndarray:
-    """
-    Smooth the SEM across bins in a scientifically valid way:
-    LOWESS on SEM vs x (only where defined), then interpolate to xs_target; clip to ≥0.
-    """
-    ok = ~np.isnan(x_raw) & ~np.isnan(e_raw)
-    if ok.sum() < 5:
-        es = np.interp(xs_target, x_raw[ok], e_raw[ok], left=np.nan, right=np.nan)
-    else:
-        sm = lowess(e_raw[ok], x_raw[ok], frac=frac, it=1, return_sorted=True)
-        es = np.interp(xs_target, sm[:, 0], sm[:, 1], left=np.nan, right=np.nan)
-    if es.size:
-        es = np.where(es < 0, 0, es)
-    return es
 
 # ----------------------- LEGEND PROXIES ---------------------
 
