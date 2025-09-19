@@ -5,18 +5,29 @@ from scipy import stats
 import pingouin as pg
 
 FNAME = "output.csv"
-ALTERNATIVE = "two-sided"  # fixed
+ALTERNATIVE = "two-sided"
 
 # ----------------------------- Utilities -----------------------------
 
 def nf(x, digits=6):
-    if x is None or (isinstance(x, float) and (np.isnan(x) or np.isinf(x))):
-        return "NA"
-    if isinstance(x, (list, tuple)) and len(x) == 2:
-        return f"[{nf(x[0], digits)},{nf(x[1], digits)}]"
-    if abs(x) > 1e4 or (0 < abs(x) < 1e-4):
-        return f"{x:.3e}"
-    return f"{x:.{digits}g}"
+    # Formatter that avoids "−0" and handles tiny/large values.
+    def _scalar(v):
+        if v is None or (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
+            return "NA"
+        # squash negative zero
+        if isinstance(v, (int, float, np.floating)):
+            if abs(v) < 1e-15:
+                v = 0.0
+        if isinstance(v, (int, float, np.floating)):
+            if abs(v) > 1e4 or (0 < abs(v) < 1e-4):
+                return f"{float(v):.3e}"
+            return f"{float(v):.{digits}g}"
+        return str(v)
+
+    if isinstance(x, (list, tuple, np.ndarray)) and np.size(x) == 2:
+        a, b = x
+        return f"[{_scalar(float(a))},{_scalar(float(b))}]"
+    return _scalar(x)
 
 def summarize(s, name):
     s = pd.Series(s, dtype=float)
@@ -33,10 +44,10 @@ def summarize(s, name):
 
 def aggregate_duplicates(df):
     key = ["chr", "region_start", "region_end"]
-    counts = df.groupby(key, dropna=False, observed=True).size()
+    counts = df.groupby(key, dropna=False).size()
     n_dups = int((counts > 1).sum())
     if n_dups > 0:
-        df = (df.groupby(key, dropna=False, observed=True)
+        df = (df.groupby(key, dropna=False)
                 .agg({"pi_inverted": "mean", "pi_direct": "mean"})
                 .reset_index())
     return df, n_dups
@@ -77,34 +88,16 @@ n_ties = int((diff == 0).sum())
 n_pos = int((diff > 0).sum())
 n_neg = int((diff < 0).sum())
 
+# Group means/medians
+mean_inv, mean_dir = float(np.mean(x)), float(np.mean(y))
+median_inv, median_dir = float(np.median(x)), float(np.median(y))
+mean_diff = float(np.mean(diff))
+median_diff = float(np.median(diff))
+
 # ----------------------------- Tests -----------------------------
 
-# 1) Wilcoxon signed-rank (SciPy) + effect sizes (Pingouin)
-wilc = stats.wilcoxon(x, y, zero_method="pratt", alternative=ALTERNATIVE, nan_policy="omit")
-try:
-    w_pg = pg.wilcoxon(x, y, alternative=ALTERNATIVE)
-    rbc = float(w_pg["RBC"].iloc[0])
-    cles = float(w_pg["CLES"].iloc[0])
-    n_wilcox_used = int(w_pg["N"].iloc[0])
-except Exception:
-    rbc = np.nan
-    cles = np.nan
-    # approximate n used (non-zero diffs) for info only
-    n_wilcox_used = int((diff != 0).sum())
-
-# 2) Paired t-test (SciPy)
-tt_sc = stats.ttest_rel(x, y, alternative=ALTERNATIVE, nan_policy="omit")
-dof_sc = int(np.count_nonzero(~np.isnan(diff)) - 1)
-
-# 3) Paired t-test (Pingouin) with CI & Cohen's dz
-tt_pg = pg.ttest(x, y, paired=True, alternative=ALTERNATIVE)
-t_pg = float(tt_pg["T"].iloc[0])
-dof_pg = float(tt_pg["dof"].iloc[0])
-p_pg = float(tt_pg["p-val"].iloc[0])
-ci_pg = tuple(np.asarray(tt_pg["CI95%"].iloc[0]).tolist())  # (low, high)
-dz = float(pg.compute_effsize(x, y, paired=True, eftype="cohen"))
-
-# 4) Exact Sign test (binomial) on direction (ties removed)
+# MEDIAN-BASED / LOCATION tests
+# 1) Exact Sign test (tests median of differences = 0; ties removed) — SciPy
 nz = diff[diff != 0]
 n_sign = nz.size
 if n_sign > 0:
@@ -115,27 +108,25 @@ if n_sign > 0:
 else:
     k_pos = 0
     prop_pos = np.nan
-    p_sign = np.nan
+    p_sign = np.nan  # zero informative pairs
 
-# 5) Paired permutation test on mean difference (SciPy)
-def stat_func(a, b):
-    return np.mean(a - b)
+# 2) Wilcoxon signed-rank (tests symmetric location shift; equals median test if symmetric) — SciPy
+wilc = stats.wilcoxon(x, y, zero_method="pratt", alternative=ALTERNATIVE, nan_policy="omit")
+# n used (non-zero diffs); pulled from data to avoid version quirks
+n_wilcox_used = int((diff != 0).sum())
 
-try:
-    perm = stats.permutation_test(
-        data=(x, y),
-        statistic=stat_func,
-        permutation_type="paired",
-        alternative=ALTERNATIVE,
-        n_resamples=10000,
-        vectorized=False,
-        random_state=42
-    )
-    p_perm = float(perm.pvalue)
-    stat_mean_diff = float(np.mean(diff))
-except Exception:
-    p_perm = np.nan
-    stat_mean_diff = float(np.mean(diff))
+# MEAN-BASED tests
+# 3) Paired t-test — SciPy
+tt_sc = stats.ttest_rel(x, y, alternative=ALTERNATIVE, nan_policy="omit")
+dof_sc = int(np.count_nonzero(~np.isnan(diff)) - 1)
+
+# 4) Paired t-test — Pingouin (with 95% CI & Cohen's dz; all library-computed)
+tt_pg = pg.ttest(x, y, paired=True, alternative=ALTERNATIVE)
+t_pg = float(tt_pg["T"].iloc[0])
+dof_pg = float(tt_pg["dof"].iloc[0])
+p_pg = float(tt_pg["p-val"].iloc[0])
+ci_low, ci_high = map(float, np.asarray(tt_pg["CI95%"].iloc[0]).tolist())
+dz = float(pg.compute_effsize(x, y, paired=True, eftype="cohen"))
 
 # ----------------------------- Output (data only) -----------------------------
 
@@ -157,30 +148,26 @@ print("-" * 72)
 print(summarize(y, "direct_group0_pi"))
 print(summarize(x, "inverted_group1_pi"))
 print(summarize(diff, "difference_inv_minus_dir"))
+print(f"group_means: direct={nf(mean_dir)}  inverted={nf(mean_inv)}")
+print(f"group_medians: direct={nf(median_dir)}  inverted={nf(median_inv)}")
+print(f"mean_difference_inv_minus_dir: {nf(mean_diff)}")
+print(f"median_difference_inv_minus_dir: {nf(median_diff)}")
 print()
 
-print("wilcoxon_signed_rank_scipy")
+print("MEDIAN-BASED / LOCATION TESTS")
 print("-" * 72)
-print(f"W={nf(wilc.statistic)}  p={nf(wilc.pvalue)}  n_used={n_wilcox_used}  "
-      f"rank_biserial_r={nf(rbc)}  CLES={nf(cles)}")
+print("Exact sign test (median of differences) — SciPy")
+print(f"  n_nonzero={n_sign}  k_positive={k_pos}  prop_positive={nf(prop_pos)}  p={nf(p_sign)}")
+print()
+print("Wilcoxon signed-rank (location shift; median if symmetric) — SciPy")
+print(f"  W={nf(wilc.statistic)}  p={nf(wilc.pvalue)}  n_used={n_wilcox_used}")
 print()
 
-print("paired_t_test_scipy")
+print("MEAN-BASED TESTS")
 print("-" * 72)
-print(f"t={nf(tt_sc.statistic)}  dof={dof_sc}  p={nf(tt_sc.pvalue)}")
+print("Paired t-test — SciPy (tests mean of differences)")
+print(f"  t={nf(tt_sc.statistic)}  dof={dof_sc}  p={nf(tt_sc.pvalue)}")
 print()
-
-print("paired_t_test_pingouin")
-print("-" * 72)
-print(f"t={nf(t_pg)}  dof={nf(dof_pg)}  p={nf(p_pg)}  CI95%={nf(ci_pg)}  cohen_dz={nf(dz)}")
-print()
-
-print("exact_sign_test_binomial")
-print("-" * 72)
-print(f"n_nonzero={n_sign}  k_positive={k_pos}  prop_positive={nf(prop_pos)}  p={nf(p_sign)}")
-print()
-
-print("paired_permutation_test_mean_diff_scipy")
-print("-" * 72)
-print(f"mean_diff={nf(stat_mean_diff)}  p={nf(p_perm)}  resamples=10000")
+print("Paired t-test — Pingouin (tests mean of differences)")
+print(f"  t={nf(t_pg)}  dof={nf(dof_pg)}  p={nf(p_pg)}  CI95%={nf((ci_low, ci_high))}  cohen_dz={nf(dz)}")
 print(sep)
