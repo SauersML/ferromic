@@ -24,12 +24,17 @@ BLOCK_GAP_H      = 0.80   # vertical gap after a section (breathing room)
 LEFT_RIGHT       = (0.4, 0.6)
 
 # Text & styling
-WRAP_WIDTH       = 37      # phenotype label wrapping width (characters)
-POINT_SIZE_PT2   = 34.0    # tiny, uniform point size (pt^2)
-POINT_EDGE_LW    = 0.85
+WRAP_WIDTH       = 42      # phenotype label wrapping width (characters)
 GRID_ALPHA       = 0.28
 BAND_ALPHA       = 0.06
 HEADER_UL_ALPHA  = 0.16
+
+# --- Point and CI Sizing ---
+POINT_SIZE_PT2   = 80.0    # Size of the OR point estimate. Increased from 14.0.
+POINT_EDGE_LW    = 1.0     # Linewidth of the point's black border. Increased from 0.55.
+CI_LINE_LW       = 3.5     # Linewidth of the horizontal CI bar.
+CI_CAP_LW        = 3.0     # THICKNESS of the vertical CI end-caps.
+CI_CAP_H         = 0.30    # HEIGHT of the CI end-caps.
 
 # Header label placement (initial seed) and movement limits
 HEADER_X_SHIFT        = 0.08      # x-position (axes-fraction on left panel) for header text
@@ -419,9 +424,14 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
             x_hi  = float(warp_or_to_axis([or_hi])[0])
             x_pt  = float(warp_or_to_axis([or_pt])[0])
 
-            axR.hlines(y=yc, xmin=x_lo, xmax=x_hi, color=c, linewidth=2.0, alpha=0.95, zorder=2.2)
-            axR.plot([x_lo, x_lo], [yc-0.22, yc+0.22], color=c, linewidth=1.6, alpha=0.95, zorder=2.25)
-            axR.plot([x_hi, x_hi], [yc-0.22, yc+0.22], color=c, linewidth=1.6, alpha=0.95, zorder=2.25)
+            # Horizontal CI line
+            axR.hlines(y=yc, xmin=x_lo, xmax=x_hi, color=c, linewidth=CI_LINE_LW, alpha=0.95, zorder=2.2)
+            
+            # Vertical CI end-caps
+            axR.plot([x_lo, x_lo], [yc-CI_CAP_H, yc+CI_CAP_H], color=c, linewidth=CI_CAP_LW, alpha=0.95, zorder=2.25)
+            axR.plot([x_hi, x_hi], [yc-CI_CAP_H, yc+CI_CAP_H], color=c, linewidth=CI_CAP_LW, alpha=0.95, zorder=2.25)
+            
+            # Point estimate dot
             axR.scatter([x_pt], [yc], s=POINT_SIZE_PT2, facecolor=c, edgecolor="black",
                         linewidth=POINT_EDGE_LW, alpha=0.97, zorder=3.0)
 
