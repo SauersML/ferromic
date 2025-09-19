@@ -844,7 +844,7 @@ const INVALID_GROUP: u16 = u16::MAX;
 struct PairDescriptor {
     left: u16,
     right: u16,
-
+    key: String,
 }
 
 #[derive(Clone)]
