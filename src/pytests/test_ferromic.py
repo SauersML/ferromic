@@ -17,12 +17,17 @@ def test_segregating_sites_counts_polymorphic_sites():
         build_variant(200, [[0, 1], [1, 1]]),
     ]
 
-    assert fm.segregating_sites(variants) == 2
+    actual = fm.segregating_sites(variants)
+    expected = 2
+    print(f"segregating_sites actual={actual} expected={expected}")
+    assert actual == expected
 
 
 def test_watterson_theta_matches_rust_implementation():
     theta = fm.watterson_theta(3, 4, 100)
     expected = 3 / (1 + 1 / 2 + 1 / 3) / 100
+
+    print(f"watterson_theta actual={theta} expected={expected}")
 
     assert math.isclose(theta, expected, rel_tol=1e-12)
 
@@ -30,6 +35,12 @@ def test_watterson_theta_matches_rust_implementation():
 def test_watterson_theta_requires_multiple_samples():
     with pytest.raises(ValueError) as excinfo:
         fm.watterson_theta(1, 1, 100)
+
+    print(
+        "watterson_theta error message:",
+        str(excinfo.value),
+    )
+
 
     assert "sample_count" in str(excinfo.value)
 
@@ -42,12 +53,16 @@ def test_adjusted_sequence_length_respects_allow_and_mask_regions():
         mask=[(45, 50)],
     )
 
+    print(f"adjusted_sequence_length actual={adjusted} expected=25")
+
     assert adjusted == 25
 
 
 def test_population_rejects_non_positive_sequence_length():
     with pytest.raises(ValueError) as excinfo:
         fm.Population("demo", [], [], 0)
+
+    print("Population error message:", str(excinfo.value))
 
     assert "sequence_length" in str(excinfo.value)
 
@@ -60,5 +75,7 @@ def test_inversion_allele_frequency_counts_haplotypes():
     }
 
     frequency = fm.inversion_allele_frequency(sample_map)
+
+    print(f"inversion_allele_frequency actual={frequency} expected=0.75")
 
     assert frequency == pytest.approx(0.75)

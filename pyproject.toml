@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin[patchelf]>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -12,6 +12,7 @@ test = [
     "pytest",
     "numpy",
     "scikit-allel",
+    "patchelf; platform_system == 'Linux'",
 ]
 
 [tool.maturin]

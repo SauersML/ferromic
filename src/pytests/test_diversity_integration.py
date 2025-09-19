@@ -144,15 +144,28 @@ def test_nucleotide_diversity_matches_scikit_allel(diversity_dataset):
         / sequence_length
     )
 
-    assert fm.nucleotide_diversity(
+    actual_pop1 = fm.nucleotide_diversity(
         dataset["variants"], dataset["haplotypes"]["pop1"], sequence_length
-    ) == pytest.approx(expected_pop1, rel=1e-12)
-    assert fm.nucleotide_diversity(
+    )
+    actual_pop2 = fm.nucleotide_diversity(
         dataset["variants"], dataset["haplotypes"]["pop2"], sequence_length
-    ) == pytest.approx(expected_pop2, rel=1e-12)
-    assert fm.nucleotide_diversity(
+    )
+    actual_combined = fm.nucleotide_diversity(
         dataset["variants"], dataset["haplotypes"]["combined"], sequence_length
-    ) == pytest.approx(expected_combined, rel=1e-12)
+    )
+
+    print(
+        "nucleotide_diversity results:",
+        {
+            "pop1": {"actual": actual_pop1, "expected": expected_pop1},
+            "pop2": {"actual": actual_pop2, "expected": expected_pop2},
+            "combined": {"actual": actual_combined, "expected": expected_combined},
+        },
+    )
+
+    assert actual_pop1 == pytest.approx(expected_pop1, rel=1e-12)
+    assert actual_pop2 == pytest.approx(expected_pop2, rel=1e-12)
+    assert actual_combined == pytest.approx(expected_combined, rel=1e-12)
 
 
 def test_per_site_diversity_pi_aligns_with_scikit_allel(diversity_dataset):
@@ -169,7 +182,11 @@ def test_per_site_diversity_pi_aligns_with_scikit_allel(diversity_dataset):
 
     for position, expected_pi in zip(dataset["positions"], per_variant_pi):
         assert position in site_by_position
-        assert site_by_position[position].pi == pytest.approx(expected_pi, rel=1e-12)
+        actual_pi = site_by_position[position].pi
+        print(
+            f"per_site_diversity position={position} actual={actual_pi} expected={expected_pi}"
+        )
+        assert actual_pi == pytest.approx(expected_pi, rel=1e-12)
 
 
 def test_hudson_dxy_matches_scikit_allel(diversity_dataset):
@@ -185,6 +202,11 @@ def test_hudson_dxy_matches_scikit_allel(diversity_dataset):
             )
         )
         / dataset["sequence_length"]
+    )
+
+    print(
+        "hudson_dxy result:",
+        {"actual": result.d_xy, "expected": expected_dxy},
     )
 
     assert result.d_xy == pytest.approx(expected_dxy, rel=1e-12)
