@@ -1,4 +1,3 @@
-#![feature(portable_simd)]
 //! Ergonomic Python bindings for Ferromic's population genetics toolkit.
 //!
 //! The bindings expose a high-level, well-documented API that mirrors the core
