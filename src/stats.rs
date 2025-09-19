@@ -1759,11 +1759,6 @@ impl AlleleCountSummary {
     }
 
     #[inline]
-    fn distinct_alleles(&self) -> usize {
-        self.counts.len()
-    }
-
-    #[inline]
     fn sum_counts_sq(&self) -> f64 {
         self.sum_counts_sq
     }
@@ -1809,17 +1804,81 @@ fn freq_map_for_pop(
 /// Missing Data Handling:
 /// Only uses called haplotypes at this site; n and {p_a} are computed from available data.
 #[inline]
-fn pi_from_summary(summary: &AlleleCountSummary) -> Option<f64> {
-    let n = summary.total_called();
-    if n < 2 {
+fn pi_from_components(total_called: usize, sum_counts_sq: f64) -> Option<f64> {
+    if total_called < 2 {
         return None;
     }
 
-    let n_f64 = n as f64;
-    let inv_n = 1.0 / n_f64;
-    let sum_p2 = summary.sum_counts_sq() * inv_n * inv_n;
+    let n = total_called as f64;
+    let inv_n = 1.0 / n;
+    let sum_p2 = sum_counts_sq * inv_n * inv_n;
 
-    Some(n_f64 / (n_f64 - 1.0) * (1.0 - sum_p2))
+    Some(n / (n - 1.0) * (1.0 - sum_p2))
+}
+
+#[inline]
+fn pi_from_summary(summary: &AlleleCountSummary) -> Option<f64> {
+    pi_from_components(summary.total_called(), summary.sum_counts_sq())
+}
+
+#[derive(Default)]
+struct PiComputationState {
+    counts: Vec<u32>,
+    used_indices: Vec<usize>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct PiComputationOutcome {
+    total_called: usize,
+    sum_counts_sq: f64,
+    distinct_alleles: usize,
+}
+
+impl PiComputationOutcome {
+    #[inline]
+    fn pi(self) -> Option<f64> {
+        pi_from_components(self.total_called, self.sum_counts_sq)
+    }
+}
+
+#[inline]
+fn compute_pi_metrics(
+    variant: &Variant,
+    haplotypes: &[(usize, HaplotypeSide)],
+    state: &mut PiComputationState,
+) -> PiComputationOutcome {
+    let mut total_called = 0usize;
+
+    for &(sample_index, side) in haplotypes {
+        if let Some(Some(genotype)) = variant.genotypes.get(sample_index) {
+            if let Some(&allele) = genotype.get(side as usize) {
+                let idx = allele as usize;
+                if idx >= state.counts.len() {
+                    state.counts.resize(idx + 1, 0);
+                }
+                if state.counts[idx] == 0 {
+                    state.used_indices.push(idx);
+                }
+                state.counts[idx] += 1;
+                total_called += 1;
+            }
+        }
+    }
+
+    let mut sum_counts_sq = 0.0_f64;
+    for &idx in &state.used_indices {
+        let count = state.counts[idx] as f64;
+        sum_counts_sq += count * count;
+        state.counts[idx] = 0;
+    }
+    let distinct_alleles = state.used_indices.len();
+    state.used_indices.clear();
+
+    PiComputationOutcome {
+        total_called,
+        sum_counts_sq,
+        distinct_alleles,
+    }
 }
 
 /// Compute between-population diversity (D_xy) from allele counts.
@@ -2699,15 +2758,20 @@ pub fn calculate_pi(
     // Use unbiased per-site aggregation approach with parallel processing for large variant sets
     let (sum_pi, variant_count) = variants
         .par_iter()
-        .map(|variant| {
-            let summary = freq_map_for_pop(variant, haplotypes_in_group);
-            match pi_from_summary(&summary) {
-                Some(pi_site) => (pi_site, 1usize),
-                None => (0.0, 0usize),
-            }
-        })
+        .fold(
+            || (PiComputationState::default(), 0.0_f64, 0usize),
+            |(mut state, mut partial_sum, mut partial_count), variant| {
+                let metrics = compute_pi_metrics(variant, haplotypes_in_group, &mut state);
+                if let Some(pi_site) = metrics.pi() {
+                    partial_sum += pi_site;
+                    partial_count += 1;
+                }
+                (state, partial_sum, partial_count)
+            },
+        )
+        .map(|(_, sum, count)| (sum, count))
         .reduce(
-            || (0.0, 0usize),
+            || (0.0_f64, 0usize),
             |(sum_a, count_a), (sum_b, count_b)| (sum_a + sum_b, count_a + count_b),
         );
 
@@ -2737,6 +2801,7 @@ pub fn calculate_per_site_diversity(
     set_stage(ProcessingStage::StatsCalculation);
 
     let start_time = std::time::Instant::now();
+    let mut pi_state = PiComputationState::default();
     log(
         LogLevel::Info,
         &format!(
@@ -2832,26 +2897,15 @@ pub fn calculate_per_site_diversity(
         // Process the current position
         if let Some(var) = variant_map.get(&pos) {
             // Variant exists at this position; compute diversity metrics
-            let mut summary = AlleleCountSummary::with_capacity(haplotypes_in_group.len());
-
-            for &(sample_index, side) in haplotypes_in_group {
-                if let Some(gt_opt) = var.genotypes.get(sample_index) {
-                    if let Some(gt) = gt_opt {
-                        if let Some(&allele) = gt.get(side as usize) {
-                            summary.record(allele as i32);
-                        }
-                    }
-                }
-            }
-
-            let total_called = summary.total_called();
+            let metrics = compute_pi_metrics(var, haplotypes_in_group, &mut pi_state);
+            let total_called = metrics.total_called;
 
             let (pi_value, watterson_value) = if total_called < 2 {
                 // Fewer than 2 haplotypes with data; diversity is 0
                 (0.0, 0.0)
             } else {
                 // Calculate Watterson's θ for this site
-                let distinct_alleles = summary.distinct_alleles();
+                let distinct_alleles = metrics.distinct_alleles;
                 let watterson_value = if distinct_alleles > 1 {
                     // Site is polymorphic; θ_w = 1 / H_{n-1}
                     let denom = harmonic(total_called - 1);
@@ -2863,7 +2917,7 @@ pub fn calculate_per_site_diversity(
                 } else {
                     0.0 // Monomorphic site; θ_w = 0
                 };
-                let pi_value = pi_from_summary(&summary).unwrap_or(0.0);
+                let pi_value = metrics.pi().unwrap_or(0.0);
                 (pi_value, watterson_value)
             };
 
