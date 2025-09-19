@@ -17,7 +17,7 @@ OUT_PNG          = "phewas_forest.png"
 
 # Layout: explicit box model (data-units on the y-axis)
 HEADER_BOX_H     = 1.80   # height of the header box per inversion
-ROW_BOX_H        = 1.70   # height of each phenotype row box
+ROW_BOX_H        = 2.60   # height of each phenotype row box
 BLOCK_GAP_H      = 0.50   # vertical gap after a section (breathing room)
 
 # Panel widths: [label panel, main plot panel]
@@ -145,7 +145,8 @@ def load_and_prepare(path: str) -> pd.DataFrame:
 
     df = pd.read_csv(path, sep="\t", dtype=str)
 
-    required = ["Phenotype", "Inversion", "OR", "Q_GLOBAL", "OR_CI95"]
+    # Only the core columns are strictly required. CI will be resolved from multiple sources.
+    required = ["Phenotype", "Inversion", "OR", "Q_GLOBAL"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise SystemExit(f"ERROR: missing required column(s): {', '.join(missing)}")
@@ -157,12 +158,73 @@ def load_and_prepare(path: str) -> pd.DataFrame:
     df["OR"]        = pd.to_numeric(df["OR"], errors="coerce")
     df["Q_GLOBAL"]  = pd.to_numeric(df["Q_GLOBAL"], errors="coerce")
 
-    # Parse CI from OR_CI95
-    lo, hi = parse_or_ci95(df["OR_CI95"])
-    df["OR_lo"] = lo
-    df["OR_hi"] = hi
+    # Resolve CI with strict priority per row:
+    #   1) OR_Lower/OR_Upper numeric columns if present
+    #   2) OR_CI95 string "lo,hi" (ignore any CI_Valid flags)
+    #   3) Wald_OR_CI95 string "lo,hi"
+    n = len(df)
+    # 1) Numeric lower/upper
+    if ("OR_Lower" in df.columns) and ("OR_Upper" in df.columns):
+        lo1 = pd.to_numeric(df["OR_Lower"], errors="coerce").to_numpy()
+        hi1 = pd.to_numeric(df["OR_Upper"], errors="coerce").to_numpy()
+    else:
+        lo1 = np.full(n, np.nan, dtype=float)
+        hi1 = np.full(n, np.nan, dtype=float)
+    m1 = np.isfinite(lo1) & np.isfinite(hi1) & (lo1 > 0) & (hi1 > 0) & (lo1 < hi1)
 
-    # Keep only valid & significant rows
+    # 2) OR_CI95
+    if "OR_CI95" in df.columns:
+        lo2, hi2 = parse_or_ci95(df["OR_CI95"])
+    else:
+        lo2 = np.full(n, np.nan, dtype=float)
+        hi2 = np.full(n, np.nan, dtype=float)
+    m2 = np.isfinite(lo2) & np.isfinite(hi2) & (lo2 > 0) & (hi2 > 0) & (lo2 < hi2)
+
+    # 3) Wald_OR_CI95
+    if "Wald_OR_CI95" in df.columns:
+        lo3, hi3 = parse_or_ci95(df["Wald_OR_CI95"])
+    else:
+        lo3 = np.full(n, np.nan, dtype=float)
+        hi3 = np.full(n, np.nan, dtype=float)
+    m3 = np.isfinite(lo3) & np.isfinite(hi3) & (lo3 > 0) & (hi3 > 0) & (lo3 < hi3)
+
+    # Choose first available source per row
+    chosen_lo = np.full(n, np.nan, dtype=float)
+    chosen_hi = np.full(n, np.nan, dtype=float)
+
+    choose1 = m1
+    chosen_lo[choose1] = lo1[choose1]
+    chosen_hi[choose1] = hi1[choose1]
+
+    not_set = (~np.isfinite(chosen_lo)) | (~np.isfinite(chosen_hi))
+    choose2 = m2 & not_set
+    chosen_lo[choose2] = lo2[choose2]
+    chosen_hi[choose2] = hi2[choose2]
+
+    not_set = (~np.isfinite(chosen_lo)) | (~np.isfinite(chosen_hi))
+    choose3 = m3 & not_set
+    chosen_lo[choose3] = lo3[choose3]
+    chosen_hi[choose3] = hi3[choose3]
+
+    df["OR_lo"] = chosen_lo
+    df["OR_hi"] = chosen_hi
+
+    # Warn if a significant row lacks any CI and will be skipped
+    sig_mask = (
+        df["Phenotype"].str.strip().ne("") &
+        np.isfinite(df["OR"]) & (df["OR"] > 0) &
+        np.isfinite(df["Q_GLOBAL"]) & (df["Q_GLOBAL"] <= 0.05)
+    )
+    missing_ci = sig_mask & ((~np.isfinite(df["OR_lo"])) | (~np.isfinite(df["OR_hi"])))
+    if missing_ci.any():
+        for i in df.index[missing_ci]:
+            phen = str(df.at[i, "Phenotype"])
+            inv  = str(df.at[i, "Inversion"])
+            orv  = df.at[i, "OR"]
+            qv   = df.at[i, "Q_GLOBAL"]
+            print(f"WARNING: significant row without CI and will be skipped: Phenotype='{phen}', Inversion='{inv}', OR={orv}, q={qv}")
+
+    # Keep only valid rows with a usable CI; then restrict to FDR-significant
     good = (
         df["Phenotype"].str.strip().ne("") &
         np.isfinite(df["OR"]) & (df["OR"] > 0) &
@@ -172,7 +234,7 @@ def load_and_prepare(path: str) -> pd.DataFrame:
     )
     df = df[good].copy()
     if df.empty:
-        raise SystemExit("No valid rows after cleaning (check OR, Q_GLOBAL, OR_CI95).")
+        raise SystemExit("No valid rows after cleaning (check OR, Q_GLOBAL, and CI sources).")
 
     df = df[df["Q_GLOBAL"] <= 0.05].copy()
     if df.empty:
