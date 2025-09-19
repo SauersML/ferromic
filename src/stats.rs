@@ -835,43 +835,6 @@ fn map_samples_to_populations(
     sample_to_pop_map_for_fst
 }
 
-fn calculate_fst_wc_at_site_by_haplotype_group(
-    variant: &Variant,
-    haplotype_to_group: &HashMap<(usize, HaplotypeSide), String>,
-) -> (
-    FstEstimate,
-    HashMap<String, FstEstimate>,
-    (f64, f64),
-    HashMap<String, usize>,
-    HashMap<String, (f64, f64)>,
-) {
-    calculate_fst_wc_at_site_general(variant, haplotype_to_group)
-}
-
-/// Calculates Weir & Cockerham FST at a single site between population groups defined from a CSV file.
-///
-/// This function delegates to `calculate_fst_wc_at_site_general`.
-///
-/// # Arguments
-/// * `variant`: The `Variant` struct for the site.
-/// * `sample_to_pop`: A `HashMap` mapping `(vcf_sample_index, HaplotypeSide)` to population name strings.
-///
-/// # Returns
-/// A tuple containing the overall FST estimate (`FstEstimate`), pairwise FST estimates,
-/// variance components (a,b), population sizes, and pairwise variance components (a_xy, b_xy) for the site.
-fn calculate_fst_wc_at_site_by_population(
-    variant: &Variant,
-    sample_to_pop: &HashMap<(usize, HaplotypeSide), String>,
-) -> (
-    FstEstimate,
-    HashMap<String, FstEstimate>,
-    (f64, f64),
-    HashMap<String, usize>,
-    HashMap<String, (f64, f64)>,
-) {
-    calculate_fst_wc_at_site_general(variant, sample_to_pop)
-}
-
 const INVALID_GROUP: u16 = u16::MAX;
 
 #[derive(Clone)]
@@ -881,7 +844,7 @@ const INVALID_GROUP: u16 = u16::MAX;
 struct PairDescriptor {
     left: u16,
     right: u16,
-    key: String,
+
 }
 
 #[derive(Clone)]
@@ -894,6 +857,7 @@ struct SubpopulationMembership {
     /// regardless of which comparisons had sufficient data.
     pair_keys: Vec<PairDescriptor>,
 }
+
 
 impl SubpopulationMembership {
     fn from_map(sample_count: usize, map_subpop: &HashMap<(usize, HaplotypeSide), String>) -> Self {
@@ -992,9 +956,7 @@ impl WcSiteWorkspace {
 
 #[derive(Clone, Copy)]
 struct PopSiteStat {
-    index: usize,
     total: usize,
-    alt: usize,
     freq: f64,
 }
 
@@ -1154,12 +1116,7 @@ fn calculate_fst_wc_at_site_with_membership(
         total_called += total;
         total_alt += alt;
         let freq = alt as f64 / total as f64;
-        workspace.stats.push(PopSiteStat {
-            index: idx,
-            total,
-            alt,
-            freq,
-        });
+        workspace.stats.push(PopSiteStat { total, freq });
         pop_sizes.insert(membership.label(idx).to_string(), total);
     }
 
@@ -1223,15 +1180,11 @@ fn calculate_fst_wc_at_site_with_membership(
 
         let pair_stats = [
             PopSiteStat {
-                index: idx_a,
                 total: total_a,
-                alt: alt_a,
                 freq: freq_a,
             },
             PopSiteStat {
-                index: idx_b,
                 total: total_b,
-                alt: alt_b,
                 freq: freq_b,
             },
         ];
@@ -1245,6 +1198,7 @@ fn calculate_fst_wc_at_site_with_membership(
 
     workspace.stats.clear();
 
+
     (
         overall_fst_at_site,
         pairwise_fst_estimate_map,
@@ -1254,20 +1208,6 @@ fn calculate_fst_wc_at_site_with_membership(
     )
 }
 
-fn calculate_fst_wc_at_site_general(
-    variant: &Variant,
-    map_subpop: &HashMap<(usize, HaplotypeSide), String>,
-) -> (
-    FstEstimate,
-    HashMap<String, FstEstimate>,
-    (f64, f64),
-    HashMap<String, usize>,
-    HashMap<String, (f64, f64)>,
-) {
-    let membership = SubpopulationMembership::from_map(variant.genotypes.len(), map_subpop);
-    let mut workspace = WcSiteWorkspace::new(membership.group_count());
-    calculate_fst_wc_at_site_with_membership(variant, &membership, &mut workspace)
-}
 
 fn calculate_variance_components(
     pop_stats: &[PopSiteStat], // (n_i, p_i)
@@ -2779,9 +2719,9 @@ pub fn calculate_watterson_theta(seg_sites: usize, n: usize, seq_length: i64) ->
 /// handling missing data by only considering sites where both haplotypes have alleles.
 ///
 /// # Returns
-/// * f64::NAN if fewer than 2 haplotypes
-/// * f64::NAN if no valid pairs exist
-/// * Otherwise, the average π across all sites
+/// * `0.0` if fewer than two haplotypes are provided or if no callable pairs exist
+/// * `f64::INFINITY` when `seq_length` is zero (mirrors the legacy behaviour expected by callers)
+/// * Otherwise, the average π across all sites scaled by the provided `seq_length`
 pub fn calculate_pi(
     variants: &[Variant],
     haplotypes_in_group: &[(usize, HaplotypeSide)],
