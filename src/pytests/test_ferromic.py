@@ -28,6 +28,7 @@ def test_watterson_theta_matches_rust_implementation():
     expected = 3 / (1 + 1 / 2 + 1 / 3) / 100
 
     print(f"watterson_theta actual={theta} expected={expected}")
+
     assert math.isclose(theta, expected, rel_tol=1e-12)
 
 
@@ -39,6 +40,7 @@ def test_watterson_theta_requires_multiple_samples():
         "watterson_theta error message:",
         str(excinfo.value),
     )
+
 
     assert "sample_count" in str(excinfo.value)
 
@@ -52,6 +54,7 @@ def test_adjusted_sequence_length_respects_allow_and_mask_regions():
     )
 
     print(f"adjusted_sequence_length actual={adjusted} expected=25")
+
     assert adjusted == 25
 
 

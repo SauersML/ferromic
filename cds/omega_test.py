@@ -40,6 +40,15 @@ ENABLE_PAML_TIMEOUT = False
 RUN_BRANCH_MODEL_TEST = False
 RUN_CLADE_MODEL_TEST = True
 
+# === REGION WHITELIST =========================================================
+# Only regions whose (chromosome, start, end) triple appears in this list will run.
+# Coordinates are inclusive and must exactly match the parsed filename values.
+ALLOWED_REGIONS = [
+    ("chr12", 46896694, 46915975),
+    ("chr17", 45585159, 46292045),
+    ("chr6", 76109081, 76158474),
+    ("chr7", 57835188, 58119653),
+]
 
 # === PAML CACHE CONFIG =======================================================
 import hashlib, json, time, random, shlex
@@ -1636,6 +1645,20 @@ def main():
             logging.warning(
                 f"Skipping {len(bad_regions)} region files with bad names: " +
                 "; ".join(os.path.basename(b) for b, _ in bad_regions))
+        # Whitelist filter: retain only regions explicitly listed in ALLOWED_REGIONS.
+        if len(ALLOWED_REGIONS) > 0:
+            before = len(region_infos)
+            region_infos = [
+                r for r in region_infos
+                if (r['chrom'], r['start'], r['end']) in ALLOWED_REGIONS
+            ]
+            dropped = before - len(region_infos)
+            if dropped:
+                logging.info(f"Whitelist active: kept {len(region_infos)} region(s); dropped {dropped} non-whitelisted region(s).")
+            present = {(r['chrom'], r['start'], r['end']) for r in region_infos}
+            missing = [t for t in ALLOWED_REGIONS if t not in present]
+            if missing:
+                logging.warning(f"Whitelist regions not found among available files: {sorted(missing)}")
 
         gene_infos, bad_genes = [], []
         for f in gene_files:
