@@ -49,7 +49,6 @@ openssl = { version = "0.10", features = ["vendored"] }
 openssl-sys = { version = "0.9.109", features = ["vendored"] }
 
 [patch.crates-io]
-openblas-build = { path = "vendor/openblas-build" }
 efficient_pca = { git = "https://github.com/SauersML/efficient_pca", rev = "0c80fad462c3913ea76f3494e8c254fa9cd221f3" }
 private-gemm-x86 = { path = "vendor/private-gemm-x86/private-gemm-x86-0.1.14" }
 
