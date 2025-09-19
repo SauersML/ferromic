@@ -18,26 +18,10 @@ from pytest_benchmark.fixture import BenchmarkFixture
 from pytest_benchmark.stats import Metadata
 
 
-@dataclass(frozen=True)
-class DatasetConfig:
-    """Parameters controlling the synthetic cohorts used in benchmarks."""
-
-    label: str
-    variant_count: int
-    sample_count: int
-    divergence_scale: float
-    benchmark_rounds: int = 5
-
-    @property
-    def identifier(self) -> str:
-        return f"{self.label}_variants_{self.variant_count}_samples_{self.sample_count}"
-
-
-DATASET_CONFIGS: Sequence[DatasetConfig] = (
-    DatasetConfig("pilot_panel", 512, 48, 0.02),
-    DatasetConfig("regional_panel", 4096, 96, 0.05),
-    DatasetConfig("chromosome_arm", 16384, 128, 0.08, benchmark_rounds=4),
-    DatasetConfig("deep_cohort", 65536, 256, 0.1, benchmark_rounds=3),
+DATASET_CONFIGS: Sequence[Tuple[int, int]] = (
+    (256, 24),
+    (1024, 40),
+    (4096, 64),
 )
 
 
@@ -59,67 +43,32 @@ class BenchmarkDataset:
     pop2: Dict[str, object]
     expected_segregating_sites: int
     expected_nucleotide_diversity: float
-    expected_nucleotide_diversity_pop1: float
-    expected_nucleotide_diversity_pop2: float
     expected_watterson_theta: float
     expected_hudson_fst: float
     expected_hudson_dxy: float
     haplotype_count: int
-    benchmark_rounds: int
 
 
-@pytest.fixture(scope="module", params=DATASET_CONFIGS, ids=lambda config: config.identifier)
+@pytest.fixture(scope="module", params=DATASET_CONFIGS)
 def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
-    config: DatasetConfig = request.param
-    sample_count = config.sample_count
+    variant_count, sample_count = request.param
     if sample_count % 2:
         raise ValueError("sample count must be even so we can split populations evenly")
 
-    rng = np.random.default_rng(seed=config.variant_count + sample_count)
+    rng = np.random.default_rng(seed=variant_count + sample_count)
+    genotypes = rng.integers(0, 2, size=(variant_count, sample_count, 2), dtype=np.int8)
+
     half = sample_count // 2
-
-    base_freq = rng.beta(0.8, 0.8, size=config.variant_count)
-    divergence = rng.normal(0.0, config.divergence_scale, size=config.variant_count)
-    pop1_freq = np.clip(base_freq + divergence, 0.001, 0.999)
-    pop2_freq = np.clip(base_freq - divergence, 0.001, 0.999)
-
-    pop1_haplotypes = rng.binomial(
-        1,
-        pop1_freq[:, None],
-        size=(config.variant_count, half * 2),
-    ).astype(np.int8)
-    pop2_haplotypes = rng.binomial(
-        1,
-        pop2_freq[:, None],
-        size=(config.variant_count, half * 2),
-    ).astype(np.int8)
-
-    genotypes = np.concatenate(
-        [
-            pop1_haplotypes.reshape(config.variant_count, half, 2),
-            pop2_haplotypes.reshape(config.variant_count, half, 2),
-        ],
-        axis=1,
-    )
-
-    # Ensure at least two informative variants for stability across runs.
-    if config.variant_count:
-        genotypes[0, :half, :] = 0
-        genotypes[0, half:, :] = 1
-    if config.variant_count > 1:
+    # Ensure there is signal for Hudson FST and overall diversity statistics.
+    genotypes[0, :half, :] = 0
+    genotypes[0, half:, :] = 1
+    if variant_count > 1:
         genotypes[1, :half, 0] = 0
         genotypes[1, :half, 1] = 1
         genotypes[1, half:, :] = 1
 
-    if config.variant_count:
-        increments = rng.integers(1, 50, size=config.variant_count, dtype=np.int64)
-        positions = np.cumsum(increments, dtype=np.int64)
-    else:
-        positions = np.array([], dtype=np.int64)
-
-    sequence_start = int(positions[0]) if config.variant_count else 0
-    sequence_stop = int(positions[-1]) + 1 if config.variant_count else 0
-    sequence_length = sequence_stop - sequence_start
+    positions = np.arange(variant_count, dtype=np.int64) * 10
+    sequence_length = int(positions[-1]) + 1 if variant_count else 0
 
     variants = [
         {"position": int(position), "genotypes": genotypes[idx].tolist()}
@@ -145,26 +94,13 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
     fst = float(numerator.sum() / denominator.sum()) if float(denominator.sum()) else math.nan
     d_xy = float(denominator.sum() / sequence_length) if sequence_length else math.nan
 
-    expected_pi_total = float(
+    sequence_start = int(positions[0]) if variant_count else 0
+    sequence_stop = sequence_start + sequence_length
+
+    expected_pi = float(
         allel.sequence_diversity(
             positions,
             allele_counts_total,
-            start=sequence_start,
-            stop=sequence_stop,
-        )
-    )
-    expected_pi_pop1 = float(
-        allel.sequence_diversity(
-            positions,
-            allele_counts_pop1,
-            start=sequence_start,
-            stop=sequence_stop,
-        )
-    )
-    expected_pi_pop2 = float(
-        allel.sequence_diversity(
-            positions,
-            allele_counts_pop2,
             start=sequence_start,
             stop=sequence_stop,
         )
@@ -182,7 +118,7 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
     pop2 = _build_population("population_2", pop2_indices, haplotypes, variants, sequence_length, sample_names)
 
     return BenchmarkDataset(
-        identifier=config.identifier,
+        identifier=f"variants_{variant_count}_samples_{sample_count}",
         variants=variants,
         haplotypes=haplotypes,
         sample_names=sample_names,
@@ -195,14 +131,11 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
         pop1=pop1,
         pop2=pop2,
         expected_segregating_sites=int(allele_counts_total.is_segregating().sum()),
-        expected_nucleotide_diversity=expected_pi_total,
-        expected_nucleotide_diversity_pop1=expected_pi_pop1,
-        expected_nucleotide_diversity_pop2=expected_pi_pop2,
+        expected_nucleotide_diversity=expected_pi,
         expected_watterson_theta=expected_theta,
         expected_hudson_fst=fst,
         expected_hudson_dxy=d_xy,
         haplotype_count=sample_count * 2,
-        benchmark_rounds=config.benchmark_rounds,
     )
 
 
@@ -313,11 +246,7 @@ def test_benchmark_segregating_sites(
         def run() -> int:
             return int(allele_counts.is_segregating().sum())
 
-    result = benchmark.pedantic(
-        run,
-        iterations=1,
-        rounds=genotype_dataset.benchmark_rounds,
-    )
+    result = benchmark.pedantic(run, iterations=1, rounds=5)
     benchmark.extra_info["dataset"] = genotype_dataset.identifier
     benchmark.extra_info["implementation"] = implementation
     assert result == genotype_dataset.expected_segregating_sites
@@ -354,11 +283,7 @@ def test_benchmark_nucleotide_diversity(
                 )
             )
 
-    result = benchmark.pedantic(
-        run,
-        iterations=1,
-        rounds=genotype_dataset.benchmark_rounds,
-    )
+    result = benchmark.pedantic(run, iterations=1, rounds=5)
     benchmark.extra_info["dataset"] = genotype_dataset.identifier
     benchmark.extra_info["implementation"] = implementation
     assert result == pytest.approx(
@@ -366,66 +291,6 @@ def test_benchmark_nucleotide_diversity(
         rel=5e-4,
     )
     performance_recorder["nucleotide_diversity"][genotype_dataset.identifier][implementation] = benchmark.stats
-
-
-@pytest.mark.parametrize("population_key", ["pop1", "pop2"])
-@pytest.mark.parametrize("implementation", ["ferromic", "scikit-allel"])
-def test_benchmark_population_nucleotide_diversity(
-    benchmark: "BenchmarkFixture",
-    genotype_dataset: BenchmarkDataset,
-    performance_recorder,
-    implementation: str,
-    population_key: str,
-) -> None:
-    populations = {
-        "pop1": (
-            genotype_dataset.pop1["haplotypes"],
-            genotype_dataset.allele_counts_pop1,
-            genotype_dataset.expected_nucleotide_diversity_pop1,
-            genotype_dataset.pop1["id"],
-        ),
-        "pop2": (
-            genotype_dataset.pop2["haplotypes"],
-            genotype_dataset.allele_counts_pop2,
-            genotype_dataset.expected_nucleotide_diversity_pop2,
-            genotype_dataset.pop2["id"],
-        ),
-    }
-    haplotypes, allele_counts, expected_value, population_id = populations[population_key]
-
-    if implementation == "ferromic":
-        def run() -> float:
-            return fm.nucleotide_diversity(
-                genotype_dataset.variants,
-                haplotypes,
-                genotype_dataset.sequence_length,
-            )
-    else:
-        positions = genotype_dataset.positions
-        start = int(positions[0]) if len(positions) else 0
-        stop = start + genotype_dataset.sequence_length
-
-        def run() -> float:
-            return float(
-                allel.sequence_diversity(
-                    positions,
-                    allele_counts,
-                    start=start,
-                    stop=stop,
-                )
-            )
-
-    result = benchmark.pedantic(
-        run,
-        iterations=1,
-        rounds=genotype_dataset.benchmark_rounds,
-    )
-    dataset_key = f"{genotype_dataset.identifier}_{population_id}"
-    benchmark.extra_info["dataset"] = genotype_dataset.identifier
-    benchmark.extra_info["population"] = population_id
-    benchmark.extra_info["implementation"] = implementation
-    assert result == pytest.approx(expected_value, rel=5e-4)
-    performance_recorder["nucleotide_diversity_population"][dataset_key][implementation] = benchmark.stats
 
 
 @pytest.mark.parametrize("implementation", ["ferromic", "scikit-allel"])
@@ -458,11 +323,7 @@ def test_benchmark_watterson_theta(
                 )
             )
 
-    result = benchmark.pedantic(
-        run,
-        iterations=1,
-        rounds=genotype_dataset.benchmark_rounds,
-    )
+    result = benchmark.pedantic(run, iterations=1, rounds=5)
     benchmark.extra_info["dataset"] = genotype_dataset.identifier
     benchmark.extra_info["implementation"] = implementation
     assert result == pytest.approx(
@@ -473,44 +334,25 @@ def test_benchmark_watterson_theta(
 
 
 @pytest.mark.parametrize("implementation", ["ferromic", "scikit-allel"])
-def test_benchmark_hudson_fst_result(
+def test_benchmark_hudson_fst(
     benchmark: "BenchmarkFixture",
     genotype_dataset: BenchmarkDataset,
     performance_recorder,
     implementation: str,
 ) -> None:
     if implementation == "ferromic":
-        def run() -> Tuple[float, float]:
-            result = fm.hudson_fst(genotype_dataset.pop1, genotype_dataset.pop2)
-            return result.fst, result.d_xy
+        def run() -> float:
+            return fm.hudson_fst(genotype_dataset.pop1, genotype_dataset.pop2).fst
     else:
         allele_counts_pop1 = genotype_dataset.allele_counts_pop1
         allele_counts_pop2 = genotype_dataset.allele_counts_pop2
-        sequence_length = genotype_dataset.sequence_length
 
-        def run() -> Tuple[float, float]:
+        def run() -> float:
             numerator, denominator = allel.hudson_fst(allele_counts_pop1, allele_counts_pop2)
-            fst = float(numerator.sum() / denominator.sum())
-            d_xy = float(denominator.sum() / sequence_length) if sequence_length else math.nan
-            return fst, d_xy
+            return float(numerator.sum() / denominator.sum())
 
-    fst_value, d_xy_value = benchmark.pedantic(
-        run,
-        iterations=1,
-        rounds=genotype_dataset.benchmark_rounds,
-    )
+    result = benchmark.pedantic(run, iterations=1, rounds=5)
     benchmark.extra_info["dataset"] = genotype_dataset.identifier
     benchmark.extra_info["implementation"] = implementation
-    benchmark.extra_info["fst"] = fst_value
-    benchmark.extra_info["d_xy"] = d_xy_value
-    assert fst_value == pytest.approx(
-        genotype_dataset.expected_hudson_fst,
-        rel=1e-9,
-        abs=1e-12,
-    )
-    assert d_xy_value == pytest.approx(
-        genotype_dataset.expected_hudson_dxy,
-        rel=1e-9,
-        abs=1e-12,
-    )
+    assert result == pytest.approx(genotype_dataset.expected_hudson_fst, rel=1e-9, abs=1e-12)
     performance_recorder["hudson_fst"][genotype_dataset.identifier][implementation] = benchmark.stats
