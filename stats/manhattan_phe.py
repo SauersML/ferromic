@@ -8,6 +8,8 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import FancyArrowPatch
 from adjustText import adjust_text as ADJUST_TEXT  # required
 
+from _inv_common import map_inversion_series
+
 # ---------- Config ----------
 INFILE = "phewas_results.tsv"
 PHECODE_FILE = "phecodeX.csv"
@@ -519,9 +521,12 @@ def main():
         how="left", left_on="Phen_clean", right_on="clean_name"
     )
 
-    inv_mask = df[INV_COL].astype(str).str.strip() != ""
+    df[INV_COL] = df[INV_COL].fillna("").astype(str)
+    inv_mask = df[INV_COL].str.strip() != ""
     df = df[inv_mask].copy()
     if df.empty: sys.exit("No rows with a non-empty Inversion value.")
+
+    df[INV_COL] = map_inversion_series(df[INV_COL])
 
     made, to_open = [], []
     for inv, grp in df.groupby(INV_COL, dropna=False):

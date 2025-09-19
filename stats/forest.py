@@ -7,6 +7,8 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
+from _inv_common import map_inversion_series
+
 # --------------------------- Configuration ---------------------------
 
 INPUT_FILE       = "phewas_results.tsv"
@@ -151,6 +153,7 @@ def load_and_prepare(path: str) -> pd.DataFrame:
     # Types
     df["Phenotype"] = df["Phenotype"].fillna("").astype(str)
     df["Inversion"] = df["Inversion"].fillna("").astype(str)
+    df["Inversion"] = map_inversion_series(df["Inversion"])
     df["OR"]        = pd.to_numeric(df["OR"], errors="coerce")
     df["Q_GLOBAL"]  = pd.to_numeric(df["Q_GLOBAL"], errors="coerce")
 

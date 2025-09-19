@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle as MplRectangle
 from matplotlib.transforms import blended_transform_factory
 
+from _inv_common import map_inversion_series
+
 # =========================
 # Global configuration
 # =========================
@@ -262,6 +264,9 @@ def main():
 
     df = df.dropna(subset=["Inversion", "Phenotype", "OR"])
     df = df[df["OR"] > 0]
+
+    df["Inversion"] = df["Inversion"].astype(str)
+    df["Inversion"] = map_inversion_series(df["Inversion"])
 
     # Normed OR
     df["normed_OR"] = np.log(df["OR"].values)
