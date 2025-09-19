@@ -83,6 +83,10 @@ mpl.rcParams.update({
 N_CORES        = max(1, mp.cpu_count() - 1)
 OPEN_PLOTS_ON_LINUX = True  # auto open generated PDFs using `xdg-open` if available
 
+# Hudson specifics
+EPS_DENOM        = 1e-12         # treat denom <= EPS as uninformative
+BOOTSTRAP_REPS   = 300           # inversion bootstrap reps for pooled curve SE
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
@@ -263,7 +267,10 @@ _NUM_BINS: Optional[int] = None
 _MODE: Optional[str] = None   # 'proportion' or 'bp'
 _MAX_BP: Optional[int] = None
 _BIN_RETURN_SUMS: Optional[bool] = None
-_HUDSON_SUMS: Optional[dict] = None
+
+# Hudson globals for pooled & median variants
+_HUDSON_SUMS: Optional[dict] = None   # {"num": defaultdict(np.array), "den": defaultdict(np.array)}
+_HUDSON_PERINV: Optional[dict] = None # {"num": defaultdict(list[np.array]), "den": defaultdict(list[np.array]), "cnt": defaultdict(list[np.array])}
 
 def _pool_init(mode: str, num_bins: int, max_bp: Optional[int], return_sums: bool = False):
     """
@@ -713,7 +720,7 @@ def _collect_grouped_means(which: str,
        per_group_means: group -> list of per-seq values (means for π; per-seq ratios for FST)
        per_group_counts: group -> number of sequences contributing
     """
-    global _HUDSON_SUMS
+    global _HUDSON_SUMS, _HUDSON_PERINV
     per_group_means = defaultdict(list)
     per_group_counts = Counter()
 
@@ -732,13 +739,12 @@ def _collect_grouped_means(which: str,
                 d["num"] = rec["data"]
             elif "denominator" in hl:
                 d["den"] = rec["data"]
-            else:
-                pass
 
         pairs = [(k, v) for k, v in by_coords.items() if v["num"] is not None and v["den"] is not None]
         if not pairs:
             log.warning(f"[{which}/{mode}] No numerator/denominator pairs found.")
             _HUDSON_SUMS = None
+            _HUDSON_PERINV = None
             return per_group_means, per_group_counts
 
         groups = []
@@ -750,25 +756,46 @@ def _collect_grouped_means(which: str,
             nums.append(v["num"])
             dens.append(v["den"])
 
+        # Bin numerator and denominator sums across sites
         with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(mode, num_bins, max_bp, True)) as pool:
             binned_num_sums = pool.map(_bin_one_sequence, nums, chunksize=max(1, len(nums)//(N_CORES*4) if nums else 1))
         with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(mode, num_bins, max_bp, True)) as pool:
             binned_den_sums = pool.map(_bin_one_sequence, dens, chunksize=max(1, len(dens)//(N_CORES*4) if dens else 1))
 
+        # Bin counts of informative sites (where per-site denom > EPS_DENOM)
+        cnt_inputs = [np.where(d > EPS_DENOM, 1.0, np.nan).astype(np.float32) for d in dens]
+        with mp.Pool(processes=N_CORES, initializer=_pool_init, initargs=(mode, num_bins, max_bp, True)) as pool:
+            binned_cnt_sums = pool.map(_bin_one_sequence, cnt_inputs, chunksize=max(1, len(cnt_inputs)//(N_CORES*4) if cnt_inputs else 1))
+
+        # Totals for pooled; per-inversion lists for median & bootstrap
         hud_num_tot = defaultdict(lambda: np.zeros(num_bins, dtype=float))
         hud_den_tot = defaultdict(lambda: np.zeros(num_bins, dtype=float))
+        hud_perinv_num = defaultdict(list)
+        hud_perinv_den = defaultdict(list)
+        hud_perinv_cnt = defaultdict(list)
 
-        for gkey, nsum, dsum in zip(groups, binned_num_sums, binned_den_sums):
-            if nsum is None or dsum is None:
+        for gkey, nsum, dsum, csum in zip(groups, binned_num_sums, binned_den_sums, binned_cnt_sums):
+            if nsum is None or dsum is None or csum is None:
                 continue
+            # Per-inversion ratio-of-sums per bin (for MEDIAN view)
             with np.errstate(divide="ignore", invalid="ignore"):
-                ratio = np.where(dsum > 0, nsum / dsum, np.nan)
+                ratio = np.where(dsum > EPS_DENOM, nsum / dsum, np.nan)
             per_group_means[gkey].append(ratio)
             per_group_counts[gkey] += 1
             if gkey != "uncategorized":
                 per_group_means["overall"].append(ratio)
                 per_group_counts["overall"] += 1
 
+            # Store per-inversion sums for pooled & bootstrap
+            hud_perinv_num[gkey].append(nsum)
+            hud_perinv_den[gkey].append(dsum)
+            hud_perinv_cnt[gkey].append(csum)
+            if gkey != "uncategorized":
+                hud_perinv_num["overall"].append(nsum)
+                hud_perinv_den["overall"].append(dsum)
+                hud_perinv_cnt["overall"].append(csum)
+
+            # Update pooled totals
             hud_num_tot[gkey] += np.nan_to_num(nsum, nan=0.0)
             hud_den_tot[gkey] += np.nan_to_num(dsum, nan=0.0)
             if gkey != "uncategorized":
@@ -776,6 +803,7 @@ def _collect_grouped_means(which: str,
                 hud_den_tot["overall"] += np.nan_to_num(dsum, nan=0.0)
 
         _HUDSON_SUMS = {"num": hud_num_tot, "den": hud_den_tot}
+        _HUDSON_PERINV = {"num": hud_perinv_num, "den": hud_perinv_den, "cnt": hud_perinv_cnt}
 
         for g in ["recurrent", "single-event", "uncategorized", "overall"]:
             if per_group_counts.get(g, 0):
@@ -783,6 +811,7 @@ def _collect_grouped_means(which: str,
 
         return per_group_means, per_group_counts
 
+    # π pathway (unchanged): bin per-sequence means
     seqs_with_meta: List[Tuple[str, Optional[str], np.ndarray]] = []
     for rec in _iter_falsta(falsta, which=which, min_len=min_len):
         c = rec["coords"]
@@ -831,6 +860,30 @@ def _collect_grouped_means(which: str,
     return per_group_means, per_group_counts
 
 
+def _bootstrap_pooled_se(perinv_num: List[np.ndarray],
+                         perinv_den: List[np.ndarray],
+                         reps: int = BOOTSTRAP_REPS) -> np.ndarray:
+    """
+    Bootstrap SE for pooled ratio-of-sums curve (resample inversions).
+    Returns per-bin standard deviation of bootstrap estimates.
+    """
+    if not perinv_num or not perinv_den:
+        return np.array([])
+    N = len(perinv_num)
+    num_mat = np.vstack(perinv_num)  # [N, B]
+    den_mat = np.vstack(perinv_den)  # [N, B]
+    B = num_mat.shape[1]
+    boot = np.full((reps, B), np.nan, dtype=float)
+    rng = np.random.default_rng(1337)
+    for r in range(reps):
+        idx = rng.integers(0, N, size=N)
+        Ns = np.nansum(num_mat[idx, :], axis=0)
+        Ds = np.nansum(den_mat[idx, :], axis=0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            boot[r, :] = np.where(Ds > EPS_DENOM, Ns / Ds, np.nan)
+    return np.nanstd(boot, axis=0, ddof=1)
+
+
 def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       per_group_counts: Dict[str,int],
                       which: str,
@@ -843,10 +896,12 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       agg_kind: str):
     """
     Build tables, compute stats, and plot for given mode.
-    For Hudson FST, the plotted central tendency per bin is the ratio of summed numerators to summed denominators across sequences.
-    agg_kind ∈ {'mean','median'} controls whether we aggregate across inversions by mean or median for the per-sequence values used in SEM.
+    For Hudson FST:
+      - agg_kind == 'median': median across inversions of per-inversion ratios (each inversion’s ratio is ratio-of-sums across sites per bin).
+      - agg_kind == 'pooled': pooled ratio-of-sums across inversions (sum numerators/denominators first, then divide).
+    For π: behavior unchanged (agg_kind ∈ {'mean','median'}).
     """
-    global _HUDSON_SUMS
+    global _HUDSON_SUMS, _HUDSON_PERINV
 
     if mode == "proportion":
         edges = np.linspace(0.0, 1.0, num_bins + 1, dtype=np.float64)
@@ -883,24 +938,61 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
     group_stats: Dict[str, dict] = {}
     all_rows = []
 
-    aggregator = _aggregate_unweighted_mean if agg_kind == "mean" else _aggregate_unweighted_median
+    agg_func = None
+    if agg_kind == "mean":
+        agg_func = _aggregate_unweighted_mean
+    elif agg_kind == "median":
+        agg_func = _aggregate_unweighted_median
+    elif agg_kind == "pooled":
+        agg_func = None
+    else:
+        raise ValueError("agg_kind must be one of {'mean','median','pooled'} for Hudson; {'mean','median'} for π.")
 
     for grp in group_iter:
         seqs = per_group_means.get(grp, [])
-        if not seqs:
-            continue
-        mean_per, se_per, nseq_per = aggregator(seqs)
-
-        if which == "hudson" and _HUDSON_SUMS is not None:
-            num_tot = _HUDSON_SUMS["num"].get(grp) if isinstance(_HUDSON_SUMS.get("num"), dict) else None  # type: ignore[attr-defined]
-            den_tot = _HUDSON_SUMS["den"].get(grp) if isinstance(_HUDSON_SUMS.get("den"), dict) else None  # type: ignore[attr-defined]
-            if num_tot is not None and den_tot is not None:
+        if which == "pi":
+            if not seqs:
+                continue
+            mean_per, se_per, nseq_per = agg_func(seqs)  # type: ignore[misc]
+        else:
+            # Hudson:
+            if agg_kind == "median":
+                if not seqs:
+                    continue
+                mean_per, se_per, nseq_per = _aggregate_unweighted_median(seqs)
+            elif agg_kind == "pooled":
+                # Build pooled curve from totals; SE from inversion bootstrap
+                if _HUDSON_SUMS is None or _HUDSON_PERINV is None:
+                    log.warning("[hudson/pooled] Missing pooled components.")
+                    continue
+                num_tot = _HUDSON_SUMS["num"].get(grp)
+                den_tot = _HUDSON_SUMS["den"].get(grp)
+                if num_tot is None or den_tot is None:
+                    continue
                 with np.errstate(divide="ignore", invalid="ignore"):
-                    weighted = np.where(den_tot > 0, num_tot / den_tot, np.nan)
-                mean_per = weighted
+                    pooled_curve = np.where(den_tot > EPS_DENOM, num_tot / den_tot, np.nan)
 
+                perinv_num = _HUDSON_PERINV["num"].get(grp, [])
+                perinv_den = _HUDSON_PERINV["den"].get(grp, [])
+                # n inversions contributing per bin = count of inversions with positive denom in that bin
+                if perinv_den:
+                    den_mat = np.vstack(perinv_den)
+                    nseq_per = np.sum(den_mat > EPS_DENOM, axis=0).astype(int)
+                else:
+                    nseq_per = np.zeros_like(pooled_curve, dtype=int)
+                # Bootstrap SE (over inversions); band will render if SE is finite
+                se_per = _bootstrap_pooled_se(perinv_num, perinv_den, reps=BOOTSTRAP_REPS)
+                mean_per = pooled_curve
+            else:
+                # (Unweighted mean, not requested; keep for completeness if ever used)
+                if not seqs:
+                    continue
+                mean_per, se_per, nseq_per = _aggregate_unweighted_mean(seqs)
+
+        # Plot mask: require enough inversions in the bin
         plot_mask = (nseq_per >= MIN_INV_PER_BIN)
 
+        # Correlation uses only allowed bins
         mean_for_corr = mean_per.copy()
         mean_for_corr[~plot_mask] = np.nan
         x_for_corr = x_centers.copy()
@@ -962,8 +1054,11 @@ def run_metric(which: str,
                out_tsv_bp: Path,
                agg_kind: str):
     """
-    Run a metric ('pi' or 'hudson') end-to-end for both proportion and bp modes
-    using aggregation agg_kind ∈ {'mean','median'} across inversions.
+    Run a metric end-to-end for both proportion and bp modes.
+    π: agg_kind ∈ {'mean','median'} on per-sequence bin means.
+    Hudson FST:
+      - 'median' → median across inversions of per-inversion (ratio-of-sums) bin values.
+      - 'pooled' → pooled ratio-of-sums across inversions.
     """
     t0 = time.time()
 
@@ -1056,29 +1151,29 @@ def main():
         agg_kind="median",
     )
 
-    # Hudson FST — produce MEAN and MEDIAN versions
-    # --- MEAN ---
+    # Hudson FST — produce POOLED and MEDIAN versions
+    # --- POOLED (ratio-of-sums across inversions) ---
     run_metric(
         which="hudson",
         falsta=FST_FILE,
         min_len=MIN_LEN_FST,
         fuzzy_map=fuzzy_map,
-        y_label="Mean Hudson FST (per site)",
-        # proportion mode outputs (now capped by MAX_BP too)
-        out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_mean.pdf",
-        out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_mean.tsv",
+        y_label="Hudson FST (pooled ratio-of-sums)",
+        # proportion mode outputs
+        out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_pooled.pdf",
+        out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_pooled.tsv",
         # bp mode outputs
-        out_plot_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean.pdf",
-        out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean.tsv",
-        agg_kind="mean",
+        out_plot_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_pooled.pdf",
+        out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_pooled.tsv",
+        agg_kind="pooled",
     )
-    # --- MEDIAN ---
+    # --- MEDIAN (across inversions; per-inversion is ratio-of-sums across sites) ---
     run_metric(
         which="hudson",
         falsta=FST_FILE,
         min_len=MIN_LEN_FST,
         fuzzy_map=fuzzy_map,
-        y_label="Median Hudson FST (per site)",
+        y_label="Hudson FST (median across inversions)",
         # proportion mode outputs
         out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_median.pdf",
         out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_median.tsv",
