@@ -241,6 +241,82 @@ pub struct PopulationContext<'a> {
     /// The effective sequence length (L) for normalization in diversity calculations.
     /// This should account for any masking or specific intervals considered.
     pub sequence_length: i64,
+    pub dense_genotypes: Option<&'a DenseGenotypeMatrix>,
+    pub dense_summary: Option<Arc<DensePopulationSummary>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DenseGenotypeMatrix {
+    data: Arc<[u8]>,
+    missing: Option<Arc<[u64]>>,
+    variant_count: usize,
+    sample_count: usize,
+    ploidy: usize,
+    stride: usize,
+    max_allele: u8,
+}
+
+impl DenseGenotypeMatrix {
+    pub fn new(
+        data: Vec<u8>,
+        missing: Option<Vec<u64>>,
+        variant_count: usize,
+        sample_count: usize,
+        ploidy: usize,
+        max_allele: u8,
+    ) -> Self {
+        debug_assert_eq!(
+            data.len(),
+            variant_count * sample_count * ploidy,
+            "dense genotype matrix requires variants * samples * ploidy entries",
+        );
+        let data = Arc::<[u8]>::from(data.into_boxed_slice());
+        let missing = missing.map(|bits| Arc::<[u64]>::from(bits.into_boxed_slice()));
+        Self {
+            data,
+            missing,
+            variant_count,
+            sample_count,
+            ploidy,
+            stride: sample_count * ploidy,
+            max_allele,
+        }
+    }
+
+    #[inline]
+    pub fn variant_count(&self) -> usize {
+        self.variant_count
+    }
+
+    #[inline]
+    pub fn sample_count(&self) -> usize {
+        self.sample_count
+    }
+
+    #[inline]
+    pub fn ploidy(&self) -> usize {
+        self.ploidy
+    }
+
+    #[inline]
+    fn stride(&self) -> usize {
+        self.stride
+    }
+
+    #[inline]
+    fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    #[inline]
+    fn missing_slice(&self) -> Option<&[u64]> {
+        self.missing.as_deref()
+    }
+
+    #[inline]
+    pub fn max_allele(&self) -> u8 {
+        self.max_allele
+    }
 }
 
 /// Holds the result of a Dxy (between-population nucleotide diversity) calculation,
@@ -858,7 +934,6 @@ struct SubpopulationMembership {
     pair_keys: Vec<PairDescriptor>,
 }
 
-
 impl SubpopulationMembership {
     fn from_map(sample_count: usize, map_subpop: &HashMap<(usize, HaplotypeSide), String>) -> Self {
         let mut labels: Vec<String> = map_subpop.values().cloned().collect();
@@ -994,6 +1069,349 @@ impl HapMembership {
         }
 
         Self { left, right, total }
+    }
+}
+
+#[derive(Clone)]
+struct DenseMembership {
+    offsets: Vec<usize>,
+}
+
+impl DenseMembership {
+    fn build(matrix: &DenseGenotypeMatrix, haplotypes: &[(usize, HaplotypeSide)]) -> Self {
+        let sample_count = matrix.sample_count();
+        let ploidy = matrix.ploidy();
+        let mut left = vec![false; sample_count];
+        let mut right = vec![false; sample_count];
+        let mut offsets = Vec::with_capacity(haplotypes.len());
+
+        for &(sample_idx, side) in haplotypes {
+            if sample_idx >= sample_count {
+                continue;
+            }
+            match side {
+                HaplotypeSide::Left => {
+                    if !left[sample_idx] {
+                        left[sample_idx] = true;
+                        offsets.push(sample_idx * ploidy);
+                    }
+                }
+                HaplotypeSide::Right => {
+                    if ploidy <= 1 {
+                        continue;
+                    }
+                    if !right[sample_idx] {
+                        right[sample_idx] = true;
+                        offsets.push(sample_idx * ploidy + 1);
+                    }
+                }
+            }
+        }
+
+        Self { offsets }
+    }
+
+    #[inline]
+    fn offsets(&self) -> &[usize] {
+        &self.offsets
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.offsets.len()
+    }
+}
+
+#[inline(always)]
+fn dense_missing(bits: &[u64], idx: usize) -> bool {
+    let word = idx >> 6;
+    let bit = idx & 63;
+    unsafe { ((*bits.get_unchecked(word) >> bit) & 1) == 1 }
+}
+
+#[derive(Debug)]
+pub struct DensePopulationSummary {
+    alt_counts: Arc<[u32]>,
+    called_counts: Arc<[u32]>,
+    haplotype_capacity: usize,
+}
+
+impl DensePopulationSummary {
+    #[inline]
+    pub fn alt_counts(&self) -> &[u32] {
+        &self.alt_counts
+    }
+
+    #[inline]
+    pub fn called_counts(&self) -> &[u32] {
+        &self.called_counts
+    }
+
+    #[inline]
+    pub fn haplotype_capacity(&self) -> usize {
+        self.haplotype_capacity
+    }
+}
+
+pub fn build_dense_population_summary(
+    matrix: &DenseGenotypeMatrix,
+    haplotypes: &[(usize, HaplotypeSide)],
+) -> DensePopulationSummary {
+    let membership = DenseMembership::build(matrix, haplotypes);
+    let offsets = membership.offsets();
+    let variant_count = matrix.variant_count();
+    let stride = matrix.stride();
+    let data = matrix.data();
+    let mut alt_counts = vec![0u32; variant_count];
+    let mut called_counts = vec![0u32; variant_count];
+
+    if let Some(bits) = matrix.missing_slice() {
+        for variant_idx in 0..variant_count {
+            let base = variant_idx * stride;
+            let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
+            alt_counts[variant_idx] = alt as u32;
+            called_counts[variant_idx] = called as u32;
+        }
+    } else {
+        let total = offsets.len() as u32;
+        for variant_idx in 0..variant_count {
+            let base = variant_idx * stride;
+            let alt = dense_sum_alt_no_missing(data, base, offsets);
+            alt_counts[variant_idx] = alt as u32;
+            called_counts[variant_idx] = total;
+        }
+    }
+
+    DensePopulationSummary {
+        alt_counts: Arc::from(alt_counts.into_boxed_slice()),
+        called_counts: Arc::from(called_counts.into_boxed_slice()),
+        haplotype_capacity: offsets.len(),
+    }
+}
+
+fn count_segregating_sites_from_summary(summary: &DensePopulationSummary) -> usize {
+    summary
+        .alt_counts()
+        .iter()
+        .zip(summary.called_counts())
+        .filter(|(&alt, &called)| {
+            let called = called as usize;
+            let alt = alt as usize;
+            called >= 2 && alt > 0 && alt < called
+        })
+        .count()
+}
+
+fn calculate_pi_from_summary(summary: &DensePopulationSummary, seq_length: i64) -> f64 {
+    if summary.haplotype_capacity() <= 1 {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Cannot calculate pi: insufficient haplotypes ({})",
+                summary.haplotype_capacity()
+            ),
+        );
+        return 0.0;
+    }
+
+    if seq_length < 0 {
+        log(
+            LogLevel::Warning,
+            &format!("Cannot calculate pi: invalid sequence length ({seq_length})"),
+        );
+        return 0.0;
+    }
+
+    if seq_length == 0 {
+        log(
+            LogLevel::Warning,
+            "Cannot calculate pi: zero sequence length causes division by zero",
+        );
+        return f64::INFINITY;
+    }
+
+    let mut sum_pi = 0.0_f64;
+    for (&alt, &called) in summary.alt_counts().iter().zip(summary.called_counts()) {
+        let alt = alt as usize;
+        let called = called as usize;
+        if let Some(pi) = dense_pi_from_counts(called, alt) {
+            sum_pi += pi;
+        }
+    }
+
+    sum_pi / seq_length as f64
+}
+
+fn aggregate_hudson_components_from_summaries(
+    pop1: &DensePopulationSummary,
+    pop2: &DensePopulationSummary,
+) -> (f64, f64) {
+    let len = pop1.alt_counts().len().min(pop2.alt_counts().len());
+    let alt1 = pop1.alt_counts();
+    let alt2 = pop2.alt_counts();
+    let called1 = pop1.called_counts();
+    let called2 = pop2.called_counts();
+    let mut num_sum = 0.0;
+    let mut den_sum = 0.0;
+
+    for idx in 0..len {
+        let n1 = called1[idx] as usize;
+        let alt_count1 = alt1[idx] as usize;
+        let n2 = called2[idx] as usize;
+        let alt_count2 = alt2[idx] as usize;
+
+        let pi1 = dense_pi_from_counts(n1, alt_count1);
+        let pi2 = dense_pi_from_counts(n2, alt_count2);
+        let dxy = dense_dxy_from_biallelic_counts(n1, alt_count1, n2, alt_count2);
+
+        if let (Some(d), Some(p1_val), Some(p2_val)) = (dxy, pi1, pi2) {
+            if d > FST_EPSILON {
+                num_sum += d - 0.5 * (p1_val + p2_val);
+                den_sum += d;
+            } else {
+                let pi_avg = 0.5 * (p1_val + p2_val);
+                if pi_avg.abs() <= FST_EPSILON {
+                    // contributes zero to both sums
+                }
+            }
+        }
+    }
+
+    (num_sum, den_sum)
+}
+
+fn hudson_component_sums(sites: &[SiteFstHudson]) -> (f64, f64) {
+    let mut num_sum = 0.0_f64;
+    let mut den_sum = 0.0_f64;
+    for s in sites {
+        if let (Some(nc), Some(dc)) = (s.num_component, s.den_component) {
+            num_sum += nc;
+            den_sum += dc;
+        }
+    }
+    (num_sum, den_sum)
+}
+
+fn dxy_from_summaries(
+    pop1: &DensePopulationSummary,
+    pop2: &DensePopulationSummary,
+    sequence_length: i64,
+) -> Option<f64> {
+    if sequence_length <= 0 {
+        return None;
+    }
+    let len = pop1.alt_counts().len().min(pop2.alt_counts().len());
+    let alt1 = pop1.alt_counts();
+    let alt2 = pop2.alt_counts();
+    let called1 = pop1.called_counts();
+    let called2 = pop2.called_counts();
+    let mut sum_dxy = 0.0_f64;
+
+    for idx in 0..len {
+        let n1 = called1[idx] as usize;
+        let alt_count1 = alt1[idx] as usize;
+        let n2 = called2[idx] as usize;
+        let alt_count2 = alt2[idx] as usize;
+        if let Some(dxy) = dense_dxy_from_biallelic_counts(n1, alt_count1, n2, alt_count2) {
+            sum_dxy += dxy;
+        }
+    }
+
+    Some(sum_dxy / sequence_length as f64)
+}
+
+#[inline(always)]
+fn dense_sum_alt_no_missing(data: &[u8], base: usize, offsets: &[usize]) -> usize {
+    let mut sum = 0usize;
+    unsafe {
+        let ptr = data.as_ptr().add(base);
+        for &offset in offsets {
+            sum += *ptr.add(offset) as usize;
+        }
+    }
+    sum
+}
+
+#[inline(always)]
+fn dense_sum_alt_with_missing(
+    data: &[u8],
+    base: usize,
+    offsets: &[usize],
+    bits: &[u64],
+) -> (usize, usize) {
+    let mut alt = 0usize;
+    let mut total = 0usize;
+    unsafe {
+        let ptr = data.as_ptr().add(base);
+        for &offset in offsets {
+            let idx = base + offset;
+            if dense_missing(bits, idx) {
+                continue;
+            }
+            alt += *ptr.add(offset) as usize;
+            total += 1;
+        }
+    }
+    (total, alt)
+}
+
+#[inline(always)]
+fn dense_pi_from_counts(total_called: usize, alt_count: usize) -> Option<f64> {
+    if total_called < 2 {
+        return None;
+    }
+    let n = total_called as f64;
+    let alt = alt_count as f64;
+    let ref_count = (total_called - alt_count) as f64;
+    let sum_sq = ref_count * ref_count + alt * alt;
+    Some(n / (n - 1.0) * (1.0 - sum_sq / (n * n)))
+}
+
+#[inline(always)]
+fn dense_dxy_from_biallelic_counts(n1: usize, alt1: usize, n2: usize, alt2: usize) -> Option<f64> {
+    if n1 == 0 || n2 == 0 {
+        return None;
+    }
+    let n1_f = n1 as f64;
+    let n2_f = n2 as f64;
+    let alt1_f = alt1 as f64 / n1_f;
+    let alt2_f = alt2 as f64 / n2_f;
+    let ref1 = 1.0 - alt1_f;
+    let ref2 = 1.0 - alt2_f;
+    let mut dot = ref1 * ref2 + alt1_f * alt2_f;
+    if dot < 0.0 {
+        dot = 0.0;
+    }
+    let mut dxy = 1.0 - dot;
+    if dxy < 0.0 {
+        dxy = 0.0;
+    } else if dxy > 1.0 {
+        dxy = 1.0;
+    }
+    Some(dxy)
+}
+
+#[inline(always)]
+fn dense_fst_components_from_biallelic(
+    dxy: Option<f64>,
+    pi1: Option<f64>,
+    pi2: Option<f64>,
+) -> (Option<f64>, Option<f64>, Option<f64>) {
+    match (dxy, pi1, pi2) {
+        (Some(d), Some(p1), Some(p2)) => {
+            if d > FST_EPSILON {
+                let num = d - 0.5 * (p1 + p2);
+                (Some(num / d), Some(num), Some(d))
+            } else {
+                let pi_avg = 0.5 * (p1 + p2);
+                if pi_avg.abs() <= FST_EPSILON {
+                    (Some(0.0), Some(0.0), Some(0.0))
+                } else {
+                    (None, None, None)
+                }
+            }
+        }
+        _ => (None, None, None),
     }
 }
 
@@ -1198,7 +1616,6 @@ fn calculate_fst_wc_at_site_with_membership(
 
     workspace.stats.clear();
 
-
     (
         overall_fst_at_site,
         pairwise_fst_estimate_map,
@@ -1207,7 +1624,6 @@ fn calculate_fst_wc_at_site_with_membership(
         pairwise_variance_components_map,
     )
 }
-
 
 fn calculate_variance_components(
     pop_stats: &[PopSiteStat], // (n_i, p_i)
@@ -1612,6 +2028,30 @@ pub fn calculate_d_xy_hudson<'a>(
         return Ok(DxyHudsonResult { d_xy: None });
     }
 
+    if let (Some(summary1), Some(summary2)) = (
+        pop1_context.dense_summary.as_deref(),
+        pop2_context.dense_summary.as_deref(),
+    ) {
+        let dxy_value = dxy_from_summaries(summary1, summary2, pop1_context.sequence_length);
+        return Ok(DxyHudsonResult { d_xy: dxy_value });
+    }
+
+    if let (Some(matrix1), Some(matrix2)) =
+        (pop1_context.dense_genotypes, pop2_context.dense_genotypes)
+    {
+        if std::ptr::eq(matrix1, matrix2) && matrix1.ploidy() == 2 {
+            let membership1 = DenseMembership::build(matrix1, &pop1_context.haplotypes);
+            let membership2 = DenseMembership::build(matrix2, &pop2_context.haplotypes);
+            let d_xy_value = calculate_dxy_dense(
+                matrix1,
+                &membership1,
+                &membership2,
+                pop1_context.sequence_length,
+            );
+            return Ok(DxyHudsonResult { d_xy: d_xy_value });
+        }
+    }
+
     // Use unbiased per-site aggregation approach
     let mut sum_dxy = 0.0;
     let mut variant_count = 0;
@@ -1657,6 +2097,79 @@ pub fn calculate_d_xy_hudson<'a>(
     };
 
     Ok(DxyHudsonResult { d_xy: d_xy_value })
+}
+
+fn calculate_dxy_dense(
+    matrix: &DenseGenotypeMatrix,
+    pop1_mem: &DenseMembership,
+    pop2_mem: &DenseMembership,
+    sequence_length: i64,
+) -> Option<f64> {
+    if pop1_mem.len() == 0 || pop2_mem.len() == 0 {
+        return None;
+    }
+    if sequence_length <= 0 {
+        return None;
+    }
+
+    let mut counts1 = vec![0u32; 256];
+    let mut used1 = Vec::with_capacity(8);
+    let mut counts2 = vec![0u32; 256];
+    let mut used2 = Vec::with_capacity(8);
+    let mut sum_dxy = 0.0_f64;
+
+    for variant_idx in 0..matrix.variant_count() {
+        let (n1, _) = dense_collect_counts(matrix, pop1_mem, variant_idx, &mut counts1, &mut used1);
+        let (n2, _) = dense_collect_counts(matrix, pop2_mem, variant_idx, &mut counts2, &mut used2);
+
+        if n1 == 0 || n2 == 0 {
+            dense_reset_counts(&mut counts1, &mut used1);
+            dense_reset_counts(&mut counts2, &mut used2);
+            continue;
+        }
+
+        let inv1 = 1.0 / n1 as f64;
+        let inv2 = 1.0 / n2 as f64;
+        let mut dot = 0.0_f64;
+        if used1.len() <= used2.len() {
+            for &allele in &used1 {
+                let c1 = counts1[allele];
+                if c1 == 0 {
+                    continue;
+                }
+                let c2 = if allele < counts2.len() {
+                    counts2[allele]
+                } else {
+                    0
+                };
+                if c2 != 0 {
+                    dot += (c1 as f64 * inv1) * (c2 as f64 * inv2);
+                }
+            }
+        } else {
+            for &allele in &used2 {
+                let c2 = counts2[allele];
+                if c2 == 0 {
+                    continue;
+                }
+                let c1 = if allele < counts1.len() {
+                    counts1[allele]
+                } else {
+                    0
+                };
+                if c1 != 0 {
+                    dot += (c1 as f64 * inv1) * (c2 as f64 * inv2);
+                }
+            }
+        }
+        let dxy_site = (1.0 - dot).max(0.0).min(1.0);
+        sum_dxy += dxy_site;
+
+        dense_reset_counts(&mut counts1, &mut used1);
+        dense_reset_counts(&mut counts2, &mut used2);
+    }
+
+    Some(sum_dxy / sequence_length as f64)
 }
 
 /// Extract allele counts for a population at a specific variant site.
@@ -1870,6 +2383,72 @@ fn compute_pi_metrics_fast(
     }
 }
 
+fn dense_collect_counts(
+    matrix: &DenseGenotypeMatrix,
+    membership: &DenseMembership,
+    variant_idx: usize,
+    counts: &mut Vec<u32>,
+    used: &mut Vec<usize>,
+) -> (usize, f64) {
+    let stride = matrix.stride();
+    let base = variant_idx * stride;
+    let data = matrix.data();
+    let offsets = membership.offsets();
+    let total_called = if let Some(bits) = matrix.missing_slice() {
+        let mut called = 0usize;
+        unsafe {
+            let ptr = data.as_ptr();
+            for &offset in offsets {
+                let idx = base + offset;
+                if dense_missing(bits, idx) {
+                    continue;
+                }
+                let allele = *ptr.add(idx) as usize;
+                if allele >= counts.len() {
+                    counts.resize(allele + 1, 0);
+                }
+                if counts[allele] == 0 {
+                    used.push(allele);
+                }
+                counts[allele] += 1;
+                called += 1;
+            }
+        }
+        called
+    } else {
+        unsafe {
+            let ptr = data.as_ptr();
+            for &offset in offsets {
+                let idx = base + offset;
+                let allele = *ptr.add(idx) as usize;
+                if allele >= counts.len() {
+                    counts.resize(allele + 1, 0);
+                }
+                if counts[allele] == 0 {
+                    used.push(allele);
+                }
+                counts[allele] += 1;
+            }
+        }
+        offsets.len()
+    };
+
+    let mut sum_counts_sq = 0.0;
+    for &allele in used.iter() {
+        let count = counts[allele] as f64;
+        sum_counts_sq += count * count;
+    }
+
+    (total_called, sum_counts_sq)
+}
+
+fn dense_reset_counts(counts: &mut Vec<u32>, used: &mut Vec<usize>) {
+    for &idx in used.iter() {
+        counts[idx] = 0;
+    }
+    used.clear();
+}
+
 /// Compute between-population diversity (D_xy) from allele counts.
 ///
 /// Mathematical Foundation:
@@ -2066,6 +2645,226 @@ pub fn calculate_hudson_fst_per_site(
     sites
 }
 
+fn dense_hudson_sites(
+    matrix: &DenseGenotypeMatrix,
+    variants: &[Variant],
+    pop1_mem: &DenseMembership,
+    pop2_mem: &DenseMembership,
+) -> Vec<SiteFstHudson> {
+    if matrix.max_allele() <= 1 {
+        return dense_hudson_sites_biallelic(matrix, variants, pop1_mem, pop2_mem);
+    }
+    dense_hudson_sites_general(matrix, variants, pop1_mem, pop2_mem)
+}
+
+fn dense_hudson_sites_general(
+    matrix: &DenseGenotypeMatrix,
+    variants: &[Variant],
+    pop1_mem: &DenseMembership,
+    pop2_mem: &DenseMembership,
+) -> Vec<SiteFstHudson> {
+    let mut counts1 = vec![0u32; 256];
+    let mut used1 = Vec::with_capacity(8);
+    let mut counts2 = vec![0u32; 256];
+    let mut used2 = Vec::with_capacity(8);
+    let mut sites = Vec::with_capacity(variants.len());
+
+    for (variant_idx, variant) in variants.iter().enumerate() {
+        let (n1, sum_sq1) =
+            dense_collect_counts(matrix, pop1_mem, variant_idx, &mut counts1, &mut used1);
+        let (n2, sum_sq2) =
+            dense_collect_counts(matrix, pop2_mem, variant_idx, &mut counts2, &mut used2);
+
+        let pi1 = if n1 >= 2 {
+            let n = n1 as f64;
+            Some(n / (n - 1.0) * (1.0 - sum_sq1 / (n * n)))
+        } else {
+            None
+        };
+        let pi2 = if n2 >= 2 {
+            let n = n2 as f64;
+            Some(n / (n - 1.0) * (1.0 - sum_sq2 / (n * n)))
+        } else {
+            None
+        };
+
+        let dxy = if n1 == 0 || n2 == 0 {
+            None
+        } else {
+            let inv1 = 1.0 / n1 as f64;
+            let inv2 = 1.0 / n2 as f64;
+            let mut dot = 0.0_f64;
+            if used1.len() <= used2.len() {
+                for &allele in &used1 {
+                    let c1 = counts1[allele];
+                    if c1 == 0 {
+                        continue;
+                    }
+                    let c2 = if allele < counts2.len() {
+                        counts2[allele]
+                    } else {
+                        0
+                    };
+                    if c2 != 0 {
+                        dot += (c1 as f64 * inv1) * (c2 as f64 * inv2);
+                    }
+                }
+            } else {
+                for &allele in &used2 {
+                    let c2 = counts2[allele];
+                    if c2 == 0 {
+                        continue;
+                    }
+                    let c1 = if allele < counts1.len() {
+                        counts1[allele]
+                    } else {
+                        0
+                    };
+                    if c1 != 0 {
+                        dot += (c1 as f64 * inv1) * (c2 as f64 * inv2);
+                    }
+                }
+            }
+            Some((1.0 - dot).max(0.0).min(1.0))
+        };
+
+        let (fst, num_component, den_component) = match (dxy, pi1, pi2) {
+            (Some(d), Some(p1), Some(p2)) => {
+                if d > FST_EPSILON {
+                    let num = d - 0.5 * (p1 + p2);
+                    (Some(num / d), Some(num), Some(d))
+                } else {
+                    let pi_avg = 0.5 * (p1 + p2);
+                    if pi_avg.abs() <= FST_EPSILON {
+                        (Some(0.0), Some(0.0), Some(0.0))
+                    } else {
+                        (None, None, None)
+                    }
+                }
+            }
+            _ => (None, None, None),
+        };
+
+        sites.push(SiteFstHudson {
+            position: ZeroBasedPosition(variant.position).to_one_based(),
+            fst,
+            d_xy: dxy,
+            pi_pop1: pi1,
+            pi_pop2: pi2,
+            n1_called: n1,
+            n2_called: n2,
+            num_component,
+            den_component,
+        });
+
+        dense_reset_counts(&mut counts1, &mut used1);
+        dense_reset_counts(&mut counts2, &mut used2);
+    }
+
+    sites
+}
+
+fn dense_hudson_sites_biallelic(
+    matrix: &DenseGenotypeMatrix,
+    variants: &[Variant],
+    pop1_mem: &DenseMembership,
+    pop2_mem: &DenseMembership,
+) -> Vec<SiteFstHudson> {
+    let offsets1 = pop1_mem.offsets();
+    let offsets2 = pop2_mem.offsets();
+    let stride = matrix.stride();
+    let data = matrix.data();
+    let mut sites = Vec::with_capacity(variants.len());
+
+    match matrix.missing_slice() {
+        Some(bits) => {
+            for (variant_idx, variant) in variants.iter().enumerate() {
+                let base = variant_idx * stride;
+                let (n1, alt1) = dense_sum_alt_with_missing(data, base, offsets1, bits);
+                let (n2, alt2) = dense_sum_alt_with_missing(data, base, offsets2, bits);
+
+                let pi1 = dense_pi_from_counts(n1, alt1);
+                let pi2 = dense_pi_from_counts(n2, alt2);
+                let dxy = dense_dxy_from_biallelic_counts(n1, alt1, n2, alt2);
+
+                let (fst, num_component, den_component) =
+                    dense_fst_components_from_biallelic(dxy, pi1, pi2);
+
+                sites.push(SiteFstHudson {
+                    position: ZeroBasedPosition(variant.position).to_one_based(),
+                    fst,
+                    d_xy: dxy,
+                    pi_pop1: pi1,
+                    pi_pop2: pi2,
+                    n1_called: n1,
+                    n2_called: n2,
+                    num_component,
+                    den_component,
+                });
+            }
+        }
+        None => {
+            let n1_total = offsets1.len();
+            let n2_total = offsets2.len();
+            let n1_f = n1_total as f64;
+            let n2_f = n2_total as f64;
+            let scale1 = if n1_total >= 2 {
+                Some((n1_f / (n1_f - 1.0), 1.0 / (n1_f * n1_f)))
+            } else {
+                None
+            };
+            let scale2 = if n2_total >= 2 {
+                Some((n2_f / (n2_f - 1.0), 1.0 / (n2_f * n2_f)))
+            } else {
+                None
+            };
+
+            for (variant_idx, variant) in variants.iter().enumerate() {
+                let base = variant_idx * stride;
+                let alt1 = dense_sum_alt_no_missing(data, base, offsets1);
+                let alt2 = dense_sum_alt_no_missing(data, base, offsets2);
+
+                let pi1 = scale1.map(|(scale, inv_n_sq)| {
+                    if alt1 == 0 || alt1 == n1_total {
+                        0.0
+                    } else {
+                        let alt_f = alt1 as f64;
+                        let ref_f = (n1_total - alt1) as f64;
+                        scale * (1.0 - (ref_f * ref_f + alt_f * alt_f) * inv_n_sq)
+                    }
+                });
+                let pi2 = scale2.map(|(scale, inv_n_sq)| {
+                    if alt2 == 0 || alt2 == n2_total {
+                        0.0
+                    } else {
+                        let alt_f = alt2 as f64;
+                        let ref_f = (n2_total - alt2) as f64;
+                        scale * (1.0 - (ref_f * ref_f + alt_f * alt_f) * inv_n_sq)
+                    }
+                });
+
+                let dxy = dense_dxy_from_biallelic_counts(n1_total, alt1, n2_total, alt2);
+                let (fst, num_component, den_component) =
+                    dense_fst_components_from_biallelic(dxy, pi1, pi2);
+
+                sites.push(SiteFstHudson {
+                    position: ZeroBasedPosition(variant.position).to_one_based(),
+                    fst,
+                    d_xy: dxy,
+                    pi_pop1: pi1,
+                    pi_pop2: pi2,
+                    n1_called: n1_total,
+                    n2_called: n2_total,
+                    num_component,
+                    den_component,
+                });
+            }
+        }
+    }
+
+    sites
+}
+
 /// Aggregate per-site Hudson components into a window/regional FST using ratio of sums.
 ///
 /// Mathematical Foundation:
@@ -2096,14 +2895,7 @@ pub fn calculate_hudson_fst_per_site(
 /// Monomorphic Sites:
 /// Sites with D_xy = π = 0 contribute (0, 0) to the sums, which is mathematically correct.
 pub fn aggregate_hudson_from_sites(sites: &[SiteFstHudson]) -> Option<f64> {
-    let mut num_sum = 0.0_f64;
-    let mut den_sum = 0.0_f64;
-    for s in sites {
-        if let (Some(nc), Some(dc)) = (s.num_component, s.den_component) {
-            num_sum += nc;
-            den_sum += dc;
-        }
-    }
+    let (num_sum, den_sum) = hudson_component_sums(sites);
     if den_sum > FST_EPSILON {
         Some(num_sum / den_sum)
     } else if num_sum.abs() <= FST_EPSILON {
@@ -2250,45 +3042,66 @@ fn calculate_hudson_fst_for_pair_core<'a>(
         ));
     }
 
-    // Calculate per-site Hudson FST values
-    let site_values = if let Some(reg) = region {
-        calculate_hudson_fst_per_site(pop1_context, pop2_context, reg)
-    } else {
-        if pop1_context.variants.is_empty() {
-            Vec::new()
-        } else {
-            let pop1_mem =
-                HapMembership::build(pop1_context.sample_names.len(), &pop1_context.haplotypes);
-            let pop2_mem =
-                HapMembership::build(pop2_context.sample_names.len(), &pop2_context.haplotypes);
-            pop1_context
-                .variants
-                .iter()
-                .map(|variant| hudson_site_from_variant(variant, &pop1_mem, &pop2_mem))
-                .collect()
-        }
+    let summary_pair = match (
+        pop1_context.dense_summary.as_deref(),
+        pop2_context.dense_summary.as_deref(),
+    ) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
     };
 
-    // Compute regional FST using unbiased ratio-of-sums from per-site components
-    let regional_fst = aggregate_hudson_from_sites(&site_values);
+    let dense_shared = match (pop1_context.dense_genotypes, pop2_context.dense_genotypes) {
+        (Some(a), Some(b)) if std::ptr::eq(a, b) && a.ploidy() == 2 => Some(a),
+        _ => None,
+    };
+
+    let mut site_values = Vec::new();
+    let (num_sum, den_sum) = if let Some(reg) = region {
+        site_values = calculate_hudson_fst_per_site(pop1_context, pop2_context, reg);
+        hudson_component_sums(&site_values)
+    } else if let Some((summary1, summary2)) = summary_pair {
+        aggregate_hudson_components_from_summaries(summary1, summary2)
+    } else if let Some(matrix) = dense_shared {
+        if pop1_context.variants.is_empty() {
+            (0.0, 0.0)
+        } else {
+            let pop1_mem = DenseMembership::build(matrix, &pop1_context.haplotypes);
+            let pop2_mem = DenseMembership::build(matrix, &pop2_context.haplotypes);
+            site_values = dense_hudson_sites(matrix, pop1_context.variants, &pop1_mem, &pop2_mem);
+            hudson_component_sums(&site_values)
+        }
+    } else if pop1_context.variants.is_empty() {
+        (0.0, 0.0)
+    } else {
+        let pop1_mem =
+            HapMembership::build(pop1_context.sample_names.len(), &pop1_context.haplotypes);
+        let pop2_mem =
+            HapMembership::build(pop2_context.sample_names.len(), &pop2_context.haplotypes);
+        site_values = pop1_context
+            .variants
+            .iter()
+            .map(|variant| hudson_site_from_variant(variant, &pop1_mem, &pop2_mem))
+            .collect();
+        hudson_component_sums(&site_values)
+    };
+
+    let regional_fst = if den_sum > FST_EPSILON {
+        Some(num_sum / den_sum)
+    } else if num_sum.abs() <= FST_EPSILON {
+        Some(0.0)
+    } else {
+        None
+    };
 
     // Calculate auxiliary π and Dxy values for output (but don't use for FST)
-    let pi1_raw = calculate_pi(
-        pop1_context.variants,
-        &pop1_context.haplotypes,
-        pop1_context.sequence_length,
-    );
+    let pi1_raw = calculate_pi_for_population(pop1_context);
     let pi1_opt = if pi1_raw.is_finite() {
         Some(pi1_raw)
     } else {
         None
     };
 
-    let pi2_raw = calculate_pi(
-        pop2_context.variants,
-        &pop2_context.haplotypes,
-        pop2_context.sequence_length,
-    );
+    let pi2_raw = calculate_pi_for_population(pop2_context);
     let pi2_opt = if pi2_raw.is_finite() {
         Some(pi2_raw)
     } else {
@@ -2514,15 +3327,142 @@ pub fn calculate_inversion_allele_frequency(
 
 // Count the number of segregating sites, where a site has more than one allele
 pub fn count_segregating_sites(variants: &[Variant]) -> usize {
-    // Returns the count as usize
     variants
-        .par_iter() // Use parallel iteration for efficiency over the variants slice
-        .filter(|v| {
-            // Collect all alleles across all genotypes into a HashSet to find unique alleles
-            let alleles: HashSet<_> = v.genotypes.iter().flatten().flatten().collect();
-            alleles.len() > 1 // True if the site is segregating (has multiple alleles)
-        })
-        .count() // Count the number of segregating sites
+        .par_iter()
+        .filter(|variant| variant_is_segregating(variant))
+        .count()
+}
+
+fn variant_is_segregating(variant: &Variant) -> bool {
+    let mut first = None;
+    for genotype_opt in &variant.genotypes {
+        if let Some(genotype) = genotype_opt {
+            for &allele in genotype {
+                match first {
+                    None => first = Some(allele),
+                    Some(value) if value != allele => return true,
+                    _ => {}
+                }
+            }
+        }
+    }
+    false
+}
+
+pub fn count_segregating_sites_for_population(context: &PopulationContext<'_>) -> usize {
+    if let Some(summary) = context.dense_summary.as_deref() {
+        return count_segregating_sites_from_summary(summary);
+    }
+    if let Some(matrix) = context.dense_genotypes {
+        if matrix.ploidy() == 2 {
+            let membership = DenseMembership::build(matrix, &context.haplotypes);
+            if membership.len() <= 1 {
+                return 0;
+            }
+            return count_segregating_sites_dense(matrix, &membership);
+        }
+    }
+    count_segregating_sites(context.variants)
+}
+
+fn count_segregating_sites_dense(
+    matrix: &DenseGenotypeMatrix,
+    membership: &DenseMembership,
+) -> usize {
+    if matrix.max_allele() <= 1 {
+        return count_segregating_sites_dense_biallelic(matrix, membership);
+    }
+
+    let offsets = membership.offsets();
+    if offsets.is_empty() {
+        return 0;
+    }
+    let stride = matrix.stride();
+    let data = matrix.data();
+    let mut segregating = 0usize;
+
+    if let Some(bits) = matrix.missing_slice() {
+        for variant_idx in 0..matrix.variant_count() {
+            let base = variant_idx * stride;
+            let mut first: Option<u8> = None;
+            let mut polymorphic = false;
+            for &offset in offsets {
+                let idx = base + offset;
+                if dense_missing(bits, idx) {
+                    continue;
+                }
+                let allele = data[idx];
+                if let Some(value) = first {
+                    if allele != value {
+                        polymorphic = true;
+                        break;
+                    }
+                } else {
+                    first = Some(allele);
+                }
+            }
+            if polymorphic {
+                segregating += 1;
+            }
+        }
+    } else {
+        for variant_idx in 0..matrix.variant_count() {
+            let base = variant_idx * stride;
+            let mut first: Option<u8> = None;
+            let mut polymorphic = false;
+            for &offset in offsets {
+                let idx = base + offset;
+                let allele = data[idx];
+                if let Some(value) = first {
+                    if allele != value {
+                        polymorphic = true;
+                        break;
+                    }
+                } else {
+                    first = Some(allele);
+                }
+            }
+            if polymorphic {
+                segregating += 1;
+            }
+        }
+    }
+
+    segregating
+}
+
+fn count_segregating_sites_dense_biallelic(
+    matrix: &DenseGenotypeMatrix,
+    membership: &DenseMembership,
+) -> usize {
+    let offsets = membership.offsets();
+    if offsets.len() < 2 {
+        return 0;
+    }
+    let stride = matrix.stride();
+    let data = matrix.data();
+    let total = offsets.len();
+    let mut segregating = 0usize;
+
+    if let Some(bits) = matrix.missing_slice() {
+        for variant_idx in 0..matrix.variant_count() {
+            let base = variant_idx * stride;
+            let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
+            if called >= 2 && alt > 0 && alt < called {
+                segregating += 1;
+            }
+        }
+    } else {
+        for variant_idx in 0..matrix.variant_count() {
+            let base = variant_idx * stride;
+            let alt = dense_sum_alt_no_missing(data, base, offsets);
+            if alt > 0 && alt < total {
+                segregating += 1;
+            }
+        }
+    }
+
+    segregating
 }
 
 // Calculate pairwise differences and comparable sites between all sample pairs
@@ -2803,6 +3743,125 @@ pub fn calculate_pi(
     );
 
     pi
+}
+
+fn calculate_pi_dense_biallelic(
+    matrix: &DenseGenotypeMatrix,
+    membership: &DenseMembership,
+    seq_length: i64,
+) -> f64 {
+    let offsets = membership.offsets();
+    if offsets.len() <= 1 {
+        return 0.0;
+    }
+    let stride = matrix.stride();
+    let data = matrix.data();
+    let mut sum_pi = 0.0_f64;
+
+    if let Some(bits) = matrix.missing_slice() {
+        for variant_idx in 0..matrix.variant_count() {
+            let base = variant_idx * stride;
+            let (total_called, alt_count) = dense_sum_alt_with_missing(data, base, offsets, bits);
+            if let Some(pi) = dense_pi_from_counts(total_called, alt_count) {
+                sum_pi += pi;
+            }
+        }
+    } else {
+        let total = offsets.len();
+        if total < 2 {
+            return 0.0;
+        }
+        let n = total as f64;
+        let scale = n / (n - 1.0);
+        let inv_n_sq = 1.0 / (n * n);
+        for variant_idx in 0..matrix.variant_count() {
+            let base = variant_idx * stride;
+            let alt = dense_sum_alt_no_missing(data, base, offsets);
+            if alt == 0 || alt == total {
+                continue;
+            }
+            let alt_f = alt as f64;
+            let ref_f = (total - alt) as f64;
+            let sum_sq = ref_f * ref_f + alt_f * alt_f;
+            sum_pi += scale * (1.0 - sum_sq * inv_n_sq);
+        }
+    }
+
+    sum_pi / seq_length as f64
+}
+
+fn calculate_pi_dense(
+    matrix: &DenseGenotypeMatrix,
+    membership: &DenseMembership,
+    seq_length: i64,
+) -> f64 {
+    if membership.len() <= 1 {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Cannot calculate pi: insufficient haplotypes ({})",
+                membership.len()
+            ),
+        );
+        return 0.0;
+    }
+
+    if seq_length < 0 {
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Cannot calculate pi: invalid sequence length ({})",
+                seq_length
+            ),
+        );
+        return 0.0;
+    }
+
+    if seq_length == 0 {
+        log(
+            LogLevel::Warning,
+            "Cannot calculate pi: zero sequence length causes division by zero",
+        );
+        return f64::INFINITY;
+    }
+
+    if matrix.max_allele() <= 1 {
+        return calculate_pi_dense_biallelic(matrix, membership, seq_length);
+    }
+
+    let mut counts = vec![0u32; 256];
+    let mut used = Vec::with_capacity(8);
+    let mut sum_pi = 0.0_f64;
+
+    for variant_idx in 0..matrix.variant_count() {
+        let (total_called, sum_counts_sq) =
+            dense_collect_counts(matrix, membership, variant_idx, &mut counts, &mut used);
+        if total_called >= 2 {
+            let n = total_called as f64;
+            let sum_p2 = sum_counts_sq / (n * n);
+            sum_pi += n / (n - 1.0) * (1.0 - sum_p2);
+        }
+        dense_reset_counts(&mut counts, &mut used);
+    }
+
+    sum_pi / seq_length as f64
+}
+
+pub fn calculate_pi_for_population(context: &PopulationContext<'_>) -> f64 {
+    if let Some(summary) = context.dense_summary.as_deref() {
+        return calculate_pi_from_summary(summary, context.sequence_length);
+    }
+    if let Some(matrix) = context.dense_genotypes {
+        if matrix.ploidy() == 2 {
+            let membership = DenseMembership::build(matrix, &context.haplotypes);
+            return calculate_pi_dense(matrix, &membership, context.sequence_length);
+        }
+    }
+    calculate_pi(
+        context.variants,
+        &context.haplotypes,
+        context.sequence_length,
+    )
 }
 
 /// Calculate per-site diversity metrics (π and Watterson's θ) across a genomic region.
