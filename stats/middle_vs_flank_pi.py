@@ -707,6 +707,18 @@ def _draw_right_key(rax):
         rax.text(X0 + S + 0.08, y + S/2, label, transform=rax.transAxes,
                  ha="left", va="center", fontsize=12, color=AX_TEXT)
 
+def _annotate_p_bracket(ax, x1: float, x2: float, y: float, label: str) -> None:
+    """
+    Draw a bracket between x1 and x2 at height y and center the label above the bracket.
+    The bracket consists of two short vertical ticks joined by a horizontal line.
+    """
+    ymin, ymax = ax.get_ylim()
+    span = float(ymax - ymin)
+    tick = span * 0.015
+    y0 = y - tick
+    ax.plot([x1, x1, x2, x2], [y0, y, y, y0], color=AX_TEXT, linewidth=1.1, zorder=10, clip_on=False)
+    ax.text((x1 + x2) * 0.5, y + tick * 0.6, label, ha="center", va="bottom", color=AX_TEXT, fontsize=11, zorder=10, clip_on=False)
+
 def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional[plt.Figure]:
     """
     Build a 2x2 grid of subplots:
@@ -800,25 +812,19 @@ def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional
         for spine in ["top", "right"]:
             ax.spines[spine].set_visible(False)
 
-        # Statistical annotation in the upper-left of each panel
+        # Statistical annotation: bracket across Flank and Middle with p-value only
         disp_name = title_map[key]
         tr = test_results.get(disp_name, {})
-        n_pairs = tr.get("n_valid_pairs", 0)
         perm_p = _format_p_value_for_annotation(tr.get("mean_p", np.nan))
-        shap_p = _format_p_value_for_annotation(tr.get("mean_normality_p", np.nan))
-        anno = f"n={int(n_pairs)}  perm p={perm_p}  normality p={shap_p}"
-        ax.text(
-            0.02,
-            0.98,
-            anno,
-            transform=ax.transAxes,
-            ha="left",
-            va="top",
-            fontsize=11,
-            color=AX_TEXT,
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="#f7f7f7", edgecolor="#bbbbbb", linewidth=0.8),
-            zorder=10,
-        )
+        label = f"p={perm_p}"
+
+        # Determine bracket height based on data and axis limits
+        has_vals = (np.isfinite(vals[0]).any() or np.isfinite(vals[1]).any())
+        data_max = np.nanmax(np.concatenate([vals[0], vals[1]])) if has_vals else y_hi
+        y_range = y_hi - y_lo
+        y_bracket = min(y_hi - 0.02 * y_range, data_max + 0.06 * y_range)
+
+        _annotate_p_bracket(ax, POS_X["Flank"], POS_X["Middle"], y_bracket, label)
 
     # Shared Y label
     ax_map["single_event_inverted"].set_ylabel("Mean Nucleotide Diversity (π)", fontsize=16, color=AX_TEXT)
