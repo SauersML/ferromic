@@ -53,9 +53,9 @@ mpl.rcParams.update({
 # ------------------------------------------------------------------------------
 # GLOBAL WINDOW SPECS (exact windows; no overlap)
 # ------------------------------------------------------------------------------
-MIN_REQUIRED_TOTAL_LENGTH = 100_000   # Must be >= 100 kb total
-FLANK_SIZE = 25_000                   # Exactly 25 kb on each flank
-MIDDLE_SIZE = 50_000                  # Exactly 50 kb centered in the middle
+MIN_REQUIRED_TOTAL_LENGTH = 40_000   # Must be >= 100 kb total
+FLANK_SIZE = 10_000                   # Exactly 25 kb on each flank
+MIDDLE_SIZE = 20_000                  # Exactly 50 kb centered in the middle
 assert (2 * FLANK_SIZE + MIDDLE_SIZE) == MIN_REQUIRED_TOTAL_LENGTH, \
     "Window sizes must sum to the minimum required length (100 kb)."
 
@@ -1002,12 +1002,22 @@ def main():
         logger.error("No sequences after flanking stats (NaN/length issues). Exiting.")
         return
 
-    # Categorize & tests
+    # Categorize sequences
     categories = categorize_sequences(flanking_stats, recurrent_regions, single_event_regions)
-    tests = perform_statistical_tests(categories, flanking_stats)
 
-    # Print summary statistics for each group
-    print_summary_statistics(flanking_stats, "Overall")
+    # Create a new list containing only the sequences that were successfully categorized.
+    # This filters out any sequences classified as "unknown" or "ambiguous".
+    filtered_flanking_stats = []
+    for key in CATEGORY_KEYS:
+        filtered_flanking_stats.extend(categories.get(key, []))
+    logger.info(f"Filtered out ambiguous/unknown sequences. Kept {len(filtered_flanking_stats)} for final analysis.")
+
+
+    # Perform tests using the filtered list for the "Overall" category
+    tests = perform_statistical_tests(categories, filtered_flanking_stats)
+
+    # Print summary statistics for each group, using the filtered list for "Overall"
+    print_summary_statistics(filtered_flanking_stats, "Overall")
     for name, key in zip(CATEGORY_ORDER, CATEGORY_KEYS):
         print_summary_statistics(categories.get(key, []), name)
 
@@ -1032,7 +1042,7 @@ def main():
     logger.info("\n--- Analysis Summary ---")
     logger.info(f"Input Pi File: {PI_DATA_FILE}")
     logger.info(f"Input Inversion File: {INVERSION_FILE}")
-    logger.info(f"Total sequences in final analysis: {len(flanking_stats)}")
+    logger.info(f"Total sequences in final analysis: {len(filtered_flanking_stats)}")
 
     logger.info("-" * 95)
     logger.info(f"--- Finished in {time.time() - t0:.2f}s ---")
