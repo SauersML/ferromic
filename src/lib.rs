@@ -12,16 +12,16 @@ use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-use numpy::ndarray::ArrayView3;
-use numpy::{PyReadonlyArray1, PyReadonlyArray3};
+use numpy::ndarray::{Array3, ArrayView3};
+use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray3};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyIterator, PyList, PyTuple};
 use pyo3::IntoPy;
 
 use crate::pca::{
-    compute_chromosome_pca, run_chromosome_pca_analysis, run_global_pca_analysis,
-    write_chromosome_pca_to_file, PcaResult,
+    compute_chromosome_pca, compute_chromosome_pca_from_dense, run_chromosome_pca_analysis,
+    run_global_pca_analysis, write_chromosome_pca_to_file, PcaResult,
 };
 use crate::process::{HaplotypeSide, QueryRegion, Variant, VcfError};
 use crate::stats::{
@@ -173,37 +173,54 @@ struct ChromosomePcaResult {
     #[pyo3(get)]
     haplotype_labels: Vec<String>,
     #[pyo3(get)]
-    coordinates: Vec<Vec<f64>>,
+    coordinates: Py<PyArray2<f64>>,
     #[pyo3(get)]
-    positions: Vec<i64>,
+    positions: Py<PyArray1<i64>>,
 }
 
 #[pymethods]
 impl ChromosomePcaResult {
     fn __repr__(&self) -> String {
-        format!(
-            "ChromosomePcaResult(haplotypes={}, components={}, variants={})",
-            self.haplotype_labels.len(),
-            self.coordinates.first().map(|row| row.len()).unwrap_or(0),
-            self.positions.len()
-        )
+        Python::with_gil(|py| {
+            let coords = self.coordinates.as_ref(py);
+            let dims = coords.shape();
+            let haplotypes = dims.get(0).copied().unwrap_or(0);
+            let components = dims.get(1).copied().unwrap_or(0);
+            let variants = self.positions.as_ref(py).len();
+            format!(
+                "ChromosomePcaResult(haplotypes={}, components={}, variants={})",
+                haplotypes, components, variants
+            )
+        })
     }
 }
 
 impl ChromosomePcaResult {
-    fn from_result(py: Python, result: &PcaResult) -> PyResult<Py<Self>> {
-        let coordinates = result
-            .pca_coordinates
-            .outer_iter()
-            .map(|row| row.to_vec())
-            .collect();
+    fn from_result(py: Python, result: PcaResult) -> PyResult<Py<Self>> {
+        let PcaResult {
+            haplotype_labels,
+            pca_coordinates,
+            positions,
+        } = result;
+
+        let dims = pca_coordinates.dim();
+        let (coords_data, _) = pca_coordinates.into_raw_vec_and_offset();
+        let coords_py = PyArray2::<f64>::zeros(py, dims, false).to_owned();
+        unsafe {
+            coords_py
+                .as_ref(py)
+                .as_slice_mut()
+                .expect("newly allocated array is contiguous")
+                .copy_from_slice(&coords_data);
+        }
+        let positions_py = PyArray1::from_vec(py, positions).to_owned();
 
         Py::new(
             py,
             ChromosomePcaResult {
-                haplotype_labels: result.haplotype_labels.clone(),
-                coordinates,
-                positions: result.positions.clone(),
+                haplotype_labels,
+                coordinates: coords_py,
+                positions: positions_py,
             },
         )
     }
@@ -1685,6 +1702,134 @@ fn wc_fst_components_py(
 }
 
 /// Compute principal components for variants on a single chromosome.
+struct DenseChromosomePayload<'py> {
+    genotypes: DenseGenotypeData<'py>,
+    positions: DensePositions<'py>,
+}
+
+enum DenseGenotypeData<'py> {
+    Borrowed(PyReadonlyArray3<'py, i16>),
+    Owned(Array3<i16>),
+}
+
+impl<'py> DenseGenotypeData<'py> {
+    fn from_pyobject(obj: &'py PyAny) -> PyResult<Self> {
+        if let Ok(array) = obj.extract::<PyReadonlyArray3<'py, i16>>() {
+            return Ok(DenseGenotypeData::Borrowed(array));
+        }
+        extract_genotype_cube_i16(obj).map(DenseGenotypeData::Owned)
+    }
+
+    fn variant_count(&self) -> usize {
+        match self {
+            DenseGenotypeData::Borrowed(array) => array.shape()[0],
+            DenseGenotypeData::Owned(array) => array.shape()[0],
+        }
+    }
+
+    fn as_view(&self) -> ArrayView3<'_, i16> {
+        match self {
+            DenseGenotypeData::Borrowed(array) => array.as_array(),
+            DenseGenotypeData::Owned(array) => array.view(),
+        }
+    }
+}
+
+enum DensePositions<'py> {
+    Borrowed(PyReadonlyArray1<'py, i64>),
+    Owned(Vec<i64>),
+}
+
+impl<'py> DensePositions<'py> {
+    fn from_pyobject(obj: &'py PyAny, expected_len: usize) -> PyResult<Self> {
+        if let Ok(array) = obj.extract::<PyReadonlyArray1<'py, i64>>() {
+            if array.len() != expected_len {
+                return Err(PyValueError::new_err(format!(
+                    "positions length {} does not match variant dimension {}",
+                    array.len(),
+                    expected_len
+                )));
+            }
+            return Ok(DensePositions::Borrowed(array));
+        }
+
+        extract_positions(obj, expected_len).map(DensePositions::Owned)
+    }
+
+    fn as_slice(&self) -> PyResult<&[i64]> {
+        match self {
+            DensePositions::Borrowed(array) => Ok(array.as_slice()?),
+            DensePositions::Owned(vec) => Ok(vec.as_slice()),
+        }
+    }
+}
+
+fn parse_dense_chromosome_input<'py>(
+    variants_obj: &'py PyAny,
+) -> PyResult<Option<DenseChromosomePayload<'py>>> {
+    let Ok(mapping) = variants_obj.downcast::<PyDict>() else {
+        return Ok(None);
+    };
+
+    let Some(genotypes_obj) = mapping.get_item("genotypes") else {
+        return Ok(None);
+    };
+    let positions_obj = mapping.get_item("positions").ok_or_else(|| {
+        PyValueError::new_err("dense chromosome PCA input requires a 'positions' array")
+    })?;
+
+    let genotypes = DenseGenotypeData::from_pyobject(genotypes_obj)?;
+    let positions = DensePositions::from_pyobject(positions_obj, genotypes.variant_count())?;
+
+    Ok(Some(DenseChromosomePayload {
+        genotypes,
+        positions,
+    }))
+}
+
+fn extract_genotype_cube_i16(genotypes_obj: &PyAny) -> PyResult<Array3<i16>> {
+    if let Ok(array) = genotypes_obj.extract::<PyReadonlyArray3<'_, i16>>() {
+        let view = array.as_array();
+        let shape = view.dim();
+        let data: Vec<i16> = view.iter().copied().collect();
+        return Array3::from_shape_vec(shape, data)
+            .map_err(|_| PyValueError::new_err("genotype array is not C-contiguous in memory"));
+    }
+    if let Ok(array) = genotypes_obj.extract::<PyReadonlyArray3<'_, i8>>() {
+        let view = array.as_array();
+        let shape = view.dim();
+        let data: Vec<i16> = view.iter().map(|&value| value as i16).collect();
+        return Array3::from_shape_vec(shape, data)
+            .map_err(|_| PyValueError::new_err("genotype array is not C-contiguous in memory"));
+    }
+    if let Ok(array) = genotypes_obj.extract::<PyReadonlyArray3<'_, u8>>() {
+        let view = array.as_array();
+        let shape = view.dim();
+        let data: Vec<i16> = view.iter().map(|&value| value as i16).collect();
+        return Array3::from_shape_vec(shape, data)
+            .map_err(|_| PyValueError::new_err("genotype array is not C-contiguous in memory"));
+    }
+    if let Ok(array) = genotypes_obj.extract::<PyReadonlyArray3<'_, u16>>() {
+        let view = array.as_array();
+        let shape = view.dim();
+        let mut data = Vec::with_capacity(view.len());
+        for &value in view.iter() {
+            if value > i16::MAX as u16 {
+                return Err(PyValueError::new_err(
+                    "allele values must fit within signed 16-bit integers",
+                ));
+            }
+            data.push(value as i16);
+        }
+        return Array3::from_shape_vec(shape, data)
+            .map_err(|_| PyValueError::new_err("genotype array is not C-contiguous in memory"));
+    }
+
+    Err(PyValueError::new_err(
+        "genotypes must be a numpy.ndarray with dtype int16/int8/uint8/uint16 and shape (variants, samples, ploidy)",
+    ))
+}
+
 #[pyfunction(
     name = "chromosome_pca",
     signature = (variants, sample_names, n_components=10),
@@ -1692,7 +1837,7 @@ fn wc_fst_components_py(
 )]
 fn chromosome_pca_py(
     py: Python,
-    variants: Vec<VariantInput>,
+    variants: &PyAny,
     sample_names: Vec<String>,
     n_components: usize,
 ) -> PyResult<Py<ChromosomePcaResult>> {
@@ -1707,10 +1852,31 @@ fn chromosome_pca_py(
         ));
     }
 
-    let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
-    let result = compute_chromosome_pca(&variants, &sample_names, n_components)
+    if let Some(dense_payload) = parse_dense_chromosome_input(variants)? {
+        let positions = dense_payload.positions.as_slice()?;
+        let genotypes_view = dense_payload.genotypes.as_view();
+        let result = py
+            .allow_threads(|| {
+                compute_chromosome_pca_from_dense(
+                    genotypes_view,
+                    positions,
+                    &sample_names,
+                    n_components,
+                )
+            })
+            .map_err(vcf_error_to_pyerr)?;
+        return ChromosomePcaResult::from_result(py, result);
+    }
+
+    let variants: Vec<Variant> = variants
+        .extract::<Vec<VariantInput>>()?
+        .into_iter()
+        .map(VariantInput::into_inner)
+        .collect();
+    let result = py
+        .allow_threads(|| compute_chromosome_pca(&variants, &sample_names, n_components))
         .map_err(vcf_error_to_pyerr)?;
-    ChromosomePcaResult::from_result(py, &result)
+    ChromosomePcaResult::from_result(py, result)
 }
 
 /// Compute principal components for a chromosome and write them to a TSV file.
