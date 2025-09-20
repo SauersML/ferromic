@@ -89,6 +89,7 @@ pub struct ProgressTracker {
 
     // Track timing for operations
     start_time: Instant,
+    total_entry_time: Duration,
 
     // Cache for reusable progress styles
     styles: HashMap<String, ProgressStyle>,
@@ -184,6 +185,7 @@ impl ProgressTracker {
             transcripts_log: Self::create_log_file(&log_dir, "transcripts.log"),
             stats_log: Self::create_log_file(&log_dir, "stats.log"),
             start_time: Instant::now(),
+            total_entry_time: Duration::default(),
             styles,
         }
     }
@@ -236,6 +238,8 @@ impl ProgressTracker {
     pub fn init_global_progress(&mut self, total: usize) {
         self.total_entries = total;
         self.current_entry = 0;
+        self.total_entry_time = Duration::default();
+        self.start_time = Instant::now();
 
         let style = self.styles.get("global").cloned().unwrap_or_else(|| {
             ProgressStyle::default_bar()
@@ -293,6 +297,7 @@ impl ProgressTracker {
 
         self.entry_bar = Some(bar);
         self.entry_name = entry_desc.to_string();
+        self.start_time = Instant::now();
         self.log(LogLevel::Info, &format!("Processing entry: {}", entry_desc));
     }
 
@@ -305,12 +310,16 @@ impl ProgressTracker {
     }
 
     /// Finish entry progress, show summary box
-    pub fn finish_entry_progress(&mut self, message: &str) {
+    pub fn finish_entry_progress(&mut self, message: &str, completed_units: usize) {
         // Calculate entry completion time and statistics
         let entry_name = self.entry_name.clone();
         let execution_time = self.start_time.elapsed();
-        let current_entry = self.current_entry + 1; // +1 because we're about to increment it
+        self.total_entry_time += execution_time;
+
         let total_entries = self.total_entries;
+        let available = total_entries.saturating_sub(self.current_entry);
+        let increment = completed_units.min(available);
+        let new_total = self.current_entry + increment;
 
         // Format a detailed completion message with timing
         let completion_message = format!("{} (in {:.2}s)", message, execution_time.as_secs_f64());
@@ -319,10 +328,11 @@ impl ProgressTracker {
         self.log(
             LogLevel::Info,
             &format!(
-                "Entry {}/{} completed: {} - execution time: {:.2}s",
-                current_entry,
-                total_entries,
+                "Completed {} region(s) for {} ({}/{}) in {:.2}s",
+                increment,
                 entry_name,
+                new_total,
+                total_entries,
                 execution_time.as_secs_f64()
             ),
         );
@@ -332,53 +342,57 @@ impl ProgressTracker {
             bar.finish_with_message(completion_message);
         }
 
-        // Display a mini summary box for this entry (in-place)
-        let progress_percentage = (current_entry as f64 / total_entries as f64) * 100.0;
+        let progress_percentage = if total_entries > 0 {
+            (new_total as f64 / total_entries as f64) * 100.0
+        } else {
+            100.0
+        };
+        let remaining_entries = total_entries.saturating_sub(new_total);
+
+        let stats = vec![
+            (String::from("Regions in this batch"), increment.to_string()),
+            (
+                String::from("Progress"),
+                format!("{:.1}%", progress_percentage),
+            ),
+            (
+                String::from("Time taken"),
+                format!("{:.2}s", execution_time.as_secs_f64()),
+            ),
+            (
+                String::from("Remaining regions"),
+                remaining_entries.to_string(),
+            ),
+        ];
 
         let entry_box = StatusBox {
             title: format!(
-                "Entry {}/{} Complete ({})",
-                current_entry, total_entries, entry_name
+                "Regions {}/{} complete ({})",
+                new_total, total_entries, entry_name
             ),
-            stats: vec![
-                (
-                    String::from("Progress"),
-                    format!("{:.1}%", progress_percentage),
-                ),
-                (
-                    String::from("Time taken"),
-                    format!("{:.2}s", execution_time.as_secs_f64()),
-                ),
-                (
-                    String::from("Remaining entries"),
-                    format!("{}", total_entries - current_entry),
-                ),
-            ],
+            stats,
         };
         self.display_status_box(entry_box);
 
         // Also update global progress
         if let Some(bar) = &self.global_bar {
-            self.current_entry += 1;
+            self.current_entry = new_total;
             bar.set_position(self.current_entry as u64);
 
-            // Estimate remaining time based on average time per entry
-            let elapsed_total = self.start_time.elapsed();
             let avg_time_per_entry = if self.current_entry > 0 {
-                elapsed_total.as_secs_f64() / self.current_entry as f64
+                self.total_entry_time.as_secs_f64() / self.current_entry as f64
             } else {
                 0.0
             };
 
-            let remaining_entries = self.total_entries - self.current_entry;
             let est_remaining_time = avg_time_per_entry * remaining_entries as f64;
 
             bar.set_message(format!(
-                "Completed {}/{}: {} - {:.1}% complete - ~{:.0}s remaining",
+                "Completed {}/{} regions ({}) - {:.1}% complete - ~{:.0}s remaining",
                 self.current_entry,
-                self.total_entries,
-                self.entry_name,
-                (self.current_entry as f64 / self.total_entries as f64) * 100.0,
+                total_entries,
+                entry_name,
+                progress_percentage,
                 est_remaining_time
             ));
         }
@@ -720,12 +734,12 @@ pub fn update_entry_progress(position: u64, message: &str) {
     tracker.update_entry_progress(position, message);
 }
 
-pub fn finish_entry_progress(message: &str) {
+pub fn finish_entry_progress(message: &str, completed_units: usize) {
     if !progress_enabled() {
         return;
     }
     let mut tracker = PROGRESS_TRACKER.lock();
-    tracker.finish_entry_progress(message);
+    tracker.finish_entry_progress(message, completed_units);
 }
 
 pub fn init_step_progress(step_desc: &str, len: u64) {
