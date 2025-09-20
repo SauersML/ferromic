@@ -437,7 +437,7 @@ def plot_one_inversion(
             x0, r["y"], balanced_linebreak(r["Phen_wrapped"]),
             fontsize=LABEL_FONTSZ, ha=ha, va="bottom", zorder=3.6,
             bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
-                      edgecolor="#333333", linewidth=0.35, alpha=0.98)
+                      edgecolor="#333333", linewidth=0.35, alpha=0.4)
         )
         t._rowid = idx  # persistent binding for connectors
         texts.append(t)
