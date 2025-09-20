@@ -1203,6 +1203,14 @@ fn count_segregating_sites_from_summary(summary: &DensePopulationSummary) -> usi
 }
 
 fn calculate_pi_from_summary(summary: &DensePopulationSummary, seq_length: i64) -> f64 {
+    calculate_pi_from_summary_with_precomputed(summary, seq_length, None)
+}
+
+fn calculate_pi_from_summary_with_precomputed(
+    summary: &DensePopulationSummary,
+    seq_length: i64,
+    precomputed: Option<f64>,
+) -> f64 {
     if summary.haplotype_capacity() <= 1 {
         log(
             LogLevel::Warning,
@@ -1230,54 +1238,103 @@ fn calculate_pi_from_summary(summary: &DensePopulationSummary, seq_length: i64) 
         return f64::INFINITY;
     }
 
-    let mut sum_pi = 0.0_f64;
-    for (&alt, &called) in summary.alt_counts().iter().zip(summary.called_counts()) {
-        let alt = alt as usize;
-        let called = called as usize;
-        if let Some(pi) = dense_pi_from_counts(called, alt) {
-            sum_pi += pi;
+    let sum_pi = if let Some(value) = precomputed {
+        value
+    } else {
+        let mut sum = 0.0_f64;
+        for (&alt, &called) in summary.alt_counts().iter().zip(summary.called_counts()) {
+            let alt = alt as usize;
+            let called = called as usize;
+            if let Some(pi) = dense_pi_from_counts(called, alt) {
+                sum += pi;
+            }
         }
-    }
+        sum
+    };
+
 
     sum_pi / seq_length as f64
+}
+
+#[derive(Clone, Copy, Default)]
+struct HudsonSummaryTotals {
+    numerator_sum: f64,
+    denominator_sum: f64,
+    pi1_sum: f64,
+    pi2_sum: f64,
+    dxy_sum_all: f64,
 }
 
 fn aggregate_hudson_components_from_summaries(
     pop1: &DensePopulationSummary,
     pop2: &DensePopulationSummary,
-) -> (f64, f64) {
+) -> HudsonSummaryTotals {
+
     let len = pop1.alt_counts().len().min(pop2.alt_counts().len());
     let alt1 = pop1.alt_counts();
     let alt2 = pop2.alt_counts();
     let called1 = pop1.called_counts();
     let called2 = pop2.called_counts();
-    let mut num_sum = 0.0;
-    let mut den_sum = 0.0;
+    let mut totals = HudsonSummaryTotals::default();
 
     for idx in 0..len {
         let n1 = called1[idx] as usize;
-        let alt_count1 = alt1[idx] as usize;
         let n2 = called2[idx] as usize;
+        if n1 == 0 || n2 == 0 {
+            continue;
+        }
+
+        let alt_count1 = alt1[idx] as usize;
         let alt_count2 = alt2[idx] as usize;
+        let ref_count1 = n1 - alt_count1;
+        let ref_count2 = n2 - alt_count2;
 
-        let pi1 = dense_pi_from_counts(n1, alt_count1);
-        let pi2 = dense_pi_from_counts(n2, alt_count2);
-        let dxy = dense_dxy_from_biallelic_counts(n1, alt_count1, n2, alt_count2);
+        let denom_pairs = (n1 * n2) as f64;
+        if denom_pairs == 0.0 {
+            continue;
+        }
 
-        if let (Some(d), Some(p1_val), Some(p2_val)) = (dxy, pi1, pi2) {
-            if d > FST_EPSILON {
-                num_sum += d - 0.5 * (p1_val + p2_val);
-                den_sum += d;
-            } else {
-                let pi_avg = 0.5 * (p1_val + p2_val);
-                if pi_avg.abs() <= FST_EPSILON {
-                    // contributes zero to both sums
-                }
+        let mut dxy = (alt_count1 * ref_count2 + ref_count1 * alt_count2) as f64 / denom_pairs;
+        if dxy < 0.0 {
+            dxy = 0.0;
+        } else if dxy > 1.0 {
+            dxy = 1.0;
+        }
+        totals.dxy_sum_all += dxy;
+
+        if n1 < 2 || n2 < 2 {
+            continue;
+        }
+
+        let denom1 = (n1 * (n1 - 1)) as f64;
+        let denom2 = (n2 * (n2 - 1)) as f64;
+        let pi1 = if denom1 > 0.0 {
+            2.0 * (alt_count1 as f64) * (ref_count1 as f64) / denom1
+        } else {
+            0.0
+        };
+        let pi2 = if denom2 > 0.0 {
+            2.0 * (alt_count2 as f64) * (ref_count2 as f64) / denom2
+        } else {
+            0.0
+        };
+
+        totals.pi1_sum += pi1;
+        totals.pi2_sum += pi2;
+
+        if dxy > FST_EPSILON {
+            totals.numerator_sum += dxy - 0.5 * (pi1 + pi2);
+            totals.denominator_sum += dxy;
+        } else {
+            let pi_avg = 0.5 * (pi1 + pi2);
+            if pi_avg.abs() <= FST_EPSILON {
+                // contributes zero to both sums
             }
         }
     }
 
-    (num_sum, den_sum)
+    totals
+
 }
 
 fn hudson_component_sums(sites: &[SiteFstHudson]) -> (f64, f64) {
@@ -3030,6 +3087,11 @@ fn calculate_hudson_fst_for_pair_core<'a>(
     pop2_context: &PopulationContext<'a>,
     region: Option<QueryRegion>,
 ) -> Result<(HudsonFSTOutcome, Vec<SiteFstHudson>), VcfError> {
+    if pop1_context.sequence_length <= 0 {
+        return Err(VcfError::InvalidRegion(
+            "Sequence length must be positive for Hudson FST calculation.".to_string(),
+        ));
+    }
     if pop1_context.sequence_length != pop2_context.sequence_length {
         return Err(VcfError::Parse(
             "Sequence length mismatch between population contexts for Hudson FST calculation."
@@ -3050,6 +3112,8 @@ fn calculate_hudson_fst_for_pair_core<'a>(
         _ => None,
     };
 
+    let mut summary_totals: Option<HudsonSummaryTotals> = None;
+    let mut summary_refs: Option<(&DensePopulationSummary, &DensePopulationSummary)> = None;
     let dense_shared = match (pop1_context.dense_genotypes, pop2_context.dense_genotypes) {
         (Some(a), Some(b)) if std::ptr::eq(a, b) && a.ploidy() == 2 => Some(a),
         _ => None,
@@ -3060,7 +3124,11 @@ fn calculate_hudson_fst_for_pair_core<'a>(
         site_values = calculate_hudson_fst_per_site(pop1_context, pop2_context, reg);
         hudson_component_sums(&site_values)
     } else if let Some((summary1, summary2)) = summary_pair {
-        aggregate_hudson_components_from_summaries(summary1, summary2)
+        let totals = aggregate_hudson_components_from_summaries(summary1, summary2);
+        summary_totals = Some(totals);
+        summary_refs = Some((summary1, summary2));
+        (totals.numerator_sum, totals.denominator_sum)
+
     } else if let Some(matrix) = dense_shared {
         if pop1_context.variants.is_empty() {
             (0.0, 0.0)
@@ -3094,21 +3162,57 @@ fn calculate_hudson_fst_for_pair_core<'a>(
     };
 
     // Calculate auxiliary π and Dxy values for output (but don't use for FST)
-    let pi1_raw = calculate_pi_for_population(pop1_context);
+    let (pi1_raw, pi2_raw, dxy_result) = if let (Some((summary1, summary2)), Some(totals)) =
+        (summary_refs, summary_totals)
+    {
+        let pi1_raw = calculate_pi_from_summary_with_precomputed(
+            summary1,
+            pop1_context.sequence_length,
+            Some(totals.pi1_sum),
+        );
+        let pi2_raw = calculate_pi_from_summary_with_precomputed(
+            summary2,
+            pop2_context.sequence_length,
+            Some(totals.pi2_sum),
+        );
+
+        let dxy_value = if pop1_context.haplotypes.is_empty() || pop2_context.haplotypes.is_empty()
+        {
+            log(
+                LogLevel::Warning,
+                &format!(
+                    "Cannot calculate Dxy for pops {:?}/{:?}: one or both have no haplotypes ({} and {} respectively).",
+                    pop1_context.id,
+                    pop2_context.id,
+                    pop1_context.haplotypes.len(),
+                    pop2_context.haplotypes.len()
+                ),
+            );
+            None
+        } else {
+            Some(totals.dxy_sum_all / pop1_context.sequence_length as f64)
+        };
+
+        (pi1_raw, pi2_raw, DxyHudsonResult { d_xy: dxy_value })
+    } else {
+        let pi1_raw = calculate_pi_for_population(pop1_context);
+        let pi2_raw = calculate_pi_for_population(pop2_context);
+        let dxy_result = calculate_d_xy_hudson(pop1_context, pop2_context)?;
+        (pi1_raw, pi2_raw, dxy_result)
+    };
+
+
     let pi1_opt = if pi1_raw.is_finite() {
         Some(pi1_raw)
     } else {
         None
     };
 
-    let pi2_raw = calculate_pi_for_population(pop2_context);
     let pi2_opt = if pi2_raw.is_finite() {
         Some(pi2_raw)
     } else {
         None
     };
-
-    let dxy_result = calculate_d_xy_hudson(pop1_context, pop2_context)?;
 
     // Create outcome with unbiased FST from per-site aggregation
     let mut outcome = HudsonFSTOutcome {
