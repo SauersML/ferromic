@@ -720,49 +720,81 @@ def parse_h1_cmc_paml_output(outfile_path):
     """
     Parse parameters from a Clade Model C (model=3, NSsites=2) output.
     Extracts shared p0, p1, w0, and clade-specific w2 values.
+    Handles multiple PAML formatting variants.
     """
+    F = FLOAT_REGEX
     params = {
         'cmc_kappa': np.nan, 'cmc_p0': np.nan, 'cmc_p1': np.nan, 'cmc_p2': np.nan,
         'cmc_omega0': np.nan, 'cmc_omega2_direct': np.nan, 'cmc_omega2_inverted': np.nan
     }
-    with open(outfile_path, 'r') as f:
-        content = f.read()
 
-    kappa_m = re.search(r'kappa \(ts/tv\)\s*=\s*(' + FLOAT_REGEX + ')', content)
-    if kappa_m: params['cmc_kappa'] = float(kappa_m.group(1))
+    with open(outfile_path, 'r', errors='ignore') as f:
+        s = f.read()
 
-    # Site class parameters can be in various formats
-    p_m = re.search(r'p0\s*=\s*(' + FLOAT_REGEX + r')\s*p1\s*=\s*(' + FLOAT_REGEX + ')', content)
-    if p_m:
-        params['cmc_p0'] = float(p_m.group(1))
-        params['cmc_p1'] = float(p_m.group(2))
+    # --- kappa ---
+    m = re.search(r'\bkappa\s*\(ts/tv\)\s*[=:]\s*(' + F + r')', s, re.I)
+    if m:
+        params['cmc_kappa'] = float(m.group(1))
+
+    # --- p0, p1, p2 (site-class proportions) ---
+    # 1) "p0 = x ... p1 = y ... p2 = z" (possibly split across lines)
+    m = re.search(
+        r'\bp0\s*[=:]\s*(' + F + r').*?\bp1\s*[=:]\s*(' + F + r').*?\bp2\s*[=:]\s*(' + F + r')',
+        s, re.I | re.S
+    )
+    if m:
+        params['cmc_p0'], params['cmc_p1'], params['cmc_p2'] = map(float, m.groups())
     else:
-        p_m_line = re.search(r'p\s*\(proportion\):\s*([\d\.\s]+)', content)
-        if p_m_line:
-            props = p_m_line.group(1).strip().split()
-            if len(props) >= 2:
-                params['cmc_p0'] = float(props[0])
-                params['cmc_p1'] = float(props[1])
+        # 2) "p (proportion): x y z"  OR  "p: x y z"  OR  "proportion(s) of sites: x y z"
+        m = re.search(
+            r'\b(?:p(?:\s*\(proportion\))?|proportion(?:s)?\s*of\s*site(?:s)?(?:\s*classes)?)\s*[:=]\s*(' + F + r')\s+(' + F + r')\s+(' + F + r')',
+            s, re.I
+        )
+        if m:
+            params['cmc_p0'], params['cmc_p1'], params['cmc_p2'] = map(float, m.groups())
+        else:
+            # 3) Only p0 and p1 reported → infer p2
+            m = re.search(r'\bp0\s*[=:]\s*(' + F + r').*?\bp1\s*[=:]\s*(' + F + r')', s, re.I | re.S)
+            if m:
+                params['cmc_p0'], params['cmc_p1'] = map(float, m.groups())
+                params['cmc_p2'] = max(0.0, 1.0 - params['cmc_p0'] - params['cmc_p1'])
 
-    w0_m = re.search(r'w0\s*=\s*(' + FLOAT_REGEX + ')', content)
-    if w0_m:
-        params['cmc_omega0'] = float(w0_m.group(1))
+    # --- omega0 / w0 (first of site-class omegas) ---
+    # Try explicit "w0 = x"
+    m = re.search(r'\bw0\s*[=:]\s*(' + F + r')', s, re.I)
+    if m:
+        params['cmc_omega0'] = float(m.group(1))
     else:
-        w_m_line = re.search(r'w\s*\(dN/dS\):\s*([\d\.\s]+)', content)
-        if w_m_line:
-            omegas = w_m_line.group(1).strip().split()
-            if len(omegas) >= 1:
-                params['cmc_omega0'] = float(omegas[0])
+        # Fallbacks like "w (dN/dS): x y z" or "omega (dN/dS): x y z"
+        m = re.search(r'\b(?:w|omega)\b\s*(?:\(dN/dS\))?\s*[:=]\s*(' + F + r')\s+(' + F + r')\s+(' + F + r')', s, re.I)
+        if m:
+            params['cmc_omega0'] = float(m.group(1))
 
-    # Clade-specific parameters for w2, with permissive regex
-    w2_direct_m = re.search(r'w2.*(?:clade|foreground)\s*#?\s*1\s*:\s*(' + FLOAT_REGEX + ')', content, re.I)
-    if w2_direct_m: params['cmc_omega2_direct'] = float(w2_direct_m.group(1))
+    # --- clade-specific w2 for direct (=#1) and inverted (=#2) ---
+    # Most explicit: "... w2 ... (clade|foreground|group|branch set) #1 : x"
+    m = re.search(r'\bw2[^\n]*?(?:for|in)?\s*(?:clade|foreground|group|branch\s*set)\s*#?\s*1\s*[:=]\s*(' + F + r')',
+                  s, re.I)
+    if m:
+        params['cmc_omega2_direct'] = float(m.group(1))
+    m = re.search(r'\bw2[^\n]*?(?:for|in)?\s*(?:clade|foreground|group|branch\s*set)\s*#?\s*2\s*[:=]\s*(' + F + r')',
+                  s, re.I)
+    if m:
+        params['cmc_omega2_inverted'] = float(m.group(1))
 
-    w2_inverted_m = re.search(r'w2.*(?:clade|foreground)\s*#?\s*2\s*:\s*(' + FLOAT_REGEX + ')', content, re.I)
-    if w2_inverted_m: params['cmc_omega2_inverted'] = float(w2_inverted_m.group(1))
+    # Fallback: a single line that mentions both "1:" and "2:" after w2
+    if np.isnan(params['cmc_omega2_direct']) or np.isnan(params['cmc_omega2_inverted']):
+        m = re.search(
+            r'\bw2[^\n]*?(?:1\s*[:=]\s*(' + F + r'))[^\n]*?(?:2\s*[:=]\s*(' + F + r'))',
+            s, re.I
+        )
+        if m:
+            if np.isnan(params['cmc_omega2_direct']):
+                params['cmc_omega2_direct'] = float(m.group(1))
+            if np.isnan(params['cmc_omega2_inverted']) and m.group(2):
+                params['cmc_omega2_inverted'] = float(m.group(2))
 
-    # Compute p2 if p0 and p1 were found
-    if not np.isnan(params['cmc_p0']) and not np.isnan(params['cmc_p1']):
+    # Compute p2 if still missing but p0 & p1 present
+    if np.isnan(params['cmc_p2']) and not np.isnan(params['cmc_p0']) and not np.isnan(params['cmc_p1']):
         params['cmc_p2'] = max(0.0, 1.0 - params['cmc_p0'] - params['cmc_p1'])
 
     return params
