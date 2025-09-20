@@ -640,7 +640,10 @@ def _overlay_boxplots(ax, vals, pos):
                 artist.set_zorder(5)
 
 def _draw_two_violins(ax, vals, pos, flank_color, middle_color, hatch_pattern, hatch_edge_color):
-    """Two full violins (Flank, Middle) with specific base colors and a hatch."""
+    """
+    Draws two half-violins (Flank left half, Middle right half) with specific
+    base colors and a hatch pattern.
+    """
     v = ax.violinplot(
         dataset=vals,
         positions=pos,
@@ -649,19 +652,36 @@ def _draw_two_violins(ax, vals, pos, flank_color, middle_color, hatch_pattern, h
         showmedians=False,
         showextrema=False,
     )
-    # Apply flank_color, middle_color, and hatch pattern to violin bodies
+
+    # Get the axis limits, which MUST be set before this function is called.
+    xmin, xmax = ax.get_xlim()
+    ymin, ymax = ax.get_ylim()
+    plot_height = ymax - ymin
+
+    # The violin bodies are returned in order: [Flank, Middle]
     for i, body in enumerate(v["bodies"]):
-        if i == 0: # First violin is Flank
+        # Apply the common hatch and alpha properties first
+        body.set_hatch(hatch_pattern)
+        body.set_edgecolor(hatch_edge_color)
+        body.set_linewidth(0.0)  # No outer edge for the violin body itself
+        body.set_alpha(ALPHA_VIOLIN)
+
+        if i == 0:  # This is the Flank violin at pos[0]
             body.set_facecolor(flank_color)
-            body.set_hatch(hatch_pattern)
-            body.set_edgecolor(hatch_edge_color) # Edge color for hatch, not outer edge
-            body.set_linewidth(0.0) # Hatch edge should be thin, no outer edge for violin
-        elif i == 1: # Second violin is Middle
+            # Create a clipping rectangle that covers the LEFT side of the plot,
+            # ending at the center of this violin.
+            clip_width = pos[0] - xmin
+            clip_rect = Rectangle((xmin, ymin), clip_width, plot_height, transform=ax.transData)
+            body.set_clip_path(clip_rect)
+
+        elif i == 1:  # This is the Middle violin at pos[1]
             body.set_facecolor(middle_color)
-            body.set_hatch(hatch_pattern)
-            body.set_edgecolor(hatch_edge_color)
-            body.set_linewidth(0.0)
-        body.set_alpha(ALPHA_VIOLIN) # Apply overall alpha
+            # Create a clipping rectangle that covers the RIGHT side of the plot,
+            # starting from the center of this violin.
+            clip_start_x = pos[1]
+            clip_width = xmax - clip_start_x
+            clip_rect = Rectangle((clip_start_x, ymin), clip_width, plot_height, transform=ax.transData)
+            body.set_clip_path(clip_rect)
 
 def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str, flank_point_color, middle_point_color):
     """Per sequence: draw two points (Flank, Middle) and the connecting line colored by log2(M/MF)."""
@@ -856,16 +876,16 @@ def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional
         vals = [np.asarray(v_flank, dtype=float), np.asarray(v_mid, dtype=float)]
         pos  = [POS_X["Flank"], POS_X["Middle"]]
         
-        _draw_two_violins(ax, vals, pos, flank_color, middle_color, hatch_pattern, hatch_edge_color)
+        ax.set_title(title_map[key], fontsize=14, color=AX_TEXT, pad=20)
+        ax.set_xlim(-0.55, 1.55)
+        ax.set_ylim(y_lo, y_hi)        _draw_two_violins(ax, vals, pos, flank_color, middle_color, hatch_pattern, hatch_edge_color)
         
         _overlay_boxplots(ax, vals, pos)
         
         _paired_lines_and_points(ax, rows, cmap=cmap, norm=norm, category_key=key, 
                                  flank_point_color=flank_color, middle_point_color=middle_color)
 
-        ax.set_title(title_map[key], fontsize=14, color=AX_TEXT, pad=12)
-        ax.set_xlim(-0.55, 1.55)
-        ax.set_ylim(y_lo, y_hi)
+
         ax.set_xticks([POS_X["Flank"], POS_X["Middle"]])
         ax.set_xticklabels(["Flank", "Middle"], fontsize=12)
         ax.tick_params(axis='y', labelsize=12)
