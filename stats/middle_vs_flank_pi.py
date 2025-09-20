@@ -759,7 +759,7 @@ def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional
     cmap = plt.get_cmap("coolwarm")
     
     # Layout: 2 rows x 3 columns (last col used for legend & colorbar)
-    fig = plt.figure(figsize=(12, 8.0))
+    fig = plt.figure(figsize=(12, 10.0))
     gs = fig.add_gridspec(
         2, 3,
         width_ratios=[1.0, 1.0, 0.72],
