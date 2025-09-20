@@ -756,11 +756,16 @@ def test_benchmark_watterson_theta(
     implementation: str,
 ) -> None:
     if implementation == "ferromic":
+        population = genotype_dataset.population
+        haplotype_count = genotype_dataset.haplotype_count
+        sequence_length = genotype_dataset.sequence_length
+
         def run() -> float:
+            segregating_sites = population.segregating_sites()
             return fm.watterson_theta(
-                genotype_dataset.expected_segregating_sites,
-                genotype_dataset.haplotype_count,
-                genotype_dataset.sequence_length,
+                segregating_sites,
+                haplotype_count,
+                sequence_length,
             )
     else:
         allele_counts = genotype_dataset.allele_counts_total
