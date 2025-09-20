@@ -16,7 +16,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
-from matplotlib.colors import TwoSlopeNorm
+from matplotlib.colors import TwoSlopeNorm, to_rgb, to_hex
 from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter
@@ -53,9 +53,9 @@ mpl.rcParams.update({
 # ------------------------------------------------------------------------------
 # GLOBAL WINDOW SPECS (exact windows; no overlap)
 # ------------------------------------------------------------------------------
-MIN_REQUIRED_TOTAL_LENGTH = 100_000   # Must be >= 100 kb total
-FLANK_SIZE = 25_000                   # Exactly 25 kb on each flank
-MIDDLE_SIZE = 50_000                  # Exactly 50 kb centered in the middle
+MIN_REQUIRED_TOTAL_LENGTH = 40_000   # Must be >= 100 kb total
+FLANK_SIZE = 10_000                   # Exactly 25 kb on each flank
+MIDDLE_SIZE = 20_000                  # Exactly 50 kb centered in the middle
 assert (2 * FLANK_SIZE + MIDDLE_SIZE) == MIN_REQUIRED_TOTAL_LENGTH, \
     "Window sizes must sum to the minimum required length (100 kb)."
 
@@ -96,34 +96,50 @@ CATEGORY_KEYS = [
 # ------------------------------------------------------------------------------
 # Plotting Style & Colors
 # ------------------------------------------------------------------------------
-# Region colors
-FLANKING_COLOR = "#1f77b4"  # blue
-MIDDLE_COLOR   = "#ff7f0e"  # orange
-AX_TEXT = "#333333"
+# Core colors for Direct/Inverted status
+COLOR_DIRECT   = "#1f3b78"   # dark blue
+COLOR_INVERTED = "#8c2d7e"   # reddish purple
 
-# Point/line styles
+# Overlay (hatch) properties for Single-event/Recurrent status
+OVERLAY_SINGLE_HATCH = "..." # Light gray dots (density adjusted from previous '. ')
+OVERLAY_SINGLE_EDGE  = "#d9d9d9" # Light gray for hatch edge
+
+OVERLAY_RECUR_HATCH  = "//"  # Dark gray diagonals
+OVERLAY_RECUR_EDGE   = "#4a4a4a" # Dark gray for hatch edge
+
+# Lightness factors for Flank (darker) and Middle (lighter)
+FLANK_LIGHTNESS_FACTOR  = 0.75  # Make 25% darker
+MIDDLE_LIGHTNESS_FACTOR = 1.25  # Make 25% lighter
+
+# Other plot styles
+AX_TEXT = "#333333"          # labels/ticks
 POINT_SIZE    = 28
 LINE_WIDTH    = 1.6
 ALPHA_POINTS  = 0.60
-
-# Violin styles
 VIOLIN_WIDTH  = 0.90
 ALPHA_VIOLIN  = 0.72
+# VIOLIN_EDGE and VIOLIN_EWIDTH are no longer used for violin bodies directly,
+# but can remain for boxplots if desired.
 VIOLIN_EDGE   = "#111111"
 VIOLIN_EWIDTH = 0.6
 
-# Slim internal box plot width
 BOXPLOT_WIDTH = 0.20
-
-# Deterministic jitter
 JITTER_MIN = 0.06
 JITTER_MAX = 0.20
-
-# X positions within each subplot
 POS_X = {"Flank": 0.0, "Middle": 1.0}
 
-# ------------------------------------------------------------------------------
-# Helpers: chromosome normalization & parsing
+# Helper to adjust color lightness
+def adjust_lightness(color, factor):
+    """
+    Adjusts the lightness of a given color (hex or RGB tuple).
+    Factor < 1 for darker, > 1 for lighter.
+    """
+    rgb = to_rgb(color)
+    hls = mcolors.rgb_to_hsv(rgb)
+    new_l = max(0.0, min(1.0, hls[1] * factor)) # Ensure lightness stays between 0 and 1
+    new_rgb = mcolors.hsv_to_rgb((hls[0], new_l, hls[2]))
+    return to_hex(new_rgb)
+
 # ------------------------------------------------------------------------------
 def normalize_chromosome(chrom: str) -> Optional[str]:
     if not isinstance(chrom, str):
@@ -543,8 +559,24 @@ def perform_statistical_tests(categories: dict, all_sequences_stats: List[dict])
 
     return test_results
 
+
+def print_summary_statistics(sequences: List[dict], group_name: str):
+    """Calculates and prints summary statistics for a given group of sequences."""
+    if not sequences:
+        logger.info(f"\n--- Summary Statistics for {group_name} (n=0) ---")
+        logger.info("  No sequences in this group.")
+        return
+
+    flank_means = [s['flanking_mean'] for s in sequences]
+    middle_means = [s['middle_mean'] for s in sequences]
+
+    n = len(sequences)
+
+    logger.info(f"\n--- Summary Statistics for {group_name} (n={n}) ---")
+    logger.info(f"  Flank Region (π means):  Mean={np.nanmean(flank_means):.8f}, Median={np.nanmedian(flank_means):.8f}")
+    logger.info(f"  Middle Region (π means): Mean={np.nanmean(middle_means):.8f}, Median={np.nanmedian(middle_means):.8f}")
+
 # ------------------------------------------------------------------------------
-# Plain decimal formatting (no scientific 'e')
 # ------------------------------------------------------------------------------
 def format_plain_no_e(x: float, max_decimals: int = 8) -> str:
     if not np.isfinite(x):
@@ -553,8 +585,17 @@ def format_plain_no_e(x: float, max_decimals: int = 8) -> str:
     s = s.rstrip("0").rstrip(".")
     return s if s else "0"
 
-# ------------------------------------------------------------------------------
-# Tiny raised exponent drawer (no TeX), reused for annotations if needed
+def _format_p_value_for_annotation(p: float) -> str:
+    """
+    Format a p-value for compact axis annotation.
+    Returns 'NA' if not finite, '<1e-6' for very small values, otherwise a plain decimal.
+    """
+    if not np.isfinite(p):
+        return "NA"
+    if p < 1e-6:
+        return "<1e-6"
+    return format_plain_no_e(p, max_decimals=8)
+
 # ------------------------------------------------------------------------------
 def _split_forced_sci(x: float, sig: int = 3) -> Tuple[str, Optional[str]]:
     if not np.isfinite(x):
@@ -585,7 +626,7 @@ def _split_forced_sci(x: float, sig: int = 3) -> Tuple[str, Optional[str]]:
 # Plot helpers for the MF (Middle vs Flank) quadrant layout
 # ------------------------------------------------------------------------------
 def _deterministic_rng(seed_key: str) -> np.random.RandomState:
-    seed = int.from_bytes(hashlib.md5(seed_key.encode("utf-8")).digest()[:4], "little")
+    seed = int.from_bytes(hashlib.md5(hashlib.md5(seed_key.encode("utf-8")).digest()).digest()[:4], "little") # Double hash for extra robustness
     return np.random.RandomState(seed)
 
 def _inward_jitter(rng: np.random.RandomState) -> float:
@@ -615,8 +656,11 @@ def _overlay_boxplots(ax, vals, pos):
             for artist in bp[part]:
                 artist.set_zorder(5)
 
-def _draw_two_violins(ax, vals, pos, colors):
-    """Two full violins (Flank, Middle) with soft alpha and thin edge."""
+def _draw_two_violins(ax, vals, pos, flank_color, middle_color, hatch_pattern, hatch_edge_color):
+    """
+    Draws two half-violins (Flank left half, Middle right half) with specific
+    base colors and a hatch pattern.
+    """
     v = ax.violinplot(
         dataset=vals,
         positions=pos,
@@ -625,13 +669,38 @@ def _draw_two_violins(ax, vals, pos, colors):
         showmedians=False,
         showextrema=False,
     )
-    for body, color in zip(v["bodies"], colors):
-        body.set_facecolor(color)
-        body.set_edgecolor(VIOLIN_EDGE)
-        body.set_linewidth(VIOLIN_EWIDTH)
+
+    # Get the axis limits, which MUST be set before this function is called.
+    xmin, xmax = ax.get_xlim()
+    ymin, ymax = ax.get_ylim()
+    plot_height = ymax - ymin
+
+    # The violin bodies are returned in order: [Flank, Middle]
+    for i, body in enumerate(v["bodies"]):
+        # Apply the common hatch and alpha properties first
+        body.set_hatch(hatch_pattern)
+        body.set_edgecolor(hatch_edge_color)
+        body.set_linewidth(0.0)  # No outer edge for the violin body itself
         body.set_alpha(ALPHA_VIOLIN)
 
-def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str):
+        if i == 0:  # This is the Flank violin at pos[0]
+            body.set_facecolor(flank_color)
+            # Create a clipping rectangle that covers the LEFT side of the plot,
+            # ending at the center of this violin.
+            clip_width = pos[0] - xmin
+            clip_rect = Rectangle((xmin, ymin), clip_width, plot_height, transform=ax.transData)
+            body.set_clip_path(clip_rect)
+
+        elif i == 1:  # This is the Middle violin at pos[1]
+            body.set_facecolor(middle_color)
+            # Create a clipping rectangle that covers the RIGHT side of the plot,
+            # starting from the center of this violin.
+            clip_start_x = pos[1]
+            clip_width = xmax - clip_start_x
+            clip_rect = Rectangle((clip_start_x, ymin), clip_width, plot_height, transform=ax.transData)
+            body.set_clip_path(clip_rect)
+
+def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str, flank_point_color, middle_point_color):
     """Per sequence: draw two points (Flank, Middle) and the connecting line colored by log2(M/MF)."""
     EPS = 1e-12
     for r in rows:
@@ -649,8 +718,10 @@ def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str):
         c = cmap(norm(log2fc))
 
         ax.plot([x_f, x_m], [f, m], color=c, linewidth=LINE_WIDTH, alpha=0.98, zorder=3, solid_capstyle="round")
-        ax.scatter([x_f], [f], s=POINT_SIZE, c=FLANKING_COLOR, edgecolors="black", linewidths=0.5, alpha=ALPHA_POINTS, zorder=6)
-        ax.scatter([x_m], [m], s=POINT_SIZE, c=MIDDLE_COLOR,   edgecolors="black", linewidths=0.5, alpha=ALPHA_POINTS, zorder=6)
+        # Use specific point colors derived from the base color
+        ax.scatter([x_f], [f], s=POINT_SIZE, c=flank_point_color, edgecolors="black", linewidths=0.5, alpha=ALPHA_POINTS, zorder=6)
+        ax.scatter([x_m], [m], s=POINT_SIZE, c=middle_point_color,   edgecolors="black", linewidths=0.5, alpha=ALPHA_POINTS, zorder=6)
+
 
 def _prepare_category_bins(categories: dict) -> Dict[str, List[dict]]:
     """Ensure the bins are present for the four requested panels."""
@@ -675,32 +746,64 @@ def _collect_all_pairs_for_scale(categories: dict) -> np.ndarray:
     return np.asarray(vals, dtype=float)
 
 def _draw_right_key(rax):
-    """Right-side legend showing region colors used in the violins/points."""
+    """Right-side legend showing region colors and patterns compositionally."""
     rax.set_xlim(0, 1)
     rax.set_ylim(0, 1)
     rax.axis("off")
 
-    S = 0.18
-    X0 = 0.10
-    YS = [0.65, 0.30]
-    entries = [
-        ("Flanking (mean of ends)", FLANKING_COLOR),
-        ("Middle (centered 50 kb)", MIDDLE_COLOR),
+    # Define legend entries for compositional elements
+    # Using 'none' for edgecolor/hatch indicates it's not applicable for that specific visual aspect of the legend
+    # For hatches, we want to show the hatch itself clearly, so facecolor can be white for better contrast
+    legend_elements = [
+        # Inversion Type (Direct/Inverted)
+        {"label": "Direct Orientation",   "facecolor": COLOR_DIRECT,   "hatch": None,   "edgecolor": "none", "alpha": ALPHA_VIOLIN, "y": 0.88},
+        {"label": "Inverted Orientation", "facecolor": COLOR_INVERTED, "hatch": None,   "edgecolor": "none", "alpha": ALPHA_VIOLIN, "y": 0.76},
+        # Recurrence Type (Single-event/Recurrent)
+        {"label": "Single-event",         "facecolor": "#FFFFFF",      "hatch": OVERLAY_SINGLE_HATCH, "edgecolor": OVERLAY_SINGLE_EDGE, "alpha": 1.0, "y": 0.54},
+        {"label": "Recurrent",            "facecolor": "#FFFFFF",      "hatch": OVERLAY_RECUR_HATCH,  "edgecolor": OVERLAY_RECUR_EDGE,  "alpha": 1.0, "y": 0.42},
+        # Region Type (Flank/Middle) - using an arbitrary base color (e.g., COLOR_DIRECT) to show lightness
+        {"label": "Flanking Region",      "facecolor": adjust_lightness(COLOR_DIRECT, FLANK_LIGHTNESS_FACTOR),  "hatch": None, "edgecolor": "none", "alpha": ALPHA_VIOLIN, "y": 0.20},
+        {"label": "Middle Region",        "facecolor": adjust_lightness(COLOR_DIRECT, MIDDLE_LIGHTNESS_FACTOR), "hatch": None, "edgecolor": "none", "alpha": ALPHA_VIOLIN, "y": 0.08},
     ]
-    for (label, face), y in zip(entries, YS):
-        sq = Rectangle((X0, y), S, S, transform=rax.transAxes,
-                       facecolor=face, edgecolor="#222222",
-                       linewidth=0.8, alpha=ALPHA_VIOLIN, clip_on=False)
-        rax.add_patch(sq)
-        rax.text(X0 + S + 0.08, y + S/2, label, transform=rax.transAxes,
-                 ha="left", va="center", fontsize=12, color=AX_TEXT)
 
-def create_mf_quadrant_violins(categories: dict) -> Optional[plt.Figure]:
+    S = 0.08 # Smaller square size for compositional key
+    X0 = 0.08 # X position for squares
+
+    rax.text(X0, 0.96, "Inversion Status:", ha="left", va="bottom", fontsize=12, color=AX_TEXT, fontweight="bold")
+    rax.text(X0, 0.62, "Recurrence Type:", ha="left", va="bottom", fontsize=12, color=AX_TEXT, fontweight="bold")
+    rax.text(X0, 0.28, "Region Type:", ha="left", va="bottom", fontsize=12, color=AX_TEXT, fontweight="bold")
+
+
+    for entry in legend_elements:
+        # Pass hatch=None if not applicable to avoid matplotlib warnings/errors
+        hatch_to_pass = entry["hatch"] if entry["hatch"] else None
+        sq = Rectangle((X0, entry["y"]), S, S, transform=rax.transAxes,
+                       facecolor=entry["facecolor"], edgecolor=entry["edgecolor"],
+                       hatch=hatch_to_pass, linewidth=0.0, alpha=entry["alpha"], clip_on=False)
+        rax.add_patch(sq)
+        rax.text(X0 + S + 0.02, entry["y"] + S/2, entry["label"], transform=rax.transAxes,
+                 ha="left", va="center", fontsize=11, color=AX_TEXT)
+
+
+def _annotate_p_bracket(ax, x1: float, x2: float, y: float, label: str) -> None:
+    """
+    Draw a bracket between x1 and x2 at height y and center the label above the bracket.
+    The bracket consists of two short vertical ticks joined by a horizontal line.
+    """
+    ymin, ymax = ax.get_ylim()
+    span = float(ymax - ymin)
+    tick = span * 0.015
+    y0 = y - tick
+    ax.plot([x1, x1, x2, x2], [y0, y, y, y0], color=AX_TEXT, linewidth=1.1, zorder=10, clip_on=False)
+    ax.text((x1 + x2) * 0.5, y + tick * 0.6, label, ha="center", va="bottom", color=AX_TEXT, fontsize=11, zorder=10, clip_on=False)
+
+def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional[plt.Figure]:
     """
     Build a 2x2 grid of subplots:
       [Single-event Inverted]  [Single-event Direct]
       [Recurrent Inverted]     [Recurrent Direct]
-    Each subplot: two violins (Flank, Middle), slim boxplots, paired lines/points.
+    Each subplot: two violins (Flank, Middle), slim boxplots, paired lines/points, and
+    an annotation box with n, permutation p-value, and Shapiro–Wilk p-value.
     Right column: legend (top) + thin horizontal colorbar (bottom).
     """
     logger.info("Creating Middle vs Flank quadrant violins...")
@@ -765,21 +868,42 @@ def create_mf_quadrant_violins(categories: dict) -> Optional[plt.Figure]:
         ax = ax_map[key]
         rows = bins[key]
 
+        if "direct" in key:
+            base_color = COLOR_DIRECT
+            inversion_status = "Direct" # For potential debugging/logging
+        else: # "inverted" in key
+            base_color = COLOR_INVERTED
+            inversion_status = "Inverted"
+
+        if "single_event" in key:
+            hatch_pattern = OVERLAY_SINGLE_HATCH
+            hatch_edge_color = OVERLAY_SINGLE_EDGE
+            recurrence_type = "Single-event" # For potential debugging/logging
+        else: # "recurrent" in key
+            hatch_pattern = OVERLAY_RECUR_HATCH
+            hatch_edge_color = OVERLAY_RECUR_EDGE
+            recurrence_type = "Recurrent"
+
+        flank_color = adjust_lightness(base_color, FLANK_LIGHTNESS_FACTOR)
+        middle_color = adjust_lightness(base_color, MIDDLE_LIGHTNESS_FACTOR)
+
         # Violin data in order [Flank, Middle]
         v_flank = [s.get("flanking_mean", np.nan) for s in rows]
         v_mid   = [s.get("middle_mean",  np.nan) for s in rows]
         vals = [np.asarray(v_flank, dtype=float), np.asarray(v_mid, dtype=float)]
         pos  = [POS_X["Flank"], POS_X["Middle"]]
-        cols = [FLANKING_COLOR, MIDDLE_COLOR]
-
-        _draw_two_violins(ax, vals, pos, cols)
-        _overlay_boxplots(ax, vals, pos)
-        _paired_lines_and_points(ax, rows, cmap=cmap, norm=norm, category_key=key)
-
-        # Axes cosmetics
-        ax.set_title(title_map[key], fontsize=14, color=AX_TEXT, pad=8)
+        
+        ax.set_title(title_map[key], fontsize=14, color=AX_TEXT, pad=20)
         ax.set_xlim(-0.55, 1.55)
-        ax.set_ylim(y_lo, y_hi)
+        ax.set_ylim(y_lo, y_hi)        
+        _draw_two_violins(ax, vals, pos, flank_color, middle_color, hatch_pattern, hatch_edge_color)
+        
+        _overlay_boxplots(ax, vals, pos)
+        
+        _paired_lines_and_points(ax, rows, cmap=cmap, norm=norm, category_key=key, 
+                                 flank_point_color=flank_color, middle_point_color=middle_color)
+
+
         ax.set_xticks([POS_X["Flank"], POS_X["Middle"]])
         ax.set_xticklabels(["Flank", "Middle"], fontsize=12)
         ax.tick_params(axis='y', labelsize=12)
@@ -787,14 +911,23 @@ def create_mf_quadrant_violins(categories: dict) -> Optional[plt.Figure]:
         for spine in ["top", "right"]:
             ax.spines[spine].set_visible(False)
 
-    # Shared Y label
+        disp_name = title_map[key]
+        tr = test_results.get(disp_name, {})
+        perm_p = _format_p_value_for_annotation(tr.get("mean_p", np.nan))
+        label = f"p={perm_p}"
+
+        has_vals = (np.isfinite(vals[0]).any() or np.isfinite(vals[1]).any())
+        data_max = np.nanmax(np.concatenate([vals[0], vals[1]])) if has_vals else y_hi
+        y_range = y_hi - y_lo
+        y_bracket = min(y_hi - 0.02 * y_range, data_max + 0.06 * y_range)
+
+        _annotate_p_bracket(ax, POS_X["Flank"], POS_X["Middle"], y_bracket, label)
+
     ax_map["single_event_inverted"].set_ylabel("Mean Nucleotide Diversity (π)", fontsize=16, color=AX_TEXT)
     ax_map["recurrent_inverted"].set_ylabel("Mean Nucleotide Diversity (π)", fontsize=16, color=AX_TEXT)
 
-    # Right legend (region key)
     _draw_right_key(rax)
 
-    # Thin horizontal colorbar below the key
     for spine in cax.spines.values():
         spine.set_visible(False)
     cax.set_xticks([]); cax.set_yticks([])
@@ -806,7 +939,6 @@ def create_mf_quadrant_violins(categories: dict) -> Optional[plt.Figure]:
     cbar.ax.tick_params(color=AX_TEXT, labelcolor=AX_TEXT, labelsize=12)
     cbar.outline.set_visible(False)
 
-    # Make the bar thinner & centered inside its cell
     pos = cax.get_position(fig)
     new_h = pos.height * 0.45
     new_y = pos.y0 + (pos.height - new_h) * 0.50
@@ -828,8 +960,7 @@ def create_mf_quadrant_violins(categories: dict) -> Optional[plt.Figure]:
     logger.info(f"MF quadrant plot built in {time.time() - start_time:.2f}s.")
     return fig
 
-# ------------------------------------------------------------------------------
-# Main
+
 # ------------------------------------------------------------------------------
 def main():
     t0 = time.time()
@@ -871,18 +1002,47 @@ def main():
         logger.error("No sequences after flanking stats (NaN/length issues). Exiting.")
         return
 
-    # Categorize & tests
+    # Categorize sequences
     categories = categorize_sequences(flanking_stats, recurrent_regions, single_event_regions)
-    _ = perform_statistical_tests(categories, flanking_stats)  # keep if you want to log/use p-values elsewhere
+
+    # Create a new list containing only the sequences that were successfully categorized.
+    # This filters out any sequences classified as "unknown" or "ambiguous".
+    filtered_flanking_stats = []
+    for key in CATEGORY_KEYS:
+        filtered_flanking_stats.extend(categories.get(key, []))
+    logger.info(f"Filtered out ambiguous/unknown sequences. Kept {len(filtered_flanking_stats)} for final analysis.")
+
+
+    # Perform tests using the filtered list for the "Overall" category
+    tests = perform_statistical_tests(categories, filtered_flanking_stats)
+
+    # Print summary statistics for each group, using the filtered list for "Overall"
+    print_summary_statistics(filtered_flanking_stats, "Overall")
+    for name, key in zip(CATEGORY_ORDER, CATEGORY_KEYS):
+        print_summary_statistics(categories.get(key, []), name)
+
+    logger.info("\n--- Permutation Test Results ---")
+    for name in ["Single-event Inverted", "Single-event Direct", "Recurrent Inverted", "Recurrent Direct", "Overall"]:
+        tr = tests.get(name, {})
+        logger.info(
+            f"[{name}] n={tr.get('n_valid_pairs', 0)}  "
+            f"perm_p={_format_p_value_for_annotation(tr.get('mean_p', np.nan))}  "
+            f"shapiro_p={_format_p_value_for_annotation(tr.get('mean_normality_p', np.nan))}"
+        )
+    try:
+        pd.DataFrame.from_dict(tests, orient="index").to_csv(OUTPUT_DIR / "mf_permtest_results.csv", index_label="group")
+        logger.info(f"Saved test results to {OUTPUT_DIR / 'mf_permtest_results.csv'}")
+    except Exception as e:
+        logger.error(f"Failed to save test results: {e}")
 
     # Plot: FOUR SUBPLOTS (each with two violins) + right legend + thin horizontal colorbar
-    fig = create_mf_quadrant_violins(categories)
+    fig = create_mf_quadrant_violins(categories, tests)
 
     # Summary log (plain decimals)
     logger.info("\n--- Analysis Summary ---")
     logger.info(f"Input Pi File: {PI_DATA_FILE}")
     logger.info(f"Input Inversion File: {INVERSION_FILE}")
-    logger.info(f"Total sequences in final analysis: {len(flanking_stats)}")
+    logger.info(f"Total sequences in final analysis: {len(filtered_flanking_stats)}")
 
     logger.info("-" * 95)
     logger.info(f"--- Finished in {time.time() - t0:.2f}s ---")

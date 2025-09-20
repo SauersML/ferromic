@@ -1,8 +1,10 @@
 from __future__ import annotations
 import logging, re, sys, time, subprocess, shutil
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Callable
 from collections import defaultdict, Counter
+
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -20,18 +22,18 @@ INV_TSV        = Path("inv_info.tsv")  # recurrence mapping input
 DIVERSITY_FILE = Path("per_site_diversity_output.falsta")
 FST_FILE       = Path("per_site_fst_output.falsta")
 
-OUTDIR         = Path("length_norm_trend_fast")
+OUTDIR         = Path("length_norm_trend_fast_normed")
 
-MIN_LEN_PI     = 50_000
-MIN_LEN_FST    = 50_000
+MIN_LEN_PI     = 100_000
+MIN_LEN_FST    = 100_000
 
-MAX_BP         = 50_000          # cap distance from inversion edge
+MAX_BP         = 100_000          # cap distance from inversion edge
 
 # Proportion mode
-NUM_BINS_PROP  = 50
+NUM_BINS_PROP  = 100
 
 # Base-pair mode 
-NUM_BINS_BP    = 25               # number of bins between 0..MAX_BP
+NUM_BINS_BP    = 100               # number of bins between 0..MAX_BP
 
 # Plotting/analysis rules
 LOWESS_FRAC     = 0.4
@@ -91,7 +93,7 @@ logging.basicConfig(
     format="%(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
-log = logging.getLogger("len_norm_fast_grouped")
+log = logging.getLogger("len_norm_fast_grouped_normed")
 
 # ---------------------- REGEX & PARSING --------------------
 
@@ -114,6 +116,70 @@ def _norm_chr(s: str) -> str:
 def _parse_values_fast(line: str) -> np.ndarray:
     """Fast parser: replace 'NA' with 'nan' and use np.fromstring with sep=','."""
     return np.fromstring(line.strip().replace("NA", "nan"), sep=",", dtype=np.float32)
+
+# -------------------- PER-INVERSION TRANSFORMS ------------------
+
+
+def _transform_zscore(arr: np.ndarray) -> np.ndarray:
+    """Z-score per inversion across finite bins. Constant arrays map to 0."""
+    out = np.array(arr, dtype=float, copy=True)
+    mask = np.isfinite(out)
+    if not np.any(mask):
+        return out
+    vals = out[mask]
+    mean = float(vals.mean())
+    std = float(vals.std(ddof=0))
+    if not np.isfinite(std) or std <= 0:
+        out[mask] = 0.0
+        return out
+    out[mask] = (vals - mean) / std
+    return out
+
+
+def _transform_log2_fold_change(arr: np.ndarray) -> np.ndarray:
+    """Log2 fold-change from the per-inversion mean (finite, positive values only)."""
+    out = np.array(arr, dtype=float, copy=True)
+    mask = np.isfinite(out)
+    if not np.any(mask):
+        return out
+    vals = out[mask]
+    mean = float(vals.mean())
+    if not np.isfinite(mean) or mean <= 0:
+        out[mask] = np.nan
+        return out
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratios = vals / mean
+        ratios = np.where(ratios > 0, ratios, np.nan)
+        out_vals = np.log2(ratios)
+    out[mask] = out_vals
+    return out
+
+
+@dataclass(frozen=True)
+class TransformSpec:
+    key: str
+    func: Callable[[np.ndarray], np.ndarray]
+    label_suffix: str
+    file_suffix: str
+    description: str
+
+
+TRANSFORM_SPECS: Tuple[TransformSpec, ...] = (
+    TransformSpec(
+        key="znorm",
+        func=_transform_zscore,
+        label_suffix=" — per inversion z-score",
+        file_suffix="_znorm",
+        description="per-inversion z-score",
+    ),
+    TransformSpec(
+        key="log2fc",
+        func=_transform_log2_fold_change,
+        label_suffix=" — per inversion log2 fold-change from mean",
+        file_suffix="_log2fc",
+        description="per-inversion log2 fold-change from mean",
+    ),
+)
 
 # -------------------- INVERSION MAPPING --------------
 
@@ -297,7 +363,7 @@ def _kernel_regress_1d(
         dx = 1.0
 
     # ----- single knob → base sigma in *bin units* -----
-    f = 1.0 if (frac is None or not np.isfinite(float(frac))) else float(frac)
+    f = 0.4 if (frac is None or not np.isfinite(float(frac))) else float(frac)
     # map 'frac' to σ so ~95% mass spans ≈ frac * n_points bins
     base_sigma_bins = max(0.5, (f * max(xs.size, 1.0)) / 4.0)
 
@@ -774,7 +840,9 @@ def _collect_grouped_means(which: str,
                            fuzzy_map: Dict[Tuple[str,int,int], str],
                            mode: str,
                            num_bins: int,
-                           max_bp: Optional[int]) -> Tuple[Dict[str, List[np.ndarray]], Dict[str,int]]:
+                           max_bp: Optional[int],
+                           transform_func: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+                           transform_tag: str = "raw") -> Tuple[Dict[str, List[np.ndarray]], Dict[str,int]]:
     """
     Iterate falsta, assign each record to a group using fuzzy_map (±1 bp),
     and compute per-sequence binned means for the requested mode ('proportion' or 'bp').
@@ -787,7 +855,7 @@ def _collect_grouped_means(which: str,
     per_group_means = defaultdict(list)
     per_group_counts = Counter()
 
-    log.info(f"[{which}/{mode}] scanning sequences and assigning groups...")
+    log.info(f"[{which}/{mode}/{transform_tag}] scanning sequences and assigning groups...")
 
     if which == "hudson":
         by_coords: Dict[Tuple[str,int,int], dict] = {}
@@ -843,6 +911,8 @@ def _collect_grouped_means(which: str,
             # Per-inversion ratio-of-sums per bin (for MEDIAN view)
             with np.errstate(divide="ignore", invalid="ignore"):
                 ratio = np.where(dsum > EPS_DENOM, nsum / dsum, np.nan)
+            if transform_func is not None:
+                ratio = transform_func(ratio)
             per_group_means[gkey].append(ratio)
             per_group_counts[gkey] += 1
             if gkey != "uncategorized":
@@ -870,7 +940,7 @@ def _collect_grouped_means(which: str,
 
         for g in ["recurrent", "single-event", "uncategorized", "overall"]:
             if per_group_counts.get(g, 0):
-                log.info(f"[{which}/{mode}] N {g:>22} = {per_group_counts[g]}")
+                log.info(f"[{which}/{mode}/{transform_tag}] N {g:>22} = {per_group_counts[g]}")
 
         return per_group_means, per_group_counts
 
@@ -906,6 +976,9 @@ def _collect_grouped_means(which: str,
         else:
             gkey = recur if recur in ("single-event", "recurrent") else "uncategorized"
 
+        if transform_func is not None and m is not None:
+            m = transform_func(m)
+
         per_group_means[gkey].append(m)
         per_group_counts[gkey] += 1
         if gkey != "uncategorized":
@@ -918,7 +991,7 @@ def _collect_grouped_means(which: str,
     log_groups += ["uncategorized", "overall"]
     for g in log_groups:
         if per_group_counts.get(g, 0):
-            log.info(f"[{which}/{mode}] N {g:>22} = {per_group_counts[g]}")
+            log.info(f"[{which}/{mode}/{transform_tag}] N {g:>22} = {per_group_counts[g]}")
 
     return per_group_means, per_group_counts
 
@@ -956,7 +1029,8 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                       y_label: str,
                       out_path: Path,
                       out_tsv: Path,
-                      agg_kind: str):
+                      agg_kind: str,
+                      transform_tag: str = "raw"):
     """
     Build tables, compute stats, and plot for given mode.
     For Hudson FST:
@@ -1026,7 +1100,7 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
             elif agg_kind == "pooled":
                 # Build pooled curve from totals; SE from inversion bootstrap
                 if _HUDSON_SUMS is None or _HUDSON_PERINV is None:
-                    log.warning("[hudson/pooled] Missing pooled components.")
+                    log.warning(f"[hudson/pooled/{transform_tag}] Missing pooled components.")
                     continue
                 num_tot = _HUDSON_SUMS["num"].get(grp)
                 den_tot = _HUDSON_SUMS["den"].get(grp)
@@ -1088,13 +1162,14 @@ def _assemble_outputs(per_group_means: Dict[str, List[np.ndarray]],
                 "mode": mode,
                 "metric": which,
                 "aggregate": agg_kind,
+                "transform": transform_tag,
             })
 
     # Save table (combined)
     df = pd.DataFrame(all_rows)
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_tsv, sep="\t", index=False, float_format="%.6g")
-    log.info(f"Saved table → {out_tsv}")
+    log.info(f"[{which}/{mode}/{agg_kind}/{transform_tag}] Saved table → {out_tsv}")
 
     # Plot (grouped)
     _plot_multi(x_centers, group_stats, y_label, out_path, x_label, metric=which)
@@ -1115,7 +1190,9 @@ def run_metric(which: str,
                # bp mode outputs
                out_plot_bp: Path,
                out_tsv_bp: Path,
-               agg_kind: str):
+               agg_kind: str,
+               transform_func: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+               transform_tag: str = "raw"):
     """
     Run a metric end-to-end for both proportion and bp modes.
     π: agg_kind ∈ {'mean','median'} on per-sequence bin means.
@@ -1134,10 +1211,12 @@ def run_metric(which: str,
         mode="proportion",
         num_bins=NUM_BINS_PROP,
         max_bp=MAX_BP,     # cap for proportion mode too
+        transform_func=transform_func,
+        transform_tag=transform_tag,
     )
     total_loaded_prop = sum(per_group_counts_prop.values())
     if total_loaded_prop == 0:
-        log.error(f"[{which}/proportion/{agg_kind}] No sequences loaded from {falsta}.")
+        log.error(f"[{which}/proportion/{agg_kind}/{transform_tag}] No sequences loaded from {falsta}.")
     else:
         _assemble_outputs(
             per_group_means_prop, per_group_counts_prop,
@@ -1146,6 +1225,7 @@ def run_metric(which: str,
             out_path=out_plot_prop,
             out_tsv=out_tsv_prop,
             agg_kind=agg_kind,
+            transform_tag=transform_tag,
         )
 
     # ---------- BASE-PAIR MODE  ----------
@@ -1157,10 +1237,12 @@ def run_metric(which: str,
         mode="bp",
         num_bins=NUM_BINS_BP,
         max_bp=MAX_BP,
+        transform_func=transform_func,
+        transform_tag=transform_tag,
     )
     total_loaded_bp = sum(per_group_counts_bp.values())
     if total_loaded_bp == 0:
-        log.error(f"[{which}/bp/{agg_kind}] No sequences loaded from {falsta}.")
+        log.error(f"[{which}/bp/{agg_kind}/{transform_tag}] No sequences loaded from {falsta}.")
     else:
         _assemble_outputs(
             per_group_means_bp, per_group_counts_bp,
@@ -1169,9 +1251,10 @@ def run_metric(which: str,
             out_path=out_plot_bp,
             out_tsv=out_tsv_bp,
             agg_kind=agg_kind,
+            transform_tag=transform_tag,
         )
 
-    log.info(f"[{which}/{agg_kind}] done in {time.time() - t0:.2f}s\n")
+    log.info(f"[{which}/{agg_kind}/{transform_tag}] done in {time.time() - t0:.2f}s\n")
 
 # --------------------------- MAIN --------------------------
 
@@ -1182,69 +1265,77 @@ def main():
     inv_df = _load_inv_mapping(INV_TSV)
     fuzzy_map = _build_fuzzy_lookup(inv_df) if not inv_df.empty else {}
 
-    # π (diversity): produce MEAN-suffixed originals and MEDIAN-suffixed additions
-    # --- MEAN ---
-    run_metric(
-        which="pi",
-        falsta=DIVERSITY_FILE,
-        min_len=MIN_LEN_PI,
-        fuzzy_map=fuzzy_map,
-        y_label="Mean nucleotide diversity (π per site)",
-        # proportion mode outputs (now capped by MAX_BP too)
-        out_plot_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_mean.pdf",
-        out_tsv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_mean.tsv",
-        # bp mode outputs
-        out_plot_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean.pdf",
-        out_tsv_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean.tsv",
-        agg_kind="mean",
-    )
-    # --- MEDIAN ---
-    run_metric(
-        which="pi",
-        falsta=DIVERSITY_FILE,
-        min_len=MIN_LEN_PI,
-        fuzzy_map=fuzzy_map,
-        y_label="Median nucleotide diversity (π per site)",
-        # proportion mode outputs
-        out_plot_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_median.pdf",
-        out_tsv_prop=OUTDIR / "pi_vs_inversion_edge_proportion_grouped_median.tsv",
-        # bp mode outputs
-        out_plot_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median.pdf",
-        out_tsv_bp=OUTDIR / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median.tsv",
-        agg_kind="median",
-    )
+    for spec in TRANSFORM_SPECS:
+        log.info("=" * 72)
+        log.info(f"Running transform '{spec.key}': {spec.description}")
+        spec_dir = OUTDIR / spec.key
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        suffix = spec.file_suffix
+        label_suffix = spec.label_suffix
 
-    # Hudson FST — produce POOLED and MEDIAN versions
-    # --- POOLED (ratio-of-sums across inversions) ---
-    run_metric(
-        which="hudson",
-        falsta=FST_FILE,
-        min_len=MIN_LEN_FST,
-        fuzzy_map=fuzzy_map,
-        y_label="Hudson FST (pooled ratio-of-sums)",
-        # proportion mode outputs
-        out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_pooled.pdf",
-        out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_pooled.tsv",
-        # bp mode outputs
-        out_plot_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_pooled.pdf",
-        out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_pooled.tsv",
-        agg_kind="pooled",
-    )
-    # --- MEDIAN (across inversions; per-inversion is ratio-of-sums across sites) ---
-    run_metric(
-        which="hudson",
-        falsta=FST_FILE,
-        min_len=MIN_LEN_FST,
-        fuzzy_map=fuzzy_map,
-        y_label="Hudson FST (median across inversions)",
-        # proportion mode outputs
-        out_plot_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_median.pdf",
-        out_tsv_prop=OUTDIR / "fst_vs_inversion_edge_proportion_grouped_median.tsv",
-        # bp mode outputs
-        out_plot_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median.pdf",
-        out_tsv_bp=OUTDIR / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median.tsv",
-        agg_kind="median",
-    )
+        # π (diversity)
+        run_metric(
+            which="pi",
+            falsta=DIVERSITY_FILE,
+            min_len=MIN_LEN_PI,
+            fuzzy_map=fuzzy_map,
+            y_label=f"Mean nucleotide diversity (π per site){label_suffix}",
+            out_plot_prop=spec_dir / f"pi_vs_inversion_edge_proportion_grouped_mean{suffix}.pdf",
+            out_tsv_prop=spec_dir / f"pi_vs_inversion_edge_proportion_grouped_mean{suffix}.tsv",
+            out_plot_bp=spec_dir / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean{suffix}.pdf",
+            out_tsv_bp=spec_dir / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean{suffix}.tsv",
+            agg_kind="mean",
+            transform_func=spec.func,
+            transform_tag=spec.key,
+        )
+
+        run_metric(
+            which="pi",
+            falsta=DIVERSITY_FILE,
+            min_len=MIN_LEN_PI,
+            fuzzy_map=fuzzy_map,
+            y_label=f"Median nucleotide diversity (π per site){label_suffix}",
+            out_plot_prop=spec_dir / f"pi_vs_inversion_edge_proportion_grouped_median{suffix}.pdf",
+            out_tsv_prop=spec_dir / f"pi_vs_inversion_edge_proportion_grouped_median{suffix}.tsv",
+            out_plot_bp=spec_dir / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median{suffix}.pdf",
+            out_tsv_bp=spec_dir / f"pi_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median{suffix}.tsv",
+            agg_kind="median",
+            transform_func=spec.func,
+            transform_tag=spec.key,
+        )
+
+        # Hudson FST — compute mean and median over normalized per-inversion curves
+        run_metric(
+            which="hudson",
+            falsta=FST_FILE,
+            min_len=MIN_LEN_FST,
+            fuzzy_map=fuzzy_map,
+            y_label=f"Hudson FST (mean across inversions){label_suffix}",
+            out_plot_prop=spec_dir / f"fst_vs_inversion_edge_proportion_grouped_mean{suffix}.pdf",
+            out_tsv_prop=spec_dir / f"fst_vs_inversion_edge_proportion_grouped_mean{suffix}.tsv",
+            out_plot_bp=spec_dir / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean{suffix}.pdf",
+            out_tsv_bp=spec_dir / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_mean{suffix}.tsv",
+            agg_kind="mean",
+            transform_func=spec.func,
+            transform_tag=spec.key,
+        )
+
+        run_metric(
+            which="hudson",
+            falsta=FST_FILE,
+            min_len=MIN_LEN_FST,
+            fuzzy_map=fuzzy_map,
+            y_label=f"Hudson FST (median across inversions){label_suffix}",
+            out_plot_prop=spec_dir / f"fst_vs_inversion_edge_proportion_grouped_median{suffix}.pdf",
+            out_tsv_prop=spec_dir / f"fst_vs_inversion_edge_proportion_grouped_median{suffix}.tsv",
+            out_plot_bp=spec_dir / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median{suffix}.pdf",
+            out_tsv_bp=spec_dir / f"fst_vs_inversion_edge_bp_cap{MAX_BP//1000}kb_grouped_median{suffix}.tsv",
+            agg_kind="median",
+            transform_func=spec.func,
+            transform_tag=spec.key,
+        )
+
+        log.info(f"Completed transform '{spec.key}'.")
 
 if __name__ == "__main__":
     mp.freeze_support()
