@@ -7,17 +7,20 @@ use tempfile::tempdir;
 
 #[test]
 fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
-    use crate::process::{process_variant, MissingDataInfo, FilteringStats, ZeroBasedHalfOpen};
-    use std::collections::HashMap;
+    use crate::process::{process_variant, FilteringStats, MissingDataInfo, ZeroBasedHalfOpen};
     use parking_lot::Mutex;
-    
+    use std::collections::HashMap;
+
     // Test the core filtering functionality directly (unit test)
     let sample_names = vec!["SAMPLE1".to_string(), "SAMPLE2".to_string()];
     let mut missing_data_info = MissingDataInfo::default();
     let mut filtering_stats = FilteringStats::default();
     let position_allele_map = Mutex::new(HashMap::new());
-    let region = ZeroBasedHalfOpen { start: 999, end: 2000 };
-    
+    let region = ZeroBasedHalfOpen {
+        start: 999,
+        end: 2000,
+    };
+
     // Test variant with high GQ values (should pass)
     let high_gq_variant = "chr1\t1000\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:50\t0|1:60";
     let result_high = process_variant(
@@ -32,12 +35,15 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
         None,
         &position_allele_map,
     );
-    
-    assert!(result_high.is_ok(), "High GQ variant should be processed successfully");
+
+    assert!(
+        result_high.is_ok(),
+        "High GQ variant should be processed successfully"
+    );
     let (variant_high, is_valid_high) = result_high.unwrap().unwrap();
     assert!(is_valid_high, "High GQ variant should be marked as valid");
     assert_eq!(variant_high.position, 999); // 1-based to 0-based conversion
-    
+
     // Test variant with low GQ values (should be filtered)
     let low_gq_variant = "chr1\t1001\t.\tA\tT\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|1:25";
     let result_low = process_variant(
@@ -52,15 +58,24 @@ fn test_variant_filtering_unit() -> Result<(), Box<dyn std::error::Error>> {
         None,
         &position_allele_map,
     );
-    
-    assert!(result_low.is_ok(), "Low GQ variant should be processed successfully");
+
+    assert!(
+        result_low.is_ok(),
+        "Low GQ variant should be processed successfully"
+    );
     let (variant_low, is_valid_low) = result_low.unwrap().unwrap();
-    assert!(!is_valid_low, "Low GQ variant should be marked as invalid (filtered)");
+    assert!(
+        !is_valid_low,
+        "Low GQ variant should be marked as invalid (filtered)"
+    );
     assert_eq!(variant_low.position, 1000); // 1-based to 0-based conversion
-    
+
     // Verify filtering stats were updated
-    assert!(filtering_stats.low_gq_variants > 0, "Filtering stats should record low GQ variants");
-    
+    assert!(
+        filtering_stats.low_gq_variants > 0,
+        "Filtering stats should record low GQ variants"
+    );
+
     Ok(())
 }
 
@@ -109,40 +124,53 @@ chr1\t81650508\t81707447\t81678978\tchr1-81642914-INV-66617\tpass\tinv\t0|0\t0|0
 
     // Create simple VCF files for testing
     let vcf_header = "##fileformat=VCFv4.2\n##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00096\tHG00171\tHG00268\n";
-    
+
     // chr22.test.vcf
     let chr22_vcf_content = format!("{}chr22\t1234\t.\tG\tA\t.\tPASS\t.\tGT:GQ\t0|1:50\t1|0:60\t0|0:40\nchr22\t10731885\t.\tC\tT\t.\tPASS\t.\tGT:GQ\t0|0:50\t0|0:60\t0|0:40\n", vcf_header);
     fs::write(vcf_folder_path.join("chr22.test.vcf"), chr22_vcf_content)?;
 
-    // chr3.test.vcf  
+    // chr3.test.vcf
     let chr3_vcf_content = format!("{}chr3\t10000\t.\tA\tG\t.\tPASS\t.\tGT:GQ\t0|0:50\t1|0:60\t0|0:40\nchr3\t200500\t.\tG\tA\t.\tPASS\t.\tGT:GQ\t0|0:20\t0|0:25\t0|0:30\n", vcf_header);
     fs::write(vcf_folder_path.join("chr3.test.vcf"), chr3_vcf_content)?;
 
     // chr17.test.vcf
-    let chr17_vcf_content = format!("{}chr17\t2400\t.\tG\tT\t.\tPASS\t.\tGT:GQ\t0|0:50\t1|0:60\t0|0:40\n", vcf_header);
+    let chr17_vcf_content = format!(
+        "{}chr17\t2400\t.\tG\tT\t.\tPASS\t.\tGT:GQ\t0|0:50\t1|0:60\t0|0:40\n",
+        vcf_header
+    );
     fs::write(vcf_folder_path.join("chr17.test.vcf"), chr17_vcf_content)?;
 
     // Create reference and GTF files
     let reference_file_path = temp_path.join("reference.fasta");
     let gtf_file_path = temp_path.join("annotations.gtf");
-    
+
     // Generate reference file content for all chromosomes
     let sequence = "ACTACGTACGGATCG"; // Repeatable sequence pattern
     let mut reference_content = String::new();
     let mut gtf_content = String::new();
-    
+
     for chr_num in 1..=22 {
         let full_sequence = sequence.repeat(1000); // Shorter for testing
         reference_content.push_str(&format!(">chr{}\n{}\n", chr_num, full_sequence));
-        gtf_content.push_str(&format!("chr{}\t.\tgene\t1\t1000\t.\t+\t.\tgene_id \"gene_chr{}\"; gene_name \"gene_chr{}\";\n", chr_num, chr_num, chr_num));
+        gtf_content.push_str(&format!(
+            "chr{}\t.\tgene\t1\t1000\t.\t+\t.\tgene_id \"gene_chr{}\"; gene_name \"gene_chr{}\";\n",
+            chr_num, chr_num, chr_num
+        ));
     }
-    
+
     // Chromosomes X and Y
     let full_sequence = sequence.repeat(1000); // Shorter for testing
-    reference_content.push_str(&format!(">chrX\n{}\n>chrY\n{}\n", full_sequence, full_sequence));
-    gtf_content.push_str("chrX\t.\tgene\t1\t1000\t.\t+\t.\tgene_id \"gene_chrX\"; gene_name \"gene_chrX\";\n");
-    gtf_content.push_str("chrY\t.\tgene\t1\t1000\t.\t+\t.\tgene_id \"gene_chrY\"; gene_name \"gene_chrY\";\n");
-    
+    reference_content.push_str(&format!(
+        ">chrX\n{}\n>chrY\n{}\n",
+        full_sequence, full_sequence
+    ));
+    gtf_content.push_str(
+        "chrX\t.\tgene\t1\t1000\t.\t+\t.\tgene_id \"gene_chrX\"; gene_name \"gene_chrX\";\n",
+    );
+    gtf_content.push_str(
+        "chrY\t.\tgene\t1\t1000\t.\t+\t.\tgene_id \"gene_chrY\"; gene_name \"gene_chrY\";\n",
+    );
+
     // Write the reference and GTF content to files
     fs::write(&reference_file_path, reference_content)?;
     fs::write(&gtf_file_path, gtf_content)?;
@@ -150,14 +178,20 @@ chr1\t81650508\t81707447\t81678978\tchr1-81642914-INV-66617\tpass\tinv\t0|0\t0|0
     // Determine the path to the run_vcf binary
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let run_vcf_binary = if cfg!(windows) {
-        project_root.join("target").join("release").join("run_vcf.exe")
+        project_root
+            .join("target")
+            .join("release")
+            .join("run_vcf.exe")
     } else {
         project_root.join("target").join("release").join("run_vcf")
     };
 
     // Skip test if binary doesn't exist (not built in release mode)
     if !run_vcf_binary.exists() {
-        println!("Skipping CLI integration test - run_vcf binary not found at {:?}", run_vcf_binary);
+        println!(
+            "Skipping CLI integration test - run_vcf binary not found at {:?}",
+            run_vcf_binary
+        );
         println!("Build with 'cargo build --release' to enable this test");
         return Ok(());
     }
@@ -181,7 +215,7 @@ chr1\t81650508\t81707447\t81678978\tchr1-81642914-INV-66617\tpass\tinv\t0|0\t0|0
 
     // Execute and capture output
     let output = cmd.output()?;
-    
+
     // Check that the command executed successfully
     if !output.status.success() {
         println!("Command failed with status: {}", output.status);
@@ -191,15 +225,20 @@ chr1\t81650508\t81707447\t81678978\tchr1-81642914-INV-66617\tpass\tinv\t0|0\t0|0
     }
 
     // Verify that output file was created
-    assert!(output_file_path.exists(), "Output CSV file should be created");
-    
+    assert!(
+        output_file_path.exists(),
+        "Output CSV file should be created"
+    );
+
     // Read and validate output file exists and has content
     let output_csv = fs::read_to_string(&output_file_path)?;
     assert!(!output_csv.is_empty(), "Output CSV should not be empty");
-    
+
     // Basic validation - should have header line
-    assert!(output_csv.contains("chromosome") || output_csv.contains("chr"), 
-        "Output CSV should contain chromosome information");
+    assert!(
+        output_csv.contains("chromosome") || output_csv.contains("chr"),
+        "Output CSV should contain chromosome information"
+    );
 
     // Clean up
     dir.close()?;
