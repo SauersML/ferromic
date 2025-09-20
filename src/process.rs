@@ -1770,11 +1770,10 @@ fn process_chromosome_entries(
         );
     }
 
-    finish_entry_progress(&format!(
-        "Processed {} regions on chr{}",
+    finish_entry_progress(
+        &format!("Processed {} regions on chr{}", entries.len(), chr),
         entries.len(),
-        chr
-    ));
+    );
 
     display_status_box(StatusBox {
         title: format!("Chromosome {} Statistics", chr),
