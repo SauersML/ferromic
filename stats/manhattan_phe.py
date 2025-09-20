@@ -3,10 +3,12 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import FancyArrowPatch
 from adjustText import adjust_text as ADJUST_TEXT  # required
+matplotlib.use('Agg')
 
 from _inv_common import map_inversion_series
 
