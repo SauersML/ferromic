@@ -1,1 +1,1 @@
-"""Performance benchmark suite for the ferromic Python bindings."""
+"""Pytest benchmarks package for ferromic comparisons."""
