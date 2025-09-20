@@ -8,8 +8,12 @@
 //! native Python library while retaining Rust's performance.
 
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
+use numpy::ndarray::ArrayView3;
+use numpy::{PyReadonlyArray1, PyReadonlyArray3};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyIterator, PyList, PyTuple};
@@ -21,11 +25,13 @@ use crate::pca::{
 };
 use crate::process::{HaplotypeSide, QueryRegion, Variant, VcfError};
 use crate::stats::{
-    calculate_adjusted_sequence_length, calculate_d_xy_hudson, calculate_fst_wc_haplotype_groups,
-    calculate_hudson_fst_for_pair, calculate_hudson_fst_for_pair_with_sites,
-    calculate_hudson_fst_per_site, calculate_inversion_allele_frequency,
-    calculate_pairwise_differences, calculate_per_site_diversity, calculate_pi,
-    calculate_watterson_theta, count_segregating_sites, DxyHudsonResult, FstEstimate, FstWcResults,
+    build_dense_population_summary, calculate_adjusted_sequence_length, calculate_d_xy_hudson,
+    calculate_fst_wc_haplotype_groups, calculate_hudson_fst_for_pair,
+    calculate_hudson_fst_for_pair_with_sites, calculate_hudson_fst_per_site,
+    calculate_inversion_allele_frequency, calculate_pairwise_differences,
+    calculate_per_site_diversity, calculate_pi, calculate_pi_for_population,
+    calculate_watterson_theta, count_segregating_sites, count_segregating_sites_for_population,
+    DenseGenotypeMatrix, DensePopulationSummary, DxyHudsonResult, FstEstimate, FstWcResults,
     HudsonFSTOutcome, PopulationContext, PopulationId, SiteDiversity, SiteFstHudson, SiteFstWc,
 };
 
@@ -495,7 +501,7 @@ impl WcFstResultPy {
 #[pyclass(module = "ferromic")]
 #[derive(Clone)]
 struct Population {
-    inner: OwnedPopulationContext,
+    inner: Arc<OwnedPopulationContext>,
 }
 
 #[pymethods]
@@ -515,15 +521,79 @@ impl Population {
             ));
         }
 
+        let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
+        let haplotypes: Vec<(usize, HaplotypeSide)> =
+            haplotypes.into_iter().map(|h| h.into_pair()).collect();
+        let context = OwnedPopulationContext::from_parts(
+            id.0,
+            variants,
+            haplotypes,
+            sample_names.unwrap_or_default(),
+            sequence_length,
+            None,
+        );
         Ok(Population {
-            inner: OwnedPopulationContext {
-                id: id.0,
-                haplotypes: haplotypes.into_iter().map(|h| h.into_pair()).collect(),
-                variants: variants.into_iter().map(VariantInput::into_inner).collect(),
-                sample_names: sample_names.unwrap_or_default(),
-                sequence_length,
-            },
+            inner: Arc::new(context),
         })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (id, genotypes, positions, haplotypes, sequence_length, sample_names=None))]
+    fn from_numpy(
+        id: &PyAny,
+        genotypes: &PyAny,
+        positions: &PyAny,
+        haplotypes: Vec<HaplotypeInput>,
+        sequence_length: i64,
+        sample_names: Option<Vec<String>>,
+    ) -> PyResult<Self> {
+        if sequence_length <= 0 {
+            return Err(PyValueError::new_err(
+                "sequence_length must be a positive integer",
+            ));
+        }
+
+        let id = id.extract::<PopulationIdInput>()?.0;
+        let haplotypes: Vec<(usize, HaplotypeSide)> =
+            haplotypes.into_iter().map(|h| h.into_pair()).collect();
+        let (variants, dense) = build_variants_from_numpy(genotypes, positions)?;
+        let sample_names = sample_names.unwrap_or_default();
+        let context = OwnedPopulationContext::from_parts(
+            id,
+            variants,
+            haplotypes,
+            sample_names,
+            sequence_length,
+            dense.map(Arc::new),
+        );
+
+        Ok(Population {
+            inner: Arc::new(context),
+        })
+    }
+
+    #[pyo3(signature = (id, haplotypes))]
+    fn with_haplotypes(
+        &self,
+        id: PopulationIdInput,
+        haplotypes: Vec<HaplotypeInput>,
+    ) -> PyResult<Self> {
+        let haplotypes: Vec<(usize, HaplotypeSide)> =
+            haplotypes.into_iter().map(|h| h.into_pair()).collect();
+        let context = self.inner.clone_with_haplotypes(id.0, haplotypes);
+        Ok(Population {
+            inner: Arc::new(context),
+        })
+    }
+
+    fn segregating_sites(&self) -> usize {
+        let ctx = self.inner.as_population_context();
+        count_segregating_sites_for_population(&ctx)
+    }
+
+    fn nucleotide_diversity(&self) -> f64 {
+        let ctx = self.inner.as_population_context();
+        calculate_pi_for_population(&ctx)
     }
 
     /// Identifier for the population. Haplotype groups are returned as integers, custom
@@ -569,7 +639,7 @@ impl Population {
     /// Names of the samples backing this population.
     #[getter]
     fn sample_names(&self) -> Vec<String> {
-        self.inner.sample_names.clone()
+        self.inner.sample_names.as_ref().to_vec()
     }
 
     /// Haplotypes represented as ``(sample_index, side)`` where side is 0 for left and 1 for right.
@@ -605,23 +675,87 @@ impl Population {
 }
 
 /// Internal owned representation of a population used to build [`PopulationContext`].
-#[derive(Clone)]
 struct OwnedPopulationContext {
     id: PopulationId,
-    haplotypes: Vec<(usize, HaplotypeSide)>,
-    variants: Vec<Variant>,
-    sample_names: Vec<String>,
+    haplotypes: Arc<[(usize, HaplotypeSide)]>,
+    variants: Arc<[Variant]>,
+    sample_names: Arc<[String]>,
     sequence_length: i64,
+    dense: Option<Arc<DenseGenotypeMatrix>>,
+    dense_summary: OnceLock<Arc<DensePopulationSummary>>,
 }
 
 impl OwnedPopulationContext {
+    fn from_parts(
+        id: PopulationId,
+        variants: Vec<Variant>,
+        haplotypes: Vec<(usize, HaplotypeSide)>,
+        sample_names: Vec<String>,
+        sequence_length: i64,
+        dense: Option<Arc<DenseGenotypeMatrix>>,
+    ) -> Self {
+        Self {
+            id,
+            haplotypes: Arc::from(haplotypes.into_boxed_slice()),
+            variants: Arc::from(variants.into_boxed_slice()),
+            sample_names: Arc::from(sample_names.into_boxed_slice()),
+            sequence_length,
+            dense,
+            dense_summary: OnceLock::new(),
+        }
+    }
+
+    fn clone_with_haplotypes(
+        &self,
+        id: PopulationId,
+        haplotypes: Vec<(usize, HaplotypeSide)>,
+    ) -> Self {
+        Self {
+            id,
+            haplotypes: Arc::from(haplotypes.into_boxed_slice()),
+            variants: Arc::clone(&self.variants),
+            sample_names: Arc::clone(&self.sample_names),
+            sequence_length: self.sequence_length,
+            dense: self.dense.as_ref().map(Arc::clone),
+            dense_summary: OnceLock::new(),
+        }
+    }
+
     fn as_population_context(&self) -> PopulationContext<'_> {
+        let dense_summary = self.dense.as_ref().and_then(|matrix| {
+            if matrix.max_allele() <= 1 {
+                Some(Arc::clone(self.dense_summary.get_or_init(|| {
+                    Arc::new(build_dense_population_summary(
+                        matrix,
+                        self.haplotypes.as_ref(),
+                    ))
+                })))
+            } else {
+                None
+            }
+        });
         PopulationContext {
             id: self.id.clone(),
-            haplotypes: self.haplotypes.clone(),
+            haplotypes: self.haplotypes.to_vec(),
             variants: &self.variants,
             sample_names: &self.sample_names,
             sequence_length: self.sequence_length,
+            dense_genotypes: self.dense.as_deref(),
+            dense_summary,
+        }
+    }
+}
+
+impl Clone for OwnedPopulationContext {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            haplotypes: Arc::clone(&self.haplotypes),
+            variants: Arc::clone(&self.variants),
+            sample_names: Arc::clone(&self.sample_names),
+            sequence_length: self.sequence_length,
+            dense: self.dense.as_ref().map(Arc::clone),
+            dense_summary: OnceLock::new(),
         }
     }
 }
@@ -779,7 +913,7 @@ impl<'source> FromPyObject<'source> for PopulationIdInput {
 
 #[derive(Clone)]
 struct PopulationInput {
-    inner: OwnedPopulationContext,
+    inner: Arc<OwnedPopulationContext>,
 }
 
 impl PopulationInput {
@@ -792,7 +926,7 @@ impl<'source> FromPyObject<'source> for PopulationInput {
     fn extract(obj: &'source PyAny) -> PyResult<Self> {
         if let Ok(pop) = obj.extract::<PyRef<Population>>() {
             return Ok(PopulationInput {
-                inner: pop.inner.clone(),
+                inner: Arc::clone(&pop.inner),
             });
         }
 
@@ -834,14 +968,17 @@ fn parse_population_like_dict(mapping: &PyDict) -> PyResult<PopulationInput> {
         None => Vec::new(),
     };
 
+    let context = OwnedPopulationContext::from_parts(
+        id,
+        variants,
+        haplotypes,
+        sample_names,
+        sequence_length,
+        None,
+    );
+
     Ok(PopulationInput {
-        inner: OwnedPopulationContext {
-            id,
-            haplotypes,
-            variants,
-            sample_names,
-            sequence_length,
-        },
+        inner: Arc::new(context),
     })
 }
 
@@ -875,15 +1012,226 @@ fn parse_population_like_object(obj: &PyAny) -> PyResult<PopulationInput> {
         .transpose()?
         .unwrap_or_default();
 
+    let context = OwnedPopulationContext::from_parts(
+        id,
+        variants,
+        haplotypes,
+        sample_names,
+        sequence_length,
+        None,
+    );
+
     Ok(PopulationInput {
-        inner: OwnedPopulationContext {
-            id,
-            haplotypes,
-            variants,
-            sample_names,
-            sequence_length,
-        },
+        inner: Arc::new(context),
     })
+}
+
+fn build_variants_from_numpy(
+    genotypes_obj: &PyAny,
+    positions_obj: &PyAny,
+) -> PyResult<(Vec<Variant>, Option<DenseGenotypeMatrix>)> {
+    if let Ok(array) = genotypes_obj.extract::<PyReadonlyArray3<'_, u8>>() {
+        let view = array.as_array();
+        let positions = extract_positions(positions_obj, view.shape()[0])?;
+        return convert_numeric_array(view, &positions, |value| Ok(Some(value)));
+    }
+
+    if let Ok(array) = genotypes_obj.extract::<PyReadonlyArray3<'_, i8>>() {
+        let view = array.as_array();
+        let positions = extract_positions(positions_obj, view.shape()[0])?;
+        return convert_numeric_array(view, &positions, |value| {
+            if value < 0 {
+                Ok(None)
+            } else {
+                Ok(Some(value as u8))
+            }
+        });
+    }
+
+    if let Ok(array) = genotypes_obj.extract::<PyReadonlyArray3<'_, u16>>() {
+        let view = array.as_array();
+        let positions = extract_positions(positions_obj, view.shape()[0])?;
+        return convert_numeric_array(view, &positions, |value| {
+            if value <= u8::MAX as u16 {
+                Ok(Some(value as u8))
+            } else {
+                Err(PyValueError::new_err("allele values must be <= 255"))
+            }
+        });
+    }
+
+    if let Ok(array) = genotypes_obj.extract::<PyReadonlyArray3<'_, i16>>() {
+        let view = array.as_array();
+        let positions = extract_positions(positions_obj, view.shape()[0])?;
+        return convert_numeric_array(view, &positions, |value| {
+            if value < 0 {
+                Ok(None)
+            } else if value <= u8::MAX as i16 {
+                Ok(Some(value as u8))
+            } else {
+                Err(PyValueError::new_err("allele values must be <= 255"))
+            }
+        });
+    }
+
+    Err(PyValueError::new_err(
+        "genotypes must be a numpy.ndarray with dtype uint8/int8/uint16/int16 and shape (variants, samples, ploidy)",
+    ))
+}
+
+fn convert_numeric_array<T, F>(
+    view: ArrayView3<'_, T>,
+    positions: &[i64],
+    mut convert: F,
+) -> PyResult<(Vec<Variant>, Option<DenseGenotypeMatrix>)>
+where
+    T: Copy,
+    F: FnMut(T) -> PyResult<Option<u8>>,
+{
+    let shape = view.shape();
+    let variant_count = shape[0];
+    let sample_count = shape[1];
+    let ploidy = shape[2];
+
+    if positions.len() != variant_count {
+        return Err(PyValueError::new_err(format!(
+            "positions length {} does not match variant dimension {}",
+            positions.len(),
+            variant_count
+        )));
+    }
+
+    let mut variants = Vec::with_capacity(variant_count);
+    let total_entries = variant_count * sample_count * ploidy;
+    let mut dense_data = Vec::with_capacity(total_entries);
+    let mut missing_bits: Vec<u64> = Vec::new();
+    let mut has_missing = false;
+    let mut linear_index = 0usize;
+    let mut global_max_allele = 0u8;
+
+    for variant_idx in 0..variant_count {
+        let mut genotypes = Vec::with_capacity(sample_count);
+        for sample_idx in 0..sample_count {
+            let mut alleles = Vec::with_capacity(ploidy);
+            let mut missing = false;
+            for allele_idx in 0..ploidy {
+                let value = view[(variant_idx, sample_idx, allele_idx)];
+                match convert(value)? {
+                    Some(allele) => {
+                        alleles.push(allele);
+                        dense_data.push(allele);
+                        if allele > global_max_allele {
+                            global_max_allele = allele;
+                        }
+                    }
+                    None => {
+                        missing = true;
+                        dense_data.push(0);
+                        if !has_missing {
+                            has_missing = true;
+                            let words = (total_entries + 63) / 64;
+                            missing_bits = vec![0; words];
+                        }
+                        if let Some(word) = missing_bits.get_mut(linear_index / 64) {
+                            *word |= 1u64 << (linear_index % 64);
+                        }
+                    }
+                }
+                linear_index += 1;
+            }
+            if missing {
+                genotypes.push(None);
+            } else {
+                genotypes.push(Some(alleles));
+            }
+        }
+
+        variants.push(Variant {
+            position: positions[variant_idx],
+            genotypes,
+        });
+    }
+
+    let dense_matrix = if ploidy == 2 {
+        let missing = if has_missing {
+            Some(missing_bits)
+        } else {
+            None
+        };
+        Some(DenseGenotypeMatrix::new(
+            dense_data,
+            missing,
+            variant_count,
+            sample_count,
+            ploidy,
+            global_max_allele,
+        ))
+    } else {
+        None
+    };
+
+    Ok((variants, dense_matrix))
+}
+
+fn extract_positions(positions_obj: &PyAny, expected_len: usize) -> PyResult<Vec<i64>> {
+    if let Ok(array) = positions_obj.extract::<PyReadonlyArray1<'_, i64>>() {
+        let slice = array.as_slice()?;
+        if slice.len() != expected_len {
+            return Err(PyValueError::new_err(format!(
+                "positions length {} does not match variant dimension {}",
+                slice.len(),
+                expected_len
+            )));
+        }
+        return Ok(slice.to_vec());
+    }
+
+    if let Ok(array) = positions_obj.extract::<PyReadonlyArray1<'_, i32>>() {
+        let slice = array.as_slice()?;
+        if slice.len() != expected_len {
+            return Err(PyValueError::new_err(format!(
+                "positions length {} does not match variant dimension {}",
+                slice.len(),
+                expected_len
+            )));
+        }
+        return Ok(slice.iter().map(|&value| value as i64).collect());
+    }
+
+    if let Ok(array) = positions_obj.extract::<PyReadonlyArray1<'_, u32>>() {
+        let slice = array.as_slice()?;
+        if slice.len() != expected_len {
+            return Err(PyValueError::new_err(format!(
+                "positions length {} does not match variant dimension {}",
+                slice.len(),
+                expected_len
+            )));
+        }
+        return Ok(slice.iter().map(|&value| value as i64).collect());
+    }
+
+    if let Ok(array) = positions_obj.extract::<PyReadonlyArray1<'_, u64>>() {
+        let slice = array.as_slice()?;
+        if slice.len() != expected_len {
+            return Err(PyValueError::new_err(format!(
+                "positions length {} does not match variant dimension {}",
+                slice.len(),
+                expected_len
+            )));
+        }
+        let mut result = Vec::with_capacity(expected_len);
+        for &value in slice {
+            let position = i64::try_from(value).map_err(|_| {
+                PyValueError::new_err("positions must fit into signed 64-bit integers")
+            })?;
+            result.push(position);
+        }
+        return Ok(result);
+    }
+
+    Err(PyValueError::new_err(
+        "positions must be a numpy.ndarray with dtype int64/int32/uint32/uint64",
+    ))
 }
 
 fn parse_genotypes(genotypes_obj: &PyAny) -> PyResult<Vec<Option<Vec<u8>>>> {

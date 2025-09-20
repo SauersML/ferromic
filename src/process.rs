@@ -196,9 +196,7 @@ impl ZeroBasedHalfOpen {
         let adjusted_end = if end_inclusive < adjusted_start {
             adjusted_start
         } else {
-            end_inclusive
-                .saturating_add(1)
-                .max(adjusted_start)
+            end_inclusive.saturating_add(1).max(adjusted_start)
         };
 
         ZeroBasedHalfOpen {
@@ -2061,14 +2059,7 @@ fn process_single_config_entry(
         ),
     );
 
-    let (
-        all_variants,
-        filtered_idxs,
-        sample_names,
-        _,
-        _,
-        filtering_stats,
-    ) = match process_vcf(
+    let (all_variants, filtered_idxs, sample_names, _, _, filtering_stats) = match process_vcf(
         vcf_file,
         Path::new(&args.reference_path),
         chr.to_string(),
@@ -2128,17 +2119,16 @@ fn process_single_config_entry(
     // The variants for Hudson FST should be the filtered variants within the specific region of the entry.
     let variants_for_hudson_slice: &[Variant] = &region_variants_filtered[..];
 
-    let hudson_query_region = if hudson_analysis_region_end_0based_exclusive
-        > hudson_analysis_region_start_0based
-    {
-        QueryRegion {
-            start: hudson_analysis_region_start_0based,
-            end: hudson_analysis_region_end_0based_exclusive - 1,
-        }
-    } else {
-        // Empty or invalid region
-        QueryRegion { start: 0, end: -1 }
-    };
+    let hudson_query_region =
+        if hudson_analysis_region_end_0based_exclusive > hudson_analysis_region_start_0based {
+            QueryRegion {
+                start: hudson_analysis_region_start_0based,
+                end: hudson_analysis_region_end_0based_exclusive - 1,
+            }
+        } else {
+            // Empty or invalid region
+            QueryRegion { start: 0, end: -1 }
+        };
     let hudson_region_is_valid = hudson_query_region.start <= hudson_query_region.end;
 
     // Calculate FST if enabled
@@ -2210,8 +2200,10 @@ fn process_single_config_entry(
     // Store filtered variants for PCA if enabled and the pca_storage is provided
     if args.enable_pca {
         if let Some((variants_storage, sample_names_storage)) = &pca_storage {
-            let filtered_for_chr: Vec<Variant> =
-                filtered_idxs.iter().map(|&i| all_variants[i].clone()).collect();
+            let filtered_for_chr: Vec<Variant> = filtered_idxs
+                .iter()
+                .map(|&i| all_variants[i].clone())
+                .collect();
             variants_storage
                 .lock()
                 .insert(chr.to_string(), filtered_for_chr);
@@ -2521,6 +2513,8 @@ fn process_single_config_entry(
                     variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                     sample_names: &sample_names,
                     sequence_length: adjusted_sequence_length,
+                    dense_genotypes: None,
+                    dense_summary: None,
                 };
                 let pop1_context = PopulationContext {
                     id: PopulationId::HaplotypeGroup(1),
@@ -2528,6 +2522,8 @@ fn process_single_config_entry(
                     variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                     sample_names: &sample_names,
                     sequence_length: adjusted_sequence_length,
+                    dense_genotypes: None,
+                    dense_summary: None,
                 };
 
                 if hudson_region_is_valid {
@@ -2609,6 +2605,8 @@ fn process_single_config_entry(
                             variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                             sample_names: &sample_names,
                             sequence_length: adjusted_sequence_length,
+                            dense_genotypes: None,
+                            dense_summary: None,
                         };
                         let pop_b_context_csv = PopulationContext {
                             id: PopulationId::Named(pop_name_b.clone()),
@@ -2616,6 +2614,8 @@ fn process_single_config_entry(
                             variants: variants_for_hudson_slice, // Use the correctly scoped variant slice
                             sample_names: &sample_names,
                             sequence_length: adjusted_sequence_length,
+                            dense_genotypes: None,
+                            dense_summary: None,
                         };
 
                         if hudson_region_is_valid {
@@ -2857,19 +2857,14 @@ fn format_optional_usize(val_opt: Option<usize>) -> String {
 
 // ── shared append opener ──────────────────────────────────────────────────────
 fn open_append(path: &std::path::Path) -> std::io::Result<BufWriter<std::fs::File>> {
-    let f = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let f = OpenOptions::new().create(true).append(true).open(path)?;
     Ok(BufWriter::new(f))
 }
 
 // ── csv append: write ONE row (no header) ─────────────────────────────────────
 fn append_csv_row(csv_path: &std::path::Path, row: &CsvRowData) -> Result<(), VcfError> {
     let f = open_append(csv_path).map_err(VcfError::Io)?;
-    let mut w = csv::WriterBuilder::new()
-        .has_headers(false)
-        .from_writer(f);
+    let mut w = csv::WriterBuilder::new().has_headers(false).from_writer(f);
     write_csv_row(&mut w, row)?;
     w.flush().map_err(|e| VcfError::Io(e.into()))
 }

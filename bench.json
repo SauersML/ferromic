@@ -1,0 +1,2492 @@
+{
+    "machine_info": {
+        "node": "5938fd4a60a3",
+        "processor": "x86_64",
+        "machine": "x86_64",
+        "python_compiler": "GCC 13.3.0",
+        "python_implementation": "CPython",
+        "python_implementation_version": "3.12.10",
+        "python_version": "3.12.10",
+        "python_build": [
+            "main",
+            "Aug 28 2025 21:54:05"
+        ],
+        "release": "6.12.13",
+        "system": "Linux",
+        "cpu": {
+            "python_version": "3.12.10.final.0 (64 bit)",
+            "cpuinfo_version": [
+                9,
+                0,
+                0
+            ],
+            "cpuinfo_version_string": "9.0.0",
+            "arch": "X86_64",
+            "bits": 64,
+            "count": 5,
+            "arch_string_raw": "x86_64",
+            "vendor_id_raw": "GenuineIntel",
+            "brand_raw": "Intel(R) Xeon(R) Platinum 8272CL CPU @ 2.60GHz",
+            "hz_advertised_friendly": "2.6000 GHz",
+            "hz_actual_friendly": "2.5939 GHz",
+            "hz_advertised": [
+                2600000000,
+                0
+            ],
+            "hz_actual": [
+                2593906000,
+                0
+            ],
+            "stepping": 7,
+            "model": 85,
+            "family": 6,
+            "flags": [
+                "3dnowprefetch",
+                "abm",
+                "adx",
+                "aes",
+                "apic",
+                "arat",
+                "arch_capabilities",
+                "avx",
+                "avx2",
+                "avx512bw",
+                "avx512cd",
+                "avx512dq",
+                "avx512f",
+                "avx512vl",
+                "bmi1",
+                "bmi2",
+                "clflush",
+                "clflushopt",
+                "cmov",
+                "constant_tsc",
+                "cpuid",
+                "cpuid_fault",
+                "cx16",
+                "cx8",
+                "de",
+                "erms",
+                "f16c",
+                "fma",
+                "fpu",
+                "fsgsbase",
+                "fxsr",
+                "hle",
+                "ht",
+                "hypervisor",
+                "invpcid",
+                "lahf_lm",
+                "lm",
+                "mca",
+                "mce",
+                "md_clear",
+                "mmx",
+                "movbe",
+                "msr",
+                "mtrr",
+                "nopl",
+                "nx",
+                "osxsave",
+                "pae",
+                "pat",
+                "pcid",
+                "pclmulqdq",
+                "pdpe1gb",
+                "pge",
+                "pni",
+                "popcnt",
+                "pse",
+                "pse36",
+                "rdrand",
+                "rdrnd",
+                "rdseed",
+                "rdtscp",
+                "rep_good",
+                "rtm",
+                "sep",
+                "smap",
+                "smep",
+                "ss",
+                "sse",
+                "sse2",
+                "sse4_1",
+                "sse4_2",
+                "ssse3",
+                "syscall",
+                "tsc",
+                "tsc_adjust",
+                "tsc_deadline_timer",
+                "tsc_known_freq",
+                "tscdeadline",
+                "umip",
+                "vme",
+                "vmx",
+                "x2apic",
+                "xsave",
+                "xsavec",
+                "xsaveopt",
+                "xsaves",
+                "xtopology"
+            ],
+            "l3_cache_size": 37486592,
+            "l2_cache_size": 3145728,
+            "l1_data_cache_size": 98304,
+            "l1_instruction_cache_size": 98304,
+            "l2_cache_line_size": 256,
+            "l2_cache_associativity": 6
+        }
+    },
+    "commit_info": {
+        "id": "179fe65e514faa70e84e81cdf02082d124a7c621",
+        "time": "2025-09-20T01:54:51+00:00",
+        "author_time": "2025-09-20T01:54:51+00:00",
+        "dirty": true,
+        "project": "ferromic",
+        "branch": "work"
+    },
+    "benchmarks": [
+        {
+            "group": null,
+            "name": "test_benchmark_segregating_sites[pilot_panel_variants_512_samples_48-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_segregating_sites[pilot_panel_variants_512_samples_48-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "ferromic"
+            },
+            "param": "pilot_panel_variants_512_samples_48-ferromic",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "implementation": "ferromic",
+                "relative_to_scikit_pilot_panel_variants_512_samples_48_segregating_sites": 0.06171627224295964
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 1.3409999155555852e-06,
+                "max": 9.177000038107508e-06,
+                "mean": 3.1676000162406124e-06,
+                "stddev": 3.3828964470345473e-06,
+                "rounds": 5,
+                "median": 1.5240000266203424e-06,
+                "iqr": 2.6309999157092534e-06,
+                "q1": 1.4227500741981203e-06,
+                "q3": 4.053749989907374e-06,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 1.3409999155555852e-06,
+                "hd15iqr": 9.177000038107508e-06,
+                "ops": 315696.4246978459,
+                "total": 1.5838000081203063e-05,
+                "data": [
+                    9.177000038107508e-06,
+                    2.3459999738406623e-06,
+                    1.5240000266203424e-06,
+                    1.3409999155555852e-06,
+                    1.4500001270789653e-06
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_segregating_sites[pilot_panel_variants_512_samples_48-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_segregating_sites[pilot_panel_variants_512_samples_48-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "pilot_panel_variants_512_samples_48-scikit-allel",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 2.0925000171700958e-05,
+                "max": 0.00016395299985560996,
+                "mean": 5.132520000188379e-05,
+                "stddev": 6.301571629245592e-05,
+                "rounds": 5,
+                "median": 2.2894000039741513e-05,
+                "iqr": 4.042500000878135e-05,
+                "q1": 2.1217499977410625e-05,
+                "q3": 6.164249998619198e-05,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 2.0925000171700958e-05,
+                "hd15iqr": 0.00016395299985560996,
+                "ops": 19483.606492781266,
+                "total": 0.00025662600000941893,
+                "data": [
+                    0.00016395299985560996,
+                    2.7539000029719318e-05,
+                    2.2894000039741513e-05,
+                    2.131499991264718e-05,
+                    2.0925000171700958e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_nucleotide_diversity[pilot_panel_variants_512_samples_48-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_nucleotide_diversity[pilot_panel_variants_512_samples_48-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "ferromic"
+            },
+            "param": "pilot_panel_variants_512_samples_48-ferromic",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "implementation": "ferromic",
+                "relative_to_scikit_pilot_panel_variants_512_samples_48_nucleotide_diversity": 0.023881682377483768
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 2.6560001060715877e-06,
+                "max": 9.748999900693889e-06,
+                "mean": 5.057399994257139e-06,
+                "stddev": 2.7203937164237688e-06,
+                "rounds": 5,
+                "median": 4.3089999053336214e-06,
+                "iqr": 2.0650001033573062e-06,
+                "q1": 3.7329999713620055e-06,
+                "q3": 5.798000074719312e-06,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 2.6560001060715877e-06,
+                "hd15iqr": 9.748999900693889e-06,
+                "ops": 197730.0591480872,
+                "total": 2.5286999971285695e-05,
+                "data": [
+                    9.748999900693889e-06,
+                    4.091999926458811e-06,
+                    2.6560001060715877e-06,
+                    4.3089999053336214e-06,
+                    4.481000132727786e-06
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_nucleotide_diversity[pilot_panel_variants_512_samples_48-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_nucleotide_diversity[pilot_panel_variants_512_samples_48-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "pilot_panel_variants_512_samples_48-scikit-allel",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00012870199998360476,
+                "max": 0.000422723999918162,
+                "mean": 0.0002117689999522554,
+                "stddev": 0.00012381115592955612,
+                "rounds": 5,
+                "median": 0.00014649599984295492,
+                "iqr": 0.00013796874986837793,
+                "q1": 0.00013529000005974012,
+                "q3": 0.00027325874992811805,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00012870199998360476,
+                "hd15iqr": 0.000422723999918162,
+                "ops": 4722.126469055697,
+                "total": 0.001058844999761277,
+                "data": [
+                    0.000422723999918162,
+                    0.00014649599984295492,
+                    0.00012870199998360476,
+                    0.00022343699993143673,
+                    0.00013748600008511858
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[pilot_panel_variants_512_samples_48-ferromic-pop1]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[pilot_panel_variants_512_samples_48-ferromic-pop1]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "ferromic",
+                "population_key": "pop1"
+            },
+            "param": "pilot_panel_variants_512_samples_48-ferromic-pop1",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "population": "population_1",
+                "implementation": "ferromic",
+                "relative_to_scikit_pilot_panel_variants_512_samples_48_population_1_nucleotide_diversity_population": 0.018553479908472423
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 2.469000037308433e-06,
+                "max": 8.729999990464421e-06,
+                "mean": 3.897600026903092e-06,
+                "stddev": 2.7179281054746625e-06,
+                "rounds": 5,
+                "median": 2.5910001113516046e-06,
+                "iqr": 2.094750016112812e-06,
+                "q1": 2.489249993686826e-06,
+                "q3": 4.584000009799638e-06,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 2.469000037308433e-06,
+                "hd15iqr": 8.729999990464421e-06,
+                "ops": 256568.14272822344,
+                "total": 1.948800013451546e-05,
+                "data": [
+                    8.729999990464421e-06,
+                    3.2020000162447104e-06,
+                    2.5910001113516046e-06,
+                    2.4959999791462906e-06,
+                    2.469000037308433e-06
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[pilot_panel_variants_512_samples_48-ferromic-pop2]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[pilot_panel_variants_512_samples_48-ferromic-pop2]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "ferromic",
+                "population_key": "pop2"
+            },
+            "param": "pilot_panel_variants_512_samples_48-ferromic-pop2",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "population": "population_2",
+                "implementation": "ferromic",
+                "relative_to_scikit_pilot_panel_variants_512_samples_48_population_2_nucleotide_diversity_population": 0.022956105762318782
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 2.4949999897216912e-06,
+                "max": 7.5010000273323385e-06,
+                "mean": 4.0182000248023545e-06,
+                "stddev": 2.1502356506636182e-06,
+                "rounds": 5,
+                "median": 2.8130000373494113e-06,
+                "iqr": 2.8625001959881047e-06,
+                "q1": 2.548999930240825e-06,
+                "q3": 5.41150012622893e-06,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 2.4949999897216912e-06,
+                "hd15iqr": 7.5010000273323385e-06,
+                "ops": 248867.65064643283,
+                "total": 2.009100012401177e-05,
+                "data": [
+                    7.5010000273323385e-06,
+                    2.8130000373494113e-06,
+                    2.5669999104138697e-06,
+                    2.4949999897216912e-06,
+                    4.71500015919446e-06
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[pilot_panel_variants_512_samples_48-scikit-allel-pop1]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[pilot_panel_variants_512_samples_48-scikit-allel-pop1]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "scikit-allel",
+                "population_key": "pop1"
+            },
+            "param": "pilot_panel_variants_512_samples_48-scikit-allel-pop1",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "population": "population_1",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00015033399995445507,
+                "max": 0.0003664089999801945,
+                "mean": 0.00021007379996262898,
+                "stddev": 9.279702021132082e-05,
+                "rounds": 5,
+                "median": 0.00015802199982317688,
+                "iqr": 0.00010947974976716068,
+                "q1": 0.00015070450012899528,
+                "q3": 0.00026018424989615596,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00015033399995445507,
+                "hd15iqr": 0.0003664089999801945,
+                "ops": 4760.231881262179,
+                "total": 0.001050368999813145,
+                "data": [
+                    0.0003664089999801945,
+                    0.00022477599986814312,
+                    0.00015802199982317688,
+                    0.00015082800018717535,
+                    0.00015033399995445507
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[pilot_panel_variants_512_samples_48-scikit-allel-pop2]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[pilot_panel_variants_512_samples_48-scikit-allel-pop2]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "scikit-allel",
+                "population_key": "pop2"
+            },
+            "param": "pilot_panel_variants_512_samples_48-scikit-allel-pop2",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "population": "population_2",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00012525099987215071,
+                "max": 0.0002573390001998632,
+                "mean": 0.00017503840008430415,
+                "stddev": 6.310055796495634e-05,
+                "rounds": 5,
+                "median": 0.00013318200012690795,
+                "iqr": 0.00010710850000350547,
+                "q1": 0.0001290520000907236,
+                "q3": 0.00023616050009422906,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00012525099987215071,
+                "hd15iqr": 0.0002573390001998632,
+                "ops": 5713.032109059313,
+                "total": 0.0008751920004215208,
+                "data": [
+                    0.00022910100005901768,
+                    0.00013318200012690795,
+                    0.00012525099987215071,
+                    0.00013031900016358122,
+                    0.0002573390001998632
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_watterson_theta[pilot_panel_variants_512_samples_48-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_watterson_theta[pilot_panel_variants_512_samples_48-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "ferromic"
+            },
+            "param": "pilot_panel_variants_512_samples_48-ferromic",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "implementation": "ferromic",
+                "relative_to_scikit_pilot_panel_variants_512_samples_48_watterson_theta": 0.02890681886224518
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 6.340001164062414e-07,
+                "max": 1.59359999543085e-05,
+                "mean": 4.008999985671835e-06,
+                "stddev": 6.6884527904814625e-06,
+                "rounds": 5,
+                "median": 8.009999419300584e-07,
+                "iqr": 4.729999943720031e-06,
+                "q1": 7.090000053722179e-07,
+                "q3": 5.438999949092249e-06,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 6.340001164062414e-07,
+                "hd15iqr": 1.59359999543085e-05,
+                "ops": 249438.76367523067,
+                "total": 2.0044999928359175e-05,
+                "data": [
+                    1.59359999543085e-05,
+                    1.939999947353499e-06,
+                    8.009999419300584e-07,
+                    7.339999683608767e-07,
+                    6.340001164062414e-07
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_watterson_theta[pilot_panel_variants_512_samples_48-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_watterson_theta[pilot_panel_variants_512_samples_48-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "pilot_panel_variants_512_samples_48-scikit-allel",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 9.659599982114742e-05,
+                "max": 0.00023920799981169694,
+                "mean": 0.00013868699993508927,
+                "stddev": 5.814165555166151e-05,
+                "rounds": 5,
+                "median": 0.00012770600005751476,
+                "iqr": 5.6850249904982775e-05,
+                "q1": 9.977224999602186e-05,
+                "q3": 0.00015662249990100463,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 9.659599982114742e-05,
+                "hd15iqr": 0.00023920799981169694,
+                "ops": 7210.481158782277,
+                "total": 0.0006934349996754463,
+                "data": [
+                    0.00023920799981169694,
+                    0.00012909399993077386,
+                    0.00012770600005751476,
+                    0.00010083100005431334,
+                    9.659599982114742e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_hudson_fst_result[pilot_panel_variants_512_samples_48-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_hudson_fst_result[pilot_panel_variants_512_samples_48-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "ferromic"
+            },
+            "param": "pilot_panel_variants_512_samples_48-ferromic",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "implementation": "ferromic",
+                "fst": 0.008230076904854725,
+                "d_xy": 0.012796184802120558,
+                "relative_to_scikit_pilot_panel_variants_512_samples_48_hudson_fst": 0.04601008084356619
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 7.254999900396797e-06,
+                "max": 2.629400000841997e-05,
+                "mean": 1.1501600010888068e-05,
+                "stddev": 8.301750015426995e-06,
+                "rounds": 5,
+                "median": 7.469999900422408e-06,
+                "iqr": 5.994999924041622e-06,
+                "q1": 7.379500118531723e-06,
+                "q3": 1.3374500042573345e-05,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 7.254999900396797e-06,
+                "hd15iqr": 2.629400000841997e-05,
+                "ops": 86944.42504115455,
+                "total": 5.7508000054440345e-05,
+                "data": [
+                    2.629400000841997e-05,
+                    9.068000053957803e-06,
+                    7.469999900422408e-06,
+                    7.254999900396797e-06,
+                    7.421000191243365e-06
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_hudson_fst_result[pilot_panel_variants_512_samples_48-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_hudson_fst_result[pilot_panel_variants_512_samples_48-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='pilot_panel', variant_count=512, sample_count=48, divergence_scale=0.02, benchmark_rounds=5)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "pilot_panel_variants_512_samples_48-scikit-allel",
+            "extra_info": {
+                "dataset": "pilot_panel_variants_512_samples_48",
+                "implementation": "scikit-allel",
+                "fst": 0.008230076904854744,
+                "d_xy": 0.012796184802120558
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00020852100010415597,
+                "max": 0.0003739989999758109,
+                "mean": 0.00024998000003506604,
+                "stddev": 6.988361851541923e-05,
+                "rounds": 5,
+                "median": 0.00022119499999462278,
+                "iqr": 5.482225009245667e-05,
+                "q1": 0.00021272325000154524,
+                "q3": 0.0002675455000940019,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 0.00020852100010415597,
+                "hd15iqr": 0.0003739989999758109,
+                "ops": 4000.320025040902,
+                "total": 0.0012499000001753302,
+                "data": [
+                    0.0003739989999758109,
+                    0.00023206100013339892,
+                    0.00020852100010415597,
+                    0.00021412399996734166,
+                    0.00022119499999462278
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_segregating_sites[regional_panel_variants_4096_samples_96-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_segregating_sites[regional_panel_variants_4096_samples_96-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "ferromic"
+            },
+            "param": "regional_panel_variants_4096_samples_96-ferromic",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "implementation": "ferromic",
+                "relative_to_scikit_regional_panel_variants_4096_samples_96_segregating_sites": 0.03189221352845594
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 2.942000037364778e-06,
+                "max": 1.2016999789921101e-05,
+                "mean": 4.828800047107506e-06,
+                "stddev": 4.020107964394271e-06,
+                "rounds": 5,
+                "median": 2.989000222441973e-06,
+                "iqr": 2.4772499500613776e-06,
+                "q1": 2.954750073058676e-06,
+                "q3": 5.432000023120054e-06,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 2.942000037364778e-06,
+                "hd15iqr": 1.2016999789921101e-05,
+                "ops": 207090.7865814425,
+                "total": 2.4144000235537533e-05,
+                "data": [
+                    1.2016999789921101e-05,
+                    3.237000100853038e-06,
+                    2.989000222441973e-06,
+                    2.942000037364778e-06,
+                    2.9590000849566422e-06
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_segregating_sites[regional_panel_variants_4096_samples_96-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_segregating_sites[regional_panel_variants_4096_samples_96-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "regional_panel_variants_4096_samples_96-scikit-allel",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 8.373899981961586e-05,
+                "max": 0.000327346999938527,
+                "mean": 0.00015140999989853298,
+                "stddev": 0.00010450026235752146,
+                "rounds": 5,
+                "median": 8.881399980964488e-05,
+                "iqr": 0.00012077899981477458,
+                "q1": 8.742750003420952e-05,
+                "q3": 0.0002082064998489841,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 8.373899981961586e-05,
+                "hd15iqr": 0.000327346999938527,
+                "ops": 6604.583585431262,
+                "total": 0.0007570499994926649,
+                "data": [
+                    0.000327346999938527,
+                    0.00016849299981913646,
+                    8.881399980964488e-05,
+                    8.865700010574074e-05,
+                    8.373899981961586e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_nucleotide_diversity[regional_panel_variants_4096_samples_96-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_nucleotide_diversity[regional_panel_variants_4096_samples_96-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "ferromic"
+            },
+            "param": "regional_panel_variants_4096_samples_96-ferromic",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "implementation": "ferromic",
+                "relative_to_scikit_regional_panel_variants_4096_samples_96_nucleotide_diversity": 0.0481997305093758
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 1.812300001802214e-05,
+                "max": 2.519399981792958e-05,
+                "mean": 1.9625599952632912e-05,
+                "stddev": 3.116614320658357e-06,
+                "rounds": 5,
+                "median": 1.8186000033892924e-05,
+                "iqr": 2.042999938112189e-06,
+                "q1": 1.8127499970432837e-05,
+                "q3": 2.0170499908545025e-05,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 1.812300001802214e-05,
+                "hd15iqr": 2.519399981792958e-05,
+                "ops": 50953.85631081525,
+                "total": 9.812799976316455e-05,
+                "data": [
+                    2.519399981792958e-05,
+                    1.8495999938750174e-05,
+                    1.8186000033892924e-05,
+                    1.812300001802214e-05,
+                    1.8128999954569736e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_nucleotide_diversity[regional_panel_variants_4096_samples_96-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_nucleotide_diversity[regional_panel_variants_4096_samples_96-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "regional_panel_variants_4096_samples_96-scikit-allel",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00029833700000381214,
+                "max": 0.0007463290000941925,
+                "mean": 0.0004071724000368704,
+                "stddev": 0.00019050029689922715,
+                "rounds": 5,
+                "median": 0.00033455700008744316,
+                "iqr": 0.0001375542500454685,
+                "q1": 0.0003080457499891054,
+                "q3": 0.0004456000000345739,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 0.00029833700000381214,
+                "hd15iqr": 0.0007463290000941925,
+                "ops": 2455.962142594753,
+                "total": 0.002035862000184352,
+                "data": [
+                    0.0007463290000941925,
+                    0.00034535700001470104,
+                    0.00029833700000381214,
+                    0.00033455700008744316,
+                    0.00031128199998420314
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[regional_panel_variants_4096_samples_96-ferromic-pop1]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[regional_panel_variants_4096_samples_96-ferromic-pop1]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "ferromic",
+                "population_key": "pop1"
+            },
+            "param": "regional_panel_variants_4096_samples_96-ferromic-pop1",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "population": "population_1",
+                "implementation": "ferromic",
+                "relative_to_scikit_regional_panel_variants_4096_samples_96_population_1_nucleotide_diversity_population": 0.04341998914302607
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 1.5760999986014212e-05,
+                "max": 2.2844000113764196e-05,
+                "mean": 1.725460001580359e-05,
+                "stddev": 3.127853200106151e-06,
+                "rounds": 5,
+                "median": 1.5781999991304474e-05,
+                "iqr": 2.013750020068983e-06,
+                "q1": 1.577599999791346e-05,
+                "q3": 1.7789750017982442e-05,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 1.5760999986014212e-05,
+                "hd15iqr": 2.2844000113764196e-05,
+                "ops": 57955.55962375796,
+                "total": 8.627300007901795e-05,
+                "data": [
+                    2.2844000113764196e-05,
+                    1.610499998605519e-05,
+                    1.5781999991304474e-05,
+                    1.5781000001879875e-05,
+                    1.5760999986014212e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[regional_panel_variants_4096_samples_96-ferromic-pop2]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[regional_panel_variants_4096_samples_96-ferromic-pop2]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "ferromic",
+                "population_key": "pop2"
+            },
+            "param": "regional_panel_variants_4096_samples_96-ferromic-pop2",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "population": "population_2",
+                "implementation": "ferromic",
+                "relative_to_scikit_regional_panel_variants_4096_samples_96_population_2_nucleotide_diversity_population": 0.06315911228056793
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 1.574800012349442e-05,
+                "max": 3.871500007335271e-05,
+                "mean": 2.4793400052658397e-05,
+                "stddev": 9.87846375236409e-06,
+                "rounds": 5,
+                "median": 2.3358000134976464e-05,
+                "iqr": 1.6699250068086258e-05,
+                "q1": 1.576299996486341e-05,
+                "q3": 3.246225003294967e-05,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 1.574800012349442e-05,
+                "hd15iqr": 3.871500007335271e-05,
+                "ops": 40333.31442545646,
+                "total": 0.000123967000263292,
+                "data": [
+                    3.871500007335271e-05,
+                    3.0378000019481988e-05,
+                    2.3358000134976464e-05,
+                    1.574800012349442e-05,
+                    1.5767999911986408e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[regional_panel_variants_4096_samples_96-scikit-allel-pop1]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[regional_panel_variants_4096_samples_96-scikit-allel-pop1]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "scikit-allel",
+                "population_key": "pop1"
+            },
+            "param": "regional_panel_variants_4096_samples_96-scikit-allel-pop1",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "population": "population_1",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0003063190001739713,
+                "max": 0.0005450529999961873,
+                "mean": 0.0003973884000515682,
+                "stddev": 9.027547617535324e-05,
+                "rounds": 5,
+                "median": 0.0003722020001077908,
+                "iqr": 9.897899997213244e-05,
+                "q1": 0.0003431950000276629,
+                "q3": 0.00044217399999979534,
+                "iqr_outliers": 0,
+                "stddev_outliers": 2,
+                "outliers": "2;0",
+                "ld15iqr": 0.0003063190001739713,
+                "hd15iqr": 0.0005450529999961873,
+                "ops": 2516.4297696415706,
+                "total": 0.001986942000257841,
+                "data": [
+                    0.0005450529999961873,
+                    0.0003722020001077908,
+                    0.0003063190001739713,
+                    0.00035548699997889344,
+                    0.00040788100000099803
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[regional_panel_variants_4096_samples_96-scikit-allel-pop2]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[regional_panel_variants_4096_samples_96-scikit-allel-pop2]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "scikit-allel",
+                "population_key": "pop2"
+            },
+            "param": "regional_panel_variants_4096_samples_96-scikit-allel-pop2",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "population": "population_2",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0003318429999126238,
+                "max": 0.00045593699996970827,
+                "mean": 0.00039255459992091344,
+                "stddev": 5.917704149363392e-05,
+                "rounds": 5,
+                "median": 0.00039303999983530957,
+                "iqr": 0.00011520575009171807,
+                "q1": 0.0003341019998970296,
+                "q3": 0.0004493077499887477,
+                "iqr_outliers": 0,
+                "stddev_outliers": 2,
+                "outliers": "2;0",
+                "ld15iqr": 0.0003318429999126238,
+                "hd15iqr": 0.00045593699996970827,
+                "ops": 2547.4163344448552,
+                "total": 0.0019627729996045673,
+                "data": [
+                    0.00045593699996970827,
+                    0.00039303999983530957,
+                    0.00044709799999509414,
+                    0.0003318429999126238,
+                    0.00033485499989183154
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_watterson_theta[regional_panel_variants_4096_samples_96-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_watterson_theta[regional_panel_variants_4096_samples_96-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "ferromic"
+            },
+            "param": "regional_panel_variants_4096_samples_96-ferromic",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "implementation": "ferromic",
+                "relative_to_scikit_regional_panel_variants_4096_samples_96_watterson_theta": 0.01122263471873019
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 6.730001587129664e-07,
+                "max": 1.2491000006775721e-05,
+                "mean": 3.1504000617132988e-06,
+                "stddev": 5.2244282443129785e-06,
+                "rounds": 5,
+                "median": 7.650000952708069e-07,
+                "iqr": 3.2522500532650156e-06,
+                "q1": 7.03000011981203e-07,
+                "q3": 3.955250065246219e-06,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 6.730001587129664e-07,
+                "hd15iqr": 1.2491000006775721e-05,
+                "ops": 317420.00393948844,
+                "total": 1.5752000308566494e-05,
+                "data": [
+                    1.2491000006775721e-05,
+                    1.1100000847363845e-06,
+                    7.650000952708069e-07,
+                    6.730001587129664e-07,
+                    7.129999630706152e-07
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_watterson_theta[regional_panel_variants_4096_samples_96-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_watterson_theta[regional_panel_variants_4096_samples_96-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "regional_panel_variants_4096_samples_96-scikit-allel",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0002273210000112158,
+                "max": 0.0004600639999807754,
+                "mean": 0.0002807183999721019,
+                "stddev": 0.00010105908152248726,
+                "rounds": 5,
+                "median": 0.0002309809999587742,
+                "iqr": 8.087925010613617e-05,
+                "q1": 0.00022744324991208487,
+                "q3": 0.00030832250001822104,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 0.0002273210000112158,
+                "hd15iqr": 0.0004600639999807754,
+                "ops": 3562.288756630777,
+                "total": 0.0014035919998605095,
+                "data": [
+                    0.0004600639999807754,
+                    0.0002577420000307029,
+                    0.0002309809999587742,
+                    0.0002273210000112158,
+                    0.00022748399987904122
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_hudson_fst_result[regional_panel_variants_4096_samples_96-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_hudson_fst_result[regional_panel_variants_4096_samples_96-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "ferromic"
+            },
+            "param": "regional_panel_variants_4096_samples_96-ferromic",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "implementation": "ferromic",
+                "fst": 0.028746943727020604,
+                "d_xy": 0.012981536777004749,
+                "relative_to_scikit_regional_panel_variants_4096_samples_96_hudson_fst": 0.07764232125739963
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 4.912699978376622e-05,
+                "max": 8.459200012111978e-05,
+                "mean": 5.6431199982398536e-05,
+                "stddev": 1.5745780664029022e-05,
+                "rounds": 5,
+                "median": 4.925099983665859e-05,
+                "iqr": 9.406250171650754e-06,
+                "q1": 4.920649996620341e-05,
+                "q3": 5.8612750137854164e-05,
+                "iqr_outliers": 1,
+                "stddev_outliers": 1,
+                "outliers": "1;1",
+                "ld15iqr": 4.912699978376622e-05,
+                "hd15iqr": 8.459200012111978e-05,
+                "ops": 17720.693522588746,
+                "total": 0.0002821559999119927,
+                "data": [
+                    8.459200012111978e-05,
+                    4.995300014343229e-05,
+                    4.925099983665859e-05,
+                    4.912699978376622e-05,
+                    4.9233000027015805e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_hudson_fst_result[regional_panel_variants_4096_samples_96-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_hudson_fst_result[regional_panel_variants_4096_samples_96-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='regional_panel', variant_count=4096, sample_count=96, divergence_scale=0.05, benchmark_rounds=5)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "regional_panel_variants_4096_samples_96-scikit-allel",
+            "extra_info": {
+                "dataset": "regional_panel_variants_4096_samples_96",
+                "implementation": "scikit-allel",
+                "fst": 0.028746943727020562,
+                "d_xy": 0.012981536777004777
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0006493779999345861,
+                "max": 0.0008208640001612366,
+                "mean": 0.0007268097999713063,
+                "stddev": 7.370725485562107e-05,
+                "rounds": 5,
+                "median": 0.0007035179999093089,
+                "iqr": 0.00012722175006274483,
+                "q1": 0.0006677777499248805,
+                "q3": 0.0007949994999876253,
+                "iqr_outliers": 0,
+                "stddev_outliers": 2,
+                "outliers": "2;0",
+                "ld15iqr": 0.0006493779999345861,
+                "hd15iqr": 0.0008208640001612366,
+                "ops": 1375.8757793847565,
+                "total": 0.0036340489998565317,
+                "data": [
+                    0.0008208640001612366,
+                    0.0007863779999297549,
+                    0.0006739109999216453,
+                    0.0006493779999345861,
+                    0.0007035179999093089
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_segregating_sites[chromosome_arm_variants_16384_samples_128-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_segregating_sites[chromosome_arm_variants_16384_samples_128-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "ferromic"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-ferromic",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "implementation": "ferromic",
+                "relative_to_scikit_chromosome_arm_variants_16384_samples_128_segregating_sites": 0.0498490098080556
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 1.0195999948336976e-05,
+                "max": 3.680700001496007e-05,
+                "mean": 1.899174992558983e-05,
+                "stddev": 1.2130273742032843e-05,
+                "rounds": 4,
+                "median": 1.4481999869531137e-05,
+                "iqr": 1.5038500123409904e-05,
+                "q1": 1.1472499863884877e-05,
+                "q3": 2.651099998729478e-05,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 1.0195999948336976e-05,
+                "hd15iqr": 3.680700001496007e-05,
+                "ops": 52654.442266669794,
+                "total": 7.596699970235932e-05,
+                "data": [
+                    3.680700001496007e-05,
+                    1.6214999959629495e-05,
+                    1.274899977943278e-05,
+                    1.0195999948336976e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_segregating_sites[chromosome_arm_variants_16384_samples_128-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_segregating_sites[chromosome_arm_variants_16384_samples_128-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-scikit-allel",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00029623099999298574,
+                "max": 0.0005865890000222862,
+                "mean": 0.00038098549998721865,
+                "stddev": 0.00013864558034487926,
+                "rounds": 4,
+                "median": 0.0003205609999668013,
+                "iqr": 0.00016650299994580564,
+                "q1": 0.0002977340000143158,
+                "q3": 0.00046423699996012147,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00029623099999298574,
+                "hd15iqr": 0.0005865890000222862,
+                "ops": 2624.77180898892,
+                "total": 0.0015239419999488746,
+                "data": [
+                    0.0005865890000222862,
+                    0.00034188499989795673,
+                    0.0002992370000356459,
+                    0.00029623099999298574
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "ferromic"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-ferromic",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "implementation": "ferromic",
+                "relative_to_scikit_chromosome_arm_variants_16384_samples_128_nucleotide_diversity": 0.06437860801716944
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 7.065999989208649e-05,
+                "max": 0.00010833300007107027,
+                "mean": 8.224100002962587e-05,
+                "stddev": 1.7802000850750717e-05,
+                "rounds": 4,
+                "median": 7.498550007767335e-05,
+                "iqr": 2.2744000148122723e-05,
+                "q1": 7.08689999555645e-05,
+                "q3": 9.361300010368723e-05,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 7.065999989208649e-05,
+                "hd15iqr": 0.00010833300007107027,
+                "ops": 12159.385217102998,
+                "total": 0.00032896400011850346,
+                "data": [
+                    7.889300013630418e-05,
+                    0.00010833300007107027,
+                    7.107800001904252e-05,
+                    7.065999989208649e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-scikit-allel",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.001069225000037477,
+                "max": 0.0015135779999582155,
+                "mean": 0.0012774584999988292,
+                "stddev": 0.00018321558743306503,
+                "rounds": 4,
+                "median": 0.0012635154999998122,
+                "iqr": 0.0002466859998548898,
+                "q1": 0.0011541155000713843,
+                "q3": 0.0014008014999262741,
+                "iqr_outliers": 0,
+                "stddev_outliers": 2,
+                "outliers": "2;0",
+                "ld15iqr": 0.001069225000037477,
+                "hd15iqr": 0.0015135779999582155,
+                "ops": 782.8042946216386,
+                "total": 0.005109833999995317,
+                "data": [
+                    0.0015135779999582155,
+                    0.0012390060001052916,
+                    0.001069225000037477,
+                    0.0012880249998943327
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-ferromic-pop1]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-ferromic-pop1]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "ferromic",
+                "population_key": "pop1"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-ferromic-pop1",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "population": "population_1",
+                "implementation": "ferromic",
+                "relative_to_scikit_chromosome_arm_variants_16384_samples_128_population_1_nucleotide_diversity_population": 0.0860372022493396
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 7.209499995042279e-05,
+                "max": 0.00011411500008762232,
+                "mean": 0.00010069450001992664,
+                "stddev": 1.9624163552965944e-05,
+                "rounds": 4,
+                "median": 0.00010828400002083072,
+                "iqr": 2.559700010351662e-05,
+                "q1": 8.789599996816833e-05,
+                "q3": 0.00011349300007168495,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 7.209499995042279e-05,
+                "hd15iqr": 0.00011411500008762232,
+                "ops": 9931.029001604933,
+                "total": 0.00040277800007970654,
+                "data": [
+                    0.00010369699998591386,
+                    7.209499995042279e-05,
+                    0.00011287100005574757,
+                    0.00011411500008762232
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-ferromic-pop2]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-ferromic-pop2]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "ferromic",
+                "population_key": "pop2"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-ferromic-pop2",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "population": "population_2",
+                "implementation": "ferromic",
+                "relative_to_scikit_chromosome_arm_variants_16384_samples_128_population_2_nucleotide_diversity_population": 0.09044305509696172
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 6.189700002323661e-05,
+                "max": 0.00015547800012427615,
+                "mean": 9.546425002326941e-05,
+                "stddev": 4.115652077679519e-05,
+                "rounds": 4,
+                "median": 8.224099997278245e-05,
+                "iqr": 4.8105500013662095e-05,
+                "q1": 7.141150001643837e-05,
+                "q3": 0.00011951700003010046,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 6.189700002323661e-05,
+                "hd15iqr": 0.00015547800012427615,
+                "ops": 10475.125502544146,
+                "total": 0.00038185700009307766,
+                "data": [
+                    0.00015547800012427615,
+                    8.355599993592477e-05,
+                    8.092600000964012e-05,
+                    6.189700002323661e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-scikit-allel-pop1]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-scikit-allel-pop1]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "scikit-allel",
+                "population_key": "pop1"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-scikit-allel-pop1",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "population": "population_1",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0009898379998958262,
+                "max": 0.001293632999932015,
+                "mean": 0.0011703599999464132,
+                "stddev": 0.00014830503146259045,
+                "rounds": 4,
+                "median": 0.0011989844999789057,
+                "iqr": 0.00024289199996019306,
+                "q1": 0.0010489139999663166,
+                "q3": 0.0012918059999265097,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0009898379998958262,
+                "hd15iqr": 0.001293632999932015,
+                "ops": 854.4379507551408,
+                "total": 0.004681439999785653,
+                "data": [
+                    0.001293632999932015,
+                    0.0012899789999210043,
+                    0.001107990000036807,
+                    0.0009898379998958262
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-scikit-allel-pop2]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[chromosome_arm_variants_16384_samples_128-scikit-allel-pop2]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "scikit-allel",
+                "population_key": "pop2"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-scikit-allel-pop2",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "population": "population_2",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0009938040000179171,
+                "max": 0.0011119330001747585,
+                "mean": 0.0010555177500464197,
+                "stddev": 6.401282654762243e-05,
+                "rounds": 4,
+                "median": 0.0010581669999965015,
+                "iqr": 0.00011048250007661409,
+                "q1": 0.0010002765000081126,
+                "q3": 0.0011107590000847267,
+                "iqr_outliers": 0,
+                "stddev_outliers": 0,
+                "outliers": "0;0",
+                "ld15iqr": 0.0009938040000179171,
+                "hd15iqr": 0.0011119330001747585,
+                "ops": 947.4023529741891,
+                "total": 0.004222071000185679,
+                "data": [
+                    0.0011119330001747585,
+                    0.0010067489999983081,
+                    0.0009938040000179171,
+                    0.001109584999994695
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_watterson_theta[chromosome_arm_variants_16384_samples_128-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_watterson_theta[chromosome_arm_variants_16384_samples_128-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "ferromic"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-ferromic",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "implementation": "ferromic",
+                "relative_to_scikit_chromosome_arm_variants_16384_samples_128_watterson_theta": 0.004909817851502413
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 6.709999524900923e-07,
+                "max": 1.3081999895803165e-05,
+                "mean": 3.9169999013211054e-06,
+                "stddev": 6.113191359764338e-06,
+                "rounds": 4,
+                "median": 9.574998784955824e-07,
+                "iqr": 6.381999924087722e-06,
+                "q1": 7.259999392772443e-07,
+                "q3": 7.107999863364967e-06,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 6.709999524900923e-07,
+                "hd15iqr": 1.3081999895803165e-05,
+                "ops": 255297.427927615,
+                "total": 1.5667999605284422e-05,
+                "data": [
+                    1.3081999895803165e-05,
+                    1.1339998309267685e-06,
+                    7.809999260643963e-07,
+                    6.709999524900923e-07
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_watterson_theta[chromosome_arm_variants_16384_samples_128-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_watterson_theta[chromosome_arm_variants_16384_samples_128-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-scikit-allel",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0006742640000538813,
+                "max": 0.0009149019999767916,
+                "mean": 0.0007977892499866357,
+                "stddev": 0.00011560336042551418,
+                "rounds": 4,
+                "median": 0.000800995499957935,
+                "iqr": 0.00019481050003378186,
+                "q1": 0.0007003839999697448,
+                "q3": 0.0008951945000035266,
+                "iqr_outliers": 0,
+                "stddev_outliers": 2,
+                "outliers": "2;0",
+                "ld15iqr": 0.0006742640000538813,
+                "hd15iqr": 0.0009149019999767916,
+                "ops": 1253.4638690816548,
+                "total": 0.0031911569999465428,
+                "data": [
+                    0.0009149019999767916,
+                    0.0008754870000302617,
+                    0.0007265039998856082,
+                    0.0006742640000538813
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_hudson_fst_result[chromosome_arm_variants_16384_samples_128-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_hudson_fst_result[chromosome_arm_variants_16384_samples_128-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "ferromic"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-ferromic",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "implementation": "ferromic",
+                "fst": 0.06676412120482449,
+                "d_xy": 0.013018435627179586,
+                "relative_to_scikit_chromosome_arm_variants_16384_samples_128_hudson_fst": 0.12513951286972777
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00022775299999011622,
+                "max": 0.0003490320000310021,
+                "mean": 0.00029930925001053765,
+                "stddev": 5.1673330727247134e-05,
+                "rounds": 4,
+                "median": 0.00031022600001051615,
+                "iqr": 7.011049990524043e-05,
+                "q1": 0.00026425400005791744,
+                "q3": 0.00033436449996315787,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00022775299999011622,
+                "hd15iqr": 0.0003490320000310021,
+                "ops": 3341.0260456861706,
+                "total": 0.0011972370000421506,
+                "data": [
+                    0.00030075500012571865,
+                    0.00022775299999011622,
+                    0.0003490320000310021,
+                    0.00031969699989531364
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_hudson_fst_result[chromosome_arm_variants_16384_samples_128-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_hudson_fst_result[chromosome_arm_variants_16384_samples_128-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='chromosome_arm', variant_count=16384, sample_count=128, divergence_scale=0.08, benchmark_rounds=4)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "chromosome_arm_variants_16384_samples_128-scikit-allel",
+            "extra_info": {
+                "dataset": "chromosome_arm_variants_16384_samples_128",
+                "implementation": "scikit-allel",
+                "fst": 0.06676412120482433,
+                "d_xy": 0.013018435627179586
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.002286206000007951,
+                "max": 0.0026104030000624334,
+                "mean": 0.0023918045000073107,
+                "stddev": 0.00015030724204732678,
+                "rounds": 4,
+                "median": 0.0023353044999794292,
+                "iqr": 0.00019714099994416756,
+                "q1": 0.002293234000035227,
+                "q3": 0.0024903749999793945,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.002286206000007951,
+                "hd15iqr": 0.0026104030000624334,
+                "ops": 418.0943718422402,
+                "total": 0.009567218000029243,
+                "data": [
+                    0.0026104030000624334,
+                    0.0023703469998963556,
+                    0.002286206000007951,
+                    0.002300262000062503
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_segregating_sites[deep_cohort_variants_65536_samples_256-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_segregating_sites[deep_cohort_variants_65536_samples_256-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "ferromic"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-ferromic",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "implementation": "ferromic",
+                "relative_to_scikit_deep_cohort_variants_65536_samples_256_segregating_sites": 0.057128052239142114
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 3.942500006814953e-05,
+                "max": 0.00016869599994606688,
+                "mean": 8.566366667158339e-05,
+                "stddev": 7.206301605320414e-05,
+                "rounds": 3,
+                "median": 4.8870000000533764e-05,
+                "iqr": 9.695324990843801e-05,
+                "q1": 4.178625005124559e-05,
+                "q3": 0.0001387394999596836,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 3.942500006814953e-05,
+                "hd15iqr": 0.00016869599994606688,
+                "ops": 11673.560552034169,
+                "total": 0.00025699100001475017,
+                "data": [
+                    0.00016869599994606688,
+                    4.8870000000533764e-05,
+                    3.942500006814953e-05
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_segregating_sites[deep_cohort_variants_65536_samples_256-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_segregating_sites[deep_cohort_variants_65536_samples_256-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-scikit-allel",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.001339652000069691,
+                "max": 0.0017587479999292555,
+                "mean": 0.0014995026666232054,
+                "stddev": 0.00022653882472703813,
+                "rounds": 3,
+                "median": 0.00140010799987067,
+                "iqr": 0.00031432199989467335,
+                "q1": 0.0013547660000199357,
+                "q3": 0.001669087999914609,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.001339652000069691,
+                "hd15iqr": 0.0017587479999292555,
+                "ops": 666.8877770333967,
+                "total": 0.0044985079998696165,
+                "data": [
+                    0.0017587479999292555,
+                    0.001339652000069691,
+                    0.00140010799987067
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_nucleotide_diversity[deep_cohort_variants_65536_samples_256-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_nucleotide_diversity[deep_cohort_variants_65536_samples_256-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "ferromic"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-ferromic",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "implementation": "ferromic",
+                "relative_to_scikit_deep_cohort_variants_65536_samples_256_nucleotide_diversity": 0.07104466248651871
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0002563180000834109,
+                "max": 0.00033291999989160104,
+                "mean": 0.0002846866666459391,
+                "stddev": 4.198714482407077e-05,
+                "rounds": 3,
+                "median": 0.0002648219999628054,
+                "iqr": 5.745149985614262e-05,
+                "q1": 0.0002584440000532595,
+                "q3": 0.00031589549990940213,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0002563180000834109,
+                "hd15iqr": 0.00033291999989160104,
+                "ops": 3512.6337730585965,
+                "total": 0.0008540599999378173,
+                "data": [
+                    0.0002648219999628054,
+                    0.00033291999989160104,
+                    0.0002563180000834109
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_nucleotide_diversity[deep_cohort_variants_65536_samples_256-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_nucleotide_diversity[deep_cohort_variants_65536_samples_256-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-scikit-allel",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.003561801999921954,
+                "max": 0.004761191999932635,
+                "mean": 0.004007150666666348,
+                "stddev": 0.0006565839358411858,
+                "rounds": 3,
+                "median": 0.0036984580001444556,
+                "iqr": 0.0008995425000080104,
+                "q1": 0.0035959659999775795,
+                "q3": 0.00449550849998559,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.003561801999921954,
+                "hd15iqr": 0.004761191999932635,
+                "ops": 249.55388084569472,
+                "total": 0.012021451999999044,
+                "data": [
+                    0.004761191999932635,
+                    0.0036984580001444556,
+                    0.003561801999921954
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[deep_cohort_variants_65536_samples_256-ferromic-pop1]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[deep_cohort_variants_65536_samples_256-ferromic-pop1]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "ferromic",
+                "population_key": "pop1"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-ferromic-pop1",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "population": "population_1",
+                "implementation": "ferromic",
+                "relative_to_scikit_deep_cohort_variants_65536_samples_256_population_1_nucleotide_diversity_population": 0.07174399863827896
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0002458430001297529,
+                "max": 0.00030730599996786623,
+                "mean": 0.00027316233331475814,
+                "stddev": 3.129462785747549e-05,
+                "rounds": 3,
+                "median": 0.0002663379998466553,
+                "iqr": 4.609724987858499e-05,
+                "q1": 0.0002509667500589785,
+                "q3": 0.0002970639999375635,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0002458430001297529,
+                "hd15iqr": 0.00030730599996786623,
+                "ops": 3660.8268345977444,
+                "total": 0.0008194869999442744,
+                "data": [
+                    0.00030730599996786623,
+                    0.0002663379998466553,
+                    0.0002458430001297529
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[deep_cohort_variants_65536_samples_256-ferromic-pop2]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[deep_cohort_variants_65536_samples_256-ferromic-pop2]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "ferromic",
+                "population_key": "pop2"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-ferromic-pop2",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "population": "population_2",
+                "implementation": "ferromic",
+                "relative_to_scikit_deep_cohort_variants_65536_samples_256_population_2_nucleotide_diversity_population": 0.0712675743138323
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0002444750000449858,
+                "max": 0.0002818010000282811,
+                "mean": 0.0002641753333894788,
+                "stddev": 1.8749286656910895e-05,
+                "rounds": 3,
+                "median": 0.0002662500000951695,
+                "iqr": 2.79944999874715e-05,
+                "q1": 0.0002499187500575317,
+                "q3": 0.0002779132500450032,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0002444750000449858,
+                "hd15iqr": 0.0002818010000282811,
+                "ops": 3785.3647695626473,
+                "total": 0.0007925260001684364,
+                "data": [
+                    0.0002818010000282811,
+                    0.0002662500000951695,
+                    0.0002444750000449858
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[deep_cohort_variants_65536_samples_256-scikit-allel-pop1]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[deep_cohort_variants_65536_samples_256-scikit-allel-pop1]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "scikit-allel",
+                "population_key": "pop1"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-scikit-allel-pop1",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "population": "population_1",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.003605305000064618,
+                "max": 0.004176840000127413,
+                "mean": 0.00380745900004816,
+                "stddev": 0.00032036965562448817,
+                "rounds": 3,
+                "median": 0.003640231999952448,
+                "iqr": 0.00042865125004709626,
+                "q1": 0.0036140367500365755,
+                "q3": 0.004042688000083672,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.003605305000064618,
+                "hd15iqr": 0.004176840000127413,
+                "ops": 262.6423554363557,
+                "total": 0.011422377000144479,
+                "data": [
+                    0.004176840000127413,
+                    0.003605305000064618,
+                    0.003640231999952448
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_population_nucleotide_diversity[deep_cohort_variants_65536_samples_256-scikit-allel-pop2]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_population_nucleotide_diversity[deep_cohort_variants_65536_samples_256-scikit-allel-pop2]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "scikit-allel",
+                "population_key": "pop2"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-scikit-allel-pop2",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "population": "population_2",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.003612027000144735,
+                "max": 0.0038296440000067378,
+                "mean": 0.003706809666709887,
+                "stddev": 0.00011148749554122394,
+                "rounds": 3,
+                "median": 0.0036787579999781883,
+                "iqr": 0.00016321274989650192,
+                "q1": 0.0036287097501030985,
+                "q3": 0.0037919224999996004,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.003612027000144735,
+                "hd15iqr": 0.0038296440000067378,
+                "ops": 269.77376501976863,
+                "total": 0.011120429000129661,
+                "data": [
+                    0.0038296440000067378,
+                    0.0036787579999781883,
+                    0.003612027000144735
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_watterson_theta[deep_cohort_variants_65536_samples_256-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_watterson_theta[deep_cohort_variants_65536_samples_256-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "ferromic"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-ferromic",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "implementation": "ferromic",
+                "relative_to_scikit_deep_cohort_variants_65536_samples_256_watterson_theta": 0.00215547986114886
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 7.400001322821481e-07,
+                "max": 1.6999000081341364e-05,
+                "mean": 6.306333413400959e-06,
+                "stddev": 9.262733955507316e-06,
+                "rounds": 3,
+                "median": 1.1800000265793642e-06,
+                "iqr": 1.2194249961794412e-05,
+                "q1": 8.500001058564521e-07,
+                "q3": 1.3044250067650864e-05,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 7.400001322821481e-07,
+                "hd15iqr": 1.6999000081341364e-05,
+                "ops": 158570.74696922937,
+                "total": 1.8919000240202877e-05,
+                "data": [
+                    1.6999000081341364e-05,
+                    1.1800000265793642e-06,
+                    7.400001322821481e-07
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_watterson_theta[deep_cohort_variants_65536_samples_256-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_watterson_theta[deep_cohort_variants_65536_samples_256-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-scikit-allel",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "implementation": "scikit-allel"
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.002640347000124166,
+                "max": 0.0032943339999746968,
+                "mean": 0.0029257213333645873,
+                "stddev": 0.00033484505984111076,
+                "rounds": 3,
+                "median": 0.0028424829999948997,
+                "iqr": 0.0004904902498878982,
+                "q1": 0.0026908810000918493,
+                "q3": 0.0031813712499797475,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.002640347000124166,
+                "hd15iqr": 0.0032943339999746968,
+                "ops": 341.79605165950557,
+                "total": 0.008777164000093762,
+                "data": [
+                    0.0032943339999746968,
+                    0.0028424829999948997,
+                    0.002640347000124166
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_hudson_fst_result[deep_cohort_variants_65536_samples_256-ferromic]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_hudson_fst_result[deep_cohort_variants_65536_samples_256-ferromic]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "ferromic"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-ferromic",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "implementation": "ferromic",
+                "fst": 0.09871859560569146,
+                "d_xy": 0.01341475163945433,
+                "relative_to_scikit_deep_cohort_variants_65536_samples_256_hudson_fst": 0.10511827368757713
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0009352930001114146,
+                "max": 0.001140578999866193,
+                "mean": 0.0010452766666730895,
+                "stddev": 0.00010342747017083552,
+                "rounds": 3,
+                "median": 0.0010599580000416609,
+                "iqr": 0.00015396449981608384,
+                "q1": 0.0009664592500939762,
+                "q3": 0.00112042374991006,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0009352930001114146,
+                "hd15iqr": 0.001140578999866193,
+                "ops": 956.684514141891,
+                "total": 0.0031358300000192685,
+                "data": [
+                    0.001140578999866193,
+                    0.0010599580000416609,
+                    0.0009352930001114146
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_benchmark_hudson_fst_result[deep_cohort_variants_65536_samples_256-scikit-allel]",
+            "fullname": "src/pybenches/test_population_statistics_benchmarks.py::test_benchmark_hudson_fst_result[deep_cohort_variants_65536_samples_256-scikit-allel]",
+            "params": {
+                "genotype_dataset": "UNSERIALIZABLE[DatasetConfig(label='deep_cohort', variant_count=65536, sample_count=256, divergence_scale=0.1, benchmark_rounds=3)]",
+                "implementation": "scikit-allel"
+            },
+            "param": "deep_cohort_variants_65536_samples_256-scikit-allel",
+            "extra_info": {
+                "dataset": "deep_cohort_variants_65536_samples_256",
+                "implementation": "scikit-allel",
+                "fst": 0.0987185956056903,
+                "d_xy": 0.01341475163945433
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00914657599992097,
+                "max": 0.011136577000115722,
+                "mean": 0.009943815000042378,
+                "stddev": 0.0010523092833441426,
+                "rounds": 3,
+                "median": 0.009548292000090441,
+                "iqr": 0.001492500750146064,
+                "q1": 0.009247004999963337,
+                "q3": 0.010739505750109402,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00914657599992097,
+                "hd15iqr": 0.011136577000115722,
+                "ops": 100.56502459023406,
+                "total": 0.029831445000127133,
+                "data": [
+                    0.011136577000115722,
+                    0.009548292000090441,
+                    0.00914657599992097
+                ],
+                "iterations": 1
+            }
+        }
+    ],
+    "datetime": "2025-09-20T02:27:39.008616+00:00",
+    "version": "5.1.0"
+}
