@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Sequence, Tuple
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Sequence, Tuple, Union
 
 import numpy as np
 import pytest
@@ -18,8 +19,11 @@ from pytest_benchmark.fixture import BenchmarkFixture
 from pytest_benchmark.stats import Metadata
 
 
+ABSOLUTE_TOLERANCE = 1e-12
+
+
 @dataclass(frozen=True)
-class DatasetConfig:
+class SyntheticDatasetConfig:
     """Parameters controlling the synthetic cohorts used in benchmarks."""
 
     label: str
@@ -32,12 +36,33 @@ class DatasetConfig:
     def identifier(self) -> str:
         return f"{self.label}_variants_{self.variant_count}_samples_{self.sample_count}"
 
+    def build(self) -> "BenchmarkDataset":
+        return _build_synthetic_dataset(self)
 
-DATASET_CONFIGS: Sequence[DatasetConfig] = (
-    DatasetConfig("pilot_panel", 512, 48, 0.02),
-    DatasetConfig("regional_panel", 4096, 96, 0.05),
-    DatasetConfig("chromosome_arm", 16384, 128, 0.08, benchmark_rounds=4),
-    DatasetConfig("deep_cohort", 65536, 256, 0.1, benchmark_rounds=3),
+
+@dataclass(frozen=True)
+class RealDatasetConfig:
+    """Configuration describing a VCF-backed benchmark cohort."""
+
+    label: str
+    vcf_filename: str
+    benchmark_rounds: int = 3
+    pop1_size: int | None = None
+
+    @property
+    def identifier(self) -> str:
+        return f"{self.label}_vcf"
+
+    def build(self) -> "BenchmarkDataset":
+        return _build_real_dataset(self)
+
+
+DATASET_CONFIGS: Sequence[Union[SyntheticDatasetConfig, RealDatasetConfig]] = (
+    SyntheticDatasetConfig("pilot_panel", 512, 48, 0.02),
+    SyntheticDatasetConfig("regional_panel", 4096, 96, 0.05),
+    SyntheticDatasetConfig("chromosome_arm", 16384, 128, 0.08, benchmark_rounds=4),
+    SyntheticDatasetConfig("deep_cohort", 65536, 256, 0.1, benchmark_rounds=3),
+    RealDatasetConfig("ag1000g_excerpt", "sample.vcf.gz", benchmark_rounds=2),
 )
 
 
@@ -49,6 +74,8 @@ class BenchmarkDataset:
     variants: List[Dict[str, object]]
     haplotypes: List[Tuple[int, int]]
     sample_names: List[str]
+    sequence_start: int
+    sequence_stop_inclusive: int
     sequence_length: int
     positions: np.ndarray
     genotype_array: "allel.GenotypeArray"
@@ -71,7 +98,12 @@ class BenchmarkDataset:
 
 @pytest.fixture(scope="module", params=DATASET_CONFIGS, ids=lambda config: config.identifier)
 def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
-    config: DatasetConfig = request.param
+    config = request.param
+    dataset: BenchmarkDataset = config.build()
+    return dataset
+
+
+def _build_synthetic_dataset(config: SyntheticDatasetConfig) -> BenchmarkDataset:
     sample_count = config.sample_count
     if sample_count % 2:
         raise ValueError("sample count must be even so we can split populations evenly")
@@ -119,8 +151,11 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
         positions = np.array([], dtype=np.int64)
 
     sequence_start = int(positions[0]) if config.variant_count else 0
-    sequence_stop = int(positions[-1]) + 1 if config.variant_count else 0
-    sequence_length = sequence_stop - sequence_start
+    sequence_stop_exclusive = int(positions[-1]) + 1 if config.variant_count else sequence_start
+    sequence_length = sequence_stop_exclusive - sequence_start
+    sequence_stop_inclusive = (
+        sequence_stop_exclusive - 1 if sequence_length > 0 else sequence_start
+    )
 
     variants = [
         {"position": int(position), "genotypes": genotypes[idx].tolist()}
@@ -160,7 +195,7 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
             positions,
             allele_counts_total,
             start=sequence_start,
-            stop=sequence_stop,
+            stop=sequence_stop_inclusive,
         )
     )
     expected_pi_pop1 = float(
@@ -168,7 +203,7 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
             positions,
             allele_counts_pop1,
             start=sequence_start,
-            stop=sequence_stop,
+            stop=sequence_stop_inclusive,
         )
     )
     expected_pi_pop2 = float(
@@ -176,7 +211,7 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
             positions,
             allele_counts_pop2,
             start=sequence_start,
-            stop=sequence_stop,
+            stop=sequence_stop_inclusive,
         )
     )
     expected_theta = float(
@@ -184,7 +219,7 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
             positions,
             allele_counts_total,
             start=sequence_start,
-            stop=sequence_stop,
+            stop=sequence_stop_inclusive,
         )
     )
 
@@ -196,6 +231,131 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
         variants=variants,
         haplotypes=haplotypes,
         sample_names=sample_names,
+        sequence_start=sequence_start,
+        sequence_stop_inclusive=sequence_stop_inclusive,
+        sequence_length=sequence_length,
+        positions=positions,
+        genotype_array=genotype_array,
+        allele_counts_total=allele_counts_total,
+        allele_counts_pop1=allele_counts_pop1,
+        allele_counts_pop2=allele_counts_pop2,
+        population=population,
+        pop1=pop1,
+        pop2=pop2,
+        expected_segregating_sites=int(allele_counts_total.is_segregating().sum()),
+        expected_nucleotide_diversity=expected_pi_total,
+        expected_nucleotide_diversity_pop1=expected_pi_pop1,
+        expected_nucleotide_diversity_pop2=expected_pi_pop2,
+        expected_watterson_theta=expected_theta,
+        expected_hudson_fst=fst,
+        expected_hudson_dxy=d_xy,
+        haplotype_count=sample_count * 2,
+        benchmark_rounds=config.benchmark_rounds,
+    )
+
+
+def _build_real_dataset(config: RealDatasetConfig) -> BenchmarkDataset:
+    data_path = Path(allel.__file__).resolve().parent / "test" / "data" / config.vcf_filename
+    callset = allel.read_vcf(str(data_path), alt_number=1)
+
+    genotype_array = allel.GenotypeArray(callset["calldata/GT"])
+    positions = np.asarray(callset["variants/POS"], dtype=np.int64)
+    if genotype_array.size == 0 or positions.size == 0:
+        raise ValueError(f"VCF file {data_path} does not contain genotype information")
+
+    completeness_mask = ~genotype_array.is_missing().any(axis=1)
+    genotype_array = genotype_array.compress(completeness_mask, axis=0)
+    positions = positions[completeness_mask]
+    if genotype_array.shape[0] == 0:
+        raise ValueError(f"VCF file {data_path} does not contain fully called variants")
+
+    sequence_start = int(positions[0])
+    sequence_stop_exclusive = int(positions[-1]) + 1
+    sequence_length = sequence_stop_exclusive - sequence_start
+    sequence_stop_inclusive = sequence_stop_exclusive - 1 if sequence_length > 0 else sequence_start
+
+    sample_names = list(map(str, callset["samples"]))
+    sample_count = len(sample_names)
+    if sample_count < 2:
+        raise ValueError("at least two samples are required to define populations")
+
+    pop1_size = config.pop1_size if config.pop1_size is not None else sample_count // 2
+    pop1_size = max(1, min(pop1_size, sample_count - 1))
+    pop1_indices = list(range(pop1_size))
+    pop2_indices = list(range(pop1_size, sample_count))
+
+    haplotypes = [
+        (sample_index, haplotype_side)
+        for sample_index in range(sample_count)
+        for haplotype_side in (0, 1)
+    ]
+
+    variants = [
+        {"position": int(position), "genotypes": genotype_array[idx].tolist()}
+        for idx, position in enumerate(positions)
+    ]
+
+    genotypes_numpy = genotype_array.astype(np.int8)
+    population = fm.Population.from_numpy(
+        config.label,
+        genotypes_numpy,
+        positions,
+        haplotypes,
+        sequence_length,
+        sample_names=sample_names,
+    )
+
+    allele_counts_total = genotype_array.count_alleles(max_allele=2)
+    allele_counts_pop1 = genotype_array.count_alleles(subpop=pop1_indices, max_allele=2)
+    allele_counts_pop2 = genotype_array.count_alleles(subpop=pop2_indices, max_allele=2)
+
+    numerator, denominator = allel.hudson_fst(allele_counts_pop1, allele_counts_pop2)
+    fst = float(numerator.sum() / denominator.sum()) if float(denominator.sum()) else math.nan
+    d_xy = float(denominator.sum() / sequence_length) if sequence_length else math.nan
+
+    expected_pi_total = float(
+        allel.sequence_diversity(
+            positions,
+            allele_counts_total,
+            start=sequence_start,
+            stop=sequence_stop_inclusive,
+        )
+    )
+    expected_pi_pop1 = float(
+        allel.sequence_diversity(
+            positions,
+            allele_counts_pop1,
+            start=sequence_start,
+            stop=sequence_stop_inclusive,
+        )
+    )
+    expected_pi_pop2 = float(
+        allel.sequence_diversity(
+            positions,
+            allele_counts_pop2,
+            start=sequence_start,
+            stop=sequence_stop_inclusive,
+        )
+    )
+    expected_theta = float(
+        allel.watterson_theta(
+            positions,
+            allele_counts_total,
+            start=sequence_start,
+            stop=sequence_stop_inclusive,
+        )
+    )
+
+    pop1 = _build_population(population, "population_1", pop1_indices, haplotypes)
+    pop2 = _build_population(population, "population_2", pop2_indices, haplotypes)
+
+    return BenchmarkDataset(
+        identifier=config.identifier,
+        variants=variants,
+        haplotypes=haplotypes,
+        sample_names=sample_names,
+        sequence_start=sequence_start,
+        sequence_stop_inclusive=sequence_stop_inclusive,
         sequence_length=sequence_length,
         positions=positions,
         genotype_array=genotype_array,
@@ -232,21 +392,106 @@ def _build_population(
     return base_population.with_haplotypes(population_id, filtered_haplotypes)
 
 
+def _assert_float_close(actual: float, expected: float, metric: str, dataset_id: str) -> None:
+    if math.isnan(expected):
+        assert math.isnan(actual), f"{metric} expected NaN for {dataset_id}"
+        return
+    assert math.isclose(
+        actual,
+        expected,
+        rel_tol=0.0,
+        abs_tol=ABSOLUTE_TOLERANCE,
+    ), f"{metric} mismatch for {dataset_id}: {actual} != {expected}"
+
+
+def _assert_results_equal(
+    ferromic_result: Any,
+    scikit_result: Any,
+    metric: str,
+    dataset_id: str,
+) -> None:
+    if isinstance(ferromic_result, tuple) and isinstance(scikit_result, tuple):
+        assert len(ferromic_result) == len(
+            scikit_result
+        ), f"Tuple length mismatch for {metric} on {dataset_id}"
+        for index, (ferro_value, scikit_value) in enumerate(
+            zip(ferromic_result, scikit_result)
+        ):
+            _assert_results_equal(
+                ferro_value,
+                scikit_value,
+                f"{metric}[{index}]",
+                dataset_id,
+            )
+        return
+
+    if isinstance(scikit_result, (int, np.integer)):
+        assert ferromic_result == scikit_result, (
+            f"{metric} mismatch for {dataset_id}: {ferromic_result} != {scikit_result}"
+        )
+        return
+
+    if isinstance(scikit_result, str):
+        assert ferromic_result == scikit_result, (
+            f"{metric} mismatch for {dataset_id}: {ferromic_result!r} != {scikit_result!r}"
+        )
+        return
+
+    ferromic_value = float(ferromic_result)
+    scikit_value = float(scikit_result)
+    _assert_float_close(ferromic_value, scikit_value, metric, dataset_id)
+
+
+@dataclass
+class BenchmarkRecord:
+    """Benchmark statistics paired with the exact computed result."""
+
+    stats: "Metadata"
+    result: Any
+
+
+@dataclass
+class PerformanceRecorder:
+    timings: Dict[str, Dict[str, Dict[str, BenchmarkRecord]]]
+
+    def record(
+        self,
+        metric: str,
+        dataset_id: str,
+        implementation: str,
+        stats: "Metadata",
+        result: Any,
+    ) -> None:
+        self.timings[metric][dataset_id][implementation] = BenchmarkRecord(stats=stats, result=result)
+
+
 @pytest.fixture(scope="module")
 def performance_recorder():
-    store: Dict[str, Dict[str, Dict[str, "Metadata"]]] = defaultdict(lambda: defaultdict(dict))
-    yield store
-    for metric, dataset_map in store.items():
+    recorder = PerformanceRecorder(
+        timings=defaultdict(lambda: defaultdict(dict)),
+    )
+    yield recorder
+    for metric, dataset_map in recorder.timings.items():
         for dataset_id, stats_by_library in dataset_map.items():
             missing = {"ferromic", "scikit-allel"} - set(stats_by_library)
             assert not missing, f"Missing benchmarks for {metric} on {dataset_id}: {sorted(missing)}"
-            ferromic_stats = stats_by_library["ferromic"].stats
-            competitor_stats = stats_by_library["scikit-allel"].stats
+
+            ferromic_record = stats_by_library["ferromic"]
+            competitor_record = stats_by_library["scikit-allel"]
+            _assert_results_equal(
+                ferromic_record.result,
+                competitor_record.result,
+                metric,
+                dataset_id,
+            )
+
+            ferromic_stats = ferromic_record.stats.stats
+            competitor_stats = competitor_record.stats.stats
             if competitor_stats.mean == 0:
                 continue
             ratio = ferromic_stats.mean / competitor_stats.mean
             assert math.isfinite(ratio), "Performance ratio must be finite"
-            stats_by_library["ferromic"].extra_info[f"relative_to_scikit_{dataset_id}_{metric}"] = ratio
+            ferromic_record.stats.extra_info[f"relative_to_scikit_{dataset_id}_{metric}"] = ratio
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +505,7 @@ def test_segregating_sites_matches_scikit_allel(genotype_dataset: BenchmarkDatas
 
     assert ferromic_value == genotype_dataset.expected_segregating_sites
     assert ferromic_value == scikit_value
-    assert genotype_dataset.population.segregating_sites() == ferromic_value
+    assert genotype_dataset.population.segregating_sites() == scikit_value
 
 
 def test_nucleotide_diversity_matches_scikit_allel(genotype_dataset: BenchmarkDataset):
@@ -270,14 +515,25 @@ def test_nucleotide_diversity_matches_scikit_allel(genotype_dataset: BenchmarkDa
         genotype_dataset.sequence_length,
     )
     population_value = genotype_dataset.population.nucleotide_diversity()
-
-    assert ferromic_value == pytest.approx(
-        genotype_dataset.expected_nucleotide_diversity,
-        rel=5e-4,
+    start = genotype_dataset.sequence_start
+    stop = genotype_dataset.sequence_stop_inclusive
+    scikit_value = float(
+        allel.sequence_diversity(
+            genotype_dataset.positions,
+            genotype_dataset.allele_counts_total,
+            start=start,
+            stop=stop,
+        )
     )
-    assert population_value == pytest.approx(
+
+    dataset_id = genotype_dataset.identifier
+    _assert_float_close(ferromic_value, scikit_value, "nucleotide_diversity", dataset_id)
+    _assert_float_close(population_value, scikit_value, "nucleotide_diversity", dataset_id)
+    _assert_float_close(
+        scikit_value,
         genotype_dataset.expected_nucleotide_diversity,
-        rel=5e-4,
+        "nucleotide_diversity",
+        dataset_id,
     )
 
 
@@ -287,18 +543,60 @@ def test_watterson_theta_matches_scikit_allel(genotype_dataset: BenchmarkDataset
         genotype_dataset.haplotype_count,
         genotype_dataset.sequence_length,
     )
+    start = genotype_dataset.sequence_start
+    stop = genotype_dataset.sequence_stop_inclusive
+    scikit_value = float(
+        allel.watterson_theta(
+            genotype_dataset.positions,
+            genotype_dataset.allele_counts_total,
+            start=start,
+            stop=stop,
+        )
+    )
 
-    assert ferromic_value == pytest.approx(
+    dataset_id = genotype_dataset.identifier
+    _assert_float_close(ferromic_value, scikit_value, "watterson_theta", dataset_id)
+    _assert_float_close(
+        scikit_value,
         genotype_dataset.expected_watterson_theta,
-        rel=5e-4,
+        "watterson_theta",
+        dataset_id,
     )
 
 
 def test_hudson_fst_matches_scikit_allel(genotype_dataset: BenchmarkDataset):
     result = fm.hudson_fst(genotype_dataset.pop1, genotype_dataset.pop2)
+    numerator, denominator = allel.hudson_fst(
+        genotype_dataset.allele_counts_pop1,
+        genotype_dataset.allele_counts_pop2,
+    )
+    denominator_sum = float(denominator.sum())
+    fst_expected = (
+        float(numerator.sum() / denominator_sum)
+        if denominator_sum
+        else math.nan
+    )
+    d_xy_expected = (
+        float(denominator_sum / genotype_dataset.sequence_length)
+        if denominator_sum and genotype_dataset.sequence_length
+        else math.nan
+    )
 
-    assert result.fst == pytest.approx(genotype_dataset.expected_hudson_fst, rel=1e-9, abs=1e-12)
-    assert result.d_xy == pytest.approx(genotype_dataset.expected_hudson_dxy, rel=1e-9, abs=1e-12)
+    dataset_id = genotype_dataset.identifier
+    _assert_float_close(result.fst, fst_expected, "hudson_fst", dataset_id)
+    _assert_float_close(result.d_xy, d_xy_expected, "hudson_dxy", dataset_id)
+    _assert_float_close(
+        fst_expected,
+        genotype_dataset.expected_hudson_fst,
+        "hudson_fst",
+        dataset_id,
+    )
+    _assert_float_close(
+        d_xy_expected,
+        genotype_dataset.expected_hudson_dxy,
+        "hudson_dxy",
+        dataset_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -327,10 +625,18 @@ def test_benchmark_segregating_sites(
         iterations=1,
         rounds=genotype_dataset.benchmark_rounds,
     )
-    benchmark.extra_info["dataset"] = genotype_dataset.identifier
+    dataset_id = genotype_dataset.identifier
+    benchmark.extra_info["dataset"] = dataset_id
     benchmark.extra_info["implementation"] = implementation
-    assert result == genotype_dataset.expected_segregating_sites
-    performance_recorder["segregating_sites"][genotype_dataset.identifier][implementation] = benchmark.stats
+    expected_value = genotype_dataset.expected_segregating_sites
+    assert result == expected_value
+    performance_recorder.record(
+        "segregating_sites",
+        dataset_id,
+        implementation,
+        benchmark.stats,
+        int(result),
+    )
 
 
 @pytest.mark.parametrize("implementation", ["ferromic", "scikit-allel"])
@@ -345,14 +651,13 @@ def test_benchmark_nucleotide_diversity(
             return genotype_dataset.population.nucleotide_diversity()
     else:
         allele_counts = genotype_dataset.allele_counts_total
-        positions = genotype_dataset.positions
-        start = int(positions[0]) if len(positions) else 0
-        stop = start + genotype_dataset.sequence_length
+        start = genotype_dataset.sequence_start
+        stop = genotype_dataset.sequence_stop_inclusive
 
         def run() -> float:
             return float(
                 allel.sequence_diversity(
-                    positions,
+                    genotype_dataset.positions,
                     allele_counts,
                     start=start,
                     stop=stop,
@@ -364,13 +669,22 @@ def test_benchmark_nucleotide_diversity(
         iterations=1,
         rounds=genotype_dataset.benchmark_rounds,
     )
-    benchmark.extra_info["dataset"] = genotype_dataset.identifier
+    dataset_id = genotype_dataset.identifier
+    benchmark.extra_info["dataset"] = dataset_id
     benchmark.extra_info["implementation"] = implementation
-    assert result == pytest.approx(
+    _assert_float_close(
+        float(result),
         genotype_dataset.expected_nucleotide_diversity,
-        rel=5e-4,
+        "nucleotide_diversity",
+        dataset_id,
     )
-    performance_recorder["nucleotide_diversity"][genotype_dataset.identifier][implementation] = benchmark.stats
+    performance_recorder.record(
+        "nucleotide_diversity",
+        dataset_id,
+        implementation,
+        benchmark.stats,
+        float(result),
+    )
 
 
 @pytest.mark.parametrize("population_key", ["pop1", "pop2"])
@@ -402,14 +716,13 @@ def test_benchmark_population_nucleotide_diversity(
         def run() -> float:
             return population_obj.nucleotide_diversity()
     else:
-        positions = genotype_dataset.positions
-        start = int(positions[0]) if len(positions) else 0
-        stop = start + genotype_dataset.sequence_length
+        start = genotype_dataset.sequence_start
+        stop = genotype_dataset.sequence_stop_inclusive
 
         def run() -> float:
             return float(
                 allel.sequence_diversity(
-                    positions,
+                    genotype_dataset.positions,
                     allele_counts,
                     start=start,
                     stop=stop,
@@ -425,8 +738,14 @@ def test_benchmark_population_nucleotide_diversity(
     benchmark.extra_info["dataset"] = genotype_dataset.identifier
     benchmark.extra_info["population"] = population_id
     benchmark.extra_info["implementation"] = implementation
-    assert result == pytest.approx(expected_value, rel=5e-4)
-    performance_recorder["nucleotide_diversity_population"][dataset_key][implementation] = benchmark.stats
+    _assert_float_close(float(result), expected_value, "nucleotide_diversity", dataset_key)
+    performance_recorder.record(
+        "nucleotide_diversity_population",
+        dataset_key,
+        implementation,
+        benchmark.stats,
+        float(result),
+    )
 
 
 @pytest.mark.parametrize("implementation", ["ferromic", "scikit-allel"])
@@ -445,14 +764,13 @@ def test_benchmark_watterson_theta(
             )
     else:
         allele_counts = genotype_dataset.allele_counts_total
-        positions = genotype_dataset.positions
-        start = int(positions[0]) if len(positions) else 0
-        stop = start + genotype_dataset.sequence_length
+        start = genotype_dataset.sequence_start
+        stop = genotype_dataset.sequence_stop_inclusive
 
         def run() -> float:
             return float(
                 allel.watterson_theta(
-                    positions,
+                    genotype_dataset.positions,
                     allele_counts,
                     start=start,
                     stop=stop,
@@ -464,13 +782,22 @@ def test_benchmark_watterson_theta(
         iterations=1,
         rounds=genotype_dataset.benchmark_rounds,
     )
-    benchmark.extra_info["dataset"] = genotype_dataset.identifier
+    dataset_id = genotype_dataset.identifier
+    benchmark.extra_info["dataset"] = dataset_id
     benchmark.extra_info["implementation"] = implementation
-    assert result == pytest.approx(
+    _assert_float_close(
+        float(result),
         genotype_dataset.expected_watterson_theta,
-        rel=5e-4,
+        "watterson_theta",
+        dataset_id,
     )
-    performance_recorder["watterson_theta"][genotype_dataset.identifier][implementation] = benchmark.stats
+    performance_recorder.record(
+        "watterson_theta",
+        dataset_id,
+        implementation,
+        benchmark.stats,
+        float(result),
+    )
 
 
 @pytest.mark.parametrize("implementation", ["ferromic", "scikit-allel"])
@@ -500,18 +827,17 @@ def test_benchmark_hudson_fst_result(
         iterations=1,
         rounds=genotype_dataset.benchmark_rounds,
     )
-    benchmark.extra_info["dataset"] = genotype_dataset.identifier
+    dataset_id = genotype_dataset.identifier
+    benchmark.extra_info["dataset"] = dataset_id
     benchmark.extra_info["implementation"] = implementation
     benchmark.extra_info["fst"] = fst_value
     benchmark.extra_info["d_xy"] = d_xy_value
-    assert fst_value == pytest.approx(
-        genotype_dataset.expected_hudson_fst,
-        rel=1e-9,
-        abs=1e-12,
+    _assert_float_close(float(fst_value), genotype_dataset.expected_hudson_fst, "hudson_fst", dataset_id)
+    _assert_float_close(float(d_xy_value), genotype_dataset.expected_hudson_dxy, "hudson_dxy", dataset_id)
+    performance_recorder.record(
+        "hudson_fst",
+        dataset_id,
+        implementation,
+        benchmark.stats,
+        (float(fst_value), float(d_xy_value)),
     )
-    assert d_xy_value == pytest.approx(
-        genotype_dataset.expected_hudson_dxy,
-        rel=1e-9,
-        abs=1e-12,
-    )
-    performance_recorder["hudson_fst"][genotype_dataset.identifier][implementation] = benchmark.stats
