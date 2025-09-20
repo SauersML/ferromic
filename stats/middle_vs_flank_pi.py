@@ -553,6 +553,18 @@ def format_plain_no_e(x: float, max_decimals: int = 8) -> str:
     s = s.rstrip("0").rstrip(".")
     return s if s else "0"
 
+def _format_p_value_for_annotation(p: float) -> str:
+    """
+    Format a p-value for compact axis annotation.
+    Returns 'NA' if not finite, '<1e-6' for very small values, otherwise a plain decimal.
+    """
+    if not np.isfinite(p):
+        return "NA"
+    if p < 1e-6:
+        return "<1e-6"
+    return format_plain_no_e(p, max_decimals=8)
+
+
 # ------------------------------------------------------------------------------
 # Tiny raised exponent drawer (no TeX), reused for annotations if needed
 # ------------------------------------------------------------------------------
@@ -684,8 +696,8 @@ def _draw_right_key(rax):
     X0 = 0.10
     YS = [0.65, 0.30]
     entries = [
-        ("Flanking (mean of ends)", FLANKING_COLOR),
-        ("Middle (centered 50 kb)", MIDDLE_COLOR),
+        ("Internal flanks (mean of both ends)", FLANKING_COLOR),
+        ("Middle region (centered 50 kb)", MIDDLE_COLOR),
     ]
     for (label, face), y in zip(entries, YS):
         sq = Rectangle((X0, y), S, S, transform=rax.transAxes,
@@ -695,12 +707,13 @@ def _draw_right_key(rax):
         rax.text(X0 + S + 0.08, y + S/2, label, transform=rax.transAxes,
                  ha="left", va="center", fontsize=12, color=AX_TEXT)
 
-def create_mf_quadrant_violins(categories: dict) -> Optional[plt.Figure]:
+def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional[plt.Figure]:
     """
     Build a 2x2 grid of subplots:
       [Single-event Inverted]  [Single-event Direct]
       [Recurrent Inverted]     [Recurrent Direct]
-    Each subplot: two violins (Flank, Middle), slim boxplots, paired lines/points.
+    Each subplot: two violins (Flank, Middle), slim boxplots, paired lines/points, and
+    an annotation box with n, permutation p-value, and Shapiro–Wilk p-value.
     Right column: legend (top) + thin horizontal colorbar (bottom).
     """
     logger.info("Creating Middle vs Flank quadrant violins...")
@@ -787,6 +800,26 @@ def create_mf_quadrant_violins(categories: dict) -> Optional[plt.Figure]:
         for spine in ["top", "right"]:
             ax.spines[spine].set_visible(False)
 
+        # Statistical annotation in the upper-left of each panel
+        disp_name = title_map[key]
+        tr = test_results.get(disp_name, {})
+        n_pairs = tr.get("n_valid_pairs", 0)
+        perm_p = _format_p_value_for_annotation(tr.get("mean_p", np.nan))
+        shap_p = _format_p_value_for_annotation(tr.get("mean_normality_p", np.nan))
+        anno = f"n={int(n_pairs)}  perm p={perm_p}  normality p={shap_p}"
+        ax.text(
+            0.02,
+            0.98,
+            anno,
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=11,
+            color=AX_TEXT,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#f7f7f7", edgecolor="#bbbbbb", linewidth=0.8),
+            zorder=10,
+        )
+
     # Shared Y label
     ax_map["single_event_inverted"].set_ylabel("Mean Nucleotide Diversity (π)", fontsize=16, color=AX_TEXT)
     ax_map["recurrent_inverted"].set_ylabel("Mean Nucleotide Diversity (π)", fontsize=16, color=AX_TEXT)
@@ -827,6 +860,7 @@ def create_mf_quadrant_violins(categories: dict) -> Optional[plt.Figure]:
 
     logger.info(f"MF quadrant plot built in {time.time() - start_time:.2f}s.")
     return fig
+
 
 # ------------------------------------------------------------------------------
 # Main
@@ -873,10 +907,22 @@ def main():
 
     # Categorize & tests
     categories = categorize_sequences(flanking_stats, recurrent_regions, single_event_regions)
-    _ = perform_statistical_tests(categories, flanking_stats)  # keep if you want to log/use p-values elsewhere
+    tests = perform_statistical_tests(categories, flanking_stats)
+    for name in ["Single-event Inverted", "Single-event Direct", "Recurrent Inverted", "Recurrent Direct", "Overall"]:
+        tr = tests.get(name, {})
+        logger.info(
+            f"[{name}] n={tr.get('n_valid_pairs', 0)}  "
+            f"perm_p={_format_p_value_for_annotation(tr.get('mean_p', np.nan))}  "
+            f"shapiro_p={_format_p_value_for_annotation(tr.get('mean_normality_p', np.nan))}"
+        )
+    try:
+        pd.DataFrame.from_dict(tests, orient="index").to_csv(OUTPUT_DIR / "mf_permtest_results.csv", index_label="group")
+        logger.info(f"Saved test results to {OUTPUT_DIR / 'mf_permtest_results.csv'}")
+    except Exception as e:
+        logger.error(f"Failed to save test results: {e}")
 
     # Plot: FOUR SUBPLOTS (each with two violins) + right legend + thin horizontal colorbar
-    fig = create_mf_quadrant_violins(categories)
+    fig = create_mf_quadrant_violins(categories, tests)
 
     # Summary log (plain decimals)
     logger.info("\n--- Analysis Summary ---")
