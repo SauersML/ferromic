@@ -1,0 +1,153 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  python-benchmarks:
+    name: Python benchmarks
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "maturin[patchelf]" pytest pytest-benchmark numpy scikit-allel scipy
+
+      - name: Build ferromic extension module
+        run: maturin develop --release
+
+      - name: Run pytest benchmarks
+        id: run_benchmarks
+        continue-on-error: true
+        run: |
+          pytest src/pybenches --benchmark-only --benchmark-json bench-results.json
+
+      - name: Print benchmark summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          def format_seconds(value: float | None) -> str:
+              if value is None:
+                  return ""
+              if value >= 1:
+                  return f"{value:,.3f}s"
+              value_ms = value * 1_000
+              if value_ms >= 1:
+                  return f"{value_ms:,.3f}ms"
+              value_us = value_ms * 1_000
+              if value_us >= 1:
+                  return f"{value_us:,.3f}µs"
+              value_ns = value_us * 1_000
+              return f"{value_ns:,.3f}ns"
+
+          def format_ops(value: float | None) -> str:
+              if value is None:
+                  return ""
+              if value >= 1:
+                  return f"{value:,.1f}/s"
+              return f"{value:,.3f}/s"
+
+          path = Path("bench-results.json")
+          if not path.exists():
+              print("No benchmark results found.")
+              raise SystemExit(0)
+
+          with path.open() as fp:
+              data = json.load(fp)
+
+          benches = data.get("benchmarks", [])
+          if not benches:
+              print("No benchmark results recorded.")
+              raise SystemExit(0)
+
+          rows: list[dict[str, str]] = []
+          for bench in benches:
+              stats = bench.get("stats", {})
+              extra = bench.get("extra_info", {})
+              dataset = extra.get("dataset", "")
+              implementation = extra.get("implementation", "")
+              population = extra.get("population", "")
+              name = bench.get("name", "").split("[", 1)[0]
+              mean = stats.get("mean")
+              stddev = stats.get("stddev")
+              rounds = stats.get("rounds")
+              ops = stats.get("ops")
+              rows.append({
+                  "Dataset": dataset,
+                  "Implementation": implementation,
+                  "Population": population,
+                  "Benchmark": name,
+                  "Mean": format_seconds(mean) if mean is not None else "",
+                  "StdDev": format_seconds(stddev) if stddev is not None else "",
+                  "Rounds": str(rounds) if rounds is not None else "",
+                  "Ops": format_ops(ops) if ops is not None else "",
+              })
+
+          rows.sort(key=lambda r: (r["Dataset"], r["Benchmark"], r["Implementation"], r["Population"]))
+
+          headers = [
+              "Dataset",
+              "Implementation",
+              "Population",
+              "Benchmark",
+              "Mean",
+              "StdDev",
+              "Rounds",
+              "Ops",
+          ]
+
+          col_widths: dict[str, int] = {
+              header: max(len(header), *(len(row[header]) for row in rows))
+              for header in headers
+          }
+
+          separator = " | "
+          header_line = separator.join(header.ljust(col_widths[header]) for header in headers)
+          rule = "-+-".join("-" * col_widths[header] for header in headers)
+          print(header_line)
+          print(rule)
+          for row in rows:
+              print(separator.join(row[header].ljust(col_widths[header]) for header in headers))
+          PY
+
+      - name: Upload benchmark JSON
+        if: always() && hashFiles('bench-results.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-benchmarks
+          path: bench-results.json
+
+      - name: Fail if benchmarks failed
+        if: steps.run_benchmarks.outcome == 'failure'
+        run: exit 1
