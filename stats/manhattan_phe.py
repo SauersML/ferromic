@@ -3,10 +3,12 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import FancyArrowPatch
 from adjustText import adjust_text as ADJUST_TEXT  # required
+matplotlib.use('Agg')
 
 from _inv_common import map_inversion_series
 
@@ -38,11 +40,11 @@ POINT_ALPHA     = 0.98
 CIRCLE_EDGE_LW  = 1.3
 
 # Label/legend
-LABEL_FONTSZ    = 9.2
+LABEL_FONTSZ    = 14.2
 AX_LABEL_FONTSZ = 12
 TICK_FONTSZ     = 10.5
 TITLE_FONTSZ    = 15
-ANNOTATE_Q_THRESH = 0.1
+ANNOTATE_Q_THRESH = 0.05
 
 # Single linebreak rule
 MIN_WORDS_BREAK = 6
@@ -296,7 +298,12 @@ def draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2):
         ))
 
 # ---------- Plot per inversion ----------
-def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | None:
+def plot_one_inversion(
+    df_group: pd.DataFrame,
+    inversion_label: str,
+    global_ymin: float | None = None,
+    global_ymax: float | None = None,
+) -> str | None:
     g = df_group.copy()
     g[P_Q_COL] = pd.to_numeric(g[P_Q_COL], errors="coerce")
     g[BETA_COL] = pd.to_numeric(g[BETA_COL], errors="coerce")
@@ -430,7 +437,7 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
             x0, r["y"], balanced_linebreak(r["Phen_wrapped"]),
             fontsize=LABEL_FONTSZ, ha=ha, va="bottom", zorder=3.6,
             bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
-                      edgecolor="#333333", linewidth=0.35, alpha=0.98)
+                      edgecolor="#333333", linewidth=0.35, alpha=0.4)
         )
         t._rowid = idx  # persistent binding for connectors
         texts.append(t)
@@ -468,8 +475,22 @@ def plot_one_inversion(df_group: pd.DataFrame, inversion_label: str) -> str | No
     xmin, xmax = g["x"].min(), g["x"].max()
     ax.set_xlim(xmin - xpad_data, xmax + xpad_data)
 
-    ymin, ymax = g["y"].min(), g["y"].max()
-    ax.set_ylim(ymin, ymax + max(0.25, (ymax - ymin) * Y_TOP_PAD_FRAC))
+    if global_ymax is not None and np.isfinite(global_ymax):
+        base_min = float(global_ymin) if (global_ymin is not None and np.isfinite(global_ymin)) else 0.0
+        y_bottom = min(0.0, base_min)
+        margin = abs(float(global_ymax)) * 0.05
+        y_top = float(global_ymax) + margin
+        if not np.isfinite(y_top):
+            y_top = float(global_ymax)
+        if y_top <= y_bottom:
+            fallback = abs(y_bottom) * 0.05
+            if fallback <= 0:
+                fallback = 0.05
+            y_top = y_bottom + fallback
+        ax.set_ylim(y_bottom, y_top)
+    else:
+        ymin, ymax = g["y"].min(), g["y"].max()
+        ax.set_ylim(ymin, ymax + max(0.25, (ymax - ymin) * Y_TOP_PAD_FRAC))
 
     # q = 0.05 reference line
     q05_y = -math.log10(0.05)
@@ -528,9 +549,27 @@ def main():
 
     df[INV_COL] = map_inversion_series(df[INV_COL])
 
+    q_numeric_all = pd.to_numeric(df[P_Q_COL], errors="coerce")
+    valid_mask = df[PHENO_COL].notna() & q_numeric_all.notna()
+    if valid_mask.any():
+        tiny = np.nextafter(0, 1)
+        q_valid = q_numeric_all.loc[valid_mask].astype(float).copy()
+        q_valid[q_valid <= 0] = tiny
+        y_vals = -np.log10(q_valid)
+        global_ymin = float(y_vals.min()) if not y_vals.empty else None
+        global_ymax = float(y_vals.max()) if not y_vals.empty else None
+    else:
+        global_ymin = None
+        global_ymax = None
+
     made, to_open = [], []
     for inv, grp in df.groupby(INV_COL, dropna=False):
-        out = plot_one_inversion(grp, inversion_label=inv)
+        out = plot_one_inversion(
+            grp,
+            inversion_label=inv,
+            global_ymin=global_ymin,
+            global_ymax=global_ymax,
+        )
         if out:
             made.append(out)
             if (SIG_COL in grp.columns) and truthy_series(grp[SIG_COL]).any():

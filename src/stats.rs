@@ -1252,6 +1252,7 @@ fn calculate_pi_from_summary_with_precomputed(
         sum
     };
 
+
     sum_pi / seq_length as f64
 }
 
@@ -1268,6 +1269,7 @@ fn aggregate_hudson_components_from_summaries(
     pop1: &DensePopulationSummary,
     pop2: &DensePopulationSummary,
 ) -> HudsonSummaryTotals {
+
     let len = pop1.alt_counts().len().min(pop2.alt_counts().len());
     let alt1 = pop1.alt_counts();
     let alt2 = pop2.alt_counts();
@@ -1332,6 +1334,7 @@ fn aggregate_hudson_components_from_summaries(
     }
 
     totals
+
 }
 
 fn hudson_component_sums(sites: &[SiteFstHudson]) -> (f64, f64) {
@@ -3125,6 +3128,7 @@ fn calculate_hudson_fst_for_pair_core<'a>(
         summary_totals = Some(totals);
         summary_refs = Some((summary1, summary2));
         (totals.numerator_sum, totals.denominator_sum)
+
     } else if let Some(matrix) = dense_shared {
         if pop1_context.variants.is_empty() {
             (0.0, 0.0)
@@ -3196,6 +3200,7 @@ fn calculate_hudson_fst_for_pair_core<'a>(
         let dxy_result = calculate_d_xy_hudson(pop1_context, pop2_context)?;
         (pi1_raw, pi2_raw, dxy_result)
     };
+
 
     let pi1_opt = if pi1_raw.is_finite() {
         Some(pi1_raw)

@@ -16,20 +16,25 @@ OUT_PDF          = "phewas_forest.pdf"
 OUT_PNG          = "phewas_forest.png"
 
 # Layout: explicit box model (data-units on the y-axis)
-HEADER_BOX_H     = 1.80   # height of the header box per inversion
-ROW_BOX_H        = 1.70   # height of each phenotype row box
-BLOCK_GAP_H      = 0.50   # vertical gap after a section (breathing room)
+HEADER_BOX_H     = 3.80   # height of the header box per inversion
+ROW_BOX_H        = 2.60   # height of each phenotype row box
+BLOCK_GAP_H      = 0.80   # vertical gap after a section (breathing room)
 
 # Panel widths: [label panel, main plot panel]
 LEFT_RIGHT       = (0.4, 0.6)
 
 # Text & styling
 WRAP_WIDTH       = 42      # phenotype label wrapping width (characters)
-POINT_SIZE_PT2   = 14.0    # tiny, uniform point size (pt^2)
-POINT_EDGE_LW    = 0.55
 GRID_ALPHA       = 0.28
 BAND_ALPHA       = 0.06
 HEADER_UL_ALPHA  = 0.16
+
+# --- Point and CI Sizing ---
+POINT_SIZE_PT2   = 80.0    # Size of the OR point estimate. Increased from 14.0.
+POINT_EDGE_LW    = 1.0     # Linewidth of the point's black border. Increased from 0.55.
+CI_LINE_LW       = 3.5     # Linewidth of the horizontal CI bar.
+CI_CAP_LW        = 3.0     # THICKNESS of the vertical CI end-caps.
+CI_CAP_H         = 0.30    # HEIGHT of the CI end-caps.
 
 # Header label placement (initial seed) and movement limits
 HEADER_X_SHIFT        = 0.08      # x-position (axes-fraction on left panel) for header text
@@ -145,7 +150,8 @@ def load_and_prepare(path: str) -> pd.DataFrame:
 
     df = pd.read_csv(path, sep="\t", dtype=str)
 
-    required = ["Phenotype", "Inversion", "OR", "Q_GLOBAL", "OR_CI95"]
+    # Only the core columns are strictly required. CI will be resolved from multiple sources.
+    required = ["Phenotype", "Inversion", "OR", "Q_GLOBAL"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise SystemExit(f"ERROR: missing required column(s): {', '.join(missing)}")
@@ -157,12 +163,73 @@ def load_and_prepare(path: str) -> pd.DataFrame:
     df["OR"]        = pd.to_numeric(df["OR"], errors="coerce")
     df["Q_GLOBAL"]  = pd.to_numeric(df["Q_GLOBAL"], errors="coerce")
 
-    # Parse CI from OR_CI95
-    lo, hi = parse_or_ci95(df["OR_CI95"])
-    df["OR_lo"] = lo
-    df["OR_hi"] = hi
+    # Resolve CI with strict priority per row:
+    #   1) OR_Lower/OR_Upper numeric columns if present
+    #   2) OR_CI95 string "lo,hi" (ignore any CI_Valid flags)
+    #   3) Wald_OR_CI95 string "lo,hi"
+    n = len(df)
+    # 1) Numeric lower/upper
+    if ("OR_Lower" in df.columns) and ("OR_Upper" in df.columns):
+        lo1 = pd.to_numeric(df["OR_Lower"], errors="coerce").to_numpy()
+        hi1 = pd.to_numeric(df["OR_Upper"], errors="coerce").to_numpy()
+    else:
+        lo1 = np.full(n, np.nan, dtype=float)
+        hi1 = np.full(n, np.nan, dtype=float)
+    m1 = np.isfinite(lo1) & np.isfinite(hi1) & (lo1 > 0) & (hi1 > 0) & (lo1 < hi1)
 
-    # Keep only valid & significant rows
+    # 2) OR_CI95
+    if "OR_CI95" in df.columns:
+        lo2, hi2 = parse_or_ci95(df["OR_CI95"])
+    else:
+        lo2 = np.full(n, np.nan, dtype=float)
+        hi2 = np.full(n, np.nan, dtype=float)
+    m2 = np.isfinite(lo2) & np.isfinite(hi2) & (lo2 > 0) & (hi2 > 0) & (lo2 < hi2)
+
+    # 3) Wald_OR_CI95
+    if "Wald_OR_CI95" in df.columns:
+        lo3, hi3 = parse_or_ci95(df["Wald_OR_CI95"])
+    else:
+        lo3 = np.full(n, np.nan, dtype=float)
+        hi3 = np.full(n, np.nan, dtype=float)
+    m3 = np.isfinite(lo3) & np.isfinite(hi3) & (lo3 > 0) & (hi3 > 0) & (lo3 < hi3)
+
+    # Choose first available source per row
+    chosen_lo = np.full(n, np.nan, dtype=float)
+    chosen_hi = np.full(n, np.nan, dtype=float)
+
+    choose1 = m1
+    chosen_lo[choose1] = lo1[choose1]
+    chosen_hi[choose1] = hi1[choose1]
+
+    not_set = (~np.isfinite(chosen_lo)) | (~np.isfinite(chosen_hi))
+    choose2 = m2 & not_set
+    chosen_lo[choose2] = lo2[choose2]
+    chosen_hi[choose2] = hi2[choose2]
+
+    not_set = (~np.isfinite(chosen_lo)) | (~np.isfinite(chosen_hi))
+    choose3 = m3 & not_set
+    chosen_lo[choose3] = lo3[choose3]
+    chosen_hi[choose3] = hi3[choose3]
+
+    df["OR_lo"] = chosen_lo
+    df["OR_hi"] = chosen_hi
+
+    # Warn if a significant row lacks any CI and will be skipped
+    sig_mask = (
+        df["Phenotype"].str.strip().ne("") &
+        np.isfinite(df["OR"]) & (df["OR"] > 0) &
+        np.isfinite(df["Q_GLOBAL"]) & (df["Q_GLOBAL"] <= 0.05)
+    )
+    missing_ci = sig_mask & ((~np.isfinite(df["OR_lo"])) | (~np.isfinite(df["OR_hi"])))
+    if missing_ci.any():
+        for i in df.index[missing_ci]:
+            phen = str(df.at[i, "Phenotype"])
+            inv  = str(df.at[i, "Inversion"])
+            orv  = df.at[i, "OR"]
+            qv   = df.at[i, "Q_GLOBAL"]
+            print(f"WARNING: significant row without CI and will be skipped: Phenotype='{phen}', Inversion='{inv}', OR={orv}, q={qv}")
+
+    # Keep only valid rows with a usable CI; then restrict to FDR-significant
     good = (
         df["Phenotype"].str.strip().ne("") &
         np.isfinite(df["OR"]) & (df["OR"] > 0) &
@@ -172,7 +239,7 @@ def load_and_prepare(path: str) -> pd.DataFrame:
     )
     df = df[good].copy()
     if df.empty:
-        raise SystemExit("No valid rows after cleaning (check OR, Q_GLOBAL, OR_CI95).")
+        raise SystemExit("No valid rows after cleaning (check OR, Q_GLOBAL, and CI sources).")
 
     df = df[df["Q_GLOBAL"] <= 0.05].copy()
     if df.empty:
@@ -257,11 +324,15 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
 
     # Figure sizing
     n_rows_total = sum(len(sec["rows"]) for sec in sections)
-    fig_h = max(8.0, min(28.0, 2.3 + n_rows_total * 0.24 + len(sections) * 0.70))
-    fig_w = 17.0
+    
+    row_height_inches = (ROW_BOX_H / 1.70) * 0.4
+    
+    fig_h = max(8.0, min(150.0, 2.3 + n_rows_total * row_height_inches + len(sections) * 0.90))
+    fig_w = 20.0
 
     # Panels
     fig = plt.figure(figsize=(fig_w, fig_h))
+
     gs = fig.add_gridspec(nrows=1, ncols=2, width_ratios=LEFT_RIGHT, wspace=0.05)
     axL = fig.add_subplot(gs[0, 0])  # label panel
     axR = fig.add_subplot(gs[0, 1])  # main plot panel
@@ -353,9 +424,14 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
             x_hi  = float(warp_or_to_axis([or_hi])[0])
             x_pt  = float(warp_or_to_axis([or_pt])[0])
 
-            axR.hlines(y=yc, xmin=x_lo, xmax=x_hi, color=c, linewidth=2.0, alpha=0.95, zorder=2.2)
-            axR.plot([x_lo, x_lo], [yc-0.12, yc+0.12], color=c, linewidth=1.6, alpha=0.95, zorder=2.25)
-            axR.plot([x_hi, x_hi], [yc-0.12, yc+0.12], color=c, linewidth=1.6, alpha=0.95, zorder=2.25)
+            # Horizontal CI line
+            axR.hlines(y=yc, xmin=x_lo, xmax=x_hi, color=c, linewidth=CI_LINE_LW, alpha=0.95, zorder=2.2)
+            
+            # Vertical CI end-caps
+            axR.plot([x_lo, x_lo], [yc-CI_CAP_H, yc+CI_CAP_H], color=c, linewidth=CI_CAP_LW, alpha=0.95, zorder=2.25)
+            axR.plot([x_hi, x_hi], [yc-CI_CAP_H, yc+CI_CAP_H], color=c, linewidth=CI_CAP_LW, alpha=0.95, zorder=2.25)
+            
+            # Point estimate dot
             axR.scatter([x_pt], [yc], s=POINT_SIZE_PT2, facecolor=c, edgecolor="black",
                         linewidth=POINT_EDGE_LW, alpha=0.97, zorder=3.0)
 
