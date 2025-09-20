@@ -559,6 +559,23 @@ def perform_statistical_tests(categories: dict, all_sequences_stats: List[dict])
 
     return test_results
 
+
+def print_summary_statistics(sequences: List[dict], group_name: str):
+    """Calculates and prints summary statistics for a given group of sequences."""
+    if not sequences:
+        logger.info(f"\n--- Summary Statistics for {group_name} (n=0) ---")
+        logger.info("  No sequences in this group.")
+        return
+
+    flank_means = [s['flanking_mean'] for s in sequences]
+    middle_means = [s['middle_mean'] for s in sequences]
+
+    n = len(sequences)
+
+    logger.info(f"\n--- Summary Statistics for {group_name} (n={n}) ---")
+    logger.info(f"  Flank Region (π means):  Mean={np.nanmean(flank_means):.8f}, Median={np.nanmedian(flank_means):.8f}")
+    logger.info(f"  Middle Region (π means): Mean={np.nanmean(middle_means):.8f}, Median={np.nanmedian(middle_means):.8f}")
+
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 def format_plain_no_e(x: float, max_decimals: int = 8) -> str:
@@ -988,6 +1005,13 @@ def main():
     # Categorize & tests
     categories = categorize_sequences(flanking_stats, recurrent_regions, single_event_regions)
     tests = perform_statistical_tests(categories, flanking_stats)
+
+    # Print summary statistics for each group
+    print_summary_statistics(flanking_stats, "Overall")
+    for name, key in zip(CATEGORY_ORDER, CATEGORY_KEYS):
+        print_summary_statistics(categories.get(key, []), name)
+
+    logger.info("\n--- Permutation Test Results ---")
     for name in ["Single-event Inverted", "Single-event Direct", "Recurrent Inverted", "Recurrent Direct", "Overall"]:
         tr = tests.get(name, {})
         logger.info(
