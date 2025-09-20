@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Sequence, Tuple
+from typing import Dict, Sequence, Tuple
 
 import numpy as np
 import pytest
@@ -27,6 +27,13 @@ SIGN_EPSILON = 1e-12
 PCA_COMPONENT_REQUEST = 6
 POPULATION_SEPARATION_MINIMUM = 0.5
 PCA_ABSOLUTE_TOLERANCE = ABSOLUTE_TOLERANCE * 128.0
+
+
+def _dense_variant_payload(dataset: BenchmarkDataset) -> Dict[str, np.ndarray]:
+    """Prepare a dense genotype payload for Ferromic's PCA interface."""
+
+    genotypes = np.asarray(dataset.genotype_array, dtype=np.int16, order="C")
+    return {"genotypes": genotypes, "positions": dataset.positions}
 
 
 def _expected_haplotype_labels(sample_names: Sequence[str]) -> Tuple[str, ...]:
@@ -315,7 +322,7 @@ def test_chromosome_pca_matches_scikit_allel(
     component_count = _component_count(haplotype_matrix)
 
     ferromic_result = fm.chromosome_pca(
-        genotype_dataset.variants,
+        _dense_variant_payload(genotype_dataset),
         genotype_dataset.sample_names,
         n_components=component_count,
     )
@@ -360,7 +367,7 @@ def test_chromosome_pca_positions_match_filtered_inputs(
     component_count = _component_count(haplotype_matrix)
 
     ferromic_result = fm.chromosome_pca(
-        genotype_dataset.variants,
+        _dense_variant_payload(genotype_dataset),
         genotype_dataset.sample_names,
         n_components=component_count,
     )
@@ -448,7 +455,7 @@ def test_benchmark_chromosome_pca(
 
     def run_ferromic() -> Tuple[Tuple[str, ...], Tuple[int, ...], Tuple[Tuple[float, ...], ...]]:
         result = fm.chromosome_pca(
-            genotype_dataset.variants,
+            _dense_variant_payload(genotype_dataset),
             genotype_dataset.sample_names,
             n_components=component_count,
         )
@@ -562,7 +569,7 @@ def test_benchmark_population_pca_population_gap(
 
     def run_ferromic() -> Tuple[float, float, float]:
         result = fm.chromosome_pca(
-            genotype_dataset.variants,
+            _dense_variant_payload(genotype_dataset),
             genotype_dataset.sample_names,
             n_components=component_count,
         )
