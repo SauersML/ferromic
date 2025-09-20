@@ -1,22 +1,22 @@
 use crate::process::{
-    ZeroBasedHalfOpen, ZeroBasedPosition, VcfError, Variant, HaplotypeSide, QueryRegion, TEMP_DIR,
-    create_temp_dir, map_sample_names_to_indices, get_haplotype_indices_for_group
+    create_temp_dir, get_haplotype_indices_for_group, map_sample_names_to_indices, HaplotypeSide,
+    QueryRegion, Variant, VcfError, ZeroBasedHalfOpen, ZeroBasedPosition, TEMP_DIR,
 };
 
 use crate::progress::{
-    log, LogLevel, init_step_progress, update_step_progress, 
-    finish_step_progress, create_spinner, display_status_box, StatusBox, set_stage, ProcessingStage
+    create_spinner, display_status_box, finish_step_progress, init_step_progress, log, set_stage,
+    update_step_progress, LogLevel, ProcessingStage, StatusBox,
 };
 
-use parking_lot::Mutex;
+use csv::Writer;
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{self, BufWriter, Write};
 use std::sync::Arc;
 use std::time::SystemTime;
-use csv::Writer;
 
 // A simple struct to hold the data for one row of our TSV file.
 #[derive(Debug, Clone)]
@@ -41,15 +41,23 @@ static METADATA_WRITER: Lazy<Mutex<Writer<BufWriter<File>>>> = Lazy::new(|| {
         .from_writer(BufWriter::new(file));
 
     // Write the header immediately upon creation.
-    writer.write_record(&[
-        "phy_filename", "transcript_id", "gene_name", "chromosome", "haplotype_group",
-        "overall_cds_start_1based", "overall_cds_end_1based", "spliced_cds_length", "cds_segment_coords_1based"
-    ]).expect("Failed to write header to phy_metadata.tsv");
+    writer
+        .write_record(&[
+            "phy_filename",
+            "transcript_id",
+            "gene_name",
+            "chromosome",
+            "haplotype_group",
+            "overall_cds_start_1based",
+            "overall_cds_end_1based",
+            "spliced_cds_length",
+            "cds_segment_coords_1based",
+        ])
+        .expect("Failed to write header to phy_metadata.tsv");
 
     // Return the writer wrapped in a Mutex for thread-safety.
     Mutex::new(writer)
 });
-
 
 /// A CDS sequence guaranteed to have length divisible by 3 and no internal stops.
 #[derive(Debug)]
@@ -67,7 +75,8 @@ impl CdsSeq {
         let log_file_path = {
             let mut locked_opt = TEMP_DIR.lock();
             if locked_opt.is_none() {
-                *locked_opt = Some(create_temp_dir().expect("Failed to create temporary directory"));
+                *locked_opt =
+                    Some(create_temp_dir().expect("Failed to create temporary directory"));
             }
             if let Some(dir) = locked_opt.as_ref() {
                 dir.path().join("cds_validation.log")
@@ -174,7 +183,6 @@ impl CdsSeq {
     }
 }
 
-
 /// Represents one transcript's coding sequence. It stores all CDS segments
 /// belonging to a single transcript (no introns).
 #[derive(Debug, Clone)]
@@ -208,13 +216,16 @@ pub fn make_sequences(
     inversion_interval: ZeroBasedHalfOpen,
 ) -> Result<(), VcfError> {
     set_stage(ProcessingStage::CdsProcessing);
-    log(LogLevel::Info, &format!(
-        "Generating sequences for group {} on chromosome {}", 
-        haplotype_group, chromosome
-    ));
-    
+    log(
+        LogLevel::Info,
+        &format!(
+            "Generating sequences for group {} on chromosome {}",
+            haplotype_group, chromosome
+        ),
+    );
+
     init_step_progress("Sequence generation", 4); // 4 major steps
-    
+
     update_step_progress(0, "Mapping samples and haplotypes");
     let vcf_sample_id_to_index = map_sample_names_to_indices(sample_names)?;
 
@@ -222,13 +233,19 @@ pub fn make_sequences(
         get_haplotype_indices_for_group(haplotype_group, sample_filter, &vcf_sample_id_to_index)?;
 
     if haplotype_indices.is_empty() {
-        log(LogLevel::Warning, &format!("No haplotypes found for group {}.", haplotype_group));
+        log(
+            LogLevel::Warning,
+            &format!("No haplotypes found for group {}.", haplotype_group),
+        );
         finish_step_progress("No haplotypes found");
         return Ok(());
     }
 
     if cds_regions.is_empty() {
-        log(LogLevel::Warning, "No CDS regions available for transcript. Skipping sequence generation.");
+        log(
+            LogLevel::Warning,
+            "No CDS regions available for transcript. Skipping sequence generation.",
+        );
         finish_step_progress("No CDS regions found");
         return Ok(());
     }
@@ -242,10 +259,13 @@ pub fn make_sequences(
     );
 
     if hap_sequences.is_empty() {
-        log(LogLevel::Warning, &format!(
-            "No sequences initialized for group {}. Skipping variant application.",
-            haplotype_group
-        ));
+        log(
+            LogLevel::Warning,
+            &format!(
+                "No sequences initialized for group {}. Skipping variant application.",
+                haplotype_group
+            ),
+        );
         finish_step_progress("No sequences initialized");
         return Ok(());
     }
@@ -279,8 +299,9 @@ pub fn make_sequences(
     )?;
 
     finish_step_progress(&format!(
-        "Completed sequence generation for {} haplotypes in group {}", 
-        haplotype_indices.len(), haplotype_group
+        "Completed sequence generation for {} haplotypes in group {}",
+        haplotype_indices.len(),
+        haplotype_group
     ));
     Ok(())
 }
@@ -292,12 +313,15 @@ pub fn initialize_hap_sequences(
     extended_region: ZeroBasedHalfOpen,
 ) -> HashMap<String, Vec<u8>> {
     if extended_region.end > reference_sequence.len() {
-        log(LogLevel::Warning, &format!(
-            "Invalid extended region: start={}, end={}, reference length={}",
-            extended_region.start,
-            extended_region.end,
-            reference_sequence.len()
-        ));
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Invalid extended region: start={}, end={}, reference length={}",
+                extended_region.start,
+                extended_region.end,
+                reference_sequence.len()
+            ),
+        );
         return HashMap::new();
     }
     let region_slice = extended_region.slice(reference_sequence);
@@ -388,10 +412,13 @@ pub fn apply_variants_to_transcripts(
                     }
                 } else {
                     // If the position is out of bounds, log a warning
-                    log(LogLevel::Warning, &format!(
-                        "Position {} is out of bounds for sequence {}",
-                        variant.position, sample_name
-                    ));
+                    log(
+                        LogLevel::Warning,
+                        &format!(
+                            "Position {} is out of bounds for sequence {}",
+                            variant.position, sample_name
+                        ),
+                    );
                 }
             }
         }
@@ -435,39 +462,90 @@ pub fn generate_batch_statistics(hap_sequences: &HashMap<String, Vec<u8>>) -> Re
     // Display batch statistics in a status box and log the information
     let stats_vec = vec![
         ("Total sequences", total_sequences.to_string()),
-        ("Stop codon/too short", format!("{:.2}%", (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0)),
-        ("Skipped sequences", format!("{:.2}%", (skipped_sequences as f64 / total_sequences as f64) * 100.0)),
-        ("Not divisible by three", format!("{:.2}%", (not_divisible_by_three as f64 / total_sequences as f64) * 100.0)),
-        ("Mid-sequence stop", format!("{:.2}%", (mid_sequence_stop as f64 / total_sequences as f64) * 100.0)),
-        ("Modified length", format!("{:.2}%", (length_modified as f64 / total_sequences as f64) * 100.0))
+        (
+            "Stop codon/too short",
+            format!(
+                "{:.2}%",
+                (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
+            ),
+        ),
+        (
+            "Skipped sequences",
+            format!(
+                "{:.2}%",
+                (skipped_sequences as f64 / total_sequences as f64) * 100.0
+            ),
+        ),
+        (
+            "Not divisible by three",
+            format!(
+                "{:.2}%",
+                (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
+            ),
+        ),
+        (
+            "Mid-sequence stop",
+            format!(
+                "{:.2}%",
+                (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
+            ),
+        ),
+        (
+            "Modified length",
+            format!(
+                "{:.2}%",
+                (length_modified as f64 / total_sequences as f64) * 100.0
+            ),
+        ),
     ];
-    
+
     display_status_box(StatusBox {
         title: "Sequence Batch Statistics".to_string(),
-        stats: stats_vec.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        stats: stats_vec
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
     });
-    
-    log(LogLevel::Info, &format!("Batch statistics: {} sequences processed.", total_sequences));
-    log(LogLevel::Info, &format!(
-        "Percentage of sequences with stop codon or too short: {:.2}%",
-        (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
-    ));
-    log(LogLevel::Info, &format!(
-        "Percentage of sequences skipped: {:.2}%",
-        (skipped_sequences as f64 / total_sequences as f64) * 100.0
-    ));
-    log(LogLevel::Info, &format!(
-        "Percentage of sequences not divisible by three: {:.2}%",
-        (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
-    ));
-    log(LogLevel::Info, &format!(
-        "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
-        (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
-    ));
-    log(LogLevel::Info, &format!(
-        "Percentage of sequences with modified length: {:.2}%",
-        (length_modified as f64 / total_sequences as f64) * 100.0
-    ));
+
+    log(
+        LogLevel::Info,
+        &format!("Batch statistics: {} sequences processed.", total_sequences),
+    );
+    log(
+        LogLevel::Info,
+        &format!(
+            "Percentage of sequences with stop codon or too short: {:.2}%",
+            (stop_codon_or_too_short as f64 / total_sequences as f64) * 100.0
+        ),
+    );
+    log(
+        LogLevel::Info,
+        &format!(
+            "Percentage of sequences skipped: {:.2}%",
+            (skipped_sequences as f64 / total_sequences as f64) * 100.0
+        ),
+    );
+    log(
+        LogLevel::Info,
+        &format!(
+            "Percentage of sequences not divisible by three: {:.2}%",
+            (not_divisible_by_three as f64 / total_sequences as f64) * 100.0
+        ),
+    );
+    log(
+        LogLevel::Info,
+        &format!(
+            "Percentage of sequences with a mid-sequence stop codon: {:.2}%",
+            (mid_sequence_stop as f64 / total_sequences as f64) * 100.0
+        ),
+    );
+    log(
+        LogLevel::Info,
+        &format!(
+            "Percentage of sequences with modified length: {:.2}%",
+            (length_modified as f64 / total_sequences as f64) * 100.0
+        ),
+    );
 
     Ok(())
 }
@@ -480,22 +558,31 @@ pub fn prepare_to_write_cds(
     hap_region: ZeroBasedHalfOpen,
     inversion_interval: ZeroBasedHalfOpen,
 ) -> Result<(), VcfError> {
-    log(LogLevel::Info, &format!("Preparing to write CDS files for group {} ({} regions)", 
-        haplotype_group, cds_regions.len()));
-    
+    log(
+        LogLevel::Info,
+        &format!(
+            "Preparing to write CDS files for group {} ({} regions)",
+            haplotype_group,
+            cds_regions.len()
+        ),
+    );
+
     // Skip initialization if no CDS regions
     if cds_regions.is_empty() {
         log(LogLevel::Info, "No CDS regions to process");
         return Ok(());
     }
-    
-    init_step_progress(&format!("Writing CDS files for group {}", haplotype_group), cds_regions.len() as u64);
-    
+
+    init_step_progress(
+        &format!("Writing CDS files for group {}", haplotype_group),
+        cds_regions.len() as u64,
+    );
+
     // For each transcript, we build a spliced coding sequence for every sample in hap_sequences.
     // Offsets come from intersecting each CDS with hap_region in zero-based form.
     for (idx, cds) in cds_regions.iter().enumerate() {
         update_step_progress(idx as u64, &format!("Processing {}", cds.transcript_id));
-        
+
         if cds.segments.is_empty() {
             continue;
         }
@@ -570,15 +657,21 @@ pub fn prepare_to_write_cds(
                 // For positive strand: first segment start to last segment end
                 let first_seg = cds.segments.first().unwrap();
                 let last_seg = cds.segments.last().unwrap();
-                (first_seg.start_1based_inclusive(), last_seg.get_1based_inclusive_end_coord())
+                (
+                    first_seg.start_1based_inclusive(),
+                    last_seg.get_1based_inclusive_end_coord(),
+                )
             } else {
                 // For negative strand: last segment start to first segment end
                 let first_seg = cds.segments.first().unwrap();
                 let last_seg = cds.segments.last().unwrap();
-                (last_seg.start_1based_inclusive(), first_seg.get_1based_inclusive_end_coord())
+                (
+                    last_seg.start_1based_inclusive(),
+                    first_seg.get_1based_inclusive_end_coord(),
+                )
             }
         };
-        
+
         // Create a filename-safe version of gene name
         let safe_gene_name = cds.gene_name.replace(|c: char| !c.is_alphanumeric(), "");
 
@@ -586,42 +679,42 @@ pub fn prepare_to_write_cds(
          * CDS SEGMENT COLLECTION:
          * -----------------------
          * 1. Transcript CDS regions are parsed from GTF files in parse_gtf_file() function
-         *    - Only features with type "CDS" are collected (proved in parse_gtf_file at line 
+         *    - Only features with type "CDS" are collected (proved in parse_gtf_file at line
          *    - Each transcript may have multiple CDS segments (representing coding exons)
-         *    
+         *
          * 2. TranscriptAnnotationCDS.segments stores these as ZeroBasedHalfOpen intervals
-         *    - Segments are ordered by position for '+' strand 
+         *    - Segments are ordered by position for '+' strand
          *    - Or reverse-ordered for '-' strand (see parse_gtf_file: "if strand == '-' { segments.reverse(); }")
-         * 
+         *
          * COORDINATE DETERMINATION ALGORITHM:
          * ----------------------------------
          * In prepare_to_write_cds(), coordinates for the filename are determined as follows:
-         * 
+         *
          * 1. For '+' strand transcripts:
          *    - cds_start = first segment's start_1based_inclusive()
          *    - cds_end = last segment's get_1based_inclusive_end_coord()
-         *    
+         *
          * 2. For '-' strand transcripts:
          *    - cds_start = last segment's start_1based_inclusive()
          *    - cds_end = first segment's get_1based_inclusive_end_coord()
-         * 
+         *
          * COORDINATES ARE 1-BASED:
          * ----------------------------------
-         * 
+         *
          *   Conversion transforms [start, end) in 0-based half-open to [start+1, end] in 1-based inclusive.
-         * 
+         *
          * WHAT THESE COORDINATES REPRESENT BIOLOGICALLY:
          * ---------------------------------------------
          * The coordinates in the filename represent the genomic boundaries of the CDS (Coding Sequence),
          * NOT the transcript or gene boundaries.
-         * 
+         *
          * 1. The TranscriptAnnotationCDS struct specifically stores CDS segments from the GTF file.
-         * 
+         *
          * 2. The prepare_to_write_cds() function specifically builds spliced coding sequences.
-         * 
+         *
          * 3. These coordinates span the full genomic range of the CDS, including introns between coding exons,
          *    even though the introns themselves are not part of the actual coding sequence in the .phy file.
-         * 
+         *
          * COMPLETE PIPELINE CONTEXT:
          * -------------------------
          * 1. parse_gtf_file() → Extracts CDS features from GTF file
@@ -629,11 +722,11 @@ pub fn prepare_to_write_cds(
          * 3. process_variants() → Processes variants and calls make_sequences()
          * 4. make_sequences() → Assembles sequences and calls prepare_to_write_cds()
          * 5. prepare_to_write_cds() → Creates .phy files with proper coordinates
-         * 
+         *
          * FINAL FILENAME FORMAT:
          * ---------------------
          * "group{haplotype_group}_{gene_name}_{gene_id}_{transcript_id}_chr{chromosome}_start{cds_start}_end{cds_end}.phy"
-         * 
+         *
          * Where:
          * - haplotype_group: The group ID (0 or 1)
          * - gene_name: Sanitized gene name (alphanumeric characters only)
@@ -660,8 +753,16 @@ pub fn prepare_to_write_cds(
         );
 
         // --- NEW METADATA LOGIC ---
-        let segment_coords_str = cds.segments.iter()
-            .map(|seg| format!("{}-{}", seg.start_1based_inclusive(), seg.get_1based_inclusive_end_coord()))
+        let segment_coords_str = cds
+            .segments
+            .iter()
+            .map(|seg| {
+                format!(
+                    "{}-{}",
+                    seg.start_1based_inclusive(),
+                    seg.get_1based_inclusive_end_coord()
+                )
+            })
             .collect::<Vec<String>>()
             .join(";");
 
@@ -680,17 +781,20 @@ pub fn prepare_to_write_cds(
         };
 
         // Lock the shared writer and write the single record.
-        METADATA_WRITER.lock().write_record(&[
-            &metadata.phy_filename,
-            &metadata.transcript_id,
-            &metadata.gene_name,
-            &metadata.chromosome,
-            &metadata.haplotype_group.to_string(),
-            &metadata.overall_start.to_string(),
-            &metadata.overall_end.to_string(),
-            &metadata.spliced_length.to_string(),
-            &metadata.segment_coords,
-        ]).map_err(|e| VcfError::Parse(format!("Failed to write metadata record: {}", e)))?;
+        METADATA_WRITER
+            .lock()
+            .write_record(&[
+                &metadata.phy_filename,
+                &metadata.transcript_id,
+                &metadata.gene_name,
+                &metadata.chromosome,
+                &metadata.haplotype_group.to_string(),
+                &metadata.overall_start.to_string(),
+                &metadata.overall_end.to_string(),
+                &metadata.spliced_length.to_string(),
+                &metadata.segment_coords,
+            ])
+            .map_err(|e| VcfError::Parse(format!("Failed to write metadata record: {}", e)))?;
         // --- END OF NEW LOGIC ---
 
         write_phylip_file(&filename, &filtered_map, &cds.transcript_id)?;
@@ -716,7 +820,7 @@ pub fn filter_and_log_transcripts(
             return Vec::new(); // Return empty vector if temp dir not available
         }
     };
-        
+
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -725,8 +829,8 @@ pub fn filter_and_log_transcripts(
     let mut log_file = BufWriter::new(log_file);
 
     // Create a ZeroBasedHalfOpen for the query region
-        let query_interval = ZeroBasedHalfOpen::from_0based_inclusive(query.start, query.end);
-    
+    let query_interval = ZeroBasedHalfOpen::from_0based_inclusive(query.start, query.end);
+
     writeln!(log_file, "Query region: {} to {}", query.start, query.end)
         .expect("Failed to write to transcript_overlap.log");
 
@@ -734,7 +838,7 @@ pub fn filter_and_log_transcripts(
 
     log(LogLevel::Info, "Processing CDS regions by transcript");
     init_step_progress("Filtering transcripts", transcripts.len() as u64);
-    
+
     writeln!(log_file, "Processing CDS regions by transcript...")
         .expect("Failed to write to transcript_overlap.log");
 
@@ -757,7 +861,10 @@ pub fn filter_and_log_transcripts(
 
     // Should this be for mut tcds in transcripts instead?
     for (idx, mut tcds) in transcripts.into_iter().enumerate() {
-        update_step_progress(idx as u64, &format!("Processing transcript {}", tcds.transcript_id));
+        update_step_progress(
+            idx as u64,
+            &format!("Processing transcript {}", tcds.transcript_id),
+        );
 
         let transcript_coding_start = tcds
             .segments
@@ -781,20 +888,20 @@ pub fn filter_and_log_transcripts(
             start: transcript_coding_start as usize,
             end: transcript_coding_end as usize,
         };
-        
+
         // Check for overlap using the intersect method
         let overlaps_query = transcript_interval.intersect(&query_interval).is_some();
-        
+
         if !overlaps_query {
             continue;
         }
-        
+
         tcds.segments.sort_by_key(|seg| seg.start);
-        
+
         // Only log to file instead of printing to terminal to reduce spam
         writeln!(log_file, "\nProcessing transcript: {}", tcds.transcript_id)
             .expect("Failed to write to transcript_overlap.log");
-        
+
         // Log to file only, not terminal
         writeln!(log_file, "Found {} CDS segments", tcds.segments.len())
             .expect("Failed to write to transcript_overlap.log");
@@ -825,14 +932,17 @@ pub fn filter_and_log_transcripts(
         for (i, seg) in tcds.segments.iter().enumerate() {
             let segment_length = seg.len() as i64;
             let frame = tcds.frames.get(i).copied().unwrap_or(0);
-            log(LogLevel::Info, &format!(
-                "  Segment {}: {}-{} (length: {}, frame: {})",
-                i + 1,
-                seg.start,
-                seg.end,
-                segment_length,
-                frame
-            ));
+            log(
+                LogLevel::Info,
+                &format!(
+                    "  Segment {}: {}-{} (length: {}, frame: {})",
+                    i + 1,
+                    seg.start,
+                    seg.end,
+                    segment_length,
+                    frame
+                ),
+            );
 
             writeln!(
                 log_file,
@@ -881,10 +991,13 @@ pub fn filter_and_log_transcripts(
             )
             .expect("Failed to write to transcript_overlap.log");
 
-            log(LogLevel::Info, &format!(
-                "    Remainder when divided by 3: {}",
-                total_coding_length % 3
-            ));
+            log(
+                LogLevel::Info,
+                &format!(
+                    "    Remainder when divided by 3: {}",
+                    total_coding_length % 3
+                ),
+            );
             writeln!(
                 log_file,
                 "    Remainder when divided by 3: {}",
@@ -892,13 +1005,16 @@ pub fn filter_and_log_transcripts(
             )
             .expect("Failed to write to transcript_overlap.log");
 
-            log(LogLevel::Info, &format!(
-                "    Individual segment lengths: {:?}",
-                tcds.segments
-                    .iter()
-                    .map(|seg| seg.len())
-                    .collect::<Vec<_>>()
-            ));
+            log(
+                LogLevel::Info,
+                &format!(
+                    "    Individual segment lengths: {:?}",
+                    tcds.segments
+                        .iter()
+                        .map(|seg| seg.len())
+                        .collect::<Vec<_>>()
+                ),
+            );
             writeln!(
                 log_file,
                 "    Individual segment lengths: {:?}",
@@ -910,29 +1026,38 @@ pub fn filter_and_log_transcripts(
             .expect("Failed to write to transcript_overlap.log");
         }
 
-        let min_start = tcds.segments.iter().map(|seg| seg.start as i64).min().unwrap();
-        let max_end = tcds.segments.iter().map(|seg| seg.end as i64).max().unwrap();
+        let min_start = tcds
+            .segments
+            .iter()
+            .map(|seg| seg.start as i64)
+            .min()
+            .unwrap();
+        let max_end = tcds
+            .segments
+            .iter()
+            .map(|seg| seg.end as i64)
+            .max()
+            .unwrap();
         let transcript_span = max_end - min_start;
 
-        log(LogLevel::Info, &format!(
-            "  CDS region: {}-{}",
-            min_start,
-            max_end
-        ));
+        log(
+            LogLevel::Info,
+            &format!("  CDS region: {}-{}", min_start, max_end),
+        );
         writeln!(log_file, "  CDS region: {}-{}", min_start, max_end)
             .expect("Failed to write to transcript_overlap.log");
 
-        log(LogLevel::Info, &format!(
-            "    Genomic span: {}",
-            transcript_span
-        ));
+        log(
+            LogLevel::Info,
+            &format!("    Genomic span: {}", transcript_span),
+        );
         writeln!(log_file, "    Genomic span: {}", transcript_span)
             .expect("Failed to write to transcript_overlap.log");
 
-        log(LogLevel::Info, &format!(
-            "    Total coding length: {}",
-            total_coding_length
-        ));
+        log(
+            LogLevel::Info,
+            &format!("    Total coding length: {}", total_coding_length),
+        );
         writeln!(log_file, "    Total coding length: {}", total_coding_length)
             .expect("Failed to write to transcript_overlap.log");
 
@@ -943,65 +1068,75 @@ pub fn filter_and_log_transcripts(
         log(LogLevel::Info, "CDS Processing Summary");
         writeln!(log_file, "\nCDS Processing Summary:")
             .expect("Failed to write to transcript_overlap.log");
-            
+
         // Build status box data
         let mut summary_stats = Vec::new();
         summary_stats.push(("Total transcripts", stats.total_transcripts.to_string()));
         summary_stats.push(("Total CDS segments", stats.total_cds_segments.to_string()));
         summary_stats.push((
-            "Avg segments/transcript", 
-            format!("{:.2}", stats.total_cds_segments as f64 / stats.total_transcripts as f64)
+            "Avg segments/transcript",
+            format!(
+                "{:.2}",
+                stats.total_cds_segments as f64 / stats.total_transcripts as f64
+            ),
         ));
         summary_stats.push((
-            "Single-CDS transcripts", 
-            format!("{} ({:.1}%)", 
+            "Single-CDS transcripts",
+            format!(
+                "{} ({:.1}%)",
                 stats.single_cds_transcripts,
                 100.0 * stats.single_cds_transcripts as f64 / stats.total_transcripts as f64
-            )
+            ),
         ));
         summary_stats.push((
-            "Multi-CDS transcripts", 
-            format!("{} ({:.1}%)", 
+            "Multi-CDS transcripts",
+            format!(
+                "{} ({:.1}%)",
                 stats.multi_cds_transcripts,
                 100.0 * stats.multi_cds_transcripts as f64 / stats.total_transcripts as f64
-            )
+            ),
         ));
         summary_stats.push((
-            "Transcripts with gaps", 
-            format!("{} ({:.1}%)", 
+            "Transcripts with gaps",
+            format!(
+                "{} ({:.1}%)",
                 stats.transcripts_with_gaps,
                 100.0 * stats.transcripts_with_gaps as f64 / stats.total_transcripts as f64
-            )
+            ),
         ));
         summary_stats.push((
-            "Non-divisible by three", 
-            format!("{} ({:.1}%)", 
+            "Non-divisible by three",
+            format!(
+                "{} ({:.1}%)",
                 stats.non_divisible_by_three,
                 100.0 * stats.non_divisible_by_three as f64 / stats.total_transcripts as f64
-            )
+            ),
         ));
         summary_stats.push(("Total coding bases", stats.total_coding_length.to_string()));
-        
+
         if let Some(shortest) = stats.shortest_transcript_length {
             summary_stats.push(("Shortest transcript", format!("{} bp", shortest)));
         }
         if let Some(longest) = stats.longest_transcript_length {
             summary_stats.push(("Longest transcript", format!("{} bp", longest)));
         }
-        
+
         let avg_len = if stats.total_transcripts == 0 {
             0.0
         } else {
             stats.total_coding_length as f64 / stats.total_transcripts as f64
         };
         summary_stats.push(("Average length", format!("{:.1} bp", avg_len)));
-        
+
         // Display the status box
         display_status_box(StatusBox {
             title: "CDS Processing Summary".to_string(),
-            stats: summary_stats.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            stats: summary_stats
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
         });
-        
+
         // Still log everything to the file
         writeln!(
             log_file,
@@ -1064,10 +1199,10 @@ pub fn filter_and_log_transcripts(
     }
 
     if filtered.is_empty() {
-        log(LogLevel::Warning, &format!(
-            "{}",
-            "No valid CDS regions found!".red()
-        ));
+        log(
+            LogLevel::Warning,
+            &format!("{}", "No valid CDS regions found!".red()),
+        );
         writeln!(log_file, "No valid CDS regions found!")
             .expect("Failed to write to transcript_overlap.log");
     }
@@ -1104,7 +1239,9 @@ pub fn write_phylip_file(
         if let Some(dir) = locked_opt.as_ref() {
             dir.path().join(output_file)
         } else {
-            return Err(VcfError::Parse("Failed to access temporary directory".to_string()));
+            return Err(VcfError::Parse(
+                "Failed to access temporary directory".to_string(),
+            ));
         }
     };
 
@@ -1113,7 +1250,11 @@ pub fn write_phylip_file(
         spinner.finish_with_message(format!("Failed to create file: {}", e));
         VcfError::Io(io::Error::new(
             io::ErrorKind::Other,
-            format!("Failed to create PHYLIP file '{}': {:?}", temp_output_file.display(), e),
+            format!(
+                "Failed to create PHYLIP file '{}': {:?}",
+                temp_output_file.display(),
+                e
+            ),
         ))
     })?;
 
@@ -1165,7 +1306,13 @@ pub fn write_phylip_file(
 
     spinner.set_message(format!("Wrote {} sequences to {}", n, output_file));
     spinner.finish_and_clear();
-    log(LogLevel::Info, &format!("Successfully wrote PHYLIP file for transcript {}", transcript_id));
+    log(
+        LogLevel::Info,
+        &format!(
+            "Successfully wrote PHYLIP file for transcript {}",
+            transcript_id
+        ),
+    );
 
     Ok(())
 }

@@ -1,15 +1,17 @@
-use ndarray::Array2;
-use ndarray::s;
 use efficient_pca::PCA;
+use ndarray::s;
+use ndarray::Array2;
 
-use std::path::Path;
 use std::collections::HashMap;
-use std::io::{BufWriter, Write};
 use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::Path;
 
-use crate::Variant;
 use crate::process::VcfError;
-use crate::progress::{log, LogLevel, create_spinner, ProcessingStage, set_stage, display_status_box, StatusBox};
+use crate::progress::{
+    create_spinner, display_status_box, log, set_stage, LogLevel, ProcessingStage, StatusBox,
+};
+use crate::Variant;
 
 /// Structure to hold PCA results per chromosome
 pub struct PcaResult {
@@ -19,12 +21,12 @@ pub struct PcaResult {
 }
 
 /// Computes PCA for a single chromosome keeping haplotypes separate
-/// 
+///
 /// # Arguments
 /// * `variants` - Slice of variants for a single chromosome
 /// * `sample_names` - Names of the samples
 /// * `n_components` - Number of principal components to compute
-/// 
+///
 /// # Returns
 /// PCA results containing haplotype labels and their coordinates in PC space
 pub fn compute_chromosome_pca(
@@ -34,45 +36,58 @@ pub fn compute_chromosome_pca(
 ) -> Result<PcaResult, VcfError> {
     set_stage(ProcessingStage::PcaAnalysis);
     let spinner = create_spinner(&format!("Computing PCA for {} variants", variants.len()));
-    
+
     // Count valid variants without materializing them
-    let mut valid_count = variants.iter()
-        .filter(|v| v.genotypes.iter().all(|g| match g {
-            None => false,
-            Some(alleles) => alleles.len() >= 2
-        }))
+    let mut valid_count = variants
+        .iter()
+        .filter(|v| {
+            v.genotypes.iter().all(|g| match g {
+                None => false,
+                Some(alleles) => alleles.len() >= 2,
+            })
+        })
         .count();
-    
-    log(LogLevel::Info, &format!(
-        "Found {} variants with complete data out of {} total variants", 
-        valid_count, variants.len()
-    ));
-    
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Found {} variants with complete data out of {} total variants",
+            valid_count,
+            variants.len()
+        ),
+    );
+
     if valid_count == 0 {
         return Err(VcfError::Parse(
-            "No variants without missing data found".to_string()
+            "No variants without missing data found".to_string(),
         ));
     }
-    
+
     // Number of haplotypes (2 per sample)
     let n_haplotypes = sample_names.len() * 2;
-    
+
     // Calculate maximum valid number of components
     let max_components = std::cmp::min(valid_count, n_haplotypes);
     let n_components = std::cmp::min(n_components, max_components);
-    
+
     // Display statistics
     display_status_box(StatusBox {
         title: "Chromosome PCA Data Preparation".to_string(),
         stats: vec![
             ("Total variants".to_string(), variants.len().to_string()),
-            ("Variants with complete data".to_string(), valid_count.to_string()),
+            (
+                "Variants with complete data".to_string(),
+                valid_count.to_string(),
+            ),
             ("Samples".to_string(), sample_names.len().to_string()),
-            ("Haplotypes (2 per sample)".to_string(), n_haplotypes.to_string()),
+            (
+                "Haplotypes (2 per sample)".to_string(),
+                n_haplotypes.to_string(),
+            ),
             ("Requested PCs".to_string(), n_components.to_string()),
         ],
     });
-    
+
     // Create data matrix efficiently
     let mut data_matrix = Array2::<f64>::zeros((n_haplotypes, valid_count));
     let mut positions = Vec::with_capacity(valid_count);
@@ -83,10 +98,10 @@ pub fn compute_chromosome_pca(
         // Check if this variant has complete data
         if variant.genotypes.iter().all(|g| match g {
             None => false,
-            Some(alleles) => alleles.len() >= 2
+            Some(alleles) => alleles.len() >= 2,
         }) {
             positions.push(variant.position);
-            
+
             // Add each haplotype's data
             for (sample_idx, genotypes_opt) in variant.genotypes.iter().enumerate() {
                 if let Some(genotypes) = genotypes_opt {
@@ -94,7 +109,7 @@ pub fn compute_chromosome_pca(
                         // Left haplotype
                         let left_idx = sample_idx * 2;
                         data_matrix[[left_idx, valid_idx]] = genotypes[0] as f64;
-                        
+
                         // Right haplotype
                         let right_idx = sample_idx * 2 + 1;
                         data_matrix[[right_idx, valid_idx]] = genotypes[1] as f64;
@@ -104,14 +119,17 @@ pub fn compute_chromosome_pca(
             valid_idx += 1;
         }
     }
-    
+
     // Sanity check the matrix dimensions
     if valid_idx != valid_count {
-        log(LogLevel::Warning, &format!(
-            "Matrix inconsistency: Expected {} columns but found {}",
-            valid_count, valid_idx
-        ));
-        
+        log(
+            LogLevel::Warning,
+            &format!(
+                "Matrix inconsistency: Expected {} columns but found {}",
+                valid_count, valid_idx
+            ),
+        );
+
         // Resize the matrix if needed
         if valid_idx < valid_count {
             data_matrix = data_matrix.slice(s![.., 0..valid_idx]).to_owned();
@@ -119,122 +137,146 @@ pub fn compute_chromosome_pca(
             valid_count = valid_idx; // Update valid_count to match actual size
         }
     }
-    
+
     // Filter variants by Minor Allele Frequency to prevent numerical instability in PCA
-    log(LogLevel::Info, "Filtering variants by Minor Allele Frequency (MAF) for PCA stability");
+    log(
+        LogLevel::Info,
+        "Filtering variants by Minor Allele Frequency (MAF) for PCA stability",
+    );
     let mut filtered_indices = Vec::new();
-    
+
     for c in 0..valid_count {
         // Get the current variant column from the data matrix
         let column = data_matrix.slice(s![.., c]);
-        
+
         // Count number of non-reference alleles (1s) in this column
         let allele_count: f64 = column.iter().sum();
-        
+
         // Calculate allele frequency (proportion of 1s)
         let allele_freq = allele_count / column.len() as f64;
-        
+
         // Calculate true Minor Allele Frequency - the frequency of the less common allele
         // If allele_freq > 0.5, then ref allele (0) is minor, so MAF = 1 - allele_freq
         // If allele_freq <= 0.5, then alt allele (1) is minor, so MAF = allele_freq
         let maf = allele_freq.min(1.0 - allele_freq);
-        
+
         // Keep only variants with MAF >= 5% to ensure numerical stability
         if maf >= 0.05 {
             filtered_indices.push(c);
         }
     }
-    
-    log(LogLevel::Info, &format!(
-        "Keeping {}/{} variants with MAF >= 5% for PCA",
-        filtered_indices.len(), valid_count
-    ));
-    
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Keeping {}/{} variants with MAF >= 5% for PCA",
+            filtered_indices.len(),
+            valid_count
+        ),
+    );
+
     if filtered_indices.is_empty() {
-        return Err(VcfError::Parse("No variants with MAF >= 5% found for PCA".to_string()));
+        return Err(VcfError::Parse(
+            "No variants with MAF >= 5% found for PCA".to_string(),
+        ));
     }
-    
+
     // Create a new matrix containing only the variants with sufficient MAF
     let mut filtered_matrix = Array2::<f64>::zeros((n_haplotypes, filtered_indices.len()));
     let mut filtered_positions = Vec::with_capacity(filtered_indices.len());
-    
+
     // Copy selected columns (variants) to the new filtered matrix
     for (new_idx, &old_idx) in filtered_indices.iter().enumerate() {
         // Copy all sample values for this variant
         for r in 0..n_haplotypes {
             filtered_matrix[[r, new_idx]] = data_matrix[[r, old_idx]];
         }
-        
+
         // Keep track of the genomic positions for these variants
         filtered_positions.push(positions[old_idx]);
     }
-    
+
     // Replace the original data with the filtered data for subsequent processing
     data_matrix = filtered_matrix;
     positions = filtered_positions;
-    
+
     // Debug prints to investigate potential NaN causes:
-    log(LogLevel::Info, &format!(
-        "Debug PCA: final valid_idx = {}, total variants in 'variants' = {}",
-        valid_idx, variants.len()
-    ));
+    log(
+        LogLevel::Info,
+        &format!(
+            "Debug PCA: final valid_idx = {}, total variants in 'variants' = {}",
+            valid_idx,
+            variants.len()
+        ),
+    );
     let row_count = data_matrix.nrows();
     let col_count = data_matrix.ncols();
-    log(LogLevel::Info, &format!(
-        "Debug PCA: matrix dimensions = {} rows (haplotypes) x {} columns (sites)",
-        row_count, col_count
-    ));
+    log(
+        LogLevel::Info,
+        &format!(
+            "Debug PCA: matrix dimensions = {} rows (haplotypes) x {} columns (sites)",
+            row_count, col_count
+        ),
+    );
     if col_count > 0 {
         let check_limit = if col_count < 5 { col_count } else { 5 };
         for c in 0..check_limit {
             let column_slice = data_matrix.slice(s![.., c]);
             let min_val = column_slice.fold(f64::INFINITY, |acc, &x| if x < acc { x } else { acc });
-            let max_val = column_slice.fold(f64::NEG_INFINITY, |acc, &x| if x > acc { x } else { acc });
-            log(LogLevel::Info, &format!(
-                "Debug PCA: column {} => min={}, max={}",
-                c, min_val, max_val
-            ));
+            let max_val =
+                column_slice.fold(f64::NEG_INFINITY, |acc, &x| if x > acc { x } else { acc });
+            log(
+                LogLevel::Info,
+                &format!(
+                    "Debug PCA: column {} => min={}, max={}",
+                    c, min_val, max_val
+                ),
+            );
         }
     }
 
     spinner.finish_and_clear();
-    
+
     // Apply PCA using the library
     let spinner = create_spinner("Computing PCA");
-    
+
     let mut pca = PCA::new();
-    
+
     // Use randomized SVD without cloning the data matrix
     if let Err(e) = pca.rfit(
         data_matrix.clone(), // clone here due to library API
         n_components,
-        5, // oversampling parameter
+        5,        // oversampling parameter
         Some(42), // random seed
-        None, // no variance tolerance filter
+        None,     // no variance tolerance filter
     ) {
         return Err(VcfError::Parse(format!("PCA computation failed: {}", e)));
     }
-    
+
     // Transform to get PC coordinates
     let transformed = match pca.transform(data_matrix) {
         Ok(t) => t,
         Err(e) => return Err(VcfError::Parse(format!("PCA transformation failed: {}", e))),
     };
-    
+
     spinner.finish_and_clear();
-    
+
     // Create haplotype labels
     let mut haplotype_labels = Vec::with_capacity(n_haplotypes);
     for sample_name in sample_names {
         haplotype_labels.push(format!("{}_L", sample_name)); // Left haplotype
         haplotype_labels.push(format!("{}_R", sample_name)); // Right haplotype
     }
-    
-    log(LogLevel::Info, &format!(
-        "PCA computation complete: generated {} components for {} haplotypes",
-        n_components, haplotype_labels.len()
-    ));
-    
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "PCA computation complete: generated {} components for {} haplotypes",
+            n_components,
+            haplotype_labels.len()
+        ),
+    );
+
     Ok(PcaResult {
         haplotype_labels,
         pca_coordinates: transformed,
@@ -250,40 +292,45 @@ pub fn write_chromosome_pca_to_file(
 ) -> Result<(), VcfError> {
     let file_name = format!("pca_chr_{}.tsv", chromosome);
     let output_file = output_dir.join(file_name);
-    
+
     let spinner = create_spinner(&format!("Writing PCA results to {}", output_file.display()));
-    
-    let file = File::create(&output_file)
-        .map_err(|e| VcfError::Io(e))?;
+
+    let file = File::create(&output_file).map_err(|e| VcfError::Io(e))?;
     let mut writer = BufWriter::new(file);
-    
+
     // Write header
     write!(writer, "Haplotype").map_err(|e| VcfError::Io(e))?;
     for i in 0..result.pca_coordinates.shape()[1] {
-        write!(writer, "\tPC{}", i+1).map_err(|e| VcfError::Io(e))?;
+        write!(writer, "\tPC{}", i + 1).map_err(|e| VcfError::Io(e))?;
     }
     writeln!(writer).map_err(|e| VcfError::Io(e))?;
-    
+
     // Write rows - ensure haplotype count matches coordinates
     let actual_rows = std::cmp::min(
         result.haplotype_labels.len(),
-        result.pca_coordinates.shape()[0]
+        result.pca_coordinates.shape()[0],
     );
-    
+
     for idx in 0..actual_rows {
         write!(writer, "{}", result.haplotype_labels[idx]).map_err(|e| VcfError::Io(e))?;
-        
+
         for j in 0..result.pca_coordinates.shape()[1] {
             write!(writer, "\t{:.6}", result.pca_coordinates[[idx, j]])
                 .map_err(|e| VcfError::Io(e))?;
         }
         writeln!(writer).map_err(|e| VcfError::Io(e))?;
     }
-    
+
     spinner.finish_and_clear();
-    log(LogLevel::Info, &format!("PCA results for chromosome {} written to {}", 
-                                chromosome, output_file.display()));
-    
+    log(
+        LogLevel::Info,
+        &format!(
+            "PCA results for chromosome {} written to {}",
+            chromosome,
+            output_file.display()
+        ),
+    );
+
     Ok(())
 }
 
@@ -296,57 +343,77 @@ pub fn run_chromosome_pca_analysis(
 ) -> Result<(), VcfError> {
     set_stage(ProcessingStage::PcaAnalysis);
     log(LogLevel::Info, "Starting per-chromosome PCA analysis");
-    
+
     // Create output directory if it doesn't exist
     if !output_dir.exists() {
-        std::fs::create_dir_all(output_dir)
-            .map_err(|e| VcfError::Io(e))?;
+        std::fs::create_dir_all(output_dir).map_err(|e| VcfError::Io(e))?;
     }
-    
+
     // Process each chromosome separately
     let total_chr = variants_by_chr.len();
     let mut processed = 0;
     let mut successful = 0;
-    
+
     for (chr, variants) in variants_by_chr {
         processed += 1;
-        log(LogLevel::Info, &format!("Processing chromosome {} ({}/{}) with {} variants", 
-                                  chr, processed, total_chr, variants.len()));
-        
+        log(
+            LogLevel::Info,
+            &format!(
+                "Processing chromosome {} ({}/{}) with {} variants",
+                chr,
+                processed,
+                total_chr,
+                variants.len()
+            ),
+        );
+
         // Skip chromosomes with too few variants
         if variants.len() < 2 {
-            log(LogLevel::Warning, &format!("Skipping chromosome {} - too few variants ({})", 
-                                         chr, variants.len()));
+            log(
+                LogLevel::Warning,
+                &format!(
+                    "Skipping chromosome {} - too few variants ({})",
+                    chr,
+                    variants.len()
+                ),
+            );
             continue;
         }
-        
+
         // Compute PCA for this chromosome
         match compute_chromosome_pca(variants, sample_names, n_components) {
             Ok(result) => {
                 // Write results to file
                 if let Err(e) = write_chromosome_pca_to_file(&result, chr, output_dir) {
-                    log(LogLevel::Warning, &format!("Failed to write PCA results for chromosome {}: {}", 
-                                                 chr, e));
+                    log(
+                        LogLevel::Warning,
+                        &format!("Failed to write PCA results for chromosome {}: {}", chr, e),
+                    );
                 } else {
                     successful += 1;
                 }
-            },
+            }
             Err(e) => {
-                log(LogLevel::Warning, &format!("Failed to compute PCA for chromosome {}: {}", chr, e));
+                log(
+                    LogLevel::Warning,
+                    &format!("Failed to compute PCA for chromosome {}: {}", chr, e),
+                );
                 // Continue with other chromosomes
             }
         }
     }
-    
+
     if successful == 0 {
-        return Err(VcfError::Parse("Failed to compute PCA for any chromosome".to_string()));
+        return Err(VcfError::Parse(
+            "Failed to compute PCA for any chromosome".to_string(),
+        ));
     }
-    
+
     log(LogLevel::Info, &format!(
         "Chromosome-specific PCA analysis completed successfully. Processed {}/{} chromosomes. Results saved to {}",
         successful, total_chr, output_dir.display()
     ));
-    
+
     Ok(())
 }
 
@@ -357,7 +424,7 @@ pub fn combine_chromosome_pca_results(
     output_file: &Path,
 ) -> Result<(), VcfError> {
     let spinner = create_spinner("Combining PCA results from all chromosomes");
-    
+
     // Find all PCA result files
     let mut result_files = vec![];
     match std::fs::read_dir(results_dir) {
@@ -369,99 +436,106 @@ pub fn combine_chromosome_pca_results(
                         if path.is_file() && path.to_string_lossy().contains("pca_chr_") {
                             result_files.push(path);
                         }
-                    },
+                    }
                     Err(e) => {
-                        log(LogLevel::Warning, &format!("Error reading directory entry: {}", e));
+                        log(
+                            LogLevel::Warning,
+                            &format!("Error reading directory entry: {}", e),
+                        );
                     }
                 }
             }
-        },
+        }
         Err(e) => {
             return Err(VcfError::Io(e));
         }
     }
-    
+
     if result_files.is_empty() {
-        return Err(VcfError::Parse("No chromosome PCA result files found".to_string()));
+        return Err(VcfError::Parse(
+            "No chromosome PCA result files found".to_string(),
+        ));
     }
-    
+
     // Sort files by chromosome name for consistent ordering
     result_files.sort_by(|a, b| {
         let a_name = a.file_name().unwrap_or_default().to_string_lossy();
         let b_name = b.file_name().unwrap_or_default().to_string_lossy();
         a_name.cmp(&b_name)
     });
-    
+
     // Read the first file to get haplotype names and component count
-    let first_file = std::fs::read_to_string(&result_files[0])
-        .map_err(|e| VcfError::Io(e))?;
-    
+    let first_file = std::fs::read_to_string(&result_files[0]).map_err(|e| VcfError::Io(e))?;
+
     let mut lines = first_file.lines();
     let header = match lines.next() {
         Some(h) => h,
         None => return Err(VcfError::Parse("Empty PCA result file".to_string())),
     };
-    
+
     let n_components = header.split('\t').count() - 1; // Subtract 1 for the 'Haplotype' column
-    
+
     // Create a combined output file
-    let file = File::create(output_file)
-        .map_err(|e| VcfError::Io(e))?;
+    let file = File::create(output_file).map_err(|e| VcfError::Io(e))?;
     let mut writer = BufWriter::new(file);
-    
+
     // Write header
     write!(writer, "Haplotype\tChromosome").map_err(|e| VcfError::Io(e))?;
-    
+
     for i in 0..n_components {
-        write!(writer, "\tPC{}", i+1).map_err(|e| VcfError::Io(e))?;
+        write!(writer, "\tPC{}", i + 1).map_err(|e| VcfError::Io(e))?;
     }
-    
+
     writeln!(writer).map_err(|e| VcfError::Io(e))?;
-    
+
     // Write results for each chromosome
     for file_path in &result_files {
         // Extract chromosome name from filename
-        let chr_name = file_path.file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
-        
+        let chr_name = file_path.file_name().unwrap_or_default().to_string_lossy();
+
         let chr = chr_name
             .strip_prefix("pca_chr_")
             .and_then(|s| s.strip_suffix(".tsv"))
             .unwrap_or(&chr_name);
-        
+
         // Read chromosome file
         let file_content = match std::fs::read_to_string(file_path) {
             Ok(content) => content,
             Err(e) => {
-                log(LogLevel::Warning, &format!("Failed to read file {}: {}", file_path.display(), e));
+                log(
+                    LogLevel::Warning,
+                    &format!("Failed to read file {}: {}", file_path.display(), e),
+                );
                 continue;
             }
         };
-        
+
         let mut lines = file_content.lines();
         let _header = lines.next(); // Skip header
-        
+
         for line in lines {
             let parts: Vec<&str> = line.split('\t').collect();
             if parts.len() < 2 {
                 continue;
             }
-            
+
             let haplotype = parts[0];
             write!(writer, "{}\t{}", haplotype, chr).map_err(|e| VcfError::Io(e))?;
-            
+
             for i in 1..parts.len() {
                 write!(writer, "\t{}", parts[i]).map_err(|e| VcfError::Io(e))?;
             }
-            
+
             writeln!(writer).map_err(|e| VcfError::Io(e))?;
         }
     }
-    
+
     spinner.finish_and_clear();
-    log(LogLevel::Info, &format!("Combined PCA results written to {}", output_file.display()));
-    
+    log(
+        LogLevel::Info,
+        &format!("Combined PCA results written to {}", output_file.display()),
+    );
+
     Ok(())
 }
 
@@ -476,21 +550,28 @@ pub fn run_global_pca_analysis(
     // Create directory for chromosome-specific results
     let chr_results_dir = output_dir.join("chr_pca");
     if !chr_results_dir.exists() {
-        std::fs::create_dir_all(&chr_results_dir)
-            .map_err(|e| VcfError::Io(e))?;
+        std::fs::create_dir_all(&chr_results_dir).map_err(|e| VcfError::Io(e))?;
     }
-    
+
     // Run PCA for each chromosome separately
-    run_chromosome_pca_analysis(variants_by_chr, sample_names, &chr_results_dir, n_components)?;
-    
+    run_chromosome_pca_analysis(
+        variants_by_chr,
+        sample_names,
+        &chr_results_dir,
+        n_components,
+    )?;
+
     // Combine results into a single file
     let combined_output = output_dir.join("combined_chromosome_pca.tsv");
     combine_chromosome_pca_results(&chr_results_dir, &combined_output)?;
-    
-    log(LogLevel::Info, &format!(
+
+    log(
+        LogLevel::Info,
+        &format!(
         "Memory-efficient per-chromosome PCA analysis completed successfully. Results saved to {}",
         output_dir.display()
-    ));
-    
+    ),
+    );
+
     Ok(())
 }
