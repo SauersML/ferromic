@@ -242,22 +242,14 @@ pub fn compute_chromosome_pca(
 
     let mut pca = PCA::new();
 
-    // Use randomized SVD without cloning the data matrix
-    if let Err(e) = pca.rfit(
-        data_matrix.clone(), // clone here due to library API
-        n_components,
-        5,        // oversampling parameter
-        Some(42), // random seed
-        None,     // no variance tolerance filter
-    ) {
-        return Err(VcfError::Parse(format!("PCA computation failed: {}", e)));
-    }
-
-    // Transform to get PC coordinates
-    let transformed = match pca.transform(data_matrix) {
+    let transformed = match pca.rfit(data_matrix, n_components, 5, Some(42), None) {
         Ok(t) => t,
-        Err(e) => return Err(VcfError::Parse(format!("PCA transformation failed: {}", e))),
+        Err(e) => return Err(VcfError::Parse(format!("PCA computation failed: {}", e))),
     };
+
+    let available_components = transformed.ncols();
+    let kept_components = std::cmp::min(n_components, available_components);
+    let transformed = transformed.slice(s![.., 0..kept_components]).to_owned();
 
     spinner.finish_and_clear();
 
