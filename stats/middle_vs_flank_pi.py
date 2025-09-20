@@ -6,6 +6,7 @@ import math
 import hashlib
 import logging
 from pathlib import Path
+from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 
 import numpy as np
@@ -51,13 +52,84 @@ mpl.rcParams.update({
 })
 
 # ------------------------------------------------------------------------------
-# GLOBAL WINDOW SPECS (exact windows; no overlap)
+# Window specifications (exact windows; no overlap)
 # ------------------------------------------------------------------------------
-MIN_REQUIRED_TOTAL_LENGTH = 40_000   # Must be >= 100 kb total
-FLANK_SIZE = 10_000                   # Exactly 25 kb on each flank
-MIDDLE_SIZE = 20_000                  # Exactly 50 kb centered in the middle
-assert (2 * FLANK_SIZE + MIDDLE_SIZE) == MIN_REQUIRED_TOTAL_LENGTH, \
-    "Window sizes must sum to the minimum required length (100 kb)."
+def _format_bp_to_kb(value: int) -> str:
+    value_kb = value / 1_000
+    if value % 1_000 == 0:
+        return f"{int(value_kb)} kb"
+    formatted = f"{value_kb:.3f}".rstrip("0").rstrip(".")
+    return f"{formatted} kb"
+
+
+def _format_bp_slug(value: int) -> str:
+    value_kb = value / 1_000
+    if value % 1_000 == 0:
+        return f"{int(value_kb)}kb"
+    formatted = f"{value_kb:.3f}".rstrip("0").rstrip(".")
+    return f"{formatted.replace('.', 'p')}kb"
+
+
+@dataclass(frozen=True)
+class WindowSpec:
+    total_length: int
+    flank_size: int
+    middle_size: int
+
+    def __post_init__(self) -> None:
+        if self.total_length <= 0:
+            raise ValueError("Total length must be positive.")
+        if self.flank_size <= 0:
+            raise ValueError("Flank size must be positive.")
+        if self.middle_size <= 0:
+            raise ValueError("Middle size must be positive.")
+        if (2 * self.flank_size + self.middle_size) != self.total_length:
+            raise ValueError(
+                "Window sizes must satisfy: total = 2 * flank + middle."
+            )
+
+    @property
+    def slug(self) -> str:
+        return _format_bp_slug(self.total_length)
+
+    @property
+    def total_label(self) -> str:
+        return _format_bp_to_kb(self.total_length)
+
+    @property
+    def flank_label(self) -> str:
+        return _format_bp_to_kb(self.flank_size)
+
+    @property
+    def middle_label(self) -> str:
+        return _format_bp_to_kb(self.middle_size)
+
+    @property
+    def description(self) -> str:
+        return (
+            f"{self.total_label} total "
+            f"(flanks {self.flank_label} each, middle {self.middle_label})"
+        )
+
+
+TOTAL_WINDOW_LENGTHS = [20_000, 40_000, 80_000, 100_000]
+WINDOW_SPECS: List[WindowSpec] = []
+for total in TOTAL_WINDOW_LENGTHS:
+    if total % 4 != 0:
+        raise ValueError(
+            f"Total window length {total:,} bp must be divisible by 4 to define symmetric flanks and middle."
+        )
+    flank = total // 4
+    middle = total // 2
+    WINDOW_SPECS.append(
+        WindowSpec(total_length=total, flank_size=flank, middle_size=middle)
+    )
+
+# Output directories are organized by total window size (e.g., total_20kb)
+def ensure_output_dir(spec: WindowSpec) -> Path:
+    out = OUTPUT_BASE_DIR / f"total_{spec.slug}"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
 
 # ------------------------------------------------------------------------------
 # Other Constants & File Paths
@@ -66,8 +138,8 @@ PERMUTATIONS = 10_000
 
 PI_DATA_FILE = "per_site_diversity_output.falsta"
 INVERSION_FILE = "inv_info.tsv"
-OUTPUT_DIR = Path("pi_analysis_results_exact_mf_quadrants")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_BASE_DIR = Path("pi_analysis_results_exact_mf_quadrants")
+OUTPUT_BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ------------------------------------------------------------------------------
 # Category Mappings & Order
@@ -290,10 +362,10 @@ def parse_pi_data_line(line: str) -> Optional[np.ndarray]:
         return None
 
 
-def load_pi_data(file_path: str | Path) -> List[dict]:
+def load_pi_data(file_path: str | Path, min_total_length: int) -> List[dict]:
     logger.info(f"Loading pi data from {file_path}")
     logger.info(
-        f"Applying filters: Header must contain 'filtered_pi', Sequence length ≥ {MIN_REQUIRED_TOTAL_LENGTH:,} (total)"
+        f"Applying filters: Header must contain 'filtered_pi', Sequence length ≥ {min_total_length:,} (total)"
     )
     start_time = time.time()
 
@@ -324,7 +396,7 @@ def load_pi_data(file_path: str | Path) -> List[dict]:
                         pi_data = parse_pi_data_line(full)
                         if pi_data is not None:
                             length = len(pi_data)
-                            if length >= MIN_REQUIRED_TOTAL_LENGTH:
+                            if length >= min_total_length:
                                 coords = extract_coordinates_from_header(current_header)
                                 if coords:
                                     if coords.get("group") is not None:
@@ -371,7 +443,7 @@ def load_pi_data(file_path: str | Path) -> List[dict]:
                 pi_data = parse_pi_data_line(full)
                 if pi_data is not None:
                     length = len(pi_data)
-                    if length >= MIN_REQUIRED_TOTAL_LENGTH:
+                    if length >= min_total_length:
                         coords = extract_coordinates_from_header(current_header)
                         if coords:
                             if coords.get("group") is not None:
@@ -405,7 +477,7 @@ def load_pi_data(file_path: str | Path) -> List[dict]:
         f"Read {headers_read} headers, processed {sequences_processed} candidate 'filtered_pi' sequences in {elapsed_time:.2f}s."
     )
     logger.info(
-        f"Loaded {len(pi_sequences)} valid sequences (filtered_pi, length ≥ {MIN_REQUIRED_TOTAL_LENGTH:,}, valid coords, group)."
+        f"Loaded {len(pi_sequences)} valid sequences (filtered_pi, length ≥ {min_total_length:,}, valid coords, group)."
     )
     logger.info("Skipped counts: "
                 f"Not 'filtered_pi'={skipped_not_filtered_pi}, "
@@ -416,15 +488,21 @@ def load_pi_data(file_path: str | Path) -> List[dict]:
     return pi_sequences
 
 
-def calculate_flanking_stats(pi_sequences: List[dict]) -> List[dict]:
+def calculate_flanking_stats(pi_sequences: List[dict], spec: WindowSpec) -> List[dict]:
     """
-    EXACT windows:
-      - Left flank:  first  FLANK_SIZE bases
-      - Middle:      centered window of MIDDLE_SIZE bases
-      - Right flank: last   FLANK_SIZE bases
-    Total length must be ≥ MIN_REQUIRED_TOTAL_LENGTH. Windows never overlap.
+    EXACT windows defined by ``spec``:
+      - Left flank:  first  ``spec.flank_size`` bases
+      - Middle:      centered window of ``spec.middle_size`` bases
+      - Right flank: last   ``spec.flank_size`` bases
+    Total length must be ≥ ``spec.total_length``. Windows never overlap.
     """
-    logger.info(f"Calculating flanking and middle statistics for {len(pi_sequences)} sequences...")
+    logger.info(
+        "Calculating flanking and middle statistics for %d sequences (total=%s, flank=%s, middle=%s)...",
+        len(pi_sequences),
+        spec.total_label,
+        spec.flank_label,
+        spec.middle_label,
+    )
     start_time = time.time()
     results: List[dict] = []
     skipped_too_short_total = 0
@@ -434,20 +512,23 @@ def calculate_flanking_stats(pi_sequences: List[dict]) -> List[dict]:
     for seq in pi_sequences:
         data = seq["data"]
         L = len(data)
-        if L < MIN_REQUIRED_TOTAL_LENGTH:
+        if L < spec.total_length:
             skipped_too_short_total += 1
             continue
 
         # Exact windows
-        beginning_flank = data[:FLANK_SIZE]
-        ending_flank = data[-FLANK_SIZE:]
+        beginning_flank = data[:spec.flank_size]
+        ending_flank = data[-spec.flank_size:]
 
-        # Centered 50kb middle
-        start_middle = (L - MIDDLE_SIZE) // 2
-        end_middle = start_middle + MIDDLE_SIZE
+        # Centered middle window
+        start_middle = (L - spec.middle_size) // 2
+        end_middle = start_middle + spec.middle_size
         middle_region = data[start_middle:end_middle]
 
-        if not (FLANK_SIZE <= start_middle and end_middle <= (L - FLANK_SIZE)):
+        if not (
+            spec.flank_size <= start_middle
+            and end_middle <= (L - spec.flank_size)
+        ):
             logger.warning(
                 f"Middle window overlaps flanks (len={L}, start_mid={start_middle}, end_mid={end_middle}). Skipping."
             )
@@ -458,6 +539,9 @@ def calculate_flanking_stats(pi_sequences: List[dict]) -> List[dict]:
             "coords": seq["coords"],
             "is_inverted": seq["is_inverted"],
             "length": seq["length"],
+            "window_total_bp": spec.total_length,
+            "window_flank_bp": spec.flank_size,
+            "window_middle_bp": spec.middle_size,
             "beginning_mean": np.nanmean(beginning_flank),
             "ending_mean": np.nanmean(ending_flank),
             "middle_mean": np.nanmean(middle_region),
@@ -481,7 +565,9 @@ def calculate_flanking_stats(pi_sequences: List[dict]) -> List[dict]:
     elapsed_time = time.time() - start_time
     logger.info(f"Calculated stats for {len(results)} sequences in {elapsed_time:.2f}s.")
     if skipped_too_short_total:
-        logger.warning(f"Skipped {skipped_too_short_total} sequences too short for exact windows (need ≥ {MIN_REQUIRED_TOTAL_LENGTH:,}).")
+        logger.warning(
+            f"Skipped {skipped_too_short_total} sequences too short for exact windows (need ≥ {spec.total_length:,})."
+        )
     if skipped_nan_middle:
         logger.warning(f"Skipped {skipped_nan_middle} sequences (NaN middle mean).")
     if skipped_nan_flanks:
@@ -797,7 +883,9 @@ def _annotate_p_bracket(ax, x1: float, x2: float, y: float, label: str) -> None:
     ax.plot([x1, x1, x2, x2], [y0, y, y, y0], color=AX_TEXT, linewidth=1.1, zorder=10, clip_on=False)
     ax.text((x1 + x2) * 0.5, y + tick * 0.6, label, ha="center", va="bottom", color=AX_TEXT, fontsize=11, zorder=10, clip_on=False)
 
-def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional[plt.Figure]:
+def create_mf_quadrant_violins(
+    categories: dict, test_results: dict, output_dir: Path, spec: WindowSpec
+) -> Optional[plt.Figure]:
     """
     Build a 2x2 grid of subplots:
       [Single-event Inverted]  [Single-event Direct]
@@ -806,7 +894,10 @@ def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional
     an annotation box with n, permutation p-value, and Shapiro–Wilk p-value.
     Right column: legend (top) + thin horizontal colorbar (bottom).
     """
-    logger.info("Creating Middle vs Flank quadrant violins...")
+    logger.info(
+        "Creating Middle vs Flank quadrant violins for %s...",
+        spec.description,
+    )
     start_time = time.time()
 
     bins = _prepare_category_bins(categories)
@@ -838,6 +929,12 @@ def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional
     
     # Layout: 2 rows x 3 columns (last col used for legend & colorbar)
     fig = plt.figure(figsize=(12, 8.0))
+    fig.suptitle(
+        f"Middle vs Flank π — {spec.total_label} total (flanks {spec.flank_label} each, middle {spec.middle_label})",
+        fontsize=16,
+        color=AX_TEXT,
+        y=0.98,
+    )
     gs = fig.add_gridspec(
         2, 3,
         width_ratios=[1.0, 1.0, 0.72],
@@ -946,9 +1043,9 @@ def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional
     new_w = pos.width * 0.84
     cax.set_position([new_x, new_y, new_w, new_h])
 
-    out = OUTPUT_DIR / "pi_mf_quadrant_violins.pdf"
+    out = output_dir / f"pi_mf_quadrant_violins_total_{spec.slug}.pdf"
     try:
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0, 1, 0.96))
     except Exception:
         pass
     try:
@@ -963,9 +1060,11 @@ def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional
 
 # ------------------------------------------------------------------------------
 def main():
-    t0 = time.time()
+    overall_start = time.time()
     logger.info("--- Starting Pi Flanking Regions Analysis ---")
-    logger.info("--- EXACT Windows: 25 kb flanks, 50 kb centered middle; ≥100 kb total ---")
+    logger.info("Configured window specifications:")
+    for spec in WINDOW_SPECS:
+        logger.info("  • %s", spec.description)
 
     # Log font resolution (debug)
     try:
@@ -974,7 +1073,7 @@ def main():
     except Exception as e:
         logger.warning(f"Could not resolve 'DejaVu Sans': {e}")
 
-    # Load inversion info
+    # Load inversion info once
     inv_file_path = Path(INVERSION_FILE)
     if not inv_file_path.is_file():
         logger.error(f"Inversion info file not found: {inv_file_path}")
@@ -986,69 +1085,99 @@ def main():
         return
     recurrent_regions, single_event_regions = map_regions_to_inversions(inv_df)
 
-    # Load pi data
     pi_path = Path(PI_DATA_FILE)
     if not pi_path.is_file():
         logger.error(f"Pi data file not found: {pi_path}")
         return
-    pi_sequences = load_pi_data(pi_path)
-    if not pi_sequences:
-        logger.error("No valid sequences after filtering. Exiting.")
-        return
 
-    # Stats
-    flanking_stats = calculate_flanking_stats(pi_sequences)
-    if not flanking_stats:
-        logger.error("No sequences after flanking stats (NaN/length issues). Exiting.")
-        return
+    successful_runs = 0
+    for spec in WINDOW_SPECS:
+        run_start = time.time()
+        logger.info("\n%s", "=" * 95)
+        logger.info(">>> Analyzing window specification: %s", spec.description)
+        output_dir = ensure_output_dir(spec)
 
-    # Categorize sequences
-    categories = categorize_sequences(flanking_stats, recurrent_regions, single_event_regions)
+        pi_sequences = load_pi_data(pi_path, spec.total_length)
+        if not pi_sequences:
+            logger.error(
+                "No valid sequences after filtering for %s. Skipping.",
+                spec.description,
+            )
+            continue
 
-    # Create a new list containing only the sequences that were successfully categorized.
-    # This filters out any sequences classified as "unknown" or "ambiguous".
-    filtered_flanking_stats = []
-    for key in CATEGORY_KEYS:
-        filtered_flanking_stats.extend(categories.get(key, []))
-    logger.info(f"Filtered out ambiguous/unknown sequences. Kept {len(filtered_flanking_stats)} for final analysis.")
+        flanking_stats = calculate_flanking_stats(pi_sequences, spec)
+        if not flanking_stats:
+            logger.error(
+                "No sequences after flanking stats (NaN/length issues) for %s. Skipping.",
+                spec.description,
+            )
+            continue
 
-
-    # Perform tests using the filtered list for the "Overall" category
-    tests = perform_statistical_tests(categories, filtered_flanking_stats)
-
-    # Print summary statistics for each group, using the filtered list for "Overall"
-    print_summary_statistics(filtered_flanking_stats, "Overall")
-    for name, key in zip(CATEGORY_ORDER, CATEGORY_KEYS):
-        print_summary_statistics(categories.get(key, []), name)
-
-    logger.info("\n--- Permutation Test Results ---")
-    for name in ["Single-event Inverted", "Single-event Direct", "Recurrent Inverted", "Recurrent Direct", "Overall"]:
-        tr = tests.get(name, {})
-        logger.info(
-            f"[{name}] n={tr.get('n_valid_pairs', 0)}  "
-            f"perm_p={_format_p_value_for_annotation(tr.get('mean_p', np.nan))}  "
-            f"shapiro_p={_format_p_value_for_annotation(tr.get('mean_normality_p', np.nan))}"
+        categories = categorize_sequences(
+            flanking_stats, recurrent_regions, single_event_regions
         )
-    try:
-        pd.DataFrame.from_dict(tests, orient="index").to_csv(OUTPUT_DIR / "mf_permtest_results.csv", index_label="group")
-        logger.info(f"Saved test results to {OUTPUT_DIR / 'mf_permtest_results.csv'}")
-    except Exception as e:
-        logger.error(f"Failed to save test results: {e}")
 
-    # Plot: FOUR SUBPLOTS (each with two violins) + right legend + thin horizontal colorbar
-    fig = create_mf_quadrant_violins(categories, tests)
+        filtered_flanking_stats: List[dict] = []
+        for key in CATEGORY_KEYS:
+            filtered_flanking_stats.extend(categories.get(key, []))
+        logger.info(
+            "Filtered out ambiguous/unknown sequences. Kept %d for final analysis.",
+            len(filtered_flanking_stats),
+        )
 
-    # Summary log (plain decimals)
-    logger.info("\n--- Analysis Summary ---")
-    logger.info(f"Input Pi File: {PI_DATA_FILE}")
-    logger.info(f"Input Inversion File: {INVERSION_FILE}")
-    logger.info(f"Total sequences in final analysis: {len(filtered_flanking_stats)}")
+        tests = perform_statistical_tests(categories, filtered_flanking_stats)
 
-    logger.info("-" * 95)
-    logger.info(f"--- Finished in {time.time() - t0:.2f}s ---")
+        logger.info("\n=== Summary Statistics (%s) ===", spec.description)
+        print_summary_statistics(filtered_flanking_stats, "Overall")
+        for name, key in zip(CATEGORY_ORDER, CATEGORY_KEYS):
+            print_summary_statistics(categories.get(key, []), name)
 
-    if fig:
-        plt.close(fig)
+        logger.info("\n--- Permutation Test Results (%s) ---", spec.description)
+        for name in [
+            "Single-event Inverted",
+            "Single-event Direct",
+            "Recurrent Inverted",
+            "Recurrent Direct",
+            "Overall",
+        ]:
+            tr = tests.get(name, {})
+            logger.info(
+                f"[{name}] n={tr.get('n_valid_pairs', 0)}  "
+                f"perm_p={_format_p_value_for_annotation(tr.get('mean_p', np.nan))}  "
+                f"shapiro_p={_format_p_value_for_annotation(tr.get('mean_normality_p', np.nan))}"
+            )
+
+        tests_path = output_dir / f"mf_permtest_results_{spec.slug}.csv"
+        try:
+            pd.DataFrame.from_dict(tests, orient="index").to_csv(
+                tests_path, index_label="group"
+            )
+            logger.info(f"Saved test results to {tests_path}")
+        except Exception as e:
+            logger.error(f"Failed to save test results: {e}")
+
+        fig = create_mf_quadrant_violins(categories, tests, output_dir, spec)
+
+        logger.info("\n--- Analysis Summary (%s) ---", spec.description)
+        logger.info(f"Input Pi File: {PI_DATA_FILE}")
+        logger.info(f"Input Inversion File: {INVERSION_FILE}")
+        logger.info(
+            f"Total sequences in final analysis: {len(filtered_flanking_stats)}"
+        )
+        logger.info("--- Finished %s in %.2fs ---", spec.description, time.time() - run_start)
+
+        if fig:
+            plt.close(fig)
+
+        successful_runs += 1
+
+    logger.info("\n%s", "=" * 95)
+    logger.info(
+        "Completed %d of %d window specifications in %.2fs.",
+        successful_runs,
+        len(WINDOW_SPECS),
+        time.time() - overall_start,
+    )
 
 if __name__ == "__main__":
     main()
