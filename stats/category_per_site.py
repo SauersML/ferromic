@@ -28,10 +28,10 @@ MIN_LEN_FST    = 100_000
 MAX_BP         = 100_000          # cap distance from inversion edge
 
 # Proportion mode
-NUM_BINS_PROP  = 100
+NUM_BINS_PROP  = 50
 
 # Base-pair mode 
-NUM_BINS_BP    = 100               # number of bins between 0..MAX_BP
+NUM_BINS_BP    = 50               # number of bins between 0..MAX_BP
 
 # Plotting/analysis rules
 LOWESS_FRAC     = 0.4
@@ -297,7 +297,7 @@ def _kernel_regress_1d(
         dx = 1.0
 
     # ----- single knob → base sigma in *bin units* -----
-    f = 0.4 if (frac is None or not np.isfinite(float(frac))) else float(frac)
+    f = 1.0 if (frac is None or not np.isfinite(float(frac))) else float(frac)
     # map 'frac' to σ so ~95% mass spans ≈ frac * n_points bins
     base_sigma_bins = max(0.5, (f * max(xs.size, 1.0)) / 4.0)
 
