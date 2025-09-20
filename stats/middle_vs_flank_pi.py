@@ -112,7 +112,7 @@ class WindowSpec:
         )
 
 
-TOTAL_WINDOW_LENGTHS = [20_000, 40_000, 80_000, 100_000]
+TOTAL_WINDOW_LENGTHS = [20_000, 40_000, 60_000 80_000, 100_000, 200_000]
 WINDOW_SPECS: List[WindowSpec] = []
 for total in TOTAL_WINDOW_LENGTHS:
     if total % 4 != 0:
