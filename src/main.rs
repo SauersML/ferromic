@@ -1,16 +1,16 @@
-use std::path::{Path, PathBuf};
+use anyhow::{bail, Context, Result};
+use clap::Parser;
+use colored::*;
+use flate2::read::MultiGzDecoder;
+use human_bytes::human_bytes;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use std::fs::{self, File};
-use std::io::{Read, Write, BufReader, BufWriter, BufRead};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use rayon::prelude::*;
-use flate2::read::MultiGzDecoder;
-use anyhow::{Context, Result, bail};
-use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
-use colored::*;
-use human_bytes::human_bytes;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -50,7 +50,10 @@ fn main() -> Result<()> {
         bail!("No VCF files found in the input directory");
     }
 
-    println!("Found {} VCF files. Starting concatenation...", vcf_files.len().to_string().green());
+    println!(
+        "Found {} VCF files. Starting concatenation...",
+        vcf_files.len().to_string().green()
+    );
 
     let runtime = Runtime::new().context("Failed to create Tokio runtime")?;
     runtime.block_on(async {
@@ -93,12 +96,18 @@ fn discover_and_sort_vcf_files(dir: &str) -> Result<Vec<VcfFile>> {
     let mut sorted_files = vcf_files;
     sorted_files.par_sort_unstable_by(|a, b| custom_chromosome_sort(&a.chromosome, &b.chromosome));
 
-    println!("Total VCF files found: {}", sorted_files.len().to_string().green());
+    println!(
+        "Total VCF files found: {}",
+        sorted_files.len().to_string().green()
+    );
     Ok(sorted_files)
 }
 
 fn custom_chromosome_sort(a: &str, b: &str) -> std::cmp::Ordering {
-    let order = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "X", "Y", "MT"];
+    let order = [
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
+        "17", "18", "19", "20", "21", "22", "X", "Y", "MT",
+    ];
     let a_pos = order.iter().position(|&x| x == a);
     let b_pos = order.iter().position(|&x| x == b);
     a_pos.cmp(&b_pos)
@@ -132,15 +141,23 @@ fn get_chromosome(path: &Path) -> Result<String> {
         }
     }
 
-    first_data_line.split('\t')
+    first_data_line
+        .split('\t')
         .next()
         .map(|s| s.trim_start_matches("chr").to_string())
         .context("Failed to extract chromosome from VCF file")
 }
 
-async fn concatenate_files(vcf_files: Vec<VcfFile>, output_file: &str, chunk_size: usize, num_threads: usize) -> Result<()> {
+async fn concatenate_files(
+    vcf_files: Vec<VcfFile>,
+    output_file: &str,
+    chunk_size: usize,
+    num_threads: usize,
+) -> Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(num_threads);
-    let output = Arc::new(tokio::sync::Mutex::new(BufWriter::new(File::create(output_file)?)));
+    let output = Arc::new(tokio::sync::Mutex::new(BufWriter::new(File::create(
+        output_file,
+    )?)));
 
     println!("Extracting header from the first file...");
     let header = extract_header(&vcf_files[0])?;
@@ -150,19 +167,25 @@ async fn concatenate_files(vcf_files: Vec<VcfFile>, output_file: &str, chunk_siz
     let progress = Arc::new(AtomicUsize::new(0));
     let total_files = vcf_files.len();
     let multi_progress = MultiProgress::new();
-    
+
     let overall_pb = multi_progress.add(ProgressBar::new(total_files as u64));
-    overall_pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
-        .expect("Failed to set progress bar template")
-        .progress_chars("#>-"));
+    overall_pb.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
+            )
+            .expect("Failed to set progress bar template")
+            .progress_chars("#>-"),
+    );
     overall_pb.set_message("Overall progress");
 
     let file_pb = multi_progress.add(ProgressBar::new(100));
-    file_pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {msg}")
-        .expect("Failed to set progress bar template")
-        .progress_chars("#>-"));
+    file_pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {msg}")
+            .expect("Failed to set progress bar template")
+            .progress_chars("#>-"),
+    );
     file_pb.set_message("Current file progress");
 
     println!("Starting parallel file processing...");
@@ -193,7 +216,10 @@ async fn concatenate_files(vcf_files: Vec<VcfFile>, output_file: &str, chunk_siz
     overall_pb.finish_with_message("Concatenation completed");
     file_pb.finish_with_message("All files processed");
 
-    println!("Total data processed: {}", human_bytes(total_bytes_processed as f64).green());
+    println!(
+        "Total data processed: {}",
+        human_bytes(total_bytes_processed as f64).green()
+    );
     Ok(())
 }
 
