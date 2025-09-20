@@ -878,7 +878,8 @@ def create_mf_quadrant_violins(categories: dict, test_results: dict) -> Optional
         
         ax.set_title(title_map[key], fontsize=14, color=AX_TEXT, pad=20)
         ax.set_xlim(-0.55, 1.55)
-        ax.set_ylim(y_lo, y_hi)        _draw_two_violins(ax, vals, pos, flank_color, middle_color, hatch_pattern, hatch_edge_color)
+        ax.set_ylim(y_lo, y_hi)        
+        _draw_two_violins(ax, vals, pos, flank_color, middle_color, hatch_pattern, hatch_edge_color)
         
         _overlay_boxplots(ax, vals, pos)
         
