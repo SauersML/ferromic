@@ -1,6 +1,7 @@
 use efficient_pca::PCA;
 use ndarray::s;
 use ndarray::Array2;
+use numpy::ndarray::ArrayView3;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -35,51 +36,82 @@ pub fn compute_chromosome_pca(
     n_components: usize,
 ) -> Result<PcaResult, VcfError> {
     set_stage(ProcessingStage::PcaAnalysis);
-    let spinner = create_spinner(&format!("Computing PCA for {} variants", variants.len()));
+    let spinner = create_spinner(&format!(
+        "Preparing PCA matrix for {} variants",
+        variants.len()
+    ));
 
-    // Count valid variants without materializing them
-    let mut valid_count = variants
-        .iter()
-        .filter(|v| {
-            v.genotypes.iter().all(|g| match g {
-                None => false,
-                Some(alleles) => alleles.len() >= 2,
-            })
-        })
-        .count();
+    if variants.is_empty() {
+        return Err(VcfError::Parse("No variants provided for PCA".to_string()));
+    }
+
+    let sample_count = sample_names.len();
+    let n_haplotypes = sample_count * 2;
+
+    let mut complete_variants = Vec::new();
+    let mut maf_filtered_indices = Vec::new();
+    let mut filtered_positions = Vec::new();
+
+    for (variant_idx, variant) in variants.iter().enumerate() {
+        if variant.genotypes.len() != sample_count {
+            spinner.finish_and_clear();
+            return Err(VcfError::Parse(format!(
+                "variant {} contains {} samples but {} names were provided",
+                variant_idx,
+                variant.genotypes.len(),
+                sample_count
+            )));
+        }
+
+        let mut allele_sum = 0.0f64;
+        let mut complete = true;
+        for genotype in &variant.genotypes {
+            let Some(alleles) = genotype else {
+                complete = false;
+                break;
+            };
+            if alleles.len() < 2 {
+                complete = false;
+                break;
+            }
+            allele_sum += alleles[0] as f64 + alleles[1] as f64;
+        }
+
+        if !complete {
+            continue;
+        }
+
+        complete_variants.push(variant_idx);
+
+        let allele_freq = allele_sum / n_haplotypes as f64;
+        let maf = allele_freq.min(1.0 - allele_freq);
+        if maf >= 0.05 {
+            maf_filtered_indices.push(variant_idx);
+            filtered_positions.push(variant.position);
+        }
+    }
 
     log(
         LogLevel::Info,
         &format!(
             "Found {} variants with complete data out of {} total variants",
-            valid_count,
+            complete_variants.len(),
             variants.len()
         ),
     );
 
-    if valid_count == 0 {
-        return Err(VcfError::Parse(
-            "No variants without missing data found".to_string(),
-        ));
-    }
-
-    // Number of haplotypes (2 per sample)
-    let n_haplotypes = sample_names.len() * 2;
-
-    // Calculate maximum valid number of components
-    let max_components = std::cmp::min(valid_count, n_haplotypes);
+    let max_components = std::cmp::min(complete_variants.len(), n_haplotypes);
     let n_components = std::cmp::min(n_components, max_components);
 
-    // Display statistics
     display_status_box(StatusBox {
         title: "Chromosome PCA Data Preparation".to_string(),
         stats: vec![
             ("Total variants".to_string(), variants.len().to_string()),
             (
                 "Variants with complete data".to_string(),
-                valid_count.to_string(),
+                complete_variants.len().to_string(),
             ),
-            ("Samples".to_string(), sample_names.len().to_string()),
+            ("Samples".to_string(), sample_count.to_string()),
             (
                 "Haplotypes (2 per sample)".to_string(),
                 n_haplotypes.to_string(),
@@ -88,163 +120,203 @@ pub fn compute_chromosome_pca(
         ],
     });
 
-    // Create data matrix efficiently
-    let mut data_matrix = Array2::<f64>::zeros((n_haplotypes, valid_count));
-    let mut positions = Vec::with_capacity(valid_count);
-
-    // Fill data matrix without collecting filtered variants first
-    let mut valid_idx = 0;
-    for variant in variants {
-        // Check if this variant has complete data
-        if variant.genotypes.iter().all(|g| match g {
-            None => false,
-            Some(alleles) => alleles.len() >= 2,
-        }) {
-            positions.push(variant.position);
-
-            // Add each haplotype's data
-            for (sample_idx, genotypes_opt) in variant.genotypes.iter().enumerate() {
-                if let Some(genotypes) = genotypes_opt {
-                    if genotypes.len() >= 2 {
-                        // Left haplotype
-                        let left_idx = sample_idx * 2;
-                        data_matrix[[left_idx, valid_idx]] = genotypes[0] as f64;
-
-                        // Right haplotype
-                        let right_idx = sample_idx * 2 + 1;
-                        data_matrix[[right_idx, valid_idx]] = genotypes[1] as f64;
-                    }
-                }
-            }
-            valid_idx += 1;
-        }
-    }
-
-    // Sanity check the matrix dimensions
-    if valid_idx != valid_count {
-        log(
-            LogLevel::Warning,
-            &format!(
-                "Matrix inconsistency: Expected {} columns but found {}",
-                valid_count, valid_idx
-            ),
-        );
-
-        // Resize the matrix if needed
-        if valid_idx < valid_count {
-            data_matrix = data_matrix.slice(s![.., 0..valid_idx]).to_owned();
-            positions.truncate(valid_idx);
-            valid_count = valid_idx; // Update valid_count to match actual size
-        }
-    }
-
-    // Filter variants by Minor Allele Frequency to prevent numerical instability in PCA
-    log(
-        LogLevel::Info,
-        "Filtering variants by Minor Allele Frequency (MAF) for PCA stability",
-    );
-    let mut filtered_indices = Vec::new();
-
-    for c in 0..valid_count {
-        // Get the current variant column from the data matrix
-        let column = data_matrix.slice(s![.., c]);
-
-        // Count number of non-reference alleles (1s) in this column
-        let allele_count: f64 = column.iter().sum();
-
-        // Calculate allele frequency (proportion of 1s)
-        let allele_freq = allele_count / column.len() as f64;
-
-        // Calculate true Minor Allele Frequency - the frequency of the less common allele
-        // If allele_freq > 0.5, then ref allele (0) is minor, so MAF = 1 - allele_freq
-        // If allele_freq <= 0.5, then alt allele (1) is minor, so MAF = allele_freq
-        let maf = allele_freq.min(1.0 - allele_freq);
-
-        // Keep only variants with MAF >= 5% to ensure numerical stability
-        if maf >= 0.05 {
-            filtered_indices.push(c);
-        }
+    if maf_filtered_indices.is_empty() {
+        spinner.finish_and_clear();
+        return Err(VcfError::Parse(
+            "No variants with MAF >= 5% found for PCA".to_string(),
+        ));
     }
 
     log(
         LogLevel::Info,
         &format!(
             "Keeping {}/{} variants with MAF >= 5% for PCA",
-            filtered_indices.len(),
-            valid_count
+            maf_filtered_indices.len(),
+            complete_variants.len()
         ),
     );
 
-    if filtered_indices.is_empty() {
-        return Err(VcfError::Parse(
-            "No variants with MAF >= 5% found for PCA".to_string(),
-        ));
-    }
-
-    // Create a new matrix containing only the variants with sufficient MAF
-    let mut filtered_matrix = Array2::<f64>::zeros((n_haplotypes, filtered_indices.len()));
-    let mut filtered_positions = Vec::with_capacity(filtered_indices.len());
-
-    // Copy selected columns (variants) to the new filtered matrix
-    for (new_idx, &old_idx) in filtered_indices.iter().enumerate() {
-        // Copy all sample values for this variant
-        for r in 0..n_haplotypes {
-            filtered_matrix[[r, new_idx]] = data_matrix[[r, old_idx]];
-        }
-
-        // Keep track of the genomic positions for these variants
-        filtered_positions.push(positions[old_idx]);
-    }
-
-    // Replace the original data with the filtered data for subsequent processing
-    data_matrix = filtered_matrix;
-    positions = filtered_positions;
-
-    // Debug prints to investigate potential NaN causes:
-    log(
-        LogLevel::Info,
-        &format!(
-            "Debug PCA: final valid_idx = {}, total variants in 'variants' = {}",
-            valid_idx,
-            variants.len()
-        ),
-    );
-    let row_count = data_matrix.nrows();
-    let col_count = data_matrix.ncols();
-    log(
-        LogLevel::Info,
-        &format!(
-            "Debug PCA: matrix dimensions = {} rows (haplotypes) x {} columns (sites)",
-            row_count, col_count
-        ),
-    );
-    if col_count > 0 {
-        let check_limit = if col_count < 5 { col_count } else { 5 };
-        for c in 0..check_limit {
-            let column_slice = data_matrix.slice(s![.., c]);
-            let min_val = column_slice.fold(f64::INFINITY, |acc, &x| if x < acc { x } else { acc });
-            let max_val =
-                column_slice.fold(f64::NEG_INFINITY, |acc, &x| if x > acc { x } else { acc });
-            log(
-                LogLevel::Info,
-                &format!(
-                    "Debug PCA: column {} => min={}, max={}",
-                    c, min_val, max_val
-                ),
-            );
+    let mut data_matrix = Array2::<f64>::zeros((n_haplotypes, maf_filtered_indices.len()));
+    for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
+        let variant = &variants[variant_idx];
+        for (sample_idx, genotype) in variant.genotypes.iter().enumerate() {
+            let alleles = genotype
+                .as_ref()
+                .expect("filtered variants lack missing data");
+            data_matrix[[sample_idx * 2, column_idx]] = alleles[0] as f64;
+            data_matrix[[sample_idx * 2 + 1, column_idx]] = alleles[1] as f64;
         }
     }
 
     spinner.finish_and_clear();
 
-    // Apply PCA using the library
-    let spinner = create_spinner("Computing PCA");
+    run_pca_analysis(data_matrix, sample_names, n_components, filtered_positions)
+}
 
+pub fn compute_chromosome_pca_from_dense(
+    genotypes: ArrayView3<'_, i16>,
+    positions: &[i64],
+    sample_names: &[String],
+    n_components: usize,
+) -> Result<PcaResult, VcfError> {
+    set_stage(ProcessingStage::PcaAnalysis);
+
+    let shape = genotypes.shape();
+    let variant_count = shape[0];
+    let sample_count = shape[1];
+    let ploidy = shape[2];
+
+    if sample_count != sample_names.len() {
+        return Err(VcfError::Parse(format!(
+            "genotype sample dimension {} does not match sample_names length {}",
+            sample_count,
+            sample_names.len()
+        )));
+    }
+    if ploidy != 2 {
+        return Err(VcfError::Parse(format!(
+            "expected diploid genotypes (ploidy=2) but received ploidy {}",
+            ploidy
+        )));
+    }
+    if positions.len() != variant_count {
+        return Err(VcfError::Parse(format!(
+            "positions length {} does not match variant dimension {}",
+            positions.len(),
+            variant_count
+        )));
+    }
+
+    let spinner = create_spinner(&format!(
+        "Preparing PCA matrix for {} dense variants",
+        variant_count
+    ));
+
+    let n_haplotypes = sample_count * 2;
+    let mut complete_count = 0usize;
+    let mut maf_filtered_indices = Vec::new();
+    let mut filtered_positions = Vec::new();
+
+    for variant_idx in 0..variant_count {
+        let mut allele_sum = 0.0f64;
+        let mut complete = true;
+        for sample_idx in 0..sample_count {
+            let left = genotypes[(variant_idx, sample_idx, 0)];
+            let right = genotypes[(variant_idx, sample_idx, 1)];
+            if left < 0 || right < 0 || left > 1 || right > 1 {
+                complete = false;
+                break;
+            }
+            allele_sum += left as f64 + right as f64;
+        }
+        if !complete {
+            continue;
+        }
+
+        complete_count += 1;
+        let allele_freq = allele_sum / n_haplotypes as f64;
+        let maf = allele_freq.min(1.0 - allele_freq);
+        if maf >= 0.05 {
+            maf_filtered_indices.push(variant_idx);
+            filtered_positions.push(positions[variant_idx]);
+        }
+    }
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Dense PCA input: {} variants with complete data out of {}",
+            complete_count, variant_count
+        ),
+    );
+
+    let max_components = std::cmp::min(complete_count, n_haplotypes);
+    let n_components = std::cmp::min(n_components, max_components);
+
+    display_status_box(StatusBox {
+        title: "Chromosome PCA Data Preparation".to_string(),
+        stats: vec![
+            ("Total variants".to_string(), variant_count.to_string()),
+            (
+                "Variants with complete data".to_string(),
+                complete_count.to_string(),
+            ),
+            ("Samples".to_string(), sample_count.to_string()),
+            (
+                "Haplotypes (2 per sample)".to_string(),
+                n_haplotypes.to_string(),
+            ),
+            ("Requested PCs".to_string(), n_components.to_string()),
+        ],
+    });
+
+    if maf_filtered_indices.is_empty() {
+        spinner.finish_and_clear();
+        return Err(VcfError::Parse(
+            "No variants with MAF >= 5% found for PCA".to_string(),
+        ));
+    }
+
+    log(
+        LogLevel::Info,
+        &format!(
+            "Keeping {}/{} dense variants with MAF >= 5%",
+            maf_filtered_indices.len(),
+            complete_count
+        ),
+    );
+
+    let mut data_matrix = Array2::<f64>::zeros((n_haplotypes, maf_filtered_indices.len()));
+    for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
+        for sample_idx in 0..sample_count {
+            let left = genotypes[(variant_idx, sample_idx, 0)] as f64;
+            let right = genotypes[(variant_idx, sample_idx, 1)] as f64;
+            data_matrix[[sample_idx * 2, column_idx]] = left;
+            data_matrix[[sample_idx * 2 + 1, column_idx]] = right;
+        }
+    }
+
+    spinner.finish_and_clear();
+
+    run_pca_analysis(data_matrix, sample_names, n_components, filtered_positions)
+}
+
+fn run_pca_analysis(
+    data_matrix: Array2<f64>,
+    sample_names: &[String],
+    n_components: usize,
+    positions: Vec<i64>,
+) -> Result<PcaResult, VcfError> {
+    if data_matrix.ncols() == 0 {
+        return Err(VcfError::Parse(
+            "No informative variants available for PCA".to_string(),
+        ));
+    }
+
+    let spinner = create_spinner("Computing PCA");
     let mut pca = PCA::new();
 
-    let transformed = match pca.rfit(data_matrix, n_components, 5, Some(42), None) {
-        Ok(t) => t,
-        Err(e) => return Err(VcfError::Parse(format!("PCA computation failed: {}", e))),
+    let transformed = match pca.fit(data_matrix.clone(), None) {
+        Ok(()) => match pca.transform(data_matrix) {
+            Ok(t) => t,
+            Err(e) => {
+                spinner.finish_and_clear();
+                return Err(VcfError::Parse(format!(
+                    "PCA transformation failed after exact fit: {}",
+                    e
+                )));
+            }
+        },
+        Err(_) => {
+            let mut fallback = PCA::new();
+            match fallback.rfit(data_matrix, n_components, 0, Some(42), None) {
+                Ok(t) => t,
+                Err(e) => {
+                    spinner.finish_and_clear();
+                    return Err(VcfError::Parse(format!("PCA computation failed: {}", e)));
+                }
+            }
+        }
     };
 
     let available_components = transformed.ncols();
@@ -253,18 +325,17 @@ pub fn compute_chromosome_pca(
 
     spinner.finish_and_clear();
 
-    // Create haplotype labels
-    let mut haplotype_labels = Vec::with_capacity(n_haplotypes);
+    let mut haplotype_labels = Vec::with_capacity(sample_names.len() * 2);
     for sample_name in sample_names {
-        haplotype_labels.push(format!("{}_L", sample_name)); // Left haplotype
-        haplotype_labels.push(format!("{}_R", sample_name)); // Right haplotype
+        haplotype_labels.push(format!("{}_L", sample_name));
+        haplotype_labels.push(format!("{}_R", sample_name));
     }
 
     log(
         LogLevel::Info,
         &format!(
             "PCA computation complete: generated {} components for {} haplotypes",
-            n_components,
+            kept_components,
             haplotype_labels.len()
         ),
     );
