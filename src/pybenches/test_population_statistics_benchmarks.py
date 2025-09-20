@@ -55,8 +55,9 @@ class BenchmarkDataset:
     allele_counts_total: "allel.AlleleCountsArray"
     allele_counts_pop1: "allel.AlleleCountsArray"
     allele_counts_pop2: "allel.AlleleCountsArray"
-    pop1: Dict[str, object]
-    pop2: Dict[str, object]
+    population: "fm.Population"
+    pop1: "fm.Population"
+    pop2: "fm.Population"
     expected_segregating_sites: int
     expected_nucleotide_diversity: float
     expected_nucleotide_diversity_pop1: float
@@ -133,6 +134,15 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
     ]
     sample_names = [f"sample_{idx}" for idx in range(sample_count)]
 
+    population = fm.Population.from_numpy(
+        "all_samples",
+        genotypes,
+        positions,
+        haplotypes,
+        sequence_length,
+        sample_names=sample_names,
+    )
+
     genotype_array = allel.GenotypeArray(genotypes)
     allele_counts_total = genotype_array.count_alleles(max_allele=2)
 
@@ -178,8 +188,8 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
         )
     )
 
-    pop1 = _build_population("population_1", pop1_indices, haplotypes, variants, sequence_length, sample_names)
-    pop2 = _build_population("population_2", pop2_indices, haplotypes, variants, sequence_length, sample_names)
+    pop1 = _build_population(population, "population_1", pop1_indices, haplotypes)
+    pop2 = _build_population(population, "population_2", pop2_indices, haplotypes)
 
     return BenchmarkDataset(
         identifier=config.identifier,
@@ -192,6 +202,7 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
         allele_counts_total=allele_counts_total,
         allele_counts_pop1=allele_counts_pop1,
         allele_counts_pop2=allele_counts_pop2,
+        population=population,
         pop1=pop1,
         pop2=pop2,
         expected_segregating_sites=int(allele_counts_total.is_segregating().sum()),
@@ -207,26 +218,18 @@ def genotype_dataset(request: pytest.FixtureRequest) -> BenchmarkDataset:
 
 
 def _build_population(
+    base_population: "fm.Population",
     population_id: str,
     sample_indices: Iterable[int],
     haplotypes: Sequence[Tuple[int, int]],
-    variants: Sequence[Dict[str, object]],
-    sequence_length: int,
-    sample_names: Sequence[str],
-) -> Dict[str, object]:
+) -> "fm.Population":
     haplotype_lookup = {
         (sample_index, haplotype_side)
         for sample_index in sample_indices
         for haplotype_side in (0, 1)
     }
     filtered_haplotypes = [h for h in haplotypes if h in haplotype_lookup]
-    return {
-        "id": population_id,
-        "haplotypes": filtered_haplotypes,
-        "variants": variants,
-        "sequence_length": sequence_length,
-        "sample_names": sample_names,
-    }
+    return base_population.with_haplotypes(population_id, filtered_haplotypes)
 
 
 @pytest.fixture(scope="module")
@@ -257,6 +260,7 @@ def test_segregating_sites_matches_scikit_allel(genotype_dataset: BenchmarkDatas
 
     assert ferromic_value == genotype_dataset.expected_segregating_sites
     assert ferromic_value == scikit_value
+    assert genotype_dataset.population.segregating_sites() == ferromic_value
 
 
 def test_nucleotide_diversity_matches_scikit_allel(genotype_dataset: BenchmarkDataset):
@@ -265,8 +269,13 @@ def test_nucleotide_diversity_matches_scikit_allel(genotype_dataset: BenchmarkDa
         genotype_dataset.haplotypes,
         genotype_dataset.sequence_length,
     )
+    population_value = genotype_dataset.population.nucleotide_diversity()
 
     assert ferromic_value == pytest.approx(
+        genotype_dataset.expected_nucleotide_diversity,
+        rel=5e-4,
+    )
+    assert population_value == pytest.approx(
         genotype_dataset.expected_nucleotide_diversity,
         rel=5e-4,
     )
@@ -306,7 +315,7 @@ def test_benchmark_segregating_sites(
 ) -> None:
     if implementation == "ferromic":
         def run() -> int:
-            return fm.segregating_sites(genotype_dataset.variants)
+            return genotype_dataset.population.segregating_sites()
     else:
         allele_counts = genotype_dataset.allele_counts_total
 
@@ -333,11 +342,7 @@ def test_benchmark_nucleotide_diversity(
 ) -> None:
     if implementation == "ferromic":
         def run() -> float:
-            return fm.nucleotide_diversity(
-                genotype_dataset.variants,
-                genotype_dataset.haplotypes,
-                genotype_dataset.sequence_length,
-            )
+            return genotype_dataset.population.nucleotide_diversity()
     else:
         allele_counts = genotype_dataset.allele_counts_total
         positions = genotype_dataset.positions
@@ -379,27 +384,23 @@ def test_benchmark_population_nucleotide_diversity(
 ) -> None:
     populations = {
         "pop1": (
-            genotype_dataset.pop1["haplotypes"],
+            "population_1",
+            genotype_dataset.pop1,
             genotype_dataset.allele_counts_pop1,
             genotype_dataset.expected_nucleotide_diversity_pop1,
-            genotype_dataset.pop1["id"],
         ),
         "pop2": (
-            genotype_dataset.pop2["haplotypes"],
+            "population_2",
+            genotype_dataset.pop2,
             genotype_dataset.allele_counts_pop2,
             genotype_dataset.expected_nucleotide_diversity_pop2,
-            genotype_dataset.pop2["id"],
         ),
     }
-    haplotypes, allele_counts, expected_value, population_id = populations[population_key]
+    population_id, population_obj, allele_counts, expected_value = populations[population_key]
 
     if implementation == "ferromic":
         def run() -> float:
-            return fm.nucleotide_diversity(
-                genotype_dataset.variants,
-                haplotypes,
-                genotype_dataset.sequence_length,
-            )
+            return population_obj.nucleotide_diversity()
     else:
         positions = genotype_dataset.positions
         start = int(positions[0]) if len(positions) else 0

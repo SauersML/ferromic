@@ -1,21 +1,41 @@
-
+use chrono::Local;
 use colored::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use terminal_size::{terminal_size, Width, Height};
-use once_cell::sync::Lazy;
-use chrono::Local;
+use terminal_size::{terminal_size, Height, Width};
 
 // A global tracker that can be accessed from anywhere
-pub static PROGRESS_TRACKER: Lazy<Arc<Mutex<ProgressTracker>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(ProgressTracker::new()))
+pub static PROGRESS_TRACKER: Lazy<Arc<Mutex<ProgressTracker>>> =
+    Lazy::new(|| Arc::new(Mutex::new(ProgressTracker::new())));
+
+static PROGRESS_ALLOWED: Lazy<bool> = Lazy::new(|| {
+    if let Ok(value) = std::env::var("FERROMIC_PROGRESS") {
+        let normalized = value.to_ascii_lowercase();
+        if matches!(normalized.as_str(), "0" | "false" | "off" | "no") {
+            return false;
+        }
+        if matches!(normalized.as_str(), "1" | "true" | "on" | "yes") {
+            return true;
+        }
+    }
+
+    if std::env::var("PYTEST_CURRENT_TEST").is_ok() {
+        return false;
+    }
+
+    std::io::stdout().is_terminal()
 });
+
+fn progress_enabled() -> bool {
+    *PROGRESS_ALLOWED
+}
 
 // Log levels
 #[derive(Clone, Copy)]
@@ -48,28 +68,28 @@ pub struct StatusBox {
 pub struct ProgressTracker {
     // The multi-progress manages all progress bars
     multi_progress: MultiProgress,
-    
+
     // Main progress indicators for different stages
     global_bar: Option<ProgressBar>,
     entry_bar: Option<ProgressBar>,
     step_bar: Option<ProgressBar>,
     variant_bar: Option<ProgressBar>,
-    
+
     // Track the current stage and state
     current_stage: ProcessingStage,
     total_entries: usize,
     current_entry: usize,
     entry_name: String,
-    
+
     // Log file writers
     processing_log: Option<BufWriter<File>>,
     variants_log: Option<BufWriter<File>>,
     transcripts_log: Option<BufWriter<File>>,
     stats_log: Option<BufWriter<File>>,
-    
+
     // Track timing for operations
     start_time: Instant,
-    
+
     // Cache for reusable progress styles
     styles: HashMap<String, ProgressStyle>,
 }
@@ -78,14 +98,14 @@ impl ProgressTracker {
     /// Creates a new ProgressTracker with multiple reusable styles
     pub fn new() -> Self {
         let multi_progress = MultiProgress::new();
-        
+
         // Create default log directory
         let log_dir = PathBuf::from("ferromic_logs");
         let _ = fs::create_dir_all(&log_dir);
-        
+
         // Create reusable styles
         let mut styles = HashMap::new();
-        
+
         // Global progress style with improved layout and ETA
         styles.insert(
             "global".to_string(),
@@ -94,7 +114,7 @@ impl ProgressTracker {
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░"),
         );
-        
+
         // Entry progress style with clear hierarchy
         styles.insert(
             "entry".to_string(),
@@ -103,7 +123,7 @@ impl ProgressTracker {
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░"),
         );
-        
+
         // Step progress style with more detailed information
         styles.insert(
             "step".to_string(),
@@ -112,7 +132,7 @@ impl ProgressTracker {
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░"),
         );
-        
+
         // Variant progress style with enhanced visualization
         styles.insert(
             "variant".to_string(),
@@ -121,7 +141,7 @@ impl ProgressTracker {
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░"),
         );
-        
+
         // Spinner style with contextual information
         styles.insert(
             "spinner".to_string(),
@@ -130,7 +150,7 @@ impl ProgressTracker {
                 .expect("Spinner template error")
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
         );
-        
+
         // Add memory-intensive operation style for operations with heavy memory usage
         styles.insert(
             "memory_intensive".to_string(),
@@ -139,7 +159,7 @@ impl ProgressTracker {
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░"),
         );
-        
+
         // Add IO-intensive operation style
         styles.insert(
             "io_intensive".to_string(),
@@ -148,7 +168,7 @@ impl ProgressTracker {
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░"),
         );
-        
+
         ProgressTracker {
             multi_progress,
             global_bar: None,
@@ -167,7 +187,7 @@ impl ProgressTracker {
             styles,
         }
     }
-    
+
     /// Helper function to create a log file if possible
     fn create_log_file(dir: &Path, filename: &str) -> Option<BufWriter<File>> {
         match OpenOptions::new()
@@ -216,22 +236,25 @@ impl ProgressTracker {
     pub fn init_global_progress(&mut self, total: usize) {
         self.total_entries = total;
         self.current_entry = 0;
-        
+
         let style = self.styles.get("global").cloned().unwrap_or_else(|| {
             ProgressStyle::default_bar()
                 .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} entries {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
         });
-        
+
         let bar = self.multi_progress.add(ProgressBar::new(total as u64));
         bar.set_style(style);
         bar.set_message("Processing config entries...".to_string());
-        
+
         self.global_bar = Some(bar);
-        self.log(LogLevel::Info, &format!("Starting processing of {} config entries", total));
+        self.log(
+            LogLevel::Info,
+            &format!("Starting processing of {} config entries", total),
+        );
     }
-    
+
     /// Update global progress bar
     pub fn update_global_progress(&mut self, current: usize, message: &str) {
         if let Some(bar) = &self.global_bar {
@@ -240,39 +263,39 @@ impl ProgressTracker {
             bar.set_message(message.to_string());
         }
     }
-    
+
     /// Initialize entry progress bar
     pub fn init_entry_progress(&mut self, entry_desc: &str, len: u64) {
         // Clear any existing entry progress
         if let Some(old_bar) = self.entry_bar.take() {
             old_bar.finish_and_clear();
         }
-        
+
         // Also clear step and variant bars
         if let Some(old_bar) = self.step_bar.take() {
             old_bar.finish_and_clear();
         }
-        
+
         if let Some(old_bar) = self.variant_bar.take() {
             old_bar.finish_and_clear();
         }
-        
+
         let style = self.styles.get("entry").cloned().unwrap_or_else(|| {
             ProgressStyle::default_bar()
                 .template("  [{elapsed_precise}] {bar:30.green/white} {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
         });
-        
+
         let bar = self.multi_progress.add(ProgressBar::new(len));
         bar.set_style(style);
         bar.set_message(format!("Processing {}", entry_desc));
-        
+
         self.entry_bar = Some(bar);
         self.entry_name = entry_desc.to_string();
         self.log(LogLevel::Info, &format!("Processing entry: {}", entry_desc));
     }
-    
+
     /// Update entry progress
     pub fn update_entry_progress(&mut self, position: u64, message: &str) {
         if let Some(bar) = &self.entry_bar {
@@ -280,7 +303,7 @@ impl ProgressTracker {
             bar.set_message(message.to_string());
         }
     }
-    
+
     /// Finish entry progress, show summary box
     pub fn finish_entry_progress(&mut self, message: &str) {
         // Calculate entry completion time and statistics
@@ -288,43 +311,57 @@ impl ProgressTracker {
         let execution_time = self.start_time.elapsed();
         let current_entry = self.current_entry + 1; // +1 because we're about to increment it
         let total_entries = self.total_entries;
-        
+
         // Format a detailed completion message with timing
-        let completion_message = format!(
-            "{} (in {:.2}s)", 
-            message, 
-            execution_time.as_secs_f64()
-        );
-        
+        let completion_message = format!("{} (in {:.2}s)", message, execution_time.as_secs_f64());
+
         // Log detailed completion info
-        self.log(LogLevel::Info, &format!(
-            "Entry {}/{} completed: {} - execution time: {:.2}s",
-            current_entry, total_entries, entry_name, execution_time.as_secs_f64()
-        ));
-        
+        self.log(
+            LogLevel::Info,
+            &format!(
+                "Entry {}/{} completed: {} - execution time: {:.2}s",
+                current_entry,
+                total_entries,
+                entry_name,
+                execution_time.as_secs_f64()
+            ),
+        );
+
         // Finish entry progress bar with detailed message
         if let Some(bar) = &self.entry_bar {
             bar.finish_with_message(completion_message);
         }
-    
+
         // Display a mini summary box for this entry (in-place)
         let progress_percentage = (current_entry as f64 / total_entries as f64) * 100.0;
-        
+
         let entry_box = StatusBox {
-            title: format!("Entry {}/{} Complete ({})", current_entry, total_entries, entry_name),
+            title: format!(
+                "Entry {}/{} Complete ({})",
+                current_entry, total_entries, entry_name
+            ),
             stats: vec![
-                (String::from("Progress"), format!("{:.1}%", progress_percentage)),
-                (String::from("Time taken"), format!("{:.2}s", execution_time.as_secs_f64())),
-                (String::from("Remaining entries"), format!("{}", total_entries - current_entry)),
+                (
+                    String::from("Progress"),
+                    format!("{:.1}%", progress_percentage),
+                ),
+                (
+                    String::from("Time taken"),
+                    format!("{:.2}s", execution_time.as_secs_f64()),
+                ),
+                (
+                    String::from("Remaining entries"),
+                    format!("{}", total_entries - current_entry),
+                ),
             ],
         };
         self.display_status_box(entry_box);
-    
+
         // Also update global progress
         if let Some(bar) = &self.global_bar {
             self.current_entry += 1;
             bar.set_position(self.current_entry as u64);
-            
+
             // Estimate remaining time based on average time per entry
             let elapsed_total = self.start_time.elapsed();
             let avg_time_per_entry = if self.current_entry > 0 {
@@ -332,49 +369,51 @@ impl ProgressTracker {
             } else {
                 0.0
             };
-            
+
             let remaining_entries = self.total_entries - self.current_entry;
             let est_remaining_time = avg_time_per_entry * remaining_entries as f64;
-            
+
             bar.set_message(format!(
                 "Completed {}/{}: {} - {:.1}% complete - ~{:.0}s remaining",
-                self.current_entry, self.total_entries, self.entry_name,
+                self.current_entry,
+                self.total_entries,
+                self.entry_name,
                 (self.current_entry as f64 / self.total_entries as f64) * 100.0,
                 est_remaining_time
             ));
         }
-        
+
         // Reset timer for next entry
         self.start_time = Instant::now();
     }
-    
+
     /// Initialize step progress bar
     pub fn init_step_progress(&mut self, step_desc: &str, len: u64) {
         // Clear any existing step progress
         if let Some(old_bar) = self.step_bar.take() {
             old_bar.finish_and_clear();
         }
-        
+
         // Also clear variant bar
         if let Some(old_bar) = self.variant_bar.take() {
             old_bar.finish_and_clear();
         }
-        
+
         let style = self.styles.get("step").cloned().unwrap_or_else(|| {
             ProgressStyle::default_bar()
                 .template("    [{elapsed_precise}] {bar:20.yellow/white} {pos}/{len} {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
         });
-        
+
         let bar = self.multi_progress.add(ProgressBar::new(len));
         bar.set_style(style);
         bar.set_message(format!("{}", step_desc));
-        
+
         self.step_bar = Some(bar);
         self.log(LogLevel::Info, &format!("Starting step: {}", step_desc));
     }
-    
+
     /// Update step progress
     pub fn update_step_progress(&mut self, position: u64, message: &str) {
         if let Some(bar) = &self.step_bar {
@@ -382,36 +421,39 @@ impl ProgressTracker {
             bar.set_message(message.to_string());
         }
     }
-    
+
     /// Finish step progress
     pub fn finish_step_progress(&mut self, message: &str) {
         if let Some(bar) = &self.step_bar {
             bar.finish_with_message(message.to_string());
         }
     }
-    
+
     /// Initialize variant progress bar
     pub fn init_variant_progress(&mut self, desc: &str, len: u64) {
         // Clear any existing variant progress bar
         if let Some(old_bar) = self.variant_bar.take() {
             old_bar.finish_and_clear();
         }
-        
+
         let style = self.styles.get("variant").cloned().unwrap_or_else(|| {
             ProgressStyle::default_bar()
                 .template("      [{elapsed_precise}] {bar:15.magenta/white} {pos}/{len} {msg}")
                 .expect("Progress bar template error")
                 .progress_chars("█▓▒░")
         });
-        
+
         let bar = self.multi_progress.add(ProgressBar::new(len));
         bar.set_style(style);
         bar.set_message(format!("{}", desc));
-        
+
         self.variant_bar = Some(bar);
-        self.log(LogLevel::Debug, &format!("Starting variant analysis: {}", desc));
+        self.log(
+            LogLevel::Debug,
+            &format!("Starting variant analysis: {}", desc),
+        );
     }
-    
+
     /// Update variant progress
     pub fn update_variant_progress(&mut self, position: u64, message: &str) {
         if let Some(bar) = &self.variant_bar {
@@ -419,14 +461,14 @@ impl ProgressTracker {
             bar.set_message(message.to_string());
         }
     }
-    
+
     /// Finish variant progress
     pub fn finish_variant_progress(&mut self, message: &str) {
         if let Some(bar) = &self.variant_bar {
             bar.finish_with_message(message.to_string());
         }
     }
-    
+
     /// Create and return a spinner (useful for short tasks)
     pub fn spinner(&mut self, message: &str) -> ProgressBar {
         // Spinner with stage context and better timing information
@@ -439,7 +481,7 @@ impl ProgressTracker {
             ProcessingStage::StatsCalculation => "[Stats]",
             ProcessingStage::PcaAnalysis => "[PCA]",
         };
-    
+
         let style = self.styles.get("spinner").cloned().unwrap_or_else(|| {
             ProgressStyle::default_spinner()
                 .template(&format!(
@@ -449,16 +491,16 @@ impl ProgressTracker {
                 .expect("Spinner template error")
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         });
-    
+
         let spinner = self.multi_progress.add(ProgressBar::new_spinner());
         spinner.set_style(style);
         spinner.set_message(message.to_string());
         spinner.enable_steady_tick(Duration::from_millis(80));
-    
+
         self.log(LogLevel::Info, &format!("Started operation: {}", message));
         spinner
     }
-    
+
     /// Log a message to the stage-appropriate log file
     pub fn log(&mut self, level: LogLevel, message: &str) {
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
@@ -468,9 +510,9 @@ impl ProgressTracker {
             LogLevel::Error => "ERROR",
             LogLevel::Debug => "DEBUG",
         };
-        
+
         let log_line = format!("[{}] [{}] {}\n", timestamp, level_str, message);
-        
+
         // Write to the appropriate log file based on current stage
         let log_file = match self.current_stage {
             ProcessingStage::VcfProcessing => &mut self.variants_log,
@@ -478,13 +520,13 @@ impl ProgressTracker {
             ProcessingStage::StatsCalculation => &mut self.stats_log,
             _ => &mut self.processing_log,
         };
-        
+
         if let Some(writer) = log_file {
             let _ = writer.write_all(log_line.as_bytes());
             let _ = writer.flush();
         }
     }
-    
+
     /// Change the current stage of processing
     pub fn set_stage(&mut self, stage: ProcessingStage) {
         self.current_stage = stage;
@@ -497,22 +539,24 @@ impl ProgressTracker {
             Some((Width(w), Height(_))) => w as usize,
             None => 80,
         };
-    
+
         // Calculate box width based on content
         let title_len = status.title.len();
-        let max_content_width = status.stats.iter()
+        let max_content_width = status
+            .stats
+            .iter()
             .map(|(k, v)| k.len() + v.len() + 3) // +3 for separator and spacing
             .max()
             .unwrap_or(20);
-    
+
         let content_width = std::cmp::max(max_content_width, title_len);
         let box_width = std::cmp::min(terminal_width.saturating_sub(4), content_width + 4);
-    
+
         // Create timestamp for the status box
         let timestamp = Local::now().format("%H:%M:%S").to_string();
         let timestamp_display = format!(" [{}] ", timestamp);
         let timestamp_len = timestamp_display.len();
-    
+
         // Create stage context for the status box
         let stage_context = match self.current_stage {
             ProcessingStage::Global => "[Global Context]",
@@ -523,36 +567,36 @@ impl ProgressTracker {
             ProcessingStage::StatsCalculation => "[Statistics]",
             ProcessingStage::PcaAnalysis => "[PCA Analysis]",
         };
-        
+
         // Create the top border with timestamp
         let top_border = format!(
-            "┌{}{}{}┐", 
-            "─".repeat((box_width.saturating_sub(2 + timestamp_len))/2),
+            "┌{}{}{}┐",
+            "─".repeat((box_width.saturating_sub(2 + timestamp_len)) / 2),
             timestamp_display,
-            "─".repeat((box_width.saturating_sub(2 + timestamp_len) + 1)/2)
+            "─".repeat((box_width.saturating_sub(2 + timestamp_len) + 1) / 2)
         );
-    
+
         // Create the title bar with special formatting
-        let padding = (box_width.saturating_sub(2 + title_len))/2;
+        let padding = (box_width.saturating_sub(2 + title_len)) / 2;
         let title_bar = format!(
             "│{}{}{}│",
             " ".repeat(padding),
             status.title.bold(),
             " ".repeat(box_width.saturating_sub(2 + padding + title_len))
         );
-        
+
         // Create the context bar
-        let context_padding = (box_width.saturating_sub(2 + stage_context.len()))/2;
+        let context_padding = (box_width.saturating_sub(2 + stage_context.len())) / 2;
         let context_bar = format!(
             "│{}{}{}│",
             " ".repeat(context_padding),
             stage_context.dimmed(),
             " ".repeat(box_width.saturating_sub(2 + context_padding + stage_context.len()))
         );
-    
+
         // Create the divider
         let divider = format!("├{}┤", "─".repeat(box_width.saturating_sub(2)));
-    
+
         // Create the stats rows with improved formatting
         let mut stats_rows = Vec::new();
         for (key, value) in status.stats.iter() {
@@ -564,13 +608,16 @@ impl ProgressTracker {
             );
             stats_rows.push(row);
         }
-    
+
         // Create the bottom border
         let bottom_border = format!("└{}┘", "─".repeat(box_width.saturating_sub(2)));
-    
+
         // Log the status box creation
-        self.log(LogLevel::Info, &format!("Displaying status box: {}", status.title));
-    
+        self.log(
+            LogLevel::Info,
+            &format!("Displaying status box: {}", status.title),
+        );
+
         // Build the multi-line string
         let mut final_box = String::new();
         final_box.push('\n');
@@ -588,25 +635,25 @@ impl ProgressTracker {
         final_box.push('\n');
         final_box.push_str(&bottom_border.cyan());
         final_box.push('\n');
-    
+
         // Print in-place
         self.inplace_print(&final_box);
     }
-    
+
     /// Finish all progress bars and flush logs
     pub fn finish_all(&mut self) {
         if let Some(bar) = &self.variant_bar {
             bar.finish_and_clear();
         }
-        
+
         if let Some(bar) = &self.step_bar {
             bar.finish_and_clear();
         }
-        
+
         if let Some(bar) = &self.entry_bar {
             bar.finish_and_clear();
         }
-        
+
         if let Some(bar) = &self.global_bar {
             bar.finish_with_message(format!(
                 "Processed {} entries in {:.2} seconds",
@@ -614,7 +661,7 @@ impl ProgressTracker {
                 self.start_time.elapsed().as_secs_f64()
             ));
         }
-        
+
         // Flush all log files
         if let Some(writer) = &mut self.processing_log {
             let _ = writer.flush();
@@ -628,15 +675,12 @@ impl ProgressTracker {
         if let Some(writer) = &mut self.stats_log {
             let _ = writer.flush();
         }
-        
+
         // Print completion message in-place
-        let completion_str = format!(
-            "\n{}\n",
-            "Analysis complete.".green().bold()
-        );
+        let completion_str = format!("\n{}\n", "Analysis complete.".green().bold());
         self.inplace_print(&completion_str);
     }
-    
+
     // Helper function to get the global progress tracker
     pub fn global() -> Arc<Mutex<ProgressTracker>> {
         PROGRESS_TRACKER.clone()
@@ -645,81 +689,128 @@ impl ProgressTracker {
 
 // Helper functions for common operations
 pub fn init_global_progress(total: usize) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.init_global_progress(total);
 }
 
 pub fn update_global_progress(current: usize, message: &str) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.update_global_progress(current, message);
 }
 
 pub fn init_entry_progress(entry_desc: &str, len: u64) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.init_entry_progress(entry_desc, len);
 }
 
 pub fn update_entry_progress(position: u64, message: &str) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.update_entry_progress(position, message);
 }
 
 pub fn finish_entry_progress(message: &str) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.finish_entry_progress(message);
 }
 
 pub fn init_step_progress(step_desc: &str, len: u64) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.init_step_progress(step_desc, len);
 }
 
 pub fn update_step_progress(position: u64, message: &str) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.update_step_progress(position, message);
 }
 
 pub fn finish_step_progress(message: &str) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.finish_step_progress(message);
 }
 
 pub fn init_variant_progress(desc: &str, len: u64) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.init_variant_progress(desc, len);
 }
 
 pub fn update_variant_progress(position: u64, message: &str) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.update_variant_progress(position, message);
 }
 
 pub fn finish_variant_progress(message: &str) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.finish_variant_progress(message);
 }
 
 pub fn create_spinner(message: &str) -> ProgressBar {
+    if !progress_enabled() {
+        let bar = ProgressBar::hidden();
+        bar.set_message(message.to_string());
+        return bar;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.spinner(message)
 }
 
 pub fn log(level: LogLevel, message: &str) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.log(level, message);
 }
 
 pub fn set_stage(stage: ProcessingStage) {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.set_stage(stage);
 }
 
 /// Display status box without directly borrowing the mutable tracker.
 pub fn display_status_box(status: StatusBox) {
+    if !progress_enabled() {
+        return;
+    }
     // Get active progress bar and context information
     let active_bar_opt = {
         let mut tracker = PROGRESS_TRACKER.lock();
-        
+
         // Get context
         let stage_context = match tracker.current_stage {
             ProcessingStage::Global => "[Global Context]",
@@ -730,20 +821,26 @@ pub fn display_status_box(status: StatusBox) {
             ProcessingStage::StatsCalculation => "[Statistics]",
             ProcessingStage::PcaAnalysis => "[PCA Analysis]",
         };
-        
+
         // Log the status box display
-        tracker.log(LogLevel::Info, &format!("Displaying status box: {}", status.title));
-        
+        tracker.log(
+            LogLevel::Info,
+            &format!("Displaying status box: {}", status.title),
+        );
+
         // Create timestamp for the status box
         let timestamp = Local::now().format("%H:%M:%S").to_string();
-        
+
         // Construct the status box content
         let mut content = String::new();
-        content.push_str(&format!("[{}] {} {}\n", timestamp, stage_context, status.title));
+        content.push_str(&format!(
+            "[{}] {} {}\n",
+            timestamp, stage_context, status.title
+        ));
         for (key, value) in status.stats.iter() {
             content.push_str(&format!("  {}: {}\n", key, value));
         }
-        
+
         // Get the active bar if any (cloned to avoid borrowing issues)
         if let Some(bar) = tracker.find_active_bar() {
             Some((bar.clone(), content))
@@ -760,6 +857,9 @@ pub fn display_status_box(status: StatusBox) {
 }
 
 pub fn finish_all() {
+    if !progress_enabled() {
+        return;
+    }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.finish_all();
 }
