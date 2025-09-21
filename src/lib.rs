@@ -204,14 +204,18 @@ impl ChromosomePcaResult {
         } = result;
 
         let dims = pca_coordinates.dim();
-        let (coords_data, _) = pca_coordinates.into_raw_vec_and_offset();
+        let (coords_vec, offset) = pca_coordinates.into_raw_vec_and_offset();
+        debug_assert!(
+            offset.is_none() || offset == Some(0),
+            "ndarray storage is expected to be contiguous"
+        );
         let coords_py = PyArray2::<f64>::zeros(py, dims, false).to_owned();
         unsafe {
             coords_py
                 .as_ref(py)
                 .as_slice_mut()
                 .expect("newly allocated array is contiguous")
-                .copy_from_slice(&coords_data);
+                .copy_from_slice(&coords_vec);
         }
         let positions_py = PyArray1::from_vec(py, positions).to_owned();
 
@@ -603,14 +607,20 @@ impl Population {
         })
     }
 
-    fn segregating_sites(&self) -> usize {
-        let ctx = self.inner.as_population_context();
-        count_segregating_sites_for_population(&ctx)
+    fn segregating_sites(&self, py: Python) -> PyResult<usize> {
+        let result = py.allow_threads(|| {
+            let ctx = self.inner.as_population_context();
+            count_segregating_sites_for_population(&ctx)
+        });
+        Ok(result)
     }
 
-    fn nucleotide_diversity(&self) -> f64 {
-        let ctx = self.inner.as_population_context();
-        calculate_pi_for_population(&ctx)
+    fn nucleotide_diversity(&self, py: Python) -> PyResult<f64> {
+        let result = py.allow_threads(|| {
+            let ctx = self.inner.as_population_context();
+            calculate_pi_for_population(&ctx)
+        });
+        Ok(result)
     }
 
     /// Identifier for the population. Haplotype groups are returned as integers, custom
@@ -1505,9 +1515,10 @@ fn vcf_error_to_pyerr(err: VcfError) -> PyErr {
 
 /// Count the number of segregating (polymorphic) sites.
 #[pyfunction(name = "segregating_sites", text_signature = "(variants, /)")]
-fn segregating_sites_py(variants: Vec<VariantInput>) -> PyResult<usize> {
+fn segregating_sites_py(py: Python, variants: Vec<VariantInput>) -> PyResult<usize> {
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
-    Ok(count_segregating_sites(&variants))
+    let result = py.allow_threads(|| count_segregating_sites(&variants));
+    Ok(result)
 }
 
 /// Compute nucleotide diversity (π) for the provided haplotypes and region length.
@@ -1516,6 +1527,7 @@ fn segregating_sites_py(variants: Vec<VariantInput>) -> PyResult<usize> {
     text_signature = "(variants, haplotypes, sequence_length, /)"
 )]
 fn nucleotide_diversity_py(
+    py: Python,
     variants: Vec<VariantInput>,
     haplotypes: Vec<HaplotypeInput>,
     sequence_length: i64,
@@ -1530,7 +1542,8 @@ fn nucleotide_diversity_py(
     let haplotypes: Vec<(usize, HaplotypeSide)> =
         haplotypes.into_iter().map(|h| h.into_pair()).collect();
 
-    Ok(calculate_pi(&variants, &haplotypes, sequence_length))
+    let result = py.allow_threads(|| calculate_pi(&variants, &haplotypes, sequence_length));
+    Ok(result)
 }
 
 /// Compute Watterson's θ estimator.
@@ -1571,7 +1584,7 @@ fn pairwise_differences_py(
     sample_count: usize,
 ) -> PyResult<Vec<Py<PairwiseDifference>>> {
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
-    let diffs = calculate_pairwise_differences(&variants, sample_count);
+    let diffs = py.allow_threads(|| calculate_pairwise_differences(&variants, sample_count));
     pairwise_differences_to_py(py, diffs)
 }
 
@@ -1597,7 +1610,7 @@ fn per_site_diversity_py(
     }
 
     let region = build_optional_region(region, &variants)?;
-    let sites = calculate_per_site_diversity(&variants, &haplotypes, region);
+    let sites = py.allow_threads(|| calculate_per_site_diversity(&variants, &haplotypes, region));
     diversity_sites_to_py(py, &sites)
 }
 
@@ -1608,9 +1621,13 @@ fn hudson_dxy_py(
     population1: PopulationInput,
     population2: PopulationInput,
 ) -> PyResult<Py<HudsonDxyResultPy>> {
-    let pop1_ctx = population1.as_context();
-    let pop2_ctx = population2.as_context();
-    let result = calculate_d_xy_hudson(&pop1_ctx, &pop2_ctx).map_err(vcf_error_to_pyerr)?;
+    let result = py
+        .allow_threads(move || {
+            let pop1_ctx = population1.as_context();
+            let pop2_ctx = population2.as_context();
+            calculate_d_xy_hudson(&pop1_ctx, &pop2_ctx)
+        })
+        .map_err(vcf_error_to_pyerr)?;
     HudsonDxyResultPy::from_result(py, &result)
 }
 
@@ -1621,10 +1638,13 @@ fn hudson_fst_py(
     population1: PopulationInput,
     population2: PopulationInput,
 ) -> PyResult<Py<HudsonFstResultPy>> {
-    let pop1_ctx = population1.as_context();
-    let pop2_ctx = population2.as_context();
-    let outcome =
-        calculate_hudson_fst_for_pair(&pop1_ctx, &pop2_ctx).map_err(vcf_error_to_pyerr)?;
+    let outcome = py
+        .allow_threads(move || {
+            let pop1_ctx = population1.as_context();
+            let pop2_ctx = population2.as_context();
+            calculate_hudson_fst_for_pair(&pop1_ctx, &pop2_ctx)
+        })
+        .map_err(vcf_error_to_pyerr)?;
     HudsonFstResultPy::from_outcome(py, &outcome)
 }
 
@@ -1639,10 +1659,12 @@ fn hudson_fst_sites_py(
     population2: PopulationInput,
     region: (i64, i64),
 ) -> PyResult<Vec<Py<HudsonFstSitePy>>> {
-    let pop1_ctx = population1.as_context();
-    let pop2_ctx = population2.as_context();
     let region = build_region(region)?;
-    let sites = calculate_hudson_fst_per_site(&pop1_ctx, &pop2_ctx, region);
+    let sites = py.allow_threads(move || {
+        let pop1_ctx = population1.as_context();
+        let pop2_ctx = population2.as_context();
+        calculate_hudson_fst_per_site(&pop1_ctx, &pop2_ctx, region)
+    });
     hudson_sites_to_py(py, &sites)
 }
 
@@ -1657,10 +1679,13 @@ fn hudson_fst_with_sites_py(
     population2: PopulationInput,
     region: (i64, i64),
 ) -> PyResult<(Py<HudsonFstResultPy>, Vec<Py<HudsonFstSitePy>>)> {
-    let pop1_ctx = population1.as_context();
-    let pop2_ctx = population2.as_context();
     let region = build_region(region)?;
-    let (outcome, sites) = calculate_hudson_fst_for_pair_with_sites(&pop1_ctx, &pop2_ctx, region)
+    let (outcome, sites) = py
+        .allow_threads(move || {
+            let pop1_ctx = population1.as_context();
+            let pop2_ctx = population2.as_context();
+            calculate_hudson_fst_for_pair_with_sites(&pop1_ctx, &pop2_ctx, region)
+        })
         .map_err(vcf_error_to_pyerr)?;
     let outcome_py = HudsonFstResultPy::from_outcome(py, &outcome)?;
     let sites_py = hudson_sites_to_py(py, &sites)?;
@@ -1688,8 +1713,9 @@ fn wc_fst_py(
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
     let sample_group_map = extract_sample_group_map(sample_to_group)?;
     let region = build_region(region)?;
-    let results =
-        calculate_fst_wc_haplotype_groups(&variants, &sample_names, &sample_group_map, region);
+    let results = py.allow_threads(|| {
+        calculate_fst_wc_haplotype_groups(&variants, &sample_names, &sample_group_map, region)
+    });
     WcFstResultPy::from_results(py, &results)
 }
 
@@ -1766,25 +1792,158 @@ impl<'py> DensePositions<'py> {
 
 fn parse_dense_chromosome_input<'py>(
     variants_obj: &'py PyAny,
+    expected_samples: usize,
 ) -> PyResult<Option<DenseChromosomePayload<'py>>> {
-    let Ok(mapping) = variants_obj.downcast::<PyDict>() else {
-        return Ok(None);
+    if let Ok(mapping) = variants_obj.downcast::<PyDict>() {
+        let Some(genotypes_obj) = mapping.get_item("genotypes") else {
+            return Ok(None);
+        };
+        let positions_obj = mapping.get_item("positions").ok_or_else(|| {
+            PyValueError::new_err("dense chromosome PCA input requires a 'positions' array")
+        })?;
+
+        let genotypes = DenseGenotypeData::from_pyobject(genotypes_obj)?;
+        let positions = DensePositions::from_pyobject(positions_obj, genotypes.variant_count())?;
+
+        return Ok(Some(DenseChromosomePayload {
+            genotypes,
+            positions,
+        }));
+    }
+
+    if let Some(payload) = try_parse_variant_sequence_to_dense(variants_obj, expected_samples)? {
+        return Ok(Some(payload));
+    }
+
+    Ok(None)
+}
+
+fn try_parse_variant_sequence_to_dense<'py>(
+    variants_obj: &'py PyAny,
+    expected_samples: usize,
+) -> PyResult<Option<DenseChromosomePayload<'py>>> {
+    let list = match variants_obj.downcast::<PyList>() {
+        Ok(list) => list,
+        Err(_) => return Ok(None),
     };
 
-    let Some(genotypes_obj) = mapping.get_item("genotypes") else {
-        return Ok(None);
-    };
-    let positions_obj = mapping.get_item("positions").ok_or_else(|| {
-        PyValueError::new_err("dense chromosome PCA input requires a 'positions' array")
+    let variant_count = list.len();
+    let capacity = variant_count
+        .saturating_mul(expected_samples)
+        .saturating_mul(2);
+    let mut data = Vec::with_capacity(capacity);
+    let mut positions = Vec::with_capacity(variant_count);
+
+    for (variant_idx, entry) in list.iter().enumerate() {
+        let (position, genotypes_obj) = dense_variant_components(entry)?;
+        let genotype_list = match genotypes_obj.downcast::<PyList>() {
+            Ok(genotypes) => genotypes,
+            Err(_) => return Ok(None),
+        };
+
+        if genotype_list.len() != expected_samples {
+            return Err(PyValueError::new_err(format!(
+                "variant {variant_idx} contains {} samples but {} names were provided",
+                genotype_list.len(),
+                expected_samples
+            )));
+        }
+
+        positions.push(position);
+        for sample_idx in 0..expected_samples {
+            let call = genotype_list.get_item(sample_idx)?;
+            let Some([left, right]) = extract_diploid_alleles(call)? else {
+                return Ok(None);
+            };
+            data.push(left);
+            data.push(right);
+        }
+    }
+
+    let shape = (variant_count, expected_samples, 2);
+    let genotypes = Array3::from_shape_vec(shape, data).map_err(|_| {
+        PyValueError::new_err("dense chromosome PCA input produced inconsistent genotype lengths")
     })?;
 
-    let genotypes = DenseGenotypeData::from_pyobject(genotypes_obj)?;
-    let positions = DensePositions::from_pyobject(positions_obj, genotypes.variant_count())?;
-
     Ok(Some(DenseChromosomePayload {
-        genotypes,
-        positions,
+        genotypes: DenseGenotypeData::Owned(genotypes),
+        positions: DensePositions::Owned(positions),
     }))
+}
+
+fn dense_variant_components<'py>(entry: &'py PyAny) -> PyResult<(i64, &'py PyAny)> {
+    if let Ok(tuple) = entry.downcast::<PyTuple>() {
+        if tuple.len() != 2 {
+            return Err(PyValueError::new_err(
+                "variant tuples must have length 2: (position, genotypes)",
+            ));
+        }
+        let position = tuple.get_item(0)?.extract::<i64>()?;
+        let genotypes = tuple.get_item(1)?;
+        return Ok((position, genotypes));
+    }
+
+    if let Ok(mapping) = entry.downcast::<PyDict>() {
+        let position =
+            extract_from_mapping(mapping, &["position", "pos", "site"])?.extract::<i64>()?;
+        let genotypes = extract_from_mapping(mapping, &["genotypes", "calls"])?;
+        return Ok((position, genotypes));
+    }
+
+    let position = extract_optional_field(entry, &["position", "pos", "site"])
+        .ok_or_else(|| PyValueError::new_err("variant is missing a position"))?
+        .extract::<i64>()?;
+    let genotypes = extract_optional_field(entry, &["genotypes", "calls"])
+        .ok_or_else(|| PyValueError::new_err("variant is missing genotypes"))?;
+    Ok((position, genotypes))
+}
+
+fn extract_diploid_alleles(call: &PyAny) -> PyResult<Option<[i16; 2]>> {
+    if call.is_none() {
+        return Ok(Some([-1, -1]));
+    }
+
+    if let Ok(value) = call.extract::<i16>() {
+        return Ok(Some([value, value]));
+    }
+
+    if let Ok(list) = call.downcast::<PyList>() {
+        if list.len() < 2 {
+            return Ok(Some([-1, -1]));
+        }
+        let left = list.get_item(0)?.extract::<i16>()?;
+        let right = list.get_item(1)?.extract::<i16>()?;
+        return Ok(Some([left, right]));
+    }
+
+    if let Ok(tuple) = call.downcast::<PyTuple>() {
+        if tuple.len() < 2 {
+            return Ok(Some([-1, -1]));
+        }
+        let left = tuple.get_item(0)?.extract::<i16>()?;
+        let right = tuple.get_item(1)?.extract::<i16>()?;
+        return Ok(Some([left, right]));
+    }
+
+    if let Ok(iter) = PyIterator::from_object(call.py(), call) {
+        let mut alleles = [0i16; 2];
+        let mut count = 0usize;
+        for allele in iter {
+            if count >= 2 {
+                break;
+            }
+            alleles[count] = allele?.extract::<i16>()?;
+            count += 1;
+        }
+        return match count {
+            0 => Ok(Some([-1, -1])),
+            1 => Ok(Some([-1, -1])),
+            2 => Ok(Some(alleles)),
+            _ => unreachable!(),
+        };
+    }
+
+    Ok(None)
 }
 
 fn extract_genotype_cube_i16(genotypes_obj: &PyAny) -> PyResult<Array3<i16>> {
@@ -1852,7 +2011,7 @@ fn chromosome_pca_py(
         ));
     }
 
-    if let Some(dense_payload) = parse_dense_chromosome_input(variants)? {
+    if let Some(dense_payload) = parse_dense_chromosome_input(variants, sample_names.len())? {
         let positions = dense_payload.positions.as_slice()?;
         let genotypes_view = dense_payload.genotypes.as_view();
         let result = py
@@ -1886,6 +2045,7 @@ fn chromosome_pca_py(
     text_signature = "(variants, sample_names, chromosome, output_dir, n_components=10, /)"
 )]
 fn chromosome_pca_to_file_py(
+    py: Python,
     variants: Vec<VariantInput>,
     sample_names: Vec<String>,
     chromosome: &str,
@@ -1904,11 +2064,13 @@ fn chromosome_pca_to_file_py(
     }
 
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
-    let result = compute_chromosome_pca(&variants, &sample_names, n_components)
-        .map_err(vcf_error_to_pyerr)?;
+    let chromosome = chromosome.to_string();
     let output_dir = PathBuf::from(output_dir);
-    write_chromosome_pca_to_file(&result, chromosome, output_dir.as_path())
-        .map_err(vcf_error_to_pyerr)
+    py.allow_threads(move || {
+        let result = compute_chromosome_pca(&variants, &sample_names, n_components)?;
+        write_chromosome_pca_to_file(&result, &chromosome, output_dir.as_path())
+    })
+    .map_err(vcf_error_to_pyerr)
 }
 
 /// Run per-chromosome PCA for a dictionary of chromosomes -> variants.
@@ -1918,6 +2080,7 @@ fn chromosome_pca_to_file_py(
     text_signature = "(variants_by_chromosome, sample_names, output_dir, n_components=10, /)"
 )]
 fn per_chromosome_pca_py(
+    py: Python,
     variants_by_chromosome: &PyAny,
     sample_names: Vec<String>,
     output_dir: &str,
@@ -1936,8 +2099,10 @@ fn per_chromosome_pca_py(
 
     let variants = extract_variants_by_chromosome(variants_by_chromosome)?;
     let output_dir = PathBuf::from(output_dir);
-    run_chromosome_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
-        .map_err(vcf_error_to_pyerr)
+    py.allow_threads(move || {
+        run_chromosome_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
+    })
+    .map_err(vcf_error_to_pyerr)
 }
 
 /// Execute the memory-efficient multi-chromosome PCA pipeline.
@@ -1947,6 +2112,7 @@ fn per_chromosome_pca_py(
     text_signature = "(variants_by_chromosome, sample_names, output_dir, n_components=10, /)"
 )]
 fn global_pca_py(
+    py: Python,
     variants_by_chromosome: &PyAny,
     sample_names: Vec<String>,
     output_dir: &str,
@@ -1965,8 +2131,10 @@ fn global_pca_py(
 
     let variants = extract_variants_by_chromosome(variants_by_chromosome)?;
     let output_dir = PathBuf::from(output_dir);
-    run_global_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
-        .map_err(vcf_error_to_pyerr)
+    py.allow_threads(move || {
+        run_global_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
+    })
+    .map_err(vcf_error_to_pyerr)
 }
 
 /// Adjust the effective sequence length by applying allow and mask intervals.
