@@ -374,26 +374,50 @@ fn run_pca_analysis(
 
     let spinner = create_spinner("Computing PCA");
     let mut pca = PCA::new();
+    const RANDOMIZED_ELEMENT_THRESHOLD: usize = 1_000_000;
+    let total_elements = data_matrix.len();
 
-    let transformed = match pca.fit(data_matrix.clone(), None) {
-        Ok(()) => match pca.transform(data_matrix) {
-            Ok(t) => t,
-            Err(e) => {
-                spinner.finish_and_clear();
-                return Err(VcfError::Parse(format!(
-                    "PCA transformation failed after exact fit: {}",
-                    e
-                )));
+    let transformed = if total_elements <= RANDOMIZED_ELEMENT_THRESHOLD {
+        match pca.rfit(data_matrix.clone(), n_components, 4, Some(42), None) {
+            Ok(t) => {
+                drop(data_matrix);
+                t
             }
-        },
-        Err(_) => {
-            let mut fallback = PCA::new();
-            match fallback.rfit(data_matrix, n_components, 0, Some(42), None) {
+            Err(_) => match pca.fit(data_matrix.clone(), None) {
+                Ok(()) => match pca.transform(data_matrix) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        spinner.finish_and_clear();
+                        return Err(VcfError::Parse(format!(
+                            "PCA transformation failed after exact fit: {}",
+                            e
+                        )));
+                    }
+                },
+                Err(e) => {
+                    spinner.finish_and_clear();
+                    return Err(VcfError::Parse(format!(
+                        "PCA computation failed after randomized attempt: {}",
+                        e
+                    )));
+                }
+            },
+        }
+    } else {
+        match pca.fit(data_matrix.clone(), None) {
+            Ok(()) => match pca.transform(data_matrix) {
                 Ok(t) => t,
                 Err(e) => {
                     spinner.finish_and_clear();
-                    return Err(VcfError::Parse(format!("PCA computation failed: {}", e)));
+                    return Err(VcfError::Parse(format!(
+                        "PCA transformation failed after exact fit: {}",
+                        e
+                    )));
                 }
+            },
+            Err(e) => {
+                spinner.finish_and_clear();
+                return Err(VcfError::Parse(format!("PCA computation failed: {}", e)));
             }
         }
     };

@@ -1792,25 +1792,158 @@ impl<'py> DensePositions<'py> {
 
 fn parse_dense_chromosome_input<'py>(
     variants_obj: &'py PyAny,
+    expected_samples: usize,
 ) -> PyResult<Option<DenseChromosomePayload<'py>>> {
-    let Ok(mapping) = variants_obj.downcast::<PyDict>() else {
-        return Ok(None);
+    if let Ok(mapping) = variants_obj.downcast::<PyDict>() {
+        let Some(genotypes_obj) = mapping.get_item("genotypes") else {
+            return Ok(None);
+        };
+        let positions_obj = mapping.get_item("positions").ok_or_else(|| {
+            PyValueError::new_err("dense chromosome PCA input requires a 'positions' array")
+        })?;
+
+        let genotypes = DenseGenotypeData::from_pyobject(genotypes_obj)?;
+        let positions = DensePositions::from_pyobject(positions_obj, genotypes.variant_count())?;
+
+        return Ok(Some(DenseChromosomePayload {
+            genotypes,
+            positions,
+        }));
+    }
+
+    if let Some(payload) = try_parse_variant_sequence_to_dense(variants_obj, expected_samples)? {
+        return Ok(Some(payload));
+    }
+
+    Ok(None)
+}
+
+fn try_parse_variant_sequence_to_dense<'py>(
+    variants_obj: &'py PyAny,
+    expected_samples: usize,
+) -> PyResult<Option<DenseChromosomePayload<'py>>> {
+    let list = match variants_obj.downcast::<PyList>() {
+        Ok(list) => list,
+        Err(_) => return Ok(None),
     };
 
-    let Some(genotypes_obj) = mapping.get_item("genotypes") else {
-        return Ok(None);
-    };
-    let positions_obj = mapping.get_item("positions").ok_or_else(|| {
-        PyValueError::new_err("dense chromosome PCA input requires a 'positions' array")
+    let variant_count = list.len();
+    let capacity = variant_count
+        .saturating_mul(expected_samples)
+        .saturating_mul(2);
+    let mut data = Vec::with_capacity(capacity);
+    let mut positions = Vec::with_capacity(variant_count);
+
+    for (variant_idx, entry) in list.iter().enumerate() {
+        let (position, genotypes_obj) = dense_variant_components(entry)?;
+        let genotype_list = match genotypes_obj.downcast::<PyList>() {
+            Ok(genotypes) => genotypes,
+            Err(_) => return Ok(None),
+        };
+
+        if genotype_list.len() != expected_samples {
+            return Err(PyValueError::new_err(format!(
+                "variant {variant_idx} contains {} samples but {} names were provided",
+                genotype_list.len(),
+                expected_samples
+            )));
+        }
+
+        positions.push(position);
+        for sample_idx in 0..expected_samples {
+            let call = genotype_list.get_item(sample_idx)?;
+            let Some([left, right]) = extract_diploid_alleles(call)? else {
+                return Ok(None);
+            };
+            data.push(left);
+            data.push(right);
+        }
+    }
+
+    let shape = (variant_count, expected_samples, 2);
+    let genotypes = Array3::from_shape_vec(shape, data).map_err(|_| {
+        PyValueError::new_err("dense chromosome PCA input produced inconsistent genotype lengths")
     })?;
 
-    let genotypes = DenseGenotypeData::from_pyobject(genotypes_obj)?;
-    let positions = DensePositions::from_pyobject(positions_obj, genotypes.variant_count())?;
-
     Ok(Some(DenseChromosomePayload {
-        genotypes,
-        positions,
+        genotypes: DenseGenotypeData::Owned(genotypes),
+        positions: DensePositions::Owned(positions),
     }))
+}
+
+fn dense_variant_components<'py>(entry: &'py PyAny) -> PyResult<(i64, &'py PyAny)> {
+    if let Ok(tuple) = entry.downcast::<PyTuple>() {
+        if tuple.len() != 2 {
+            return Err(PyValueError::new_err(
+                "variant tuples must have length 2: (position, genotypes)",
+            ));
+        }
+        let position = tuple.get_item(0)?.extract::<i64>()?;
+        let genotypes = tuple.get_item(1)?;
+        return Ok((position, genotypes));
+    }
+
+    if let Ok(mapping) = entry.downcast::<PyDict>() {
+        let position =
+            extract_from_mapping(mapping, &["position", "pos", "site"])?.extract::<i64>()?;
+        let genotypes = extract_from_mapping(mapping, &["genotypes", "calls"])?;
+        return Ok((position, genotypes));
+    }
+
+    let position = extract_optional_field(entry, &["position", "pos", "site"])
+        .ok_or_else(|| PyValueError::new_err("variant is missing a position"))?
+        .extract::<i64>()?;
+    let genotypes = extract_optional_field(entry, &["genotypes", "calls"])
+        .ok_or_else(|| PyValueError::new_err("variant is missing genotypes"))?;
+    Ok((position, genotypes))
+}
+
+fn extract_diploid_alleles(call: &PyAny) -> PyResult<Option<[i16; 2]>> {
+    if call.is_none() {
+        return Ok(Some([-1, -1]));
+    }
+
+    if let Ok(value) = call.extract::<i16>() {
+        return Ok(Some([value, value]));
+    }
+
+    if let Ok(list) = call.downcast::<PyList>() {
+        if list.len() < 2 {
+            return Ok(Some([-1, -1]));
+        }
+        let left = list.get_item(0)?.extract::<i16>()?;
+        let right = list.get_item(1)?.extract::<i16>()?;
+        return Ok(Some([left, right]));
+    }
+
+    if let Ok(tuple) = call.downcast::<PyTuple>() {
+        if tuple.len() < 2 {
+            return Ok(Some([-1, -1]));
+        }
+        let left = tuple.get_item(0)?.extract::<i16>()?;
+        let right = tuple.get_item(1)?.extract::<i16>()?;
+        return Ok(Some([left, right]));
+    }
+
+    if let Ok(iter) = PyIterator::from_object(call.py(), call) {
+        let mut alleles = [0i16; 2];
+        let mut count = 0usize;
+        for allele in iter {
+            if count >= 2 {
+                break;
+            }
+            alleles[count] = allele?.extract::<i16>()?;
+            count += 1;
+        }
+        return match count {
+            0 => Ok(Some([-1, -1])),
+            1 => Ok(Some([-1, -1])),
+            2 => Ok(Some(alleles)),
+            _ => unreachable!(),
+        };
+    }
+
+    Ok(None)
 }
 
 fn extract_genotype_cube_i16(genotypes_obj: &PyAny) -> PyResult<Array3<i16>> {
@@ -1878,7 +2011,7 @@ fn chromosome_pca_py(
         ));
     }
 
-    if let Some(dense_payload) = parse_dense_chromosome_input(variants)? {
+    if let Some(dense_payload) = parse_dense_chromosome_input(variants, sample_names.len())? {
         let positions = dense_payload.positions.as_slice()?;
         let genotypes_view = dense_payload.genotypes.as_view();
         let result = py
