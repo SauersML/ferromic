@@ -1223,6 +1223,7 @@ pub fn build_dense_population_summary(
             (seg, pi_total)
         }
     } else if let Some(bits) = missing {
+
         alt_counts
             .par_iter_mut()
             .zip_eq(called_counts.par_iter_mut())
