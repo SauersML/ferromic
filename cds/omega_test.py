@@ -1682,7 +1682,7 @@ def main():
             before = len(region_infos)
             region_infos = [
                 r for r in region_infos
-                if (r['chrom'], r['start'], r['end']) in ALLOWED_REGIONS
+                #if (r['chrom'], r['start'], r['end']) in ALLOWED_REGIONS
             ]
             dropped = before - len(region_infos)
             if dropped:
