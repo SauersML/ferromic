@@ -303,6 +303,9 @@ def plot_one_inversion(
     inversion_label: str,
     global_ymin: float | None = None,
     global_ymax: float | None = None,
+    global_xlim: tuple[float, float] | None = None,
+    global_fig_width: float | None = None,
+    global_xrange: float | None = None,
 ) -> str | None:
     g = df_group.copy()
     g[P_Q_COL] = pd.to_numeric(g[P_Q_COL], errors="coerce")
@@ -378,7 +381,10 @@ def plot_one_inversion(
     m = len(g)
 
     # figure
-    fig_w = compute_width(m)
+    if global_fig_width is not None:
+        fig_w = float(global_fig_width)
+    else:
+        fig_w = compute_width(m)
     fig, ax = plt.subplots(figsize=(fig_w, FIG_HEIGHT))
     ax.set_facecolor("#ffffff")
     ax.spines['top'].set_visible(False)
@@ -419,6 +425,25 @@ def plot_one_inversion(
     if tri_inc is not None: obstacles.append(tri_inc)
     if tri_dec is not None: obstacles.append(tri_dec)
 
+    # establish consistent x-limits prior to layout/annotation work
+    raw_xmin = float(g["x"].min())
+    raw_xmax = float(g["x"].max())
+    if global_xlim is not None:
+        base_xmin, base_xmax = map(float, global_xlim)
+    else:
+        base_xmin, base_xmax = raw_xmin, raw_xmax
+    if not np.isfinite(base_xmin) or not np.isfinite(base_xmax):
+        base_xmin, base_xmax = raw_xmin, raw_xmax
+    if base_xmax <= base_xmin:
+        base_xmax = base_xmin + 1.0
+    ax.set_xlim(base_xmin, base_xmax)
+    fig.canvas.draw()
+    xpad_data = px_step_to_data(ax, X_PAD_PX, 0)[0]
+    final_xmin = base_xmin - xpad_data
+    final_xmax = base_xmax + xpad_data
+    ax.set_xlim(final_xmin, final_xmax)
+    fig.canvas.draw()
+
     # annotations: q < 0.1 OR FDR significant
     annotate_mask = (g[P_Q_COL] < ANNOTATE_Q_THRESH)
     if SIG_COL in g.columns: annotate_mask |= truthy_series(g[SIG_COL])
@@ -427,8 +452,12 @@ def plot_one_inversion(
     # initial placement: natural side
     texts=[]
     # side-aware offset (right for inc, left for dec)
-    x_range = (g["x"].max() - g["x"].min()) if m>1 else 1.0
-    dx_side = 0.02 * max(1.0, x_range)
+    if global_xrange is not None and np.isfinite(global_xrange):
+        x_range = float(global_xrange)
+    else:
+        x_range = float(g["x"].max() - g["x"].min()) if m > 1 else 1.0
+    x_range = max(1.0, x_range)
+    dx_side = 0.02 * x_range
     for idx, r in ann_rows.iterrows():
         place_right = (r["risk_dir"] == "inc")
         x0 = r["x"] + (dx_side if place_right else -dx_side)
@@ -469,11 +498,7 @@ def plot_one_inversion(
     rad_px = np.array(rad_px)
     resolve_overlaps_strict(ax, texts, pts_px, rad_px, max_iter=450, step_px=2.5)
 
-    # margins & headroom
-    # convert X_PAD_PX to data units
-    xpad_data = px_step_to_data(ax, X_PAD_PX, 0)[0]
-    xmin, xmax = g["x"].min(), g["x"].max()
-    ax.set_xlim(xmin - xpad_data, xmax + xpad_data)
+    # margins & headroom (x-limits already established above)
 
     if global_ymax is not None and np.isfinite(global_ymax):
         base_min = float(global_ymin) if (global_ymin is not None and np.isfinite(global_ymin)) else 0.0
@@ -562,6 +587,27 @@ def main():
         global_ymin = None
         global_ymax = None
 
+    counts_series = (
+        df.loc[valid_mask]
+        .groupby(INV_COL, dropna=False)
+        .size()
+    )
+    if not counts_series.empty:
+        max_points = int(counts_series.max())
+        if max_points > 0:
+            xmax_val = float(max_points - 1)
+            global_xlim = (0.0, xmax_val)
+            global_fig_width = compute_width(max_points)
+            global_xrange = xmax_val - 0.0
+        else:
+            global_xlim = None
+            global_fig_width = None
+            global_xrange = None
+    else:
+        global_xlim = None
+        global_fig_width = None
+        global_xrange = None
+
     made, to_open = [], []
     for inv, grp in df.groupby(INV_COL, dropna=False):
         out = plot_one_inversion(
@@ -569,6 +615,9 @@ def main():
             inversion_label=inv,
             global_ymin=global_ymin,
             global_ymax=global_ymax,
+            global_xlim=global_xlim,
+            global_fig_width=global_fig_width,
+            global_xrange=global_xrange,
         )
         if out:
             made.append(out)
