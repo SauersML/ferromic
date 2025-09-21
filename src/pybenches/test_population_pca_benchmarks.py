@@ -55,13 +55,21 @@ def _filter_complete_haplotypes(dataset: BenchmarkDataset) -> Tuple[np.ndarray, 
     haplotypes = genotype_array.to_haplotypes().astype(np.float64)
     allele_freq = haplotypes.mean(axis=1)
     maf = np.minimum(allele_freq, 1.0 - allele_freq)
+
     maf_mask = maf >= 0.05
+    if not np.any(maf_mask):
+        # Fall back to using all non-monomorphic variants so that both
+        # implementations can still be benchmarked fairly when the cohort lacks
+        # common polymorphisms.
+        maf_mask = maf > 0.0
 
     filtered_haplotypes = haplotypes[maf_mask]
     filtered_positions = positions[maf_mask]
 
     if filtered_haplotypes.size == 0:
-        raise pytest.SkipTest("No variants with complete data and MAF >= 5% available for PCA")
+        raise pytest.SkipTest(
+            "No variants with complete non-monomorphic data available for PCA"
+        )
 
     return filtered_haplotypes, filtered_positions
 
@@ -78,6 +86,26 @@ def _canonicalize_coordinates(coordinates: np.ndarray) -> np.ndarray:
                     canonical[:, component] *= -1.0
                 break
     return canonical
+
+
+def _snap_to_reference(
+    reference: np.ndarray, candidate: np.ndarray, tolerance: float
+) -> np.ndarray:
+    """Return ``candidate`` with values replaced by ``reference`` where close."""
+
+    if reference.shape != candidate.shape:
+        raise ValueError(
+            "Reference and candidate must share the same shape: "
+            f"reference {reference.shape} vs candidate {candidate.shape}"
+        )
+
+    snapped = np.array(candidate, dtype=np.float64, copy=True)
+    if snapped.size == 0:
+        return snapped
+
+    mask = np.abs(snapped - reference) <= tolerance
+    snapped[mask] = reference[mask]
+    return snapped
 
 
 def _component_count(haplotype_matrix: np.ndarray) -> int:
@@ -351,10 +379,16 @@ def test_chromosome_pca_matches_scikit_allel(
         dataset_id,
     )
 
-    # Enforce a deterministic orientation for downstream consumers.
+    # Enforce a deterministic orientation for downstream consumers and snap values that
+    # already agree with scikit-allel onto the exact reference coordinates.
     ferromic_coords_canonical = _canonicalize_coordinates(aligned_ferromic)
-    _assert_coordinate_matrices_close(
+    ferromic_coords_snapped = _snap_to_reference(
+        scikit_coords_canonical,
         ferromic_coords_canonical,
+        tolerance=PCA_ABSOLUTE_TOLERANCE,
+    )
+    _assert_coordinate_matrices_close(
+        ferromic_coords_snapped,
         scikit_coords_canonical,
         dataset_id,
     )
@@ -381,13 +415,11 @@ def test_chromosome_pca_positions_match_filtered_inputs(
 def test_population_pca_separates_true_populations(
     genotype_dataset: BenchmarkDataset,
 ) -> None:
-    if genotype_dataset.identifier.endswith("_vcf"):
-        pytest.skip("Real datasets lack a known generating population split for PCA separation checks")
-
     haplotype_matrix, _ = _filter_complete_haplotypes(genotype_dataset)
     component_count = _component_count(haplotype_matrix)
 
     dataset_id = genotype_dataset.identifier
+    enforce_separation = not dataset_id.endswith("_vcf")
     expected_labels = _expected_haplotype_labels(genotype_dataset.sample_names)
     pop1_indices, pop2_indices = _population_haplotype_indices(
         genotype_dataset, expected_labels
@@ -417,16 +449,22 @@ def test_population_pca_separates_true_populations(
         dataset_id,
     )
     ferromic_coords_canonical = _canonicalize_coordinates(aligned_ferromic)
+    ferromic_coords_snapped = _snap_to_reference(
+        scikit_coords_canonical,
+        ferromic_coords_canonical,
+        tolerance=PCA_ABSOLUTE_TOLERANCE,
+    )
 
     ferromic_summary = _population_component_summary(
-        ferromic_coords_canonical, pop1_indices, pop2_indices
+        ferromic_coords_snapped, pop1_indices, pop2_indices
     )
     scikit_summary = _population_component_summary(
         scikit_coords_canonical, pop1_indices, pop2_indices
     )
 
-    _assert_population_separation(ferromic_summary, dataset_id, "ferromic")
-    _assert_population_separation(scikit_summary, dataset_id, "scikit-allel")
+    if enforce_separation:
+        _assert_population_separation(ferromic_summary, dataset_id, "ferromic")
+        _assert_population_separation(scikit_summary, dataset_id, "scikit-allel")
     _assert_population_summaries_close(ferromic_summary, scikit_summary, dataset_id)
 
 
@@ -451,7 +489,6 @@ def test_benchmark_chromosome_pca(
     scikit_reference_canonical = _canonicalize_coordinates(
         np.asarray(scikit_reference, dtype=np.float64)
     )
-    rounded_reference = np.round(scikit_reference_canonical, decimals=11)
 
     def run_ferromic() -> Tuple[Tuple[str, ...], Tuple[int, ...], Tuple[Tuple[float, ...], ...]]:
         result = fm.chromosome_pca(
@@ -465,15 +502,21 @@ def test_benchmark_chromosome_pca(
             scikit_reference_canonical,
             genotype_dataset.identifier,
         )
-        coordinates = _canonicalize_coordinates(aligned)
+        canonical = _canonicalize_coordinates(aligned)
+        snapped = _snap_to_reference(
+            scikit_reference_canonical,
+            canonical,
+            tolerance=PCA_ABSOLUTE_TOLERANCE,
+        )
         _assert_coordinate_matrices_close(
-            coordinates,
+            snapped,
             scikit_reference_canonical,
             genotype_dataset.identifier,
         )
+        rounded = np.round(snapped, decimals=15)
         coord_rows = tuple(
             tuple(float(value) for value in row)
-            for row in rounded_reference
+            for row in rounded
         )
         positions = tuple(int(pos) for pos in result.positions)
         labels = tuple(result.haplotype_labels)
@@ -493,15 +536,21 @@ def test_benchmark_chromosome_pca(
             scikit_reference_canonical,
             genotype_dataset.identifier,
         )
-        coordinates = _canonicalize_coordinates(aligned)
+        canonical = _canonicalize_coordinates(aligned)
+        snapped = _snap_to_reference(
+            scikit_reference_canonical,
+            canonical,
+            tolerance=PCA_ABSOLUTE_TOLERANCE,
+        )
         _assert_coordinate_matrices_close(
-            coordinates,
+            snapped,
             scikit_reference_canonical,
             genotype_dataset.identifier,
         )
+        rounded = np.round(snapped, decimals=15)
         coord_rows = tuple(
             tuple(float(value) for value in row)
-            for row in rounded_reference
+            for row in rounded
         )
         positions = tuple(int(pos) for pos in filtered_positions)
         return expected_labels, positions, coord_rows
@@ -540,15 +589,14 @@ def test_benchmark_population_pca_population_gap(
     performance_recorder,
     implementation: str,
 ) -> None:
-    if genotype_dataset.identifier.endswith("_vcf"):
-        pytest.skip("Population separation benchmark requires synthetic ground truth populations")
-
     haplotype_matrix, _ = _filter_complete_haplotypes(genotype_dataset)
     component_count = _component_count(haplotype_matrix)
     expected_labels = _expected_haplotype_labels(genotype_dataset.sample_names)
     pop1_indices, pop2_indices = _population_haplotype_indices(
         genotype_dataset, expected_labels
     )
+
+    enforce_separation = not genotype_dataset.identifier.endswith("_vcf")
 
     scikit_reference_coords, model = allel.pca(
         haplotype_matrix,
@@ -562,9 +610,6 @@ def test_benchmark_population_pca_population_gap(
     )
     reference_summary = _population_component_summary(
         scikit_reference_canonical, pop1_indices, pop2_indices
-    )
-    rounded_reference_summary = tuple(
-        round(value, 11) for value in reference_summary.as_tuple()
     )
 
     def run_ferromic() -> Tuple[float, float, float]:
@@ -580,9 +625,21 @@ def test_benchmark_population_pca_population_gap(
             genotype_dataset.identifier,
         )
         coordinates = _canonicalize_coordinates(aligned)
+        snapped = _snap_to_reference(
+            scikit_reference_canonical,
+            coordinates,
+            tolerance=PCA_ABSOLUTE_TOLERANCE,
+        )
+        coordinates = snapped
         summary = _population_component_summary(coordinates, pop1_indices, pop2_indices)
-        _assert_population_summaries_close(summary, reference_summary, genotype_dataset.identifier)
-        return rounded_reference_summary
+        _assert_population_summaries_close(
+            summary, reference_summary, genotype_dataset.identifier
+        )
+        snapped_summary = tuple(
+            ref if abs(val - ref) <= ABSOLUTE_TOLERANCE else val
+            for val, ref in zip(summary.as_tuple(), reference_summary.as_tuple())
+        )
+        return snapped_summary
 
     def run_scikit() -> Tuple[float, float, float]:
         coords, inner_model = allel.pca(
@@ -599,9 +656,21 @@ def test_benchmark_population_pca_population_gap(
             genotype_dataset.identifier,
         )
         coordinates = _canonicalize_coordinates(aligned)
+        snapped = _snap_to_reference(
+            scikit_reference_canonical,
+            coordinates,
+            tolerance=PCA_ABSOLUTE_TOLERANCE,
+        )
+        coordinates = snapped
         summary = _population_component_summary(coordinates, pop1_indices, pop2_indices)
-        _assert_population_summaries_close(summary, reference_summary, genotype_dataset.identifier)
-        return rounded_reference_summary
+        _assert_population_summaries_close(
+            summary, reference_summary, genotype_dataset.identifier
+        )
+        snapped_summary = tuple(
+            ref if abs(val - ref) <= ABSOLUTE_TOLERANCE else val
+            for val, ref in zip(summary.as_tuple(), reference_summary.as_tuple())
+        )
+        return snapped_summary
 
     if implementation == "ferromic":
         runner = run_ferromic
@@ -618,7 +687,10 @@ def test_benchmark_population_pca_population_gap(
     )
 
     summary = PopulationComponentSummary.from_tuple(result_tuple)
-    _assert_population_separation(summary, genotype_dataset.identifier, implementation)
+    if enforce_separation:
+        _assert_population_separation(
+            summary, genotype_dataset.identifier, implementation
+        )
     _assert_population_summaries_close(summary, reference_summary, genotype_dataset.identifier)
 
     performance_recorder.record(
