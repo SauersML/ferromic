@@ -1164,42 +1164,232 @@ def codeml_worker(gene_info, region_tree_file, region_label):
 
         # --- 2. Helper function to run a single codeml attempt if not cached ---
         def get_attempt_result(key_hex, tree_path, out_name, model_params, parser_func):
+            """
+            Returns a payload dict for a single codeml attempt, preferring the current cache key.
+            On a miss, performs a legacy scan of the cache to find an equivalent run (by invariant inputs),
+            then rehydrates it under the current key and copies ephemeral artifacts (notably the treefile)
+            into the permanent cache.
+        
+            Payload shape: {"lnl": float, "params": {...}}; params may be {} if parser_func is None.
+            """
+            # --- quick helpers (local to keep this change self-contained) ---
+            def _safe_json_load(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        return json.load(f)
+                except Exception:
+                    return None
+        
+            def _copy_if_exists(src, dst_dir, dst_name=None):
+                try:
+                    if src and os.path.exists(src):
+                        os.makedirs(dst_dir, exist_ok=True)
+                        dst = os.path.join(dst_dir, (dst_name if dst_name else os.path.basename(src)))
+                        shutil.copy(src, dst)
+                        return dst
+                except Exception as e:
+                    logging.debug(f"Copy failed from {src} to {dst_dir}: {e}")
+                return None
+        
+            def _parse_ctl_fields(ctl_path):
+                """Extract minimal fields from a codeml .ctl file needed for legacy matching."""
+                FINT = r'[-+]?\d+'
+                FFLT = FLOAT_REGEX  # already defined globally
+                rx = {
+                    "seqfile": re.compile(r'^\s*seqfile\s*=\s*(.+?)\s*$', re.I|re.M),
+                    "treefile": re.compile(r'^\s*treefile\s*=\s*(.+?)\s*$', re.I|re.M),
+                    "model": re.compile(r'^\s*model\s*=\s*(' + FINT + r')\s*$', re.I|re.M),
+                    "NSsites": re.compile(r'^\s*NSsites\s*=\s*(' + FINT + r'(?:\s+' + FINT + r')*)\s*$', re.I|re.M),
+                    "ncatG": re.compile(r'^\s*ncatG\s*=\s*(' + FINT + r')\s*$', re.I|re.M),
+                    "fix_blength": re.compile(r'^\s*fix_blength\s*=\s*(' + FINT + r')\s*$', re.I|re.M),
+                }
+                try:
+                    s = _read_text(ctl_path)
+                except Exception:
+                    return None
+        
+                def _pick_int(key, default=None):
+                    m = rx[key].search(s)
+                    return int(m.group(1)) if m else default
+        
+                # NSsites may be a list, but for these models we pass a single value; normalize to int
+                ns_m = rx["NSsites"].search(s)
+                ns_val = None
+                if ns_m:
+                    toks = ns_m.group(1).strip().split()
+                    if toks:
+                        try:
+                            ns_val = int(toks[0])
+                        except ValueError:
+                            ns_val = None
+        
+                seqfile = rx["seqfile"].search(s)
+                treefile = rx["treefile"].search(s)
+                return {
+                    "seqfile": seqfile.group(1).strip() if seqfile else None,
+                    "treefile": treefile.group(1).strip() if treefile else None,
+                    "model": _pick_int("model"),
+                    "NSsites": ns_val,
+                    "ncatG": _pick_int("ncatG", None),
+                    "fix_blength": _pick_int("fix_blength", 0),
+                }
+        
+            def _sha_file_safe(p):
+                try:
+                    return _sha256_file(p)
+                except Exception:
+                    return None
+        
+            def _legacy_find_equivalent(out_name, expect_params, expect_gene_phy_sha, expect_tree_sha):
+                """
+                Scan existing cache for an attempt with the same out_name whose ctl
+                refers to the same gene (by PHY sha), same tree (by treefile sha), and same model knobs.
+                Returns (payload, legacy_key_dir, ctl_path, treefile_path) or (None, None, None, None)
+                """
+                # Fast path: if the current cache dir already has artifacts/ctl for out_name, just verify those.
+                cur_dir = _fanout_dir(PAML_CACHE_DIR, key_hex)
+                candidate = os.path.join(cur_dir, "artifacts", f"{out_name}.ctl")
+                if os.path.exists(candidate):
+                    fields = _parse_ctl_fields(candidate)
+                    if fields and fields["model"] == expect_params.get("model") \
+                       and fields["NSsites"] == expect_params.get("NSsites") \
+                       and (fields["ncatG"] or None) == expect_params.get("ncatG") \
+                       and (fields["fix_blength"] or 0) == expect_params.get("fix_blength", 0):
+                        seq_sha = _sha_file_safe(fields["seqfile"]) if fields.get("seqfile") else None
+                        tree_sha = _sha_file_safe(fields["treefile"]) if fields.get("treefile") else None
+                        if seq_sha == expect_gene_phy_sha and tree_sha == expect_tree_sha:
+                            payload = cache_read_json(PAML_CACHE_DIR, key_hex, "attempt.json")
+                            if payload:
+                                return payload, cur_dir, candidate, fields.get("treefile")
+        
+                # Full scan (bounded to cache structure)
+                for lvl1 in (os.listdir(PAML_CACHE_DIR) if os.path.isdir(PAML_CACHE_DIR) else []):
+                    p1 = os.path.join(PAML_CACHE_DIR, lvl1)
+                    if not os.path.isdir(p1) or len(lvl1) != 2:  # fanout sanity
+                        continue
+                    for lvl2 in (os.listdir(p1) if os.path.isdir(p1) else []):
+                        p2 = os.path.join(p1, lvl2)
+                        if not os.path.isdir(p2) or len(lvl2) != 2:
+                            continue
+                        # Iterate keys under this fanout bucket
+                        for keydir in (os.listdir(p2) if os.path.isdir(p2) else []):
+                            kd = os.path.join(p2, keydir)
+                            if not os.path.isdir(kd):
+                                continue
+                            att_json = os.path.join(kd, "attempt.json")
+                            if not os.path.exists(att_json):
+                                continue
+                            ctl_candidate = os.path.join(kd, "artifacts", f"{out_name}.ctl")
+                            out_candidate = os.path.join(kd, "artifacts", out_name)
+                            if not os.path.exists(ctl_candidate) or not os.path.exists(out_candidate):
+                                continue
+                            fields = _parse_ctl_fields(ctl_candidate)
+                            if not fields:
+                                continue
+                            # Match model knobs
+                            if fields["model"] != expect_params.get("model"):
+                                continue
+                            if fields["NSsites"] != expect_params.get("NSsites"):
+                                continue
+                            if (fields["ncatG"] or None) != expect_params.get("ncatG"):
+                                continue
+                            if (fields["fix_blength"] or 0) != expect_params.get("fix_blength", 0):
+                                continue
+                            # Match input content by sha
+                            seq_sha = _sha_file_safe(fields["seqfile"]) if fields.get("seqfile") else None
+                            if seq_sha != expect_gene_phy_sha:
+                                continue
+                            tree_sha = _sha_file_safe(fields["treefile"]) if fields.get("treefile") else None
+                            if tree_sha != expect_tree_sha:
+                                continue
+                            payload = _safe_json_load(att_json)
+                            if payload and isinstance(payload, dict) and "lnl" in payload:
+                                return payload, kd, ctl_candidate, fields.get("treefile")
+                return None, None, None, None
+        
+            def _rehydrate_under_new_key(new_key_hex, payload, legacy_dir, legacy_ctl, legacy_tree):
+                """
+                Writes attempt.json into the new key directory and copies artifacts.
+                Also copies the treefile used (which may be in a temp dir) into artifacts → permanent.
+                """
+                target_dir = _fanout_dir(PAML_CACHE_DIR, new_key_hex)
+                with _with_lock(target_dir):
+                    cache_write_json(PAML_CACHE_DIR, new_key_hex, "attempt.json", payload)
+                    art_dst = os.path.join(target_dir, "artifacts")
+                    os.makedirs(art_dst, exist_ok=True)
+        
+                    # Copy known artifacts from legacy (if present)
+                    _copy_if_exists(os.path.join(legacy_dir, "artifacts", out_name), art_dst, out_name)
+                    _copy_if_exists(os.path.join(legacy_dir, "artifacts", f"{out_name}.ctl"), art_dst, f"{out_name}.ctl")
+                    _copy_if_exists(os.path.join(legacy_dir, "artifacts", "mlc"), art_dst, "mlc")
+        
+                    # Copy the legacy treefile into artifacts for permanence
+                    if legacy_tree and os.path.exists(legacy_tree):
+                        # Name it predictably so we can find it later regardless of temp paths
+                        _copy_if_exists(legacy_tree, art_dst, f"{out_name}.tree")
+        
+            # --- 1) Try the current key directly ---
             payload = cache_read_json(PAML_CACHE_DIR, key_hex, "attempt.json")
             if payload:
-                logging.info(f"[{gene_name}|{region_label}] Using cached ATTEMPT: {out_name}")
+                logging.info(f"[{gene_name}|{region_label}] Using cached ATTEMPT (current key): {out_name}")
+                # Ensure the tree used is persisted (copy if missing)
+                art_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, key_hex), "artifacts")
+                tree_copy = os.path.join(art_dir, f"{out_name}.tree")
+                if not os.path.exists(tree_copy):
+                    _copy_if_exists(tree_path, art_dir, f"{out_name}.tree")
                 return payload
-
+        
+            # --- 2) Legacy fallback: find an equivalent attempt and rehydrate it ---
+            # Prepare invariants for matching
+            expect_gene_phy_sha = gene_phy_sha  # from closure
+            expect_tree_sha = _sha_file_safe(tree_path)
+            # Normalize model knobs we care about for matching
+            expect_params = {
+                "model": model_params.get("model"),
+                "NSsites": model_params.get("NSsites"),
+                "ncatG": model_params.get("ncatG"),
+                "fix_blength": model_params.get("fix_blength", 0),
+            }
+            legacy_payload, legacy_dir, legacy_ctl, legacy_tree = _legacy_find_equivalent(
+                out_name, expect_params, expect_gene_phy_sha, expect_tree_sha
+            )
+            if legacy_payload:
+                logging.info(f"[{gene_name}|{region_label}] Using cached ATTEMPT (legacy rehydrated): {out_name}")
+                _rehydrate_under_new_key(key_hex, legacy_payload, legacy_dir, legacy_ctl, legacy_tree)
+                return legacy_payload
+        
+            # --- 3) No cache found → run codeml and cache fresh (and persist the tree) ---
             run_dir = os.path.join(temp_dir, out_name.replace(".out", ""))
             ctl_file = os.path.join(run_dir, f"{gene_name}_{out_name}.ctl")
             out_file = os.path.join(run_dir, f"{gene_name}_{out_name}")
-
-            # Add fixed initial params to a copy of the model_params dict
-            params = {**model_params, 'init_kappa': 2.0, 'init_omega': 0.5, 'fix_blength': 0}
+        
+            # Fix initial params and generate ctl
+            params = {**model_params, 'init_kappa': 2.0, 'init_omega': 0.5, 'fix_blength': model_params.get('fix_blength', 0)}
             generate_paml_ctl(ctl_file, phy_abs, tree_path, out_file, **params)
             run_codeml_in(run_dir, ctl_file, PAML_TIMEOUT)
-            _log_tail(out_file, 25, prefix=f"[{gene_name}|{region_label}] {out_name} out (recomputed)")
-
+            _log_tail(out_file, 25, prefix=f"[{gene_name}|{region_label}] {out_name} out (computed)")
+        
             lnl = parse_paml_lnl(out_file)
-            params = parser_func(out_file) if parser_func else {}
-            payload = {"lnl": float(lnl), "params": params}
-
-            with _with_lock(_fanout_dir(PAML_CACHE_DIR, key_hex)):
-                cache_write_json(PAML_CACHE_DIR, key_hex, "attempt.json", payload)
-                artifact_dir = os.path.join(_fanout_dir(PAML_CACHE_DIR, key_hex), "artifacts")
-                os.makedirs(artifact_dir, exist_ok=True)
-                shutil.copy(out_file, os.path.join(artifact_dir, out_name))
-                shutil.copy(ctl_file, os.path.join(artifact_dir, f"{out_name}.ctl"))
-                mlc_path = os.path.join(run_dir, "mlc")
-                if os.path.exists(mlc_path): shutil.copy(mlc_path, os.path.join(artifact_dir, "mlc"))
-
+            parsed = parser_func(out_file) if parser_func else {}
+        
+            payload = {"lnl": float(lnl), "params": parsed}
+        
             cache_dir = _fanout_dir(PAML_CACHE_DIR, key_hex)
+            with _with_lock(cache_dir):
+                cache_write_json(PAML_CACHE_DIR, key_hex, "attempt.json", payload)
+                artifact_dir = os.path.join(cache_dir, "artifacts")
+                os.makedirs(artifact_dir, exist_ok=True)
+                # Core artifacts
+                _copy_if_exists(out_file, artifact_dir, out_name)
+                _copy_if_exists(ctl_file, artifact_dir, f"{out_name}.ctl")
+                mlc_path = os.path.join(run_dir, "mlc")
+                _copy_if_exists(mlc_path, artifact_dir, "mlc")
+                # Persist the exact tree used (temp paths can vanish)
+                _copy_if_exists(tree_path, artifact_dir, f"{out_name}.tree")
+        
             logging.info(f"[{gene_name}|{region_label}] Cached attempt {out_name} to {cache_dir}")
             return payload
 
-        if not RUN_BRANCH_MODEL_TEST and not RUN_CLADE_MODEL_TEST:
-            logging.warning(f"[{gene_name}|{region_label}] Both tests are disabled, skipping PAML analysis.")
-            final_result.update({'status': 'skipped', 'reason': 'Both tests disabled in config.'})
-            return final_result
 
         # --- 3. Process Branch-Model LRT ---
         bm_result = {}
