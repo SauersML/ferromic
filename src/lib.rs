@@ -204,14 +204,18 @@ impl ChromosomePcaResult {
         } = result;
 
         let dims = pca_coordinates.dim();
-        let (coords_data, _) = pca_coordinates.into_raw_vec_and_offset();
+        let (coords_vec, offset) = pca_coordinates.into_raw_vec_and_offset();
+        debug_assert!(
+            offset.is_none() || offset == Some(0),
+            "ndarray storage is expected to be contiguous"
+        );
         let coords_py = PyArray2::<f64>::zeros(py, dims, false).to_owned();
         unsafe {
             coords_py
                 .as_ref(py)
                 .as_slice_mut()
                 .expect("newly allocated array is contiguous")
-                .copy_from_slice(&coords_data);
+                .copy_from_slice(&coords_vec);
         }
         let positions_py = PyArray1::from_vec(py, positions).to_owned();
 
@@ -603,14 +607,20 @@ impl Population {
         })
     }
 
-    fn segregating_sites(&self) -> usize {
-        let ctx = self.inner.as_population_context();
-        count_segregating_sites_for_population(&ctx)
+    fn segregating_sites(&self, py: Python) -> PyResult<usize> {
+        let result = py.allow_threads(|| {
+            let ctx = self.inner.as_population_context();
+            count_segregating_sites_for_population(&ctx)
+        });
+        Ok(result)
     }
 
-    fn nucleotide_diversity(&self) -> f64 {
-        let ctx = self.inner.as_population_context();
-        calculate_pi_for_population(&ctx)
+    fn nucleotide_diversity(&self, py: Python) -> PyResult<f64> {
+        let result = py.allow_threads(|| {
+            let ctx = self.inner.as_population_context();
+            calculate_pi_for_population(&ctx)
+        });
+        Ok(result)
     }
 
     /// Identifier for the population. Haplotype groups are returned as integers, custom
@@ -1505,9 +1515,10 @@ fn vcf_error_to_pyerr(err: VcfError) -> PyErr {
 
 /// Count the number of segregating (polymorphic) sites.
 #[pyfunction(name = "segregating_sites", text_signature = "(variants, /)")]
-fn segregating_sites_py(variants: Vec<VariantInput>) -> PyResult<usize> {
+fn segregating_sites_py(py: Python, variants: Vec<VariantInput>) -> PyResult<usize> {
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
-    Ok(count_segregating_sites(&variants))
+    let result = py.allow_threads(|| count_segregating_sites(&variants));
+    Ok(result)
 }
 
 /// Compute nucleotide diversity (π) for the provided haplotypes and region length.
@@ -1516,6 +1527,7 @@ fn segregating_sites_py(variants: Vec<VariantInput>) -> PyResult<usize> {
     text_signature = "(variants, haplotypes, sequence_length, /)"
 )]
 fn nucleotide_diversity_py(
+    py: Python,
     variants: Vec<VariantInput>,
     haplotypes: Vec<HaplotypeInput>,
     sequence_length: i64,
@@ -1530,7 +1542,8 @@ fn nucleotide_diversity_py(
     let haplotypes: Vec<(usize, HaplotypeSide)> =
         haplotypes.into_iter().map(|h| h.into_pair()).collect();
 
-    Ok(calculate_pi(&variants, &haplotypes, sequence_length))
+    let result = py.allow_threads(|| calculate_pi(&variants, &haplotypes, sequence_length));
+    Ok(result)
 }
 
 /// Compute Watterson's θ estimator.
@@ -1571,7 +1584,7 @@ fn pairwise_differences_py(
     sample_count: usize,
 ) -> PyResult<Vec<Py<PairwiseDifference>>> {
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
-    let diffs = calculate_pairwise_differences(&variants, sample_count);
+    let diffs = py.allow_threads(|| calculate_pairwise_differences(&variants, sample_count));
     pairwise_differences_to_py(py, diffs)
 }
 
@@ -1597,7 +1610,7 @@ fn per_site_diversity_py(
     }
 
     let region = build_optional_region(region, &variants)?;
-    let sites = calculate_per_site_diversity(&variants, &haplotypes, region);
+    let sites = py.allow_threads(|| calculate_per_site_diversity(&variants, &haplotypes, region));
     diversity_sites_to_py(py, &sites)
 }
 
@@ -1608,9 +1621,13 @@ fn hudson_dxy_py(
     population1: PopulationInput,
     population2: PopulationInput,
 ) -> PyResult<Py<HudsonDxyResultPy>> {
-    let pop1_ctx = population1.as_context();
-    let pop2_ctx = population2.as_context();
-    let result = calculate_d_xy_hudson(&pop1_ctx, &pop2_ctx).map_err(vcf_error_to_pyerr)?;
+    let result = py
+        .allow_threads(move || {
+            let pop1_ctx = population1.as_context();
+            let pop2_ctx = population2.as_context();
+            calculate_d_xy_hudson(&pop1_ctx, &pop2_ctx)
+        })
+        .map_err(vcf_error_to_pyerr)?;
     HudsonDxyResultPy::from_result(py, &result)
 }
 
@@ -1621,10 +1638,13 @@ fn hudson_fst_py(
     population1: PopulationInput,
     population2: PopulationInput,
 ) -> PyResult<Py<HudsonFstResultPy>> {
-    let pop1_ctx = population1.as_context();
-    let pop2_ctx = population2.as_context();
-    let outcome =
-        calculate_hudson_fst_for_pair(&pop1_ctx, &pop2_ctx).map_err(vcf_error_to_pyerr)?;
+    let outcome = py
+        .allow_threads(move || {
+            let pop1_ctx = population1.as_context();
+            let pop2_ctx = population2.as_context();
+            calculate_hudson_fst_for_pair(&pop1_ctx, &pop2_ctx)
+        })
+        .map_err(vcf_error_to_pyerr)?;
     HudsonFstResultPy::from_outcome(py, &outcome)
 }
 
@@ -1639,10 +1659,12 @@ fn hudson_fst_sites_py(
     population2: PopulationInput,
     region: (i64, i64),
 ) -> PyResult<Vec<Py<HudsonFstSitePy>>> {
-    let pop1_ctx = population1.as_context();
-    let pop2_ctx = population2.as_context();
     let region = build_region(region)?;
-    let sites = calculate_hudson_fst_per_site(&pop1_ctx, &pop2_ctx, region);
+    let sites = py.allow_threads(move || {
+        let pop1_ctx = population1.as_context();
+        let pop2_ctx = population2.as_context();
+        calculate_hudson_fst_per_site(&pop1_ctx, &pop2_ctx, region)
+    });
     hudson_sites_to_py(py, &sites)
 }
 
@@ -1657,10 +1679,13 @@ fn hudson_fst_with_sites_py(
     population2: PopulationInput,
     region: (i64, i64),
 ) -> PyResult<(Py<HudsonFstResultPy>, Vec<Py<HudsonFstSitePy>>)> {
-    let pop1_ctx = population1.as_context();
-    let pop2_ctx = population2.as_context();
     let region = build_region(region)?;
-    let (outcome, sites) = calculate_hudson_fst_for_pair_with_sites(&pop1_ctx, &pop2_ctx, region)
+    let (outcome, sites) = py
+        .allow_threads(move || {
+            let pop1_ctx = population1.as_context();
+            let pop2_ctx = population2.as_context();
+            calculate_hudson_fst_for_pair_with_sites(&pop1_ctx, &pop2_ctx, region)
+        })
         .map_err(vcf_error_to_pyerr)?;
     let outcome_py = HudsonFstResultPy::from_outcome(py, &outcome)?;
     let sites_py = hudson_sites_to_py(py, &sites)?;
@@ -1688,8 +1713,9 @@ fn wc_fst_py(
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
     let sample_group_map = extract_sample_group_map(sample_to_group)?;
     let region = build_region(region)?;
-    let results =
-        calculate_fst_wc_haplotype_groups(&variants, &sample_names, &sample_group_map, region);
+    let results = py.allow_threads(|| {
+        calculate_fst_wc_haplotype_groups(&variants, &sample_names, &sample_group_map, region)
+    });
     WcFstResultPy::from_results(py, &results)
 }
 
@@ -1886,6 +1912,7 @@ fn chromosome_pca_py(
     text_signature = "(variants, sample_names, chromosome, output_dir, n_components=10, /)"
 )]
 fn chromosome_pca_to_file_py(
+    py: Python,
     variants: Vec<VariantInput>,
     sample_names: Vec<String>,
     chromosome: &str,
@@ -1904,11 +1931,13 @@ fn chromosome_pca_to_file_py(
     }
 
     let variants: Vec<Variant> = variants.into_iter().map(VariantInput::into_inner).collect();
-    let result = compute_chromosome_pca(&variants, &sample_names, n_components)
-        .map_err(vcf_error_to_pyerr)?;
+    let chromosome = chromosome.to_string();
     let output_dir = PathBuf::from(output_dir);
-    write_chromosome_pca_to_file(&result, chromosome, output_dir.as_path())
-        .map_err(vcf_error_to_pyerr)
+    py.allow_threads(move || {
+        let result = compute_chromosome_pca(&variants, &sample_names, n_components)?;
+        write_chromosome_pca_to_file(&result, &chromosome, output_dir.as_path())
+    })
+    .map_err(vcf_error_to_pyerr)
 }
 
 /// Run per-chromosome PCA for a dictionary of chromosomes -> variants.
@@ -1918,6 +1947,7 @@ fn chromosome_pca_to_file_py(
     text_signature = "(variants_by_chromosome, sample_names, output_dir, n_components=10, /)"
 )]
 fn per_chromosome_pca_py(
+    py: Python,
     variants_by_chromosome: &PyAny,
     sample_names: Vec<String>,
     output_dir: &str,
@@ -1936,8 +1966,10 @@ fn per_chromosome_pca_py(
 
     let variants = extract_variants_by_chromosome(variants_by_chromosome)?;
     let output_dir = PathBuf::from(output_dir);
-    run_chromosome_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
-        .map_err(vcf_error_to_pyerr)
+    py.allow_threads(move || {
+        run_chromosome_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
+    })
+    .map_err(vcf_error_to_pyerr)
 }
 
 /// Execute the memory-efficient multi-chromosome PCA pipeline.
@@ -1947,6 +1979,7 @@ fn per_chromosome_pca_py(
     text_signature = "(variants_by_chromosome, sample_names, output_dir, n_components=10, /)"
 )]
 fn global_pca_py(
+    py: Python,
     variants_by_chromosome: &PyAny,
     sample_names: Vec<String>,
     output_dir: &str,
@@ -1965,8 +1998,10 @@ fn global_pca_py(
 
     let variants = extract_variants_by_chromosome(variants_by_chromosome)?;
     let output_dir = PathBuf::from(output_dir);
-    run_global_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
-        .map_err(vcf_error_to_pyerr)
+    py.allow_threads(move || {
+        run_global_pca_analysis(&variants, &sample_names, output_dir.as_path(), n_components)
+    })
+    .map_err(vcf_error_to_pyerr)
 }
 
 /// Adjust the effective sequence length by applying allow and mask intervals.
