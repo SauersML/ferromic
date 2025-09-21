@@ -993,26 +993,84 @@ def draw_node_pie(ax, center, sizes, colors, radius):
         ax.add_patch(wedge)
         start += sz
 
+
 def plot_identity_matrix(ax, block_mat: np.ndarray, names_top: list, names_bottom: list,
                          title=None, subtitle=None):
     """
-    Minimal, clean identity matrix: top-left = Direct×Direct; bottom-right = Inverted×Inverted;
-    off-diagonals included (Direct×Inverted). No dense per-row bars to avoid clutter.
+    Identity matrix with:
+      - square cells (no stretching),
+      - clipped/wrapped subtitle (prevents overlap with the MST title),
+      - clear orientation labels for rows & columns (Direct vs Inverted).
+
+    Layout notes:
+      * Rows: Direct (top), Inverted (bottom)
+      * Cols: Direct (left), Inverted (right)
     """
     n_top = len(names_top)
     n_bot = len(names_bottom)
-    im = ax.imshow(block_mat, interpolation="nearest",
-                   cmap=ListedColormap(["#212121", "#f2f2f2"]), vmin=0, vmax=1, aspect="auto")
+    n_tot = n_top + n_bot
+
+    # Draw matrix with square cells
+    im = ax.imshow(
+        block_mat,
+        interpolation="nearest",
+        cmap=ListedColormap(["#212121", "#f2f2f2"]),
+        vmin=0, vmax=1,
+        aspect="equal"  # <-- force square cells
+    )
+    ax.set_aspect("equal", adjustable="box")  # keep squares when axes resize
+
     # Quadrant boundaries
     if n_top > 0 and n_bot > 0:
         ax.axhline(n_top - 0.5, color="#555555", linewidth=1.0)
         ax.axvline(n_top - 0.5, color="#555555", linewidth=1.0)
+
     ax.set_xticks([])
     ax.set_yticks([])
+
+    # Title (stays as-is)
     if title:
-        ax.set_title(title, fontsize=10, loc="left", pad=4)
+        ax.set_title(title, fontsize=10, loc="left", pad=2)
+
+    # Subtitle: clip inside the axis and split to two lines to avoid overrun
     if subtitle:
-        ax.text(0.0, 1.02, subtitle, transform=ax.transAxes, ha="left", va="bottom", fontsize=8.5, color="#333333")
+        # Hard wrap: put transcript on a new line; then clip inside axes
+        sub = subtitle.replace(" | transcript=", "\n| transcript=")
+        ax.text(
+            0.0, 0.985, sub,
+            transform=ax.transAxes,
+            ha="left", va="top",
+            fontsize=8.5, color="#333333",
+            clip_on=True  # <-- prevents any overlap into the MST panel
+        )
+
+    # Very clear orientation labels (rows & cols)
+    # Column headings (inside top of the heatmap, centered over each half)
+    if n_tot > 0:
+        ax.text(0.25, 0.995, "Direct columns", transform=ax.transAxes,
+                ha="center", va="top", fontsize=8, color=COLOR_DIRECT, clip_on=True)
+        ax.text(0.75, 0.995, "Inverted columns", transform=ax.transAxes,
+                ha="center", va="top", fontsize=8, color=COLOR_INVERTED, clip_on=True)
+
+        # Row headings along the left side at the centers of each half
+        y_dir = (0.5 * n_top) / max(1, n_tot)
+        y_inv = (n_top + 0.5 * n_bot) / max(1, n_tot)
+        # Slightly outside the left edge so they don't cover cells
+        ax.text(-0.02, y_dir, "Direct rows", transform=ax.transAxes,
+                rotation=90, ha="right", va="center", fontsize=8, color=COLOR_DIRECT)
+        ax.text(-0.02, y_inv, "Inverted rows", transform=ax.transAxes,
+                rotation=90, ha="right", va="center", fontsize=8, color=COLOR_INVERTED)
+
+    # Thin colored frames around the two same-orientation quadrants to reinforce meaning
+    # (top-left = Direct×Direct; bottom-right = Inverted×Inverted)
+    if n_top > 0:
+        ax.add_patch(mpatches.Rectangle(
+            (-0.5, -0.5), n_top, n_top, fill=False, linewidth=1.0, edgecolor=COLOR_DIRECT, alpha=0.9))
+    if n_bot > 0:
+        ax.add_patch(mpatches.Rectangle(
+            (n_top - 0.5, n_top - 0.5), n_bot, n_bot, fill=False, linewidth=1.0, edgecolor=COLOR_INVERTED, alpha=0.9))
+
+
 
 def build_identity_and_mst_for_gene(gene_row: pd.Series, cds_summary: pd.DataFrame, pairs_index: pd.DataFrame):
     """
