@@ -14,6 +14,11 @@ from _inv_common import map_inversion_series
 INPUT_FILE = "phewas_results.tsv"
 OUTPUT_PDF = "phewas_volcano.pdf"
 
+# Ensure PDF/SVG outputs remain vectorized with editable text
+plt.rcParams['pdf.fonttype'] = 42
+plt.rcParams['ps.fonttype'] = 42
+plt.rcParams['svg.fonttype'] = 'none'
+
 # --------------------------- Color / markers ---------------------------
 
 def non_orange_colors(n, seed=21):
@@ -39,6 +44,8 @@ def non_orange_colors(n, seed=21):
 def assign_colors_and_markers(levels):
     n = len(levels)
     colors = non_orange_colors(n)
+    if n > 1:
+        colors = colors[1:] + colors[:1]
     marker_cycle = ['o', 's', 'D', 'P', 'X', '*', 'v', '<', '>', 'h', 'H', 'd']
     marker_map = {lvl: marker_cycle[i % len(marker_cycle)] for i, lvl in enumerate(levels)}
     color_map  = {lvl: colors[i] for i, lvl in enumerate(levels)}
