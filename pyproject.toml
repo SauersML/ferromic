@@ -12,6 +12,7 @@ test = [
     "pytest",
     "numpy",
     "scikit-allel",
+    "scipy",
     "pytest-benchmark",
     "patchelf; platform_system == 'Linux'",
 ]
