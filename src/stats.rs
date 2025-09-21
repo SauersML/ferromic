@@ -1108,6 +1108,7 @@ impl DenseMembership {
             }
         }
 
+        offsets.sort_unstable();
         Self { offsets }
     }
 
@@ -1129,11 +1130,19 @@ fn dense_missing(bits: &[u64], idx: usize) -> bool {
     unsafe { ((*bits.get_unchecked(word) >> bit) & 1) == 1 }
 }
 
+#[inline(always)]
+fn dense_should_parallelize(variant_count: usize, haplotypes: usize) -> bool {
+    const PARALLEL_WORK_THRESHOLD: usize = 32 * 1024;
+    variant_count.saturating_mul(haplotypes) >= PARALLEL_WORK_THRESHOLD
+}
+
 #[derive(Debug)]
 pub struct DensePopulationSummary {
     alt_counts: Arc<[u32]>,
     called_counts: Arc<[u32]>,
     haplotype_capacity: usize,
+    segregating_sites: usize,
+    pi_sum: f64,
 }
 
 impl DensePopulationSummary {
@@ -1151,7 +1160,19 @@ impl DensePopulationSummary {
     pub fn haplotype_capacity(&self) -> usize {
         self.haplotype_capacity
     }
+
+    #[inline]
+    fn segregating_site_count(&self) -> usize {
+        self.segregating_sites
+    }
+
+    #[inline]
+    fn cached_pi_sum(&self) -> f64 {
+        self.pi_sum
+    }
 }
+
+const SUMMARY_PARALLEL_THRESHOLD: usize = 2048;
 
 pub fn build_dense_population_summary(
     matrix: &DenseGenotypeMatrix,
@@ -1164,42 +1185,102 @@ pub fn build_dense_population_summary(
     let data = matrix.data();
     let mut alt_counts = vec![0u32; variant_count];
     let mut called_counts = vec![0u32; variant_count];
+    let missing = matrix.missing_slice();
 
-    if let Some(bits) = matrix.missing_slice() {
-        for variant_idx in 0..variant_count {
-            let base = variant_idx * stride;
-            let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
-            alt_counts[variant_idx] = alt as u32;
-            called_counts[variant_idx] = called as u32;
+    let (segregating_sites, pi_sum) = if variant_count < SUMMARY_PARALLEL_THRESHOLD {
+        if let Some(bits) = missing {
+            let mut seg = 0usize;
+            let mut pi_total = 0.0_f64;
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
+                alt_counts[variant_idx] = alt as u32;
+                called_counts[variant_idx] = called as u32;
+                if called >= 2 && alt > 0 && alt < called {
+                    seg += 1;
+                }
+                if let Some(value) = dense_pi_from_counts(called, alt) {
+                    pi_total += value;
+                }
+            }
+            (seg, pi_total)
+        } else {
+            let mut seg = 0usize;
+            let mut pi_total = 0.0_f64;
+            let total = offsets.len();
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let alt = dense_sum_alt_no_missing(data, base, offsets);
+                alt_counts[variant_idx] = alt as u32;
+                called_counts[variant_idx] = total as u32;
+                if alt > 0 && alt < total {
+                    seg += 1;
+                }
+                if let Some(value) = dense_pi_from_counts(total, alt) {
+                    pi_total += value;
+                }
+            }
+            (seg, pi_total)
         }
+    } else if let Some(bits) = missing {
+        alt_counts
+            .par_iter_mut()
+            .zip_eq(called_counts.par_iter_mut())
+            .enumerate()
+            .fold(
+                || (0usize, 0.0_f64),
+                |(mut seg, mut pi_total), (variant_idx, (alt_slot, called_slot))| {
+                    let base = variant_idx * stride;
+                    let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
+                    *alt_slot = alt as u32;
+                    *called_slot = called as u32;
+                    if called >= 2 && alt > 0 && alt < called {
+                        seg += 1;
+                    }
+                    if let Some(value) = dense_pi_from_counts(called, alt) {
+                        pi_total += value;
+                    }
+                    (seg, pi_total)
+                },
+            )
+            .reduce(|| (0usize, 0.0_f64), |a, b| (a.0 + b.0, a.1 + b.1))
     } else {
-        let total = offsets.len() as u32;
-        for variant_idx in 0..variant_count {
-            let base = variant_idx * stride;
-            let alt = dense_sum_alt_no_missing(data, base, offsets);
-            alt_counts[variant_idx] = alt as u32;
-            called_counts[variant_idx] = total;
-        }
-    }
+        let total = offsets.len();
+        let total_u32 = total as u32;
+        alt_counts
+            .par_iter_mut()
+            .zip_eq(called_counts.par_iter_mut())
+            .enumerate()
+            .fold(
+                || (0usize, 0.0_f64),
+                |(mut seg, mut pi_total), (variant_idx, (alt_slot, called_slot))| {
+                    let base = variant_idx * stride;
+                    let alt = dense_sum_alt_no_missing(data, base, offsets);
+                    *alt_slot = alt as u32;
+                    *called_slot = total_u32;
+                    if alt > 0 && alt < total {
+                        seg += 1;
+                    }
+                    if let Some(value) = dense_pi_from_counts(total, alt) {
+                        pi_total += value;
+                    }
+                    (seg, pi_total)
+                },
+            )
+            .reduce(|| (0usize, 0.0_f64), |a, b| (a.0 + b.0, a.1 + b.1))
+    };
 
     DensePopulationSummary {
         alt_counts: Arc::from(alt_counts.into_boxed_slice()),
         called_counts: Arc::from(called_counts.into_boxed_slice()),
         haplotype_capacity: offsets.len(),
+        segregating_sites,
+        pi_sum,
     }
 }
 
 fn count_segregating_sites_from_summary(summary: &DensePopulationSummary) -> usize {
-    summary
-        .alt_counts()
-        .iter()
-        .zip(summary.called_counts())
-        .filter(|(&alt, &called)| {
-            let called = called as usize;
-            let alt = alt as usize;
-            called >= 2 && alt > 0 && alt < called
-        })
-        .count()
+    summary.segregating_site_count()
 }
 
 fn calculate_pi_from_summary(summary: &DensePopulationSummary, seq_length: i64) -> f64 {
@@ -1238,19 +1319,7 @@ fn calculate_pi_from_summary_with_precomputed(
         return f64::INFINITY;
     }
 
-    let sum_pi = if let Some(value) = precomputed {
-        value
-    } else {
-        let mut sum = 0.0_f64;
-        for (&alt, &called) in summary.alt_counts().iter().zip(summary.called_counts()) {
-            let alt = alt as usize;
-            let called = called as usize;
-            if let Some(pi) = dense_pi_from_counts(called, alt) {
-                sum += pi;
-            }
-        }
-        sum
-    };
+    let sum_pi = precomputed.unwrap_or_else(|| summary.cached_pi_sum());
 
     sum_pi / seq_length as f64
 }
@@ -3478,56 +3547,127 @@ fn count_segregating_sites_dense(
     }
     let stride = matrix.stride();
     let data = matrix.data();
-    let mut segregating = 0usize;
+    let variant_count = matrix.variant_count();
 
-    if let Some(bits) = matrix.missing_slice() {
-        for variant_idx in 0..matrix.variant_count() {
-            let base = variant_idx * stride;
-            let mut first: Option<u8> = None;
-            let mut polymorphic = false;
-            for &offset in offsets {
-                let idx = base + offset;
-                if dense_missing(bits, idx) {
-                    continue;
-                }
-                let allele = data[idx];
-                if let Some(value) = first {
-                    if allele != value {
-                        polymorphic = true;
-                        break;
+    let should_parallel = dense_should_parallelize(variant_count, offsets.len());
+
+    if !should_parallel {
+        if let Some(bits) = matrix.missing_slice() {
+            let mut segregating = 0usize;
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let mut first = 0u8;
+                let mut seen = false;
+                let mut polymorphic = false;
+                unsafe {
+                    let ptr = data.as_ptr().add(base);
+                    for &offset in offsets {
+                        let idx = base + offset;
+                        if dense_missing(bits, idx) {
+                            continue;
+                        }
+                        let allele = *ptr.add(offset);
+                        if seen {
+                            if allele != first {
+                                polymorphic = true;
+                                break;
+                            }
+                        } else {
+                            first = allele;
+                            seen = true;
+                        }
                     }
-                } else {
-                    first = Some(allele);
+                }
+                if polymorphic {
+                    segregating += 1;
                 }
             }
-            if polymorphic {
-                segregating += 1;
+            segregating
+        } else {
+            let mut segregating = 0usize;
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let mut first = 0u8;
+                let mut seen = false;
+                let mut polymorphic = false;
+                unsafe {
+                    let ptr = data.as_ptr().add(base);
+                    for &offset in offsets {
+                        let allele = *ptr.add(offset);
+                        if seen {
+                            if allele != first {
+                                polymorphic = true;
+                                break;
+                            }
+                        } else {
+                            first = allele;
+                            seen = true;
+                        }
+                    }
+                }
+                if polymorphic {
+                    segregating += 1;
+                }
             }
+            segregating
         }
+    } else if let Some(bits) = matrix.missing_slice() {
+        (0..variant_count)
+            .into_par_iter()
+            .map(|variant_idx| {
+                let base = variant_idx * stride;
+                let mut first = 0u8;
+                let mut seen = false;
+                let mut polymorphic = false;
+                unsafe {
+                    let ptr = data.as_ptr().add(base);
+                    for &offset in offsets {
+                        let idx = base + offset;
+                        if dense_missing(bits, idx) {
+                            continue;
+                        }
+                        let allele = *ptr.add(offset);
+                        if seen {
+                            if allele != first {
+                                polymorphic = true;
+                                break;
+                            }
+                        } else {
+                            first = allele;
+                            seen = true;
+                        }
+                    }
+                }
+                usize::from(polymorphic)
+            })
+            .sum()
     } else {
-        for variant_idx in 0..matrix.variant_count() {
-            let base = variant_idx * stride;
-            let mut first: Option<u8> = None;
-            let mut polymorphic = false;
-            for &offset in offsets {
-                let idx = base + offset;
-                let allele = data[idx];
-                if let Some(value) = first {
-                    if allele != value {
-                        polymorphic = true;
-                        break;
+        (0..variant_count)
+            .into_par_iter()
+            .map(|variant_idx| {
+                let base = variant_idx * stride;
+                let mut first = 0u8;
+                let mut seen = false;
+                let mut polymorphic = false;
+                unsafe {
+                    let ptr = data.as_ptr().add(base);
+                    for &offset in offsets {
+                        let allele = *ptr.add(offset);
+                        if seen {
+                            if allele != first {
+                                polymorphic = true;
+                                break;
+                            }
+                        } else {
+                            first = allele;
+                            seen = true;
+                        }
                     }
-                } else {
-                    first = Some(allele);
                 }
-            }
-            if polymorphic {
-                segregating += 1;
-            }
-        }
+                usize::from(polymorphic)
+            })
+            .sum()
     }
-
-    segregating
 }
 
 fn count_segregating_sites_dense_biallelic(
@@ -3541,27 +3681,51 @@ fn count_segregating_sites_dense_biallelic(
     let stride = matrix.stride();
     let data = matrix.data();
     let total = offsets.len();
-    let mut segregating = 0usize;
+    let variant_count = matrix.variant_count();
 
-    if let Some(bits) = matrix.missing_slice() {
-        for variant_idx in 0..matrix.variant_count() {
-            let base = variant_idx * stride;
-            let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
-            if called >= 2 && alt > 0 && alt < called {
-                segregating += 1;
+    let should_parallel = dense_should_parallelize(variant_count, total);
+
+    if !should_parallel {
+        if let Some(bits) = matrix.missing_slice() {
+            let mut segregating = 0usize;
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
+                if called >= 2 && alt > 0 && alt < called {
+                    segregating += 1;
+                }
             }
+            segregating
+        } else {
+            let mut segregating = 0usize;
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let alt = dense_sum_alt_no_missing(data, base, offsets);
+                if alt > 0 && alt < total {
+                    segregating += 1;
+                }
+            }
+            segregating
         }
+    } else if let Some(bits) = matrix.missing_slice() {
+        (0..variant_count)
+            .into_par_iter()
+            .map(|variant_idx| {
+                let base = variant_idx * stride;
+                let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
+                usize::from(called >= 2 && alt > 0 && alt < called)
+            })
+            .sum()
     } else {
-        for variant_idx in 0..matrix.variant_count() {
-            let base = variant_idx * stride;
-            let alt = dense_sum_alt_no_missing(data, base, offsets);
-            if alt > 0 && alt < total {
-                segregating += 1;
-            }
-        }
+        (0..variant_count)
+            .into_par_iter()
+            .map(|variant_idx| {
+                let base = variant_idx * stride;
+                let alt = dense_sum_alt_no_missing(data, base, offsets);
+                usize::from(alt > 0 && alt < total)
+            })
+            .sum()
     }
-
-    segregating
 }
 
 // Calculate pairwise differences and comparable sites between all sample pairs
@@ -3856,13 +4020,27 @@ fn calculate_pi_dense_biallelic(
     let stride = matrix.stride();
     let data = matrix.data();
     let mut sum_pi = 0.0_f64;
+    let parallel = dense_should_parallelize(matrix.variant_count(), offsets.len());
 
     if let Some(bits) = matrix.missing_slice() {
-        for variant_idx in 0..matrix.variant_count() {
-            let base = variant_idx * stride;
-            let (total_called, alt_count) = dense_sum_alt_with_missing(data, base, offsets, bits);
-            if let Some(pi) = dense_pi_from_counts(total_called, alt_count) {
-                sum_pi += pi;
+        if parallel {
+            sum_pi = (0..matrix.variant_count())
+                .into_par_iter()
+                .map(|variant_idx| {
+                    let base = variant_idx * stride;
+                    let (total_called, alt_count) =
+                        dense_sum_alt_with_missing(data, base, offsets, bits);
+                    dense_pi_from_counts(total_called, alt_count).unwrap_or(0.0)
+                })
+                .sum();
+        } else {
+            for variant_idx in 0..matrix.variant_count() {
+                let base = variant_idx * stride;
+                let (total_called, alt_count) =
+                    dense_sum_alt_with_missing(data, base, offsets, bits);
+                if let Some(pi) = dense_pi_from_counts(total_called, alt_count) {
+                    sum_pi += pi;
+                }
             }
         }
     } else {
@@ -3873,16 +4051,34 @@ fn calculate_pi_dense_biallelic(
         let n = total as f64;
         let scale = n / (n - 1.0);
         let inv_n_sq = 1.0 / (n * n);
-        for variant_idx in 0..matrix.variant_count() {
-            let base = variant_idx * stride;
-            let alt = dense_sum_alt_no_missing(data, base, offsets);
-            if alt == 0 || alt == total {
-                continue;
+        if parallel {
+            sum_pi = (0..matrix.variant_count())
+                .into_par_iter()
+                .map(|variant_idx| {
+                    let base = variant_idx * stride;
+                    let alt = dense_sum_alt_no_missing(data, base, offsets);
+                    if alt == 0 || alt == total {
+                        0.0
+                    } else {
+                        let alt_f = alt as f64;
+                        let ref_f = (total - alt) as f64;
+                        let sum_sq = ref_f * ref_f + alt_f * alt_f;
+                        scale * (1.0 - sum_sq * inv_n_sq)
+                    }
+                })
+                .sum();
+        } else {
+            for variant_idx in 0..matrix.variant_count() {
+                let base = variant_idx * stride;
+                let alt = dense_sum_alt_no_missing(data, base, offsets);
+                if alt == 0 || alt == total {
+                    continue;
+                }
+                let alt_f = alt as f64;
+                let ref_f = (total - alt) as f64;
+                let sum_sq = ref_f * ref_f + alt_f * alt_f;
+                sum_pi += scale * (1.0 - sum_sq * inv_n_sq);
             }
-            let alt_f = alt as f64;
-            let ref_f = (total - alt) as f64;
-            let sum_sq = ref_f * ref_f + alt_f * alt_f;
-            sum_pi += scale * (1.0 - sum_sq * inv_n_sq);
         }
     }
 
