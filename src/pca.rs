@@ -48,9 +48,9 @@ pub fn compute_chromosome_pca(
     let sample_count = sample_names.len();
     let n_haplotypes = sample_count * 2;
 
-    let mut complete_variants = Vec::new();
-    let mut maf_filtered_indices = Vec::new();
-    let mut filtered_positions = Vec::new();
+    let mut complete_count = 0usize;
+    let mut maf_filtered_indices = Vec::with_capacity(variants.len());
+    let mut filtered_positions = Vec::with_capacity(variants.len());
 
     for (variant_idx, variant) in variants.iter().enumerate() {
         if variant.genotypes.len() != sample_count {
@@ -63,7 +63,7 @@ pub fn compute_chromosome_pca(
             )));
         }
 
-        let mut allele_sum = 0.0f64;
+        let mut allele_sum = 0usize;
         let mut complete = true;
         for genotype in &variant.genotypes {
             let Some(alleles) = genotype else {
@@ -74,16 +74,16 @@ pub fn compute_chromosome_pca(
                 complete = false;
                 break;
             }
-            allele_sum += alleles[0] as f64 + alleles[1] as f64;
+            allele_sum += (alleles[0] + alleles[1]) as usize;
         }
 
         if !complete {
             continue;
         }
 
-        complete_variants.push(variant_idx);
+        complete_count += 1;
 
-        let allele_freq = allele_sum / n_haplotypes as f64;
+        let allele_freq = allele_sum as f64 / n_haplotypes as f64;
         let maf = allele_freq.min(1.0 - allele_freq);
         if maf >= 0.05 {
             maf_filtered_indices.push(variant_idx);
@@ -95,12 +95,12 @@ pub fn compute_chromosome_pca(
         LogLevel::Info,
         &format!(
             "Found {} variants with complete data out of {} total variants",
-            complete_variants.len(),
+            complete_count,
             variants.len()
         ),
     );
 
-    let max_components = std::cmp::min(complete_variants.len(), n_haplotypes);
+    let max_components = std::cmp::min(complete_count, n_haplotypes);
     let n_components = std::cmp::min(n_components, max_components);
 
     display_status_box(StatusBox {
@@ -109,7 +109,7 @@ pub fn compute_chromosome_pca(
             ("Total variants".to_string(), variants.len().to_string()),
             (
                 "Variants with complete data".to_string(),
-                complete_variants.len().to_string(),
+                complete_count.to_string(),
             ),
             ("Samples".to_string(), sample_count.to_string()),
             (
@@ -132,19 +132,35 @@ pub fn compute_chromosome_pca(
         &format!(
             "Keeping {}/{} variants with MAF >= 5% for PCA",
             maf_filtered_indices.len(),
-            complete_variants.len()
+            complete_count
         ),
     );
 
     let mut data_matrix = Array2::<f64>::zeros((n_haplotypes, maf_filtered_indices.len()));
-    for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
-        let variant = &variants[variant_idx];
-        for (sample_idx, genotype) in variant.genotypes.iter().enumerate() {
-            let alleles = genotype
-                .as_ref()
-                .expect("filtered variants lack missing data");
-            data_matrix[[sample_idx * 2, column_idx]] = alleles[0] as f64;
-            data_matrix[[sample_idx * 2 + 1, column_idx]] = alleles[1] as f64;
+    if let Some(matrix_slice) = data_matrix.as_slice_mut() {
+        let cols = maf_filtered_indices.len();
+        for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
+            let variant = &variants[variant_idx];
+            for (sample_idx, genotype) in variant.genotypes.iter().enumerate() {
+                let alleles = genotype
+                    .as_ref()
+                    .expect("filtered variants lack missing data");
+                let left_row = sample_idx * 2;
+                let right_row = left_row + 1;
+                matrix_slice[left_row * cols + column_idx] = alleles[0] as f64;
+                matrix_slice[right_row * cols + column_idx] = alleles[1] as f64;
+            }
+        }
+    } else {
+        for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
+            let variant = &variants[variant_idx];
+            for (sample_idx, genotype) in variant.genotypes.iter().enumerate() {
+                let alleles = genotype
+                    .as_ref()
+                    .expect("filtered variants lack missing data");
+                data_matrix[[sample_idx * 2, column_idx]] = alleles[0] as f64;
+                data_matrix[[sample_idx * 2 + 1, column_idx]] = alleles[1] as f64;
+            }
         }
     }
 
@@ -173,6 +189,11 @@ pub fn compute_chromosome_pca_from_dense(
             sample_names.len()
         )));
     }
+    if sample_count == 0 {
+        return Err(VcfError::Parse(
+            "dense PCA requires at least one sample".to_string(),
+        ));
+    }
     if ploidy != 2 {
         return Err(VcfError::Parse(format!(
             "expected diploid genotypes (ploidy=2) but received ploidy {}",
@@ -194,31 +215,58 @@ pub fn compute_chromosome_pca_from_dense(
 
     let n_haplotypes = sample_count * 2;
     let mut complete_count = 0usize;
-    let mut maf_filtered_indices = Vec::new();
-    let mut filtered_positions = Vec::new();
+    let mut maf_filtered_indices = Vec::with_capacity(variant_count);
+    let mut filtered_positions = Vec::with_capacity(variant_count);
+    let storage = genotypes.as_slice_memory_order();
+    let stride = sample_count * ploidy;
 
-    for variant_idx in 0..variant_count {
-        let mut allele_sum = 0.0f64;
-        let mut complete = true;
-        for sample_idx in 0..sample_count {
-            let left = genotypes[(variant_idx, sample_idx, 0)];
-            let right = genotypes[(variant_idx, sample_idx, 1)];
-            if left < 0 || right < 0 || left > 1 || right > 1 {
-                complete = false;
-                break;
+    if let Some(values) = storage {
+        for (variant_idx, chunk) in values.chunks_exact(stride).enumerate() {
+            let mut allele_sum = 0usize;
+            let mut complete = true;
+            for &value in chunk {
+                if value < 0 || value > 1 {
+                    complete = false;
+                    break;
+                }
+                allele_sum += value as usize;
             }
-            allele_sum += left as f64 + right as f64;
-        }
-        if !complete {
-            continue;
-        }
+            if !complete {
+                continue;
+            }
 
-        complete_count += 1;
-        let allele_freq = allele_sum / n_haplotypes as f64;
-        let maf = allele_freq.min(1.0 - allele_freq);
-        if maf >= 0.05 {
-            maf_filtered_indices.push(variant_idx);
-            filtered_positions.push(positions[variant_idx]);
+            complete_count += 1;
+            let allele_freq = allele_sum as f64 / n_haplotypes as f64;
+            let maf = allele_freq.min(1.0 - allele_freq);
+            if maf >= 0.05 {
+                maf_filtered_indices.push(variant_idx);
+                filtered_positions.push(positions[variant_idx]);
+            }
+        }
+    } else {
+        for variant_idx in 0..variant_count {
+            let mut allele_sum = 0usize;
+            let mut complete = true;
+            for sample_idx in 0..sample_count {
+                let left = genotypes[(variant_idx, sample_idx, 0)];
+                let right = genotypes[(variant_idx, sample_idx, 1)];
+                if left < 0 || right < 0 || left > 1 || right > 1 {
+                    complete = false;
+                    break;
+                }
+                allele_sum += (left + right) as usize;
+            }
+            if !complete {
+                continue;
+            }
+
+            complete_count += 1;
+            let allele_freq = allele_sum as f64 / n_haplotypes as f64;
+            let maf = allele_freq.min(1.0 - allele_freq);
+            if maf >= 0.05 {
+                maf_filtered_indices.push(variant_idx);
+                filtered_positions.push(positions[variant_idx]);
+            }
         }
     }
 
@@ -267,12 +315,43 @@ pub fn compute_chromosome_pca_from_dense(
     );
 
     let mut data_matrix = Array2::<f64>::zeros((n_haplotypes, maf_filtered_indices.len()));
-    for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
-        for sample_idx in 0..sample_count {
-            let left = genotypes[(variant_idx, sample_idx, 0)] as f64;
-            let right = genotypes[(variant_idx, sample_idx, 1)] as f64;
-            data_matrix[[sample_idx * 2, column_idx]] = left;
-            data_matrix[[sample_idx * 2 + 1, column_idx]] = right;
+    if let Some(matrix_slice) = data_matrix.as_slice_mut() {
+        let cols = maf_filtered_indices.len();
+        if let Some(values) = storage {
+            let src_ptr = values.as_ptr();
+            unsafe {
+                for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
+                    let variant_ptr = src_ptr.add(variant_idx * stride);
+                    for sample_idx in 0..sample_count {
+                        let row_left = sample_idx * 2;
+                        let dest_idx = row_left * cols + column_idx;
+                        let allele_left = *variant_ptr.add(sample_idx * ploidy) as f64;
+                        let allele_right = *variant_ptr.add(sample_idx * ploidy + 1) as f64;
+                        *matrix_slice.get_unchecked_mut(dest_idx) = allele_left;
+                        *matrix_slice.get_unchecked_mut(dest_idx + cols) = allele_right;
+                    }
+                }
+            }
+        } else {
+            for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
+                for sample_idx in 0..sample_count {
+                    let left = genotypes[(variant_idx, sample_idx, 0)] as f64;
+                    let right = genotypes[(variant_idx, sample_idx, 1)] as f64;
+                    let left_row = sample_idx * 2;
+                    let right_row = left_row + 1;
+                    matrix_slice[left_row * cols + column_idx] = left;
+                    matrix_slice[right_row * cols + column_idx] = right;
+                }
+            }
+        }
+    } else {
+        for (column_idx, &variant_idx) in maf_filtered_indices.iter().enumerate() {
+            for sample_idx in 0..sample_count {
+                let left = genotypes[(variant_idx, sample_idx, 0)] as f64;
+                let right = genotypes[(variant_idx, sample_idx, 1)] as f64;
+                data_matrix[[sample_idx * 2, column_idx]] = left;
+                data_matrix[[sample_idx * 2 + 1, column_idx]] = right;
+            }
         }
     }
 
