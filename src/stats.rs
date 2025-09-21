@@ -1141,6 +1141,8 @@ pub struct DensePopulationSummary {
     alt_counts: Arc<[u32]>,
     called_counts: Arc<[u32]>,
     haplotype_capacity: usize,
+    segregating_sites: usize,
+    pi_sum: f64,
 }
 
 impl DensePopulationSummary {
@@ -1158,7 +1160,19 @@ impl DensePopulationSummary {
     pub fn haplotype_capacity(&self) -> usize {
         self.haplotype_capacity
     }
+
+    #[inline]
+    fn segregating_site_count(&self) -> usize {
+        self.segregating_sites
+    }
+
+    #[inline]
+    fn cached_pi_sum(&self) -> f64 {
+        self.pi_sum
+    }
 }
+
+const SUMMARY_PARALLEL_THRESHOLD: usize = 2048;
 
 pub fn build_dense_population_summary(
     matrix: &DenseGenotypeMatrix,
@@ -1171,50 +1185,103 @@ pub fn build_dense_population_summary(
     let data = matrix.data();
     let mut alt_counts = vec![0u32; variant_count];
     let mut called_counts = vec![0u32; variant_count];
+    let missing = matrix.missing_slice();
 
-    if let Some(bits) = matrix.missing_slice() {
-        alt_counts
-            .par_iter_mut()
-            .zip_eq(called_counts.par_iter_mut())
-            .enumerate()
-            .for_each(|(variant_idx, (alt_slot, called_slot))| {
+    let (segregating_sites, pi_sum) = if variant_count < SUMMARY_PARALLEL_THRESHOLD {
+        if let Some(bits) = missing {
+            let mut seg = 0usize;
+            let mut pi_total = 0.0_f64;
+            for variant_idx in 0..variant_count {
                 let base = variant_idx * stride;
                 let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
-                *alt_slot = alt as u32;
-                *called_slot = called as u32;
-            });
-    } else {
-        let total = offsets.len() as u32;
+                alt_counts[variant_idx] = alt as u32;
+                called_counts[variant_idx] = called as u32;
+                if called >= 2 && alt > 0 && alt < called {
+                    seg += 1;
+                }
+                if let Some(value) = dense_pi_from_counts(called, alt) {
+                    pi_total += value;
+                }
+            }
+            (seg, pi_total)
+        } else {
+            let mut seg = 0usize;
+            let mut pi_total = 0.0_f64;
+            let total = offsets.len();
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let alt = dense_sum_alt_no_missing(data, base, offsets);
+                alt_counts[variant_idx] = alt as u32;
+                called_counts[variant_idx] = total as u32;
+                if alt > 0 && alt < total {
+                    seg += 1;
+                }
+                if let Some(value) = dense_pi_from_counts(total, alt) {
+                    pi_total += value;
+                }
+            }
+            (seg, pi_total)
+        }
+    } else if let Some(bits) = missing {
+
         alt_counts
             .par_iter_mut()
             .zip_eq(called_counts.par_iter_mut())
             .enumerate()
-            .for_each(|(variant_idx, (alt_slot, called_slot))| {
-                let base = variant_idx * stride;
-                let alt = dense_sum_alt_no_missing(data, base, offsets);
-                *alt_slot = alt as u32;
-                *called_slot = total;
-            });
-    }
+            .fold(
+                || (0usize, 0.0_f64),
+                |(mut seg, mut pi_total), (variant_idx, (alt_slot, called_slot))| {
+                    let base = variant_idx * stride;
+                    let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
+                    *alt_slot = alt as u32;
+                    *called_slot = called as u32;
+                    if called >= 2 && alt > 0 && alt < called {
+                        seg += 1;
+                    }
+                    if let Some(value) = dense_pi_from_counts(called, alt) {
+                        pi_total += value;
+                    }
+                    (seg, pi_total)
+                },
+            )
+            .reduce(|| (0usize, 0.0_f64), |a, b| (a.0 + b.0, a.1 + b.1))
+    } else {
+        let total = offsets.len();
+        let total_u32 = total as u32;
+        alt_counts
+            .par_iter_mut()
+            .zip_eq(called_counts.par_iter_mut())
+            .enumerate()
+            .fold(
+                || (0usize, 0.0_f64),
+                |(mut seg, mut pi_total), (variant_idx, (alt_slot, called_slot))| {
+                    let base = variant_idx * stride;
+                    let alt = dense_sum_alt_no_missing(data, base, offsets);
+                    *alt_slot = alt as u32;
+                    *called_slot = total_u32;
+                    if alt > 0 && alt < total {
+                        seg += 1;
+                    }
+                    if let Some(value) = dense_pi_from_counts(total, alt) {
+                        pi_total += value;
+                    }
+                    (seg, pi_total)
+                },
+            )
+            .reduce(|| (0usize, 0.0_f64), |a, b| (a.0 + b.0, a.1 + b.1))
+    };
 
     DensePopulationSummary {
         alt_counts: Arc::from(alt_counts.into_boxed_slice()),
         called_counts: Arc::from(called_counts.into_boxed_slice()),
         haplotype_capacity: offsets.len(),
+        segregating_sites,
+        pi_sum,
     }
 }
 
 fn count_segregating_sites_from_summary(summary: &DensePopulationSummary) -> usize {
-    summary
-        .alt_counts()
-        .iter()
-        .zip(summary.called_counts())
-        .filter(|(&alt, &called)| {
-            let called = called as usize;
-            let alt = alt as usize;
-            called >= 2 && alt > 0 && alt < called
-        })
-        .count()
+    summary.segregating_site_count()
 }
 
 fn calculate_pi_from_summary(summary: &DensePopulationSummary, seq_length: i64) -> f64 {
@@ -1253,19 +1320,7 @@ fn calculate_pi_from_summary_with_precomputed(
         return f64::INFINITY;
     }
 
-    let sum_pi = if let Some(value) = precomputed {
-        value
-    } else {
-        let mut sum = 0.0_f64;
-        for (&alt, &called) in summary.alt_counts().iter().zip(summary.called_counts()) {
-            let alt = alt as usize;
-            let called = called as usize;
-            if let Some(pi) = dense_pi_from_counts(called, alt) {
-                sum += pi;
-            }
-        }
-        sum
-    };
+    let sum_pi = precomputed.unwrap_or_else(|| summary.cached_pi_sum());
 
     sum_pi / seq_length as f64
 }
