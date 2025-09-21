@@ -13,7 +13,14 @@ import pytest
 
 import ferromic as fm
 
-allel = pytest.importorskip("allel")
+try:  # scikit-allel is required for fair benchmark comparisons.
+    import allel
+except ModuleNotFoundError as exc:  # pragma: no cover - import guard
+    raise ModuleNotFoundError(
+        "scikit-allel must be installed for population statistic benchmarks. "
+        "Install ferromic with the 'test' extra (pip install .[test]) so both "
+        "implementations are exercised."
+    ) from exc
 
 from pytest_benchmark.fixture import BenchmarkFixture
 from pytest_benchmark.stats import Metadata
