@@ -3489,12 +3489,15 @@ fn count_segregating_sites_dense(
     let data = matrix.data();
     let variant_count = matrix.variant_count();
 
-    if let Some(bits) = matrix.missing_slice() {
-        (0..variant_count)
-            .into_par_iter()
-            .map(|variant_idx| {
+    const PAR_THRESHOLD: usize = 1024;
+
+    if variant_count < PAR_THRESHOLD {
+        if let Some(bits) = matrix.missing_slice() {
+            let mut segregating = 0usize;
+            for variant_idx in 0..variant_count {
                 let base = variant_idx * stride;
-                let mut first: Option<u8> = None;
+                let mut first = 0u8;
+                let mut seen = false;
                 let mut polymorphic = false;
                 unsafe {
                     let ptr = data.as_ptr().add(base);
@@ -3504,13 +3507,74 @@ fn count_segregating_sites_dense(
                             continue;
                         }
                         let allele = *ptr.add(offset);
-                        match first {
-                            None => first = Some(allele),
-                            Some(value) if value != allele => {
+                        if seen {
+                            if allele != first {
                                 polymorphic = true;
                                 break;
                             }
-                            _ => {}
+                        } else {
+                            first = allele;
+                            seen = true;
+                        }
+                    }
+                }
+                if polymorphic {
+                    segregating += 1;
+                }
+            }
+            segregating
+        } else {
+            let mut segregating = 0usize;
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let mut first = 0u8;
+                let mut seen = false;
+                let mut polymorphic = false;
+                unsafe {
+                    let ptr = data.as_ptr().add(base);
+                    for &offset in offsets {
+                        let allele = *ptr.add(offset);
+                        if seen {
+                            if allele != first {
+                                polymorphic = true;
+                                break;
+                            }
+                        } else {
+                            first = allele;
+                            seen = true;
+                        }
+                    }
+                }
+                if polymorphic {
+                    segregating += 1;
+                }
+            }
+            segregating
+        }
+    } else if let Some(bits) = matrix.missing_slice() {
+        (0..variant_count)
+            .into_par_iter()
+            .map(|variant_idx| {
+                let base = variant_idx * stride;
+                let mut first = 0u8;
+                let mut seen = false;
+                let mut polymorphic = false;
+                unsafe {
+                    let ptr = data.as_ptr().add(base);
+                    for &offset in offsets {
+                        let idx = base + offset;
+                        if dense_missing(bits, idx) {
+                            continue;
+                        }
+                        let allele = *ptr.add(offset);
+                        if seen {
+                            if allele != first {
+                                polymorphic = true;
+                                break;
+                            }
+                        } else {
+                            first = allele;
+                            seen = true;
                         }
                     }
                 }
@@ -3522,19 +3586,21 @@ fn count_segregating_sites_dense(
             .into_par_iter()
             .map(|variant_idx| {
                 let base = variant_idx * stride;
-                let mut first: Option<u8> = None;
+                let mut first = 0u8;
+                let mut seen = false;
                 let mut polymorphic = false;
                 unsafe {
                     let ptr = data.as_ptr().add(base);
                     for &offset in offsets {
                         let allele = *ptr.add(offset);
-                        match first {
-                            None => first = Some(allele),
-                            Some(value) if value != allele => {
+                        if seen {
+                            if allele != first {
                                 polymorphic = true;
                                 break;
                             }
-                            _ => {}
+                        } else {
+                            first = allele;
+                            seen = true;
                         }
                     }
                 }
@@ -3557,7 +3623,31 @@ fn count_segregating_sites_dense_biallelic(
     let total = offsets.len();
     let variant_count = matrix.variant_count();
 
-    if let Some(bits) = matrix.missing_slice() {
+    const PAR_THRESHOLD: usize = 1024;
+
+    if variant_count < PAR_THRESHOLD {
+        if let Some(bits) = matrix.missing_slice() {
+            let mut segregating = 0usize;
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let (called, alt) = dense_sum_alt_with_missing(data, base, offsets, bits);
+                if called >= 2 && alt > 0 && alt < called {
+                    segregating += 1;
+                }
+            }
+            segregating
+        } else {
+            let mut segregating = 0usize;
+            for variant_idx in 0..variant_count {
+                let base = variant_idx * stride;
+                let alt = dense_sum_alt_no_missing(data, base, offsets);
+                if alt > 0 && alt < total {
+                    segregating += 1;
+                }
+            }
+            segregating
+        }
+    } else if let Some(bits) = matrix.missing_slice() {
         (0..variant_count)
             .into_par_iter()
             .map(|variant_idx| {
