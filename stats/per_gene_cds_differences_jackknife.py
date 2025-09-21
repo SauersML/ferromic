@@ -14,6 +14,12 @@ from tqdm import tqdm
 CDS_SUMMARY_TSV = "cds_identical_proportions.tsv"
 PAIRS_PREFIX = "pairs_CDS__"   # actual filename: f"{PAIRS_PREFIX}{summary_filename}.tsv"
 
+# Minimum required haplotypes *per group* for an alignment to be considered.
+# Increasing this value enforces stricter filtering before performing
+# Direct vs Inverted comparisons. Values below 3 are not supported because the
+# jackknife estimates require at least three haplotypes.
+MIN_HAPLOTYPES_PER_GROUP = 3
+
 def cat_label(cons: int, grp: int) -> str:
     return f"{'Recurrent' if cons==1 else 'Single'}/{ 'Inverted' if grp==1 else 'Direct'}"
 
@@ -131,6 +137,7 @@ def main():
         sys.exit(1)
 
     print(">>> Loading cds_identical_proportions.tsv ...")
+    print(f"    Minimum haplotypes per group required: {MIN_HAPLOTYPES_PER_GROUP}")
     df0 = pd.read_csv(CDS_SUMMARY_TSV, sep="\t", dtype=str)
 
     needed = {
@@ -191,6 +198,15 @@ def main():
             p, se, k, n_sites, H, y, n, ident_counts = compute_alignment_stats(pairs_path)
         except Exception as e:
             skips.append({"level":"alignment","filename":fn,"reason":"ALIGNMENT_FAIL","detail":repr(e)})
+            continue
+
+        if k < MIN_HAPLOTYPES_PER_GROUP:
+            skips.append({
+                "level": "alignment",
+                "filename": fn,
+                "reason": "ALIGNMENT_MIN_HAPLOTYPES",
+                "detail": f"k={k} < MIN_HAPLOTYPES_PER_GROUP={MIN_HAPLOTYPES_PER_GROUP}"
+            })
             continue
 
         if not math.isfinite(se):
@@ -297,6 +313,15 @@ def main():
         idx_inv = key_to_idxs[(gname, inv_id, 1)][0]
         rec_dir = aln.loc[idx_dir]
         rec_inv = aln.loc[idx_inv]
+
+        # Ensure both groups have enough haplotypes for testing
+        if int(rec_dir["k"]) < MIN_HAPLOTYPES_PER_GROUP or int(rec_inv["k"]) < MIN_HAPLOTYPES_PER_GROUP:
+            tests.append({
+                "gene_name": gname, "inv_id": inv_id,
+                "status": "SKIP_MIN_HAPLOTYPES",
+                "detail": f"direct_k={int(rec_dir['k'])}, inverted_k={int(rec_inv['k'])}, min={MIN_HAPLOTYPES_PER_GROUP}"
+            })
+            continue
 
         # Group-level p = the single alignment p (no averaging)
         p_dir = float(rec_dir["p"])
