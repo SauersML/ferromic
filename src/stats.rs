@@ -1130,6 +1130,12 @@ fn dense_missing(bits: &[u64], idx: usize) -> bool {
     unsafe { ((*bits.get_unchecked(word) >> bit) & 1) == 1 }
 }
 
+#[inline(always)]
+fn dense_should_parallelize(variant_count: usize, haplotypes: usize) -> bool {
+    const PARALLEL_WORK_THRESHOLD: usize = 32 * 1024;
+    variant_count.saturating_mul(haplotypes) >= PARALLEL_WORK_THRESHOLD
+}
+
 #[derive(Debug)]
 pub struct DensePopulationSummary {
     alt_counts: Arc<[u32]>,
@@ -3489,9 +3495,9 @@ fn count_segregating_sites_dense(
     let data = matrix.data();
     let variant_count = matrix.variant_count();
 
-    const PAR_THRESHOLD: usize = 1024;
+    let should_parallel = dense_should_parallelize(variant_count, offsets.len());
 
-    if variant_count < PAR_THRESHOLD {
+    if !should_parallel {
         if let Some(bits) = matrix.missing_slice() {
             let mut segregating = 0usize;
             for variant_idx in 0..variant_count {
@@ -3623,9 +3629,9 @@ fn count_segregating_sites_dense_biallelic(
     let total = offsets.len();
     let variant_count = matrix.variant_count();
 
-    const PAR_THRESHOLD: usize = 1024;
+    let should_parallel = dense_should_parallelize(variant_count, total);
 
-    if variant_count < PAR_THRESHOLD {
+    if !should_parallel {
         if let Some(bits) = matrix.missing_slice() {
             let mut segregating = 0usize;
             for variant_idx in 0..variant_count {
@@ -3960,13 +3966,27 @@ fn calculate_pi_dense_biallelic(
     let stride = matrix.stride();
     let data = matrix.data();
     let mut sum_pi = 0.0_f64;
+    let parallel = dense_should_parallelize(matrix.variant_count(), offsets.len());
 
     if let Some(bits) = matrix.missing_slice() {
-        for variant_idx in 0..matrix.variant_count() {
-            let base = variant_idx * stride;
-            let (total_called, alt_count) = dense_sum_alt_with_missing(data, base, offsets, bits);
-            if let Some(pi) = dense_pi_from_counts(total_called, alt_count) {
-                sum_pi += pi;
+        if parallel {
+            sum_pi = (0..matrix.variant_count())
+                .into_par_iter()
+                .map(|variant_idx| {
+                    let base = variant_idx * stride;
+                    let (total_called, alt_count) =
+                        dense_sum_alt_with_missing(data, base, offsets, bits);
+                    dense_pi_from_counts(total_called, alt_count).unwrap_or(0.0)
+                })
+                .sum();
+        } else {
+            for variant_idx in 0..matrix.variant_count() {
+                let base = variant_idx * stride;
+                let (total_called, alt_count) =
+                    dense_sum_alt_with_missing(data, base, offsets, bits);
+                if let Some(pi) = dense_pi_from_counts(total_called, alt_count) {
+                    sum_pi += pi;
+                }
             }
         }
     } else {
@@ -3977,16 +3997,34 @@ fn calculate_pi_dense_biallelic(
         let n = total as f64;
         let scale = n / (n - 1.0);
         let inv_n_sq = 1.0 / (n * n);
-        for variant_idx in 0..matrix.variant_count() {
-            let base = variant_idx * stride;
-            let alt = dense_sum_alt_no_missing(data, base, offsets);
-            if alt == 0 || alt == total {
-                continue;
+        if parallel {
+            sum_pi = (0..matrix.variant_count())
+                .into_par_iter()
+                .map(|variant_idx| {
+                    let base = variant_idx * stride;
+                    let alt = dense_sum_alt_no_missing(data, base, offsets);
+                    if alt == 0 || alt == total {
+                        0.0
+                    } else {
+                        let alt_f = alt as f64;
+                        let ref_f = (total - alt) as f64;
+                        let sum_sq = ref_f * ref_f + alt_f * alt_f;
+                        scale * (1.0 - sum_sq * inv_n_sq)
+                    }
+                })
+                .sum();
+        } else {
+            for variant_idx in 0..matrix.variant_count() {
+                let base = variant_idx * stride;
+                let alt = dense_sum_alt_no_missing(data, base, offsets);
+                if alt == 0 || alt == total {
+                    continue;
+                }
+                let alt_f = alt as f64;
+                let ref_f = (total - alt) as f64;
+                let sum_sq = ref_f * ref_f + alt_f * alt_f;
+                sum_pi += scale * (1.0 - sum_sq * inv_n_sq);
             }
-            let alt_f = alt as f64;
-            let ref_f = (total - alt) as f64;
-            let sum_sq = ref_f * ref_f + alt_f * alt_f;
-            sum_pi += scale * (1.0 - sum_sq * inv_n_sq);
         }
     }
 
