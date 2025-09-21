@@ -11,7 +11,14 @@ import pytest
 
 import ferromic as fm
 
-allel = pytest.importorskip("allel")
+try:  # scikit-allel is required so both PCA implementations are benchmarked.
+    import allel
+except ModuleNotFoundError as exc:  # pragma: no cover - import guard
+    raise ModuleNotFoundError(
+        "scikit-allel must be installed for PCA benchmarks. Install ferromic "
+        "with the 'test' extra (pip install .[test]) to compare against "
+        "scikit-allel."
+    ) from exc
 
 from pytest_benchmark.fixture import BenchmarkFixture
 
