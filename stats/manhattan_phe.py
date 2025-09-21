@@ -32,6 +32,9 @@ MAX_WIDTH       = 26.0
 WIDTH_PER_100   = 0.40
 FIG_HEIGHT      = 7.8
 
+# Axes placement (figure fractions) to enforce constant drawable width
+AXES_BBOX       = (0.18, 0.14, 0.64, 0.78)  # left, bottom, width, height
+
 # Markers & style
 TRI_SIZE        = 82.0     # triangle area (pt^2)
 CIRCLE_SIZE     = 300.0    # FDR circle area (pt^2)
@@ -385,7 +388,9 @@ def plot_one_inversion(
         fig_w = float(global_fig_width)
     else:
         fig_w = compute_width(m)
-    fig, ax = plt.subplots(figsize=(fig_w, FIG_HEIGHT))
+    fig = plt.figure(figsize=(fig_w, FIG_HEIGHT))
+    ax = fig.add_axes(AXES_BBOX)
+    fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -543,7 +548,6 @@ def plot_one_inversion(
     color_by_rowid = g["color"].to_dict()
     draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2=TRI_SIZE)
 
-    fig.tight_layout()
     os.makedirs(OUTDIR, exist_ok=True)
     out = os.path.join(OUTDIR, f"phewas_{sanitize_filename(str(inversion_label))}.pdf")
     fig.savefig(out, format="pdf")
