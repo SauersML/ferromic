@@ -14,6 +14,8 @@ from matplotlib.ticker import MultipleLocator
 
 from scipy.cluster.hierarchy import linkage, leaves_list
 from scipy.spatial.distance import squareform
+from scipy.stats import gaussian_kde
+
 
 # =============================================================================
 # Global configuration
@@ -445,20 +447,41 @@ def compute_group_distributions(cds_summary: pd.DataFrame):
                         n_at1=n_at1, box_stats=(med, q1, q3))
     return out
 
-def draw_half_violin(ax, y_vals, center_x, width=0.4, side="left", bins=40, clip=(0.0, 1.0), facecolor="#cccccc", alpha=0.6):
-    y_vals = np.asarray(y_vals, dtype=float)
-    y_vals = y_vals[(y_vals >= clip[0]) & (y_vals <= clip[1])]
-    if y_vals.size == 0:
+def draw_half_violin(ax, y_vals, center_x, width=0.4, side="left",
+                     clip=(0.0, 1.0), facecolor="#cccccc", alpha=0.6,
+                     y_grid=None, global_density_max=None, bw_method="scott"):
+    # keep only clipped values
+    y = np.asarray(y_vals, dtype=float)
+    y = y[(y >= clip[0]) & (y <= clip[1])]
+    if y.size < 2:
         return
-    hist, edges = np.histogram(y_vals, bins=bins, range=clip, density=True)
-    if hist.size >= 3:
-        hist = np.convolve(hist, [0.25, 0.5, 0.25], mode="same")
-    if hist.max() > 0:
-        hist = hist / hist.max()
-    xs   = hist * width
-    mids = 0.5 * (edges[:-1] + edges[1:])
+
+    # shared y-grid for consistent shapes
+    if y_grid is None:
+        y_grid = np.linspace(clip[0], clip[1], 400)
+
+    # KDE smoothing
+    try:
+        kde = gaussian_kde(y, bw_method=bw_method)
+        dens = kde(y_grid)
+    except Exception:
+        # safe fallback to histogram if KDE fails
+        hist, edges = np.histogram(y, bins=40, range=clip, density=True)
+        y_grid = 0.5 * (edges[:-1] + edges[1:])
+        dens = hist
+
+    dens = np.clip(dens, 0, np.inf)
+
+    # normalize widths by a GLOBAL max (passed in), else local max
+    scale = float(global_density_max) if (global_density_max is not None and global_density_max > 0) else float(dens.max())
+    if scale <= 0:
+        return
+
+    xs = (dens / scale) * width
     xcoords = center_x - xs if side == "left" else center_x + xs
-    ax.fill_betweenx(mids, center_x, xcoords, color=facecolor, alpha=alpha, linewidth=0)
+    ax.fill_betweenx(y_grid, center_x, xcoords, color=facecolor, alpha=alpha, linewidth=0)
+
+
 def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     dist = compute_group_distributions(cds_summary)
 
@@ -479,14 +502,34 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.text(1.5, 1.05, "Single-event", ha="center", va="bottom", fontsize=8, color="#5d3a9b")
     ax.text(3.5, 1.05, "Recurrent", ha="center", va="bottom", fontsize=8, color="#1b8132")
 
+    # --- Compute a global KDE max for fair width scaling across violins ---
+    y_grid = np.linspace(0.0, 1.0, 400)
+    global_density_max = 0.0
+    for cat_tmp in CATEGORY_ORDER:
+        vals_tmp = dist[cat_tmp]["values_core"]
+        vals_tmp = vals_tmp[(vals_tmp >= 0.0) & (vals_tmp <= 1.0)]
+        if vals_tmp.size >= 2:
+            try:
+                kde_tmp = gaussian_kde(vals_tmp, bw_method="scott")
+                global_density_max = max(global_density_max, float(np.max(kde_tmp(y_grid))))
+            except Exception:
+                hist_tmp, _ = np.histogram(vals_tmp, bins=40, range=(0.0, 1.0), density=True)
+                if hist_tmp.size:
+                    global_density_max = max(global_density_max, float(hist_tmp.max()))
+
     for i, cat in enumerate(CATEGORY_ORDER, start=1):
         d = dist[cat]
         core = d["values_core"]
         all_vals = d["values_all"]
 
-        # Symmetric half-violins with subtle transparency
-        draw_half_violin(ax, core, i, width=0.36, side="left", facecolor=CATEGORY_COLORS[cat], alpha=0.40)
-        draw_half_violin(ax, core, i, width=0.36, side="right", facecolor=CATEGORY_COLORS[cat], alpha=0.40)
+        # Symmetric half-violins with KDE smoothing + GLOBAL scaling
+        draw_half_violin(ax, core, i, width=0.36, side="left",
+                         facecolor=CATEGORY_COLORS[cat], alpha=0.40,
+                         y_grid=y_grid, global_density_max=global_density_max, bw_method="scott")
+        draw_half_violin(ax, core, i, width=0.36, side="right",
+                         facecolor=CATEGORY_COLORS[cat], alpha=0.40,
+                         y_grid=y_grid, global_density_max=global_density_max, bw_method="scott")
+
 
         # Box (median & IQR)
         median, q1, q3 = d["box_stats"]
@@ -1167,14 +1210,6 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
         frameon=False,
         fontsize=9,
         title="Base",
-    )
-
-    fig.text(
-        0.01,
-        0.02,
-        "Rows ordered by haplotype similarity. Triangles denote CDS sites fixed between orientations.",
-        fontsize=8,
-        color="#555555",
     )
 
     fig.tight_layout(rect=[0, 0.05, 1, 0.94])
