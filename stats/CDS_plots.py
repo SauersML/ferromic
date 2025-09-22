@@ -563,7 +563,9 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         # Half-violin + half-box; jitter on the BOX side (raincloud-style)
         side_violin = "left" if "direct" in cat else "right"
         side_box = "right" if side_violin == "left" else "left"
-        offset = 0.22 if side_box == "right" else -0.22
+        offset = 0.08 if side_box == "right" else -0.08
+        sign = 1.0 if side_box == "right" else -1.0
+        x_center = (i + offset) + sign * 0.03
 
         # draw a single half-violin on its side
         draw_half_violin(
@@ -588,9 +590,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             vals_non1 = all_vals[~mask_at1]
 
             if vals_non1.size > 0:
-                sign = 1.0 if side_box == "right" else -1.0
-                x_center = (i + offset) + sign * 0.12  # closer to the box
-                x_jit = x_center + (np.random.rand(vals_non1.size) - 0.5) * 0.08
+                _jit = x_center + (np.random.rand(vals_non1.size) - 0.5) * 0.04
 
                 ax.scatter(
                     x_jit, vals_non1,
@@ -605,7 +605,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                 rect_y0 = 1.005
 
                 rect = mpatches.Rectangle(
-                    (i - rect_w / 2, rect_y0),
+                    (x_center - rect_w / 2, rect_y0),
                     rect_w, rect_h,
                     facecolor="none",
                     edgecolor=face,
