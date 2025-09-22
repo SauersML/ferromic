@@ -35,13 +35,13 @@ np.random.seed(RANDOM_SEED)
 COLOR_DIRECT   = "#1f77b4"  # blue
 COLOR_INVERTED = "#d62728"  # red
 
-# Category palette (SE-D, SE-I, REC-D, REC-I) — use four highly distinct colors
-CATEGORY_ORDER = ["SE-D", "SE-I", "REC-D", "REC-I"]
+# Category palette (Single-event, direct, Single-event, inverted, Recurrent, direct, Recurrent, inverted) — use four highly distinct colors
+CATEGORY_ORDER = ["Single-event, direct", "Single-event, inverted", "Recurrent, direct", "Recurrent, inverted"]
 CATEGORY_COLORS = {
-    "SE-D": "#6a3d9a",  # purple
-    "SE-I": "#ff7f00",  # orange
-    "REC-D": "#1f78b4", # blue
-    "REC-I": "#33a02c", # green
+    "Single-event, direct": "#6a3d9a",  # purple
+    "Single-event, inverted": "#ff7f00",  # orange
+    "Recurrent, direct": "#1f78b4", # blue
+    "Recurrent, inverted": "#33a02c", # green
 }
 
 # Base colors for raw haplotype plots: A,C,G,T (no gap color used)
@@ -714,18 +714,6 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     """Render the conservation volcano with polished styling."""
 
     fig, ax = plt.subplots(figsize=(8.6, 5.6))
-    fig.suptitle(
-        "Inverted haplotypes show stronger CDS conservation",
-        fontsize=12,
-        fontweight="bold",
-        y=0.98,
-    )
-    ax.set_title(
-        "Each point is a gene tested for differences in CDS identity",
-        loc="left",
-        fontsize=9,
-        color="#555555",
-    )
 
     ax.set_xlabel("Δ proportion identical (Inverted − Direct)")
     ax.set_ylabel(r"$-\log_{10}(\mathrm{BH}\;q)$")
@@ -746,7 +734,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     # Colors: trust the recurrence column provided by prepare_volcano
     rec = df["recurrence"].astype(str)
-    color_map = {"SE": CATEGORY_COLORS["SE-I"], "REC": CATEGORY_COLORS["REC-I"]}
+    color_map = {"SE": CATEGORY_COLORS["Single-event, inverted"], "REC": CATEGORY_COLORS["Recurrent, inverted"]}
     colors = rec.map(color_map).fillna("#7f7f7f")
 
     ax.scatter(
