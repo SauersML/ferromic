@@ -22,16 +22,16 @@ FST_FILE       = Path("per_site_fst_output.falsta")
 
 OUTDIR         = Path("length_norm_trend_fast")
 
-MIN_LEN_PI     = 50_000
-MIN_LEN_FST    = 50_000
+MIN_LEN_PI     = 100_000
+MIN_LEN_FST    = 100_000
 
-MAX_BP         = 50_000          # cap distance from inversion edge
+MAX_BP         = 100_000          # cap distance from inversion edge
 
 # Proportion mode
 NUM_BINS_PROP  = 50
 
 # Base-pair mode 
-NUM_BINS_BP    = 25               # number of bins between 0..MAX_BP
+NUM_BINS_BP    = 50               # number of bins between 0..MAX_BP
 
 # Plotting/analysis rules
 LOWESS_FRAC     = 0.4
