@@ -860,13 +860,13 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
                 
         def _move_up_min(j_idx, dy_px):
             """Move ONE label upward by exactly dy_px (plus tiny epsilon), in offset points."""
-            ox, oy = annotations[j_idx].get_xytext()
-            annotations[j_idx].set_xytext((ox, oy + _px_to_pt(dy_px + 0.5)))  # +0.5px for clearance
+            ox, oy = annotations[j_idx].get_position()
+            annotations[j_idx].set_position((ox, oy + _px_to_pt(dy_px + 0.5)))  # +0.5px for clearance
         
         def _move_left_min(j_idx, dx_px):
             """Move ONE label left by exactly dx_px (plus tiny epsilon), in offset points."""
-            ox, oy = annotations[j_idx].get_xytext()
-            annotations[j_idx].set_xytext((ox - _px_to_pt(dx_px + 0.5), oy))  # +0.5px for clearance
+            ox, oy = annotations[j_idx].get_position()
+            annotations[j_idx].set_position((ox - _px_to_pt(dx_px + 0.5), oy))  # +0.5px for clearance
 
         # Alternate vertical / horizontal moves, ONE PAIR per step -------------
         do_vertical = True
