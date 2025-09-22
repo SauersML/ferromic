@@ -1050,19 +1050,21 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
         ax.axis("off")
         return {"n_polymorphic": 0, "n_fixed": 0, "n_inverted": len(seqsI), "n_direct": len(seqsD)}
 
-    # ---------- encode, stack (I over D), and add row spacing ----------
+    # ---------- encode, stack (I over D), and add minimal row spacing ----------
     arr_I = _encode_no_gaps(seqsI, cols_keep)
     arr_D = _encode_no_gaps(seqsD, cols_keep)
     arr   = _np.vstack([arr_I, arr_D])
     nI, nD = len(seqsI), len(seqsD)
 
-    GAP_BETWEEN_ROWS  = 1   # 1 blank line between adjacent haplotypes
-    GAP_BETWEEN_GROUP = 3   # thicker gap between inverted & direct groups
+    # Thin-line look: no gaps between adjacent haplotypes; single-row gap between groups
+    GAP_BETWEEN_ROWS  = 0
+    GAP_BETWEEN_GROUP = 1
     arr_plot = _insert_row_gaps(arr, nI=nI, gap=GAP_BETWEEN_ROWS, group_gap=GAP_BETWEEN_GROUP)
 
-    # NaN spacers render as white so the gaps are visible
+    # NaN spacers render as white so the (now thin) group gap is visible
     _cmap = _ListedColormap(BASE_COLORS)
     _cmap.set_bad(color="white")
+
 
     ax.imshow(arr_plot, cmap=_cmap, vmin=0, vmax=3, aspect="auto",
               interpolation="nearest", origin="upper", zorder=1)
@@ -1070,14 +1072,11 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
     # ---------- x-axis (positions), y-axis (hide labels entirely) ----------
     ax.set_xlim(-0.5, arr.shape[1] - 0.5)
 
-    # Place ticks exactly on integer column centers to align labels with columns
+    # Label EVERY polymorphic position at integer column centers
     ncols = arr.shape[1]
-    max_labels = 12
-    step = max(1, int(_np.ceil(ncols / max_labels)))
-    ticks = _np.arange(0, ncols, step, dtype=int)
-    ax.set_xticks(ticks)
-    ax.set_xticklabels([str(cols_keep[t] + 1) for t in ticks], fontsize=16)
-    ax.set_xlabel("Polymorphic CDS positions")
+    ax.set_xticks(_np.arange(ncols, dtype=int))
+    ax.set_xticklabels([str(cols_keep[t] + 1) for t in range(ncols)], fontsize=12)
+    ax.set_xlabel("Polymorphic CDS positions", fontsize=18)
 
     ax.set_yticks([])  # hide haplotype labels entirely
     ax.tick_params(axis="both", which="both", length=0)
@@ -1099,7 +1098,8 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
                    clip_on=False, zorder=4)
         for k in fixed_kept:
             ax.text(k, label_y, "fixed", ha="center", va="bottom",
-                    fontsize=7.5, color="#111111", clip_on=False, zorder=5)
+                    fontsize=18, color="#111111", clip_on=False, zorder=5)
+
 
     # ---------- compute DATA y extents for each bracket in the gapped image ----------
     last_inv_row_idx  = (nI - 1) * (GAP_BETWEEN_ROWS + 1) if nI > 0 else -1
@@ -1145,9 +1145,11 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
     phyI = read_phy(pairs_index.loc[str(rowI["filename"]), "phy_path"])
 
     nrows = len(phyI["seq_order"]) + len(phyD["seq_order"])
-    panel_height = max(2.5, nrows * 0.28)
+    # Smaller per-row height so any spacers render as a thin line
+    panel_height = max(2.5, nrows * 0.14)
 
-    fig, ax = plt.subplots(figsize=(14.0, panel_height + 2.0))
+    # Narrower figure => slimmer columns
+    fig, ax = plt.subplots(figsize=(10.0, panel_height + 2.0))
 
     # Render the panel (now adds "fixed" labels and uses inward/same-x brackets)
     stats_info = plot_fixed_diff_panel(
@@ -1168,6 +1170,7 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
             frameon=False,
             fontsize=14,
             title="Base",
+            title_fontsize=20,
             borderaxespad=0.0,
         )
 
