@@ -30,7 +30,7 @@ matplotlib.rcParams.update({
     "axes.spines.right": False,
 })
 
-RANDOM_SEED = 2024
+RANDOM_SEED = 2026
 np.random.seed(RANDOM_SEED)
 
 # === Match the other plot's look ===
