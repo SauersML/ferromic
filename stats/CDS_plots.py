@@ -1098,7 +1098,7 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
                    clip_on=False, zorder=4)
         for k in fixed_kept:
             ax.text(k, label_y, "fixed", ha="center", va="bottom",
-                    fontsize=18, color="#111111", clip_on=False, zorder=5)
+                    fontsize=14, color="#111111", clip_on=False, zorder=5)
 
 
     # ---------- compute DATA y extents for each bracket in the gapped image ----------
