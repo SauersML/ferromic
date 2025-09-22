@@ -48,7 +48,7 @@ CATEGORY_COLORS = {
 
 # Base colors for raw haplotype plots: A,C,G,T (no gap color used)
 BASE_TO_IDX = {"A": 0, "C": 1, "G": 2, "T": 3}
-BASE_COLORS = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a"]  # A,C,G,T
+BASE_COLORS = ["#4daf4a", "#377eb8", "#ff7f00", "#e41a1c"]  # A,C,G,T (IGV: A=green, C=blue, G=orange, T=red)
 BASE_CMAP = ListedColormap(BASE_COLORS)  # vmin=0, vmax=3
 
 # Input filenames (all in current directory)
@@ -1083,7 +1083,7 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
     step = max(1, int(_np.ceil(ncols / max_labels)))
     ticks = _np.arange(0, ncols, step, dtype=int)
     ax.set_xticks(ticks)
-    ax.set_xticklabels([str(cols_keep[t] + 1) for t in ticks], fontsize=7)
+    ax.set_xticklabels([str(cols_keep[t] + 1) for t in ticks], fontsize=16)
     ax.set_xlabel("Polymorphic CDS positions")
 
     ax.set_yticks([])  # hide haplotype labels entirely
@@ -1169,14 +1169,14 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
     # Move the Base legend OUTSIDE the axes so it does not overlap the plot
     base_handles = [mpatches.Patch(color=BASE_COLORS[i], label=b) for b, i in BASE_TO_IDX.items()]
     fig.legend(
-        handles=base_handles,
-        loc="upper left",
-        bbox_to_anchor=(1.01, 1.0),
-        frameon=False,
-        fontsize=9,
-        title="Base",
-        borderaxespad=0.0,
-    )
+            handles=base_handles,
+            loc="upper left",
+            bbox_to_anchor=(0.88, 1.0),
+            frameon=False,
+            fontsize=14,
+            title="Base",
+            borderaxespad=0.0,
+        )
 
     # Leave space on the right for the external legend
     fig.tight_layout(rect=[0.0, 0.0, 0.86, 1.0])
