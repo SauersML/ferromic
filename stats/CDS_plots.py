@@ -14,6 +14,8 @@ from matplotlib.ticker import MultipleLocator
 
 from scipy.cluster.hierarchy import linkage, leaves_list
 from scipy.spatial.distance import squareform
+from scipy.stats import gaussian_kde
+
 
 # =============================================================================
 # Global configuration
@@ -31,22 +33,32 @@ matplotlib.rcParams.update({
 RANDOM_SEED = 2024
 np.random.seed(RANDOM_SEED)
 
-# Orientation colors (high contrast)
-COLOR_DIRECT   = "#1f77b4"  # blue
-COLOR_INVERTED = "#d62728"  # red
+# === Match the other plot's look ===
+COLOR_DIRECT   = "#1f3b78"   # dark blue
+COLOR_INVERTED = "#8c2d7e"   # reddish purple
 
-# Category palette (SE-D, SE-I, REC-D, REC-I) — use four highly distinct colors
-CATEGORY_ORDER = ["SE-D", "SE-I", "REC-D", "REC-I"]
-CATEGORY_COLORS = {
-    "SE-D": "#6a3d9a",  # purple
-    "SE-I": "#ff7f00",  # orange
-    "REC-D": "#1f78b4", # blue
-    "REC-I": "#33a02c", # green
+# Hatching overlays (by recurrence)
+OVERLAY_SINGLE = "#d9d9d9"   # very light dots
+OVERLAY_RECUR  = "#4a4a4a"   # dark gray diagonals
+ALPHA_VIOLIN   = 0.72        # same translucent fill
+
+# Category order + face colors (orientation decides the fill color)
+CATEGORY_ORDER = [
+    "Single-event, direct",
+    "Single-event, inverted",
+    "Recurrent, direct",
+    "Recurrent, inverted",
+]
+CATEGORY_FACE = {
+    "Single-event, direct":   COLOR_DIRECT,
+    "Single-event, inverted": COLOR_INVERTED,
+    "Recurrent, direct":      COLOR_DIRECT,
+    "Recurrent, inverted":    COLOR_INVERTED,
 }
 
 # Base colors for raw haplotype plots: A,C,G,T (no gap color used)
 BASE_TO_IDX = {"A": 0, "C": 1, "G": 2, "T": 3}
-BASE_COLORS = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a"]  # A,C,G,T
+BASE_COLORS = ["#4daf4a", "#377eb8", "#ff7f00", "#e41a1c"]  # A,C,G,T (IGV: A=green, C=blue, G=orange, T=red)
 BASE_CMAP = ListedColormap(BASE_COLORS)  # vmin=0, vmax=3
 
 # Input filenames (all in current directory)
@@ -89,9 +101,9 @@ def _coerce_numeric_cols(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 def build_category(consensus: int, phy_group: int) -> str:
-    recurrence = "SE" if int(consensus) == 0 else "REC"
-    orientation = "D" if int(phy_group) == 0 else "I"
-    return f"{recurrence}-{orientation}"
+    recurrence = "Single-event" if int(consensus) == 0 else "Recurrent"
+    orientation = "direct" if int(phy_group) == 0 else "inverted"
+    return f"{recurrence}, {orientation}"
 
 def ensure_dir(path: str):
     d = os.path.dirname(path)
@@ -215,10 +227,6 @@ def read_phy(phy_path: str):
 
     return {"seq_order": seq_order, "seqs": seqs, "n": n_expected, "m": m_sites}
 
-def hamming(a: str, b: str) -> int:
-    if len(a) != len(b):
-        raise ValueError("Hamming distance requires equal-length strings.")
-    return sum(1 for x, y in zip(a, b) if x != y)
 
 # =============================================================================
 # Data loading & preparation
@@ -445,39 +453,70 @@ def compute_group_distributions(cds_summary: pd.DataFrame):
                         n_at1=n_at1, box_stats=(med, q1, q3))
     return out
 
-def draw_half_violin(ax, y_vals, center_x, width=0.4, side="left", bins=40, clip=(0.0, 1.0), facecolor="#cccccc", alpha=0.6):
-    y_vals = np.asarray(y_vals, dtype=float)
-    y_vals = y_vals[(y_vals >= clip[0]) & (y_vals <= clip[1])]
-    if y_vals.size == 0:
+def draw_half_violin(
+    ax, y_vals, center_x, width=0.4, side="left",
+    clip=(0.0, 1.0), facecolor="#cccccc", alpha=0.6,
+    hatch=None, hatch_edgecolor="#000000", hatch_linewidth=0.0,
+    y_grid=None, global_density_max=None, bw_method="scott"
+):
+    # keep only clipped values
+    y = np.asarray(y_vals, dtype=float)
+    y = y[(y >= clip[0]) & (y <= clip[1])]
+    if y.size < 2:
         return
-    hist, edges = np.histogram(y_vals, bins=bins, range=clip, density=True)
-    if hist.size >= 3:
-        hist = np.convolve(hist, [0.25, 0.5, 0.25], mode="same")
-    if hist.max() > 0:
-        hist = hist / hist.max()
-    xs   = hist * width
-    mids = 0.5 * (edges[:-1] + edges[1:])
+
+    # shared y-grid for consistent shapes
+    if y_grid is None:
+        y_grid = np.linspace(clip[0], clip[1], 400)
+
+    # KDE smoothing (scale to counts so widths reflect absolute number of points)
+    try:
+        kde  = gaussian_kde(y, bw_method=bw_method)
+        dens = kde(y_grid) * y.size  # counts, not PDF
+    except Exception:
+        # robust fallback if KDE fails
+        hist, bin_edges = np.histogram(y, bins=40, range=clip, density=False)
+        # simple step function onto y_grid
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+        dens = np.interp(y_grid, bin_centers, hist, left=0, right=0)
+
+    dens  = np.clip(dens, 0, np.inf)
+    scale = float(global_density_max) if (global_density_max is not None and global_density_max > 0) else float(dens.max())
+    if scale <= 0:
+        return
+    xs = (dens / scale) * width
+
+    # x on the "open" side
     xcoords = center_x - xs if side == "left" else center_x + xs
-    ax.fill_betweenx(mids, center_x, xcoords, color=facecolor, alpha=alpha, linewidth=0)
+
+    # 1) colored base fill
+    poly = ax.fill_betweenx(
+        y_grid,
+        center_x, xcoords,
+        color=facecolor, alpha=alpha, linewidth=0, zorder=1.5
+    )
+
+    # 2) hatched overlay (drawn as a closed polygon with no facecolor)
+    if hatch:
+        # Build polygon vertices around the filled area
+        xv = np.r_[np.full_like(y_grid, center_x), xcoords[::-1]]
+        yv = np.r_[y_grid, y_grid[::-1]]
+        verts = np.column_stack([xv, yv])
+        patch = mpatches.Polygon(
+            verts, closed=True,
+            facecolor="none",
+            edgecolor=hatch_edgecolor,
+            hatch=hatch,
+            linewidth=hatch_linewidth,
+            zorder=2.0
+        )
+        ax.add_patch(patch)
+
 def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     dist = compute_group_distributions(cds_summary)
 
     fig, ax = plt.subplots(figsize=(8.2, 5.4))
-    fig.suptitle(
-        "Identical CDS proportions vary by inversion history",
-        fontsize=12,
-        fontweight="bold",
-        y=0.98,
-    )
-    ax.set_title(
-        "Half-violins show the distribution per CDS; dots include perfectly identical loci",
-        loc="left",
-        fontsize=9,
-        color="#555555",
-    )
-
     ax.set_facecolor("#f9f9f9")
-    ax.set_xlabel("Inversion class")
     ax.set_ylabel("Proportion of identical CDS pairs")
     ax.set_ylim(-0.02, 1.08)
     ax.set_xlim(0.5, len(CATEGORY_ORDER) + 0.5)
@@ -489,17 +528,50 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     # Background shading separates single-event vs recurrent classes
     ax.axvspan(0.5, 2.5, color="#ede7f6", alpha=0.18, zorder=0)
     ax.axvspan(2.5, 4.5, color="#e6f4ea", alpha=0.18, zorder=0)
-    ax.text(1.5, 1.05, "Single-event", ha="center", va="bottom", fontsize=8, color="#5d3a9b")
-    ax.text(3.5, 1.05, "Recurrent", ha="center", va="bottom", fontsize=8, color="#1b8132")
+
+    # --- Compute a global max of counts (so widths are comparable across violins) ---
+    y_grid = np.linspace(0.0, 1.0, 400)
+    global_density_max = 0.0
+    for cat_tmp in CATEGORY_ORDER:
+        vals_tmp = dist[cat_tmp]["values_core"]
+        vals_tmp = vals_tmp[(vals_tmp >= 0.0) & (vals_tmp <= 1.0)]
+        if vals_tmp.size >= 2:
+            try:
+                kde_tmp = gaussian_kde(vals_tmp, bw_method="scott")
+                dens_tmp = kde_tmp(y_grid) * vals_tmp.size  # convert PDF to expected counts
+                global_density_max = max(global_density_max, float(np.max(dens_tmp)))
+            except Exception:
+                hist_tmp, _ = np.histogram(vals_tmp, bins=40, range=(0.0, 1.0), density=False)  # counts
+                if hist_tmp.size:
+                    global_density_max = max(global_density_max, float(hist_tmp.max()))
 
     for i, cat in enumerate(CATEGORY_ORDER, start=1):
         d = dist[cat]
         core = d["values_core"]
         all_vals = d["values_all"]
 
-        # Symmetric half-violins with subtle transparency
-        draw_half_violin(ax, core, i, width=0.36, side="left", facecolor=CATEGORY_COLORS[cat], alpha=0.40)
-        draw_half_violin(ax, core, i, width=0.36, side="right", facecolor=CATEGORY_COLORS[cat], alpha=0.40)
+        # Orientation-based face color, recurrence-based hatch
+        face = CATEGORY_FACE[cat]
+        if cat.startswith("Single-event"):
+            hatch_pat  = "."
+            hatch_edge = OVERLAY_SINGLE
+        else:
+            hatch_pat  = "//"
+            hatch_edge = OVERLAY_RECUR
+
+        # Symmetric half-violins with GLOBAL scaling + hatch overlay
+        draw_half_violin(
+            ax, core, i, width=0.36, side="left",
+            facecolor=face, alpha=ALPHA_VIOLIN,
+            hatch=hatch_pat, hatch_edgecolor=hatch_edge,
+            y_grid=y_grid, global_density_max=global_density_max, bw_method="scott"
+        )
+        draw_half_violin(
+            ax, core, i, width=0.36, side="right",
+            facecolor=face, alpha=ALPHA_VIOLIN,
+            hatch=hatch_pat, hatch_edgecolor=hatch_edge,
+            y_grid=y_grid, global_density_max=global_density_max, bw_method="scott"
+        )
 
         # Box (median & IQR)
         median, q1, q3 = d["box_stats"]
@@ -509,43 +581,71 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             ax.plot([i - 0.12, i + 0.12], [q1, q1], color="#333333", lw=1.0, zorder=3)
             ax.plot([i - 0.12, i + 0.12], [q3, q3], color="#333333", lw=1.0, zorder=3)
 
-        # Jitter points (all values, including 1.0)
+        # Jitter points, colored by orientation; special handling for exact 1.0s
         if all_vals.size > 0:
-            x_jit = i + (np.random.rand(all_vals.size) - 0.5) * 0.24
-            ax.scatter(
-                x_jit,
-                all_vals,
-                s=12,
-                alpha=0.7,
-                color=CATEGORY_COLORS[cat],
-                edgecolor="white",
-                linewidths=0.4,
-                zorder=2,
-            )
+            mask_at1 = (all_vals == 1.0)
+            vals_non1 = all_vals[~mask_at1]
+
+            if vals_non1.size > 0:
+                x_jit = i + (np.random.rand(vals_non1.size) - 0.5) * 0.10
+                ax.scatter(
+                    x_jit, vals_non1,
+                    s=12, alpha=0.9, color=face,
+                    edgecolor="white", linewidths=0.4, zorder=2.4,
+                )
+
+            n_at1_pts = int(mask_at1.sum())
+            if n_at1_pts > 0:
+                rect_w = 0.44
+                rect_h = 0.045
+                rect_y0 = 1.005
+
+                rect = mpatches.Rectangle(
+                    (i - rect_w / 2, rect_y0),
+                    rect_w, rect_h,
+                    facecolor="none",
+                    edgecolor=face,
+                    linewidth=0.8,
+                    zorder=1.8,
+                )
+                ax.add_patch(rect)
+
+                x_rect = (i - rect_w / 2) + np.random.rand(n_at1_pts) * rect_w
+                y_rect = rect_y0 + np.random.rand(n_at1_pts) * rect_h
+                ax.scatter(
+                    x_rect, y_rect,
+                    s=12, alpha=0.9, color=face,
+                    edgecolor="white", linewidths=0.4, zorder=2.2,
+                )
 
         # Cap at 1.0: stacked dots + explicit counts
         n_at1 = d["n_at1"]
-        if n_at1 > 0:
-            for k in range(n_at1):
-                ax.scatter(
-                    i,
-                    1.0 - 0.008 * k,
-                    s=28,
-                    color=CATEGORY_COLORS[cat],
-                    edgecolor="#1b1b1b",
-                    linewidths=0.3,
-                    zorder=4,
-                )
-        label = f"CDS: {d['n_cds']}\n100% identical: {n_at1} ({d['share_at_1']*100:.0f}%)"
+        label = f"N (CDSs) = {d['n_cds']}\n100% identical: {d['share_at_1']*100:.0f}%"
         ax.text(i, 1.065, label, ha="center", va="bottom", fontsize=8, color="#333333")
 
     ax.yaxis.set_major_locator(MultipleLocator(0.2))
     ax.grid(axis="y", linestyle=":", linewidth=0.6, color="#cfcfcf", alpha=0.7)
     ax.tick_params(axis="both", labelsize=9)
 
-    patches = [mpatches.Patch(color=CATEGORY_COLORS[c], label=c) for c in CATEGORY_ORDER]
+    legend_entries = [
+        ("Single-event, direct",   COLOR_DIRECT,   ".",  OVERLAY_SINGLE),
+        ("Single-event, inverted", COLOR_INVERTED, ".",  OVERLAY_SINGLE),
+        ("Recurrent, direct",      COLOR_DIRECT,   "//", OVERLAY_RECUR),
+        ("Recurrent, inverted",    COLOR_INVERTED, "//", OVERLAY_RECUR),
+    ]
+    patches = [
+        mpatches.Rectangle(
+            (0, 0), 1, 1,
+            facecolor=face, edgecolor=edge, hatch=hatch,
+            linewidth=0.0, alpha=ALPHA_VIOLIN
+        )
+        for (_, face, hatch, edge) in legend_entries
+    ]
+    labels = [lbl for (lbl, *_rest) in legend_entries]
+
     leg = ax.legend(
         handles=patches,
+        labels=labels,
         title="Category",
         frameon=False,
         ncol=2,
@@ -710,57 +810,50 @@ def prepare_volcano(gene_tests: pd.DataFrame, cds_summary: pd.DataFrame) -> pd.D
     print("[prepare_volcano] END")
     return out
 
-def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
-    """Render the conservation volcano with polished styling."""
 
+def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
+    """
+    Render the conservation volcano. Detect label overlaps and resolve them by
+    moving only ONE label per iteration, alternating:
+      - Step 1a (vertical): pick ONE overlapping pair; move the label that is already
+        higher in that pair upward just enough to clear the overlap.
+      - Step 1b (horizontal): rescan; pick ONE overlapping pair; move the label that
+        is already left in that pair leftward just enough to clear the overlap.
+    Repeat (1a -> rescan -> 1b -> rescan -> ...) until no overlaps remain.
+
+    Data points and axes are NEVER adjusted by the overlap solver. Only label
+    offsets (in offset points) are changed.
+    """
     fig, ax = plt.subplots(figsize=(8.6, 5.6))
-    fig.suptitle(
-        "Inverted haplotypes show stronger CDS conservation",
-        fontsize=12,
-        fontweight="bold",
-        y=0.98,
-    )
-    ax.set_title(
-        "Each point is a gene tested for differences in CDS identity",
-        loc="left",
-        fontsize=9,
-        color="#555555",
-    )
 
     ax.set_xlabel("Δ proportion identical (Inverted − Direct)")
     ax.set_ylabel(r"$-\log_{10}(\mathrm{BH}\;q)$")
     ax.set_facecolor("#f9f9f9")
 
-    # Coordinates (cap q to avoid inf on -log10)
     x = pd.to_numeric(df["delta"], errors="coerce")
     q = pd.to_numeric(df["q_value"], errors="coerce").clip(1e-22, 1.0)
     with np.errstate(divide="ignore"):
         y = -np.log10(q.to_numpy())
 
     # Point sizes by total pairs (scaled smoothly)
-    sizes = pd.to_numeric(df.get("n_pairs_total", pd.Series(dtype=float)), errors="coerce").fillna(0)
-    if sizes.max() > 0:
-        sizes = 28 + 220 * (sizes / sizes.max())
+    sizes_raw = pd.to_numeric(df.get("n_pairs_total", pd.Series(dtype=float)), errors="coerce").fillna(0)
+    if sizes_raw.max() > 0:
+        sizes = 28 + 220 * (sizes_raw / sizes_raw.max())
     else:
-        sizes = np.full_like(y, 40.0)
+        sizes = np.full_like(y, 40.0, dtype=float)
 
-    # Colors: trust the recurrence column provided by prepare_volcano
+    # Colors by recurrence (match Hudson FST: SE=#1f77b4, REC=#6A5ACD)
     rec = df["recurrence"].astype(str)
-    color_map = {"SE": CATEGORY_COLORS["SE-I"], "REC": CATEGORY_COLORS["REC-I"]}
+    color_map = {"SE": "#1f77b4", "REC": "#6A5ACD"}
     colors = rec.map(color_map).fillna("#7f7f7f")
 
+    # Scatter (data only)
     ax.scatter(
-        x,
-        y,
-        s=sizes,
-        c=colors,
-        alpha=0.88,
-        edgecolor="white",
-        linewidths=0.7,
-        zorder=3,
+        x, y, s=sizes, c=colors, alpha=0.88,
+        edgecolor="white", linewidths=0.7, zorder=3,
     )
 
-    # Symmetric x limits with a little breathing room for annotations
+    # Axes limits from DATA ONLY (never touched again)
     if x.notna().any():
         x_lim = float(np.nanmax(np.abs(x))) * 1.1 + 0.05
     else:
@@ -769,52 +862,175 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     y_max = np.nanmax(y) if np.isfinite(np.nanmax(y)) else 1.0
     ax.set_ylim(0, y_max * 1.05 + 0.3)
 
+    # Background & reference lines (visuals only)
     left, right = ax.get_xlim()
     ax.axvspan(left, 0, color=COLOR_DIRECT, alpha=0.06, zorder=0)
     ax.axvspan(0, right, color=COLOR_INVERTED, alpha=0.05, zorder=0)
     ax.axvline(0, color="#595959", linestyle="--", linewidth=1.0, zorder=1)
 
-    # Significance threshold at q=0.05
+    # FDR 5% reference line (~1.301)
     thresh_y = -math.log10(0.05)
     ax.axhline(thresh_y, linestyle="--", color="#b0b0b0", linewidth=1.0, zorder=1)
     ax.text(
         left + 0.02 * (right - left),
         thresh_y + 0.05,
         "FDR 5%",
-        va="bottom",
-        ha="left",
-        fontsize=8,
-        color="#666666",
+        va="bottom", ha="left",
+        fontsize=8, color="#666666",
     )
 
-    # Label the most significant and most extreme genes
+    # --------------------------
+    # Select labels
+    # --------------------------
     sig = df.copy()
     sig["delta_val"] = pd.to_numeric(sig["delta"], errors="coerce")
     sig["q_val"] = pd.to_numeric(sig["q_value"], errors="coerce")
     sig = sig[sig["q_val"] <= 0.05].dropna(subset=["delta_val", "q_val"])
+
+    label_rows = []
     if not sig.empty:
-        top_by_q = sig.nsmallest(8, "q_val")
+        top_by_q    = sig.nsmallest(8, "q_val")
         extreme_pos = sig.nlargest(4, "delta_val")
         extreme_neg = sig.nsmallest(4, "delta_val")
         label_df = pd.concat([top_by_q, extreme_pos, extreme_neg]).drop_duplicates(subset="gene_name")
-        for _, row in label_df.iterrows():
-            x0 = float(row["delta_val"])
-            y0 = -math.log10(max(row["q_val"], 1e-22))
-            offset = 0.35 if x0 >= 0 else -0.35
-            align = "left" if x0 >= 0 else "right"
-            ax.annotate(
-                row["gene_name"],
-                xy=(x0, y0),
-                xytext=(x0 + offset, y0 + 0.25),
-                fontsize=8,
-                ha=align,
-                va="bottom",
-                color=color_map.get(row["recurrence"], "#555555"),
-                arrowprops=dict(arrowstyle="-", color="#808080", linewidth=0.6),
-                zorder=4,
-            )
+        # Mild sort for stable placement; exact order doesn't matter for solver
+        label_rows = list(label_df.sort_values(["q_val", "delta_val"]).itertuples(index=False))
 
-    # Legend emphasising recurrence mode
+    # -----------------------------------------
+    # Place labels (offset points) then resolve overlaps
+    # -----------------------------------------
+    annotations = []
+    if label_rows:
+        for row in label_rows:
+            rowd = row._asdict() if hasattr(row, "_asdict") else dict(row)
+            x0 = float(rowd["delta_val"])
+            y0 = -math.log10(max(float(rowd["q_val"]), 1e-22))
+            name = str(rowd["gene_name"])
+            rec_mode = str(rowd.get("recurrence", ""))
+            txt_color = color_map.get(rec_mode, "#555555")
+
+            dx = 6 if x0 >= 0 else -6
+            ha = "left" if x0 >= 0 else "right"
+
+            ann = ax.annotate(
+                name,
+                xy=(x0, y0), xycoords="data",
+                xytext=(dx, 2), textcoords="offset points",
+                fontsize=8, ha=ha, va="bottom", color=txt_color,
+                arrowprops=dict(arrowstyle="-", color="#808080", linewidth=0.6),
+                zorder=5,
+                annotation_clip=False,
+            )
+            annotations.append(ann)
+
+        # Helpers -------------------------------------------------------------
+        def _draw_and_renderer():
+            fig.canvas.draw()
+            return fig.canvas.get_renderer()
+
+        def _bboxes(renderer, expand=(1.0, 1.0)):
+            return [ann.get_window_extent(renderer=renderer).expanded(expand[0], expand[1]) for ann in annotations]
+
+        def _overlap_pairs(bbs):
+            """Return list of (i,j, area_px, w_px, h_px) for overlapping pairs, sorted by area desc."""
+            pairs = []
+            n = len(bbs)
+            for i in range(n):
+                bi = bbs[i]
+                for j in range(i+1, n):
+                    bj = bbs[j]
+                    w = min(bi.x1, bj.x1) - max(bi.x0, bj.x0)
+                    h = min(bi.y1, bj.y1) - max(bi.y0, bj.y0)
+                    if w > 0 and h > 0:
+                        pairs.append((i, j, w * h, w, h))
+            pairs.sort(key=lambda t: t[2], reverse=True)
+            return pairs
+
+        # Cap movements to prevent runaway offsets that fling labels off-canvas.
+        MAX_OFFSET_PT = 144.0  # total offset cap (±2 inches)
+        MAX_STEP_PT   = 24.0   # per-step cap (<= 24 pt)
+
+        def _px_to_pt(px):
+            return px * 72.0 / fig.dpi
+
+        def _clamp_offset(ox, oy):
+            ox = float(np.clip(ox, -MAX_OFFSET_PT, MAX_OFFSET_PT))
+            oy = float(np.clip(oy, -MAX_OFFSET_PT, MAX_OFFSET_PT))
+            return ox, oy
+
+        def _move_up_min(j_idx, dy_px):
+            """Move ONE label upward by a bounded amount; clamp offsets to avoid runaway."""
+            ox, oy = annotations[j_idx].get_position()
+            step_pt = min(_px_to_pt(dy_px + 0.5), MAX_STEP_PT)
+            newx, newy = ox, oy + step_pt
+            newx, newy = _clamp_offset(newx, newy)
+            annotations[j_idx].set_position((newx, newy))
+
+        def _move_down_min(j_idx, dy_px):
+            """Fallback: move ONE label downward by a bounded amount."""
+            ox, oy = annotations[j_idx].get_position()
+            step_pt = min(_px_to_pt(dy_px + 0.5), MAX_STEP_PT)
+            newx, newy = ox, oy - step_pt
+            newx, newy = _clamp_offset(newx, newy)
+            annotations[j_idx].set_position((newx, newy))
+
+        def _move_left_min(j_idx, dx_px):
+            """Move ONE label left by a bounded amount; clamp offsets to avoid runaway."""
+            ox, oy = annotations[j_idx].get_position()
+            step_pt = min(_px_to_pt(dx_px + 0.5), MAX_STEP_PT)
+            newx, newy = ox - step_pt, oy
+            newx, newy = _clamp_offset(newx, newy)
+            annotations[j_idx].set_position((newx, newy))
+
+        def _move_right_min(j_idx, dx_px):
+            """Fallback: move ONE label right by a bounded amount."""
+            ox, oy = annotations[j_idx].get_position()
+            step_pt = min(_px_to_pt(dx_px + 0.5), MAX_STEP_PT)
+            newx, newy = ox + step_pt, oy
+            newx, newy = _clamp_offset(newx, newy)
+            annotations[j_idx].set_position((newx, newy))
+
+        # Alternate vertical / horizontal moves, ONE PAIR per step -------------
+        do_vertical = True
+        max_iters = 5  # hard cap to guarantee termination
+
+        for _ in range(max_iters):
+            renderer = _draw_and_renderer()
+            bbs = _bboxes(renderer, expand=(1.0, 1.0))
+            pairs = _overlap_pairs(bbs)
+
+            if not pairs:
+                break  # done
+
+            # Pick ONE pair (largest overlap)
+            i, j, area, w_px, h_px = pairs[0]
+            bi, bj = bbs[i], bbs[j]
+
+            if do_vertical:
+                # Prefer to move the higher label UP, but if it's at the cap, move the other DOWN.
+                idx_pref = i if bi.y1 >= bj.y1 else j
+                other    = j if idx_pref == i else i
+                ox, oy = annotations[idx_pref].get_position()
+                step_pt = min(_px_to_pt(h_px + 0.5), MAX_STEP_PT)
+                if oy + step_pt > MAX_OFFSET_PT - 1e-6:
+                    _move_down_min(other, h_px)
+                else:
+                    _move_up_min(idx_pref, h_px)
+                do_vertical = False
+            else:
+                # Prefer to move the left label LEFT, but if it's at the cap, move the other RIGHT.
+                idx_pref = i if bi.x0 <= bj.x0 else j
+                other    = j if idx_pref == i else i
+                ox, oy = annotations[idx_pref].get_position()
+                step_pt = min(_px_to_pt(w_px + 0.5), MAX_STEP_PT)
+                if ox - step_pt < -MAX_OFFSET_PT + 1e-6:
+                    _move_right_min(other, w_px)
+                else:
+                    _move_left_min(idx_pref, w_px)
+                do_vertical = True
+
+        _draw_and_renderer()
+
     proxy_se = mpatches.Patch(color=color_map["SE"], label="Single-event")
     proxy_rec = mpatches.Patch(color=color_map["REC"], label="Recurrent")
     ax.legend(
@@ -864,29 +1080,87 @@ def _consensus_base_and_frac(col_list: list):
     frac = cnt / len(col_list)
     return base, frac
 
-def encode_sequence_array_no_gaps(seq_strs: list, cols_keep: list) -> np.ndarray:
-    """
-    Map A,C,G,T -> 0..3; only keep columns in cols_keep.
-    Returns (n_rows x len(cols_keep)) int array.
-    """
-    n = len(seq_strs)
-    m = len(cols_keep)
-    arr = np.zeros((n, m), dtype=int)
-    for i, s in enumerate(seq_strs):
-        for k, j in enumerate(cols_keep):
-            arr[i, k] = BASE_TO_IDX.get(s[j].upper(), 0)  # assume A/C/G/T only per user note
-    return arr
 
 def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold: float):
     """
-    True haplotype heatmap:
-      - Rows = haplotypes (Inverted on top, Direct on bottom), names shown
-      - Columns = polymorphic sites only (any difference across ALL haplotypes)
-      - Bold columns for fixed differences (as defined per-orientation)
-      - Slight separators between rows; clear divider between orientations
+    Polymorphism heatmap panel with fixes:
+      • Brackets now face inward and both use the SAME x-position (aligned).
+      • X tick labels are placed at integer column centers and align with columns.
+      • "fixed" text label is added above each fixed triangle marker (triangle retained).
     """
-    namesD = list(phyD["seq_order"])
-    namesI = list(phyI["seq_order"])
+    import numpy as _np
+    from matplotlib.colors import ListedColormap as _ListedColormap
+    from matplotlib.transforms import blended_transform_factory as _blend
+
+    # ---------- helpers ----------
+    def _consensus_base_and_frac(col_list: list):
+        from collections import Counter as _Counter
+        counts = _Counter(col_list)
+        if not counts:
+            return None, 0.0
+        base, cnt = counts.most_common(1)[0]
+        return base, cnt / len(col_list)
+
+    def _detect_fixed_columns(seqs_D: list, seqs_I: list, thr: float):
+        if not seqs_D or not seqs_I:
+            return []
+        m = len(seqs_D[0])
+        for s in seqs_D + seqs_I:
+            if len(s) != m:
+                raise ValueError("All sequences must have equal length.")
+        fixed = []
+        for j in range(m):
+            col_D = [s[j] for s in seqs_D]
+            col_I = [s[j] for s in seqs_I]
+            bD, fD = _consensus_base_and_frac(col_D)
+            bI, fI = _consensus_base_and_frac(col_I)
+            if bD is None or bI is None:
+                continue
+            if fD >= thr and fI >= thr and bD != bI:
+                fixed.append(j)
+        return fixed
+
+    def _encode_no_gaps(seq_strs: list, cols_keep: list) -> _np.ndarray:
+        arr = _np.zeros((len(seq_strs), len(cols_keep)), dtype=float)
+        for i, s in enumerate(seq_strs):
+            for k, j in enumerate(cols_keep):
+                arr[i, k] = BASE_TO_IDX.get(s[j].upper(), 0)
+        return arr
+
+    def _insert_row_gaps(arr: _np.ndarray, nI: int, gap: int = 1, group_gap: int = 3) -> _np.ndarray:
+        """Insert NaN spacer rows between all rows; bigger spacer between I and D groups."""
+        r, c = arr.shape
+        rows = []
+        for i in range(r):
+            rows.append(arr[i])
+            if i < r - 1:
+                n_spacers = group_gap if i == (nI - 1) else gap
+                for _ in range(n_spacers):
+                    rows.append(_np.full(c, _np.nan))
+        return _np.vstack(rows)
+
+    def _add_square_bracket(ax, y0, y1, label, *, x_axes=-0.055, tick_len_axes=0.018, lw=1.8):
+        """
+        Draw a black square/rectangle bracket just LEFT of the y-axis.
+        x is in AXES coords (negative puts it outside the plot), y in DATA coords.
+        Ticks now point INWARD (toward the plot).
+        """
+        trans = _blend(ax.transAxes, ax.transData)
+        x = x_axes
+        # vertical spine of bracket
+        ax.plot([x, x], [y0, y1], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
+        # end ticks (pointing inward, into the plot)
+        ax.plot([x, x + tick_len_axes], [y0, y0], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
+        ax.plot([x, x + tick_len_axes], [y1, y1], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
+        # vertical label (black)
+        ax.text(x - 0.006, (y0 + y1) / 2.0, label,
+                transform=trans, va="center", ha="right",
+                rotation=90, fontsize=12, fontweight="bold",
+                color="black", clip_on=False, zorder=7)
+
+    # ---------- get & alphabetically sort haplotype orders (labels hidden later) ----------
+    namesD = sorted(list(phyD["seq_order"]), key=str)
+    namesI = sorted(list(phyI["seq_order"]), key=str)
     seqsD = [phyD["seqs"].get(nm, "") for nm in namesD]
     seqsI = [phyI["seqs"].get(nm, "") for nm in namesI]
     if not seqsD or not seqsI:
@@ -894,137 +1168,86 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
         ax.axis("off")
         return {"n_polymorphic": 0, "n_fixed": 0, "n_inverted": len(seqsI), "n_direct": len(seqsD)}
 
-    # Determine columns to keep: any polymorphism across ALL haplotypes (Direct + Inverted)
+    # ---------- choose polymorphic columns across ALL haplotypes ----------
     all_seqs = seqsI + seqsD
     m_full = len(all_seqs[0])
-    for s in all_seqs:
-        if len(s) != m_full:
-            raise ValueError("Seq lengths differ between orientations.")
-    cols_keep = []
-    for j in range(m_full):
-        col = [s[j] for s in all_seqs]
-        if len(set(col)) > 1:  # polymorphic across ALL samples
-            cols_keep.append(j)
+    if any(len(s) != m_full for s in all_seqs):
+        raise ValueError("Seq lengths differ between orientations.")
+    cols_keep = [j for j in range(m_full) if len({s[j] for s in all_seqs}) > 1]
     if not cols_keep:
-        ax.text(
-            0.5,
-            0.5,
-            f"{gene_name} — {inv_id}\nNo polymorphic CDS sites",
-            ha="center",
-            va="center",
-            fontsize=10,
-        )
+        ax.text(0.5, 0.5, f"{gene_name} — {inv_id}\nNo polymorphic CDS sites",
+                ha="center", va="center", fontsize=10)
         ax.axis("off")
         return {"n_polymorphic": 0, "n_fixed": 0, "n_inverted": len(seqsI), "n_direct": len(seqsD)}
 
-    # Order rows within each orientation by clustering on kept columns to group duplicates
-    def reorder_by_cols(names, seqs):
-        if len(seqs) <= 2:
-            return list(range(len(seqs)))
-        # Build Hamming distance on filtered columns
-        n = len(seqs)
-        dmat = np.zeros((n, n), dtype=float)
-        for i in range(n):
-            si = "".join(seqs[i][j] for j in cols_keep)
-            for j in range(i + 1, n):
-                sj = "".join(seqs[j][j2] for j2 in cols_keep)
-                d = hamming(si, sj)
-                dmat[i, j] = d
-                dmat[j, i] = d
-        condensed = squareform(dmat, checks=False)
-        Z = linkage(condensed, method="average")
-        return list(leaves_list(Z))
+    # ---------- encode, stack (I over D), and add minimal row spacing ----------
+    arr_I = _encode_no_gaps(seqsI, cols_keep)
+    arr_D = _encode_no_gaps(seqsD, cols_keep)
+    arr   = _np.vstack([arr_I, arr_D])
+    nI, nD = len(seqsI), len(seqsD)
 
-    ordI = reorder_by_cols(namesI, seqsI)
-    ordD = reorder_by_cols(namesD, seqsD)
-    namesI_ord = [namesI[i] for i in ordI]
-    seqsI_ord = [seqsI[i] for i in ordI]
-    namesD_ord = [namesD[i] for i in ordD]
-    seqsD_ord = [seqsD[i] for i in ordD]
+    # Thin-line look: no gaps between adjacent haplotypes; single-row gap between groups
+    GAP_BETWEEN_ROWS  = 0
+    GAP_BETWEEN_GROUP = 1
+    arr_plot = _insert_row_gaps(arr, nI=nI, gap=GAP_BETWEEN_ROWS, group_gap=GAP_BETWEEN_GROUP)
 
-    # Encode to int array (A/C/G/T) on filtered columns
-    arr_I = encode_sequence_array_no_gaps(seqsI_ord, cols_keep)
-    arr_D = encode_sequence_array_no_gaps(seqsD_ord, cols_keep)
-    arr = np.vstack([arr_I, arr_D])
+    # NaN spacers render as white so the (now thin) group gap is visible
+    _cmap = _ListedColormap(BASE_COLORS)
+    _cmap.set_bad(color="white")
 
-    # Show image
-    ax.imshow(
-        arr,
-        cmap=BASE_CMAP,
-        vmin=0,
-        vmax=3,
-        aspect="auto",
-        interpolation="nearest",
-        zorder=1,
-    )
 
-    # Fixed columns (recompute detection on full columns, then map to kept subset)
-    fixed_full = set(detect_fixed_columns(seqsD, seqsI, threshold=threshold))
+    ax.imshow(arr_plot, cmap=_cmap, vmin=0, vmax=3, aspect="auto",
+              interpolation="nearest", origin="upper", zorder=1)
+
+    # ---------- x-axis (positions), y-axis (hide labels entirely) ----------
+    ax.set_xlim(-0.5, arr.shape[1] - 0.5)
+
+    # Label EVERY polymorphic position at integer column centers
+    ncols = arr.shape[1]
+    ax.set_xticks(_np.arange(ncols, dtype=int))
+    ax.set_xticklabels([str(cols_keep[t] + 1) for t in range(ncols)], fontsize=12)
+    ax.set_xlabel("Polymorphic CDS positions", fontsize=18)
+
+    ax.set_yticks([])  # hide haplotype labels entirely
+    ax.tick_params(axis="both", which="both", length=0)
+
+    # ---------- mark fixed-difference columns ----------
+    fixed_full = set(_detect_fixed_columns(seqsD, seqsI, thr=threshold))
     fixed_kept = [k for k, j in enumerate(cols_keep) if j in fixed_full]
+
     for k in fixed_kept:
         ax.axvline(k - 0.5, color="#111111", linewidth=1.2, zorder=3)
         ax.axvline(k + 0.5, color="#111111", linewidth=1.2, zorder=3)
+
     if fixed_kept:
-        ax.scatter(
-            fixed_kept,
-            np.full(len(fixed_kept), -0.35),
-            marker="v",
-            s=36,
-            color="#111111",
-            edgecolor="none",
-            clip_on=False,
-            zorder=4,
-        )
+        # draw triangles and place the word "fixed" above each triangle
+        tri_y = -0.35
+        label_y = -0.95  # a bit above the triangle; outside plot; included via bbox_inches="tight"
+        ax.scatter(fixed_kept, _np.full(len(fixed_kept), tri_y),
+                   marker="v", s=36, color="#111111", edgecolor="none",
+                   clip_on=False, zorder=4)
+        for k in fixed_kept:
+            ax.text(k, label_y, "fixed", ha="center", va="bottom",
+                    fontsize=14, color="#111111", clip_on=False, zorder=5)
 
-    # Row separators (slight)
-    nI = len(namesI_ord)
-    total_rows = arr.shape[0]
-    for y in np.arange(-0.5, total_rows, 1.0):
-        ax.axhline(y + 0.5, color="#ffffff", linewidth=0.8, alpha=0.8, zorder=2)
-    ax.axhline(nI - 0.5, color="#333333", linewidth=1.2, zorder=3)
 
-    # Axis labels & ticks
-    ax.set_xlim(-0.5, arr.shape[1] - 0.5)
-    ax.set_xticks(np.linspace(0, arr.shape[1] - 1, num=min(12, arr.shape[1])))
-    xtick_orig = [cols_keep[int(t)] + 1 for t in ax.get_xticks()]
-    ax.set_xticklabels([str(v) for v in xtick_orig], rotation=0, fontsize=7)
-    ax.set_xlabel("Polymorphic CDS positions")
+    # ---------- compute DATA y extents for each bracket in the gapped image ----------
+    last_inv_row_idx  = (nI - 1) * (GAP_BETWEEN_ROWS + 1) if nI > 0 else -1
+    first_dir_row_idx = last_inv_row_idx + 1 + GAP_BETWEEN_GROUP
+    last_dir_row_idx  = first_dir_row_idx + (nD - 1) * (GAP_BETWEEN_ROWS + 1) if nD > 0 else last_inv_row_idx
 
-    y_labels = namesI_ord + namesD_ord
-    ax.set_yticks(np.arange(total_rows))
-    ax.set_yticklabels(y_labels, fontsize=7)
-    ax.tick_params(axis="both", which="both", length=0)
-
-    ax.text(
-        -0.02,
-        (nI - 0.5) / total_rows,
-        "Inverted",
-        ha="right",
-        va="center",
-        rotation=90,
-        fontsize=8,
-        transform=ax.transAxes,
-        color=COLOR_INVERTED,
-        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none"),
-    )
-    ax.text(
-        -0.02,
-        (nI + (total_rows - nI) / 2) / total_rows,
-        "Direct",
-        ha="right",
-        va="center",
-        rotation=90,
-        fontsize=8,
-        transform=ax.transAxes,
-        color=COLOR_DIRECT,
-        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none"),
-    )
+    # ---------- draw square brackets (same x position; facing inward) ----------
+    BRACKET_X = -0.055  # same for both labels so they align horizontally
+    _add_square_bracket(ax, y0=-0.5,                  y1=last_inv_row_idx + 0.5, label="Inverted haplotypes",
+                        x_axes=BRACKET_X, tick_len_axes=0.018, lw=1.8)
+    _add_square_bracket(ax, y0=first_dir_row_idx - 0.5, y1=last_dir_row_idx + 0.5, label="Direct haplotypes",
+                        x_axes=BRACKET_X, tick_len_axes=0.018, lw=1.8)
 
     return {
         "n_polymorphic": int(arr.shape[1]),
         "n_fixed": int(len(fixed_kept)),
         "n_inverted": int(nI),
-        "n_direct": int(total_rows - nI),
+        "n_direct": int(nD),
     }
 
 def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.DataFrame, outfile: str):
@@ -1052,9 +1275,13 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
     phyI = read_phy(pairs_index.loc[str(rowI["filename"]), "phy_path"])
 
     nrows = len(phyI["seq_order"]) + len(phyD["seq_order"])
-    panel_height = max(2.5, nrows * 0.28)
+    # Smaller per-row height so any spacers render as a thin line
+    panel_height = max(2.5, nrows * 0.14)
 
-    fig, ax = plt.subplots(figsize=(14.0, panel_height + 2.0))
+    # Narrower figure => slimmer columns
+    fig, ax = plt.subplots(figsize=(10.0, panel_height + 2.0))
+
+    # Render the panel (now adds "fixed" labels and uses inward/same-x brackets)
     stats_info = plot_fixed_diff_panel(
         ax,
         phyD,
@@ -1064,39 +1291,26 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
         threshold=FIXED_DIFF_UNANIMITY_THRESHOLD,
     )
 
-    fig.suptitle(
-        "MAPT CDS polymorphisms align with inversion orientation",
-        fontsize=12,
-        fontweight="bold",
-        y=0.97,
-    )
-    subtitle = (
-        f"{MAPT_GENE} — {inv_id} | {stats_info['n_polymorphic']} polymorphic CDS positions"
-        f"; {stats_info['n_fixed']} orientation-fixed"
-    )
-    ax.set_title(subtitle, loc="left", fontsize=10, color="#333333")
-
+    # Move the Base legend OUTSIDE the axes so it does not overlap the plot
     base_handles = [mpatches.Patch(color=BASE_COLORS[i], label=b) for b, i in BASE_TO_IDX.items()]
     fig.legend(
-        handles=base_handles,
-        loc="upper right",
-        bbox_to_anchor=(0.96, 0.96),
-        frameon=False,
-        fontsize=9,
-        title="Base",
-    )
+            handles=base_handles,
+            loc="upper left",
+            bbox_to_anchor=(0.88, 1.0),
+            frameon=False,
+            fontsize=14,
+            title="Base",
+            title_fontsize=20,
+            borderaxespad=0.0,
+        )
 
-    fig.text(
-        0.01,
-        0.02,
-        "Rows ordered by haplotype similarity. Triangles denote CDS sites fixed between orientations.",
-        fontsize=8,
-        color="#555555",
-    )
+    # Leave space on the right for the external legend
+    fig.tight_layout(rect=[0.0, 0.0, 0.86, 1.0])
 
-    fig.tight_layout(rect=[0, 0.05, 1, 0.94])
     fig.savefig(outfile, bbox_inches="tight")
     plt.close(fig)
+
+
 
 # =============================================================================
 # Main
