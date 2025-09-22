@@ -1424,7 +1424,18 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                         cache_write_json(PAML_CACHE_DIR, pair_key_bm, "pair.json", {"key": pair_key_dict_bm, "result": bm_result})
                     logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'branch_model' (df=1)")
                 else:
-                    bm_result = {"bm_p_value": 1.0, "bm_lrt_stat": 0.0, "bm_lnl_h0": lnl0, "bm_lnl_h1": lnl1}
+                    # Cache an invalid or non-improving LRT result to prevent re-runs. Represent failure with NaN statistics.
+                    bm_result = {
+                        "bm_p_value": np.nan,
+                        "bm_lrt_stat": np.nan,
+                        "bm_lnl_h0": lnl0,
+                        "bm_lnl_h1": lnl1,
+                        "bm_h0_key": h0_bm_key,
+                        "bm_h1_key": h1_bm_key
+                    }
+                    with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_bm)):
+                        cache_write_json(PAML_CACHE_DIR, pair_key_bm, "pair.json", {"key": pair_key_dict_bm, "result": bm_result})
+                    logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'branch_model' (invalid or non-improvement)")
         else:
             logging.info(f"[{gene_name}|{region_label}] Skipping branch-model test as per configuration.")
             bm_result = {"bm_p_value": np.nan, "bm_lrt_stat": np.nan}
@@ -1509,7 +1520,19 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                                          {"key": pair_key_dict_cmc, "result": cmc_result})
                     logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (df=1)")
                 else:
-                    cmc_result = {"cmc_p_value": 1.0, "cmc_lrt_stat": 0.0, "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1}
+                    # Cache an invalid or non-improving LRT result to prevent re-runs. Represent failure with NaN statistics.
+                    cmc_result = {
+                        "cmc_p_value": np.nan,
+                        "cmc_lrt_stat": np.nan,
+                        "cmc_lnl_h0": lnl0,
+                        "cmc_lnl_h1": lnl1,
+                        "cmc_h0_key": h0_cmc_key,
+                        "cmc_h1_key": h1_cmc_key
+                    }
+                    with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_cmc)):
+                        cache_write_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json", {"key": pair_key_dict_cmc, "result": cmc_result})
+                    logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (invalid or non-improvement)")
+
         else:
             logging.info(f"[{gene_name}|{region_label}] Skipping clade-model test as per configuration.")
             cmc_result = {"cmc_p_value": np.nan, "cmc_lrt_stat": np.nan}
