@@ -1,6 +1,7 @@
 import os
 import math
 import textwrap
+import colorsys
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
@@ -110,6 +111,85 @@ def palette_cool_no_yellow_or_orange_or_brown(n: int):
         out.append(lighten(base[i % len(base)], 0.22))
         i += 1
     return out[:n]
+
+def adjust_color_for_q(base_color, norm: float):
+    """Lighten and desaturate a base color by a [0,1] normalized q-value."""
+    norm = float(np.clip(norm, 0.0, 1.0))
+    r, g, b = mpl.colors.to_rgb(base_color)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+
+    # Lighten strongly for large q (less significant) while keeping low-q colors intact.
+    lighten_strength = 0.72  # fraction of distance toward white at norm=1
+    l = l + (1.0 - l) * (lighten_strength * norm)
+
+    # Reduce saturation for large q to mute the color.
+    desat_strength = 0.65
+    s = s * (1.0 - desat_strength * norm)
+
+    l = min(1.0, max(0.0, l))
+    s = min(1.0, max(0.0, s))
+    r2, g2, b2 = colorsys.hls_to_rgb(h, l, s)
+    return (r2, g2, b2)
+
+def make_qvalue_point_scaler(sections):
+    """
+    Build a function mapping (q-value, base_color) -> (size, adjusted_color).
+    The scaling range adapts to the distribution of q-values in *sections*.
+    """
+    q_vals = []
+    for sec in sections:
+        for row in sec.get("rows", []):
+            qv = row.get("Q_GLOBAL")
+            if np.isfinite(qv):
+                q_vals.append(float(qv))
+
+    if not q_vals:
+        def fallback(q_val, base_color):
+            return POINT_SIZE_PT2, mpl.colors.to_rgb(base_color)
+        return fallback
+
+    q_arr = np.asarray(q_vals, dtype=float)
+    q_arr = q_arr[np.isfinite(q_arr)]
+    if q_arr.size == 0:
+        def fallback(q_val, base_color):
+            return POINT_SIZE_PT2, mpl.colors.to_rgb(base_color)
+        return fallback
+
+    if q_arr.size >= 3:
+        q_lo = float(np.quantile(q_arr, 0.05))
+        q_hi = float(np.quantile(q_arr, 0.95))
+    else:
+        q_lo = float(np.min(q_arr))
+        q_hi = float(np.max(q_arr))
+
+    if not (q_hi > q_lo):
+        q_lo = float(np.min(q_arr))
+        q_hi = float(np.max(q_arr))
+
+    if not (q_hi > q_lo):
+        def fallback(q_val, base_color):
+            return POINT_SIZE_PT2, mpl.colors.to_rgb(base_color)
+        return fallback
+
+    q_span = q_hi - q_lo
+    q_rel_span = float(np.clip(q_span / max(q_hi, 1e-12), 0.0, 1.0))
+
+    # Dynamic spread around the nominal point size based on how broad the q-values are.
+    size_spread = POINT_SIZE_PT2 * (0.60 + 0.55 * q_rel_span)
+    size_max = POINT_SIZE_PT2 + 0.5 * size_spread
+    size_min = max(POINT_SIZE_PT2 - 0.5 * size_spread, POINT_SIZE_PT2 * 0.32, 16.0)
+
+    def scale(q_val, base_color):
+        if not np.isfinite(q_val):
+            norm = 1.0
+        else:
+            norm = (float(q_val) - q_lo) / q_span
+            norm = float(np.clip(norm, 0.0, 1.0))
+        size = size_max - (size_max - size_min) * norm
+        facecolor = adjust_color_for_q(base_color, norm)
+        return size, facecolor
+
+    return scale
 
 def warp_or_to_axis(or_vals):
     """Map OR to warped axis coordinate via ln(OR) -> sign*|ln(OR)|^GAMMA."""
@@ -313,6 +393,7 @@ def build_layout(df: pd.DataFrame):
 
 def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
     sections, y_max = build_layout(df)
+    point_style_for_q = make_qvalue_point_scaler(sections)
 
     # X-limits from CI extremes ONLY, then ±10%
     all_los = [row["OR_lo"] for sec in sections for row in sec["rows"]]
@@ -430,9 +511,10 @@ def plot_forest(df: pd.DataFrame, out_pdf=OUT_PDF, out_png=OUT_PNG):
             # Vertical CI end-caps
             axR.plot([x_lo, x_lo], [yc-CI_CAP_H, yc+CI_CAP_H], color=c, linewidth=CI_CAP_LW, alpha=0.95, zorder=2.25)
             axR.plot([x_hi, x_hi], [yc-CI_CAP_H, yc+CI_CAP_H], color=c, linewidth=CI_CAP_LW, alpha=0.95, zorder=2.25)
-            
+
             # Point estimate dot
-            axR.scatter([x_pt], [yc], s=POINT_SIZE_PT2, facecolor=c, edgecolor="black",
+            size_pt2, facecolor = point_style_for_q(row["Q_GLOBAL"], c)
+            axR.scatter([x_pt], [yc], s=size_pt2, facecolor=facecolor, edgecolor="black",
                         linewidth=POINT_EDGE_LW, alpha=0.97, zorder=3.0)
 
     # 3) Fixed OR ticks within [x_or_left, x_or_right]
