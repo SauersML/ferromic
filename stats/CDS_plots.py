@@ -964,14 +964,103 @@ def encode_sequence_array_no_gaps(seq_strs: list, cols_keep: list) -> np.ndarray
 
 def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold: float):
     """
-    True haplotype heatmap:
-      - Rows = haplotypes (Inverted on top, Direct on bottom), names shown
-      - Columns = polymorphic sites only (any difference across ALL haplotypes)
-      - Bold columns for fixed differences (as defined per-orientation)
-      - Slight separators between rows; clear divider between orientations
+    Polymorphism heatmap with:
+      • Each haplotype on its own row + visual spacing between rows
+      • No haplotype labels shown (but rows sorted alphabetically per orientation)
+      • Two big curly-braced y-axis labels: "Inverted haplotypes" and "Direct haplotypes"
     """
-    namesD = list(phyD["seq_order"])
-    namesI = list(phyI["seq_order"])
+    import numpy as _np
+    from matplotlib.colors import ListedColormap as _ListedColormap
+    from matplotlib.patches import PathPatch as _PathPatch
+    from matplotlib.path import Path as _Path
+    from matplotlib.transforms import blended_transform_factory as _blend
+
+    # ----------------------------- helpers -----------------------------
+    def _consensus_base_and_frac(col_list: list):
+        from collections import Counter as _Counter
+        counts = _Counter(col_list)
+        if not counts:
+            return None, 0.0
+        base, cnt = counts.most_common(1)[0]
+        return base, cnt / len(col_list)
+
+    def _detect_fixed_columns(seqs_D: list, seqs_I: list, thr: float):
+        if not seqs_D or not seqs_I:
+            return []
+        m = len(seqs_D[0])
+        for s in seqs_D + seqs_I:
+            if len(s) != m:
+                raise ValueError("All sequences must have equal length.")
+        fixed = []
+        for j in range(m):
+            col_D = [s[j] for s in seqs_D]
+            col_I = [s[j] for s in seqs_I]
+            bD, fD = _consensus_base_and_frac(col_D)
+            bI, fI = _consensus_base_and_frac(col_I)
+            if bD is None or bI is None:
+                continue
+            if fD >= thr and fI >= thr and bD != bI:
+                fixed.append(j)
+        return fixed
+
+    def _encode_no_gaps(seq_strs: list, cols_keep: list) -> _np.ndarray:
+        arr = _np.zeros((len(seq_strs), len(cols_keep)), dtype=float)
+        for i, s in enumerate(seq_strs):
+            for k, j in enumerate(cols_keep):
+                arr[i, k] = BASE_TO_IDX.get(s[j].upper(), 0)
+        return arr
+
+    def _insert_row_gaps(arr: _np.ndarray, nI: int, gap: int = 1, group_gap: int = 3) -> _np.ndarray:
+        """Return array with NaN 'spacer' rows between all rows; a bigger spacer between groups."""
+        r, c = arr.shape
+        rows = []
+        for i in range(r):
+            rows.append(arr[i])
+            # after each row except last:
+            if i < r - 1:
+                # after last inverted row, insert group_gap; else regular gap
+                n_spacers = group_gap if i == (nI - 1) else gap
+                for _ in range(n_spacers):
+                    rows.append(_np.full(c, _np.nan))
+        return _np.vstack(rows)
+
+    def _add_curly_brace(ax, y0, y1, label, side="left", x_axes=0.0, width_axes=0.045, color="#111111"):
+        """
+        Draw a vertical curly brace spanning [y0,y1] in DATA coords, with its x in AXES fraction.
+        """
+        trans = _blend(ax.transAxes, ax.transData)
+        sgn = -1 if side == "left" else 1
+        x0 = x_axes
+        x1 = x_axes + sgn * width_axes
+        h = max(y1 - y0, 1e-9)
+        # Five key y's to shape the brace
+        yA, yB, yC, yD, yE = y0, y0 + 0.25*h, y0 + 0.50*h, y0 + 0.75*h, y1
+        # curvature tweak
+        d = 0.10 * h
+        verts = [
+            (x0, yA),
+            (x0, yA + d), (x1, yB - d), (x1, yB),            # curve outwards
+            (x1, yB + d), (x0, yC - d), (x0, yC),            # back to center
+            (x0, yC + d), (x1, yD - d), (x1, yD),            # curve outwards again
+            (x1, yD + d), (x0, yE - d), (x0, yE)             # finish at bottom
+        ]
+        codes = [
+            _Path.MOVETO,
+            _Path.CURVE3, _Path.CURVE3, _Path.LINETO,
+            _Path.CURVE3, _Path.CURVE3, _Path.LINETO,
+            _Path.CURVE3, _Path.CURVE3, _Path.LINETO,
+            _Path.CURVE3, _Path.CURVE3, _Path.LINETO,
+        ]
+        brace = _PathPatch(_Path(verts, codes), transform=trans,
+                           facecolor="none", edgecolor=color, linewidth=1.8, zorder=5, clip_on=False)
+        ax.add_patch(brace)
+        ax.text(x1 + sgn*0.012, (y0 + y1)/2, label, transform=trans,
+                va="center", ha="right" if side == "left" else "left",
+                rotation=90, fontsize=12, fontweight="bold", color=color, zorder=6, clip_on=False)
+
+    # ------------------- extract & ALPHABETICALLY sort names -------------------
+    namesD = sorted(list(phyD["seq_order"]), key=str)
+    namesI = sorted(list(phyI["seq_order"]), key=str)
     seqsD = [phyD["seqs"].get(nm, "") for nm in namesD]
     seqsI = [phyI["seqs"].get(nm, "") for nm in namesI]
     if not seqsD or not seqsI:
@@ -979,137 +1068,86 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
         ax.axis("off")
         return {"n_polymorphic": 0, "n_fixed": 0, "n_inverted": len(seqsI), "n_direct": len(seqsD)}
 
-    # Determine columns to keep: any polymorphism across ALL haplotypes (Direct + Inverted)
+    # ------------------- pick polymorphic columns (all haplotypes) -------------
     all_seqs = seqsI + seqsD
     m_full = len(all_seqs[0])
-    for s in all_seqs:
-        if len(s) != m_full:
-            raise ValueError("Seq lengths differ between orientations.")
-    cols_keep = []
-    for j in range(m_full):
-        col = [s[j] for s in all_seqs]
-        if len(set(col)) > 1:  # polymorphic across ALL samples
-            cols_keep.append(j)
+    if any(len(s) != m_full for s in all_seqs):
+        raise ValueError("Seq lengths differ between orientations.")
+    cols_keep = [j for j in range(m_full) if len({s[j] for s in all_seqs}) > 1]
     if not cols_keep:
-        ax.text(
-            0.5,
-            0.5,
-            f"{gene_name} — {inv_id}\nNo polymorphic CDS sites",
-            ha="center",
-            va="center",
-            fontsize=10,
-        )
+        ax.text(0.5, 0.5, f"{gene_name} — {inv_id}\nNo polymorphic CDS sites",
+                ha="center", va="center", fontsize=10)
         ax.axis("off")
         return {"n_polymorphic": 0, "n_fixed": 0, "n_inverted": len(seqsI), "n_direct": len(seqsD)}
 
-    # Order rows within each orientation by clustering on kept columns to group duplicates
-    def reorder_by_cols(names, seqs):
-        if len(seqs) <= 2:
-            return list(range(len(seqs)))
-        # Build Hamming distance on filtered columns
-        n = len(seqs)
-        dmat = np.zeros((n, n), dtype=float)
-        for i in range(n):
-            si = "".join(seqs[i][j] for j in cols_keep)
-            for j in range(i + 1, n):
-                sj = "".join(seqs[j][j2] for j2 in cols_keep)
-                d = hamming(si, sj)
-                dmat[i, j] = d
-                dmat[j, i] = d
-        condensed = squareform(dmat, checks=False)
-        Z = linkage(condensed, method="average")
-        return list(leaves_list(Z))
+    # ------------------- encode bases and stack I over D -----------------------
+    arr_I = _encode_no_gaps(seqsI, cols_keep)
+    arr_D = _encode_no_gaps(seqsD, cols_keep)
+    arr   = _np.vstack([arr_I, arr_D])
+    nI, nD = len(seqsI), len(seqsD)
 
-    ordI = reorder_by_cols(namesI, seqsI)
-    ordD = reorder_by_cols(namesD, seqsD)
-    namesI_ord = [namesI[i] for i in ordI]
-    seqsI_ord = [seqsI[i] for i in ordI]
-    namesD_ord = [namesD[i] for i in ordD]
-    seqsD_ord = [seqsD[i] for i in ordD]
+    # ------------------- add visual spacing between rows -----------------------
+    GAP_BETWEEN_ROWS = 1     # 1 blank row between adjacent haplotypes
+    GAP_BETWEEN_GROUPS = 3   # bigger blank band between inverted & direct blocks
+    arr_plot = _insert_row_gaps(arr, nI=nI, gap=GAP_BETWEEN_ROWS, group_gap=GAP_BETWEEN_GROUPS)
 
-    # Encode to int array (A/C/G/T) on filtered columns
-    arr_I = encode_sequence_array_no_gaps(seqsI_ord, cols_keep)
-    arr_D = encode_sequence_array_no_gaps(seqsD_ord, cols_keep)
-    arr = np.vstack([arr_I, arr_D])
+    # local cmap with NaN (spacers) drawn white
+    _cmap = _ListedColormap(BASE_COLORS)
+    _cmap.set_bad(color="white")
 
-    # Show image
-    ax.imshow(
-        arr,
-        cmap=BASE_CMAP,
-        vmin=0,
-        vmax=3,
-        aspect="auto",
-        interpolation="nearest",
-        zorder=1,
-    )
+    # ------------------- show image (no haplotype labels) ----------------------
+    ax.imshow(arr_plot, cmap=_cmap, vmin=0, vmax=3, aspect="auto",
+              interpolation="nearest", origin="upper", zorder=1)
+    ax.set_xlim(-0.5, arr.shape[1] - 0.5)
+    ax.set_xticks(_np.linspace(0, arr.shape[1] - 1, num=min(12, arr.shape[1])))
+    ax.set_xticklabels([str(cols_keep[int(t)] + 1) for t in ax.get_xticks()], fontsize=7)
+    ax.set_xlabel("Polymorphic CDS positions")
+    # Hide haplotype names entirely:
+    ax.set_yticks([])
+    ax.tick_params(axis="both", which="both", length=0)
 
-    # Fixed columns (recompute detection on full columns, then map to kept subset)
-    fixed_full = set(detect_fixed_columns(seqsD, seqsI, threshold=threshold))
+    # ------------------- mark fixed-difference columns -------------------------
+    fixed_full = set(_detect_fixed_columns(seqsD, seqsI, thr=threshold))
     fixed_kept = [k for k, j in enumerate(cols_keep) if j in fixed_full]
     for k in fixed_kept:
         ax.axvline(k - 0.5, color="#111111", linewidth=1.2, zorder=3)
         ax.axvline(k + 0.5, color="#111111", linewidth=1.2, zorder=3)
     if fixed_kept:
-        ax.scatter(
-            fixed_kept,
-            np.full(len(fixed_kept), -0.35),
-            marker="v",
-            s=36,
-            color="#111111",
-            edgecolor="none",
-            clip_on=False,
-            zorder=4,
-        )
+        ax.scatter(fixed_kept, _np.full(len(fixed_kept), -0.35),
+                   marker="v", s=36, color="#111111", edgecolor="none",
+                   clip_on=False, zorder=4)
 
-    # Row separators (slight)
-    nI = len(namesI_ord)
-    total_rows = arr.shape[0]
-    for y in np.arange(-0.5, total_rows, 1.0):
-        ax.axhline(y + 0.5, color="#ffffff", linewidth=0.8, alpha=0.8, zorder=2)
-    ax.axhline(nI - 0.5, color="#333333", linewidth=1.2, zorder=3)
+    # ------------------- heavy separator band already created by spacers -------
+    # Compute data y extents of each group (in gapped coordinates)
+    last_inv_row_idx   = (nI - 1) * (GAP_BETWEEN_ROWS + 1) if nI > 0 else -1
+    first_dir_row_idx  = last_inv_row_idx + 1 + GAP_BETWEEN_GROUPS
+    last_dir_row_idx   = first_dir_row_idx + (nD - 1) * (GAP_BETWEEN_ROWS + 1) if nD > 0 else last_inv_row_idx
 
-    # Axis labels & ticks
-    ax.set_xlim(-0.5, arr.shape[1] - 0.5)
-    ax.set_xticks(np.linspace(0, arr.shape[1] - 1, num=min(12, arr.shape[1])))
-    xtick_orig = [cols_keep[int(t)] + 1 for t in ax.get_xticks()]
-    ax.set_xticklabels([str(v) for v in xtick_orig], rotation=0, fontsize=7)
-    ax.set_xlabel("Polymorphic CDS positions")
+    # ------------------- curly braces + big y-axis labels ----------------------
+    # Place just inside the left edge of the axes; colors match global orientation colors.
+    _add_curly_brace(ax,
+                     y0=-0.5,
+                     y1=last_inv_row_idx + 0.5,
+                     label="Inverted haplotypes",
+                     side="left",
+                     x_axes=0.00,
+                     width_axes=0.045,
+                     color=COLOR_INVERTED)
+    _add_curly_brace(ax,
+                     y0=first_dir_row_idx - 0.5,
+                     y1=last_dir_row_idx + 0.5,
+                     label="Direct haplotypes",
+                     side="left",
+                     x_axes=0.06,   # offset a touch to avoid overlapping the first brace
+                     width_axes=0.045,
+                     color=COLOR_DIRECT)
 
-    y_labels = namesI_ord + namesD_ord
-    ax.set_yticks(np.arange(total_rows))
-    ax.set_yticklabels(y_labels, fontsize=7)
-    ax.tick_params(axis="both", which="both", length=0)
-
-    ax.text(
-        -0.02,
-        (nI - 0.5) / total_rows,
-        "Inverted",
-        ha="right",
-        va="center",
-        rotation=90,
-        fontsize=8,
-        transform=ax.transAxes,
-        color=COLOR_INVERTED,
-        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none"),
-    )
-    ax.text(
-        -0.02,
-        (nI + (total_rows - nI) / 2) / total_rows,
-        "Direct",
-        ha="right",
-        va="center",
-        rotation=90,
-        fontsize=8,
-        transform=ax.transAxes,
-        color=COLOR_DIRECT,
-        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none"),
-    )
-
+    # ------------------- return small stats dict -------------------------------
     return {
         "n_polymorphic": int(arr.shape[1]),
         "n_fixed": int(len(fixed_kept)),
         "n_inverted": int(nI),
-        "n_direct": int(total_rows - nI),
+        "n_direct": int(nD),
     }
 
 def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.DataFrame, outfile: str):
