@@ -1,7 +1,24 @@
 [package]
 name = "ferromic"
 version = "0.1.0"
+authors = ["Ferromic Developers"]
 edition = "2021"
+description = "Rust-accelerated population genetics toolkit with ergonomic Python bindings"
+readme = "README.md"
+repository = "https://github.com/SauersML/ferromic"
+homepage = "https://github.com/SauersML/ferromic"
+documentation = "https://github.com/SauersML/ferromic#readme"
+keywords = [
+    "population-genetics",
+    "bioinformatics",
+    "rust",
+    "pyo3",
+    "numpy",
+]
+categories = [
+    "science",
+    "science::bioinformatics",
+]
 
 [lib]
 name = "ferromic"
@@ -13,7 +30,7 @@ pyo3 = { version = "0.18", features = ["extension-module"] }
 numpy = "0.18"
 clap = { version = "4.5", features = ["derive"] }
 tokio = { version = "1.45", features = ["full"] }
-flate2 = "1.1" 
+flate2 = "1.1"
 anyhow = "1.0"
 rayon = "1.10"
 indicatif = "0.17"
