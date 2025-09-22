@@ -614,7 +614,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
 
         # Cap at 1.0: stacked dots + explicit counts
         n_at1 = d["n_at1"]
-        label = f"CDS: {d['n_cds']}\n100% identical: {n_at1} ({d['share_at_1']*100:.0f}%)"
+        label = f"N (CDSs) = {d['n_cds']}\n100% identical: {n_at1} ({d['share_at_1']*100:.0f}%)"
         ax.text(i, 1.065, label, ha="center", va="bottom", fontsize=8, color="#333333")
 
     ax.yaxis.set_major_locator(MultipleLocator(0.2))
