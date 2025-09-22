@@ -718,82 +718,85 @@ def parse_h1_paml_output(outfile_path):
 
 def parse_h1_cmc_paml_output(outfile_path):
     """
-    Parse parameters from a Clade Model C (model=3, NSsites=2) output.
-    Extracts shared p0, p1, w0, and clade-specific w2 values.
-    Handles multiple PAML formatting variants.
+    Robustly parse Clade Model C (model=3, NSsites=2, ncatG=3).
+    Extracts kappa, p0/p1/p2 from the 'proportion' row and w2 for
+    clade #1/#2 from 'branch type 1/2' (3rd column). w0 comes from
+    'branch type 0' (1st column). Avoids BEB grid ('w0:' lines).
     """
     F = FLOAT_REGEX
     params = {
-        'cmc_kappa': np.nan, 'cmc_p0': np.nan, 'cmc_p1': np.nan, 'cmc_p2': np.nan,
-        'cmc_omega0': np.nan, 'cmc_omega2_direct': np.nan, 'cmc_omega2_inverted': np.nan
+        'cmc_kappa': np.nan,
+        'cmc_p0': np.nan, 'cmc_p1': np.nan, 'cmc_p2': np.nan,
+        'cmc_omega0': np.nan,
+        'cmc_omega2_direct': np.nan,
+        'cmc_omega2_inverted': np.nan,
     }
 
     with open(outfile_path, 'r', errors='ignore') as f:
-        s = f.read()
+        text = f.read()
 
-    # --- kappa ---
-    m = re.search(r'\bkappa\s*\(ts/tv\)\s*[=:]\s*(' + F + r')', s, re.I)
+    # kappa
+    m = re.search(r'\bkappa\s*\(ts/tv\)\s*[=:]\s*(' + F + r')', text, re.I)
     if m:
         params['cmc_kappa'] = float(m.group(1))
 
-    # --- p0, p1, p2 (site-class proportions) ---
-    # 1) "p0 = x ... p1 = y ... p2 = z" (possibly split across lines)
-    m = re.search(
-        r'\bp0\s*[=:]\s*(' + F + r').*?\bp1\s*[=:]\s*(' + F + r').*?\bp2\s*[=:]\s*(' + F + r')',
-        s, re.I | re.S
-    )
-    if m:
-        params['cmc_p0'], params['cmc_p1'], params['cmc_p2'] = map(float, m.groups())
-    else:
-        # 2) "p (proportion): x y z"  OR  "p: x y z"  OR  "proportion(s) of sites: x y z"
-        m = re.search(
-            r'\b(?:p(?:\s*\(proportion\))?|proportion(?:s)?\s*of\s*site(?:s)?(?:\s*classes)?)\s*[:=]\s*(' + F + r')\s+(' + F + r')\s+(' + F + r')',
-            s, re.I
-        )
+    # Focus on the “MLEs of dN/dS (w) for site classes” block if present
+    lines = text.splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        if re.search(r'MLEs\s+of\s+dN/dS\s*\(w\)\s*for\s*site\s*classes', ln, re.I):
+            start = i
+            break
+
+    block = lines[start:start+40] if start is not None else lines  # scan a small window or whole file
+
+    # proportions: "proportion  <p0> <p1> <p2>"
+    for ln in block:
+        m = re.search(r'^\s*proportion\s+(' + F + r')\s+(' + F + r')\s+(' + F + r')\s*$', ln, re.I)
+        if m:
+            params['cmc_p0'], params['cmc_p1'], params['cmc_p2'] = map(float, m.groups())
+            break
+    # fallback: compute p2 if only p0/p1 later
+    # (we’ll fill at end)
+
+    # branch type rows: "... type N:  <w0>  1.00000  <w2_for_that_branch>"
+    bt0 = bt1 = bt2 = None
+    for ln in block:
+        m0 = re.search(r'^\s*branch\s*type\s*0\s*:\s*(' + F + r')\s+(' + F + r')\s+(' + F + r')\s*$', ln, re.I)
+        m1 = re.search(r'^\s*branch\s*type\s*1\s*:\s*(' + F + r')\s+(' + F + r')\s+(' + F + r')\s*$', ln, re.I)
+        m2 = re.search(r'^\s*branch\s*type\s*2\s*:\s*(' + F + r')\s+(' + F + r')\s+(' + F + r')\s*$', ln, re.I)
+        if m0: bt0 = tuple(map(float, m0.groups()))
+        if m1: bt1 = tuple(map(float, m1.groups()))
+        if m2: bt2 = tuple(map(float, m2.groups()))
+
+    if bt0 is not None:
+        # first column of branch type 0 is w0
+        params['cmc_omega0'] = bt0[0]
+    # third column of type 1/2 are the clade-specific w2’s
+    if bt1 is not None:
+        params['cmc_omega2_direct'] = bt1[2]
+    if bt2 is not None:
+        params['cmc_omega2_inverted'] = bt2[2]
+
+    # Fallbacks if the table wasn’t found (avoid BEB “w0:” grid)
+    if np.isnan(params['cmc_p0']) or np.isnan(params['cmc_p1']) or np.isnan(params['cmc_p2']):
+        m = re.search(r'\bp0\s*[=:]\s*(' + F + r').*?\bp1\s*[=:]\s*(' + F + r').*?\bp2\s*[=:]\s*(' + F + r')',
+                      text, re.I | re.S)
         if m:
             params['cmc_p0'], params['cmc_p1'], params['cmc_p2'] = map(float, m.groups())
         else:
-            # 3) Only p0 and p1 reported → infer p2
-            m = re.search(r'\bp0\s*[=:]\s*(' + F + r').*?\bp1\s*[=:]\s*(' + F + r')', s, re.I | re.S)
-            if m:
-                params['cmc_p0'], params['cmc_p1'] = map(float, m.groups())
-                params['cmc_p2'] = max(0.0, 1.0 - params['cmc_p0'] - params['cmc_p1'])
+            m2 = re.search(r'\bp0\s*[=:]\s*(' + F + r').*?\bp1\s*[=:]\s*(' + F + r')', text, re.I | re.S)
+            if m2:
+                params['cmc_p0'], params['cmc_p1'] = map(float, m2.groups())
 
-    # --- omega0 / w0 (first of site-class omegas) ---
-    # Try explicit "w0 = x"
-    m = re.search(r'\bw0\s*[=:]\s*(' + F + r')', s, re.I)
-    if m:
-        params['cmc_omega0'] = float(m.group(1))
-    else:
-        # Fallbacks like "w (dN/dS): x y z" or "omega (dN/dS): x y z"
-        m = re.search(r'\b(?:w|omega)\b\s*(?:\(dN/dS\))?\s*[:=]\s*(' + F + r')\s+(' + F + r')\s+(' + F + r')', s, re.I)
+    if np.isnan(params['cmc_omega0']):
+        # Try a safe generic "w: w0 w1 w2" (NOT the BEB grid)
+        m = re.search(r'^\s*(?:w|omega)\s*(?:\(dN/dS\))?\s*[:=]\s*(' + F + r')\s+(' + F + r')\s+(' + F + r')\s*$',
+                      text, re.I | re.M)
         if m:
             params['cmc_omega0'] = float(m.group(1))
 
-    # --- clade-specific w2 for direct (=#1) and inverted (=#2) ---
-    # Most explicit: "... w2 ... (clade|foreground|group|branch set) #1 : x"
-    m = re.search(r'\bw2[^\n]*?(?:for|in)?\s*(?:clade|foreground|group|branch\s*set)\s*#?\s*1\s*[:=]\s*(' + F + r')',
-                  s, re.I)
-    if m:
-        params['cmc_omega2_direct'] = float(m.group(1))
-    m = re.search(r'\bw2[^\n]*?(?:for|in)?\s*(?:clade|foreground|group|branch\s*set)\s*#?\s*2\s*[:=]\s*(' + F + r')',
-                  s, re.I)
-    if m:
-        params['cmc_omega2_inverted'] = float(m.group(1))
-
-    # Fallback: a single line that mentions both "1:" and "2:" after w2
-    if np.isnan(params['cmc_omega2_direct']) or np.isnan(params['cmc_omega2_inverted']):
-        m = re.search(
-            r'\bw2[^\n]*?(?:1\s*[:=]\s*(' + F + r'))[^\n]*?(?:2\s*[:=]\s*(' + F + r'))',
-            s, re.I
-        )
-        if m:
-            if np.isnan(params['cmc_omega2_direct']):
-                params['cmc_omega2_direct'] = float(m.group(1))
-            if np.isnan(params['cmc_omega2_inverted']) and m.group(2):
-                params['cmc_omega2_inverted'] = float(m.group(2))
-
-    # Compute p2 if still missing but p0 & p1 present
+    # finalize p2 if needed
     if np.isnan(params['cmc_p2']) and not np.isnan(params['cmc_p0']) and not np.isnan(params['cmc_p1']):
         params['cmc_p2'] = max(0.0, 1.0 - params['cmc_p0'] - params['cmc_p1'])
 
@@ -1337,8 +1340,30 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                 tree_copy = os.path.join(art_dir, f"{out_name}.tree")
                 if not os.path.exists(tree_copy):
                     _copy_if_exists(tree_path, art_dir, f"{out_name}.tree")
+            
+                # NEW: heal params if they are missing/NaN and we have a parser & raw out file
+                try:
+                    if parser_func:
+                        need_keys = ("cmc_p0","cmc_p1","cmc_p2","cmc_omega0","cmc_omega2_direct","cmc_omega2_inverted")
+                        params = payload.get("params", {}) or {}
+                        def _bad(x):
+                            return x is None or (isinstance(x, float) and np.isnan(x))
+                        if any(_bad(params.get(k)) for k in need_keys):
+                            raw_out = os.path.join(art_dir, out_name)
+                            if os.path.exists(raw_out):
+                                healed = parser_func(raw_out) or {}
+                                # only fill gaps; don't overwrite good values
+                                for k, v in healed.items():
+                                    if _bad(params.get(k)) and v is not None and not (isinstance(v, float) and np.isnan(v)):
+                                        params[k] = v
+                                payload["params"] = params
+                                cache_write_json(PAML_CACHE_DIR, key_hex, "attempt.json", payload)
+                                logging.info(f"[{gene_name}|{region_label}] Healed attempt.json params from artifacts for {out_name}")
+                except Exception as _e:
+                    logging.debug(f"Heal-attempt skipped for {out_name}: {_e}")
+            
                 return payload
-        
+
             # --- 2) Legacy fallback: find an equivalent attempt and rehydrate it ---
             # Prepare invariants for matching
             expect_gene_phy_sha = gene_phy_sha  # from closure
@@ -1429,10 +1454,33 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         cmc_result = {}
         if RUN_CLADE_MODEL_TEST:
             pair_key_cmc, pair_key_dict_cmc = _hash_key_pair(h0_cmc_key, h1_cmc_key, "clade_model_c", 1, exe_fp)
-            pair_payload_cmc = cache_read_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json")
             if pair_payload_cmc:
                 logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
                 cmc_result = pair_payload_cmc["result"]
+            
+                # NEW: heal missing CMC params from the raw H1_cmc.out artifact
+                try:
+                    need_keys = ["cmc_p0","cmc_p1","cmc_p2","cmc_omega0","cmc_omega2_direct","cmc_omega2_inverted"]
+                    def _bad(x): return x is None or (isinstance(x, float) and np.isnan(x))
+                    if any(_bad(cmc_result.get(k)) for k in need_keys):
+                        # get H1 attempt key (from result or from pair key)
+                        h1_key = cmc_result.get("cmc_h1_key") or pair_payload_cmc.get("key", {}).get("h1_attempt_key")
+                        if h1_key:
+                            art_dir_h1 = os.path.join(_fanout_dir(PAML_CACHE_DIR, h1_key), "artifacts")
+                            raw_h1 = os.path.join(art_dir_h1, "H1_cmc.out")
+                            if os.path.exists(raw_h1):
+                                healed = parse_h1_cmc_paml_output(raw_h1) or {}
+                                for k, v in healed.items():
+                                    if _bad(cmc_result.get(k)) and v is not None and not (isinstance(v, float) and np.isnan(v)):
+                                        cmc_result[k] = v
+                                # Persist back to the same pair.json without changing the key
+                                with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_cmc)):
+                                    cache_write_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json",
+                                                     {"key": pair_payload_cmc["key"], "result": cmc_result})
+                                logging.info(f"[{gene_name}|{region_label}] Healed cmc pair.json from H1_cmc.out")
+                except Exception as _e:
+                    logging.debug(f"Heal-pair skipped: {_e}")
+
             else:
                 # Run H0 and H1 codeml attempts concurrently to utilize multiple cores per gene×region.
                 with ThreadPoolExecutor(max_workers=2) as ex:
