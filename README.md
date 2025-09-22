@@ -25,6 +25,59 @@ Ferromic processes genomic variant data from VCF files to calculate key populati
 - Create per-site diversity statistics for fine-grained analysis
 - Support both individual region analysis and batch processing via configuration files
 
+## Python bindings
+
+Ferromic's Rust core is exposed to Python through [PyO3](https://pyo3.rs) and
+is distributed as a binary wheel on PyPI. Installing the extension pulls in the
+compiled Rust library together with its runtime dependency on NumPy:
+
+```bash
+pip install ferromic
+```
+
+Once installed, the `ferromic` module mirrors the high-level statistics API of
+the Rust crate. The example below shows how to construct an in-memory
+population, compute basic diversity statistics, and run a principal component
+analysis directly from Python:
+
+```python
+import numpy as np
+import ferromic as fm
+
+genotypes = np.array([
+    [[0, 0], [0, 1], [1, 1]],
+    [[0, 1], [0, 0], [1, 1]],
+], dtype=np.uint8)
+
+population = fm.Population.from_numpy(
+    "demo",
+    genotypes=genotypes,
+    positions=[101, 202],  # plain Python sequences are accepted
+    haplotypes=[(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1)],
+    sequence_length=1000,
+    sample_names=["sampleA", "sampleB", "sampleC"],
+)
+
+print(f"Ferromic version: {fm.__version__}")
+print("Segregating sites:", population.segregating_sites())
+print("Nucleotide diversity:", population.nucleotide_diversity())
+
+pca = fm.chromosome_pca(
+    variants=[
+        {"position": 101, "genotypes": [[0, 0], [0, 1], [1, 1]]},
+        {"position": 202, "genotypes": [[0, 1], [0, 0], [1, 1]]},
+    ],
+    sample_names=["sampleA", "sampleB", "sampleC"],
+)
+
+print("PCA components shape:", pca.coordinates.shape)
+```
+
+Additional helpers for Hudson FST, Weir & Cockerham FST, sequence length
+adjustment, and inversion allele frequency are available under the top-level
+`ferromic` namespace. Consult `src/pytests` for further end-to-end examples
+and integration tests.
+
 ## Usage
 
 ```

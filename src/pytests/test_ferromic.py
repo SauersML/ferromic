@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import pytest
 
 import ferromic as fm
@@ -79,3 +80,19 @@ def test_inversion_allele_frequency_counts_haplotypes():
     print(f"inversion_allele_frequency actual={frequency} expected=0.75")
 
     assert frequency == pytest.approx(0.75)
+
+
+def test_population_from_numpy_accepts_python_positions():
+    genotypes = np.array([[[0, 0], [0, 1]]], dtype=np.uint8)
+    population = fm.Population.from_numpy(
+        "demo",
+        genotypes=genotypes,
+        positions=[101],
+        haplotypes=[(0, 0), (0, 1)],
+        sequence_length=500,
+        sample_names=["sampleA", "sampleB"],
+    )
+
+    assert population.variant_count == 1
+    assert population.sample_names == ["sampleA", "sampleB"]
+    assert population.haplotypes == [(0, 0), (0, 1)]
