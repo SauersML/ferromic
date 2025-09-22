@@ -1256,8 +1256,19 @@ fn extract_positions(positions_obj: &PyAny, expected_len: usize) -> PyResult<Vec
         return Ok(result);
     }
 
+    if let Ok(iterable) = positions_obj.extract::<Vec<i64>>() {
+        if iterable.len() != expected_len {
+            return Err(PyValueError::new_err(format!(
+                "positions length {} does not match variant dimension {}",
+                iterable.len(),
+                expected_len
+            )));
+        }
+        return Ok(iterable);
+    }
+
     Err(PyValueError::new_err(
-        "positions must be a numpy.ndarray with dtype int64/int32/uint32/uint64",
+        "positions must be a sequence of integers (NumPy array with dtype int64/int32/uint32/uint64 or an iterable of ints)",
     ))
 }
 
@@ -2176,6 +2187,7 @@ fn inversion_allele_frequency_py(sample_map: &PyAny) -> PyResult<Option<f64>> {
 
 #[pymodule]
 fn ferromic(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<Population>()?;
     m.add_class::<PairwiseDifference>()?;
     m.add_class::<ChromosomePcaResult>()?;
