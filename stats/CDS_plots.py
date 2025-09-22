@@ -923,13 +923,13 @@ def _consensus_base_and_frac(col_list: list):
     frac = cnt / len(col_list)
     return base, frac
 
+
 def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold: float):
     """
-    Polymorphism heatmap tuned to your specs:
-      • Each haplotype has its own row with spacing between rows
-      • Haplotype labels are hidden, but rows are alphabetically sorted within orientation
-      • Two large BLACK square/rectangle brackets to the LEFT of the y-axis,
-        labeled "Inverted haplotypes" and "Direct haplotypes" in black
+    Polymorphism heatmap panel with fixes:
+      • Brackets now face inward and both use the SAME x-position (aligned).
+      • X tick labels are placed at integer column centers and align with columns.
+      • "fixed" text label is added above each fixed triangle marker (triangle retained).
     """
     import numpy as _np
     from matplotlib.colors import ListedColormap as _ListedColormap
@@ -982,20 +982,21 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
                     rows.append(_np.full(c, _np.nan))
         return _np.vstack(rows)
 
-    def _add_square_bracket(ax, y0, y1, label, *, x_axes=-0.015, tick_len_axes=0.015, lw=1.8):
+    def _add_square_bracket(ax, y0, y1, label, *, x_axes=-0.055, tick_len_axes=0.018, lw=1.8):
         """
         Draw a black square/rectangle bracket just LEFT of the y-axis.
         x is in AXES coords (negative puts it outside the plot), y in DATA coords.
+        Ticks now point INWARD (toward the plot).
         """
         trans = _blend(ax.transAxes, ax.transData)
         x = x_axes
         # vertical spine of bracket
         ax.plot([x, x], [y0, y1], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
-        # end ticks (pointing further left)
-        ax.plot([x, x - tick_len_axes], [y0, y0], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
-        ax.plot([x, x - tick_len_axes], [y1, y1], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
+        # end ticks (pointing inward, into the plot)
+        ax.plot([x, x + tick_len_axes], [y0, y0], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
+        ax.plot([x, x + tick_len_axes], [y1, y1], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
         # vertical label (black)
-        ax.text(x - tick_len_axes - 0.008, (y0 + y1) / 2.0, label,
+        ax.text(x - 0.006, (y0 + y1) / 2.0, label,
                 transform=trans, va="center", ha="right",
                 rotation=90, fontsize=12, fontweight="bold",
                 color="black", clip_on=False, zorder=7)
@@ -1041,34 +1042,49 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
 
     # ---------- x-axis (positions), y-axis (hide labels entirely) ----------
     ax.set_xlim(-0.5, arr.shape[1] - 0.5)
-    ax.set_xticks(_np.linspace(0, arr.shape[1] - 1, num=min(12, arr.shape[1])))
-    ax.set_xticklabels([str(cols_keep[int(t)] + 1) for t in ax.get_xticks()], fontsize=7)
+
+    # Place ticks exactly on integer column centers to align labels with columns
+    ncols = arr.shape[1]
+    max_labels = 12
+    step = max(1, int(_np.ceil(ncols / max_labels)))
+    ticks = _np.arange(0, ncols, step, dtype=int)
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([str(cols_keep[t] + 1) for t in ticks], fontsize=7)
     ax.set_xlabel("Polymorphic CDS positions")
-    ax.set_yticks([])  # delete haplotype labels
+
+    ax.set_yticks([])  # hide haplotype labels entirely
     ax.tick_params(axis="both", which="both", length=0)
 
     # ---------- mark fixed-difference columns ----------
     fixed_full = set(_detect_fixed_columns(seqsD, seqsI, thr=threshold))
     fixed_kept = [k for k, j in enumerate(cols_keep) if j in fixed_full]
+
     for k in fixed_kept:
         ax.axvline(k - 0.5, color="#111111", linewidth=1.2, zorder=3)
         ax.axvline(k + 0.5, color="#111111", linewidth=1.2, zorder=3)
+
     if fixed_kept:
-        ax.scatter(fixed_kept, _np.full(len(fixed_kept), -0.35),
+        # draw triangles and place the word "fixed" above each triangle
+        tri_y = -0.35
+        label_y = -0.95  # a bit above the triangle; outside plot; included via bbox_inches="tight"
+        ax.scatter(fixed_kept, _np.full(len(fixed_kept), tri_y),
                    marker="v", s=36, color="#111111", edgecolor="none",
                    clip_on=False, zorder=4)
+        for k in fixed_kept:
+            ax.text(k, label_y, "fixed", ha="center", va="bottom",
+                    fontsize=7.5, color="#111111", clip_on=False, zorder=5)
 
     # ---------- compute DATA y extents for each bracket in the gapped image ----------
     last_inv_row_idx  = (nI - 1) * (GAP_BETWEEN_ROWS + 1) if nI > 0 else -1
     first_dir_row_idx = last_inv_row_idx + 1 + GAP_BETWEEN_GROUP
     last_dir_row_idx  = first_dir_row_idx + (nD - 1) * (GAP_BETWEEN_ROWS + 1) if nD > 0 else last_inv_row_idx
 
-    # ---------- draw LEFT-OF-AXIS square brackets + black labels ----------
-    # keep them close to the y-axis but outside the plot (slightly negative x in Axes coords)
-    _add_square_bracket(ax, y0=-0.5,                 y1=last_inv_row_idx + 0.5, label="Inverted haplotypes",
-                        x_axes=-0.015, tick_len_axes=0.015, lw=1.8)
-    _add_square_bracket(ax, y0=first_dir_row_idx-0.5, y1=last_dir_row_idx + 0.5, label="Direct haplotypes",
-                        x_axes=-0.055, tick_len_axes=0.015, lw=1.8)
+    # ---------- draw square brackets (same x position; facing inward) ----------
+    BRACKET_X = -0.055  # same for both labels so they align horizontally
+    _add_square_bracket(ax, y0=-0.5,                  y1=last_inv_row_idx + 0.5, label="Inverted haplotypes",
+                        x_axes=BRACKET_X, tick_len_axes=0.018, lw=1.8)
+    _add_square_bracket(ax, y0=first_dir_row_idx - 0.5, y1=last_dir_row_idx + 0.5, label="Direct haplotypes",
+                        x_axes=BRACKET_X, tick_len_axes=0.018, lw=1.8)
 
     return {
         "n_polymorphic": int(arr.shape[1]),
@@ -1105,6 +1121,8 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
     panel_height = max(2.5, nrows * 0.28)
 
     fig, ax = plt.subplots(figsize=(14.0, panel_height + 2.0))
+
+    # Render the panel (now adds "fixed" labels and uses inward/same-x brackets)
     stats_info = plot_fixed_diff_panel(
         ax,
         phyD,
@@ -1114,25 +1132,25 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
         threshold=FIXED_DIFF_UNANIMITY_THRESHOLD,
     )
 
-    subtitle = (
-        f"{MAPT_GENE} — {inv_id} | {stats_info['n_polymorphic']} polymorphic CDS positions"
-        f"; {stats_info['n_fixed']} orientation-fixed"
-    )
-    ax.set_title(subtitle, loc="left", fontsize=10, color="#333333")
-
+    # Move the Base legend OUTSIDE the axes so it does not overlap the plot
     base_handles = [mpatches.Patch(color=BASE_COLORS[i], label=b) for b, i in BASE_TO_IDX.items()]
     fig.legend(
         handles=base_handles,
-        loc="upper right",
-        bbox_to_anchor=(0.96, 0.96),
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
         frameon=False,
         fontsize=9,
         title="Base",
+        borderaxespad=0.0,
     )
 
-    fig.tight_layout(rect=[0, 0.05, 1, 0.94])
+    # Leave space on the right for the external legend
+    fig.tight_layout(rect=[0.0, 0.0, 0.86, 1.0])
+
     fig.savefig(outfile, bbox_inches="tight")
     plt.close(fig)
+
+
 
 # =============================================================================
 # Main
