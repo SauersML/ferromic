@@ -1454,7 +1454,9 @@ def codeml_worker(gene_info, region_tree_file, region_label):
         cmc_result = {}
         if RUN_CLADE_MODEL_TEST:
             pair_key_cmc, pair_key_dict_cmc = _hash_key_pair(h0_cmc_key, h1_cmc_key, "clade_model_c", 1, exe_fp)
+            pair_payload_cmc = cache_read_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json")
             if pair_payload_cmc:
+
                 logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
                 cmc_result = pair_payload_cmc["result"]
             
