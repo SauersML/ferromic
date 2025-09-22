@@ -1,20 +1,3 @@
-#!/usr/bin/env python3
-"""Generate gene and GWAS annotations for recurrent inversion regions.
-
-This script uses public APIs (Ensembl, MyGene.info, MyVariant.info, and the
-GWAS Catalog REST service) to collect the following information for a
-hard-coded set of inversion regions:
-
-* Genes that overlap the inversion along with functional summaries.
-* Whether each gene has catalogued nonsynonymous variation.
-* GWAS associations in the same genomic interval and (when possible)
-  linkage disequilibrium (r^2) between the inversion tag SNPs and GWAS hits.
-
-The output is a JSON report written next to this script.  Network requests are
-rate-limited and cached in-memory so rerunning the script during the same
-Python session is fast.
-"""
-
 from __future__ import annotations
 
 import csv
