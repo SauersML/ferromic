@@ -528,19 +528,56 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             ax.plot([i - 0.12, i + 0.12], [q1, q1], color="#333333", lw=1.0, zorder=3)
             ax.plot([i - 0.12, i + 0.12], [q3, q3], color="#333333", lw=1.0, zorder=3)
 
-        # Jitter points (all values, including 1.0)
+        # Jitter points with special handling for exact 1.0 values:
+        #   • non-1.0 points jittered as usual
+        #   • all 1.0 points placed randomly inside a rectangle just above 1.0
         if all_vals.size > 0:
-            x_jit = i + (np.random.rand(all_vals.size) - 0.5) * 0.24
-            ax.scatter(
-                x_jit,
-                all_vals,
-                s=12,
-                alpha=0.7,
-                color=CATEGORY_COLORS[cat],
-                edgecolor="white",
-                linewidths=0.4,
-                zorder=2,
-            )
+            mask_at1 = (all_vals == 1.0)
+            vals_non1 = all_vals[~mask_at1]
+
+            # Normal jitter for non-1.0 points
+            if vals_non1.size > 0:
+                x_jit = i + (np.random.rand(vals_non1.size) - 0.5) * 0.24
+                ax.scatter(
+                    x_jit,
+                    vals_non1,
+                    s=12,
+                    alpha=0.7,
+                    color=CATEGORY_COLORS[cat],
+                    edgecolor="white",
+                    linewidths=0.4,
+                    zorder=2,
+                )
+
+            # Rectangle + random placement for the 1.0 points
+            n_at1_pts = int(mask_at1.sum())
+            if n_at1_pts > 0:
+                rect_w = 0.24   # match jitter width
+                rect_h = 0.035  # small band above 1.0 (fits under y=1.08)
+                rect_y0 = 1.005 # "right above" 1.0
+
+                rect = mpatches.Rectangle(
+                    (i - rect_w / 2, rect_y0),
+                    rect_w, rect_h,
+                    facecolor="none",
+                    edgecolor=CATEGORY_COLORS[cat],
+                    linewidth=0.8,
+                    zorder=1.8,
+                )
+                ax.add_patch(rect)
+
+                x_rect = (i - rect_w / 2) + np.random.rand(n_at1_pts) * rect_w
+                y_rect = rect_y0 + np.random.rand(n_at1_pts) * rect_h
+                ax.scatter(
+                    x_rect,
+                    y_rect,
+                    s=12,
+                    alpha=0.9,
+                    color=CATEGORY_COLORS[cat],
+                    edgecolor="white",
+                    linewidths=0.4,
+                    zorder=2.2,
+                )
 
         # Cap at 1.0: stacked dots + explicit counts
         n_at1 = d["n_at1"]
