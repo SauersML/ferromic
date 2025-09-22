@@ -478,7 +478,6 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
 
     fig, ax = plt.subplots(figsize=(8.2, 5.4))
     ax.set_facecolor("#f9f9f9")
-    ax.set_xlabel("Inversion class")
     ax.set_ylabel("Proportion of identical CDS pairs")
     ax.set_ylim(-0.02, 1.08)
     ax.set_xlim(0.5, len(CATEGORY_ORDER) + 0.5)
@@ -490,10 +489,8 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     # Background shading separates single-event vs recurrent classes
     ax.axvspan(0.5, 2.5, color="#ede7f6", alpha=0.18, zorder=0)
     ax.axvspan(2.5, 4.5, color="#e6f4ea", alpha=0.18, zorder=0)
-    ax.text(1.5, 1.05, "Single-event", ha="center", va="bottom", fontsize=8, color="#5d3a9b")
-    ax.text(3.5, 1.05, "Recurrent", ha="center", va="bottom", fontsize=8, color="#1b8132")
 
-    # --- Compute a global KDE max for fair width scaling across violins ---
+    # --- Compute a global max of counts (so widths are comparable across violins) ---
     y_grid = np.linspace(0.0, 1.0, 400)
     global_density_max = 0.0
     for cat_tmp in CATEGORY_ORDER:
@@ -502,9 +499,10 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         if vals_tmp.size >= 2:
             try:
                 kde_tmp = gaussian_kde(vals_tmp, bw_method="scott")
-                global_density_max = max(global_density_max, float(np.max(kde_tmp(y_grid))))
+                dens_tmp = kde_tmp(y_grid) * vals_tmp.size  # convert PDF to expected counts
+                global_density_max = max(global_density_max, float(np.max(dens_tmp)))
             except Exception:
-                hist_tmp, _ = np.histogram(vals_tmp, bins=40, range=(0.0, 1.0), density=True)
+                hist_tmp, _ = np.histogram(vals_tmp, bins=40, range=(0.0, 1.0), density=False)  # counts
                 if hist_tmp.size:
                     global_density_max = max(global_density_max, float(hist_tmp.max()))
 
