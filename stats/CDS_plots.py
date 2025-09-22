@@ -512,17 +512,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
 
         # Cap at 1.0: stacked dots + explicit counts
         n_at1 = d["n_at1"]
-        if n_at1 > 0:
-            for k in range(n_at1):
-                ax.scatter(
-                    i,
-                    1.0 - 0.008 * k,
-                    s=28,
-                    color=CATEGORY_COLORS[cat],
-                    edgecolor="#1b1b1b",
-                    linewidths=0.3,
-                    zorder=4,
-                )
+    
         label = f"CDS: {d['n_cds']}\n100% identical: {n_at1} ({d['share_at_1']*100:.0f}%)"
         ax.text(i, 1.065, label, ha="center", va="bottom", fontsize=8, color="#333333")
 
@@ -697,9 +687,8 @@ def prepare_volcano(gene_tests: pd.DataFrame, cds_summary: pd.DataFrame) -> pd.D
     print("[prepare_volcano] END")
     return out
 
-def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
-    """Render the conservation volcano with polished styling."""
 
+def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     fig, ax = plt.subplots(figsize=(8.6, 5.6))
 
     ax.set_xlabel("Δ proportion identical (Inverted − Direct)")
@@ -713,11 +702,11 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         y = -np.log10(q.to_numpy())
 
     # Point sizes by total pairs (scaled smoothly)
-    sizes = pd.to_numeric(df.get("n_pairs_total", pd.Series(dtype=float)), errors="coerce").fillna(0)
-    if sizes.max() > 0:
-        sizes = 28 + 220 * (sizes / sizes.max())
+    sizes_raw = pd.to_numeric(df.get("n_pairs_total", pd.Series(dtype=float)), errors="coerce").fillna(0)
+    if sizes_raw.max() > 0:
+        sizes = 28 + 220 * (sizes_raw / sizes_raw.max())
     else:
-        sizes = np.full_like(y, 40.0)
+        sizes = np.full_like(y, 40.0, dtype=float)
 
     # Colors: trust the recurrence column provided by prepare_volcano
     rec = df["recurrence"].astype(str)
@@ -735,7 +724,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         zorder=3,
     )
 
-    # Symmetric x limits with a little breathing room for annotations
+    # Symmetric x limits with breathing room for annotations
     if x.notna().any():
         x_lim = float(np.nanmax(np.abs(x))) * 1.1 + 0.05
     else:
@@ -762,32 +751,151 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         color="#666666",
     )
 
-    # Label the most significant and most extreme genes
+    # --------------------------
+    # Label selection (as before)
+    # --------------------------
     sig = df.copy()
     sig["delta_val"] = pd.to_numeric(sig["delta"], errors="coerce")
     sig["q_val"] = pd.to_numeric(sig["q_value"], errors="coerce")
     sig = sig[sig["q_val"] <= 0.05].dropna(subset=["delta_val", "q_val"])
+    label_rows = []
     if not sig.empty:
-        top_by_q = sig.nsmallest(8, "q_val")
+        top_by_q   = sig.nsmallest(8, "q_val")
         extreme_pos = sig.nlargest(4, "delta_val")
         extreme_neg = sig.nsmallest(4, "delta_val")
         label_df = pd.concat([top_by_q, extreme_pos, extreme_neg]).drop_duplicates(subset="gene_name")
-        for _, row in label_df.iterrows():
-            x0 = float(row["delta_val"])
-            y0 = -math.log10(max(row["q_val"], 1e-22))
-            offset = 0.35 if x0 >= 0 else -0.35
+        label_rows = list(label_df.itertuples(index=False))
+
+    # -----------------------------------------
+    # Place labels then repel to remove overlap
+    # -----------------------------------------
+    annotations = []
+    if label_rows:
+        # Initial placement
+        for row in label_rows:
+            # Access by attribute if present; otherwise via dict-like
+            if hasattr(row, "_asdict"):
+                rowd = row._asdict()
+            else:
+                rowd = dict(row)
+            x0 = float(rowd["delta_val"])
+            y0 = -math.log10(max(float(rowd["q_val"]), 1e-22))
+            name = str(rowd["gene_name"])
+            rec_mode = str(rowd.get("recurrence", ""))
+            txt_color = color_map.get(rec_mode, "#555555")
+
+            x_offset = 0.35 if x0 >= 0 else -0.35
             align = "left" if x0 >= 0 else "right"
-            ax.annotate(
-                row["gene_name"],
+
+            ann = ax.annotate(
+                name,
                 xy=(x0, y0),
-                xytext=(x0 + offset, y0 + 0.25),
+                xytext=(x0 + x_offset, y0 + 0.25),
+                textcoords="data",
                 fontsize=8,
                 ha=align,
                 va="bottom",
-                color=color_map.get(row["recurrence"], "#555555"),
+                color=txt_color,
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.9),
                 arrowprops=dict(arrowstyle="-", color="#808080", linewidth=0.6),
-                zorder=4,
+                zorder=5,
+                annotation_clip=False,
             )
+            annotations.append(ann)
+
+        # Helper: compute pixels->data conversion for Y
+        def _px_to_data_y(px):
+            # How many display pixels correspond to 1.0 data unit on Y?
+            d0 = ax.transData.transform((0, 0))[1]
+            d1 = ax.transData.transform((0, 1))[1]
+            per_data = (d1 - d0)
+            if per_data == 0:
+                return 0.0
+            return px / per_data
+
+        # Repulsion loop
+        max_iter = 200
+        pad_px = 2.0    # extra pixels between boxes
+        grew_ylim = False
+
+        for _ in range(max_iter):
+            # Must draw to get valid renderer + extents
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+
+            # Collect (bbox, center_y_px) for all current annotations
+            bboxes = [ann.get_window_extent(renderer=renderer).expanded(1.02, 1.10) for ann in annotations]
+
+            moved_any = False
+            n = len(annotations)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    bi, bj = bboxes[i], bboxes[j]
+                    if not bi.overlaps(bj):
+                        continue
+
+                    # Compute vertical overlap in pixels
+                    overlap_y = min(bi.y1, bj.y1) - max(bi.y0, bj.y0)
+                    if overlap_y <= 0:
+                        continue
+
+                    # Amount to separate each label (symmetrically)
+                    sep_each_px = overlap_y / 2.0 + pad_px
+
+                    # Decide directions based on current data y
+                    xi, yi = annotations[i].get_position()
+                    xj, yj = annotations[j].get_position()
+                    if yi <= yj:
+                        dy_i = -_px_to_data_y(sep_each_px)
+                        dy_j =  _px_to_data_y(sep_each_px)
+                    else:
+                        dy_i =  _px_to_data_y(sep_each_px)
+                        dy_j = -_px_to_data_y(sep_each_px)
+
+                    annotations[i].set_position((xi, yi + dy_i))
+                    annotations[j].set_position((xj, yj + dy_j))
+                    moved_any = True
+
+            # If anything moved beyond top/bottom, expand y-limits a bit
+            if moved_any:
+                # Find the highest/lowest label y in data coords
+                ys = [ann.get_position()[1] for ann in annotations]
+                ylo, yhi = ax.get_ylim()
+                margin = 0.02 * (yhi - ylo) + 0.1
+                new_lo = min(ylo, min(ys) - margin)
+                new_hi = max(yhi, max(ys) + margin)
+                if new_hi > yhi or new_lo < ylo:
+                    ax.set_ylim(new_lo, new_hi)
+                    grew_ylim = True
+
+            if not moved_any:
+                break
+
+        # Final safety pass: ensure no overlaps remain; if any, spread uniformly
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        final_boxes = [ann.get_window_extent(renderer=renderer).expanded(1.01, 1.05) for ann in annotations]
+        def _any_overlap(boxes):
+            for i in range(len(boxes)):
+                for j in range(i+1, len(boxes)):
+                    if boxes[i].overlaps(boxes[j]):
+                        return True
+            return False
+
+        if _any_overlap(final_boxes):
+            # Uniformly stack by y-order with minimal spacing (guaranteed separation)
+            order = np.argsort([ann.get_position()[1] for ann in annotations])
+            min_gap_px = 3.0
+            # Convert pixel gap to data
+            gap_dy = _px_to_data_y(min_gap_px)
+            base_y = annotations[order[0]].get_position()[1]
+            for k, idx in enumerate(order):
+                xk, _ = annotations[idx].get_position()
+                annotations[idx].set_position((xk, base_y + k * gap_dy))
+            # Expand ylim accordingly
+            ys = [ann.get_position()[1] for ann in annotations]
+            ylo, yhi = ax.get_ylim()
+            ax.set_ylim(min(ylo, min(ys) - 0.1), max(yhi, max(ys) + 0.1))
 
     # Legend emphasising recurrence mode
     proxy_se = mpatches.Patch(color=color_map["SE"], label="Single-event")
@@ -807,6 +915,8 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     ensure_dir(outfile)
     fig.savefig(outfile, bbox_inches="tight")
     plt.close(fig)
+
+
 
 # =============================================================================
 # MAPT CDS polymorphism heatmap (polymorphic sites only)
