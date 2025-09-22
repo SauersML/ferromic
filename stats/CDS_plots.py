@@ -892,18 +892,49 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
             pairs.sort(key=lambda t: t[2], reverse=True)
             return pairs
 
+        # Cap movements to prevent runaway offsets that fling labels off-canvas.
+        MAX_OFFSET_PT = 144.0  # total offset cap (±2 inches)
+        MAX_STEP_PT   = 24.0   # per-step cap (<= 24 pt)
+
         def _px_to_pt(px):
             return px * 72.0 / fig.dpi
-                
+
+        def _clamp_offset(ox, oy):
+            ox = float(np.clip(ox, -MAX_OFFSET_PT, MAX_OFFSET_PT))
+            oy = float(np.clip(oy, -MAX_OFFSET_PT, MAX_OFFSET_PT))
+            return ox, oy
+
         def _move_up_min(j_idx, dy_px):
-            """Move ONE label upward by exactly dy_px (plus tiny epsilon), in offset points."""
+            """Move ONE label upward by a bounded amount; clamp offsets to avoid runaway."""
             ox, oy = annotations[j_idx].get_position()
-            annotations[j_idx].set_position((ox, oy + _px_to_pt(dy_px + 0.5)))  # +0.5px for clearance
-        
+            step_pt = min(_px_to_pt(dy_px + 0.5), MAX_STEP_PT)
+            newx, newy = ox, oy + step_pt
+            newx, newy = _clamp_offset(newx, newy)
+            annotations[j_idx].set_position((newx, newy))
+
+        def _move_down_min(j_idx, dy_px):
+            """Fallback: move ONE label downward by a bounded amount."""
+            ox, oy = annotations[j_idx].get_position()
+            step_pt = min(_px_to_pt(dy_px + 0.5), MAX_STEP_PT)
+            newx, newy = ox, oy - step_pt
+            newx, newy = _clamp_offset(newx, newy)
+            annotations[j_idx].set_position((newx, newy))
+
         def _move_left_min(j_idx, dx_px):
-            """Move ONE label left by exactly dx_px (plus tiny epsilon), in offset points."""
+            """Move ONE label left by a bounded amount; clamp offsets to avoid runaway."""
             ox, oy = annotations[j_idx].get_position()
-            annotations[j_idx].set_position((ox - _px_to_pt(dx_px + 0.5), oy))  # +0.5px for clearance
+            step_pt = min(_px_to_pt(dx_px + 0.5), MAX_STEP_PT)
+            newx, newy = ox - step_pt, oy
+            newx, newy = _clamp_offset(newx, newy)
+            annotations[j_idx].set_position((newx, newy))
+
+        def _move_right_min(j_idx, dx_px):
+            """Fallback: move ONE label right by a bounded amount."""
+            ox, oy = annotations[j_idx].get_position()
+            step_pt = min(_px_to_pt(dx_px + 0.5), MAX_STEP_PT)
+            newx, newy = ox + step_pt, oy
+            newx, newy = _clamp_offset(newx, newy)
+            annotations[j_idx].set_position((newx, newy))
 
         # Alternate vertical / horizontal moves, ONE PAIR per step -------------
         do_vertical = True
@@ -922,19 +953,27 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
             bi, bj = bbs[i], bbs[j]
 
             if do_vertical:
-                # Step 1a: move the label that is already HIGHER further UP
-                # "higher" => larger y1 (top edge) in display coords
-                idx_move = i if bi.y1 >= bj.y1 else j
-                # minimal vertical move to separate: current vertical overlap h_px
-                _move_up_min(idx_move, h_px)
-                do_vertical = False  # next time do horizontal
+                # Prefer to move the higher label UP, but if it's at the cap, move the other DOWN.
+                idx_pref = i if bi.y1 >= bj.y1 else j
+                other    = j if idx_pref == i else i
+                ox, oy = annotations[idx_pref].get_position()
+                step_pt = min(_px_to_pt(h_px + 0.5), MAX_STEP_PT)
+                if oy + step_pt > MAX_OFFSET_PT - 1e-6:
+                    _move_down_min(other, h_px)
+                else:
+                    _move_up_min(idx_pref, h_px)
+                do_vertical = False
             else:
-                # Step 1b: move the label that is already more LEFT further LEFT
-                # "left" => smaller x0 (left edge)
-                idx_move = i if bi.x0 <= bj.x0 else j
-                # minimal horizontal move to separate: current horizontal overlap w_px
-                _move_left_min(idx_move, w_px)
-                do_vertical = True  # next time do vertical
+                # Prefer to move the left label LEFT, but if it's at the cap, move the other RIGHT.
+                idx_pref = i if bi.x0 <= bj.x0 else j
+                other    = j if idx_pref == i else i
+                ox, oy = annotations[idx_pref].get_position()
+                step_pt = min(_px_to_pt(w_px + 0.5), MAX_STEP_PT)
+                if ox - step_pt < -MAX_OFFSET_PT + 1e-6:
+                    _move_right_min(other, w_px)
+                else:
+                    _move_left_min(idx_pref, w_px)
+                do_vertical = True
 
         _draw_and_renderer()
 
