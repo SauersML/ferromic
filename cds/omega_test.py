@@ -1436,13 +1436,13 @@ def codeml_worker(gene_info, region_tree_file, region_label):
             pair_payload_cmc = cache_read_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json")
             if pair_payload_cmc:
                 logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
-                cmc_result = dict(pair_payload_cmc["result"])  # shallow copy for safe mutation
-        
-                # NEW: unconditionally back-fill CMC fields from raw H1_cmc.out
+                cmc_result = dict(pair_payload_cmc["result"])
+
+                # Back-fill cmc_* parameters from raw H1_cmc.out when any are missing
                 h1_key = cmc_result.get("cmc_h1_key") or pair_payload_cmc.get("key", {}).get("h1_attempt_key")
                 def _bad(x): return (x is None) or (isinstance(x, float) and np.isnan(x))
                 healed = {}
-        
+
                 if h1_key:
                     art_dir_h1 = os.path.join(_fanout_dir(PAML_CACHE_DIR, h1_key), "artifacts")
                     raw_h1 = os.path.join(art_dir_h1, "H1_cmc.out")
@@ -1451,7 +1451,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                             healed = parse_h1_cmc_paml_output(raw_h1) or {}
                         except Exception as _e:
                             logging.debug(f"[{gene_name}|{region_label}] parse_h1_cmc_paml_output failed: {_e}")
-        
+
                 if healed:
                     changed = False
                     for k, v in healed.items():
@@ -1463,8 +1463,8 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                             cache_write_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json",
                                              {"key": pair_payload_cmc["key"], "result": cmc_result})
                         logging.info(f"[{gene_name}|{region_label}] Back-filled cmc_* in cached pair.json")
-        
-                    # keep the H1 attempt.json consistent (optional, but nice)
+
+                    # Keep the H1 attempt.json consistent with parsed parameters
                     try:
                         if h1_key:
                             att = cache_read_json(PAML_CACHE_DIR, h1_key, "attempt.json")
@@ -1473,16 +1473,16 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                                 a_changed = False
                                 for k, v in healed.items():
                                     if k.startswith("cmc_") and (_bad(aparams.get(k)) or (k not in aparams)):
-                                        aparams[k] = v; a_changed = True
+                                        aparams[k] = v
+                                        a_changed = True
                                 if a_changed:
                                     att["params"] = aparams
                                     cache_write_json(PAML_CACHE_DIR, h1_key, "attempt.json", att)
                                     logging.info(f"[{gene_name}|{region_label}] Back-filled cmc_* in H1 attempt.json")
                     except Exception as _e:
                         logging.debug(f"[{gene_name}|{region_label}] attempt.json back-fill skipped: {_e}")
-        
+
             else:
-                # No cached pair → compute using existing cache of attempts or new runs
                 with ThreadPoolExecutor(max_workers=2) as ex:
                     fut_h0 = ex.submit(get_attempt_result, h0_cmc_key, h0_tree, "H0_cmc.out",
                                        {"model": 0, "NSsites": 22, "ncatG": 3}, None)
@@ -1490,14 +1490,19 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                                        {"model": 3, "NSsites": 2, "ncatG": 3}, parse_h1_cmc_paml_output)
                     h0_payload = fut_h0.result()
                     h1_payload = fut_h1.result()
-        
+
                 lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
                 if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
-                    lrt = 2 * (lnl1 - lnl0); p = chi2.sf(lrt, df=1)
+                    lrt = 2 * (lnl1 - lnl0)
+                    p = chi2.sf(lrt, df=1)
                     cmc_result = {
-                        "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1, "cmc_lrt_stat": float(lrt), "cmc_p_value": float(p),
+                        "cmc_lnl_h0": lnl0,
+                        "cmc_lnl_h1": lnl1,
+                        "cmc_lrt_stat": float(lrt),
+                        "cmc_p_value": float(p),
                         **h1_payload.get("params", {}),
-                        "cmc_h0_key": h0_cmc_key, "cmc_h1_key": h1_cmc_key,
+                        "cmc_h0_key": h0_cmc_key,
+                        "cmc_h1_key": h1_cmc_key,
                     }
                     with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_cmc)):
                         cache_write_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json",
