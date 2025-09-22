@@ -6,6 +6,22 @@ build-backend = "maturin"
 version = "0.1.0"
 name = "ferromic"
 requires-python = ">=3.9"
+description = "Rust-accelerated population genetics toolkit with ergonomic Python bindings"
+readme = "README.md"
+authors = [{ name = "Ferromic Developers" }]
+keywords = ["population-genetics", "bioinformatics", "rust", "pyo3", "numpy"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: Other/Proprietary License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=1.23",
+]
 
 [project.optional-dependencies]
 test = [
