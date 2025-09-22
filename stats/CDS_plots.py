@@ -33,17 +33,21 @@ matplotlib.rcParams.update({
 RANDOM_SEED = 2024
 np.random.seed(RANDOM_SEED)
 
-# Orientation colors (high contrast)
-COLOR_DIRECT   = "#1f77b4"  # blue
-COLOR_INVERTED = "#d62728"  # red
+# === Match the other plot's look ===
+COLOR_DIRECT   = "#1f3b78"   # dark blue
+COLOR_INVERTED = "#8c2d7e"   # reddish purple
 
-# Category palette (Single-event, direct, Single-event, inverted, Recurrent, direct, Recurrent, inverted) — use four highly distinct colors
-CATEGORY_ORDER = ["Single-event, direct", "Single-event, inverted", "Recurrent, direct", "Recurrent, inverted"]
-CATEGORY_COLORS = {
-    "Single-event, direct": "#6a3d9a",  # purple
-    "Single-event, inverted": "#ff7f00",  # orange
-    "Recurrent, direct": "#1f78b4", # blue
-    "Recurrent, inverted": "#33a02c", # green
+# Hatching overlays (by recurrence)
+OVERLAY_SINGLE = "#d9d9d9"   # very light dots
+OVERLAY_RECUR  = "#4a4a4a"   # dark gray diagonals
+ALPHA_VIOLIN   = 0.72        # same translucent fill
+
+# Base face colors by category: orientation decides the fill color
+CATEGORY_FACE = {
+    "Single-event, direct":   COLOR_DIRECT,
+    "Single-event, inverted": COLOR_INVERTED,
+    "Recurrent, direct":      COLOR_DIRECT,
+    "Recurrent, inverted":    COLOR_INVERTED,
 }
 
 # Base colors for raw haplotype plots: A,C,G,T (no gap color used)
@@ -443,9 +447,12 @@ def compute_group_distributions(cds_summary: pd.DataFrame):
                         n_at1=n_at1, box_stats=(med, q1, q3))
     return out
 
-def draw_half_violin(ax, y_vals, center_x, width=0.4, side="left",
-                     clip=(0.0, 1.0), facecolor="#cccccc", alpha=0.6,
-                     y_grid=None, global_density_max=None, bw_method="scott"):
+def draw_half_violin(
+    ax, y_vals, center_x, width=0.4, side="left",
+    clip=(0.0, 1.0), facecolor="#cccccc", alpha=0.6,
+    hatch=None, hatch_edgecolor="#000000", hatch_linewidth=0.0,
+    y_grid=None, global_density_max=None, bw_method="scott"
+):
     # keep only clipped values
     y = np.asarray(y_vals, dtype=float)
     y = y[(y >= clip[0]) & (y <= clip[1])]
@@ -457,21 +464,47 @@ def draw_half_violin(ax, y_vals, center_x, width=0.4, side="left",
         y_grid = np.linspace(clip[0], clip[1], 400)
 
     # KDE smoothing (scale to counts so widths reflect absolute number of points)
-    kde = gaussian_kde(y, bw_method=bw_method)
-    dens = kde(y_grid) * y.size  # counts, not PDF
+    try:
+        kde  = gaussian_kde(y, bw_method=bw_method)
+        dens = kde(y_grid) * y.size  # counts, not PDF
+    except Exception:
+        # robust fallback if KDE fails
+        hist, bin_edges = np.histogram(y, bins=40, range=clip, density=False)
+        # simple step function onto y_grid
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+        dens = np.interp(y_grid, bin_centers, hist, left=0, right=0)
 
-    dens = np.clip(dens, 0, np.inf)
-
-    # normalize widths by a GLOBAL max over **counts** (passed in), else local max
+    dens  = np.clip(dens, 0, np.inf)
     scale = float(global_density_max) if (global_density_max is not None and global_density_max > 0) else float(dens.max())
     if scale <= 0:
         return
-
     xs = (dens / scale) * width
 
+    # x on the "open" side
     xcoords = center_x - xs if side == "left" else center_x + xs
-    ax.fill_betweenx(y_grid, center_x, xcoords, color=facecolor, alpha=alpha, linewidth=0)
 
+    # 1) colored base fill
+    poly = ax.fill_betweenx(
+        y_grid,
+        center_x, xcoords,
+        color=facecolor, alpha=alpha, linewidth=0, zorder=1.5
+    )
+
+    # 2) hatched overlay (drawn as a closed polygon with no facecolor)
+    if hatch:
+        # Build polygon vertices around the filled area
+        xv = np.r_[np.full_like(y_grid, center_x), xcoords[::-1]]
+        yv = np.r_[y_grid, y_grid[::-1]]
+        verts = np.column_stack([xv, yv])
+        patch = mpatches.Polygon(
+            verts, closed=True,
+            facecolor="none",
+            edgecolor=hatch_edgecolor,
+            hatch=hatch,
+            linewidth=hatch_linewidth,
+            zorder=2.0
+        )
+        ax.add_patch(patch)
 
 def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     dist = compute_group_distributions(cds_summary)
@@ -511,14 +544,28 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         core = d["values_core"]
         all_vals = d["values_all"]
 
-        # Symmetric half-violins with KDE smoothing + GLOBAL scaling
-        draw_half_violin(ax, core, i, width=0.36, side="left",
-                         facecolor=CATEGORY_COLORS[cat], alpha=0.40,
-                         y_grid=y_grid, global_density_max=global_density_max, bw_method="scott")
-        draw_half_violin(ax, core, i, width=0.36, side="right",
-                         facecolor=CATEGORY_COLORS[cat], alpha=0.40,
-                         y_grid=y_grid, global_density_max=global_density_max, bw_method="scott")
+        # Orientation-based face color, recurrence-based hatch
+        face = CATEGORY_FACE[cat]
+        if cat.startswith("Single-event"):
+            hatch_pat  = "."
+            hatch_edge = OVERLAY_SINGLE
+        else:
+            hatch_pat  = "//"
+            hatch_edge = OVERLAY_RECUR
 
+        # Symmetric half-violins with GLOBAL scaling + hatch overlay
+        draw_half_violin(
+            ax, core, i, width=0.36, side="left",
+            facecolor=face, alpha=ALPHA_VIOLIN,
+            hatch=hatch_pat, hatch_edgecolor=hatch_edge,
+            y_grid=y_grid, global_density_max=global_density_max, bw_method="scott"
+        )
+        draw_half_violin(
+            ax, core, i, width=0.36, side="right",
+            facecolor=face, alpha=ALPHA_VIOLIN,
+            hatch=hatch_pat, hatch_edgecolor=hatch_edge,
+            y_grid=y_grid, global_density_max=global_density_max, bw_method="scott"
+        )
 
         # Box (median & IQR)
         median, q1, q3 = d["box_stats"]
@@ -528,39 +575,30 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             ax.plot([i - 0.12, i + 0.12], [q1, q1], color="#333333", lw=1.0, zorder=3)
             ax.plot([i - 0.12, i + 0.12], [q3, q3], color="#333333", lw=1.0, zorder=3)
 
-        # Jitter points with special handling for exact 1.0 values:
-        #   • non-1.0 points jittered as usual
-        #   • all 1.0 points placed randomly inside a rectangle just above 1.0
+        # Jitter points, colored by orientation; special handling for exact 1.0s
         if all_vals.size > 0:
             mask_at1 = (all_vals == 1.0)
             vals_non1 = all_vals[~mask_at1]
 
-            # Normal jitter for non-1.0 points
             if vals_non1.size > 0:
                 x_jit = i + (np.random.rand(vals_non1.size) - 0.5) * 0.24
                 ax.scatter(
-                    x_jit,
-                    vals_non1,
-                    s=12,
-                    alpha=0.7,
-                    color=CATEGORY_COLORS[cat],
-                    edgecolor="white",
-                    linewidths=0.4,
-                    zorder=2,
+                    x_jit, vals_non1,
+                    s=12, alpha=0.7, color=face,
+                    edgecolor="white", linewidths=0.4, zorder=2,
                 )
 
-            # Rectangle + random placement for the 1.0 points
             n_at1_pts = int(mask_at1.sum())
             if n_at1_pts > 0:
-                rect_w = 0.44   # match jitter width
-                rect_h = 0.045  # small band above 1.0 (fits under y=1.08)
-                rect_y0 = 1.005 # "right above" 1.0
+                rect_w = 0.44
+                rect_h = 0.045
+                rect_y0 = 1.005
 
                 rect = mpatches.Rectangle(
                     (i - rect_w / 2, rect_y0),
                     rect_w, rect_h,
                     facecolor="none",
-                    edgecolor=CATEGORY_COLORS[cat],
+                    edgecolor=face,
                     linewidth=0.8,
                     zorder=1.8,
                 )
@@ -569,19 +607,13 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                 x_rect = (i - rect_w / 2) + np.random.rand(n_at1_pts) * rect_w
                 y_rect = rect_y0 + np.random.rand(n_at1_pts) * rect_h
                 ax.scatter(
-                    x_rect,
-                    y_rect,
-                    s=12,
-                    alpha=0.9,
-                    color=CATEGORY_COLORS[cat],
-                    edgecolor="white",
-                    linewidths=0.4,
-                    zorder=2.2,
+                    x_rect, y_rect,
+                    s=12, alpha=0.9, color=face,
+                    edgecolor="white", linewidths=0.4, zorder=2.2,
                 )
 
         # Cap at 1.0: stacked dots + explicit counts
         n_at1 = d["n_at1"]
-    
         label = f"CDS: {d['n_cds']}\n100% identical: {n_at1} ({d['share_at_1']*100:.0f}%)"
         ax.text(i, 1.065, label, ha="center", va="bottom", fontsize=8, color="#333333")
 
@@ -589,9 +621,25 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     ax.grid(axis="y", linestyle=":", linewidth=0.6, color="#cfcfcf", alpha=0.7)
     ax.tick_params(axis="both", labelsize=9)
 
-    patches = [mpatches.Patch(color=CATEGORY_COLORS[c], label=c) for c in CATEGORY_ORDER]
+    legend_entries = [
+        ("Single-event, direct",   COLOR_DIRECT,   ".",  OVERLAY_SINGLE),
+        ("Single-event, inverted", COLOR_INVERTED, ".",  OVERLAY_SINGLE),
+        ("Recurrent, direct",      COLOR_DIRECT,   "//", OVERLAY_RECUR),
+        ("Recurrent, inverted",    COLOR_INVERTED, "//", OVERLAY_RECUR),
+    ]
+    patches = [
+        mpatches.Rectangle(
+            (0, 0), 1, 1,
+            facecolor=face, edgecolor=edge, hatch=hatch,
+            linewidth=0.0, alpha=ALPHA_VIOLIN
+        )
+        for (_, face, hatch, edge) in legend_entries
+    ]
+    labels = [lbl for (lbl, *_rest) in legend_entries]
+
     leg = ax.legend(
         handles=patches,
+        labels=labels,
         title="Category",
         frameon=False,
         ncol=2,
