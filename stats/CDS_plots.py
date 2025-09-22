@@ -463,19 +463,6 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     dist = compute_group_distributions(cds_summary)
 
     fig, ax = plt.subplots(figsize=(8.2, 5.4))
-    fig.suptitle(
-        "Identical CDS proportions vary by inversion history",
-        fontsize=12,
-        fontweight="bold",
-        y=0.98,
-    )
-    ax.set_title(
-        "Half-violins show the distribution per CDS; dots include perfectly identical loci",
-        loc="left",
-        fontsize=9,
-        color="#555555",
-    )
-
     ax.set_facecolor("#f9f9f9")
     ax.set_xlabel("Inversion class")
     ax.set_ylabel("Proportion of identical CDS pairs")
