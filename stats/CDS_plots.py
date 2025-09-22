@@ -728,9 +728,17 @@ def prepare_volcano(gene_tests: pd.DataFrame, cds_summary: pd.DataFrame) -> pd.D
 
 
 def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
-    """Render the conservation volcano; if gene labels overlap, nudge labels (only) upward
-    in offset-points until overlaps are gone. Never changes data points or axes derived
-    from data.
+    """
+    Render the conservation volcano. Detect label overlaps and resolve them by
+    moving only ONE label per iteration, alternating:
+      - Step 1a (vertical): pick ONE overlapping pair; move the label that is already
+        higher in that pair upward just enough to clear the overlap.
+      - Step 1b (horizontal): rescan; pick ONE overlapping pair; move the label that
+        is already left in that pair leftward just enough to clear the overlap.
+    Repeat (1a -> rescan -> 1b -> rescan -> ...) until no overlaps remain.
+
+    Data points and axes are NEVER adjusted by the overlap solver. Only label
+    offsets (in offset points) are changed.
     """
     fig, ax = plt.subplots(figsize=(8.6, 5.6))
 
@@ -738,7 +746,6 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     ax.set_ylabel(r"$-\log_{10}(\mathrm{BH}\;q)$")
     ax.set_facecolor("#f9f9f9")
 
-    # --- Data (unchanged) ---
     x = pd.to_numeric(df["delta"], errors="coerce")
     q = pd.to_numeric(df["q_value"], errors="coerce").clip(1e-22, 1.0)
     with np.errstate(divide="ignore"):
@@ -751,7 +758,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     else:
         sizes = np.full_like(y, 40.0, dtype=float)
 
-    # Colors
+    # Colors by recurrence
     rec = df["recurrence"].astype(str)
     color_map = {"SE": CATEGORY_COLORS["Single-event, inverted"], "REC": CATEGORY_COLORS["Recurrent, inverted"]}
     colors = rec.map(color_map).fillna("#7f7f7f")
@@ -762,7 +769,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         edgecolor="white", linewidths=0.7, zorder=3,
     )
 
-    # Axes limits from DATA ONLY (do not change later)
+    # Axes limits from DATA ONLY (never touched again)
     if x.notna().any():
         x_lim = float(np.nanmax(np.abs(x))) * 1.1 + 0.05
     else:
@@ -777,7 +784,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     ax.axvspan(0, right, color=COLOR_INVERTED, alpha=0.05, zorder=0)
     ax.axvline(0, color="#595959", linestyle="--", linewidth=1.0, zorder=1)
 
-    # FDR 5% reference line (at ~1.301, never 0.0)
+    # FDR 5% reference line (~1.301)
     thresh_y = -math.log10(0.05)
     ax.axhline(thresh_y, linestyle="--", color="#b0b0b0", linewidth=1.0, zorder=1)
     ax.text(
@@ -789,7 +796,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     )
 
     # --------------------------
-    # Select labels (same policy)
+    # Select labels
     # --------------------------
     sig = df.copy()
     sig["delta_val"] = pd.to_numeric(sig["delta"], errors="coerce")
@@ -802,15 +809,14 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         extreme_pos = sig.nlargest(4, "delta_val")
         extreme_neg = sig.nsmallest(4, "delta_val")
         label_df = pd.concat([top_by_q, extreme_pos, extreme_neg]).drop_duplicates(subset="gene_name")
-        # Greedy stacking works best when we place from low y to high y
-        label_rows = list(label_df.sort_values("q_val", ascending=False).sort_values("delta_val").itertuples(index=False))
+        # Mild sort for stable placement; exact order doesn't matter for solver
+        label_rows = list(label_df.sort_values(["q_val", "delta_val"]).itertuples(index=False))
 
     # -----------------------------------------
-    # Place labels in offset points; then de-overlap
+    # Place labels (offset points) then resolve overlaps
     # -----------------------------------------
     annotations = []
     if label_rows:
-        # Initial placement (labels only; keep data fixed)
         for row in label_rows:
             rowd = row._asdict() if hasattr(row, "_asdict") else dict(row)
             x0 = float(rowd["delta_val"])
@@ -819,61 +825,89 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
             rec_mode = str(rowd.get("recurrence", ""))
             txt_color = color_map.get(rec_mode, "#555555")
 
-            # Side-aware horizontal offset in POINTS (not data)
             dx = 6 if x0 >= 0 else -6
             ha = "left" if x0 >= 0 else "right"
 
             ann = ax.annotate(
                 name,
                 xy=(x0, y0), xycoords="data",
-                xytext=(dx, 2), textcoords="offset points",  # small initial rise
+                xytext=(dx, 2), textcoords="offset points",
                 fontsize=8, ha=ha, va="bottom", color=txt_color,
                 arrowprops=dict(arrowstyle="-", color="#808080", linewidth=0.6),
                 zorder=5,
-                annotation_clip=False,  # allow outside without touching axes
+                annotation_clip=False,
             )
             annotations.append(ann)
 
-        # Draw once to obtain valid bounding boxes
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
+        # Helpers -------------------------------------------------------------
+        def _draw_and_renderer():
+            fig.canvas.draw()
+            return fig.canvas.get_renderer()
 
-        # Helper to get (slightly padded) bbox in display coords
-        def _bbox(ann):
-            return ann.get_window_extent(renderer=renderer).expanded(1.01, 1.05)
+        def _bboxes(renderer, expand=(1.0, 1.0)):
+            return [ann.get_window_extent(renderer=renderer).expanded(expand[0], expand[1]) for ann in annotations]
 
-        # Simple greedy de-overlap: process in ascending baseline y (their data y),
-        # for each label, push its text upward in small point-steps until it no longer
-        # overlaps any previously placed label.
-        # This only modifies label offsets (xytext), never the data or axes.
-        placed_bboxes = []
-        step_pts = 2.0
-        max_steps = 600  # 1200 pts (~16.6 inches) upper bound just to guarantee termination
+        def _overlap_pairs(bbs):
+            """Return list of (i,j, area_px, w_px, h_px) for overlapping pairs, sorted by area desc."""
+            pairs = []
+            n = len(bbs)
+            for i in range(n):
+                bi = bbs[i]
+                for j in range(i+1, n):
+                    bj = bbs[j]
+                    w = min(bi.x1, bj.x1) - max(bi.x0, bj.x0)
+                    h = min(bi.y1, bj.y1) - max(bi.y0, bj.y0)
+                    if w > 0 and h > 0:
+                        pairs.append((i, j, w * h, w, h))
+            pairs.sort(key=lambda t: t[2], reverse=True)
+            return pairs
 
-        for ann in annotations:
-            # Current xytext (offset points)
-            ox, oy = ann.xyann  # xyann is the text position in annotation coords
-            bbox = _bbox(ann)
-            steps = 0
-            # Check against already placed boxes
-            def overlaps_any(b):
-                for pb in placed_bboxes:
-                    # Manual overlap check (no touching allowed)
-                    if (b.x0 < pb.x1) and (b.x1 > pb.x0) and (b.y0 < pb.y1) and (b.y1 > pb.y0):
-                        return True
-                return False
+        def _px_to_pt(px):
+            return px * 72.0 / fig.dpi
 
-            while overlaps_any(bbox) and steps < max_steps:
-                oy += step_pts  # nudge label upward (in points)
-                ann.set_position((ox, oy))  # updates xytext (still in offset points)
-                fig.canvas.draw()
-                renderer = fig.canvas.get_renderer()
-                bbox = _bbox(ann)
-                steps += 1
+        def _move_up_min(j_idx, dy_px):
+            """Move ONE label upward by exactly dy_px (plus tiny epsilon), in offset points."""
+            ox, oy = annotations[j_idx].get_position()
+            annotations[j_idx].set_position((ox, oy + _px_to_pt(dy_px + 0.5)))  # +0.5px for clearance
 
-            placed_bboxes.append(bbox)
+        def _move_left_min(j_idx, dx_px):
+            """Move ONE label left by exactly dx_px (plus tiny epsilon), in offset points."""
+            ox, oy = annotations[j_idx].get_position()
+            annotations[j_idx].set_position((ox - _px_to_pt(dx_px + 0.5), oy))  # +0.5px for clearance
 
-    # Legend & cosmetics (unchanged)
+        # Alternate vertical / horizontal moves, ONE PAIR per step -------------
+        do_vertical = True
+        max_iters = 4000  # hard cap to guarantee termination
+
+        for _ in range(max_iters):
+            renderer = _draw_and_renderer()
+            bbs = _bboxes(renderer, expand=(1.0, 1.0))
+            pairs = _overlap_pairs(bbs)
+
+            if not pairs:
+                break  # done
+
+            # Pick ONE pair (largest overlap)
+            i, j, area, w_px, h_px = pairs[0]
+            bi, bj = bbs[i], bbs[j]
+
+            if do_vertical:
+                # Step 1a: move the label that is already HIGHER further UP
+                # "higher" => larger y1 (top edge) in display coords
+                idx_move = i if bi.y1 >= bj.y1 else j
+                # minimal vertical move to separate: current vertical overlap h_px
+                _move_up_min(idx_move, h_px)
+                do_vertical = False  # next time do horizontal
+            else:
+                # Step 1b: move the label that is already more LEFT further LEFT
+                # "left" => smaller x0 (left edge)
+                idx_move = i if bi.x0 <= bj.x0 else j
+                # minimal horizontal move to separate: current horizontal overlap w_px
+                _move_left_min(idx_move, w_px)
+                do_vertical = True  # next time do vertical
+
+        _draw_and_renderer()
+
     proxy_se = mpatches.Patch(color=color_map["SE"], label="Single-event")
     proxy_rec = mpatches.Patch(color=color_map["REC"], label="Recurrent")
     ax.legend(
