@@ -560,34 +560,37 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             hatch_edge = OVERLAY_RECUR
 
         # Symmetric half-violins with GLOBAL scaling + hatch overlay
+        # Half-violin + half-box; jitter on the BOX side (raincloud-style)
+        side_violin = "left" if "direct" in cat else "right"
+        side_box = "right" if side_violin == "left" else "left"
+        offset = 0.22 if side_box == "right" else -0.22
+
+        # draw a single half-violin on its side
         draw_half_violin(
-            ax, core, i, width=0.36, side="left",
-            facecolor=face, alpha=ALPHA_VIOLIN,
-            hatch=hatch_pat, hatch_edgecolor=hatch_edge,
-            y_grid=y_grid, global_density_max=global_density_max, bw_method="scott"
-        )
-        draw_half_violin(
-            ax, core, i, width=0.36, side="right",
+            ax, core, i, width=0.36, side=side_violin,
             facecolor=face, alpha=ALPHA_VIOLIN,
             hatch=hatch_pat, hatch_edgecolor=hatch_edge,
             y_grid=y_grid, global_density_max=global_density_max, bw_method="scott"
         )
 
-        # Box (median & IQR)
+        # Half-box shifted to the opposite side of the violin
         median, q1, q3 = d["box_stats"]
         if not np.isnan(median):
-            ax.plot([i - 0.18, i + 0.18], [median, median], color="#333333", lw=1.0, zorder=3)
-            ax.plot([i, i], [q1, q3], color="#333333", lw=1.0, zorder=3)
-            ax.plot([i - 0.12, i + 0.12], [q1, q1], color="#333333", lw=1.0, zorder=3)
-            ax.plot([i - 0.12, i + 0.12], [q3, q3], color="#333333", lw=1.0, zorder=3)
+            cx = i + offset
+            ax.plot([cx - 0.18, cx + 0.18], [median, median], color="#333333", lw=1.0, zorder=3)
+            ax.plot([cx, cx], [q1, q3], color="#333333", lw=1.0, zorder=3)
+            ax.plot([cx - 0.12, cx + 0.12], [q1, q1], color="#333333", lw=1.0, zorder=3)
+            ax.plot([cx - 0.12, cx + 0.12], [q3, q3], color="#333333", lw=1.0, zorder=3)
 
-        # Jitter points, colored by orientation; special handling for exact 1.0s
+        # Jitter points: NOT over the violin. Nudge just past the box on the box side.
         if all_vals.size > 0:
             mask_at1 = (all_vals == 1.0)
             vals_non1 = all_vals[~mask_at1]
 
             if vals_non1.size > 0:
-                x_jit = i + (np.random.rand(vals_non1.size) - 0.5) * 0.10
+                sign = 1.0 if side_box == "right" else -1.0
+                x_center = (i + offset) + sign * 0.25  # a bit past the box
+                x_jit = x_center + (np.random.rand(vals_non1.size) - 0.5) * 0.18
                 ax.scatter(
                     x_jit, vals_non1,
                     s=12, alpha=0.9, color=face,
