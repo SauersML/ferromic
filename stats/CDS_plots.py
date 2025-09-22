@@ -217,10 +217,6 @@ def read_phy(phy_path: str):
 
     return {"seq_order": seq_order, "seqs": seqs, "n": n_expected, "m": m_sites}
 
-def hamming(a: str, b: str) -> int:
-    if len(a) != len(b):
-        raise ValueError("Hamming distance requires equal-length strings.")
-    return sum(1 for x, y in zip(a, b) if x != y)
 
 # =============================================================================
 # Data loading & preparation
@@ -926,19 +922,6 @@ def _consensus_base_and_frac(col_list: list):
     base, cnt = counts.most_common(1)[0]
     frac = cnt / len(col_list)
     return base, frac
-
-def encode_sequence_array_no_gaps(seq_strs: list, cols_keep: list) -> np.ndarray:
-    """
-    Map A,C,G,T -> 0..3; only keep columns in cols_keep.
-    Returns (n_rows x len(cols_keep)) int array.
-    """
-    n = len(seq_strs)
-    m = len(cols_keep)
-    arr = np.zeros((n, m), dtype=int)
-    for i, s in enumerate(seq_strs):
-        for k, j in enumerate(cols_keep):
-            arr[i, k] = BASE_TO_IDX.get(s[j].upper(), 0)  # assume A/C/G/T only per user note
-    return arr
 
 def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold: float):
     """
