@@ -964,18 +964,17 @@ def encode_sequence_array_no_gaps(seq_strs: list, cols_keep: list) -> np.ndarray
 
 def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold: float):
     """
-    Polymorphism heatmap with:
-      • Each haplotype on its own row + visual spacing between rows
-      • No haplotype labels shown (but rows sorted alphabetically per orientation)
-      • Two big curly-braced y-axis labels: "Inverted haplotypes" and "Direct haplotypes"
+    Polymorphism heatmap tuned to your specs:
+      • Each haplotype has its own row with spacing between rows
+      • Haplotype labels are hidden, but rows are alphabetically sorted within orientation
+      • Two large BLACK square/rectangle brackets to the LEFT of the y-axis,
+        labeled "Inverted haplotypes" and "Direct haplotypes" in black
     """
     import numpy as _np
     from matplotlib.colors import ListedColormap as _ListedColormap
-    from matplotlib.patches import PathPatch as _PathPatch
-    from matplotlib.path import Path as _Path
     from matplotlib.transforms import blended_transform_factory as _blend
 
-    # ----------------------------- helpers -----------------------------
+    # ---------- helpers ----------
     def _consensus_base_and_frac(col_list: list):
         from collections import Counter as _Counter
         counts = _Counter(col_list)
@@ -1011,54 +1010,36 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
         return arr
 
     def _insert_row_gaps(arr: _np.ndarray, nI: int, gap: int = 1, group_gap: int = 3) -> _np.ndarray:
-        """Return array with NaN 'spacer' rows between all rows; a bigger spacer between groups."""
+        """Insert NaN spacer rows between all rows; bigger spacer between I and D groups."""
         r, c = arr.shape
         rows = []
         for i in range(r):
             rows.append(arr[i])
-            # after each row except last:
             if i < r - 1:
-                # after last inverted row, insert group_gap; else regular gap
                 n_spacers = group_gap if i == (nI - 1) else gap
                 for _ in range(n_spacers):
                     rows.append(_np.full(c, _np.nan))
         return _np.vstack(rows)
 
-    def _add_curly_brace(ax, y0, y1, label, side="left", x_axes=0.0, width_axes=0.045, color="#111111"):
+    def _add_square_bracket(ax, y0, y1, label, *, x_axes=-0.015, tick_len_axes=0.015, lw=1.8):
         """
-        Draw a vertical curly brace spanning [y0,y1] in DATA coords, with its x in AXES fraction.
+        Draw a black square/rectangle bracket just LEFT of the y-axis.
+        x is in AXES coords (negative puts it outside the plot), y in DATA coords.
         """
         trans = _blend(ax.transAxes, ax.transData)
-        sgn = -1 if side == "left" else 1
-        x0 = x_axes
-        x1 = x_axes + sgn * width_axes
-        h = max(y1 - y0, 1e-9)
-        # Five key y's to shape the brace
-        yA, yB, yC, yD, yE = y0, y0 + 0.25*h, y0 + 0.50*h, y0 + 0.75*h, y1
-        # curvature tweak
-        d = 0.10 * h
-        verts = [
-            (x0, yA),
-            (x0, yA + d), (x1, yB - d), (x1, yB),            # curve outwards
-            (x1, yB + d), (x0, yC - d), (x0, yC),            # back to center
-            (x0, yC + d), (x1, yD - d), (x1, yD),            # curve outwards again
-            (x1, yD + d), (x0, yE - d), (x0, yE)             # finish at bottom
-        ]
-        codes = [
-            _Path.MOVETO,
-            _Path.CURVE3, _Path.CURVE3, _Path.LINETO,
-            _Path.CURVE3, _Path.CURVE3, _Path.LINETO,
-            _Path.CURVE3, _Path.CURVE3, _Path.LINETO,
-            _Path.CURVE3, _Path.CURVE3, _Path.LINETO,
-        ]
-        brace = _PathPatch(_Path(verts, codes), transform=trans,
-                           facecolor="none", edgecolor=color, linewidth=1.8, zorder=5, clip_on=False)
-        ax.add_patch(brace)
-        ax.text(x1 + sgn*0.012, (y0 + y1)/2, label, transform=trans,
-                va="center", ha="right" if side == "left" else "left",
-                rotation=90, fontsize=12, fontweight="bold", color=color, zorder=6, clip_on=False)
+        x = x_axes
+        # vertical spine of bracket
+        ax.plot([x, x], [y0, y1], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
+        # end ticks (pointing further left)
+        ax.plot([x, x - tick_len_axes], [y0, y0], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
+        ax.plot([x, x - tick_len_axes], [y1, y1], color="black", lw=lw, transform=trans, clip_on=False, zorder=6)
+        # vertical label (black)
+        ax.text(x - tick_len_axes - 0.008, (y0 + y1) / 2.0, label,
+                transform=trans, va="center", ha="right",
+                rotation=90, fontsize=12, fontweight="bold",
+                color="black", clip_on=False, zorder=7)
 
-    # ------------------- extract & ALPHABETICALLY sort names -------------------
+    # ---------- get & alphabetically sort haplotype orders (labels hidden later) ----------
     namesD = sorted(list(phyD["seq_order"]), key=str)
     namesI = sorted(list(phyI["seq_order"]), key=str)
     seqsD = [phyD["seqs"].get(nm, "") for nm in namesD]
@@ -1068,7 +1049,7 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
         ax.axis("off")
         return {"n_polymorphic": 0, "n_fixed": 0, "n_inverted": len(seqsI), "n_direct": len(seqsD)}
 
-    # ------------------- pick polymorphic columns (all haplotypes) -------------
+    # ---------- choose polymorphic columns across ALL haplotypes ----------
     all_seqs = seqsI + seqsD
     m_full = len(all_seqs[0])
     if any(len(s) != m_full for s in all_seqs):
@@ -1080,33 +1061,32 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
         ax.axis("off")
         return {"n_polymorphic": 0, "n_fixed": 0, "n_inverted": len(seqsI), "n_direct": len(seqsD)}
 
-    # ------------------- encode bases and stack I over D -----------------------
+    # ---------- encode, stack (I over D), and add row spacing ----------
     arr_I = _encode_no_gaps(seqsI, cols_keep)
     arr_D = _encode_no_gaps(seqsD, cols_keep)
     arr   = _np.vstack([arr_I, arr_D])
     nI, nD = len(seqsI), len(seqsD)
 
-    # ------------------- add visual spacing between rows -----------------------
-    GAP_BETWEEN_ROWS = 1     # 1 blank row between adjacent haplotypes
-    GAP_BETWEEN_GROUPS = 3   # bigger blank band between inverted & direct blocks
-    arr_plot = _insert_row_gaps(arr, nI=nI, gap=GAP_BETWEEN_ROWS, group_gap=GAP_BETWEEN_GROUPS)
+    GAP_BETWEEN_ROWS  = 1   # 1 blank line between adjacent haplotypes
+    GAP_BETWEEN_GROUP = 3   # thicker gap between inverted & direct groups
+    arr_plot = _insert_row_gaps(arr, nI=nI, gap=GAP_BETWEEN_ROWS, group_gap=GAP_BETWEEN_GROUP)
 
-    # local cmap with NaN (spacers) drawn white
+    # NaN spacers render as white so the gaps are visible
     _cmap = _ListedColormap(BASE_COLORS)
     _cmap.set_bad(color="white")
 
-    # ------------------- show image (no haplotype labels) ----------------------
     ax.imshow(arr_plot, cmap=_cmap, vmin=0, vmax=3, aspect="auto",
               interpolation="nearest", origin="upper", zorder=1)
+
+    # ---------- x-axis (positions), y-axis (hide labels entirely) ----------
     ax.set_xlim(-0.5, arr.shape[1] - 0.5)
     ax.set_xticks(_np.linspace(0, arr.shape[1] - 1, num=min(12, arr.shape[1])))
     ax.set_xticklabels([str(cols_keep[int(t)] + 1) for t in ax.get_xticks()], fontsize=7)
     ax.set_xlabel("Polymorphic CDS positions")
-    # Hide haplotype names entirely:
-    ax.set_yticks([])
+    ax.set_yticks([])  # delete haplotype labels
     ax.tick_params(axis="both", which="both", length=0)
 
-    # ------------------- mark fixed-difference columns -------------------------
+    # ---------- mark fixed-difference columns ----------
     fixed_full = set(_detect_fixed_columns(seqsD, seqsI, thr=threshold))
     fixed_kept = [k for k, j in enumerate(cols_keep) if j in fixed_full]
     for k in fixed_kept:
@@ -1117,32 +1097,18 @@ def plot_fixed_diff_panel(ax, phyD, phyI, gene_name: str, inv_id: str, threshold
                    marker="v", s=36, color="#111111", edgecolor="none",
                    clip_on=False, zorder=4)
 
-    # ------------------- heavy separator band already created by spacers -------
-    # Compute data y extents of each group (in gapped coordinates)
-    last_inv_row_idx   = (nI - 1) * (GAP_BETWEEN_ROWS + 1) if nI > 0 else -1
-    first_dir_row_idx  = last_inv_row_idx + 1 + GAP_BETWEEN_GROUPS
-    last_dir_row_idx   = first_dir_row_idx + (nD - 1) * (GAP_BETWEEN_ROWS + 1) if nD > 0 else last_inv_row_idx
+    # ---------- compute DATA y extents for each bracket in the gapped image ----------
+    last_inv_row_idx  = (nI - 1) * (GAP_BETWEEN_ROWS + 1) if nI > 0 else -1
+    first_dir_row_idx = last_inv_row_idx + 1 + GAP_BETWEEN_GROUP
+    last_dir_row_idx  = first_dir_row_idx + (nD - 1) * (GAP_BETWEEN_ROWS + 1) if nD > 0 else last_inv_row_idx
 
-    # ------------------- curly braces + big y-axis labels ----------------------
-    # Place just inside the left edge of the axes; colors match global orientation colors.
-    _add_curly_brace(ax,
-                     y0=-0.5,
-                     y1=last_inv_row_idx + 0.5,
-                     label="Inverted haplotypes",
-                     side="left",
-                     x_axes=0.00,
-                     width_axes=0.045,
-                     color=COLOR_INVERTED)
-    _add_curly_brace(ax,
-                     y0=first_dir_row_idx - 0.5,
-                     y1=last_dir_row_idx + 0.5,
-                     label="Direct haplotypes",
-                     side="left",
-                     x_axes=0.06,   # offset a touch to avoid overlapping the first brace
-                     width_axes=0.045,
-                     color=COLOR_DIRECT)
+    # ---------- draw LEFT-OF-AXIS square brackets + black labels ----------
+    # keep them close to the y-axis but outside the plot (slightly negative x in Axes coords)
+    _add_square_bracket(ax, y0=-0.5,                 y1=last_inv_row_idx + 0.5, label="Inverted haplotypes",
+                        x_axes=-0.015, tick_len_axes=0.015, lw=1.8)
+    _add_square_bracket(ax, y0=first_dir_row_idx-0.5, y1=last_dir_row_idx + 0.5, label="Direct haplotypes",
+                        x_axes=-0.055, tick_len_axes=0.015, lw=1.8)
 
-    # ------------------- return small stats dict -------------------------------
     return {
         "n_polymorphic": int(arr.shape[1]),
         "n_fixed": int(len(fixed_kept)),
@@ -1187,12 +1153,6 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
         threshold=FIXED_DIFF_UNANIMITY_THRESHOLD,
     )
 
-    fig.suptitle(
-        "MAPT CDS polymorphisms align with inversion orientation",
-        fontsize=12,
-        fontweight="bold",
-        y=0.97,
-    )
     subtitle = (
         f"{MAPT_GENE} — {inv_id} | {stats_info['n_polymorphic']} polymorphic CDS positions"
         f"; {stats_info['n_fixed']} orientation-fixed"
