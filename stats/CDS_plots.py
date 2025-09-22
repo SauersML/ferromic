@@ -836,9 +836,9 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     else:
         sizes = np.full_like(y, 40.0, dtype=float)
 
-    # Colors by recurrence
+    # Colors by recurrence (match Hudson FST: SE=#1f77b4, REC=#6A5ACD)
     rec = df["recurrence"].astype(str)
-    color_map = {"SE": CATEGORY_COLORS["Single-event, inverted"], "REC": CATEGORY_COLORS["Recurrent, inverted"]}
+    color_map = {"SE": "#1f77b4", "REC": "#6A5ACD"}
     colors = rec.map(color_map).fillna("#7f7f7f")
 
     # Scatter (data only)
