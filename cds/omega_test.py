@@ -1319,8 +1319,9 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                 tree_copy = os.path.join(art_dir, f"{out_name}.tree")
                 if not os.path.exists(tree_copy):
                     _copy_if_exists(tree_path, art_dir, f"{out_name}.tree")
-            
-                # NEW: heal params if they are missing/NaN and we have a parser & raw out file
+
+                # Heal params when possible by parsing a persisted raw artifact.
+                # Prefer the run-specific out file; fall back to 'mlc' if needed.
                 try:
                     if parser_func:
                         need_keys = ("cmc_p0","cmc_p1","cmc_p2","cmc_omega0","cmc_omega2_direct","cmc_omega2_inverted")
@@ -1328,10 +1329,17 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                         def _bad(x):
                             return x is None or (isinstance(x, float) and np.isnan(x))
                         if any(_bad(params.get(k)) for k in need_keys):
-                            raw_out = os.path.join(art_dir, out_name)
-                            if os.path.exists(raw_out):
-                                healed = parser_func(raw_out) or {}
-                                # only fill gaps; don't overwrite good values
+                            candidates = [os.path.join(art_dir, out_name), os.path.join(art_dir, "mlc")]
+                            healed = {}
+                            for raw_path in candidates:
+                                if os.path.exists(raw_path):
+                                    try:
+                                        healed = parser_func(raw_path) or {}
+                                    except Exception as _e:
+                                        logging.debug(f"Heal-attempt parse failed for {raw_path}: {_e}")
+                                    if healed:
+                                        break
+                            if healed:
                                 for k, v in healed.items():
                                     if _bad(params.get(k)) and v is not None and not (isinstance(v, float) and np.isnan(v)):
                                         params[k] = v
@@ -1340,7 +1348,7 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                                 logging.info(f"[{gene_name}|{region_label}] Healed attempt.json params from artifacts for {out_name}")
                 except Exception as _e:
                     logging.debug(f"Heal-attempt skipped for {out_name}: {_e}")
-            
+
                 return payload
 
             # --- 2) Legacy fallback: find an equivalent attempt and rehydrate it ---
@@ -1449,19 +1457,22 @@ def codeml_worker(gene_info, region_tree_file, region_label):
                 logging.info(f"[{gene_name}|{region_label}] Using cached PAIR result for clade_model_c")
                 cmc_result = dict(pair_payload_cmc["result"])
 
-                # Back-fill cmc_* parameters from raw H1_cmc.out when any are missing
+                # Back-fill cmc_* parameters from raw artifacts when any are missing.
                 h1_key = cmc_result.get("cmc_h1_key") or pair_payload_cmc.get("key", {}).get("h1_attempt_key")
                 def _bad(x): return (x is None) or (isinstance(x, float) and np.isnan(x))
                 healed = {}
 
                 if h1_key:
                     art_dir_h1 = os.path.join(_fanout_dir(PAML_CACHE_DIR, h1_key), "artifacts")
-                    raw_h1 = os.path.join(art_dir_h1, "H1_cmc.out")
-                    if os.path.exists(raw_h1):
-                        try:
-                            healed = parse_h1_cmc_paml_output(raw_h1) or {}
-                        except Exception as _e:
-                            logging.debug(f"[{gene_name}|{region_label}] parse_h1_cmc_paml_output failed: {_e}")
+                    candidates = [os.path.join(art_dir_h1, "H1_cmc.out"), os.path.join(art_dir_h1, "mlc")]
+                    for raw_h1 in candidates:
+                        if os.path.exists(raw_h1):
+                            try:
+                                healed = parse_h1_cmc_paml_output(raw_h1) or {}
+                            except Exception as _e:
+                                logging.debug(f"[{gene_name}|{region_label}] parse_h1_cmc_paml_output failed: {_e}")
+                            if healed:
+                                break
 
                 if healed:
                     changed = False
