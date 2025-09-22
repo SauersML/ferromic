@@ -42,7 +42,13 @@ OVERLAY_SINGLE = "#d9d9d9"   # very light dots
 OVERLAY_RECUR  = "#4a4a4a"   # dark gray diagonals
 ALPHA_VIOLIN   = 0.72        # same translucent fill
 
-# Base face colors by category: orientation decides the fill color
+# Category order + face colors (orientation decides the fill color)
+CATEGORY_ORDER = [
+    "Single-event, direct",
+    "Single-event, inverted",
+    "Recurrent, direct",
+    "Recurrent, inverted",
+]
 CATEGORY_FACE = {
     "Single-event, direct":   COLOR_DIRECT,
     "Single-event, inverted": COLOR_INVERTED,
@@ -614,7 +620,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
 
         # Cap at 1.0: stacked dots + explicit counts
         n_at1 = d["n_at1"]
-        label = f"N (CDSs) = {d['n_cds']}\n100% identical: {n_at1} ({d['share_at_1']*100:.0f}%)"
+        label = f"N (CDSs) = {d['n_cds']}\n100% identical: {d['share_at_1']*100:.0f}%"
         ax.text(i, 1.065, label, ha="center", va="bottom", fontsize=8, color="#333333")
 
     ax.yaxis.set_major_locator(MultipleLocator(0.2))
