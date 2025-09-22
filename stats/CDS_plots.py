@@ -587,11 +587,11 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             vals_non1 = all_vals[~mask_at1]
 
             if vals_non1.size > 0:
-                x_jit = i + (np.random.rand(vals_non1.size) - 0.5) * 0.24
+                x_jit = i + (np.random.rand(vals_non1.size) - 0.5) * 0.10
                 ax.scatter(
                     x_jit, vals_non1,
-                    s=12, alpha=0.7, color=face,
-                    edgecolor="white", linewidths=0.4, zorder=2,
+                    s=12, alpha=0.9, color=face,
+                    edgecolor="white", linewidths=0.4, zorder=2.4,
                 )
 
             n_at1_pts = int(mask_at1.sum())
