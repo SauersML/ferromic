@@ -456,24 +456,19 @@ def draw_half_violin(ax, y_vals, center_x, width=0.4, side="left",
     if y_grid is None:
         y_grid = np.linspace(clip[0], clip[1], 400)
 
-    # KDE smoothing
-    try:
-        kde = gaussian_kde(y, bw_method=bw_method)
-        dens = kde(y_grid)
-    except Exception:
-        # safe fallback to histogram if KDE fails
-        hist, edges = np.histogram(y, bins=40, range=clip, density=True)
-        y_grid = 0.5 * (edges[:-1] + edges[1:])
-        dens = hist
+    # KDE smoothing (scale to counts so widths reflect absolute number of points)
+    kde = gaussian_kde(y, bw_method=bw_method)
+    dens = kde(y_grid) * y.size  # counts, not PDF
 
     dens = np.clip(dens, 0, np.inf)
 
-    # normalize widths by a GLOBAL max (passed in), else local max
+    # normalize widths by a GLOBAL max over **counts** (passed in), else local max
     scale = float(global_density_max) if (global_density_max is not None and global_density_max > 0) else float(dens.max())
     if scale <= 0:
         return
 
     xs = (dens / scale) * width
+
     xcoords = center_x - xs if side == "left" else center_x + xs
     ax.fill_betweenx(y_grid, center_x, xcoords, color=facecolor, alpha=alpha, linewidth=0)
 
