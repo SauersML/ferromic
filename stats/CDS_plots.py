@@ -89,9 +89,9 @@ def _coerce_numeric_cols(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 def build_category(consensus: int, phy_group: int) -> str:
-    recurrence = "SE" if int(consensus) == 0 else "REC"
-    orientation = "D" if int(phy_group) == 0 else "I"
-    return f"{recurrence}-{orientation}"
+    recurrence = "Single-event" if int(consensus) == 0 else "Recurrent"
+    orientation = "direct" if int(phy_group) == 0 else "inverted"
+    return f"{recurrence}, {orientation}"
 
 def ensure_dir(path: str):
     d = os.path.dirname(path)
