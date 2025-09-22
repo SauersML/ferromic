@@ -627,7 +627,6 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         ax.text(i, 1.065, label, ha="center", va="bottom", fontsize=8, color="#333333")
 
     ax.yaxis.set_major_locator(MultipleLocator(0.2))
-    ax.grid(axis="y", linestyle=":", linewidth=0.6, color="#cfcfcf", alpha=0.7)
     ax.tick_params(axis="both", labelsize=9)
 
     legend_entries = [
@@ -1044,7 +1043,6 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         fontsize=8,
     )
 
-    ax.grid(axis="both", linestyle=":", linewidth=0.6, color="#cfcfcf", alpha=0.7)
     ax.tick_params(axis="both", labelsize=8.5)
 
     fig.tight_layout()
