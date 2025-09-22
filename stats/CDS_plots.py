@@ -577,10 +577,10 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         median, q1, q3 = d["box_stats"]
         if not np.isnan(median):
             cx = i + offset
-            ax.plot([cx - 0.18, cx + 0.18], [median, median], color="#333333", lw=1.0, zorder=3)
-            ax.plot([cx, cx], [q1, q3], color="#333333", lw=1.0, zorder=3)
-            ax.plot([cx - 0.12, cx + 0.12], [q1, q1], color="#333333", lw=1.0, zorder=3)
-            ax.plot([cx - 0.12, cx + 0.12], [q3, q3], color="#333333", lw=1.0, zorder=3)
+            ax.plot([cx - 0.09, cx + 0.09], [median, median], color="#333333", lw=0.6, zorder=3)
+            ax.plot([cx, cx], [q1, q3], color="#333333", lw=0.6, zorder=3)
+            ax.plot([cx - 0.06, cx + 0.06], [q1, q1], color="#333333", lw=0.6, zorder=3)
+            ax.plot([cx - 0.06, cx + 0.06], [q3, q3], color="#333333", lw=0.6, zorder=3)
 
         # Jitter points: NOT over the violin. Nudge just past the box on the box side.
         if all_vals.size > 0:
@@ -589,8 +589,9 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
 
             if vals_non1.size > 0:
                 sign = 1.0 if side_box == "right" else -1.0
-                x_center = (i + offset) + sign * 0.25  # a bit past the box
-                x_jit = x_center + (np.random.rand(vals_non1.size) - 0.5) * 0.18
+                x_center = (i + offset) + sign * 0.12  # closer to the box
+                x_jit = x_center + (np.random.rand(vals_non1.size) - 0.5) * 0.08
+
                 ax.scatter(
                     x_jit, vals_non1,
                     s=12, alpha=0.9, color=face,
@@ -613,7 +614,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
                 )
                 ax.add_patch(rect)
 
-                x_rect = (i - rect_w / 2) + np.random.rand(n_at1_pts) * rect_w
+                x_rect = (x_center - rect_w / 2) + np.random.rand(n_at1_pts) * rect_w
                 y_rect = rect_y0 + np.random.rand(n_at1_pts) * rect_h
                 ax.scatter(
                     x_rect, y_rect,
