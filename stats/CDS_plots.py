@@ -590,7 +590,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             vals_non1 = all_vals[~mask_at1]
 
             if vals_non1.size > 0:
-                _jit = x_center + (np.random.rand(vals_non1.size) - 0.5) * 0.04
+                x_jit = x_center + (np.random.rand(vals_non1.size) - 0.5) * 0.04
 
                 ax.scatter(
                     x_jit, vals_non1,
