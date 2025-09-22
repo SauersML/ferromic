@@ -552,8 +552,8 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             # Rectangle + random placement for the 1.0 points
             n_at1_pts = int(mask_at1.sum())
             if n_at1_pts > 0:
-                rect_w = 0.24   # match jitter width
-                rect_h = 0.035  # small band above 1.0 (fits under y=1.08)
+                rect_w = 0.44   # match jitter width
+                rect_h = 0.045  # small band above 1.0 (fits under y=1.08)
                 rect_y0 = 1.005 # "right above" 1.0
 
                 rect = mpatches.Rectangle(
