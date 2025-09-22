@@ -5,10 +5,10 @@ authors = ["Ferromic Developers"]
 edition = "2021"
 description = "Rust-accelerated population genetics toolkit with ergonomic Python bindings"
 readme = "README.md"
-license-file = "LICENSE.md"
-repository = "https://github.com/ferromic/ferromic"
-homepage = "https://github.com/ferromic/ferromic"
-documentation = "https://github.com/ferromic/ferromic#readme"
+repository = "https://github.com/SauersML/ferromic"
+homepage = "https://github.com/SauersML/ferromic"
+documentation = "https://github.com/SauersML/ferromic#readme"
+
 keywords = [
     "population-genetics",
     "bioinformatics",
