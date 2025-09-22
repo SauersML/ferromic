@@ -374,50 +374,50 @@ fn run_pca_analysis(
 
     let spinner = create_spinner("Computing PCA");
     let mut pca = PCA::new();
-    const RANDOMIZED_ELEMENT_THRESHOLD: usize = 1_000_000;
-    let total_elements = data_matrix.len();
-
-    let transformed = if total_elements <= RANDOMIZED_ELEMENT_THRESHOLD {
-        match pca.rfit(data_matrix.clone(), n_components, 4, Some(42), None) {
-            Ok(t) => {
-                drop(data_matrix);
-                t
-            }
-            Err(_) => match pca.fit(data_matrix.clone(), None) {
-                Ok(()) => match pca.transform(data_matrix) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        spinner.finish_and_clear();
-                        return Err(VcfError::Parse(format!(
-                            "PCA transformation failed after exact fit: {}",
-                            e
-                        )));
+    // Run an exact PCA first to maximise numerical agreement with scikit-allel.
+    // Randomised SVD is used only as a fallback when the exact solve fails.
+    let transformed = match pca.fit(data_matrix.clone(), None) {
+        Ok(()) => {
+            let fallback_matrix = data_matrix.clone();
+            match pca.transform(data_matrix) {
+                Ok(t) => {
+                    drop(fallback_matrix);
+                    t
+                }
+                Err(exact_transform_error) => {
+                    log(
+                        LogLevel::Warning,
+                        "Exact PCA transform failed; retrying with randomized solver",
+                    );
+                    let mut randomized_pca = PCA::new();
+                    match randomized_pca.rfit(fallback_matrix, n_components, 4, Some(42), None) {
+                        Ok(t) => t,
+                        Err(randomized_error) => {
+                            spinner.finish_and_clear();
+                            return Err(VcfError::Parse(format!(
+                                "PCA computation failed (exact transform: {}; randomized: {})",
+                                exact_transform_error, randomized_error
+                            )));
+                        }
                     }
-                },
-                Err(e) => {
-                    spinner.finish_and_clear();
-                    return Err(VcfError::Parse(format!(
-                        "PCA computation failed after randomized attempt: {}",
-                        e
-                    )));
                 }
-            },
+            }
         }
-    } else {
-        match pca.fit(data_matrix.clone(), None) {
-            Ok(()) => match pca.transform(data_matrix) {
+        Err(exact_fit_error) => {
+            log(
+                LogLevel::Warning,
+                "Exact PCA fit failed; retrying with randomized solver",
+            );
+            let mut randomized_pca = PCA::new();
+            match randomized_pca.rfit(data_matrix, n_components, 4, Some(42), None) {
                 Ok(t) => t,
-                Err(e) => {
+                Err(randomized_error) => {
                     spinner.finish_and_clear();
                     return Err(VcfError::Parse(format!(
-                        "PCA transformation failed after exact fit: {}",
-                        e
+                        "PCA computation failed (exact fit: {}; randomized: {})",
+                        exact_fit_error, randomized_error
                     )));
                 }
-            },
-            Err(e) => {
-                spinner.finish_and_clear();
-                return Err(VcfError::Parse(format!("PCA computation failed: {}", e)));
             }
         }
     };
