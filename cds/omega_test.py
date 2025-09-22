@@ -1514,34 +1514,6 @@ def codeml_worker(gene_info, region_tree_file, region_label):
             logging.info(f"[{gene_name}|{region_label}] Skipping clade-model test as per configuration.")
             cmc_result = {"cmc_p_value": np.nan, "cmc_lrt_stat": np.nan}
 
-            else:
-                # Run H0 and H1 codeml attempts concurrently to utilize multiple cores per gene×region.
-                with ThreadPoolExecutor(max_workers=2) as ex:
-                    fut_h0 = ex.submit(get_attempt_result, h0_cmc_key, h0_tree, "H0_cmc.out", {"model": 0, "NSsites": 22, "ncatG": 3}, None)
-                    fut_h1 = ex.submit(get_attempt_result, h1_cmc_key, h1_tree, "H1_cmc.out", {"model": 3, "NSsites": 2, "ncatG": 3}, parse_h1_cmc_paml_output)
-                    h0_payload = fut_h0.result()
-                    h1_payload = fut_h1.result()
-                lnl0, lnl1 = h0_payload.get("lnl", -np.inf), h1_payload.get("lnl", -np.inf)
-
-                if np.isfinite(lnl0) and np.isfinite(lnl1) and lnl1 >= lnl0:
-                    lrt = 2 * (lnl1 - lnl0)
-                    p = chi2.sf(lrt, df=1)
-                    cmc_result = {
-                        "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1, "cmc_lrt_stat": float(lrt), "cmc_p_value": float(p),
-                        **h1_payload.get("params", {}),
-                        "cmc_h0_key": h0_cmc_key, "cmc_h1_key": h1_cmc_key,
-                    }
-                    with _with_lock(_fanout_dir(PAML_CACHE_DIR, pair_key_cmc)):
-                        cache_write_json(PAML_CACHE_DIR, pair_key_cmc, "pair.json", {"key": pair_key_dict_cmc, "result": cmc_result})
-                    logging.info(f"[{gene_name}|{region_label}] Cached LRT pair 'clade_model_c' (df=1)")
-                else:
-                    cmc_result = {"cmc_p_value": 1.0, "cmc_lrt_stat": 0.0, "cmc_lnl_h0": lnl0, "cmc_lnl_h1": lnl1}
-        else:
-            logging.info(f"[{gene_name}|{region_label}] Skipping clade-model test as per configuration.")
-            cmc_result = {"cmc_p_value": np.nan, "cmc_lrt_stat": np.nan}
-
-
-
         # --- 5. Combine results ---
         # A run is OK if the test was skipped OR if it ran and produced a p-value.
         bm_ok = not RUN_BRANCH_MODEL_TEST or not np.isnan(bm_result.get("bm_p_value", np.nan))
