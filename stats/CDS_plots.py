@@ -938,7 +938,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
         # Alternate vertical / horizontal moves, ONE PAIR per step -------------
         do_vertical = True
-        max_iters = 4000  # hard cap to guarantee termination
+        max_iters = 5  # hard cap to guarantee termination
 
         for _ in range(max_iters):
             renderer = _draw_and_renderer()
