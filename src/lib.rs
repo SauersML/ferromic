@@ -2188,6 +2188,16 @@ fn inversion_allele_frequency_py(sample_map: &PyAny) -> PyResult<Option<f64>> {
 #[pymodule]
 fn ferromic(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    let build_profile = option_env!("PROFILE").unwrap_or(if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    });
+    let opt_level =
+        option_env!("OPT_LEVEL").unwrap_or(if cfg!(debug_assertions) { "0" } else { "3" });
+    m.add("__rust_profile__", build_profile)?;
+    m.add("__rust_opt_level__", opt_level)?;
+    m.add("__debug_build__", cfg!(debug_assertions))?;
     m.add_class::<Population>()?;
     m.add_class::<PairwiseDifference>()?;
     m.add_class::<ChromosomePcaResult>()?;
