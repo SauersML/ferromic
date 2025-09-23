@@ -38,7 +38,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Install build dependencies
         if: ${{ matrix.platform.target == 'x86_64' }}
         run: |
@@ -66,6 +66,7 @@ jobs:
           args: --release --out dist --find-interpreter
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           manylinux: auto
+          rust-toolchain: nightly
           before-script-linux: |
             if command -v microdnf >/dev/null 2>&1; then
               microdnf install -y gcc gcc-c++ gcc-gfortran make perl perl-IPC-Cmd wget
@@ -110,6 +111,7 @@ jobs:
           args: --release --out dist --find-interpreter
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           manylinux: musllinux_1_2
+          rust-toolchain: nightly
           before-script-linux: |
             if command -v microdnf >/dev/null 2>&1; then
               microdnf install -y gcc gcc-c++ gcc-gfortran make perl perl-IPC-Cmd wget
@@ -160,6 +162,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          rust-toolchain: nightly
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -184,6 +187,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          rust-toolchain: nightly
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -216,3 +220,4 @@ jobs:
         with:
           command: upload
           args: --non-interactive --skip-existing wheels-*/*
+          rust-toolchain: nightly
