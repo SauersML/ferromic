@@ -28,7 +28,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Create virtual environment
         run: |
