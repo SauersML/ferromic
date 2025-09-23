@@ -1,7 +1,20 @@
+use efficient_pca::pca::NEAR_ZERO_THRESHOLD;
 use efficient_pca::PCA;
+use faer::linalg::matmul::matmul;
+use faer::linalg::solvers::SelfAdjointEigen;
+use faer::mat::{AsMatMut, AsMatRef, Mat};
+use faer::{
+    diag::DiagRef,
+    stats::{row_mean, row_varm, NanHandling},
+    Accum, ColMut, MatMut, Par, Row, Side, Stride, Unbind,
+};
 use ndarray::s;
 use ndarray::Array2;
+use ndarray::ShapeBuilder;
 use numpy::ndarray::ArrayView3;
+use rayon::prelude::*;
+
+const FAST_EXACT_MIN_WORKLOAD: usize = 200_000;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -373,58 +386,34 @@ fn run_pca_analysis(
     }
 
     let spinner = create_spinner("Computing PCA");
-    let mut pca = PCA::new();
-    // Run an exact PCA first to maximise numerical agreement with scikit-allel.
-    // Randomised SVD is used only as a fallback when the exact solve fails.
-    let transformed = match pca.fit(data_matrix.clone(), None) {
-        Ok(()) => {
-            let fallback_matrix = data_matrix.clone();
-            match pca.transform(data_matrix) {
-                Ok(t) => {
-                    drop(fallback_matrix);
-                    t
-                }
-                Err(exact_transform_error) => {
-                    log(
-                        LogLevel::Warning,
-                        "Exact PCA transform failed; retrying with randomized solver",
-                    );
-                    let mut randomized_pca = PCA::new();
-                    match randomized_pca.rfit(fallback_matrix, n_components, 4, Some(42), None) {
-                        Ok(t) => t,
-                        Err(randomized_error) => {
-                            spinner.finish_and_clear();
-                            return Err(VcfError::Parse(format!(
-                                "PCA computation failed (exact transform: {}; randomized: {})",
-                                exact_transform_error, randomized_error
-                            )));
-                        }
+
+    let workload = data_matrix.len();
+    let transformed = if workload >= FAST_EXACT_MIN_WORKLOAD {
+        let mut fast_matrix = data_matrix.clone();
+        match fast_exact_pca_transform(&mut fast_matrix, n_components) {
+            Ok(result) => result,
+            Err(err) => {
+                log(
+                    LogLevel::Warning,
+                    &format!(
+                        "Fast exact PCA path failed ({}). Falling back to efficient_pca implementation",
+                        err
+                    ),
+                );
+                match compute_exact_pca_with_fallback(data_matrix, n_components) {
+                    Ok(result) => result,
+                    Err(fallback_err) => {
+                        spinner.finish_and_clear();
+                        return Err(fallback_err);
                     }
                 }
             }
         }
-        Err(exact_fit_error) => {
-            log(
-                LogLevel::Warning,
-                "Exact PCA fit failed; retrying with randomized solver",
-            );
-            let mut randomized_pca = PCA::new();
-            match randomized_pca.rfit(data_matrix, n_components, 4, Some(42), None) {
-                Ok(t) => t,
-                Err(randomized_error) => {
-                    spinner.finish_and_clear();
-                    return Err(VcfError::Parse(format!(
-                        "PCA computation failed (exact fit: {}; randomized: {})",
-                        exact_fit_error, randomized_error
-                    )));
-                }
-            }
-        }
+    } else {
+        compute_exact_pca_with_fallback(data_matrix, n_components)?
     };
 
-    let available_components = transformed.ncols();
-    let kept_components = std::cmp::min(n_components, available_components);
-    let transformed = transformed.slice(s![.., 0..kept_components]).to_owned();
+    let kept_components = transformed.ncols();
 
     spinner.finish_and_clear();
 
@@ -448,6 +437,370 @@ fn run_pca_analysis(
         pca_coordinates: transformed,
         positions,
     })
+}
+
+fn compute_exact_pca_with_fallback(
+    data_matrix: Array2<f64>,
+    n_components: usize,
+) -> Result<Array2<f64>, VcfError> {
+    if data_matrix.ncols() == 0 {
+        return Err(VcfError::Parse(
+            "No informative variants available for PCA".to_string(),
+        ));
+    }
+
+    let mut pca = PCA::new();
+    let transformed = match pca.fit(data_matrix.clone(), None) {
+        Ok(()) => {
+            let fallback_matrix = data_matrix.clone();
+            match pca.transform(data_matrix) {
+                Ok(t) => {
+                    drop(fallback_matrix);
+                    t
+                }
+                Err(exact_transform_error) => {
+                    log(
+                        LogLevel::Warning,
+                        "Exact PCA transform failed; retrying with randomized solver",
+                    );
+                    let mut randomized_pca = PCA::new();
+                    match randomized_pca.rfit(fallback_matrix, n_components, 4, Some(42), None) {
+                        Ok(t) => t,
+                        Err(randomized_error) => {
+                            return Err(VcfError::Parse(format!(
+                                "PCA computation failed (exact transform: {}; randomized: {})",
+                                exact_transform_error, randomized_error
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        Err(exact_fit_error) => {
+            log(
+                LogLevel::Warning,
+                "Exact PCA fit failed; retrying with randomized solver",
+            );
+            let mut randomized_pca = PCA::new();
+            match randomized_pca.rfit(data_matrix, n_components, 4, Some(42), None) {
+                Ok(t) => t,
+                Err(randomized_error) => {
+                    return Err(VcfError::Parse(format!(
+                        "PCA computation failed (exact fit: {}; randomized: {})",
+                        exact_fit_error, randomized_error
+                    )));
+                }
+            }
+        }
+    };
+
+    let available_components = transformed.ncols();
+    let kept_components = std::cmp::min(n_components, available_components);
+    Ok(transformed.slice(s![.., 0..kept_components]).to_owned())
+}
+
+fn fast_exact_pca_transform(
+    data_matrix: &mut Array2<f64>,
+    n_components: usize,
+) -> Result<Array2<f64>, String> {
+    let (n_samples, n_features) = data_matrix.dim();
+
+    if n_samples < 2 {
+        return Err("Exact PCA requires at least two haplotypes".to_string());
+    }
+    if n_features == 0 {
+        return Ok(Array2::zeros((n_samples, 0)));
+    }
+
+    let mut owned_storage: Option<Array2<f64>> = None;
+
+    let is_standard_layout = data_matrix.is_standard_layout();
+    let mut matrix_view = match data_matrix.as_slice_memory_order_mut() {
+        Some(slice) => {
+            if is_standard_layout {
+                MatMut::from_row_major_slice_mut(slice, n_samples, n_features)
+            } else {
+                MatMut::from_column_major_slice_mut(slice, n_samples, n_features)
+            }
+        }
+        None => {
+            let owned_ref = owned_storage.get_or_insert_with(|| data_matrix.to_owned());
+            let owned_is_standard = owned_ref.is_standard_layout();
+            let owned_slice = owned_ref
+                .as_slice_memory_order_mut()
+                .ok_or_else(|| "Failed to materialize contiguous PCA matrix".to_string())?;
+            if owned_is_standard {
+                MatMut::from_row_major_slice_mut(owned_slice, n_samples, n_features)
+            } else {
+                MatMut::from_column_major_slice_mut(owned_slice, n_samples, n_features)
+            }
+        }
+    };
+
+    let mut column_means = Row::zeros(n_features);
+    row_mean(
+        column_means.as_mut(),
+        matrix_view.as_mat_ref(),
+        NanHandling::Propagate,
+    );
+
+    let mut column_variances = Row::zeros(n_features);
+    row_varm(
+        column_variances.as_mut(),
+        matrix_view.as_mat_ref(),
+        column_means.as_ref(),
+        NanHandling::Propagate,
+    );
+
+    let mut means = Vec::with_capacity(n_features);
+    {
+        let row_ref = column_means.as_ref();
+        let mut ptr = row_ref.as_ptr();
+        let stride = row_ref.col_stride().element_stride();
+        for _ in 0..n_features {
+            unsafe {
+                means.push(read_unchecked(ptr));
+                ptr = ptr.offset(stride);
+            }
+        }
+    }
+
+    let mut inverse_scales = Vec::with_capacity(n_features);
+    {
+        let row_ref = column_variances.as_ref();
+        let mut ptr = row_ref.as_ptr();
+        let stride = row_ref.col_stride().element_stride();
+        for _ in 0..n_features {
+            unsafe {
+                let var_value = read_unchecked(ptr);
+                let sanitized_variance = if var_value.is_finite() {
+                    var_value.max(0.0)
+                } else {
+                    0.0
+                };
+                let std_dev = sanitized_variance.sqrt();
+                let sanitized_std = if !std_dev.is_finite() || std_dev <= NEAR_ZERO_THRESHOLD {
+                    1.0
+                } else {
+                    std_dev
+                };
+                inverse_scales.push(1.0 / sanitized_std);
+                ptr = ptr.offset(stride);
+            }
+        }
+    }
+
+    {
+        let means_ref = &means;
+        let inv_scales_ref = &inverse_scales;
+        let mat_mut = matrix_view.as_mat_mut();
+        const PARALLEL_COLUMN_THRESHOLD: usize = 256;
+
+        let normalize_column = |(col_idx, column): (usize, ColMut<'_, f64>)| {
+            let mean = means_ref[col_idx];
+            let inv_scale = inv_scales_ref[col_idx];
+            let len: usize = column.nrows().unbound();
+            let stride = column.row_stride().element_stride();
+            unsafe {
+                let mut ptr = column.as_ptr_mut();
+                for _ in 0..len {
+                    *ptr = (*ptr - mean) * inv_scale;
+                    ptr = ptr.offset(stride);
+                }
+            }
+        };
+
+        if n_features >= PARALLEL_COLUMN_THRESHOLD {
+            mat_mut
+                .par_col_iter_mut()
+                .enumerate()
+                .for_each(normalize_column);
+        } else {
+            for pair in mat_mut.col_iter_mut().enumerate() {
+                normalize_column(pair);
+            }
+        }
+    }
+
+    let matrix_view_ref = matrix_view.as_mat_ref();
+    let normalization = 1.0 / ((n_samples - 1) as f64);
+
+    let transformed = if n_features <= n_samples {
+        let mut covariance = Array2::<f64>::zeros((n_features, n_features).f());
+        let cov_slice = covariance
+            .as_slice_memory_order_mut()
+            .expect("covariance matrix allocation should be contiguous");
+        let mut cov_mat = MatMut::from_column_major_slice_mut(cov_slice, n_features, n_features);
+        matmul(
+            cov_mat.as_mat_mut(),
+            Accum::Replace,
+            matrix_view_ref.transpose(),
+            matrix_view_ref,
+            normalization,
+            Par::rayon(0),
+        );
+
+        let eigen = SelfAdjointEigen::new(cov_mat.as_mat_ref(), Side::Lower).map_err(|e| {
+            format!("faer covariance eigen decomposition failed during exact PCA: {e:?}")
+        })?;
+
+        let mut eigen_pairs: Vec<(f64, usize)> = diag_to_vec(eigen.S())
+            .into_iter()
+            .enumerate()
+            .map(|(idx, value)| (value, idx))
+            .collect();
+        eigen_pairs
+            .sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        let kept = std::cmp::min(n_components, eigen_pairs.len());
+        let mut transformed = Array2::<f64>::zeros((n_samples, kept));
+        if kept == 0 {
+            return Ok(transformed);
+        }
+
+        let eigenvectors = eigen.U();
+        let mut basis = Mat::zeros(n_features, kept);
+        for (component_idx, &(eigenvalue, eigen_idx)) in eigen_pairs.iter().take(kept).enumerate() {
+            if !eigenvalue.is_finite() || eigenvalue <= NEAR_ZERO_THRESHOLD {
+                continue;
+            }
+            let src_col = match eigenvectors.col_iter().nth(eigen_idx) {
+                Some(col) => col,
+                None => continue,
+            };
+            let dest_col = match basis.as_mut().col_iter_mut().nth(component_idx) {
+                Some(col) => col,
+                None => continue,
+            };
+            for (dst, src) in dest_col.iter_mut().zip(src_col.iter()) {
+                *dst = *src;
+            }
+        }
+
+        let result_slice = transformed
+            .as_slice_memory_order_mut()
+            .expect("fresh Array2 allocation should be contiguous");
+        let mut result_view = MatMut::from_row_major_slice_mut(result_slice, n_samples, kept);
+        matmul(
+            result_view.as_mat_mut(),
+            Accum::Replace,
+            matrix_view_ref,
+            basis.as_ref(),
+            1.0,
+            Par::rayon(0),
+        );
+
+        transformed
+    } else {
+        let mut gram = Array2::<f64>::zeros((n_samples, n_samples).f());
+        let gram_slice = gram
+            .as_slice_memory_order_mut()
+            .expect("Gram matrix allocation should be contiguous");
+        let mut gram_mat = MatMut::from_column_major_slice_mut(gram_slice, n_samples, n_samples);
+        matmul(
+            gram_mat.as_mat_mut(),
+            Accum::Replace,
+            matrix_view_ref,
+            matrix_view_ref.transpose(),
+            normalization,
+            Par::rayon(0),
+        );
+
+        let eigen = SelfAdjointEigen::new(gram_mat.as_mat_ref(), Side::Lower)
+            .map_err(|e| format!("faer Gram eigen decomposition failed during exact PCA: {e:?}"))?;
+
+        let mut eigen_pairs: Vec<(f64, usize)> = diag_to_vec(eigen.S())
+            .into_iter()
+            .enumerate()
+            .map(|(idx, value)| (value, idx))
+            .collect();
+        eigen_pairs
+            .sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        let kept = std::cmp::min(n_components, eigen_pairs.len());
+        let mut transformed = Array2::<f64>::zeros((n_samples, kept));
+        if kept == 0 {
+            return Ok(transformed);
+        }
+
+        let eigenvectors = eigen.U();
+        let result_slice = transformed
+            .as_slice_memory_order_mut()
+            .expect("fresh Array2 allocation should be contiguous");
+        let mut result_view = MatMut::from_row_major_slice_mut(result_slice, n_samples, kept);
+
+        for (component_idx, &(eigenvalue, eigen_idx)) in eigen_pairs.iter().take(kept).enumerate() {
+            let eigenvalue = if eigenvalue.is_finite() {
+                eigenvalue.max(0.0)
+            } else {
+                0.0
+            };
+            if eigenvalue <= NEAR_ZERO_THRESHOLD {
+                continue;
+            }
+
+            let sigma = ((n_samples - 1) as f64 * eigenvalue).sqrt();
+            if !sigma.is_finite() || sigma <= NEAR_ZERO_THRESHOLD {
+                continue;
+            }
+
+            let src_col = match eigenvectors.col_iter().nth(eigen_idx) {
+                Some(col) => col,
+                None => continue,
+            };
+            let dest_col = match result_view.as_mat_mut().col_iter_mut().nth(component_idx) {
+                Some(col) => col,
+                None => continue,
+            };
+            for (dst, src) in dest_col.iter_mut().zip(src_col.iter()) {
+                *dst = *src * sigma;
+            }
+        }
+
+        transformed
+    };
+
+    Ok(transformed)
+}
+
+#[doc(hidden)]
+pub fn bench_fast_exact_pca(
+    data: Vec<f64>,
+    n_rows: usize,
+    n_cols: usize,
+    n_components: usize,
+) -> Result<Array2<f64>, String> {
+    let mut data_matrix = Array2::from_shape_vec((n_rows, n_cols), data)
+        .map_err(|_| "invalid matrix dimensions for bench PCA".to_string())?;
+    fast_exact_pca_transform(&mut data_matrix, n_components)
+}
+
+#[doc(hidden)]
+pub fn bench_efficient_exact_pca(
+    data: Vec<f64>,
+    n_rows: usize,
+    n_cols: usize,
+    n_components: usize,
+) -> Result<Array2<f64>, String> {
+    let data_matrix = Array2::from_shape_vec((n_rows, n_cols), data)
+        .map_err(|_| "invalid matrix dimensions for bench PCA".to_string())?;
+    compute_exact_pca_with_fallback(data_matrix, n_components).map_err(|err| err.to_string())
+}
+
+#[inline(always)]
+unsafe fn read_unchecked<T: Copy>(ptr: *const T) -> T {
+    debug_assert!(!ptr.is_null());
+    *ptr
+}
+
+fn diag_to_vec(diag: DiagRef<'_, f64>) -> Vec<f64> {
+    let column = diag.column_vector();
+    let mut values = Vec::with_capacity(column.nrows());
+    for idx in 0..column.nrows() {
+        let ptr = unsafe { column.get_unchecked(idx) };
+        values.push(unsafe { read_unchecked(ptr) });
+    }
+    values
 }
 
 /// Writes PCA results for a single chromosome to a TSV file
