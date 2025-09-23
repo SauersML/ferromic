@@ -1,5 +1,5 @@
-use nalgebra::linalg::SVD;
-use nalgebra::{DMatrix, DVector};
+use efficient_pca::PCA;
+use ndarray::s;
 use ndarray::Array2;
 use numpy::ndarray::ArrayView3;
 
@@ -373,69 +373,58 @@ fn run_pca_analysis(
     }
 
     let spinner = create_spinner("Computing PCA");
-    let (rows, cols) = data_matrix.dim();
-    if rows < 2 {
-        spinner.finish_and_clear();
-        return Err(VcfError::Parse(
-            "PCA computation requires at least two haplotypes".to_string(),
-        ));
-    }
-
-    let mut standardized = data_matrix;
-    for col_idx in 0..cols {
-        let mut sum = 0.0f64;
-        for row_idx in 0..rows {
-            sum += standardized[[row_idx, col_idx]];
+    let mut pca = PCA::new();
+    // Run an exact PCA first to maximise numerical agreement with scikit-allel.
+    // Randomised SVD is used only as a fallback when the exact solve fails.
+    let transformed = match pca.fit(data_matrix.clone(), None) {
+        Ok(()) => {
+            let fallback_matrix = data_matrix.clone();
+            match pca.transform(data_matrix) {
+                Ok(t) => {
+                    drop(fallback_matrix);
+                    t
+                }
+                Err(exact_transform_error) => {
+                    log(
+                        LogLevel::Warning,
+                        "Exact PCA transform failed; retrying with randomized solver",
+                    );
+                    let mut randomized_pca = PCA::new();
+                    match randomized_pca.rfit(fallback_matrix, n_components, 4, Some(42), None) {
+                        Ok(t) => t,
+                        Err(randomized_error) => {
+                            spinner.finish_and_clear();
+                            return Err(VcfError::Parse(format!(
+                                "PCA computation failed (exact transform: {}; randomized: {})",
+                                exact_transform_error, randomized_error
+                            )));
+                        }
+                    }
+                }
+            }
         }
-        let mean = sum / rows as f64;
-        for row_idx in 0..rows {
-            standardized[[row_idx, col_idx]] -= mean;
+        Err(exact_fit_error) => {
+            log(
+                LogLevel::Warning,
+                "Exact PCA fit failed; retrying with randomized solver",
+            );
+            let mut randomized_pca = PCA::new();
+            match randomized_pca.rfit(data_matrix, n_components, 4, Some(42), None) {
+                Ok(t) => t,
+                Err(randomized_error) => {
+                    spinner.finish_and_clear();
+                    return Err(VcfError::Parse(format!(
+                        "PCA computation failed (exact fit: {}; randomized: {})",
+                        exact_fit_error, randomized_error
+                    )));
+                }
+            }
         }
-    }
-
-    for col_idx in 0..cols {
-        let mut sum_sq = 0.0f64;
-        for row_idx in 0..rows {
-            let value = standardized[[row_idx, col_idx]];
-            sum_sq += value * value;
-        }
-        let variance = if rows > 0 { sum_sq / rows as f64 } else { 0.0 };
-        let std_dev = variance.sqrt();
-        let sanitized = if std_dev.is_finite() && std_dev > 1e-9 {
-            std_dev
-        } else {
-            1.0
-        };
-        for row_idx in 0..rows {
-            standardized[[row_idx, col_idx]] /= sanitized;
-        }
-    }
-
-    let svd = {
-        let slice = standardized
-            .as_slice()
-            .expect("standardized matrix should be contiguous");
-        let matrix = DMatrix::from_row_slice(rows, cols, slice);
-        SVD::new(matrix, true, false)
     };
 
-    let singular_values: DVector<f64> = svd.singular_values;
-    let Some(u_matrix) = svd.u else {
-        spinner.finish_and_clear();
-        return Err(VcfError::Parse(
-            "PCA computation failed to produce left singular vectors".to_string(),
-        ));
-    };
-
-    let available_components = std::cmp::min(u_matrix.ncols(), singular_values.len());
+    let available_components = transformed.ncols();
     let kept_components = std::cmp::min(n_components, available_components);
-    let mut transformed = Array2::<f64>::zeros((rows, kept_components));
-    for component_idx in 0..kept_components {
-        let singular = singular_values[component_idx];
-        for row_idx in 0..rows {
-            transformed[[row_idx, component_idx]] = u_matrix[(row_idx, component_idx)] * singular;
-        }
-    }
+    let transformed = transformed.slice(s![.., 0..kept_components]).to_owned();
 
     spinner.finish_and_clear();
 
