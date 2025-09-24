@@ -1,6 +1,6 @@
 use chrono::Local;
 use colored::*;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -99,6 +99,8 @@ impl ProgressTracker {
     /// Creates a new ProgressTracker with multiple reusable styles
     pub fn new() -> Self {
         let multi_progress = MultiProgress::new();
+        // Limit update frequency to reduce flickering in multi-threaded environments
+        multi_progress.set_draw_target(ProgressDrawTarget::stdout_with_hz(12));
 
         // Create default log directory
         let log_dir = PathBuf::from("ferromic_logs");
@@ -150,6 +152,26 @@ impl ProgressTracker {
                 .template("{spinner:.bold.green} [{elapsed_precise}] {msg}")
                 .expect("Spinner template error")
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+        );
+
+        // VCF spinner for multi-threaded VCF loading
+        styles.insert(
+            "vcf_spinner".to_string(),
+            ProgressStyle::default_spinner()
+                .template("{spinner:.bold.green} [VCF] {elapsed_precise} {wide_msg}")
+                .expect("Spinner template error")
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+        );
+
+        // VCF byte progress bar for uncompressed files
+        styles.insert(
+            "vcf_bytes".to_string(),
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.bold.green} [VCF] {elapsed_precise} {wide_bar:.cyan/blue} {bytes:>10}/{total_bytes:<10} {wide_msg}"
+                )
+                .expect("Progress bar template error")
+                .progress_chars("█▓▒░"),
         );
 
         // Add memory-intensive operation style for operations with heavy memory usage
@@ -515,6 +537,43 @@ impl ProgressTracker {
         spinner
     }
 
+    /// Create a spinner or progress bar dedicated to VCF loading operations
+    pub fn create_vcf_progress(&mut self, total_bytes: Option<u64>, message: &str) -> ProgressBar {
+        let progress = if let Some(total) = total_bytes {
+            let bar = self.multi_progress.add(ProgressBar::new(total));
+            let style = self
+                .styles
+                .get("vcf_bytes")
+                .cloned()
+                .unwrap_or_else(|| {
+                    ProgressStyle::default_bar()
+                        .template("{spinner:.bold.green} [VCF] {elapsed_precise} {wide_bar:.cyan/blue} {bytes}/{total_bytes} {msg}")
+                        .expect("Progress bar template error")
+                        .progress_chars("█▓▒░")
+                });
+            bar.set_style(style);
+            bar
+        } else {
+            let spinner = self.multi_progress.add(ProgressBar::new_spinner());
+            let style = self.styles.get("vcf_spinner").cloned().unwrap_or_else(|| {
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.bold.green} [VCF] {elapsed_precise} {wide_msg}")
+                    .expect("Spinner template error")
+                    .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+            });
+            spinner.set_style(style);
+            spinner.enable_steady_tick(Duration::from_millis(120));
+            spinner
+        };
+
+        progress.set_message(message.to_string());
+        self.log(
+            LogLevel::Info,
+            &format!("Started VCF operation: {}", message),
+        );
+        progress
+    }
+
     /// Log a message to the stage-appropriate log file
     pub fn log(&mut self, level: LogLevel, message: &str) {
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
@@ -798,6 +857,16 @@ pub fn create_spinner(message: &str) -> ProgressBar {
     }
     let mut tracker = PROGRESS_TRACKER.lock();
     tracker.spinner(message)
+}
+
+pub fn create_vcf_progress(total_bytes: Option<u64>, message: &str) -> ProgressBar {
+    if !progress_enabled() {
+        let bar = ProgressBar::hidden();
+        bar.set_message(message.to_string());
+        return bar;
+    }
+    let mut tracker = PROGRESS_TRACKER.lock();
+    tracker.create_vcf_progress(total_bytes, message)
 }
 
 pub fn log(level: LogLevel, message: &str) {
