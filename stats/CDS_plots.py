@@ -492,7 +492,13 @@ def compute_group_distributions(cds_summary: pd.DataFrame):
         if len(vals) == 0:
             out[cat] = dict(values_all=np.array([]), values_core=np.array([]),
                             share_at_1=0.0, n_cds=0, n_pairs_total=0,
-                            n_at1=0, box_stats=(np.nan, np.nan, np.nan))
+                            n_at1=0, box_stats=dict(
+                                median=np.nan,
+                                q1=np.nan,
+                                q3=np.nan,
+                                whisker_low=np.nan,
+                                whisker_high=np.nan,
+                            ))
             continue
         at1_mask = (vals == 1.0)
         n_total  = len(vals)
@@ -501,9 +507,32 @@ def compute_group_distributions(cds_summary: pd.DataFrame):
         med      = np.median(vals)
         q1       = np.percentile(vals, 25)
         q3       = np.percentile(vals, 75)
-        out[cat] = dict(values_all=vals, values_core=core, share_at_1=n_at1/n_total,
-                        n_cds=n_total, n_pairs_total=int(sub["n_pairs"].sum()),
-                        n_at1=n_at1, box_stats=(med, q1, q3))
+        iqr      = float(q3 - q1)
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+        try:
+            whisker_low = float(vals[vals >= lower_bound].min())
+        except ValueError:
+            whisker_low = float(vals.min())
+        try:
+            whisker_high = float(vals[vals <= upper_bound].max())
+        except ValueError:
+            whisker_high = float(vals.max())
+        out[cat] = dict(
+            values_all=vals,
+            values_core=core,
+            share_at_1=n_at1 / n_total,
+            n_cds=n_total,
+            n_pairs_total=int(sub["n_pairs"].sum()),
+            n_at1=n_at1,
+            box_stats=dict(
+                median=float(med),
+                q1=float(q1),
+                q3=float(q3),
+                whisker_low=whisker_low,
+                whisker_high=whisker_high,
+            ),
+        )
     return out
 
 def draw_half_violin(
@@ -621,13 +650,32 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         x_center = (i + offset) + sign * 0.03
 
         # Half-box shifted to the opposite side of the violin
-        median, q1, q3 = d["box_stats"]
+        box_stats = d["box_stats"]
+        median = box_stats["median"]
         if not np.isnan(median):
             cx = i + offset
-            ax.plot([cx - 0.09, cx + 0.09], [median, median], color="#333333", lw=0.6, zorder=3)
-            ax.plot([cx, cx], [q1, q3], color="#333333", lw=0.6, zorder=3)
-            ax.plot([cx - 0.06, cx + 0.06], [q1, q1], color="#333333", lw=0.6, zorder=3)
-            ax.plot([cx - 0.06, cx + 0.06], [q3, q3], color="#333333", lw=0.6, zorder=3)
+            q1 = box_stats["q1"]
+            q3 = box_stats["q3"]
+            whisker_low = box_stats["whisker_low"]
+            whisker_high = box_stats["whisker_high"]
+            box_width = 0.18
+            rect = mpatches.Rectangle(
+                (cx - box_width / 2, q1),
+                box_width,
+                max(q3 - q1, 0.0),
+                facecolor="white",
+                edgecolor="#333333",
+                linewidth=0.6,
+                zorder=3,
+            )
+            ax.add_patch(rect)
+            ax.plot([cx - box_width / 2, cx + box_width / 2], [median, median], color="#333333", lw=0.7, zorder=3.2)
+            # Whiskers (1.5 IQR)
+            ax.plot([cx, cx], [whisker_low, q1], color="#333333", lw=0.6, zorder=3)
+            ax.plot([cx, cx], [q3, whisker_high], color="#333333", lw=0.6, zorder=3)
+            cap_half = box_width * 0.35
+            ax.plot([cx - cap_half, cx + cap_half], [whisker_low, whisker_low], color="#333333", lw=0.6, zorder=3)
+            ax.plot([cx - cap_half, cx + cap_half], [whisker_high, whisker_high], color="#333333", lw=0.6, zorder=3)
 
         # Jitter points: NOT over the violin. Nudge just past the box on the box side.
         if all_vals.size > 0:
