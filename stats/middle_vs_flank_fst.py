@@ -840,7 +840,6 @@ def _safe_log2_ratio(m: float, f: float, eps: float = 1e-12) -> float:
     except ValueError:
         return float("nan")
 
-
 def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str, flank_point_color, middle_point_color):
     """Per sequence: draw two points (Flank, Middle) and the connecting line colored by log2(M/MF)."""
     EPS = 1e-12
@@ -858,6 +857,7 @@ def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str, flank_poin
         log2fc = _safe_log2_ratio(m, f, EPS)
         if not np.isfinite(log2fc):
             log2fc = 0.0
+
         c = cmap(norm(log2fc))
 
         ax.plot([x_f, x_m], [f, m], color=c, linewidth=LINE_WIDTH, alpha=0.98, zorder=3, solid_capstyle="round")
@@ -886,6 +886,7 @@ def _collect_all_pairs_for_scale(categories: dict) -> np.ndarray:
                 log2fc = _safe_log2_ratio(m, f, EPS)
                 if np.isfinite(log2fc):
                     vals.append(log2fc)
+
     return np.asarray(vals, dtype=float)
 
 def _draw_right_key(rax):
