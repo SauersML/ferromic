@@ -893,8 +893,8 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     # Colors by recurrence (match Hudson FST: SE=#1f77b4, REC=#6A5ACD)
     rec = df["recurrence"].astype(str)
     color_map = {
-        "SE": "#1f77b4",  # Single-event: blue from Fst plot points
-        "REC": "#6A5ACD"   # Recurrent: purple from Fst plot violin fill
+        "SE": "#c9c8d1",  # Single-event: blue from Fst plot points
+        "REC": "#ebeaf5"   # Recurrent: purple from Fst plot violin fill
     }
     colors = rec.map(color_map).fillna("#7f7f7f")
 
