@@ -569,7 +569,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
     dist = compute_group_distributions(cds_summary)
 
     fig, ax = plt.subplots(figsize=(8.2, 5.4))
-    ax.set_facecolor("#f9f9f9")
+    ax.set_facecolor("white")
     ax.set_ylabel("Proportion of identical CDS pairs")
     ax.set_ylim(-0.02, 1.08)
     ax.set_xlim(0.5, len(CATEGORY_ORDER) + 0.5)
@@ -876,7 +876,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     ax.set_xlabel("Δ proportion identical (Inverted − Direct)")
     ax.set_ylabel(r"$-\log_{10}(\mathrm{BH}\;q)$")
-    ax.set_facecolor("#f9f9f9")
+    ax.set_facecolor("white")
 
     x = pd.to_numeric(df["delta"], errors="coerce")
     q = pd.to_numeric(df["q_value"], errors="coerce").clip(1e-22, 1.0)
@@ -900,7 +900,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     # Scatter (data only)
     ax.scatter(
-        x, y, s=sizes, c=colors, alpha=0.2,
+        x, y, s=sizes, c=colors, alpha=0.6,
         edgecolor="white", linewidths=0.7, zorder=3,
     )
 
