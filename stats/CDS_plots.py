@@ -360,6 +360,41 @@ def load_cds_summary() -> pd.DataFrame:
     # ------------------------ filters with counts ------------------------
     n_before = len(df)
 
+    print("\n[load_cds_summary] --- Pre-Filter Dropped Data Report ---")
+
+    # --- Reason 1: Not enough haplotypes (n_sequences < 2) ---
+    # This is the most common reason for dropping a CDS from the violin plot.
+    mask_not_enough_haps = df['n_pairs'] <= 0
+    if mask_not_enough_haps.any():
+        dropped_for_haps = df[mask_not_enough_haps]
+        print(f"\n[!] Found {len(dropped_for_haps)} CDSs that will be dropped due to having < 2 haplotypes (n_pairs <= 0).")
+        
+        # Aggregate and display counts per inversion
+        counts_per_inversion = dropped_for_haps.groupby('inv_id').size().sort_values(ascending=False)
+        
+        print("[+] Details: Number of CDSs dropped per inversion for this reason:")
+        # Use to_string() to ensure the full list prints without truncation
+        if not counts_per_inversion.empty:
+            print(counts_per_inversion.to_string())
+        else:
+            print("   (No specific inversion data to show for this filter)")
+        print("-" * 50)
+
+    else:
+        print("\n[✔] All CDS entries have sufficient haplotypes (>= 2) for analysis.")
+
+    # --- Reason 2: Inversion does not exactly match reference ---
+    if "inv_exact_match" in df.columns:
+        mask_bad_match = df['inv_exact_match'] != 1
+        if mask_bad_match.any():
+            print(f"\n[!] Found {int(mask_bad_match.sum())} CDSs that will be dropped because 'inv_exact_match' is not 1.")
+            print("-" * 50)
+        else:
+            print("[✔] All CDS entries pass the 'inv_exact_match == 1' check.")
+    
+    print("[load_cds_summary] --- End of Pre-Filter Report ---\n")
+    
+
     if "inv_exact_match" in df.columns:
         before = len(df)
         df = df[df["inv_exact_match"] == 1]
