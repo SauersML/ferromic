@@ -59,7 +59,7 @@ terminal_size = "0.4.3"
 chrono = "0.4.42"
 glob = "0.3.3"
 ndarray = { version = "0.16.1", features = ["rayon"] }
-efficient_pca = { version = "*", default-features = false, features = ["backend_faer"] }
+efficient_pca = { version = "0.1.8", default-features = false, features = ["backend_faer"] }
 faer = { version = "0.22.6", features = ["std", "rayon"] }
 
 [dev-dependencies]
