@@ -22,6 +22,8 @@ from scipy.stats import gaussian_kde
 # =============================================================================
 
 matplotlib.rcParams.update({
+    "pdf.fonttype": 42,   
+    "ps.fonttype": 42,  
     "figure.dpi": 300,
     "savefig.dpi": 300,
     "font.size": 9,
