@@ -69,6 +69,7 @@ GENE_TESTS_FILE  = "gene_inversion_direct_inverted.tsv"
 # Output figure filenames
 VIOLIN_PLOT_FILE = "cds_proportion_identical_by_category_violin.pdf"
 VOLCANO_PLOT_FILE = "cds_conservation_volcano.pdf"
+VOLCANO_TABLE_TSV = "cds_conservation_table.tsv"
 MAPT_HEATMAP_FILE = "mapt_cds_polymorphism_heatmap.pdf"
 
 # Fixed-differences gene to show raw haplotypes (MAPT example)
@@ -877,15 +878,19 @@ def prepare_volcano(gene_tests: pd.DataFrame, cds_summary: pd.DataFrame) -> pd.D
     size_map = (cs.dropna(subset=["chr_c","start_c","end_c","n_pairs"])
                   .groupby(["chr_c","start_c","end_c","phy_group"])["n_pairs"]
                   .sum().reset_index())
+
     size_piv = (size_map
                 .pivot_table(index=["chr_c","start_c","end_c"],
                              columns="phy_group", values="n_pairs", aggfunc="sum")
-                .rename(columns={0:"n_pairs_direct", 1:"n_pairs_inverted"})
+                .rename(columns={0: "n_pairs_direct", 1: "n_pairs_inverted"})
                 .reset_index())
-    size_piv["n_pairs_total"] = size_piv[["n_pairs_direct","n_pairs_inverted"]].sum(axis=1, min_count=1)
 
-    out = out.merge(size_piv[["chr_c","start_c","end_c","n_pairs_total"]],
-                    on=["chr_c","start_c","end_c"], how="left")
+    # Merge BOTH orientations (keep them for the TSV), and compute total for the plot
+    out = out.merge(
+        size_piv[["chr_c","start_c","end_c","n_pairs_direct","n_pairs_inverted"]],
+        on=["chr_c","start_c","end_c"], how="left"
+    )
+    out["n_pairs_total"] = out[["n_pairs_direct","n_pairs_inverted"]].sum(axis=1, min_count=1)
 
     n_size_nan = out["n_pairs_total"].isna().sum()
     print(f"[prepare_volcano] rows with NaN n_pairs_total AFTER locus-only merge: {n_size_nan}")
@@ -1485,6 +1490,36 @@ def plot_mapt_polymorphism_heatmap(cds_summary: pd.DataFrame, pairs_index: pd.Da
     plt.close(fig)
 
 
+def write_volcano_tsv(df: pd.DataFrame, outfile: str):
+    """
+    Write a TSV with exactly these columns, in this order:
+      Inversion locus | Recurrence | Δ proportion identical (inverted − direct)
+      | p-value | q-value | Pairs direct | Pairs inverted
+
+    No abbreviations; recurrence expanded to 'Single-event' / 'Recurrent'.
+    Sorted by q-value ascending. UTF-8 to preserve Δ and '−'.
+    """
+    # Expand recurrence to full words (no abbreviations)
+    rec_full = df.get("recurrence").map({"SE": "Single-event", "REC": "Recurrent"}).fillna(df.get("recurrence"))
+
+    # Build the exact table in the exact order
+    tsv = pd.DataFrame({
+        "Inversion locus": df.get("inv_id").astype(str),
+        "Recurrence": rec_full.astype(str),
+        "Δ proportion identical (inverted − direct)": pd.to_numeric(df.get("delta"), errors="coerce"),
+        "p-value": pd.to_numeric(df.get("p_value"), errors="coerce"),
+        "q-value": pd.to_numeric(df.get("q_value"), errors="coerce"),
+        "Pairs direct": pd.to_numeric(df.get("n_pairs_direct"), errors="coerce").astype("Int64"),
+        "Pairs inverted": pd.to_numeric(df.get("n_pairs_inverted"), errors="coerce").astype("Int64"),
+    })
+
+    # Sort by q-value (smallest first) for p/q-aligned reading
+    tsv = tsv.sort_values("q-value", kind="mergesort")
+
+    # Write exactly these columns to disk (UTF-8 keeps the Δ and minus sign)
+    ensure_dir(outfile)
+    tsv.to_csv(outfile, sep="\t", index=False, encoding="utf-8")
+
 
 # =============================================================================
 # Main
@@ -1498,6 +1533,7 @@ def main():
     plot_proportion_identical_violin(cds_summary, VIOLIN_PLOT_FILE)
 
     volcano_df = prepare_volcano(gene_tests, cds_summary)
+    write_volcano_tsv(volcano_df, VOLCANO_TABLE_TSV)
     plot_cds_conservation_volcano(volcano_df, VOLCANO_PLOT_FILE)
 
     plot_mapt_polymorphism_heatmap(cds_summary, pairs_index, MAPT_HEATMAP_FILE)
