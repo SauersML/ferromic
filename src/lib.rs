@@ -1,3 +1,11 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+// NOTE: The current PyO3 code generation (v0.18) performs raw argument extraction
+// through helper functions that remain `unsafe` under the Rust 2024 lint regime.
+// Those calls originate in macro expansions that we cannot update locally, so we
+// suppress the lint at the crate level to keep the Python bindings compiling
+// cleanly while we remain on this PyO3 version. When PyO3 releases 2024-ready
+// macros the attribute can be revisited.
+//
 //! Ergonomic Python bindings for Ferromic's population genetics toolkit.
 //!
 //! The bindings expose a high-level, well-documented API that mirrors the core

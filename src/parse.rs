@@ -605,7 +605,7 @@ pub fn read_reference_sequence(
     let invalid_chars: Vec<(usize, u8)> = sequence
         .iter()
         .enumerate()
-        .filter(|(_, &b)| !matches!(b.to_ascii_uppercase(), b'A' | b'C' | b'G' | b'T' | b'N'))
+        .filter(|&(_, &b)| !matches!(b.to_ascii_uppercase(), b'A' | b'C' | b'G' | b'T' | b'N'))
         .take(10)
         .map(|(i, &b)| (i, b))
         .collect();
