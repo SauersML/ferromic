@@ -10,10 +10,10 @@ use crate::parse::{
 };
 
 use crate::progress::{
-    create_spinner, display_status_box, finish_entry_progress, finish_step_progress,
-    finish_variant_progress, init_entry_progress, init_step_progress, init_variant_progress, log,
-    set_stage, update_entry_progress, update_step_progress, update_variant_progress, LogLevel,
-    ProcessingStage, StatusBox,
+    create_spinner, create_vcf_progress, display_status_box, finish_entry_progress,
+    finish_step_progress, finish_variant_progress, init_entry_progress, init_step_progress,
+    init_variant_progress, log, set_stage, update_entry_progress, update_step_progress,
+    update_variant_progress, LogLevel, ProcessingStage, StatusBox,
 };
 
 use crate::transcripts::{
@@ -24,7 +24,6 @@ use clap::Parser;
 use colored::*;
 use crossbeam_channel::bounded;
 use csv::WriterBuilder;
-use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use prettytable::{row, Table};
@@ -3188,45 +3187,30 @@ pub fn process_vcf(
     let missing_data_info = Arc::new(Mutex::new(MissingDataInfo::default()));
     let _filtering_stats = Arc::new(Mutex::new(FilteringStats::default()));
 
-    // Create a more modern progress bar
+    // Create a shared progress bar that plays nicely with multi-threaded rendering
     let is_gzipped = file.extension().and_then(|s| s.to_str()) == Some("gz");
-    let progress_bar = Arc::new(if is_gzipped {
-        ProgressBar::new_spinner()
+    let total_bytes = if is_gzipped {
+        None
     } else {
-        let file_size = fs::metadata(file)?.len();
-        ProgressBar::new(file_size)
-    });
-
-    let style = if is_gzipped {
-        ProgressStyle::default_spinner()
-            .template("{spinner:.bold.green} Reading VCF {elapsed_precise} {msg}")
-            .expect("Spinner template error")
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-    } else {
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
-            .expect("Progress bar template error")
-            .progress_chars("█▓▒░")
+        Some(fs::metadata(file)?.len())
     };
-
-    progress_bar.set_style(style);
-    // Set to use stdout directly to avoid duplication in multi-threaded environment
-    progress_bar.set_draw_target(indicatif::ProgressDrawTarget::stdout());
-    progress_bar.set_message(format!(
-        "Reading VCF for chr{}:{}-{}",
-        chr, region.start, region.end
-    ));
+    let progress_message = format!("Reading VCF for chr{}:{}-{}", chr, region.start, region.end);
+    let progress_bar = Arc::new(create_vcf_progress(total_bytes, &progress_message));
 
     let processing_complete = Arc::new(AtomicBool::new(false));
     let processing_complete_clone = Arc::clone(&processing_complete);
     let progress_bar_clone = Arc::clone(&progress_bar); // Clone Arc for progress thread
+    let finish_message = format!(
+        "Finished reading VCF for chr{}:{}-{}",
+        chr, region.start, region.end
+    );
     let progress_thread = thread::spawn(move || {
         while !processing_complete_clone.load(Ordering::Relaxed) {
             // Less frequent updates to prevent overprinting
             thread::sleep(Duration::from_millis(200));
         }
-        // Progress bar tick removed to reduce repeated prints
-        progress_bar_clone.finish_with_message("Finished reading VCF");
+        // Finish with a clean message once processing is complete
+        progress_bar_clone.finish_with_message(finish_message);
     });
 
     // Parse header lines.
@@ -3259,7 +3243,9 @@ pub fn process_vcf(
                 line_sender
                     .send(local_buffer.clone())
                     .map_err(|_| VcfError::ChannelSend)?;
-                progress_bar.inc(local_buffer.len() as u64);
+                if total_bytes.is_some() {
+                    progress_bar.inc(local_buffer.len() as u64);
+                }
                 local_buffer.clear();
             }
             drop(line_sender);
