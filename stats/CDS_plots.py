@@ -360,6 +360,57 @@ def load_cds_summary() -> pd.DataFrame:
     # ------------------------ filters with counts ------------------------
     n_before = len(df)
 
+    print("\n[load_cds_summary] --- Pre-Filter Dropped Data Report (Sequential) ---")
+
+    df_for_reporting = df.copy()
+
+    # --- Step 1: Report on 'inv_exact_match' filter ---
+    if "inv_exact_match" in df.columns:
+        mask_bad_match = df_for_reporting['inv_exact_match'] != 1
+        print(f"\n[Step 1] Analyzing 'inv_exact_match' filter on {len(df_for_reporting)} rows...")
+        if mask_bad_match.any():
+            print(f"[!] Found {int(mask_bad_match.sum())} CDSs that will be dropped because 'inv_exact_match' is not 1.")
+            # We now proceed with only the rows that would pass this filter
+            df_for_reporting = df_for_reporting[~mask_bad_match]
+        else:
+            print("[✔] All CDS entries pass the 'inv_exact_match == 1' check.")
+        print("-" * 60)
+    
+    # --- Step 2: Report on 'n_pairs > 0' filter (on the REMAINING data) ---
+    print(f"[Step 2] Analyzing 'n_pairs > 0' filter on the remaining {len(df_for_reporting)} rows...")
+    mask_not_enough_haps = df_for_reporting['n_pairs'] <= 0
+    if mask_not_enough_haps.any():
+        dropped_for_haps = df_for_reporting[mask_not_enough_haps]
+        print(f"\n[!] Found {len(dropped_for_haps)} CDSs that will be dropped due to having < 2 haplotypes (n_pairs <= 0).")
+        
+        # Aggregate by inversion AND orientation
+        counts_table = (dropped_for_haps.groupby(['inv_id', 'orientation'])
+                                        .size()
+                                        .unstack(fill_value=0))
+        
+        # Ensure both D and I columns exist for clarity
+        if 'D' not in counts_table: counts_table['D'] = 0
+        if 'I' not in counts_table: counts_table['I'] = 0
+        
+        # Rename columns for clarity and add a total
+        counts_table = counts_table.rename(columns={'D': 'Direct_Dropped', 'I': 'Inverted_Dropped'})
+        counts_table['Total_Dropped'] = counts_table['Direct_Dropped'] + counts_table['Inverted_Dropped']
+        
+        # Sort by the total number of dropped CDSs
+        counts_table = counts_table.sort_values('Total_Dropped', ascending=False)
+        
+        print("[+] Details: Breakdown of CDSs dropped per inversion due to insufficient haplotypes:")
+        if not counts_table.empty:
+            # Use to_string() to ensure the full table prints
+            print(counts_table.to_string())
+        else:
+            print("   (No specific inversion data to show for this filter)")
+    else:
+        print("\n[✔] All remaining CDS entries have sufficient haplotypes (>= 2).")
+
+    print("\n[load_cds_summary] --- End of Pre-Filter Report ---\n")
+    
+
     if "inv_exact_match" in df.columns:
         before = len(df)
         df = df[df["inv_exact_match"] == 1]
@@ -841,12 +892,15 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     # Colors by recurrence (match Hudson FST: SE=#1f77b4, REC=#6A5ACD)
     rec = df["recurrence"].astype(str)
-    color_map = {"SE": "#1f77b4", "REC": "#6A5ACD"}
+    color_map = {
+        "SE": "#1f77b4",  # Single-event: blue from Fst plot points
+        "REC": "#6A5ACD"   # Recurrent: purple from Fst plot violin fill
+    }
     colors = rec.map(color_map).fillna("#7f7f7f")
 
     # Scatter (data only)
     ax.scatter(
-        x, y, s=sizes, c=colors, alpha=0.88,
+        x, y, s=sizes, c=colors, alpha=0.2,
         edgecolor="white", linewidths=0.7, zorder=3,
     )
 
@@ -859,10 +913,9 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     y_max = np.nanmax(y) if np.isfinite(np.nanmax(y)) else 1.0
     ax.set_ylim(0, y_max * 1.05 + 0.3)
 
-    # Background & reference lines (visuals only)
     left, right = ax.get_xlim()
-    ax.axvspan(left, 0, color=COLOR_DIRECT, alpha=0.06, zorder=0)
-    ax.axvspan(0, right, color=COLOR_INVERTED, alpha=0.05, zorder=0)
+    # ax.axvspan(left, 0, color=COLOR_DIRECT, alpha=0.06, zorder=0)      # REMOVED
+    # ax.axvspan(0, right, color=COLOR_INVERTED, alpha=0.05, zorder=0)   # REMOVED
     ax.axvline(0, color="#595959", linestyle="--", linewidth=1.0, zorder=1)
 
     # FDR 5% reference line (~1.301)
@@ -1038,7 +1091,9 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         fontsize=8,
     )
 
-    ax.tick_params(axis="both", labelsize=8.5)
+
+    for side in ['bottom', 'left']:
+        ax.spines[side].set_color('#8a8a8a')
 
     fig.tight_layout()
     ensure_dir(outfile)
