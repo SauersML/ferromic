@@ -248,6 +248,18 @@ def main():
         log.warning("No data available; saved placeholder figure.")
         return
     vp = ax.violinplot([rec_vals, se_vals], positions=positions, widths=0.8, showmedians=True, showextrema=False)
+    jitter_width = 0.08  # Controls the horizontal spread of points
+    point_size = 8       # Controls the size of the points
+
+    # Jitter points for the 'Recurrent' category (at position 0)
+    if n_rec > 0:
+        x_rec = positions[0] + np.random.normal(0, jitter_width, n_rec)
+        ax.scatter(x_rec, rec_vals, s=point_size, color='black', alpha=0.5, zorder=10)
+
+    # Jitter points for the 'Single-event' category (at position 1)
+    if n_se > 0:
+        x_se = positions[1] + np.random.normal(0, jitter_width, n_se)
+        ax.scatter(x_se, se_vals, s=point_size, color='black', alpha=0.5, zorder=10)
     violin_colors = [RECURRENT_COLOR, SINGLE_EVENT_COLOR]
     for idx, b in enumerate(vp['bodies']):
         color = violin_colors[idx] if idx < len(violin_colors) else '#7f7f7f'
