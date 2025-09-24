@@ -378,7 +378,7 @@ def load_cds_summary() -> pd.DataFrame:
     
     # --- Step 2: Report on 'n_pairs > 0' filter (on the REMAINING data) ---
     print(f"[Step 2] Analyzing 'n_pairs > 0' filter on the remaining {len(df_for_reporting)} rows...")
-    mask_not_enough_haps = df_for_reporting['n_pairs'] <= 0
+    mask_not_enough_haps = ~(df_for_reporting['n_pairs'] > 0)
     if mask_not_enough_haps.any():
         dropped_for_haps = df_for_reporting[mask_not_enough_haps]
         print(f"\n[!] Found {len(dropped_for_haps)} CDSs that will be dropped due to having < 2 haplotypes (n_pairs <= 0).")
