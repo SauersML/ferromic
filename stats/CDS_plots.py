@@ -900,7 +900,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     # Scatter (data only)
     ax.scatter(
-        x, y, s=sizes, c=colors, alpha=0.6,
+        x, y, s=sizes, c=colors, alpha=1.0,
         edgecolor="white", linewidths=0.7, zorder=3,
     )
 
