@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
-from matplotlib.patches import PathPatch
 from scipy.stats import mannwhitneyu
 
 SUMMARY_STATS_FILE = 'output.csv'
@@ -23,22 +22,14 @@ INVERSION_CATEGORY_MAPPING = {
     'Single-event': 'single_event'
 }
 
-MAIN_COLOR = '#6A5ACD'
-FILL_ALPHA = 0.10
+RECURRENT_COLOR = '#014421'
+SINGLE_EVENT_COLOR = '#8B0000'
+VIOLIN_ALPHA = 0.5
 EDGE_COLOR = '#4a4a4a'
-RECURRENT_HATCH = '////////////////////'
-SINGLE_EVENT_HATCH = '....................'
-RECURRENT_HATCH_COLOR = (0.20, 0.20, 0.20, 0.85)
-SINGLE_EVENT_HATCH_COLOR = (0.92, 0.92, 0.95, 1.0)
-POINT_COLOR = '#1f77b4'
-POINT_SIZE = 14
-POINT_ALPHA = 0.6
-JITTER_SD = 0.042
 FIGSIZE = (4.6, 9.6)
 DPI = 350
 OUTPUT_PDF = 'hudson_fst.pdf'
 
-plt.rcParams['hatch.linewidth'] = 0.18
 plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['ps.fonttype'] = 42
 
@@ -161,20 +152,6 @@ def mann_whitney_fmt(a, b):
     except ValueError:
         return "Test error"
 
-def add_hatch_overlay(ax, poly_collection, hatch, hatch_color):
-    paths = poly_collection.get_paths()
-    for path in paths:
-        patch = PathPatch(
-            path,
-            transform=ax.transData,
-            facecolor=(1, 1, 1, 0),
-            edgecolor=hatch_color,
-            hatch=hatch,
-            linewidth=0.0,
-            zorder=14
-        )
-        ax.add_patch(patch)
-
 def main():
     log.info("Starting single-figure Hudson F_ST analysis (fine overlays, blue points)")
     inv_df, sum_df, map_df = load_required_inputs()
@@ -271,25 +248,16 @@ def main():
         log.warning("No data available; saved placeholder figure.")
         return
     vp = ax.violinplot([rec_vals, se_vals], positions=positions, widths=0.8, showmedians=True, showextrema=False)
-    for b in vp['bodies']:
-        b.set_facecolor(MAIN_COLOR)
-        b.set_alpha(FILL_ALPHA)
+    violin_colors = [RECURRENT_COLOR, SINGLE_EVENT_COLOR]
+    for idx, b in enumerate(vp['bodies']):
+        color = violin_colors[idx] if idx < len(violin_colors) else '#7f7f7f'
+        b.set_facecolor(color)
+        b.set_alpha(VIOLIN_ALPHA)
         b.set_edgecolor(EDGE_COLOR)
         b.set_linewidth(0.8)
     vp['cmedians'].set_edgecolor('#1f1f1f')
     vp['cmedians'].set_linewidth(1.2)
     vp['cmedians'].set_zorder(13)
-    if len(vp['bodies']) >= 1:
-        add_hatch_overlay(ax, vp['bodies'][0], RECURRENT_HATCH, RECURRENT_HATCH_COLOR)
-    if len(vp['bodies']) >= 2:
-        add_hatch_overlay(ax, vp['bodies'][1], SINGLE_EVENT_HATCH, SINGLE_EVENT_HATCH_COLOR)
-    rng = np.random.default_rng()
-    if n_rec > 0:
-        jit = rng.normal(0, JITTER_SD, size=n_rec)
-        ax.scatter(np.full(n_rec, positions[0]) + jit, rec_vals, s=POINT_SIZE, c=POINT_COLOR, alpha=POINT_ALPHA, edgecolors='none', zorder=20)
-    if n_se > 0:
-        jit = rng.normal(0, JITTER_SD, size=n_se)
-        ax.scatter(np.full(n_se, positions[1]) + jit, se_vals, s=POINT_SIZE, c=POINT_COLOR, alpha=POINT_ALPHA, edgecolors='none', zorder=20)
     ax.set_xlabel("")
     ax.set_ylabel(r"Hudson $F_{\mathrm{ST}}$", fontsize=16)
     ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%.2f'))
