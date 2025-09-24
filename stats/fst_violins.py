@@ -168,9 +168,14 @@ def main():
     rec_vals = rec_series.dropna().tolist()
     se_vals  = se_series.dropna().tolist()
     n_rec, n_se = len(rec_vals), len(se_vals)
-    log.info(f"Hudson F_ST values: Recurrent N={n_rec}, Single-event N={n_se}")
 
-    # ----- NEW: summary stats, p-value, fold changes, and per-locus listing -----
+    total_recurrent_found = sum(len(v) for v in rec_map.values())
+    dropped_recurrent = total_recurrent_found - n_rec
+    log.info(f"Found {total_recurrent_found} recurrent inversions in the inversion file.")
+    log.info(f"Dropped {dropped_recurrent} recurrent inversions due to no matching coordinate or invalid F_ST value in the summary file.")
+
+    log.info(f"Final counts for analysis: Recurrent N={n_rec}, Single-event N={n_se}")
+
     rec_mean = float(np.mean(rec_vals)) if n_rec else float('nan')
     se_mean  = float(np.mean(se_vals)) if n_se else float('nan')
     rec_median = float(np.median(rec_vals)) if n_rec else float('nan')
