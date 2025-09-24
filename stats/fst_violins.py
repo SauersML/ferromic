@@ -169,12 +169,73 @@ def main():
     se_vals  = se_series.dropna().tolist()
     n_rec, n_se = len(rec_vals), len(se_vals)
 
-    total_recurrent_found = sum(len(v) for v in rec_map.values())
-    dropped_recurrent = total_recurrent_found - n_rec
-    log.info(f"Found {total_recurrent_found} recurrent inversions in the inversion file.")
-    log.info(f"Dropped {dropped_recurrent} recurrent inversions due to no matching coordinate or invalid F_ST value in the summary file.")
+    log.info("--- Analyzing recurrent inversion matches and drops ---")
+    all_rec_invs = sorted(list({inv for sublist in rec_map.values() for inv in sublist}))
+    total_recurrent_found = len(all_rec_invs)
 
-    log.info(f"Final counts for analysis: Recurrent N={n_rec}, Single-event N={n_se}")
+    # Pre-process summary stats for efficient lookup
+    chr_col = SUMMARY_STATS_COORDINATE_COLUMNS['chr']
+    start_col = SUMMARY_STATS_COORDINATE_COLUMNS['start']
+    end_col = SUMMARY_STATS_COORDINATE_COLUMNS['end']
+    processed_sum_stats = []
+    for _, row in sum_df.iterrows():
+        try:
+            c = normalize_chromosome_name(row[chr_col])
+            s = int(row[start_col]); e = int(row[end_col])
+            if s > e: s, e = e, s
+            fst_val = row[HUDSON_FST_COL]
+            # Store original FST value along with numeric version
+            numeric_fst = pd.to_numeric(fst_val, errors='coerce')
+            processed_sum_stats.append({
+                'coord': (c, s, e),
+                'original_fst': fst_val,
+                'numeric_fst': numeric_fst
+            })
+        except Exception:
+            continue
+
+    # Group stats by chromosome for faster search
+    sum_stats_by_chr = {}
+    for item in processed_sum_stats:
+        chrom = item['coord'][0]
+        sum_stats_by_chr.setdefault(chrom, []).append(item)
+
+    # Analyze each recurrent inversion from the inversion file
+    unmatched_inversions = []
+    dropped_for_fst = []
+
+    for inv_coord in all_rec_invs:
+        inv_chr = inv_coord[0]
+        matches = []
+        if inv_chr in sum_stats_by_chr:
+            for stat_item in sum_stats_by_chr[inv_chr]:
+                if check_coordinate_overlap(inv_coord, stat_item['coord']):
+                    matches.append(stat_item)
+
+        if not matches:
+            unmatched_inversions.append(inv_coord)
+        else:
+            # Check if any of the matches have a valid FST value
+            has_valid_fst = any(not np.isnan(m['numeric_fst']) for m in matches)
+            if not has_valid_fst:
+                # All matches had invalid FST. Record the inversion and the first invalid value found.
+                first_invalid_match = matches[0]
+                dropped_for_fst.append((inv_coord, first_invalid_match['coord'], first_invalid_match['original_fst']))
+
+    if unmatched_inversions:
+        log.warning("The following recurrent inversions from the inversion file had NO coordinate match in the summary file:")
+        for c, s, e in unmatched_inversions:
+            log.warning(f"  - Unmatched: {c}:{s}-{e}")
+
+    if dropped_for_fst:
+        log.warning("The following recurrent inversions were matched but dropped because ALL matches had invalid FST values:")
+        for inv_c, match_c, fst in dropped_for_fst:
+            log.warning(f"  - Dropped: {inv_c[0]}:{inv_c[1]}-{inv_c[2]} (matched e.g. {match_c[0]}:{match_c[1]}-{match_c[2]} with FST='{fst}')")
+
+    log.info(f"Found {total_recurrent_found} recurrent inversions in the inversion file.")
+    log.info(f"Dropped {len(unmatched_inversions)} inversions with no coordinate match and {len(dropped_for_fst)} inversions with only invalid FST matches.")
+
+    log.info(f"Final counts for analysis (based on summary file rows): Recurrent N={n_rec}, Single-event N={n_se}")
 
     rec_mean = float(np.mean(rec_vals)) if n_rec else float('nan')
     se_mean  = float(np.mean(se_vals)) if n_se else float('nan')
