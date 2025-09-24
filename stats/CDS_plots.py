@@ -891,11 +891,11 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     else:
         sizes = np.full(len(df), 60.0)
 
-    # Colors by recurrence (match Hudson FST: SE=#1f77b4, REC=#6A5ACD)
+    # Colors by recurrence (Single-event: deep red, Recurrent: forest green)
     rec = df["recurrence"].astype(str)
     color_map = {
-        "SE": "#cccae0",  # Single-event: blue from Fst plot points
-        "REC": "#9d9ab8"   # Recurrent: purple from Fst plot violin fill
+        "SE": "#8B0000",   # Single-event: deep red
+        "REC": "#014421",  # Recurrent: deep forest green
     }
     colors = rec.map(color_map).fillna("#7f7f7f")
 
@@ -924,7 +924,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     # Scatter (data only)
     ax.scatter(
-        x, y, s=sizes, c=colors, alpha=1.0,
+        x, y, s=sizes, c=colors, alpha=0.5,
         edgecolor="white", linewidths=0.7, zorder=3,
     )
 
@@ -942,7 +942,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
                     facecolor="#bdbdd0",
                     edgecolor="white",
                     linewidth=0.7,
-                    alpha=1.0,
+                    alpha=0.5,
                 )
             )
             size_labels.append(f"{_format_pairs_label(lvl)} pairs")
@@ -1141,8 +1141,8 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
         _draw_and_renderer()
 
-    proxy_se = mpatches.Patch(color=color_map["SE"], label="Single-event")
-    proxy_rec = mpatches.Patch(color=color_map["REC"], label="Recurrent")
+    proxy_se = mpatches.Patch(facecolor=color_map["SE"], edgecolor="none", alpha=0.5, label="Single-event")
+    proxy_rec = mpatches.Patch(facecolor=color_map["REC"], edgecolor="none", alpha=0.5, label="Recurrent")
     ax.legend(
         handles=[proxy_se, proxy_rec],
         frameon=False,
