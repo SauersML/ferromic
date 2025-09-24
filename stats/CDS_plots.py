@@ -966,8 +966,11 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
                 name,
                 xy=(x0, y0), xycoords="data",
                 xytext=(dx, 2), textcoords="offset points",
-                fontsize=8, ha=ha, va="bottom", color=txt_color,
-                arrowprops=dict(arrowstyle="-", color="#808080", linewidth=0.6),
+                fontsize=9,               
+                ha=ha, 
+                va="bottom", 
+                color="black",                
+                arrowprops=dict(arrowstyle="-", color="black", linewidth=0.8),
                 zorder=5,
                 annotation_clip=False,
             )
