@@ -841,12 +841,15 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     # Colors by recurrence (match Hudson FST: SE=#1f77b4, REC=#6A5ACD)
     rec = df["recurrence"].astype(str)
-    color_map = {"SE": "#1f77b4", "REC": "#6A5ACD"}
+    color_map = {
+        "SE": "#1f77b4",  # Single-event: blue from Fst plot points
+        "REC": "#6A5ACD"   # Recurrent: purple from Fst plot violin fill
+    }
     colors = rec.map(color_map).fillna("#7f7f7f")
 
     # Scatter (data only)
     ax.scatter(
-        x, y, s=sizes, c=colors, alpha=0.88,
+        x, y, s=sizes, c=colors, alpha=0.6,
         edgecolor="white", linewidths=0.7, zorder=3,
     )
 
@@ -859,10 +862,9 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     y_max = np.nanmax(y) if np.isfinite(np.nanmax(y)) else 1.0
     ax.set_ylim(0, y_max * 1.05 + 0.3)
 
-    # Background & reference lines (visuals only)
     left, right = ax.get_xlim()
-    ax.axvspan(left, 0, color=COLOR_DIRECT, alpha=0.06, zorder=0)
-    ax.axvspan(0, right, color=COLOR_INVERTED, alpha=0.05, zorder=0)
+    # ax.axvspan(left, 0, color=COLOR_DIRECT, alpha=0.06, zorder=0)      # REMOVED
+    # ax.axvspan(0, right, color=COLOR_INVERTED, alpha=0.05, zorder=0)   # REMOVED
     ax.axvline(0, color="#595959", linestyle="--", linewidth=1.0, zorder=1)
 
     # FDR 5% reference line (~1.301)
@@ -1038,7 +1040,9 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         fontsize=8,
     )
 
-    ax.tick_params(axis="both", labelsize=8.5)
+
+    for side in ['bottom', 'left']:
+        ax.spines[side].set_color('#8a8a8a')
 
     fig.tight_layout()
     ensure_dir(outfile)
