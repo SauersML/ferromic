@@ -790,7 +790,7 @@ pub fn bench_efficient_exact_pca(
 #[inline(always)]
 unsafe fn read_unchecked<T: Copy>(ptr: *const T) -> T {
     debug_assert!(!ptr.is_null());
-    *ptr
+    unsafe { *ptr }
 }
 
 fn diag_to_vec(diag: DiagRef<'_, f64>) -> Vec<f64> {
