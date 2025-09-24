@@ -32,7 +32,7 @@ matplotlib.rcParams.update({
     "axes.spines.right": False,
 })
 
-RANDOM_SEED = 2026
+RANDOM_SEED = 2027
 np.random.seed(RANDOM_SEED)
 
 # === Match the other plot's look ===
@@ -574,7 +574,7 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
             ax, core, i, width=0.36, side=side_violin,
             facecolor=face, alpha=ALPHA_VIOLIN,
             hatch=hatch_pat, hatch_edgecolor=hatch_edge,
-            y_grid=y_grid, global_density_max=global_density_max, bw_method="scott"
+            y_grid=y_grid, global_density_max=None, bw_method="scott"
         )
 
         # Half-box shifted to the opposite side of the violin
