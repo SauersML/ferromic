@@ -15,7 +15,7 @@ from matplotlib.ticker import MultipleLocator
 from scipy.cluster.hierarchy import linkage, leaves_list
 from scipy.spatial.distance import squareform
 from scipy.stats import gaussian_kde
-
+import seaborn as sns
 
 # =============================================================================
 # Global configuration
@@ -568,14 +568,6 @@ def plot_proportion_identical_violin(cds_summary: pd.DataFrame, outfile: str):
         offset = 0.08 if side_box == "right" else -0.08
         sign = 1.0 if side_box == "right" else -1.0
         x_center = (i + offset) + sign * 0.03
-
-        # draw a single half-violin on its side
-        draw_half_violin(
-            ax, core, i, width=0.36, side=side_violin,
-            facecolor=face, alpha=ALPHA_VIOLIN,
-            hatch=hatch_pat, hatch_edgecolor=hatch_edge,
-            y_grid=y_grid, global_density_max=None, bw_method="scott"
-        )
 
         # Half-box shifted to the opposite side of the violin
         median, q1, q3 = d["box_stats"]
