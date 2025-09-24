@@ -888,7 +888,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     if sizes_raw.max() > 0:
         sizes = 28 + 220 * (sizes_raw / sizes_raw.max())
     else:
-        sizes = np.full_like(y, 40.0, dtype=float)
+        print("ERROR")
 
     # Colors by recurrence (match Hudson FST: SE=#1f77b4, REC=#6A5ACD)
     rec = df["recurrence"].astype(str)
