@@ -885,10 +885,11 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     # Point sizes by total pairs (scaled smoothly)
     sizes_raw = pd.to_numeric(df.get("n_pairs_total", pd.Series(dtype=float)), errors="coerce").fillna(0)
-    if sizes_raw.max() > 0:
-        sizes = 28 + 220 * (sizes_raw / sizes_raw.max())
+    size_scale_max = float(sizes_raw.max()) if not sizes_raw.empty else 0.0
+    if size_scale_max > 0:
+        sizes = 28 + 220 * (sizes_raw / size_scale_max)
     else:
-        print("ERROR")
+        sizes = np.full(len(df), 60.0)
 
     # Colors by recurrence (match Hudson FST: SE=#1f77b4, REC=#6A5ACD)
     rec = df["recurrence"].astype(str)
@@ -898,11 +899,67 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     }
     colors = rec.map(color_map).fillna("#7f7f7f")
 
+    def _format_pairs_label(val: float) -> str:
+        if val >= 1000:
+            return f"{int(round(val)):,}"
+        if val >= 10:
+            return str(int(round(val)))
+        if val >= 1:
+            txt = f"{val:.1f}"
+        else:
+            txt = f"{val:.2f}"
+        return txt.rstrip("0").rstrip(".")
+
+    def _size_legend_levels(scale_max: float) -> list[float]:
+        if not np.isfinite(scale_max) or scale_max <= 0:
+            return []
+        fractions = np.array([0.35, 0.65, 1.0])
+        levels = (fractions * scale_max).tolist()
+        eps = scale_max * 1e-3
+        levels = [max(val, eps) for val in levels]
+        for idx in range(1, len(levels)):
+            if levels[idx] <= levels[idx - 1]:
+                levels[idx] = min(scale_max, levels[idx - 1] + eps)
+        return levels
+
     # Scatter (data only)
     ax.scatter(
         x, y, s=sizes, c=colors, alpha=1.0,
         edgecolor="white", linewidths=0.7, zorder=3,
     )
+
+    if size_scale_max > 0:
+        legend_levels = _size_legend_levels(size_scale_max)
+        size_handles = []
+        size_labels = []
+        for lvl in legend_levels:
+            lvl = float(np.clip(lvl, 1e-9, size_scale_max))
+            handle_size = 28 + 220 * (lvl / size_scale_max)
+            size_handles.append(
+                ax.scatter(
+                    [], [],
+                    s=handle_size,
+                    facecolor="#bdbdd0",
+                    edgecolor="white",
+                    linewidth=0.7,
+                    alpha=1.0,
+                )
+            )
+            size_labels.append(f"{_format_pairs_label(lvl)} pairs")
+        size_legend = ax.legend(
+            size_handles,
+            size_labels,
+            title="Total pairs (examples)",
+            frameon=False,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.02),
+            borderaxespad=0.0,
+            labelspacing=0.9,
+            handletextpad=1.3,
+            scatterpoints=1,
+            fontsize=8,
+        )
+        ax.add_artist(size_legend)
 
     # Axes limits from DATA ONLY (never touched again)
     if x.notna().any():
