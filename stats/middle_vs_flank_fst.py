@@ -829,6 +829,17 @@ def _draw_two_violins(ax, vals, pos, flank_color, middle_color, hatch_pattern, h
             clip_rect = Rectangle((clip_start_x, ymin), clip_width, plot_height, transform=ax.transData)
             body.set_clip_path(clip_rect)
 
+def _safe_log2_ratio(m: float, f: float, eps: float = 1e-12) -> float:
+    """Safely compute log2((m + eps) / (f + eps)) allowing for negative Hudson FST values."""
+    if not (np.isfinite(m) and np.isfinite(f)):
+        return float("nan")
+    if (m + eps) <= 0 or (f + eps) <= 0:
+        return float("nan")
+    try:
+        return math.log2((m + eps) / (f + eps))
+    except ValueError:
+        return float("nan")
+
 def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str, flank_point_color, middle_point_color):
     """Per sequence: draw two points (Flank, Middle) and the connecting line colored by log2(M/MF)."""
     EPS = 1e-12
@@ -843,7 +854,10 @@ def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str, flank_poin
         x_f = POS_X["Flank"]  + j    # jitter rightwards
         x_m = POS_X["Middle"] - j    # jitter leftwards
 
-        log2fc = math.log2((m + EPS) / (f + EPS))
+        log2fc = _safe_log2_ratio(m, f, EPS)
+        if not np.isfinite(log2fc):
+            log2fc = 0.0
+
         c = cmap(norm(log2fc))
 
         ax.plot([x_f, x_m], [f, m], color=c, linewidth=LINE_WIDTH, alpha=0.98, zorder=3, solid_capstyle="round")
@@ -869,7 +883,10 @@ def _collect_all_pairs_for_scale(categories: dict) -> np.ndarray:
             f = s.get("flanking_ratio", np.nan)
             m = s.get("middle_ratio", np.nan)
             if np.isfinite(f) and np.isfinite(m):
-                vals.append(math.log2((m + EPS) / (f + EPS)))
+                log2fc = _safe_log2_ratio(m, f, EPS)
+                if np.isfinite(log2fc):
+                    vals.append(log2fc)
+
     return np.asarray(vals, dtype=float)
 
 def _draw_right_key(rax):
