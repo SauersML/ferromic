@@ -886,6 +886,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
     # Point sizes by total pairs (scaled smoothly)
     sizes_raw = pd.to_numeric(df.get("n_pairs_total", pd.Series(dtype=float)), errors="coerce").fillna(0)
     size_scale_max = float(sizes_raw.max()) if not sizes_raw.empty else 0.0
+    size_legend_info = None
     if size_scale_max > 0:
         sizes = 28 + 220 * (sizes_raw / size_scale_max)
     else:
@@ -946,20 +947,8 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
                 )
             )
             size_labels.append(f"{_format_pairs_label(lvl)} pairs")
-        size_legend = ax.legend(
-            size_handles,
-            size_labels,
-            title="Total pairs (examples)",
-            frameon=False,
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.02),
-            borderaxespad=0.0,
-            labelspacing=0.9,
-            handletextpad=1.3,
-            scatterpoints=1,
-            fontsize=8,
-        )
-        ax.add_artist(size_legend)
+        if size_handles and size_labels:
+            size_legend_info = (size_handles, size_labels)
 
     # Axes limits from DATA ONLY (never touched again)
     if x.notna().any():
@@ -1143,13 +1132,39 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
 
     proxy_se = mpatches.Patch(facecolor=color_map["SE"], edgecolor="none", alpha=0.5, label="Single-event")
     proxy_rec = mpatches.Patch(facecolor=color_map["REC"], edgecolor="none", alpha=0.5, label="Recurrent")
-    ax.legend(
+    rec_legend = ax.legend(
         handles=[proxy_se, proxy_rec],
         frameon=False,
         title="Recurrence",
         loc="upper left",
+        bbox_to_anchor=(0.02, 0.98),
+        borderaxespad=0.0,
         fontsize=8,
+        bbox_transform=ax.transAxes,
     )
+    ax.add_artist(rec_legend)
+    if rec_legend.get_title():
+        rec_legend.get_title().set_fontsize(8.5)
+
+    if size_legend_info:
+        size_handles, size_labels = size_legend_info
+        size_legend = ax.legend(
+            size_handles,
+            size_labels,
+            title="Total pairs (examples)",
+            frameon=False,
+            loc="upper left",
+            bbox_to_anchor=(0.02, 0.62),
+            borderaxespad=0.0,
+            labelspacing=0.7,
+            handletextpad=1.2,
+            scatterpoints=1,
+            fontsize=8,
+            bbox_transform=ax.transAxes,
+        )
+        ax.add_artist(size_legend)
+        if size_legend.get_title():
+            size_legend.get_title().set_fontsize(8.5)
 
 
     for side in ['bottom', 'left']:
