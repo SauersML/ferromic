@@ -1151,7 +1151,7 @@ def plot_cds_conservation_volcano(df: pd.DataFrame, outfile: str):
         size_legend = ax.legend(
             size_handles,
             size_labels,
-            title="Total pairs (examples)",
+            title="Total pairs (circle size)",
             frameon=False,
             loc="upper left",
             bbox_to_anchor=(0.02, 0.62),
