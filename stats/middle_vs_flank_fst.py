@@ -10,7 +10,7 @@ from typing import List, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.stats import shapiro
+from scipy.stats import shapiro, mannwhitneyu
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -607,6 +607,14 @@ def calculate_flanking_stats(fst_sequences: List[dict], spec: WindowSpec) -> Lis
             "ending_informative_sites": end_cnt,
             "middle_informative_sites": middle_cnt,
             "flanking_informative_sites": flank_cnt,
+            "beginning_num_sum": begin_num_sum,
+            "beginning_den_sum": begin_den_sum,
+            "ending_num_sum": end_num_sum,
+            "ending_den_sum": end_den_sum,
+            "middle_num_sum": middle_num_sum,
+            "middle_den_sum": middle_den_sum,
+            "flanking_num_sum": flank_num_sum,
+            "flanking_den_sum": flank_den_sum,
         }
 
         results.append(stats)
@@ -649,6 +657,113 @@ def categorize_sequences(flanking_stats: List[dict], recurrent_regions: dict, si
     for disp, key in zip(CATEGORY_ORDER, CATEGORY_KEYS):
         logger.info(f"  {disp}: {len(categories.get(key, []))}")
     return categories
+
+
+def _extract_flank_minus_middle_diffs(seq_stats: List[dict]) -> np.ndarray:
+    """Return an array of (flank - middle) ratios for sequences with finite values."""
+    diffs: List[float] = []
+    for stats in seq_stats:
+        flank = stats.get("flanking_ratio")
+        middle = stats.get("middle_ratio")
+        if flank is None or middle is None:
+            continue
+        if not (np.isfinite(flank) and np.isfinite(middle)):
+            continue
+        diffs.append(float(flank) - float(middle))
+    if not diffs:
+        return np.asarray([], dtype=float)
+    return np.asarray(diffs, dtype=float)
+
+
+def single_vs_recurrent_one_sided_test(categories: dict) -> dict:
+    """One-sided Mann-Whitney U test on (flank - middle) differences."""
+    se_diffs = _extract_flank_minus_middle_diffs(categories.get("single_event", []))
+    rec_diffs = _extract_flank_minus_middle_diffs(categories.get("recurrent", []))
+
+    result = {
+        "n_single_event": int(se_diffs.size),
+        "n_recurrent": int(rec_diffs.size),
+        "single_event_mean_diff": float(np.nanmean(se_diffs)) if se_diffs.size else np.nan,
+        "recurrent_mean_diff": float(np.nanmean(rec_diffs)) if rec_diffs.size else np.nan,
+        "mannwhitney_u": np.nan,
+        "p_one_sided": np.nan,
+        "alternative": "single_event>recurrent",
+    }
+
+    if se_diffs.size and rec_diffs.size:
+        try:
+            stat, p = mannwhitneyu(se_diffs, rec_diffs, alternative="greater")
+            result["mannwhitney_u"] = float(stat)
+            result["p_one_sided"] = float(p)
+        except ValueError:
+            pass
+
+    return result
+
+
+def pooled_group_estimates(categories: dict, reps: int = 2000, seed: int = 1337) -> pd.DataFrame:
+    """Compute pooled Hudson FST (ratio-of-sums) per group and window with bootstrap SE."""
+
+    def _collect(seq_stats: List[dict], window: str) -> Tuple[np.ndarray, np.ndarray]:
+        if window == "Flank":
+            num = np.asarray([s.get("flanking_num_sum", np.nan) for s in seq_stats], dtype=float)
+            den = np.asarray([s.get("flanking_den_sum", np.nan) for s in seq_stats], dtype=float)
+        else:
+            num = np.asarray([s.get("middle_num_sum", np.nan) for s in seq_stats], dtype=float)
+            den = np.asarray([s.get("middle_den_sum", np.nan) for s in seq_stats], dtype=float)
+        valid = np.isfinite(num) & np.isfinite(den) & (den > EPS_DENOM)
+        return num[valid], den[valid]
+
+    def _pooled(num: np.ndarray, den: np.ndarray) -> Tuple[float, float, float, int]:
+        if num.size == 0:
+            return (np.nan, 0.0, 0.0, 0)
+        num_sum = float(np.sum(num))
+        den_sum = float(np.sum(den))
+        if den_sum <= EPS_DENOM:
+            return (np.nan, num_sum, den_sum, int(num.size))
+        return (num_sum / den_sum, num_sum, den_sum, int(num.size))
+
+    def _bootstrap_se(num: np.ndarray, den: np.ndarray, reps: int, seed: int) -> float:
+        if num.size == 0:
+            return float("nan")
+        rng = np.random.default_rng(seed)
+        estimates = np.empty(reps, dtype=float)
+        for i in range(reps):
+            indices = rng.integers(0, num.size, size=num.size)
+            num_sum = float(np.sum(num[indices]))
+            den_sum = float(np.sum(den[indices]))
+            if den_sum <= EPS_DENOM:
+                estimates[i] = np.nan
+            else:
+                estimates[i] = num_sum / den_sum
+        finite = estimates[np.isfinite(estimates)]
+        if finite.size < 2:
+            return float("nan")
+        return float(np.std(finite, ddof=1))
+
+    groups = {
+        "Single-event": list(categories.get("single_event", [])),
+        "Recurrent": list(categories.get("recurrent", [])),
+        "Overall": list(categories.get("single_event", [])) + list(categories.get("recurrent", [])),
+    }
+
+    rows = []
+    for group_name, seqs in groups.items():
+        for window in ("Flank", "Middle"):
+            num_vals, den_vals = _collect(seqs, window)
+            pooled, num_sum, den_sum, n_inv = _pooled(num_vals, den_vals)
+            se = _bootstrap_se(num_vals, den_vals, reps=reps, seed=seed)
+            rows.append({
+                "group": group_name,
+                "window": window,
+                "pooled_fst": pooled,
+                "bootstrap_se": se,
+                "numerator_sum": num_sum,
+                "denominator_sum": den_sum,
+                "n_inversions_contributing": n_inv,
+            })
+
+    return pd.DataFrame(rows)
 
 
 def perform_statistical_tests(categories: dict, all_sequences_stats: List[dict]) -> dict:
@@ -840,6 +955,7 @@ def _safe_log2_ratio(m: float, f: float, eps: float = 1e-12) -> float:
     except ValueError:
         return float("nan")
 
+
 def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str, flank_point_color, middle_point_color):
     """Per sequence: draw two points (Flank, Middle) and the connecting line colored by log2(M/MF)."""
     EPS = 1e-12
@@ -857,7 +973,6 @@ def _paired_lines_and_points(ax, rows, cmap, norm, category_key: str, flank_poin
         log2fc = _safe_log2_ratio(m, f, EPS)
         if not np.isfinite(log2fc):
             log2fc = 0.0
-
         c = cmap(norm(log2fc))
 
         ax.plot([x_f, x_m], [f, m], color=c, linewidth=LINE_WIDTH, alpha=0.98, zorder=3, solid_capstyle="round")
@@ -886,7 +1001,6 @@ def _collect_all_pairs_for_scale(categories: dict) -> np.ndarray:
                 log2fc = _safe_log2_ratio(m, f, EPS)
                 if np.isfinite(log2fc):
                     vals.append(log2fc)
-
     return np.asarray(vals, dtype=float)
 
 def _draw_right_key(rax):
@@ -1154,7 +1268,40 @@ def main():
             len(filtered_flanking_stats),
         )
 
+        pooled_df = pooled_group_estimates(categories, reps=2_000, seed=1337)
+        pooled_csv = output_dir / f"fst_mf_pooled_group_estimates_{spec.slug}.csv"
+        try:
+            pooled_df.to_csv(pooled_csv, index=False)
+            logger.info("Saved pooled across-inversions FST estimates to %s", pooled_csv)
+        except Exception as e:
+            logger.error("Failed to write pooled estimates: %s", e)
+
+        if not pooled_df.empty:
+            try:
+                for group_name in ["Single-event", "Recurrent", "Overall"]:
+                    for window in ("Middle", "Flank"):
+                        row = pooled_df[
+                            (pooled_df.group == group_name) & (pooled_df.window == window)
+                        ]
+                        if row.empty:
+                            continue
+                        entry = row.iloc[0]
+                        logger.info(
+                            "[Pooled %s | %s] FST=%s ± %s  (n_inv=%d, num_sum=%s, den_sum=%s)",
+                            group_name,
+                            window,
+                            format_plain_no_e(entry.pooled_fst) or "NA",
+                            format_plain_no_e(entry.bootstrap_se) or "NA",
+                            int(entry.n_inversions_contributing),
+                            format_plain_no_e(entry.numerator_sum) or "NA",
+                            format_plain_no_e(entry.denominator_sum) or "NA",
+                        )
+            except Exception:
+                logger.exception("Failed logging pooled summary")
+
         tests = perform_statistical_tests(categories, filtered_flanking_stats)
+        diff_test = single_vs_recurrent_one_sided_test(categories)
+        tests["Single_vs_Recurrent_FlankMinusMiddle"] = diff_test
 
         logger.info("\n=== Summary Statistics (%s) ===", spec.description)
         print_summary_statistics(filtered_flanking_stats, "Overall")
@@ -1173,6 +1320,30 @@ def main():
                 f"perm_p={_format_p_value_for_annotation(tr.get('mean_p', np.nan))}  "
                 f"shapiro_p={_format_p_value_for_annotation(tr.get('mean_normality_p', np.nan))}"
             )
+
+        logger.info(
+            "\n--- Single-event vs Recurrent Δ(Flank − Middle) Test (%s) ---",
+            spec.description,
+        )
+        se_mean = diff_test.get("single_event_mean_diff", np.nan)
+        rec_mean = diff_test.get("recurrent_mean_diff", np.nan)
+        se_mean_str = format_plain_no_e(se_mean) or "NA"
+        rec_mean_str = format_plain_no_e(rec_mean) or "NA"
+        logger.info(
+            "[Diff Summary] n_single=%d mean_single=%s  n_recurrent=%d mean_recurrent=%s",
+            diff_test.get("n_single_event", 0),
+            se_mean_str,
+            diff_test.get("n_recurrent", 0),
+            rec_mean_str,
+        )
+        mw_u = diff_test.get("mannwhitney_u", np.nan)
+        mw_u_str = format_plain_no_e(mw_u) or "NA"
+        logger.info(
+            "[Mann-Whitney U] U=%s  p_one_sided=%s  alternative=%s",
+            mw_u_str,
+            _format_p_value_for_annotation(diff_test.get("p_one_sided", np.nan)),
+            diff_test.get("alternative", "single_event>recurrent"),
+        )
 
         tests_path = output_dir / f"fst_mf_permtest_results_{spec.slug}.csv"
         try:
