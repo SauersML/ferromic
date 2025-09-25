@@ -6,6 +6,7 @@ import sys
 from collections import defaultdict, Counter
 from typing import Dict, List, Tuple, Optional
 import numpy as np
+from tqdm import tqdm
 HAVE_TQDM = True
 
 
