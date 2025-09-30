@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: >-
-          ${{ fromJson('[{"runner":"ubuntu-22.04","target":"x86_64","openblas_target":"SANDYBRIDGE"},{"runner":"ubuntu-22.04","target":"x86","openblas_target":"ATOM"},{"runner":"ubuntu-22.04","target":"aarch64","openblas_target":"ARMV8"},{"runner":"ubuntu-22.04","target":"armv7","openblas_target":"ARMV7"},{"runner":"ubuntu-22.04","target":"ppc64le","openblas_target":"POWER9"}]') }}
+          ${{ fromJson('[{"runner":"ubuntu-22.04","target":"x86_64","openblas_target":"SANDYBRIDGE"},{"runner":"ubuntu-22.04","target":"aarch64","openblas_target":"ARMV8"},{"runner":"ubuntu-22.04","target":"ppc64le","openblas_target":"POWER9"}]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -69,7 +69,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: >-
-          ${{ fromJson('[{"runner":"ubuntu-22.04","target":"x86_64","openblas_target":"SANDYBRIDGE"},{"runner":"ubuntu-22.04","target":"x86","openblas_target":"ATOM"},{"runner":"ubuntu-22.04","target":"aarch64","openblas_target":"ARMV8"},{"runner":"ubuntu-22.04","target":"armv7","openblas_target":"ARMV7"}]') }}
+          ${{ fromJson('[{"runner":"ubuntu-22.04","target":"x86_64","openblas_target":"SANDYBRIDGE"},{"runner":"ubuntu-22.04","target":"aarch64","openblas_target":"ARMV8"}]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -112,7 +112,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: >-
-          ${{ fromJson('[{"runner":"windows-latest","target":"x64","vcpkg_triplet":"x64-windows"},{"runner":"windows-latest","target":"x86","vcpkg_triplet":"x86-windows"}]') }}
+          ${{ fromJson('[{"runner":"windows-latest","target":"x64","vcpkg_triplet":"x64-windows"}]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
