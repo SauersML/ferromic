@@ -1,7 +1,7 @@
 [package]
 name = "ferromic"
-version = "0.1.1"
-authors = ["Ferromic Developers"]
+version = "0.1.2"
+authors = ["SauersML"]
 edition = "2024"
 description = "Rust-accelerated population genetics toolkit with ergonomic Python bindings"
 readme = "README.md"
