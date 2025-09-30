@@ -35,3 +35,4 @@ test = [
 
 [tool.maturin]
 bindings = "pyo3"
+profile = "release"
