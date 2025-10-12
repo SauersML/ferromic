@@ -125,6 +125,16 @@ def _init_lrt_worker_from_df(df, masks, anc_series, ctx):
     models.init_lrt_worker(meta, list(df.columns), df.index.astype(str), masks, anc_series, ctx)
     return shm
 
+
+def _init_boot_worker_from_df(df, masks, anc_series, ctx, *, B=128, seed=1234):
+    arr = df.to_numpy(dtype=np.float32, copy=True)
+    base_meta, base_shm = io.create_shared_from_ndarray(arr, readonly=True)
+    rng = np.random.default_rng(seed)
+    U = rng.random((len(df), int(B)), dtype=np.float32)
+    boot_meta, boot_shm = io.create_shared_from_ndarray(U.astype(np.float32, copy=False), readonly=True)
+    models.init_boot_worker(base_meta, boot_meta, list(df.columns), df.index.astype(str), masks, anc_series, ctx)
+    return base_shm, boot_shm
+
 def prime_all_caches_for_run(core_data, phenos, cdr_codename, target_inversion, cache_dir="./phewas_cache"):
     os.makedirs(cache_dir, exist_ok=True)
 
@@ -585,6 +595,27 @@ def test_penalized_fit_ci_and_pval_suppression(test_ctx):
         assert pd.isna(res['P_Value'])
         shm.close(); shm.unlink()
 
+
+def test_penalized_wald_ci_keeps_firth_intervals(test_ctx):
+    models.CTX = test_ctx
+
+    class _DummyFit:
+        def __init__(self, *, beta, se, used_ridge=False, used_firth=False):
+            self.params = np.array([beta], dtype=float)
+            self.bse = np.array([se], dtype=float)
+            self._used_ridge = used_ridge
+            self._used_firth = used_firth
+
+    firth_fit = _DummyFit(beta=0.0, se=10.0, used_firth=True)
+    firth_ci = models._wald_ci_or_from_fit(firth_fit, 0, alpha=0.05, penalized=True)
+    assert firth_ci["valid"] is True
+    assert firth_ci["method"] == "wald_firth"
+
+    ridge_fit = _DummyFit(beta=0.0, se=10.0, used_ridge=True)
+    ridge_ci = models._wald_ci_or_from_fit(ridge_fit, 0, alpha=0.05, penalized=True)
+    assert ridge_ci["valid"] is False
+
+
 def test_firth_fit_keeps_inference(test_ctx):
     """Firth fits triggered by ridge should retain valid inference."""
     with temp_workspace():
@@ -631,6 +662,55 @@ def test_firth_fit_keeps_inference(test_ctx):
         assert res['OR_CI95'] is not None
         assert res['CI_Valid'] is True
         shm.close(); shm.unlink()
+
+
+def test_bootstrap_overall_emits_score_boot_ci(test_ctx):
+    """Bootstrap Stage-1 should expose score-bootstrap inversion CIs when available."""
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort(N=160)
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+
+        ctx = dict(test_ctx)
+        ctx.update({"BOOTSTRAP_B": 64, "BOOTSTRAP_B_MAX": 64})
+        models.CTX = ctx
+
+        Path(ctx["BOOT_OVERALL_CACHE_DIR"]).mkdir(parents=True, exist_ok=True)
+
+        core_df = sm.add_constant(pd.concat([
+            core_data['demographics'][['AGE_c']],
+            core_data['pcs'],
+            core_data['inversion_main'],
+        ], axis=1))
+        anc_series = core_data['ancestry']['ANCESTRY']
+        anc_lower = anc_series.str.lower()
+        anc_dummies = pd.get_dummies(pd.Categorical(anc_lower), prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df = core_df.join(anc_dummies, how="left").fillna({c: 0.0 for c in anc_dummies.columns})
+
+        masks = {"cardio": np.ones(len(core_df), dtype=bool)}
+        base_shm, boot_shm = _init_boot_worker_from_df(core_df, masks, anc_series, ctx, B=ctx["BOOTSTRAP_B"])
+        try:
+            task = {
+                "name": "A_strong_signal",
+                "category": "cardio",
+                "cdr_codename": TEST_CDR_CODENAME,
+                "target": TEST_TARGET_INVERSION,
+            }
+            models.bootstrap_overall_worker(task)
+        finally:
+            base_shm.close(); base_shm.unlink()
+            boot_shm.close(); boot_shm.unlink()
+
+        result_path = Path(ctx["RESULTS_CACHE_DIR"]) / "A_strong_signal.json"
+        assert result_path.exists()
+        with open(result_path) as f:
+            res = json.load(f)
+
+        assert res['Inference_Type'] == 'score_boot'
+        assert res['CI_Method'] == 'score_boot_multiplier'
+        assert res['CI_Label'] == 'score bootstrap (inverted)'
+        assert res['CI_Valid'] is True
+        assert res['OR_CI95'] is not None
+
 
 def test_perfect_separation_promoted_to_ridge(test_ctx):
     X = pd.DataFrame({'const': 1, 'x': [0, 0, 1, 1]}); y = pd.Series([0, 0, 1, 1])
