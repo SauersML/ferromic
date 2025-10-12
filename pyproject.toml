@@ -29,6 +29,9 @@ test = [
     "numpy",
     "scikit-allel",
     "scipy",
+    "pandas",
+    "statsmodels",
+    "pyarrow",
     "pytest-benchmark",
     "patchelf; platform_system == 'Linux'",
 ]
