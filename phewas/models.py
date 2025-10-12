@@ -930,43 +930,54 @@ def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), e
     return X.loc[:, cols]
 
 
-def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), rtol=1e-10):
-    """
-    Removes columns that render the design matrix rank-deficient by greedily dropping
-    non-essential columns based on ascending column standard deviation while preserving
-    columns listed in keep_cols and always_keep whenever possible.
-    Returns a DataFrame with full column rank or the best achievable subset if no removable columns remain.
-    """
-    keep = set(keep_cols) | set(always_keep)
+def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), rtol=1e-2):
+    """Selects a full-rank subset of columns while preserving required predictors."""
     if X.shape[1] == 0:
         return X
-    M = X.to_numpy(dtype=np.float64, copy=False)
-    rank = np.linalg.matrix_rank(M)
-    if rank == X.shape[1]:
-        return X
-    remaining = list(X.columns)
-    removable = [c for c in remaining if c not in keep]
-    X_work = X.copy()
-    while np.linalg.matrix_rank(X_work.to_numpy(dtype=np.float64, copy=False)) < X_work.shape[1]:
-        if not removable:
-            break
-        stds = np.nanstd(X_work.to_numpy(dtype=np.float64, copy=False), axis=0)
-        col_order = np.argsort(stds)
-        dropped = False
-        for k in col_order:
-            colname = X_work.columns[k]
-            if colname not in removable:
-                continue
-            trial = X_work.drop(columns=[colname])
-            if np.linalg.matrix_rank(trial.to_numpy(dtype=np.float64, copy=False)) == trial.shape[1]:
-                X_work = trial
-                remaining = list(X_work.columns)
-                removable = [c for c in remaining if c not in keep]
-                dropped = True
-                break
-        if not dropped:
-            break
-    return X_work
+
+    keep_priority = []
+    seen = set()
+    for col in list(keep_cols) + list(always_keep):
+        if col in X.columns and col not in seen:
+            keep_priority.append(col)
+            seen.add(col)
+
+    optional = [c for c in X.columns if c not in seen]
+    if optional:
+        stds = {c: float(np.nanstd(X[c].to_numpy(dtype=np.float64, copy=False))) for c in optional}
+        optional.sort(key=lambda c: stds.get(c, 0.0), reverse=True)
+
+    ordered = keep_priority + optional
+    if not ordered:
+        return X.iloc[:, :0]
+
+    M = X[ordered].to_numpy(dtype=np.float64, copy=False)
+    try:
+        import scipy.linalg as sp_linalg
+        Q, R, piv = sp_linalg.qr(M, mode='economic', pivoting=True)
+        svals = np.linalg.svd(M, compute_uv=False)
+        tol = float(rtol) * (svals[0] if svals.size else 0.0)
+        rank = int(np.sum(svals > tol))
+        piv = list(piv[:rank])
+    except Exception:
+        piv = list(range(len(ordered)))
+        rank = len(ordered)
+
+    selected = [ordered[i] for i in piv]
+    # Ensure required columns are retained even if numerically dependent.
+    for col in keep_priority:
+        if col in X.columns and col not in selected:
+            selected.insert(0, col)
+
+    # Preserve column order as in the original DataFrame.
+    seen_cols = set()
+    final_cols = []
+    for col in X.columns:
+        if col in selected and col not in seen_cols:
+            final_cols.append(col)
+            seen_cols.add(col)
+
+    return X.loc[:, final_cols]
 
 
 def _fit_diagnostics(X, y, params):
@@ -1207,8 +1218,15 @@ def _apply_sex_restriction(X: pd.DataFrame, y: pd.Series):
         return X, y, "", None
     if int(tab.loc[dominant_sex, 0]) == 0:
         return X, y, "", "sex_no_controls_in_case_sex"
+
     keep = X['sex'].eq(dominant_sex)
-    return X.loc[keep].drop(columns=['sex']), y.loc[keep], f"sex_restricted_to_{int(dominant_sex)}", None
+    note_parts = [f"sex_restricted_to_{int(dominant_sex)}"]
+    mode = str(CTX.get("SEX_RESTRICT_MODE", "majority")).lower()
+    if mode == "majority":
+        note_parts.append(f"sex_majority_restricted_to_{int(dominant_sex)}")
+
+    note = ";".join(note_parts)
+    return X.loc[keep].drop(columns=['sex']), y.loc[keep], note, None
 
 
 
@@ -1962,7 +1980,19 @@ def lrt_overall_worker(task):
 
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
         anc_cols = [c for c in worker_core_df_cols if c.startswith("ANC_")]
-        base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq'] + anc_cols
+        required_cols = ['const', target]
+        missing_required = [c for c in required_cols if c not in col_ix]
+        if missing_required:
+            raise KeyError(f"missing required design columns: {missing_required}")
+
+        def _existing(names):
+            return [name for name in names if name in col_ix]
+
+        base_cols = list(required_cols)
+        base_cols += _existing(['sex'])
+        base_cols += _existing(pc_cols)
+        base_cols += _existing(['AGE_c', 'AGE_c_sq'])
+        base_cols += _existing(anc_cols)
         base_ix = [col_ix[c] for c in base_cols]
 
         X_base = pd.DataFrame(
@@ -2560,6 +2590,15 @@ def lrt_overall_worker(task):
                     "P_Value": np.nan,
                     "P_Valid": False,
                     "P_Source": None,
+                    "Beta": np.nan,
+                    "OR": np.nan,
+                    "OR_CI95": None,
+                    "CI_Method": None,
+                    "CI_Sided": None,
+                    "CI_Label": "",
+                    "CI_Valid": False,
+                    "CI_LO_OR": np.nan,
+                    "CI_HI_OR": np.nan,
                 }
             )
             out_notes = out.get("Model_Notes")
@@ -2709,7 +2748,19 @@ def bootstrap_overall_worker(task):
 
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
         anc_cols = [c for c in worker_core_df_cols if c.startswith("ANC_")]
-        base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq'] + anc_cols
+        required_cols = ['const', target]
+        missing_required = [c for c in required_cols if c not in col_ix]
+        if missing_required:
+            raise KeyError(f"missing required design columns: {missing_required}")
+
+        def _existing(names):
+            return [name for name in names if name in col_ix]
+
+        base_cols = list(required_cols)
+        base_cols += _existing(['sex'])
+        base_cols += _existing(pc_cols)
+        base_cols += _existing(['AGE_c', 'AGE_c_sq'])
+        base_cols += _existing(anc_cols)
         base_ix = [col_ix[c] for c in base_cols]
         X_base = pd.DataFrame(
             X_all[np.ix_(valid_mask, base_ix)],
@@ -2939,7 +2990,18 @@ def lrt_followup_worker(task):
         valid_mask = (allowed_mask | case_mask) & finite_mask_worker
 
         pc_cols = [f"PC{i}" for i in range(1, CTX["NUM_PCS"] + 1)]
-        base_cols = ['const', target, 'sex'] + pc_cols + ['AGE_c', 'AGE_c_sq']
+        required_cols = ['const', target]
+        missing_required = [c for c in required_cols if c not in col_ix]
+        if missing_required:
+            raise KeyError(f"missing required design columns: {missing_required}")
+
+        def _existing(names):
+            return [name for name in names if name in col_ix]
+
+        base_cols = list(required_cols)
+        base_cols += _existing(['sex'])
+        base_cols += _existing(pc_cols)
+        base_cols += _existing(['AGE_c', 'AGE_c_sq'])
         base_ix = [col_ix[c] for c in base_cols]
         X_base_df = pd.DataFrame(
             X_all[np.ix_(valid_mask, base_ix)],
@@ -3424,6 +3486,22 @@ def lrt_followup_worker(task):
                     ci_hi_or = np.nan
                     ci_str = None
                     ci_method = None
+
+            if (
+                inference_type == "firth"
+                and not ci_valid
+                and target_ix_anc is not None
+                and target in X_anc_zv.columns
+            ):
+                wald = _wald_ci_or_from_fit(fit_full_use, target_ix_anc, alpha=0.05, penalized=False)
+                if wald.get("valid", False):
+                    ci_valid = True
+                    ci_method = wald.get("method")
+                    ci_sided = "two"
+                    ci_lo_or = float(wald["lo_or"])
+                    ci_hi_or = float(wald["hi_or"])
+                    ci_str = _fmt_ci(ci_lo_or, ci_hi_or)
+                    ci_label = "wald fallback"
 
             if inference_type == "mle":
                 ridge_inference = any(
