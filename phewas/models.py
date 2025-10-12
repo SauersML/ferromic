@@ -1028,7 +1028,10 @@ def _wald_ci_or_from_fit(fit, target_ix, alpha=0.05, *, penalized=False):
     hi_or = float(np.exp(hi_beta))
     ok = np.isfinite(lo_or) and np.isfinite(hi_or) and (lo_or > 0.0) and (hi_or > 0.0)
 
-    if ok and penalized:
+    is_ridge = bool(getattr(fit, "_used_ridge", False))
+    is_firth = bool(getattr(fit, "_used_firth", False))
+
+    if ok and penalized and is_ridge and not is_firth:
         span = hi_or / max(lo_or, 1e-300)
         if span > float(CTX.get("PENALIZED_CI_SPAN_RATIO", PENALIZED_CI_SPAN_RATIO)):
             ok = False
@@ -2898,7 +2901,35 @@ def bootstrap_overall_worker(task):
         ci_hi_or = np.nan
         or_ci95 = None
         ci_method = None
+        ci_label = None
         ci_valid = False
+        if target in X_full_zv.columns and np.isfinite(beta_full):
+            try:
+                x_target_vec_ci = X_full_zv[target].to_numpy(dtype=np.float64, copy=False)
+                ci_info = _score_boot_ci_beta(
+                    X_red_zv,
+                    yb,
+                    x_target_vec_ci,
+                    beta_full,
+                    kind="mle",
+                    seed_key=("boot_overall", s_name_safe, target, "ci"),
+                    p_at_zero=p_emp,
+                )
+            except Exception:
+                ci_info = {"valid": False}
+            if ci_info.get("valid", False):
+                lo_beta = float(ci_info.get("lo", np.nan))
+                hi_beta = float(ci_info.get("hi", np.nan))
+                ci_lo_or = 0.0 if lo_beta == -np.inf else (
+                    float(np.exp(lo_beta)) if np.isfinite(lo_beta) else np.nan
+                )
+                ci_hi_or = np.inf if hi_beta == np.inf else (
+                    float(np.exp(hi_beta)) if np.isfinite(hi_beta) else np.nan
+                )
+                or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
+                ci_method = ci_info.get("method", "score_boot_multiplier")
+                ci_label = "score bootstrap (inverted)"
+                ci_valid = True
         if fit_full is not None and target in X_full_zv.columns:
             wald = _wald_ci_or_from_fit(
                 fit_full,
@@ -2906,20 +2937,22 @@ def bootstrap_overall_worker(task):
                 alpha=0.05,
                 penalized=bool(getattr(fit_full, "_used_ridge", False)),
             )
-            if (
-                not wald.get("valid", False)
-                and bool(getattr(fit_full, "_used_ridge", False))
-                and bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
-            ):
-                firth_for_ci = _firth_refit(X_full_zv, yb)
-                if firth_for_ci is not None:
-                    wald = _wald_ci_or_from_fit(firth_for_ci, target_ix_full, alpha=0.05, penalized=True)
-            if wald.get("valid", False):
-                ci_lo_or = float(wald["lo_or"])
-                ci_hi_or = float(wald["hi_or"])
-                or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
-                ci_method = wald["method"]
-                ci_valid = True
+            if not ci_valid:
+                if (
+                    not wald.get("valid", False)
+                    and bool(getattr(fit_full, "_used_ridge", False))
+                    and bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
+                ):
+                    firth_for_ci = _firth_refit(X_full_zv, yb)
+                    if firth_for_ci is not None:
+                        wald = _wald_ci_or_from_fit(firth_for_ci, target_ix_full, alpha=0.05, penalized=True)
+                if wald.get("valid", False):
+                    ci_lo_or = float(wald["lo_or"])
+                    ci_hi_or = float(wald["hi_or"])
+                    or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
+                    ci_method = wald["method"]
+                    ci_label = None
+                    ci_valid = True
         io.atomic_write_json(res_path, {
             "Phenotype": s_name,
             "N_Total": n_total_pre,
@@ -2931,6 +2964,7 @@ def bootstrap_overall_worker(task):
             "P_Source": "score_boot",
             "OR_CI95": or_ci95,
             "CI_Method": ci_method,
+            "CI_Label": ci_label,
             "CI_Valid": bool(ci_valid),
             "CI_LO_OR": ci_lo_or,
             "CI_HI_OR": ci_hi_or,
