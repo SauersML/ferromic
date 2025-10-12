@@ -441,6 +441,9 @@ MIN_CONTROLS_FILTER = 1000
 MIN_NEFF_FILTER = 0 # Default off
 FDR_ALPHA = 0.05
 
+# --- Population filter ---
+POPULATION_FILTER = "eur"
+
 # --- Testing configuration (centralized in testing.py) ---
 tctx = testing.get_testing_ctx()
 PHENO_PROTECT = set()
@@ -589,6 +592,25 @@ def _pipeline_once():
                 lock_dir=LOCK_DIR,
             )
             anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"].str.lower()
+
+            population_filter = (POPULATION_FILTER or "").strip().lower()
+            if population_filter and population_filter != "all":
+                available_labels = anc_series.dropna().unique().tolist()
+                if population_filter not in available_labels:
+                    raise RuntimeError(
+                        "Requested population filter '"
+                        f"{population_filter}"
+                        "' does not match any available ancestry labels."
+                    )
+                keep_ids = anc_series[anc_series == population_filter].index
+                print(
+                    f"[Config] Restricting analysis to population '{population_filter}' "
+                    f"({len(keep_ids)} participants).",
+                    flush=True,
+                )
+                shared_covariates_df = shared_covariates_df.loc[keep_ids]
+                anc_series = anc_series.loc[keep_ids]
+
             anc_cat_global = pd.Categorical(anc_series.reindex(shared_covariates_df.index))
             A_global = pd.get_dummies(anc_cat_global, prefix='ANC', drop_first=True, dtype=np.float32)
             A_global.index = A_global.index.astype(str)
