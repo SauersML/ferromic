@@ -1,16 +1,15 @@
 import os
 import re
+import math
 import hashlib
 from functools import lru_cache
 import time
 import numpy as np
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from math import sqrt, copysign
 from collections import defaultdict
 from itertools import combinations
 from typing import Optional, Dict, Set, Tuple, List
-from scipy.stats import chi2_contingency
 import json
 import tempfile
 
@@ -784,21 +783,19 @@ def phenotype_fetcher_worker(pheno_queue,
 # --- Dedup functions ---
 
 def phi_from_2x2(n11: int, n10: int, n01: int, n00: int) -> float:
-    """
-    Compute the phi coefficient (Pearson correlation for two binary variables)
-    using SciPy's chi2_contingency for robustness, with the correct sign.
-    """
-    n = n11 + n10 + n01 + n00
-    if n <= 0:
+    """Compute the phi coefficient for a 2x2 contingency table."""
+
+    n1a = n11 + n10
+    n0a = n01 + n00
+    n1b = n11 + n01
+    n0b = n10 + n00
+    denom = math.sqrt(max(n1a, 0) * max(n0a, 0) * max(n1b, 0) * max(n0b, 0))
+    if denom <= 0:
         return 0.0
-    try:
-        chi2, _, _, _ = chi2_contingency([[n11, n10], [n01, n00]], correction=False)
-        mag = sqrt(max(0.0, chi2 / n))
-        sign_num = (n11 * n00) - (n10 * n01)
-        return copysign(mag, sign_num)
-    except Exception:
-        # On any numerical issue, fall back to 0.0 which cannot trigger a drop.
+    phi = ((n11 * n00) - (n10 * n01)) / denom
+    if not np.isfinite(phi):
         return 0.0
+    return float(np.clip(phi, -0.99, 0.99))
 
 
 def _build_pair_overlap_counts(cases_by_pheno: Dict[str, np.ndarray],
