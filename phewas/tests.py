@@ -42,6 +42,7 @@ import phewas.run as run
 import phewas.iox as io
 import phewas.pheno as pheno
 import phewas.models as models
+import phewas.categories as categories
 from scipy.special import expit as sigmoid
 
 pytestmark = pytest.mark.timeout(30)
@@ -1204,3 +1205,82 @@ def test_lrt_allows_when_ridge_seeded_but_final_is_mle(test_ctx):
         finally:
             M._logit_fit = orig
             shm.close(); shm.unlink()
+
+
+def test_covariance_and_metrics_basic(monkeypatch):
+    core = pd.DataFrame(index=pd.Index([str(i) for i in range(10)], name="person_id"))
+
+    def fake_cases(name, cdr, cache):
+        return {
+            "ph1": ["0", "1", "2"],
+            "ph2": ["0", "1"],
+            "ph3": ["7", "8"],
+        }.get(name, [])
+
+    monkeypatch.setattr(pheno, "_case_ids_cached", fake_cases)
+
+    cat_sets = {"Cat": ["ph1", "ph2", "ph3"]}
+    allowed = {"Cat": np.ones(core.shape[0], dtype=bool)}
+
+    nulls = categories.build_category_null_structure(
+        core,
+        allowed,
+        cat_sets,
+        cache_dir=".",
+        cdr_codename="TEST",
+        method="fast_phi",
+        shrinkage="ridge",
+        lambda_value=0.05,
+        min_k=2,
+        global_mask=None,
+    )
+
+    assert "Cat" in nulls
+    struct = nulls["Cat"]
+    assert struct.covariance.shape == (3, 3)
+
+    inv = pd.DataFrame(
+        {
+            "Phenotype": ["ph1", "ph2", "ph3"],
+            "P_EMP": [1e-5, 2e-4, 0.03],
+            "Beta": [0.2, 0.1, -0.05],
+        }
+    )
+
+    out = categories.compute_category_metrics(
+        inv,
+        p_col="P_EMP",
+        beta_col="Beta",
+        null_structures=nulls,
+        gbj_draws=200,
+        z_cap=6.0,
+        rng_seed=42,
+        min_k=2,
+    )
+
+    assert out.shape[0] == 1
+    row = out.loc[0]
+    assert row["Category"] == "Cat"
+    assert np.isfinite(row["P_GBJ"])
+    assert np.isfinite(row["P_GLS"])
+
+
+def test_plan_category_sets_respects_min_k_and_dedup(tmp_path):
+    phenos = ["A", "B", "C", "D"]
+    name_to_cat = {"A": "X", "B": "X", "C": "Y", "D": "Y"}
+    manifest = {"kept": ["A", "B", "C"]}
+
+    core_idx = pd.Index(["p1", "p2", "p3"], name="person_id")
+    cache_dir = tmp_path.as_posix()
+    fingerprint = models._index_fingerprint(core_idx)
+    manifest_path = tmp_path / f"pheno_dedup_manifest_TEST_{fingerprint}.json"
+    manifest_path.write_text(json.dumps(manifest))
+
+    loaded = categories.load_dedup_manifest(cache_dir, "TEST", core_idx)
+    kept, dropped = categories.plan_category_sets(phenos, name_to_cat, loaded, min_k=2)
+
+    assert "X" in kept
+    assert kept["X"] == ["A", "B"]
+    assert "Y" in dropped and dropped["Y"] == ["C"]
+    assert "Y" not in kept
+    assert all(p in {"A", "B", "C"} for plist in kept.values() for p in plist)
