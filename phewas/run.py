@@ -446,7 +446,47 @@ FDR_ALPHA = 0.05
 POPULATION_FILTER = "eur"
 
 # --- Testing configuration (centralized in testing.py) ---
-tctx = testing.get_testing_ctx()
+_cat_env_overrides = {}
+
+def _maybe_parse_env(name: str, cast):
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    try:
+        return cast(raw)
+    except Exception:
+        print(f"[Config] Ignoring invalid value for {name!s}: {raw!r}", flush=True)
+        return None
+
+env_method = os.getenv("CAT_METHOD")
+if env_method:
+    _cat_env_overrides["CAT_METHOD"] = env_method.strip()
+
+env_shrinkage = os.getenv("CAT_SHRINKAGE")
+if env_shrinkage:
+    _cat_env_overrides["CAT_SHRINKAGE"] = env_shrinkage.strip()
+
+gbj_draws = _maybe_parse_env("CAT_GBJ_B", int)
+if gbj_draws is not None:
+    _cat_env_overrides["CAT_GBJ_B"] = max(int(gbj_draws), 1)
+
+z_cap = _maybe_parse_env("CAT_Z_CAP", float)
+if z_cap is not None:
+    _cat_env_overrides["CAT_Z_CAP"] = float(z_cap)
+
+lambda_override = _maybe_parse_env("CAT_LAMBDA", float)
+if lambda_override is not None:
+    _cat_env_overrides["CAT_LAMBDA"] = float(lambda_override)
+
+min_k_override = _maybe_parse_env("CAT_MIN_K", int)
+if min_k_override is not None:
+    _cat_env_overrides["CAT_MIN_K"] = max(int(min_k_override), 1)
+
+seed_override = _maybe_parse_env("CAT_SEED_BASE", int)
+if seed_override is not None:
+    _cat_env_overrides["CAT_SEED_BASE"] = int(seed_override)
+
+tctx = testing.get_testing_ctx(_cat_env_overrides or None)
 PHENO_PROTECT = set()
 MAX_CONCURRENT_INVERSIONS_DEFAULT = tctx["MAX_CONCURRENT_INVERSIONS_DEFAULT"]
 MAX_CONCURRENT_INVERSIONS_BOOT = tctx["MAX_CONCURRENT_INVERSIONS_BOOT"]
@@ -961,6 +1001,18 @@ def _pipeline_once():
                                         min_k=min_k,
                                     )
                                     if not cat_df.empty:
+                                        if "P_GBJ" in cat_df.columns and cat_df["P_GBJ"].notna().any():
+                                            mask = cat_df["P_GBJ"].notna()
+                                            _, q_cat_gbj, _, _ = multipletests(
+                                                cat_df.loc[mask, "P_GBJ"], alpha=0.05, method="fdr_bh"
+                                            )
+                                            cat_df.loc[mask, "Q_GBJ"] = q_cat_gbj
+                                        if "P_GLS" in cat_df.columns and cat_df["P_GLS"].notna().any():
+                                            mask = cat_df["P_GLS"].notna()
+                                            _, q_cat_gls, _, _ = multipletests(
+                                                cat_df.loc[mask, "P_GLS"], alpha=0.05, method="fdr_bh"
+                                            )
+                                            cat_df.loc[mask, "Q_GLS"] = q_cat_gls
                                         categories_dir = os.path.join(inversion_cache_dir, "categories")
                                         os.makedirs(categories_dir, exist_ok=True)
                                         summary_path = os.path.join(categories_dir, f"{inv_safe_name}_category_summary.tsv")
