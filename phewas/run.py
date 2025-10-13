@@ -44,6 +44,7 @@ else:  # pragma: no cover - exercised in minimal environments
 from statsmodels.stats.multitest import multipletests
 from scipy import stats
 
+from . import categories
 from . import iox as io
 from . import pheno
 from . import pipes
@@ -847,6 +848,9 @@ def _pipeline_once():
                 else:
                     print(f"{log_prefix} No phenotypes qualified for Stage-1 testing after prefiltering.")
 
+                inv_df = pd.DataFrame()
+                p_col = None
+
                 try:
                     rows = []
                     if tctx["MODE"] == "lrt_bh":
@@ -917,6 +921,65 @@ def _pipeline_once():
                         + (pd.to_numeric(top["N_Controls"], errors="coerce").fillna(0).astype(int)).astype(str)
                     )
                     print(f"\n{log_prefix} --- Top Hits Summary (provisional) ---\n" + top[["Phenotype","P","Q","OR","Beta","N"]].to_string(index=False) + "\n")
+
+                    if not inv_df.empty and p_col:
+                        try:
+                            dedup_manifest = categories.load_dedup_manifest(CACHE_DIR, shared_data['cdr_codename'], core_index)
+                            valid_mask = pd.to_numeric(inv_df[p_col], errors="coerce").notna()
+                            phenos_for_plan = inv_df.loc[valid_mask, "Phenotype"].tolist()
+                            min_k = int(tctx.get("CAT_MIN_K", 3))
+                            category_sets, _dropped_small = categories.plan_category_sets(
+                                phenos_for_plan,
+                                name_to_cat,
+                                dedup_manifest,
+                                min_k=min_k,
+                            )
+                            if category_sets:
+                                null_structs = categories.build_category_null_structure(
+                                    core_df_with_const,
+                                    allowed_mask_by_cat,
+                                    category_sets,
+                                    cache_dir=CACHE_DIR,
+                                    cdr_codename=shared_data['cdr_codename'],
+                                    method=str(tctx.get("CAT_METHOD", "fast_phi")).lower(),
+                                    shrinkage=str(tctx.get("CAT_SHRINKAGE", "ridge")).lower(),
+                                    lambda_value=float(tctx.get("CAT_LAMBDA", 0.05)),
+                                    min_k=min_k,
+                                    global_mask=global_notnull_mask,
+                                )
+                                if null_structs:
+                                    base_seed = int(tctx.get("CAT_SEED_BASE", 1729))
+                                    seed = (base_seed + (abs(hash((target_inversion, ctx.get("CTX_TAG")))) % (2 ** 32))) % (2 ** 32)
+                                    cat_df = categories.compute_category_metrics(
+                                        inv_df,
+                                        p_col=p_col,
+                                        beta_col="Beta",
+                                        null_structures=null_structs,
+                                        gbj_draws=int(tctx.get("CAT_GBJ_B", 5000)),
+                                        z_cap=float(tctx.get("CAT_Z_CAP", 8.0)),
+                                        rng_seed=seed,
+                                        min_k=min_k,
+                                    )
+                                    if not cat_df.empty:
+                                        categories_dir = os.path.join(inversion_cache_dir, "categories")
+                                        os.makedirs(categories_dir, exist_ok=True)
+                                        summary_path = os.path.join(categories_dir, f"{inv_safe_name}_category_summary.tsv")
+                                        cat_df.to_csv(summary_path, sep="\t", index=False)
+                                        print(
+                                            f"{log_prefix} Category summary saved to {summary_path} ({len(cat_df)} rows).",
+                                            flush=True,
+                                        )
+                                    else:
+                                        print(f"{log_prefix} Category metrics produced no eligible categories.", flush=True)
+                                else:
+                                    print(f"{log_prefix} No category null structures built (insufficient data).", flush=True)
+                            else:
+                                print(f"{log_prefix} No categories met minimum phenotype requirement.", flush=True)
+                        except NotImplementedError as exc:
+                            print(f"{log_prefix} [WARN] Category metrics unavailable: {exc}", flush=True)
+                        except Exception as exc:
+                            print(f"{log_prefix} [WARN] Category metrics failed: {exc}", flush=True)
+                            traceback.print_exc()
                 except Exception:
                     print(f"{log_prefix} [WARN] Could not produce per-inversion summary.", flush=True)
 
