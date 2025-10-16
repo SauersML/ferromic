@@ -1,6 +1,6 @@
 # Ferromic
 
-Rust-accelerated population genetics toolkit for large variant datasets with batteries-included CLI workflows and Python bindings.
+Ferromic is a Rust-accelerated population genetics toolkit built for haplotype-aware studies on large variant cohorts. It offers batteries-included CLI workflows alongside polished Python bindings so the same core algorithms can be reused in notebooks and scripted pipelines.
 
 ## Table of contents
 
@@ -32,6 +32,7 @@ Rust-accelerated population genetics toolkit for large variant datasets with bat
 - **Designed for big cohorts.** Rayon-powered multithreading, streaming VCF readers, progress bars, and resumable temporary directories keep terabyte-scale runs responsive.
 - **Rich output surface.** Generates region summaries, per-base FASTA-style tracks, PCA tables, PHYLIP files, and optional Hudson TSV exports ready for downstream notebooks.
 - **First-class Python ergonomics.** A PyO3-powered module exposes the same core statistics to Python, NumPy, and pandas workflows without sacrificing performance.
+- **Operationally friendly.** Ships with helper scripts, resumable temporary workspaces, and informative logging so long-running analyses can be monitored and resumed with confidence.
 
 ## Quick start
 
@@ -41,6 +42,7 @@ Rust-accelerated population genetics toolkit for large variant datasets with bat
    - Place bgzipped or plain-text VCFs for each chromosome in a directory.
    - Supply a reference FASTA and matching GTF/GFF annotation.
    - Describe regions of interest in a TSV file (see [Regional configuration file](#regional-configuration-file)).
+   - (Optional) Prepare mask or allow BEDs and an FST population map if you plan to enable `--fst`.
 2. **Invoke the main driver**
 
    ```bash
@@ -95,7 +97,7 @@ pca = fm.chromosome_pca(
 print("PCA components shape:", pca.coordinates.shape)
 ```
 
-The Python surface mirrors the Rust crate: Hudson-style populations, per-site diversity iterators, PCA utilities, and sequence-length helpers are available under the top-level `ferromic` namespace. The bindings favour "plain" Python collections—variants can be dictionaries, dataclasses, or any object exposing `position` and `genotypes`, while haplotypes accept tuples such as `(sample_index, "L")` or `(sample_index, 1)`.
+The Python surface mirrors the Rust crate: Hudson-style populations, per-site diversity iterators, PCA utilities, and sequence-length helpers are available under the top-level `ferromic` namespace. The bindings favour "plain" Python collections—variants can be dictionaries, dataclasses, or any object exposing `position` and `genotypes`, while haplotypes accept tuples such as `(sample_index, "L")` or `(sample_index, 1)`. All heavy lifting happens in Rust, so interactive workflows retain native performance.
 
 #### High-level API surface
 
@@ -144,6 +146,8 @@ The script pulls platform-appropriate tarballs for `ferromic`, `vcf_stats`, and 
 
    The compiled binaries live under `target/release/`.
 
+   Use `cargo run --bin run_vcf -- --help` to confirm the toolchain is set up correctly.
+
 Environment variable `RAMDISK_PATH` can be set to redirect temporary directories to a specific high-speed volume (defaults to `/dev/shm`).
 
 ### Install the Python wheel
@@ -160,6 +164,8 @@ maturin develop --release
 ```
 
 Set `PYO3_PYTHON` or pass `--python` to target a specific interpreter.
+
+When the wheel is installed via `pip`, the Rust extensions are compiled in release mode by default. During development the `maturin develop` workflow above produces editable installs that stay in sync with local code changes.
 
 ## Input requirements
 
