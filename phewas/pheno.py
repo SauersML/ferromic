@@ -35,7 +35,8 @@ PHENO_PROTECT: Set[str] = set()
 PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = 64
 
 # --- Sample thresholds ---
-MIN_SAMPLE_SIZE = 100
+MIN_CASES_FILTER = 1_000
+MIN_CONTROLS_FILTER = 1_000
 
 # --- Prevalence cap ---
 # Drop phenotypes with extremely high absolute case counts before pairwise deduplication.
@@ -70,7 +71,8 @@ def configure_from_ctx(ctx: Dict) -> None:
     PHENO_PROTECT = set(ctx.get("PHENO_PROTECT", PHENO_PROTECT))
 
 def _prequeue_should_run(pheno_info, core_index, allowed_mask_by_cat, sex_vec,
-                         min_cases, min_ctrls, sex_mode="majority", sex_prop=0.99, max_other=0, min_neff=None):
+                         min_cases=MIN_CASES_FILTER, min_ctrls=MIN_CONTROLS_FILTER,
+                         sex_mode="majority", sex_prop=0.99, max_other=0, min_neff=None):
     """
     Decide, without loading X, whether this phenotype should be queued.
     Uses cached case indices, allowed control mask, and sex restriction rule.
@@ -608,8 +610,8 @@ def phenotype_fetcher_worker(pheno_queue,
                              allow_bq: bool = True,
                              allowed_mask_by_cat: Optional[dict] = None,
                              sex_vec: Optional[np.ndarray] = None,
-                             min_cases: int = MIN_SAMPLE_SIZE,
-                             min_ctrls: int = MIN_SAMPLE_SIZE,
+                             min_cases: int = MIN_CASES_FILTER,
+                             min_ctrls: int = MIN_CONTROLS_FILTER,
                              sex_mode: str = "majority",
                              sex_prop: float = 0.99,
                              max_other: int = 0,
