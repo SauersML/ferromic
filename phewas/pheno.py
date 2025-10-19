@@ -34,6 +34,9 @@ SHARE_THRESHOLD = 0.70
 PHENO_PROTECT: Set[str] = set()
 PHENO_DEDUP_CAP_PER_PERSON: Optional[int] = 64
 
+# --- Sample thresholds ---
+MIN_SAMPLE_SIZE = 100
+
 # --- Prevalence cap ---
 # Drop phenotypes with extremely high absolute case counts before pairwise deduplication.
 EXCLUDE_ABS_CASES = 90_000
@@ -605,8 +608,8 @@ def phenotype_fetcher_worker(pheno_queue,
                              allow_bq: bool = True,
                              allowed_mask_by_cat: Optional[dict] = None,
                              sex_vec: Optional[np.ndarray] = None,
-                             min_cases: int = 1000,
-                             min_ctrls: int = 1000,
+                             min_cases: int = MIN_SAMPLE_SIZE,
+                             min_ctrls: int = MIN_SAMPLE_SIZE,
                              sex_mode: str = "majority",
                              sex_prop: float = 0.99,
                              max_other: int = 0,

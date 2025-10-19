@@ -75,8 +75,8 @@ def _write_meta(meta_path, kind, s_name, category, target, core_cols, core_idx_f
     io.atomic_write_json(meta_path, base)
 
 # thresholds (configured via CTX; here are defaults/fallbacks)
-DEFAULT_MIN_CASES = 1000
-DEFAULT_MIN_CONTROLS = 1000
+DEFAULT_MIN_CASES = 100
+DEFAULT_MIN_CONTROLS = 100
 DEFAULT_MIN_NEFF = 0  # set 0 to disable
 DEFAULT_SEX_RESTRICT_PROP = 0.99
 
