@@ -437,8 +437,8 @@ CACHE_VERSION_TAG = io.CACHE_VERSION_TAG
 
 # --- Model parameters ---
 NUM_PCS = 16
-MIN_CASES_FILTER = 1000
-MIN_CONTROLS_FILTER = 1000
+MIN_CASES_FILTER = pheno.MIN_CASES_FILTER
+MIN_CONTROLS_FILTER = pheno.MIN_CONTROLS_FILTER
 MIN_NEFF_FILTER = 0 # Default off
 FDR_ALPHA = 0.05
 
@@ -543,6 +543,10 @@ def _pipeline_once():
     Entry point for the PheWAS pipeline. Uses module-level configuration directly.
     """
     script_start_time = time.time()
+
+    # Keep the phenotype module thresholds in sync with any overrides applied here.
+    pheno.MIN_CASES_FILTER = MIN_CASES_FILTER
+    pheno.MIN_CONTROLS_FILTER = MIN_CONTROLS_FILTER
 
     if PSUTIL_AVAILABLE:
         monitor_thread = SystemMonitor(interval=3)
@@ -690,7 +694,7 @@ def _pipeline_once():
                 core_index=shared_covariates_df.index,
                 cdr_codename=cdr_codename,
                 cache_dir=CACHE_DIR,
-                min_cases=MIN_CASES_FILTER,
+                min_cases=pheno.MIN_CASES_FILTER,
                 phi_threshold=pheno.PHI_THRESHOLD,
                 share_threshold=pheno.SHARE_THRESHOLD,
                 protect=PHENO_PROTECT
@@ -726,8 +730,8 @@ def _pipeline_once():
                 "cdr_codename": cdr_codename,
                 "target_inversion": inv,
                 "NUM_PCS": NUM_PCS,
-                "MIN_CASES_FILTER": MIN_CASES_FILTER,
-                "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
+                "MIN_CASES_FILTER": pheno.MIN_CASES_FILTER,
+                "MIN_CONTROLS_FILTER": pheno.MIN_CONTROLS_FILTER,
                 "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
                 "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES,
                 "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
@@ -765,8 +769,8 @@ def _pipeline_once():
 
                 ctx = {
                     "NUM_PCS": NUM_PCS,
-                    "MIN_CASES_FILTER": MIN_CASES_FILTER,
-                    "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
+                    "MIN_CASES_FILTER": pheno.MIN_CASES_FILTER,
+                    "MIN_CONTROLS_FILTER": pheno.MIN_CONTROLS_FILTER,
                     "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
                     "FDR_ALPHA": FDR_ALPHA,
                     "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES,
@@ -844,8 +848,8 @@ def _pipeline_once():
                         core_index,
                         allowed_mask_by_cat,
                         sex_vec,
-                        MIN_CASES_FILTER,
-                        MIN_CONTROLS_FILTER,
+                        pheno.MIN_CASES_FILTER,
+                        pheno.MIN_CONTROLS_FILTER,
                         sex_mode="majority",
                         sex_prop=models.DEFAULT_SEX_RESTRICT_PROP,
                         max_other=ctx.get("SEX_RESTRICT_MAX_OTHER_CASES", 0),
@@ -1208,7 +1212,7 @@ def _pipeline_once():
 
                 inversion_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion))
                 ctx = {
-                    "NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": MIN_CONTROLS_FILTER,
+                    "NUM_PCS": NUM_PCS, "MIN_CASES_FILTER": pheno.MIN_CASES_FILTER, "MIN_CONTROLS_FILTER": pheno.MIN_CONTROLS_FILTER,
                     "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
                     "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
                     "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE,
