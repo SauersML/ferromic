@@ -18,3 +18,20 @@ for it in json.load(sys.stdin):
     with os.fdopen(fd, "wb") as f: f.write(data)'
 
 ```
+
+## Running the PheWAS pipeline from the command line
+
+The pipeline can be launched with overrides for common configuration values via the
+`phewas.cli` module:
+
+```
+python -m phewas.cli [--min-cases-controls N] [--pop-label POPULATION]
+```
+
+* `--min-cases-controls` sets the minimum number of cases and controls required for a
+  phenotype. The same threshold is applied to both cases and controls and overrides the
+  defaults defined in `phewas.run`.
+* `--pop-label` restricts the run to participants matching the provided population label
+  generated during shared setup.
+
+Omitting these options keeps the existing default behaviour of the pipeline.
