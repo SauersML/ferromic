@@ -52,8 +52,12 @@ def apply_cli_configuration(args: argparse.Namespace) -> None:
     else:
         run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
 
-    if getattr(args, "pop_label", None) is not None:
-        run.POPULATION_FILTER = args.pop_label
+    raw_label = getattr(args, "pop_label", None)
+    if raw_label is not None:
+        label = raw_label.strip()
+        run.POPULATION_FILTER = label or "all"
+    else:
+        run.POPULATION_FILTER = "all"
 
 
 def main(argv: Sequence[str] | None = None) -> None:
