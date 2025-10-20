@@ -3045,6 +3045,17 @@ def lrt_followup_worker(task):
         y_series = pd.Series(np.where(case_mask[valid_mask], 1, 0), index=X_base_df.index, dtype=np.int8)
 
         Xb, yb, note, skip = _apply_sex_restriction(X_base_df, y_series)
+        anc_vec = worker_anc_series.reindex(Xb.index)
+        if anc_vec.isna().all():
+            skip = skip or "no_ancestry_labels"
+        else:
+            valid_anc_mask = anc_vec.notna()
+            if not valid_anc_mask.all():
+                Xb = Xb.loc[valid_anc_mask]
+                yb = yb.loc[valid_anc_mask]
+                anc_vec = anc_vec.loc[valid_anc_mask]
+                note = f"{note};dropped_missing_ancestry" if note else "dropped_missing_ancestry"
+
         out = {
             'Phenotype': s_name,
             'P_LRT_AncestryxDosage': np.nan,
@@ -3093,7 +3104,6 @@ def lrt_followup_worker(task):
             _write_meta(meta_path, "lrt_followup", s_name, category, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=meta_extra)
             return
 
-        anc_vec = worker_anc_series.loc[Xb.index]
         levels = pd.Index(anc_vec.dropna().unique(), dtype=str).tolist()
         levels_sorted = (['eur'] if 'eur' in levels else []) + [x for x in sorted(levels) if x != 'eur']
         out['LRT_Ancestry_Levels'] = ",".join(levels_sorted)
