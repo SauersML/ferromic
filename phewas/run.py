@@ -450,6 +450,69 @@ FDR_ALPHA = 0.05
 # --- Population filter ---
 POPULATION_FILTER = "all"
 
+_cli_override_env = os.getenv("FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE")
+if _cli_override_env is not None:
+    try:
+        CLI_MIN_CASES_CONTROLS_OVERRIDE = int(_cli_override_env)
+    except ValueError:
+        print(
+            f"[Config WARN] Ignoring invalid FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE={_cli_override_env!r}",
+            flush=True,
+        )
+
+_pop_filter_env = os.getenv("FERROMIC_POPULATION_FILTER")
+if _pop_filter_env is not None:
+    POPULATION_FILTER = _pop_filter_env.strip() or "all"
+
+
+def _normalize_population_label(label: Optional[str]) -> str:
+    """Return a canonical, lower-case population label suitable for comparisons."""
+    if label is None:
+        return ""
+    normalized = str(label).strip().lower()
+    return normalized
+
+
+def _apply_population_filter(
+    covariates_df: pd.DataFrame,
+    ancestry_series: pd.Series,
+    population_filter: str,
+) -> tuple[pd.DataFrame, pd.Series, str, bool]:
+    """Filter shared covariates and ancestry labels by the requested population."""
+
+    normalized = _normalize_population_label(population_filter)
+    ancestry_series = ancestry_series.astype("string").str.strip().str.lower()
+    ancestry_series = ancestry_series.reindex(covariates_df.index)
+    if not normalized or normalized == "all":
+        return covariates_df, ancestry_series, "all", True
+    available_labels = sorted(
+        {label for label in ancestry_series.dropna().unique().tolist() if label is not None}
+    )
+    if normalized not in available_labels:
+        raise RuntimeError(
+            "Requested population filter '"
+            f"{population_filter}"
+            "' does not match any available ancestry labels."
+        )
+
+    mask = ancestry_series.eq(normalized)
+    keep_ids = ancestry_series.index[mask.fillna(False)]
+    filtered_covariates = covariates_df.loc[keep_ids]
+    filtered_ancestry = ancestry_series.loc[keep_ids]
+    if filtered_covariates.empty:
+        raise RuntimeError(
+            "Population filter '"
+            f"{population_filter}"
+            "' removed all participants; check your labels and filter."
+        )
+
+    print(
+        f"[Config] Restricting analysis to population '{normalized}' "
+        f"({len(filtered_covariates)} participants).",
+        flush=True,
+    )
+    return filtered_covariates, filtered_ancestry, normalized, False
+
 # --- Testing configuration (centralized in testing.py) ---
 _cat_env_overrides = {}
 
@@ -581,6 +644,10 @@ def _pipeline_once():
         return max(4.0, governor.dynamic_floor_callable())
 
 
+    allow_ancestry_followups = True
+    population_filter_label = "all"
+
+
     print("=" * 70)
     print(" Starting Robust, Parallel PheWAS Pipeline")
     print("=" * 70)
@@ -651,27 +718,18 @@ def _pipeline_once():
                 LABELS_URI=LABELS_URI,
                 lock_dir=LOCK_DIR,
             )
-            anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"].str.lower()
-
-            population_filter = (POPULATION_FILTER or "").strip().lower()
-            if population_filter and population_filter != "all":
-                available_labels = anc_series.dropna().unique().tolist()
-                if population_filter not in available_labels:
-                    raise RuntimeError(
-                        "Requested population filter '"
-                        f"{population_filter}"
-                        "' does not match any available ancestry labels."
-                    )
-                keep_ids = anc_series[anc_series == population_filter].index
-                print(
-                    f"[Config] Restricting analysis to population '{population_filter}' "
-                    f"({len(keep_ids)} participants).",
-                    flush=True,
+            anc_series_raw = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"]
+            shared_covariates_df, anc_series, population_filter_label, allow_ancestry_followups = (
+                _apply_population_filter(
+                    shared_covariates_df,
+                    anc_series_raw,
+                    POPULATION_FILTER,
                 )
-                shared_covariates_df = shared_covariates_df.loc[keep_ids]
-                anc_series = anc_series.loc[keep_ids]
+            )
 
-            anc_cat_global = pd.Categorical(anc_series.reindex(shared_covariates_df.index))
+            anc_cat_global = pd.Categorical(
+                anc_series.reindex(shared_covariates_df.index)
+            )
             A_global = pd.get_dummies(anc_cat_global, prefix='ANC', drop_first=True, dtype=np.float32)
             A_global.index = A_global.index.astype(str)
             A_cols = list(A_global.columns)
@@ -732,6 +790,7 @@ def _pipeline_once():
         data_keys = {
             "dosages": dosages_key,
             "covars": covar_key,
+            "population_filter": population_filter_label,
         }
 
         def _inversion_cache_path(inv: str) -> str:
@@ -758,6 +817,7 @@ def _pipeline_once():
                 "BOOTSTRAP_B": tctx.get("BOOTSTRAP_B"),
                 "BOOT_SEED_BASE": tctx.get("BOOT_SEED_BASE"),
                 "DATA_KEYS": data_keys,
+                "POPULATION_FILTER": population_filter_label,
             }
             return io.stable_hash(payload)
 
@@ -810,6 +870,8 @@ def _pipeline_once():
                     "STAGE1_REPORTS_FINAL": True,
                     "STAGE1_MATCH_PHEWAS_DESIGN": True,
                     "STAGE1_EMIT_PHEWAS_EXTRAS": True,
+                    "POPULATION_FILTER": population_filter_label,
+                    "ALLOW_ANCESTRY_FOLLOWUP": allow_ancestry_followups,
                 }
                 pheno.configure_from_ctx(ctx)
                 inversion_df = io.get_cached_or_generate(
@@ -1250,35 +1312,44 @@ def _pipeline_once():
                 # Select hits for the current inversion and run follow-up
                 hit_phenos = df.loc[(df["Sig_Global"] == True) & (df["Inversion"] == target_inversion), "Phenotype"].astype(str).tolist()
                 if hit_phenos:
-                    print(f"--- Running follow-up for {len(hit_phenos)} hits in {target_inversion} ---")
-                    pipes.run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_phenos, name_to_cat, cdr_codename, target_inversion, ctx, mem_floor_callable)
+                    if allow_ancestry_followups:
+                        print(f"--- Running follow-up for {len(hit_phenos)} hits in {target_inversion} ---")
+                        pipes.run_lrt_followup(core_df_with_const, allowed_mask_by_cat, anc_series, hit_phenos, name_to_cat, cdr_codename, target_inversion, ctx, mem_floor_callable)
+                    else:
+                        print(
+                            f"--- Skipping ancestry follow-up for {len(hit_phenos)} hits in {target_inversion} "
+                            f"due to active population filter '{population_filter_label}'. ---"
+                        )
 
-            # Consolidate all follow-up results
-            print("\n--- Consolidating all Stage-2 follow-up results ---")
-            follow_records = []
-            for target_inversion in run.TARGET_INVERSIONS:
-                lrt_followup_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion), "lrt_followup")
-                if not os.path.isdir(lrt_followup_cache_dir): continue
-                files_follow = [f for f in os.listdir(lrt_followup_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
-                for filename in files_follow:
-                    try:
-                        meta_path = os.path.join(lrt_followup_cache_dir, filename.replace(".json", ".meta.json"))
-                        meta = io.read_meta_json(meta_path)
-                        expected_tag = ctx_tag_by_inversion.get(target_inversion)
-                        if not meta:
-                            continue
-                        if meta.get("ctx_tag") != expected_tag or meta.get("cdr_codename") != cdr_codename or meta.get("target") != target_inversion:
-                            continue
-                        rec = pd.read_json(os.path.join(lrt_followup_cache_dir, filename), typ="series").to_dict()
-                        rec['Inversion'] = target_inversion
-                        follow_records.append(rec)
-                    except Exception as e:
-                        print(f"Warning: Could not read LRT follow-up file: {filename}, Error: {e}")
+            if allow_ancestry_followups:
+                # Consolidate all follow-up results
+                print("\n--- Consolidating all Stage-2 follow-up results ---")
+                follow_records = []
+                for target_inversion in run.TARGET_INVERSIONS:
+                    lrt_followup_cache_dir = os.path.join(CACHE_DIR, models.safe_basename(target_inversion), "lrt_followup")
+                    if not os.path.isdir(lrt_followup_cache_dir): continue
+                    files_follow = [f for f in os.listdir(lrt_followup_cache_dir) if f.endswith(".json") and not f.endswith(".meta.json")]
+                    for filename in files_follow:
+                        try:
+                            meta_path = os.path.join(lrt_followup_cache_dir, filename.replace(".json", ".meta.json"))
+                            meta = io.read_meta_json(meta_path)
+                            expected_tag = ctx_tag_by_inversion.get(target_inversion)
+                            if not meta:
+                                continue
+                            if meta.get("ctx_tag") != expected_tag or meta.get("cdr_codename") != cdr_codename or meta.get("target") != target_inversion:
+                                continue
+                            rec = pd.read_json(os.path.join(lrt_followup_cache_dir, filename), typ="series").to_dict()
+                            rec['Inversion'] = target_inversion
+                            follow_records.append(rec)
+                        except Exception as e:
+                            print(f"Warning: Could not read LRT follow-up file: {filename}, Error: {e}")
 
-            if follow_records:
-                follow_df = pd.DataFrame(follow_records)
-                print(f"Collected {len(follow_df)} follow-up records.")
-                df = df.merge(follow_df, on=["Phenotype", "Inversion"], how="left")
+                if follow_records:
+                    follow_df = pd.DataFrame(follow_records)
+                    print(f"Collected {len(follow_df)} follow-up records.")
+                    df = df.merge(follow_df, on=["Phenotype", "Inversion"], how="left")
+            else:
+                print("\n--- Stage-2 ancestry follow-up consolidation skipped due to population filter. ---")
 
             if "EUR_P_Source" in df.columns:
                 df = df.drop(columns=["EUR_P_Source"], errors="ignore")

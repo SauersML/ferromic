@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from typing import Sequence
 
 from . import run
@@ -49,11 +50,20 @@ def apply_cli_configuration(args: argparse.Namespace) -> None:
     if getattr(args, "min_cases_controls", None) is not None:
         threshold = int(args.min_cases_controls)
         run.CLI_MIN_CASES_CONTROLS_OVERRIDE = threshold
+        os.environ["FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE"] = str(threshold)
     else:
         run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
+        os.environ.pop("FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE", None)
 
-    if getattr(args, "pop_label", None) is not None:
-        run.POPULATION_FILTER = args.pop_label
+    raw_label = getattr(args, "pop_label", None)
+    if raw_label is not None:
+        label = raw_label.strip()
+        normalized = label or "all"
+        run.POPULATION_FILTER = normalized
+        os.environ["FERROMIC_POPULATION_FILTER"] = normalized
+    else:
+        run.POPULATION_FILTER = "all"
+        os.environ.pop("FERROMIC_POPULATION_FILTER", None)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
