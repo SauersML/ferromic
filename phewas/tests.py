@@ -1282,7 +1282,8 @@ def test_covariance_and_metrics_basic(monkeypatch):
 
     assert "Cat" in nulls
     struct = nulls["Cat"]
-    assert struct.covariance.shape == (3, 3)
+    assert struct.correlation.shape == (3, 3)
+    assert struct.n_individuals == 10
 
     inv = pd.DataFrame(
         {
@@ -1308,6 +1309,7 @@ def test_covariance_and_metrics_basic(monkeypatch):
     assert row["Category"] == "Cat"
     assert np.isfinite(row["P_GBJ"])
     assert np.isfinite(row["P_GLS"])
+    assert row["Phenotypes_GLS"] == "ph1;ph2;ph3"
 
 
 def test_plan_category_sets_respects_min_k_and_dedup(tmp_path):
