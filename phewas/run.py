@@ -1020,9 +1020,8 @@ def _pipeline_once():
                                                 cat_df.loc[mask, "P_GLS"], alpha=0.05, method="fdr_bh"
                                             )
                                             cat_df.loc[mask, "Q_GLS"] = q_cat_gls
-                                        categories_dir = os.path.join(inversion_cache_dir, "categories")
-                                        os.makedirs(categories_dir, exist_ok=True)
-                                        summary_path = os.path.join(categories_dir, f"{inv_safe_name}_category_summary.tsv")
+                                        output_dir = os.getcwd()
+                                        summary_path = os.path.join(output_dir, f"{inv_safe_name}_category_summary.tsv")
                                         cat_df.to_csv(summary_path, sep="\t", index=False)
                                         print(
                                             f"{log_prefix} Category summary saved to {summary_path} ({len(cat_df)} rows).",
