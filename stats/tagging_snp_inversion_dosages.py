@@ -1,9 +1,10 @@
 import os, sys, math, re, subprocess
-from typing import List, Tuple, Dict, Iterable, Optional
+from typing import List, Tuple, Dict, Iterable
 from dataclasses import dataclass
 
 import numpy as np
 from tqdm import tqdm
+from google.cloud import storage  # hard crash if missing
 
 # ------------------------------ HARD-CODED PATHS ------------------------------
 
@@ -16,14 +17,15 @@ BED_URI = GCS_DIR + f"chr{CHR}.bed"
 FAM_URI = GCS_DIR + f"chr{CHR}.fam"
 
 # Tag SNP targets for the chr17q21 inversion (bp, inversion_allele)
+# G = inversion allele; A = direct allele (after orientation we count G copies 0/1/2).
 TARGETS: List[Tuple[int, str]] = [
     (46003698, "G"),
     (45996523, "G"),
     (45974480, "G"),
 ]
 
-# Single-output dosage matrix
-OUT_TSV = "imputed_inversion_dosages.tsv"
+# Single-output hard-call matrix
+OUT_TSV = "imputed_inversion_hardcalls.tsv"
 
 # ------------------------------ ENV & SHELL UTILS -----------------------------
 
@@ -63,7 +65,6 @@ def gsutil_cat_lines(gs_uri: str) -> Iterable[str]:
 class RangeFetcher:
     """Persistent HTTP range fetcher using google-cloud-storage (Requester Pays)."""
     def __init__(self):
-        from google.cloud import storage  # hard crash if missing
         self.project = require_project()
         self.client = storage.Client(project=self.project)
 
@@ -72,7 +73,7 @@ class RangeFetcher:
             raise RuntimeError(f"Not a gs:// URI: {gs_uri}")
         _, _, rest = gs_uri.partition("gs://")
         bucket_name, _, blob_name = rest.partition("/")
-        if not bucket_name or not blob_name:
+        if (not bucket_name) or (not blob_name):
             raise RuntimeError(f"Malformed GCS URI: {gs_uri}")
         bucket = self.client.bucket(bucket_name, user_project=self.project)
         return bucket.blob(blob_name)
@@ -115,6 +116,16 @@ class Hit:
     a2: str
     snp_id: str
 
+_bp_num_re = re.compile(r"^\d+(?:\.\d+)?$")
+
+def _parse_bp_int(s: str) -> int:
+    # Accept integer or float string that is integral (e.g., "12345" or "12345.0")
+    if not _bp_num_re.match(s):
+        return -1
+    f = float(s)
+    i = int(f)
+    return i if f == float(i) else -1
+
 def find_chr17_targets_best_effort(
     bim_uri: str,
     bim_size: int,
@@ -122,12 +133,7 @@ def find_chr17_targets_best_effort(
 ) -> Tuple[List[Hit], List[int]]:
     """
     Stream chr17.bim and collect rows for the requested BPs that actually contain
-    the requested allele (best-effort). We *do not* crash if a bp lacks that allele;
-    we simply omit that bp and report it.
-
-    Returns:
-      - hits: list of chosen rows (one per satisfied bp), unsorted
-      - missing_bps: bps where no row contained the requested allele
+    the requested allele. If a bp lacks that allele, it is omitted and recorded as missing.
     """
     if not wanted:
         raise RuntimeError("No targets provided.")
@@ -137,7 +143,6 @@ def find_chr17_targets_best_effort(
     print("[DEBUG] Target requests:",
           ", ".join(f"{bp}:{wanted[bp]}" for bp in target_bps))
 
-    # Diagnostics: collect *all* rows seen at target BPs
     seen_rows: Dict[int, List[Hit]] = {bp: [] for bp in target_bps}
     chosen: Dict[int, Hit] = {}
 
@@ -159,29 +164,24 @@ def find_chr17_targets_best_effort(
 
             # columns: chrom, snp_id, cm, bp, a1, a2
             snp_id = parts[1]
-            bp_str = parts[3]
-            a1 = parts[4].upper()
-            a2 = parts[5].upper()
-            try:
-                bp = int(float(bp_str))
-            except Exception:
+            bp_val = _parse_bp_int(parts[3])
+            if bp_val < 0:
                 idx += 1
                 continue
+            a1 = parts[4].upper()
+            a2 = parts[5].upper()
 
-            if bp in seen_rows:
-                hit = Hit(bp=bp, snp_index=idx, a1=a1, a2=a2, snp_id=snp_id)
-                seen_rows[bp].append(hit)
-                contains = (a1 == wanted[bp]) or (a2 == wanted[bp])
-                print(f"[HIT] bp={bp} idx={idx} snp_id={snp_id} alleles={a1}/{a2} "
+            if bp_val in seen_rows:
+                hit = Hit(bp=bp_val, snp_index=idx, a1=a1, a2=a2, snp_id=snp_id)
+                seen_rows[bp_val].append(hit)
+                contains = (a1 == wanted[bp_val]) or (a2 == wanted[bp_val])
+                print(f"[HIT] bp={bp_val} idx={idx} snp_id={snp_id} alleles={a1}/{a2} "
                       f"contains_target={contains}")
-                # Choose the *first* row containing the desired allele at this bp
-                if (bp not in chosen) and contains:
-                    chosen[bp] = hit
-                    print(f"[SELECT] bp={bp} -> idx={idx} ({a1}/{a2}) contains '{wanted[bp]}'")
+                if (bp_val not in chosen) and contains:
+                    chosen[bp_val] = hit
+                    print(f"[SELECT] bp={bp_val} -> idx={idx} ({a1}/{a2}) contains '{wanted[bp_val]}'")
 
-            # Early stop: once we pass the largest target bp and have seen at least
-            # one line for each target, further rows can't change selection outcomes.
-            if bp > max_bp and all(len(seen_rows[b]) > 0 for b in target_bps):
+            if bp_val > max_bp and all(len(seen_rows[b]) > 0 for b in target_bps):
                 print("[DEBUG] Passed max target bp and visited all targets; stopping scan.")
                 break
 
@@ -190,7 +190,6 @@ def find_chr17_targets_best_effort(
         if progressed:
             bar.update(progressed)
 
-    # Summarize diagnostics, determine missing BPs
     missing: List[int] = []
     for bp in target_bps:
         if bp in chosen:
@@ -199,10 +198,7 @@ def find_chr17_targets_best_effort(
         else:
             rows = seen_rows.get(bp, [])
             if rows:
-                print(f"[WARN] No row at {bp} contained requested allele '{wanted[bp]}'. "
-                      f"Rows observed at this bp:")
-                for r in rows:
-                    print(f"       idx={r.snp_index} snp_id={r.snp_id} alleles={r.a1}/{r.a2}")
+                print(f"[WARN] No row at {bp} contained requested allele '{wanted[bp]}'.")
             else:
                 print(f"[WARN] Target position {bp} never observed in BIM.")
             missing.append(bp)
@@ -210,7 +206,7 @@ def find_chr17_targets_best_effort(
     hits = list(chosen.values())
     return hits, missing
 
-# ------------------------------ FAM (IDs and N) --------------------------------
+# ------------------------------ FAM (IDs and N) -------------------------------
 
 def read_fam_ids(fam_uri: str) -> Tuple[List[str], List[str]]:
     """Return (FID_list, IID_list) with a progress bar."""
@@ -236,62 +232,76 @@ def read_fam_ids(fam_uri: str) -> Tuple[List[str], List[str]]:
             bar.update(1)
     return fids, iids
 
-# ------------------------------ SINGLE-COLUMN TSV WRITER ----------------------
+# ------------------------------ HARD-CALL LOGIC -------------------------------
 
-def write_single_inversion_tsv(
+def hard_calls_from_tags(per_bp_dosage: Dict[int, np.ndarray],
+                         selected_bps: List[int],
+                         n_samples: int) -> np.ndarray:
+    """
+    Strict unanimity-only per-sample calls across selected tag SNPs:
+      - any missing at any tag -> NaN (no-call)
+      - all values 2 -> 2  (G/G everywhere)
+      - all values 1 -> 1  (G/A everywhere)
+      - all values 0 -> 0  (A/A everywhere)
+      - any mixture -> NaN (no-call)
+    Returns float array with NaN for no-call; integers for calls.
+    """
+    if not selected_bps:
+        return np.full(n_samples, np.nan, dtype=np.float32)
+
+    M = np.vstack([per_bp_dosage[bp] for bp in selected_bps])  # shape (k_tags, N_samples)
+    out = np.full(M.shape[1], np.nan, dtype=np.float32)
+
+    for i in range(M.shape[1]):
+        col = M[:, i]
+        if np.any(col < 0):
+            # any missing tag genotype -> no-call
+            continue
+        v0 = col[0]
+        if np.all(col == v0):
+            out[i] = float(v0)  # 0, 1, or 2
+        # else: mixed -> leave as NaN (no-call)
+    return out
+
+def write_single_inversion_hardcalls_tsv(
     iids: List[str],
-    per_bp_dosage: Dict[int, np.ndarray],
+    calls: np.ndarray,
     selected_bps: List[int],
     chr_label: str,
     out_path: str = OUT_TSV,
 ) -> None:
     """
-    Write a TSV with one dosage column:
-        SampleID <TAB> chr17-<start>-INV-<length>
-    Dosage = mean across available tag-SNP dosages (0/1/2), ignoring missing (-1).
-    Values formatted to four decimals.
+    Write a TSV with one hard-call column:
+        SampleID <TAB> chr17-<start>-INV-<length>-HARD
+    Values: 0, 1, 2, or blank for no-call.
     """
     if not iids:
         raise RuntimeError("No samples found (empty IID list).")
 
     if not selected_bps:
-        print("[WARN] No usable tag SNPs found; writing empty dosage column.")
-        # Still write header and blank entries
+        print("[WARN] No usable tag SNPs found; writing header and blank entries.")
         start_bp = min(bp for bp, _ in TARGETS)
         end_bp   = max(bp for bp, _ in TARGETS)
     else:
         start_bp = min(selected_bps)
         end_bp   = max(selected_bps)
 
-    inv_id = f"{chr_label}-{start_bp}-INV-{end_bp - start_bp}"
+    inv_id = f"{chr_label}-{start_bp}-INV-{end_bp - start_bp}-HARD"
     print(f"[WRITE] Building '{out_path}' (N={len(iids)}), column='{inv_id}' "
           f"from {len(selected_bps)} tag(s): {selected_bps}")
 
-    # Vectorized mean across available tags (ignore -1 by mapping to NaN)
-    if selected_bps:
-        mats = []
-        for bp in selected_bps:
-            arr = per_bp_dosage[bp].astype(np.float32, copy=True)
-            arr[arr < 0] = np.nan
-            mats.append(arr)
-        M = np.vstack(mats)  # shape (k, N)
-        means = np.nanmean(M, axis=0)  # shape (N,)
-    else:
-        means = np.full(len(iids), np.nan, dtype=np.float32)
-
     with open(out_path, "w") as fo, tqdm(total=len(iids), desc="Write TSV", unit="sample") as bar:
         fo.write(f"SampleID\t{inv_id}\n")
-        for i, iid in enumerate(iids):
-            val = means[i]
-            fo.write(f"{iid}\t{'' if np.isnan(val) else f'{val:.4f}'}\n")
+        for iid, v in zip(iids, calls):
+            fo.write(f"{iid}\t{'' if np.isnan(v) else str(int(v))}\n")
             bar.update(1)
 
-    print(f"[DONE] Wrote {out_path} with one dosage column '{inv_id}'.")
+    print(f"[DONE] Wrote {out_path} with unanimity-only hard calls '{inv_id}'.")
 
 # ------------------------------ MAIN ------------------------------------------
 
 def main():
-    print("== chr17 inversion dosage (3 SNPs) via ranged PLINK fetch ==")
+    print("== chr17 inversion hard-calls (strict unanimity) via ranged PLINK fetch ==")
 
     # Ensure Requester-Pays project; initialize range fetcher
     _ = require_project()
@@ -306,20 +316,19 @@ def main():
     # Read FAM IDs (gets N)
     fids, iids = read_fam_ids(FAM_URI)
     n_samples = len(iids)
-    bpf = math.ceil(n_samples / 4)
+    bpf = math.ceil(n_samples / 4)  # bytes per SNP in SNP-major PLINK
     if ((bed_size - 3) % bpf) != 0:
         raise RuntimeError(f"{BED_URI} not divisible by bpf={bpf} (N={n_samples})")
 
     # Build requested map: bp -> inversion allele (G for all here)
     wanted: Dict[int, str] = {bp: al.upper() for bp, al in TARGETS}
 
-    # Find only the needed SNP indices in chr17.bim (best effort; lots of diagnostics)
+    # Find only the needed SNP indices in chr17.bim (best effort; diagnostics)
     hits, missing_bps = find_chr17_targets_best_effort(BIM_URI, bim_size, wanted)
 
     if not hits:
         print("[FATAL] No usable tag SNP rows found that contain requested allele(s).")
-        # Hard crash
-        raise RuntimeError("No tag SNPs available to compute dosages.")
+        raise RuntimeError("No tag SNPs available to compute hard-calls.")
 
     # Sort hits by their SNP index (BED order) to fetch one tight contiguous range
     hits.sort(key=lambda h: h.snp_index)
@@ -333,8 +342,6 @@ def main():
         elif inv == h.a2:
             orient[h.bp] = "A2"
         else:
-            # Should not happen (we selected rows that contain the allele),
-            # but keep a hard stop if encountered.
             raise RuntimeError(f"Selected row at {h.bp} lacks allele {inv}: {h.a1}/{h.a2}")
         print(f"[ORIENT] bp={h.bp} snp_id={h.snp_id} alleles={h.a1}/{h.a2} -> {orient[h.bp]}")
 
@@ -353,7 +360,7 @@ def main():
     if len(blob) != total_bytes:
         raise RuntimeError(f"Fetched {len(blob)} bytes but expected {total_bytes}")
 
-    # Decode only the selected tag SNP blocks
+    # Decode only the selected tag SNP blocks; map to counts of the inversion allele (G)
     per_bp_dosage: Dict[int, np.ndarray] = {}
     for h in hits:
         off = (h.snp_index - i0) * bpf
@@ -364,25 +371,28 @@ def main():
         else:
             dos = np.where(a2count >= 0, 2 - a2count, -1).astype(np.int8)
         per_bp_dosage[h.bp] = dos
-        print(f"[DECODE] bp={h.bp} decoded dosages (sample0..4) = {dos[:5].tolist()}")
+        print(f"[DECODE] bp={h.bp} decoded G-copies (sample0..4) = {dos[:5].tolist()}")
 
     selected_bps = [h.bp for h in hits]
     if missing_bps:
-        print(f"[NOTE] Tag SNPs without matching allele (skipped in mean): {missing_bps}")
+        print(f"[NOTE] Tag SNPs without matching allele (absent): {missing_bps}")
 
-    # Write single-column inversion dosage matrix
-    write_single_inversion_tsv(
+    # Strict unanimity-only hard calls
+    calls = hard_calls_from_tags(per_bp_dosage, selected_bps, n_samples)
+
+    # Write single-column hard-call matrix
+    write_single_inversion_hardcalls_tsv(
         iids=iids,
-        per_bp_dosage=per_bp_dosage,
+        calls=calls,
         selected_bps=selected_bps,
         chr_label=f"chr{CHR}",
         out_path=OUT_TSV,
     )
 
+    n_called = int(np.sum(~np.isnan(calls)))
     print(f"== DONE: wrote {OUT_TSV} for N={n_samples:,} samples "
-          f"(bpf={bpf}, fetched {total_snps} SNP blocks, {total_bytes/1024:.1f} KiB) ==")
+          f"(called {n_called:,}; no-call {n_samples - n_called:,}; "
+          f"bpf={bpf}, fetched {total_snps} SNP blocks, {total_bytes/1024:.1f} KiB) ==")
 
 if __name__ == "__main__":
-    # hard crash on any fatal error
     main()
-cc
