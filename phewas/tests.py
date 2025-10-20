@@ -241,6 +241,35 @@ def test_cli_pop_label_sets_population_filter():
         assert os.environ["FERROMIC_POPULATION_FILTER"] == "EUR"
 
 
+def test_apply_population_filter_allows_full_cohort():
+    cov = pd.DataFrame({"AGE": [40, 41]}, index=pd.Index(["p1", "p2"], name="person_id"))
+    anc = pd.Series(["eur", "amr"], index=cov.index, name="ANCESTRY")
+    filtered_cov, filtered_anc, label, followups = run._apply_population_filter(cov, anc, "all")
+    pd.testing.assert_frame_equal(filtered_cov, cov)
+    pd.testing.assert_series_equal(filtered_anc, anc)
+    assert label == "all"
+    assert followups is True
+
+
+def test_apply_population_filter_restricts_to_label():
+    cov = pd.DataFrame({"AGE": [40, 41, 42]}, index=pd.Index(["p1", "p2", "p3"], name="person_id"))
+    anc = pd.Series([" EUR", "AMR", "eur"], index=cov.index, name="ANCESTRY")
+    filtered_cov, filtered_anc, label, followups = run._apply_population_filter(cov, anc, "EuR")
+    expected_cov = cov.loc[["p1", "p3"]]
+    expected_anc = pd.Series(["eur", "eur"], index=expected_cov.index, name="ANCESTRY")
+    pd.testing.assert_frame_equal(filtered_cov, expected_cov)
+    pd.testing.assert_series_equal(filtered_anc, expected_anc)
+    assert label == "eur"
+    assert followups is False
+
+
+def test_apply_population_filter_raises_for_unknown_label():
+    cov = pd.DataFrame({"AGE": [40, 41]}, index=pd.Index(["p1", "p2"], name="person_id"))
+    anc = pd.Series(["eur", "amr"], index=cov.index, name="ANCESTRY")
+    with pytest.raises(RuntimeError):
+        run._apply_population_filter(cov, anc, "sas")
+
+
 def test_prefilter_thresholds_respect_cli_override():
     with preserve_run_globals():
         run.MIN_CASES_FILTER = 10
