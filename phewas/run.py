@@ -413,8 +413,11 @@ TARGET_INVERSIONS = {
     'chr6-141867315-INV-29159', 
     'chr6-167181003-INV-209976', 
     'chr6-76111919-INV-44661', 
-    'chr7-57835189-INV-284465'
+    'chr7-57835189-INV-284465',
+    'chr17-45974480-INV-29218'
 }
+
+# chr17-45974480-INV-29218 is arbitrary number for tagging SNP 17q21
 
 PHENOTYPE_DEFINITIONS_URL = "https://github.com/SauersML/ferromic/raw/refs/heads/main/data/significant_heritability_diseases.tsv"
 MASTER_RESULTS_CSV = f"phewas_results_{datetime.now().strftime('%Y%m%d%H%M%S')}.tsv"
