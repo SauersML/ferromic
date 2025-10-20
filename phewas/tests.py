@@ -1,4 +1,5 @@
 import os
+import argparse
 import sys
 import time
 import json
@@ -39,6 +40,7 @@ except Exception:
 # Add the current directory to the path to allow absolute imports of phewas modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import phewas.run as run
+import phewas.cli as cli
 import phewas.iox as io
 import phewas.pheno as pheno
 import phewas.models as models
@@ -70,8 +72,16 @@ def temp_workspace():
 
 @contextlib.contextmanager
 def preserve_run_globals():
-    keys = ["MIN_CASES_FILTER","MIN_CONTROLS_FILTER","FDR_ALPHA","LRT_SELECT_ALPHA",
-            "TARGET_INVERSION","PHENOTYPE_DEFINITIONS_URL","INVERSION_DOSAGES_FILE"]
+    keys = [
+        "MIN_CASES_FILTER",
+        "MIN_CONTROLS_FILTER",
+        "FDR_ALPHA",
+        "LRT_SELECT_ALPHA",
+        "TARGET_INVERSION",
+        "PHENOTYPE_DEFINITIONS_URL",
+        "INVERSION_DOSAGES_FILE",
+        "CLI_MIN_CASES_CONTROLS_OVERRIDE",
+    ]
     snapshot = {k: getattr(run, k) for k in keys if hasattr(run, k)}
     try:
         yield
@@ -191,6 +201,27 @@ def read_rss_bytes():
     except Exception:
         pass
     raise RuntimeError("Cannot measure RSS on this platform without psutil")
+
+def test_cli_min_cases_controls_only_updates_prefilter():
+    with preserve_run_globals():
+        run.MIN_CASES_FILTER = 10
+        run.MIN_CONTROLS_FILTER = 20
+        run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
+        args = argparse.Namespace(min_cases_controls=30, pop_label=None)
+        cli.apply_cli_configuration(args)
+        assert run.MIN_CASES_FILTER == 10
+        assert run.MIN_CONTROLS_FILTER == 20
+        assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE == 30
+
+
+def test_prefilter_thresholds_respect_cli_override():
+    with preserve_run_globals():
+        run.MIN_CASES_FILTER = 10
+        run.MIN_CONTROLS_FILTER = 20
+        run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
+        assert run._prefilter_thresholds() == (10, 20)
+        run.CLI_MIN_CASES_CONTROLS_OVERRIDE = 25
+        assert run._prefilter_thresholds() == (25, 25)
 
 @pytest.fixture
 def test_ctx():
