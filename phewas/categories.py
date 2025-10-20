@@ -34,12 +34,18 @@ class CategoryNull:
     """Container for per-category null correlation information."""
 
     phenotypes: List[str]
-    covariance: np.ndarray
+    correlation: np.ndarray
     method: str
     shrinkage: str
     lambda_value: float
     n_individuals: int
     dropped: List[str] = field(default_factory=list)
+
+    @property
+    def covariance(self) -> np.ndarray:
+        """Backward-compatible alias for the correlation matrix."""
+
+        return self.correlation
 
 
 def load_dedup_manifest(cache_dir: str, cdr_codename: str, core_index: pd.Index) -> Mapping[str, object]:
@@ -128,13 +134,12 @@ def _phi_covariance_for_category(
     lambda_value: float,
     min_k: int,
 ) -> Optional[CategoryNull]:
-    allowed = None
     if allowed_mask is not None:
-        allowed = allowed_mask.astype(bool, copy=True)
+        analysis_mask = allowed_mask.astype(bool, copy=True)
     elif global_mask is not None:
-        allowed = global_mask.astype(bool, copy=True)
+        analysis_mask = global_mask.astype(bool, copy=True)
     else:
-        allowed = np.ones(core_index_size, dtype=bool)
+        analysis_mask = np.ones(core_index_size, dtype=bool)
 
     dropped: List[str] = []
     candidate_names: List[str] = []
@@ -145,11 +150,14 @@ def _phi_covariance_for_category(
         if idx is None or idx.size == 0:
             dropped.append(name)
             continue
-        allowed[idx] = True
+        idx = idx[analysis_mask[idx]]
+        if idx.size == 0:
+            dropped.append(name)
+            continue
         candidate_names.append(name)
-        candidate_indices[name] = idx
+        candidate_indices[name] = np.unique(idx).astype(np.int32, copy=False)
 
-    used_idx = np.flatnonzero(allowed)
+    used_idx = np.flatnonzero(analysis_mask)
     if used_idx.size == 0:
         return None
 
@@ -191,7 +199,7 @@ def _phi_covariance_for_category(
     Sigma = _apply_shrinkage(Sigma, method=shrinkage, lambda_value=lambda_value)
     return CategoryNull(
         phenotypes=used_names,
-        covariance=Sigma,
+        correlation=Sigma,
         method="fast_phi",
         shrinkage=shrinkage,
         lambda_value=lambda_value,
@@ -279,25 +287,29 @@ def _gbj_statistic(p_values: np.ndarray) -> float:
 
 def _simulate_gbj_pvalue(
     observed_stat: float,
-    covariance: np.ndarray,
+    correlation: np.ndarray,
     draws: int,
     rng: np.random.Generator,
+    *,
+    z_cap: Optional[float] = None,
 ) -> float:
     if draws <= 0:
         return float("nan")
-    p = covariance.shape[0]
+    p = correlation.shape[0]
     if p == 0:
         return float("nan")
     try:
-        chol = np.linalg.cholesky(covariance)
+        chol = np.linalg.cholesky(correlation)
     except np.linalg.LinAlgError:
-        eigvals, eigvecs = np.linalg.eigh(covariance)
+        eigvals, eigvecs = np.linalg.eigh(correlation)
         eigvals = np.clip(eigvals, 1e-6, None)
         cov_pd = (eigvecs @ np.diag(eigvals)) @ eigvecs.T
         chol = np.linalg.cholesky(cov_pd)
     stats_obs = 0
     for _ in range(draws):
-        sample = rng.standard_normal(p) @ chol.T
+        sample = chol @ rng.standard_normal(p)
+        if z_cap is not None and z_cap > 0:
+            sample = np.clip(sample, -float(z_cap), float(z_cap))
         pvals = 2.0 * stats.norm.sf(np.abs(sample))
         stat = _gbj_statistic(pvals)
         if stat >= observed_stat:
@@ -305,14 +317,14 @@ def _simulate_gbj_pvalue(
     return float((stats_obs + 1) / (draws + 1))
 
 
-def _directional_meta_z(z_scores: np.ndarray, covariance: np.ndarray) -> Tuple[float, float]:
+def _directional_meta_z(z_scores: np.ndarray, correlation: np.ndarray) -> Tuple[float, float]:
     if z_scores.size == 0:
         return float("nan"), float("nan")
     ones = np.ones(z_scores.size, dtype=np.float64)
     try:
-        weights = np.linalg.solve(covariance, ones)
+        weights = np.linalg.solve(correlation, ones)
     except np.linalg.LinAlgError:
-        weights = np.linalg.pinv(covariance) @ ones
+        weights = np.linalg.pinv(correlation) @ ones
     denom = float(np.dot(ones, weights))
     if denom <= 0:
         return float("nan"), float("nan")
@@ -353,6 +365,7 @@ def compute_category_metrics(
             "GBJ_Draws",
             "Dropped",
             "Phenotypes",
+            "Phenotypes_GLS",
         ])
 
     df = per_pheno_results.copy()
@@ -408,19 +421,25 @@ def compute_category_metrics(
         if len(gbj_indices) < max(1, min_k):
             continue
 
-        Sigma_full = struct.covariance
-        gbj_cov = Sigma_full[np.ix_(gbj_indices, gbj_indices)]
+        corr_full = struct.correlation
+        gbj_corr = corr_full[np.ix_(gbj_indices, gbj_indices)]
         gbj_pvals = 2.0 * stats.norm.sf(np.asarray(gbj_z, dtype=np.float64))
         gbj_stat = _gbj_statistic(gbj_pvals)
-        gbj_p = _simulate_gbj_pvalue(gbj_stat, gbj_cov, int(gbj_draws), rng)
+        gbj_p = _simulate_gbj_pvalue(
+            gbj_stat,
+            gbj_corr,
+            int(gbj_draws),
+            rng,
+            z_cap=z_cap,
+        )
 
         gls_stat = float("nan")
         gls_p = float("nan")
         direction_label = "neutral"
         if dir_indices:
-            dir_cov = Sigma_full[np.ix_(dir_indices, dir_indices)]
+            dir_corr = corr_full[np.ix_(dir_indices, dir_indices)]
             dir_z_arr = np.asarray(dir_z, dtype=np.float64)
-            gls_stat, gls_p = _directional_meta_z(dir_z_arr, dir_cov)
+            gls_stat, gls_p = _directional_meta_z(dir_z_arr, dir_corr)
             if np.isfinite(gls_stat):
                 direction_label = "increase" if gls_stat > 0 else "decrease"
 
@@ -441,6 +460,7 @@ def compute_category_metrics(
             "GBJ_Draws": int(gbj_draws),
             "Dropped": ";".join(struct.dropped + missing),
             "Phenotypes": ";".join(gbj_names),
+            "Phenotypes_GLS": ";".join(dir_names),
         })
 
     if not records:
@@ -461,6 +481,7 @@ def compute_category_metrics(
             "GBJ_Draws",
             "Dropped",
             "Phenotypes",
+            "Phenotypes_GLS",
         ])
 
     df_out = pd.DataFrame(records)
