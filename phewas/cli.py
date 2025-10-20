@@ -26,8 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-cases-controls",
         type=_positive_int,
         help=(
-            "Minimum number of cases and controls required for each phenotype. "
-            "Overrides the default thresholds in phewas.run."
+            "Minimum number of cases and controls required to prefilter phenotypes before Stage-1. "
+            "Adjusts which phenotypes are enqueued without modifying downstream model thresholds."
         ),
     )
     parser.add_argument(
@@ -48,8 +48,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def apply_cli_configuration(args: argparse.Namespace) -> None:
     if getattr(args, "min_cases_controls", None) is not None:
         threshold = int(args.min_cases_controls)
-        run.MIN_CASES_FILTER = threshold
-        run.MIN_CONTROLS_FILTER = threshold
+        run.CLI_MIN_CASES_CONTROLS_OVERRIDE = threshold
+    else:
+        run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
 
     if getattr(args, "pop_label", None) is not None:
         run.POPULATION_FILTER = args.pop_label

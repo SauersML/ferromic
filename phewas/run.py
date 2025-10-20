@@ -13,6 +13,7 @@ import traceback
 import json
 import importlib
 import importlib.util
+from typing import Optional, Tuple
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -442,6 +443,7 @@ CACHE_VERSION_TAG = io.CACHE_VERSION_TAG
 NUM_PCS = 16
 MIN_CASES_FILTER = pheno.MIN_CASES_FILTER
 MIN_CONTROLS_FILTER = pheno.MIN_CONTROLS_FILTER
+CLI_MIN_CASES_CONTROLS_OVERRIDE: Optional[int] = None
 MIN_NEFF_FILTER = 0 # Default off
 FDR_ALPHA = 0.05
 
@@ -541,6 +543,15 @@ def _find_upwards(pathname: str) -> str:
 def _source_key(*parts) -> str:
     return io.stable_hash({"parts": parts, "version": CACHE_VERSION_TAG})
 
+
+def _prefilter_thresholds() -> Tuple[int, int]:
+    """Return the case/control thresholds used to prefilter phenotypes."""
+    if CLI_MIN_CASES_CONTROLS_OVERRIDE is not None:
+        threshold = int(CLI_MIN_CASES_CONTROLS_OVERRIDE)
+        return threshold, threshold
+    return int(pheno.MIN_CASES_FILTER), int(pheno.MIN_CONTROLS_FILTER)
+
+
 def _pipeline_once():
     """
     Entry point for the PheWAS pipeline. Uses module-level configuration directly.
@@ -550,6 +561,7 @@ def _pipeline_once():
     # Keep the phenotype module thresholds in sync with any overrides applied here.
     pheno.MIN_CASES_FILTER = MIN_CASES_FILTER
     pheno.MIN_CONTROLS_FILTER = MIN_CONTROLS_FILTER
+    prefilter_min_cases, prefilter_min_ctrls = _prefilter_thresholds()
 
     if PSUTIL_AVAILABLE:
         monitor_thread = SystemMonitor(interval=3)
@@ -697,7 +709,7 @@ def _pipeline_once():
                 core_index=shared_covariates_df.index,
                 cdr_codename=cdr_codename,
                 cache_dir=CACHE_DIR,
-                min_cases=pheno.MIN_CASES_FILTER,
+                min_cases=prefilter_min_cases,
                 phi_threshold=pheno.PHI_THRESHOLD,
                 share_threshold=pheno.SHARE_THRESHOLD,
                 protect=PHENO_PROTECT
@@ -851,8 +863,8 @@ def _pipeline_once():
                         core_index,
                         allowed_mask_by_cat,
                         sex_vec,
-                        pheno.MIN_CASES_FILTER,
-                        pheno.MIN_CONTROLS_FILTER,
+                        prefilter_min_cases,
+                        prefilter_min_ctrls,
                         sex_mode="majority",
                         sex_prop=models.DEFAULT_SEX_RESTRICT_PROP,
                         max_other=ctx.get("SEX_RESTRICT_MAX_OTHER_CASES", 0),
