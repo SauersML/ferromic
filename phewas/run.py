@@ -450,6 +450,20 @@ FDR_ALPHA = 0.05
 # --- Population filter ---
 POPULATION_FILTER = "all"
 
+_cli_override_env = os.getenv("FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE")
+if _cli_override_env is not None:
+    try:
+        CLI_MIN_CASES_CONTROLS_OVERRIDE = int(_cli_override_env)
+    except ValueError:
+        print(
+            f"[Config WARN] Ignoring invalid FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE={_cli_override_env!r}",
+            flush=True,
+        )
+
+_pop_filter_env = os.getenv("FERROMIC_POPULATION_FILTER")
+if _pop_filter_env is not None:
+    POPULATION_FILTER = _pop_filter_env.strip() or "all"
+
 # --- Testing configuration (centralized in testing.py) ---
 _cat_env_overrides = {}
 

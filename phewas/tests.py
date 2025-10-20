@@ -84,10 +84,21 @@ def preserve_run_globals():
         "POPULATION_FILTER",
     ]
     snapshot = {k: getattr(run, k) for k in keys if hasattr(run, k)}
+    env_keys = [
+        "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE",
+        "FERROMIC_POPULATION_FILTER",
+    ]
+    env_snapshot = {k: os.environ.get(k) for k in env_keys}
     try:
         yield
     finally:
-        for k,v in snapshot.items(): setattr(run, k, v)
+        for k, v in snapshot.items():
+            setattr(run, k, v)
+        for key, val in env_snapshot.items():
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
 
 def write_parquet(path, df):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -215,6 +226,8 @@ def test_cli_min_cases_controls_only_updates_prefilter():
         assert run.MIN_CONTROLS_FILTER == 20
         assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE == 30
         assert run.POPULATION_FILTER == "all"
+        assert os.environ["FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE"] == "30"
+        assert "FERROMIC_POPULATION_FILTER" not in os.environ
 
 
 def test_cli_pop_label_sets_population_filter():
@@ -224,6 +237,8 @@ def test_cli_pop_label_sets_population_filter():
         cli.apply_cli_configuration(args)
         assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE is None
         assert run.POPULATION_FILTER == "EUR"
+        assert "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE" not in os.environ
+        assert os.environ["FERROMIC_POPULATION_FILTER"] == "EUR"
 
 
 def test_prefilter_thresholds_respect_cli_override():
