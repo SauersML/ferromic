@@ -81,12 +81,24 @@ def preserve_run_globals():
         "PHENOTYPE_DEFINITIONS_URL",
         "INVERSION_DOSAGES_FILE",
         "CLI_MIN_CASES_CONTROLS_OVERRIDE",
+        "POPULATION_FILTER",
     ]
     snapshot = {k: getattr(run, k) for k in keys if hasattr(run, k)}
+    env_keys = [
+        "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE",
+        "FERROMIC_POPULATION_FILTER",
+    ]
+    env_snapshot = {k: os.environ.get(k) for k in env_keys}
     try:
         yield
     finally:
-        for k,v in snapshot.items(): setattr(run, k, v)
+        for k, v in snapshot.items():
+            setattr(run, k, v)
+        for key, val in env_snapshot.items():
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
 
 def write_parquet(path, df):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -207,11 +219,55 @@ def test_cli_min_cases_controls_only_updates_prefilter():
         run.MIN_CASES_FILTER = 10
         run.MIN_CONTROLS_FILTER = 20
         run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
+        run.POPULATION_FILTER = "eur"
         args = argparse.Namespace(min_cases_controls=30, pop_label=None)
         cli.apply_cli_configuration(args)
         assert run.MIN_CASES_FILTER == 10
         assert run.MIN_CONTROLS_FILTER == 20
         assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE == 30
+        assert run.POPULATION_FILTER == "all"
+        assert os.environ["FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE"] == "30"
+        assert "FERROMIC_POPULATION_FILTER" not in os.environ
+
+
+def test_cli_pop_label_sets_population_filter():
+    with preserve_run_globals():
+        run.POPULATION_FILTER = "all"
+        args = argparse.Namespace(min_cases_controls=None, pop_label="  EUR  ")
+        cli.apply_cli_configuration(args)
+        assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE is None
+        assert run.POPULATION_FILTER == "EUR"
+        assert "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE" not in os.environ
+        assert os.environ["FERROMIC_POPULATION_FILTER"] == "EUR"
+
+
+def test_apply_population_filter_allows_full_cohort():
+    cov = pd.DataFrame({"AGE": [40, 41]}, index=pd.Index(["p1", "p2"], name="person_id"))
+    anc = pd.Series(["eur", "amr"], index=cov.index, name="ANCESTRY")
+    filtered_cov, filtered_anc, label, followups = run._apply_population_filter(cov, anc, "all")
+    pd.testing.assert_frame_equal(filtered_cov, cov)
+    pd.testing.assert_series_equal(filtered_anc, anc)
+    assert label == "all"
+    assert followups is True
+
+
+def test_apply_population_filter_restricts_to_label():
+    cov = pd.DataFrame({"AGE": [40, 41, 42]}, index=pd.Index(["p1", "p2", "p3"], name="person_id"))
+    anc = pd.Series([" EUR", "AMR", "eur"], index=cov.index, name="ANCESTRY")
+    filtered_cov, filtered_anc, label, followups = run._apply_population_filter(cov, anc, "EuR")
+    expected_cov = cov.loc[["p1", "p3"]]
+    expected_anc = pd.Series(["eur", "eur"], index=expected_cov.index, name="ANCESTRY")
+    pd.testing.assert_frame_equal(filtered_cov, expected_cov)
+    pd.testing.assert_series_equal(filtered_anc, expected_anc)
+    assert label == "eur"
+    assert followups is False
+
+
+def test_apply_population_filter_raises_for_unknown_label():
+    cov = pd.DataFrame({"AGE": [40, 41]}, index=pd.Index(["p1", "p2"], name="person_id"))
+    anc = pd.Series(["eur", "amr"], index=cov.index, name="ANCESTRY")
+    with pytest.raises(RuntimeError):
+        run._apply_population_filter(cov, anc, "sas")
 
 
 def test_prefilter_thresholds_respect_cli_override():
