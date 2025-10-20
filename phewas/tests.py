@@ -448,6 +448,51 @@ def test_followup_includes_ancestry_levels_and_splits(test_ctx):
         assert result_path.exists()
         shm.close(); shm.unlink()
 
+
+def test_followup_drops_missing_ancestry_rows(test_ctx):
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort()
+        anc = core_data['ancestry']['ANCESTRY'].copy()
+        missing_ids = anc.index[:10]
+        anc.loc[missing_ids] = np.nan
+        core_data['ancestry']['ANCESTRY'] = anc
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main'],
+        ], axis=1)
+        core_df_with_const = sm.add_constant(core_df)
+        anc_series = anc.str.lower()
+        A = pd.get_dummies(pd.Categorical(anc_series), prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df_with_const = core_df_with_const.join(A, how="left").fillna({c: 0.0 for c in A.columns})
+
+        shm = _init_lrt_worker_from_df(
+            core_df_with_const,
+            {"neuro": np.ones(len(core_df), dtype=bool)},
+            core_data['ancestry']['ANCESTRY'],
+            test_ctx,
+        )
+        task = {"name": "C_moderate_signal", "category": "neuro", "cdr_codename": TEST_CDR_CODENAME, "target": TEST_TARGET_INVERSION}
+        models.lrt_followup_worker(task)
+
+        result_path = Path(test_ctx["LRT_FOLLOWUP_CACHE_DIR"]) / "C_moderate_signal.json"
+        assert result_path.exists()
+        with result_path.open() as fh:
+            record = json.load(fh)
+
+        notes = (record.get("Model_Notes") or "").split(';')
+        assert "dropped_missing_ancestry" in notes
+
+        counts = core_data['ancestry']['ANCESTRY'].value_counts(dropna=True)
+        for anc_name, expected in counts.items():
+            key = f"{anc_name.upper()}_N"
+            assert record.get(key) == int(expected)
+
+        shm.close(); shm.unlink()
+
 def test_safe_basename():
     assert models.safe_basename("endo/../../weird:thing") == "endo_.._.._weird_thing"
     assert models.safe_basename("normal_name-1.0") == "normal_name-1.0"
