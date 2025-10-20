@@ -131,19 +131,15 @@ def find_chr17_targets_best_effort(
     bim_size: int,
     wanted: Dict[int, str]
 ) -> Tuple[List[Hit], List[int]]:
-    """
-    Stream chr17.bim and collect rows for the requested BPs that actually contain
-    the requested allele. If a bp lacks that allele, it is omitted and recorded as missing.
-    """
     if not wanted:
         raise RuntimeError("No targets provided.")
-    wanted = {bp: al.upper() for bp, al in wanted.items()}
+
     target_bps = sorted(wanted.keys())
+    print("[DEBUG] Target requests (expecting A/G at each bp):",
+          ", ".join(str(bp) for bp in target_bps))
 
-    print("[DEBUG] Target requests:",
-          ", ".join(f"{bp}:{wanted[bp]}" for bp in target_bps))
-
-    seen_rows: Dict[int, List[Hit]] = {bp: [] for bp in target_bps}
+    # Track whether we saw any row at a bp (for diagnostics) and which row we selected
+    seen_any: Dict[int, bool] = {bp: False for bp in target_bps}
     chosen: Dict[int, Hit] = {}
 
     max_bp = max(target_bps)
@@ -171,18 +167,20 @@ def find_chr17_targets_best_effort(
             a1 = parts[4].upper()
             a2 = parts[5].upper()
 
-            if bp_val in seen_rows:
-                hit = Hit(bp=bp_val, snp_index=idx, a1=a1, a2=a2, snp_id=snp_id)
-                seen_rows[bp_val].append(hit)
-                contains = (a1 == wanted[bp_val]) or (a2 == wanted[bp_val])
+            if bp_val in seen_any:
+                seen_any[bp_val] = True
+                allele_set = {a1, a2}
+                is_AG = (allele_set == {'A', 'G'})
                 print(f"[HIT] bp={bp_val} idx={idx} snp_id={snp_id} alleles={a1}/{a2} "
-                      f"contains_target={contains}")
-                if (bp_val not in chosen) and contains:
-                    chosen[bp_val] = hit
-                    print(f"[SELECT] bp={bp_val} -> idx={idx} ({a1}/{a2}) contains '{wanted[bp_val]}'")
+                      f"is_AG_pair={is_AG}")
 
-            if bp_val > max_bp and all(len(seen_rows[b]) > 0 for b in target_bps):
-                print("[DEBUG] Passed max target bp and visited all targets; stopping scan.")
+                if (bp_val not in chosen) and is_AG:
+                    chosen[bp_val] = Hit(bp=bp_val, snp_index=idx, a1=a1, a2=a2, snp_id=snp_id)
+                    print(f"[SELECT] bp={bp_val} -> idx={idx} ({a1}/{a2}) A/G row chosen")
+
+            # Early stop only when we've selected an A/G row for every target
+            if (bp_val > max_bp) and all(bp in chosen for bp in target_bps):
+                print("[DEBUG] Passed max target bp and selected all A/G rows; stopping scan.")
                 break
 
             idx += 1
@@ -196,9 +194,8 @@ def find_chr17_targets_best_effort(
             k = chosen[bp]
             print(f"[KEEP] bp={bp} -> idx={k.snp_index} snp_id={k.snp_id} alleles={k.a1}/{k.a2}")
         else:
-            rows = seen_rows.get(bp, [])
-            if rows:
-                print(f"[WARN] No row at {bp} contained requested allele '{wanted[bp]}'.")
+            if seen_any[bp]:
+                print(f"[WARN] No A/G allele pair observed at {bp}.")
             else:
                 print(f"[WARN] Target position {bp} never observed in BIM.")
             missing.append(bp)
