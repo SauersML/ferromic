@@ -464,6 +464,55 @@ _pop_filter_env = os.getenv("FERROMIC_POPULATION_FILTER")
 if _pop_filter_env is not None:
     POPULATION_FILTER = _pop_filter_env.strip() or "all"
 
+
+def _normalize_population_label(label: Optional[str]) -> str:
+    """Return a canonical, lower-case population label suitable for comparisons."""
+    if label is None:
+        return ""
+    normalized = str(label).strip().lower()
+    return normalized
+
+
+def _apply_population_filter(
+    covariates_df: pd.DataFrame,
+    ancestry_series: pd.Series,
+    population_filter: str,
+) -> tuple[pd.DataFrame, pd.Series, str, bool]:
+    """Filter shared covariates and ancestry labels by the requested population."""
+
+    normalized = _normalize_population_label(population_filter)
+    ancestry_series = ancestry_series.astype("string").str.strip().str.lower()
+    ancestry_series = ancestry_series.reindex(covariates_df.index)
+    if not normalized or normalized == "all":
+        return covariates_df, ancestry_series, "all", True
+    available_labels = sorted(
+        {label for label in ancestry_series.dropna().unique().tolist() if label is not None}
+    )
+    if normalized not in available_labels:
+        raise RuntimeError(
+            "Requested population filter '"
+            f"{population_filter}"
+            "' does not match any available ancestry labels."
+        )
+
+    mask = ancestry_series.eq(normalized)
+    keep_ids = ancestry_series.index[mask.fillna(False)]
+    filtered_covariates = covariates_df.loc[keep_ids]
+    filtered_ancestry = ancestry_series.loc[keep_ids]
+    if filtered_covariates.empty:
+        raise RuntimeError(
+            "Population filter '"
+            f"{population_filter}"
+            "' removed all participants; check your labels and filter."
+        )
+
+    print(
+        f"[Config] Restricting analysis to population '{normalized}' "
+        f"({len(filtered_covariates)} participants).",
+        flush=True,
+    )
+    return filtered_covariates, filtered_ancestry, normalized, False
+
 # --- Testing configuration (centralized in testing.py) ---
 _cat_env_overrides = {}
 
@@ -669,29 +718,18 @@ def _pipeline_once():
                 LABELS_URI=LABELS_URI,
                 lock_dir=LOCK_DIR,
             )
-            anc_series = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"].str.lower()
-
-            population_filter = (POPULATION_FILTER or "").strip().lower()
-            allow_ancestry_followups = not (population_filter and population_filter != "all")
-            population_filter_label = population_filter if population_filter else "all"
-            if population_filter and population_filter != "all":
-                available_labels = anc_series.dropna().unique().tolist()
-                if population_filter not in available_labels:
-                    raise RuntimeError(
-                        "Requested population filter '"
-                        f"{population_filter}"
-                        "' does not match any available ancestry labels."
-                    )
-                keep_ids = anc_series[anc_series == population_filter].index
-                print(
-                    f"[Config] Restricting analysis to population '{population_filter}' "
-                    f"({len(keep_ids)} participants).",
-                    flush=True,
+            anc_series_raw = ancestry.reindex(shared_covariates_df.index)["ANCESTRY"]
+            shared_covariates_df, anc_series, population_filter_label, allow_ancestry_followups = (
+                _apply_population_filter(
+                    shared_covariates_df,
+                    anc_series_raw,
+                    POPULATION_FILTER,
                 )
-                shared_covariates_df = shared_covariates_df.loc[keep_ids]
-                anc_series = anc_series.loc[keep_ids]
+            )
 
-            anc_cat_global = pd.Categorical(anc_series.reindex(shared_covariates_df.index))
+            anc_cat_global = pd.Categorical(
+                anc_series.reindex(shared_covariates_df.index)
+            )
             A_global = pd.get_dummies(anc_cat_global, prefix='ANC', drop_first=True, dtype=np.float32)
             A_global.index = A_global.index.astype(str)
             A_cols = list(A_global.columns)
