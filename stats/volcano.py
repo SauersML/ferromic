@@ -19,6 +19,12 @@ plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['ps.fonttype'] = 42
 plt.rcParams['svg.fonttype'] = 'none'
 
+NON_SIG_COLOR = "#b8b8b8"
+NON_SIG_SIZE = 18
+NON_SIG_ALPHA = 0.55
+SIG_POINT_SIZE = 85
+EXTREME_ARROW_SIZE = 110
+
 # --------------------------- Color / markers ---------------------------
 
 def non_orange_colors(n, seed=21):
@@ -46,7 +52,7 @@ def assign_colors_and_markers(levels):
     colors = non_orange_colors(n)
     if n > 1:
         colors = colors[1:] + colors[:1]
-    marker_cycle = ['o', 's', 'D', 'P', 'X', '*', 'v', '<', '>', 'h', 'H', 'd']
+    marker_cycle = ['o', 's', 'D', '^', 'v', '<', '>', 'P', 'X', '*', 'h', 'H', 'd', 'p', '8']
     marker_map = {lvl: marker_cycle[i % len(marker_cycle)] for i, lvl in enumerate(levels)}
     color_map  = {lvl: colors[i] for i, lvl in enumerate(levels)}
     return color_map, marker_map
@@ -292,6 +298,8 @@ def plot_volcano(df, out_pdf):
     y_fdr = -np.log10(p_cut) if (isinstance(p_cut, (int, float)) and np.isfinite(p_cut) and p_cut > 0) else np.nan
     fdr_label = f"BH FDR 0.05 (p ≤ {p_cut:.2e})" if np.isfinite(y_fdr) else "BH FDR 0.05"
 
+    df["is_significant"] = np.isfinite(y_fdr) & (df["neglog10p"] >= y_fdr)
+
     # Dynamically set the labeling threshold to a q-value alpha
     p_cut_labeling = bh_fdr_cutoff(df["P_LRT_Overall"].to_numpy(), alpha=0.06)
     if p_cut_labeling is not None and np.isfinite(p_cut_labeling) and p_cut_labeling > 0:
@@ -332,19 +340,30 @@ def plot_volcano(df, out_pdf):
     rasterize = N > 60000
     for inv in inv_levels:
         sub = df[df["Inversion"] == inv]
-        norm = sub[~sub["is_extreme"]]
-        if not norm.empty:
+        non_sig = sub[~sub["is_significant"]]
+        sig_non_ext = sub[sub["is_significant"] & ~sub["is_extreme"]]
+        sig_ext = sub[sub["is_significant"] & sub["is_extreme"]]
+
+        if not non_sig.empty:
             ax.scatter(
-                norm["lnOR"].to_numpy(), norm["y_plot"].to_numpy(),
-                s=22, alpha=0.75, marker=marker_map[inv],
-                facecolor=color_map[inv], edgecolor="black", linewidth=0.3,
+                non_sig["lnOR"].to_numpy(), non_sig["y_plot"].to_numpy(),
+                s=NON_SIG_SIZE, alpha=NON_SIG_ALPHA, marker='o',
+                facecolor=NON_SIG_COLOR, edgecolor='none',
                 rasterized=rasterize
             )
-        ext = sub[sub["is_extreme"]]
-        if not ext.empty:
+
+        if not sig_non_ext.empty:
             ax.scatter(
-                ext["lnOR"].to_numpy(), ext["y_plot"].to_numpy(),
-                s=90, alpha=0.95, marker=r'$\uparrow$',
+                sig_non_ext["lnOR"].to_numpy(), sig_non_ext["y_plot"].to_numpy(),
+                s=SIG_POINT_SIZE, alpha=0.9, marker=marker_map[inv],
+                facecolor=color_map[inv], edgecolor="black", linewidth=0.4,
+                rasterized=rasterize
+            )
+
+        if not sig_ext.empty:
+            ax.scatter(
+                sig_ext["lnOR"].to_numpy(), sig_ext["y_plot"].to_numpy(),
+                s=EXTREME_ARROW_SIZE, alpha=0.95, marker=r'$\uparrow$',
                 facecolor=color_map[inv], edgecolor="black", linewidth=0.4,
                 rasterized=rasterize
             )
@@ -358,16 +377,26 @@ def plot_volcano(df, out_pdf):
         ax.set_xticklabels(xlabels, fontsize=15)
 
     # Legend inside top-right; include dotted FDR sample
+    sig_inv_levels = [
+        inv for inv in inv_levels
+        if not df[(df["Inversion"] == inv) & df["is_significant"]].empty
+    ]
+    legend_inv_levels = sig_inv_levels if sig_inv_levels else inv_levels
     inv_handles = [
         Line2D([], [], linestyle='None', marker=marker_map[inv], markersize=9,
                markerfacecolor=color_map[inv], markeredgecolor="black", markeredgewidth=0.6,
                label=str(inv))
-        for inv in inv_levels
+        for inv in legend_inv_levels
     ]
+    non_sig_handle = Line2D(
+        [], [], linestyle='None', marker='o', markersize=6,
+        markerfacecolor=NON_SIG_COLOR, markeredgecolor='none', alpha=NON_SIG_ALPHA,
+        label='Not significant'
+    )
     fdr_handle = Line2D([], [], linestyle=':', color='black', linewidth=1.2, label=fdr_label)
-    handles = inv_handles + ([fdr_handle] if np.isfinite(y_fdr) else [])
-    n_inv = len(inv_levels)
-    ncol = 1 if n_inv <= 12 else (2 if n_inv <= 30 else 3)
+    handles = [non_sig_handle] + inv_handles + ([fdr_handle] if np.isfinite(y_fdr) else [])
+    n_items = len(handles)
+    ncol = 1 if n_items <= 12 else (2 if n_items <= 30 else 3)
     ax.legend(
         handles=handles, title="Key",
         loc="upper right", frameon=False, ncol=ncol,
@@ -435,7 +464,7 @@ def plot_volcano(df, out_pdf):
         if t is None or (not t.get_visible()):
             continue
         inv = str(df.loc[idx, "Inversion"])
-        col = color_map.get(inv, (0, 0, 0))
+        col = color_map.get(inv, (0, 0, 0)) if bool(df.loc[idx, "is_significant"]) else NON_SIG_COLOR
         _add_connector(ax, t, point_px[idx], color=col, linewidth=0.9, alpha=0.9)
 
     # Save
