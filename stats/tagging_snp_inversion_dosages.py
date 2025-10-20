@@ -125,59 +125,114 @@ class Hit:
     a2: str
     snp_id: str
 
+
 def find_chr17_targets(bim_uri: str,
                        bim_size: int,
                        wanted: Dict[int, str]) -> List[Hit]:
-    """
-    Stream the chr17.bim and stop as soon as we've passed the max requested bp
-    AND found all present targets.
-    """
-    max_bp = max(wanted.keys())
+    if not wanted:
+        raise RuntimeError("No targets provided.")
+
+    # Normalize requested alleles once
+    wanted = {bp: al.upper() for bp, al in wanted.items()}
+    target_bps = sorted(wanted.keys())
+    print("[DEBUG] Targets:",
+          ", ".join(f"{bp}:{wanted[bp]}" for bp in target_bps))
+
     found: Dict[int, Hit] = {}
+    seen_rows: Dict[int, List[Hit]] = {bp: [] for bp in target_bps}
+
     idx = 0
     progressed = 0
     with tqdm(total=bim_size, unit="B", unit_scale=True, desc="Scan BIM chr17") as bar:
         for ln in gsutil_cat_lines(bim_uri):
             progressed += len(ln.encode("utf-8", "ignore"))
-            if progressed >= (1 << 20):   # update roughly per MiB
+            if progressed >= (1 << 20):  # ~1 MiB progress updates
                 bar.update(progressed)
                 progressed = 0
 
-            p = ln.strip().split()
-            if len(p) < 6:
+            parts = ln.strip().split()
+            if len(parts) < 6:
                 idx += 1
                 continue
-            # chrom_raw = p[0]
-            snp_id = p[1]
-            bp_s   = p[3]
-            a1u    = p[4].upper()
-            a2u    = p[5].upper()
+
+            # columns: chrom, snp_id, cm, bp, a1, a2
+            snp_id = parts[1]
+            bp_str = parts[3]
+            a1 = parts[4].upper()
+            a2 = parts[5].upper()
+
+            # skip non-SNPs early (but still show if this line is a target bp)
+            is_snp = (a1 in {"A","C","G","T"} and a2 in {"A","C","G","T"})
+
             try:
-                bp = int(float(bp_s))
-            except:
+                bp = int(float(bp_str))
+            except Exception:
                 idx += 1
                 continue
-            # keep if it's one of the requested positions
-            if bp in wanted and bp not in found:
-                found[bp] = Hit(bp=bp, snp_index=idx, a1=a1u, a2=a2u, snp_id=snp_id)
-            # quit early when we passed the biggest target and found all that exist
-            if bp > max_bp and len(found) == len(wanted):
-                break
+
+            if bp not in wanted:
+                idx += 1
+                continue
+
+            # Record everything we see at this bp for diagnostics
+            hit = Hit(bp=bp, snp_index=idx, a1=a1, a2=a2, snp_id=snp_id)
+            seen_rows[bp].append(hit)
+
+            # Print a per-row diagnostic line
+            contains = (a1 == wanted[bp]) or (a2 == wanted[bp])
+            print(f"[HIT] bp={bp} idx={idx} snp_id={snp_id} alleles={a1}/{a2} "
+                  f"is_snp={is_snp} contains_target={contains}")
+
+            # If we already satisfied this bp with a valid allele row, don't replace it.
+            if bp in found:
+                idx += 1
+                # Still keep scanning for the other bps
+                if len(found) == len(wanted):
+                    print("[DEBUG] All targets satisfied — stopping scan.")
+                    break
+                continue
+
+            # Only accept a row that actually *contains* the requested allele
+            if is_snp and contains:
+                found[bp] = hit
+                print(f"[SELECT] bp={bp} using idx={idx} ({a1}/{a2}) "
+                      f"because it contains requested allele '{wanted[bp]}'")
+
+                if len(found) == len(wanted):
+                    print("[DEBUG] All targets satisfied — stopping scan.")
+                    break
+
             idx += 1
 
         if progressed:
             bar.update(progressed)
 
-    # Ensure all targets exist in BIM
-    missing = [bp for bp in wanted.keys() if bp not in found]
+    # Post-scan diagnostics and validation
+    missing = [bp for bp in target_bps if bp not in found]
     if missing:
-        raise RuntimeError(f"Requested bp not found in BIM: {missing}")
-    # Validate alleles are SNPs
-    for h in found.values():
-        if h.a1 not in {"A","C","G","T"} or h.a2 not in {"A","C","G","T"}:
-            raise RuntimeError(f"Non-SNP allele at {h.bp}: {h.a1}/{h.a2}")
-    # return in genomic order of input TARGETS (or any order you prefer)
-    return [found[bp] for bp in sorted(found.keys())]
+        for bp in missing:
+            rows = seen_rows.get(bp, [])
+            if rows:
+                print(f"[WARN] No row at {bp} contained requested allele '{wanted[bp]}'. "
+                      f"Rows observed at this bp:")
+                for r in rows:
+                    print(f"       idx={r.snp_index} snp_id={r.snp_id} alleles={r.a1}/{r.a2}")
+            else:
+                print(f"[ERROR] Target position {bp} never observed in BIM.")
+        raise RuntimeError(f"Could not satisfy all targets; missing: {missing}")
+
+    # Summary for each bp: which row we keep, and what else existed
+    for bp in target_bps:
+        kept = found[bp]
+        print(f"[KEEP] bp={bp} -> idx={kept.snp_index} snp_id={kept.snp_id} "
+              f"alleles={kept.a1}/{kept.a2}")
+        alts = [r for r in seen_rows[bp] if r.snp_index != kept.snp_index]
+        for r in alts:
+            print(f"        (also saw) idx={r.snp_index} snp_id={r.snp_id} "
+                  f"alleles={r.a1}/{r.a2}")
+
+    # Return in ascending bp order (the caller sorts into BED order later if needed)
+    return [found[bp] for bp in target_bps]
 
 # ------------------------------ FAM (IDs and N) --------------------------------
 
