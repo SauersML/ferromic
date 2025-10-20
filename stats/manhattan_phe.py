@@ -36,11 +36,19 @@ FIG_HEIGHT      = 7.8
 AXES_BBOX       = (0.18, 0.14, 0.64, 0.78)  # left, bottom, width, height
 
 # Markers & style
-TRI_SIZE        = 82.0     # triangle area (pt^2)
+TRI_BASE_SIZE   = 130.0    # non-significant triangle area (pt^2)
+TRI_SIG_BASE    = 170.0    # baseline significant triangle area (pt^2)
+TRI_SIG_MAG_MAX = 4.0      # clamp for odds-ratio based scaling multiplier
 CIRCLE_SIZE     = 300.0    # FDR circle area (pt^2)
 POINT_EDGE_LW   = 0.45
 POINT_ALPHA     = 0.98
 CIRCLE_EDGE_LW  = 1.3
+
+# Risk direction palette
+INCOLOR_HEX     = "#2B6CB0"
+DECOLOR_HEX     = "#C53030"
+NON_SIG_LIGHTEN = 0.55
+SIG_DARKEN      = 0.35
 
 # Label/legend
 LABEL_FONTSZ    = 14.2
@@ -109,30 +117,32 @@ def sanitize_filename(s: str) -> str:
     return s[:200] if s else "NA"
 
 # Palette & shading
-def build_palette(cat_order):
-    okabe_ito = [
-        "#E69F00", "#56B4E9", "#009E73", "#F0E442",
-        "#0072B2", "#D55E00", "#CC79A7", "#999999",
-    ]
-    tableau10 = list(mcolors.TABLEAU_COLORS.values())
-    tab20 = [mcolors.to_hex(c) for c in plt.cm.tab20.colors]
-    base = okabe_ito + tableau10 + tab20
-    if len(base) < len(cat_order):
-        def lighten(h, amt=0.25):
-            r,g,b = mcolors.to_rgb(h)
-            r=min(1,r+(1-r)*amt); g=min(1,g+(1-g)*amt); b=min(1,b+(1-b)*amt)
-            return mcolors.to_hex((r,g,b))
-        base += [lighten(c) for c in base]
-    return {c: base[i % len(base)] for i, c in enumerate(cat_order)}
+def lighten_color(hex_color: str, amount: float) -> str:
+    r, g, b = mcolors.to_rgb(hex_color)
+    r = min(1.0, r + (1.0 - r) * amount)
+    g = min(1.0, g + (1.0 - g) * amount)
+    b = min(1.0, b + (1.0 - b) * amount)
+    return mcolors.to_hex((r, g, b))
 
-def shade_with_norm(base_hex: str, norm: float, l_light=0.86, l_dark=0.28) -> str:
-    r,g,b = mcolors.to_rgb(base_hex)
-    import colorsys
-    h,l,s = colorsys.rgb_to_hls(r,g,b)
-    l_new = l_light - norm * (l_light - l_dark)
-    s_new = max(0.52, s)
-    r2,g2,b2 = colorsys.hls_to_rgb(h,l_new,s_new)
-    return mcolors.to_hex((r2,g2,b2))
+def darken_color(hex_color: str, amount: float) -> str:
+    r, g, b = mcolors.to_rgb(hex_color)
+    r = max(0.0, r * (1.0 - amount))
+    g = max(0.0, g * (1.0 - amount))
+    b = max(0.0, b * (1.0 - amount))
+    return mcolors.to_hex((r, g, b))
+
+def odds_ratio_magnitude(or_value: float) -> float:
+    if not np.isfinite(or_value) or or_value <= 0:
+        return 1.0
+    return float(or_value) if or_value >= 1.0 else float(1.0 / or_value)
+
+def scale_significant_sizes(or_values: pd.Series) -> np.ndarray:
+    arr = pd.to_numeric(or_values, errors="coerce").to_numpy()
+    arr = np.nan_to_num(arr, nan=1.0, posinf=1.0, neginf=1.0)
+    arr[arr <= 0] = 1.0
+    mags = np.array([odds_ratio_magnitude(v) for v in arr], dtype=float)
+    mags = np.clip(mags, 1.0, TRI_SIG_MAG_MAX)
+    return TRI_SIG_BASE * mags
 
 def pts_to_px(fig, pts):  # points -> pixels
     return pts * (fig.dpi / 72.0)
@@ -259,7 +269,7 @@ def resolve_overlaps_strict(ax, texts, points_px, point_rad_px, max_iter=450, st
             break
 
 # ---------- Connector drawing ----------
-def draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2):
+def draw_connectors(ax, ann_rows, texts, color_by_rowid, size_by_rowid):
     """
     Connector from label-box edge to triangle edge, in pixel space (exact),
     then transformed back to data coords. Color matches the triangle.
@@ -276,7 +286,8 @@ def draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2):
     for idx, r in ann_rows.iterrows():
         pxy = ax.transData.transform((float(r["x"]), float(r["y"])))
         pt_px[idx] = np.array(pxy)
-        tri_rad_px[idx] = tri_radius_px(fig, tri_size_pt2)
+        size_val = float(size_by_rowid.get(idx, TRI_BASE_SIZE))
+        tri_rad_px[idx] = tri_radius_px(fig, size_val)
 
     for t in texts:
         rowid = getattr(t, "_rowid", None)
@@ -336,14 +347,6 @@ def plot_one_inversion(
         .sort_values(["cat_num","cat_name"], kind="mergesort")
         .reset_index(drop=True)
     )["cat_name"].tolist()
-    cat_to_base = build_palette(cat_order)
-
-    # shade by |log(OR)| normalized
-    or_vals = g[OR_COL].fillna(1.0).astype(float).clip(lower=np.nextafter(0,1))
-    mag = np.abs(np.log(or_vals))
-    p95 = np.nanpercentile(mag, 95) if np.isfinite(np.nanpercentile(mag, 95)) else 1.0
-    denom = p95 if p95 > 0 else (mag.max() if mag.max() > 0 else 1.0)
-    norm_all = np.clip(mag / denom, 0, 1)
 
     # x positions within category:
     # left side (dec) sorted by q; right side (inc) sorted by q
@@ -370,10 +373,6 @@ def plot_one_inversion(
 
         block = pd.concat([dec_df, inc_df], axis=0)
         if not block.empty:
-            # color shading (per point) using category hue
-            base = cat_to_base[cat]
-            idxs = block.index.tolist()
-            block["color"] = [shade_with_norm(base, float(norm_all.loc[i])) for i in idxs]
             pieces.append(block)
             centers.append(start + (n_tot - 1)/2.0)
             ticklabels.append(cat)
@@ -382,6 +381,26 @@ def plot_one_inversion(
     if not pieces: return None
     g = pd.concat(pieces, ignore_index=False).sort_values("x")
     m = len(g)
+
+    if SIG_COL in g.columns:
+        sig_mask_full = truthy_series(g[SIG_COL])
+    else:
+        sig_mask_full = pd.Series(False, index=g.index)
+
+    base_color_lookup = {"inc": INCOLOR_HEX, "dec": DECOLOR_HEX}
+    plot_colors: list[str] = []
+    for idx, row in g.iterrows():
+        base = base_color_lookup.get(row.get("risk_dir"), INCOLOR_HEX)
+        if bool(sig_mask_full.get(idx, False)):
+            plot_colors.append(darken_color(base, SIG_DARKEN))
+        else:
+            plot_colors.append(lighten_color(base, NON_SIG_LIGHTEN))
+    g["plot_color"] = plot_colors
+
+    size_array = np.full(m, TRI_BASE_SIZE, dtype=float)
+    if sig_mask_full.any():
+        size_array[sig_mask_full.to_numpy()] = scale_significant_sizes(g.loc[sig_mask_full, OR_COL])
+    g["plot_size"] = size_array
 
     # figure
     if global_fig_width is not None:
@@ -398,34 +417,32 @@ def plot_one_inversion(
     obstacles = []
     # FDR circles (behind triangles)
     circ=None
-    if SIG_COL in g.columns:
-        sig = truthy_series(g[SIG_COL])
-        if sig.any():
-            circ = ax.scatter(
-                g.loc[sig,"x"], g.loc[sig,"y"],
-                s=CIRCLE_SIZE, marker="o",
-                facecolors="white", edgecolors="black",
-                linewidths=CIRCLE_EDGE_LW, zorder=1.5, alpha=1.0,
-                label="FDR significant"
-            )
-            obstacles.append(circ)
+    if sig_mask_full.any():
+        circ = ax.scatter(
+            g.loc[sig_mask_full,"x"], g.loc[sig_mask_full,"y"],
+            s=CIRCLE_SIZE, marker="o",
+            facecolors="white", edgecolors="black",
+            linewidths=CIRCLE_EDGE_LW, zorder=1.5, alpha=1.0,
+            label="FDR significant"
+        )
+        obstacles.append(circ)
 
     # triangles
     inc = g["risk_dir"]=="inc"
     dec = ~inc
     tri_inc = ax.scatter(
         g.loc[inc,"x"], g.loc[inc,"y"],
-        s=TRI_SIZE, marker="^",
-        c=g.loc[inc,"color"], edgecolors="black",
+        s=g.loc[inc,"plot_size"], marker="^",
+        c=g.loc[inc,"plot_color"], edgecolors="black",
         linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA, zorder=2.0,
-        label="Risk increasing"
+        label="Risk increasing (darker = FDR sig.)"
     ) if inc.any() else None
     tri_dec = ax.scatter(
         g.loc[dec,"x"], g.loc[dec,"y"],
-        s=TRI_SIZE, marker="v",
-        c=g.loc[dec,"color"], edgecolors="black",
+        s=g.loc[dec,"plot_size"], marker="v",
+        c=g.loc[dec,"plot_color"], edgecolors="black",
         linewidths=POINT_EDGE_LW, alpha=POINT_ALPHA, zorder=2.0,
-        label="Risk decreasing"
+        label="Risk decreasing (darker = FDR sig.)"
     ) if dec.any() else None
     if tri_inc is not None: obstacles.append(tri_inc)
     if tri_dec is not None: obstacles.append(tri_dec)
@@ -492,12 +509,12 @@ def plot_one_inversion(
     # per-point px centers and collision radii (max of triangle & circle if sig)
     pts_px = []
     rad_px = []
-    sig_mask_full = truthy_series(g[SIG_COL]) if (SIG_COL in g.columns) else pd.Series(False, index=g.index)
-    tri_r = tri_radius_px(fig, TRI_SIZE)
+    tri_radius_by_rowid = {idx: tri_radius_px(fig, float(g.at[idx, "plot_size"])) for idx in g.index}
     circ_r = tri_radius_px(fig, CIRCLE_SIZE)  # consistent scale conversion
     for i, r in g.iterrows():
         px = ax.transData.transform((float(r["x"]), float(r["y"])))
         pts_px.append(np.array(px))
+        tri_r = tri_radius_by_rowid.get(i, tri_radius_px(fig, TRI_BASE_SIZE))
         rad_px.append(max(tri_r, circ_r if bool(sig_mask_full.get(i, False)) else tri_r))
     pts_px = np.vstack(pts_px)
     rad_px = np.array(rad_px)
@@ -540,13 +557,43 @@ def plot_one_inversion(
         ax.axvline(x=x0 - 0.5, color="#e6e6ee", linestyle="-", linewidth=0.7, zorder=1)
 
     # legend
-    h, l = ax.get_legend_handles_labels()
-    if h: ax.legend(fontsize=9, loc="upper right", frameon=False)
+    handles, labels = ax.get_legend_handles_labels()
+    legend1 = None
+    if handles:
+        legend1 = ax.legend(handles, labels, fontsize=9, loc="upper right", frameon=False)
+
+    if sig_mask_full.any():
+        or_levels = [1.0, 1.5, 2.5]
+        or_labels = ["1.0×" if np.isclose(val, 1.0) else f"{val:.1f}×" for val in or_levels]
+        sig_color_sample = darken_color(INCOLOR_HEX, SIG_DARKEN)
+        size_handles = [
+            ax.scatter(
+                [], [],
+                s=scale_significant_sizes(pd.Series([val]))[0],
+                marker="^", facecolors=sig_color_sample,
+                edgecolors="black", linewidths=POINT_EDGE_LW,
+                alpha=POINT_ALPHA
+            )
+            for val in or_levels
+        ]
+        legend2 = ax.legend(
+            size_handles, or_labels,
+            title="Odds ratio (sig.)",
+            fontsize=9, title_fontsize=9,
+            loc="upper left", frameon=False,
+            borderaxespad=0.8
+        )
+        if legend1 is not None:
+            ax.add_artist(legend1)
+        ax.add_artist(legend2)
+    elif legend1 is not None:
+        ax.add_artist(legend1)
 
     # connectors (AFTER final layout; color by exact rowid)
     fig.canvas.draw()
-    color_by_rowid = g["color"].to_dict()
-    draw_connectors(ax, ann_rows, texts, color_by_rowid, tri_size_pt2=TRI_SIZE)
+    color_by_rowid = g["plot_color"].to_dict()
+    size_by_rowid = g["plot_size"].to_dict()
+    draw_connectors(ax, ann_rows, texts, color_by_rowid, size_by_rowid)
 
     os.makedirs(OUTDIR, exist_ok=True)
     out = os.path.join(OUTDIR, f"phewas_{sanitize_filename(str(inversion_label))}.pdf")
