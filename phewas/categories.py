@@ -344,6 +344,9 @@ def compute_category_metrics(
     z_cap: float = 8.0,
     rng_seed: Optional[int] = None,
     min_k: int = 3,
+    fdr_method: str = "fdr_bh",
+    fdr_alpha: float = 0.05,
+    apply_fdr: bool = True,
 ) -> pd.DataFrame:
     """Compute GBJ and directional GLS metrics per category."""
 
@@ -356,6 +359,8 @@ def compute_category_metrics(
             "P_GBJ",
             "T_GLS",
             "P_GLS",
+            "Q_GBJ",
+            "Q_GLS",
             "Direction",
             "Method",
             "Shrinkage",
@@ -472,6 +477,8 @@ def compute_category_metrics(
             "P_GBJ",
             "T_GLS",
             "P_GLS",
+            "Q_GBJ",
+            "Q_GLS",
             "Direction",
             "Method",
             "Shrinkage",
@@ -485,6 +492,33 @@ def compute_category_metrics(
         ])
 
     df_out = pd.DataFrame(records)
+    df_out["Q_GBJ"] = np.nan
+    df_out["Q_GLS"] = np.nan
+
+    if apply_fdr:
+        try:
+            from statsmodels.stats.multitest import multipletests
+        except ImportError:
+            pass
+        else:
+            mask_gbj = df_out["P_GBJ"].notna() & pd.Series(
+                np.isfinite(df_out["P_GBJ"].to_numpy()), index=df_out.index
+            )
+            if mask_gbj.any():
+                _, q_gbj, _, _ = multipletests(
+                    df_out.loc[mask_gbj, "P_GBJ"], alpha=fdr_alpha, method=fdr_method
+                )
+                df_out.loc[mask_gbj, "Q_GBJ"] = q_gbj
+
+            mask_gls = df_out["P_GLS"].notna() & pd.Series(
+                np.isfinite(df_out["P_GLS"].to_numpy()), index=df_out.index
+            )
+            if mask_gls.any():
+                _, q_gls, _, _ = multipletests(
+                    df_out.loc[mask_gls, "P_GLS"], alpha=fdr_alpha, method=fdr_method
+                )
+                df_out.loc[mask_gls, "Q_GLS"] = q_gls
+
     df_out.sort_values("P_GBJ", inplace=True)
     df_out.reset_index(drop=True, inplace=True)
     return df_out
