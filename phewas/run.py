@@ -446,7 +446,7 @@ MIN_NEFF_FILTER = 0 # Default off
 FDR_ALPHA = 0.05
 
 # --- Population filter ---
-POPULATION_FILTER = "eur"
+POPULATION_FILTER = "all"
 
 # --- Testing configuration (centralized in testing.py) ---
 _cat_env_overrides = {}
