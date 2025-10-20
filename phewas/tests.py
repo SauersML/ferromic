@@ -81,6 +81,7 @@ def preserve_run_globals():
         "PHENOTYPE_DEFINITIONS_URL",
         "INVERSION_DOSAGES_FILE",
         "CLI_MIN_CASES_CONTROLS_OVERRIDE",
+        "POPULATION_FILTER",
     ]
     snapshot = {k: getattr(run, k) for k in keys if hasattr(run, k)}
     try:
@@ -207,11 +208,22 @@ def test_cli_min_cases_controls_only_updates_prefilter():
         run.MIN_CASES_FILTER = 10
         run.MIN_CONTROLS_FILTER = 20
         run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
+        run.POPULATION_FILTER = "eur"
         args = argparse.Namespace(min_cases_controls=30, pop_label=None)
         cli.apply_cli_configuration(args)
         assert run.MIN_CASES_FILTER == 10
         assert run.MIN_CONTROLS_FILTER == 20
         assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE == 30
+        assert run.POPULATION_FILTER == "all"
+
+
+def test_cli_pop_label_sets_population_filter():
+    with preserve_run_globals():
+        run.POPULATION_FILTER = "all"
+        args = argparse.Namespace(min_cases_controls=None, pop_label="  EUR  ")
+        cli.apply_cli_configuration(args)
+        assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE is None
+        assert run.POPULATION_FILTER == "EUR"
 
 
 def test_prefilter_thresholds_respect_cli_override():
