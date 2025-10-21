@@ -673,7 +673,14 @@ def test_worker_constant_dosage_emits_nan(test_ctx):
             models._fit_logit_ladder = fake_ladder
             models._firth_refit = lambda *args, **kwargs: None
             models._score_test_from_reduced = lambda *args, **kwargs: (np.nan, np.nan)
-            models._score_bootstrap_from_reduced = lambda *args, **kwargs: np.nan
+            models._score_bootstrap_from_reduced = lambda *args, **kwargs: {
+                "p": np.nan,
+                "T_obs": np.nan,
+                "draws": 0,
+                "exceed": 0,
+                "fit_kind": None,
+                "den": np.nan,
+            }
             models.lrt_overall_worker(task)
         finally:
             models._fit_logit_ladder = orig_fit
@@ -940,7 +947,14 @@ def test_penalized_fit_ci_and_pval_suppression(test_ctx):
             models._fit_logit_ladder = fake_ladder
             models._firth_refit = lambda *args, **kwargs: None
             models._score_test_from_reduced = lambda *args, **kwargs: (np.nan, np.nan)
-            models._score_bootstrap_from_reduced = lambda *args, **kwargs: np.nan
+            models._score_bootstrap_from_reduced = lambda *args, **kwargs: {
+                "p": np.nan,
+                "T_obs": np.nan,
+                "draws": 0,
+                "exceed": 0,
+                "fit_kind": None,
+                "den": np.nan,
+            }
             models.lrt_overall_worker(task)
         finally:
             models._fit_logit_ladder = orig_fit
