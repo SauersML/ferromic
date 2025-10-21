@@ -3367,6 +3367,10 @@ def lrt_followup_worker(task):
             'LRT_df': np.nan,
             'LRT_Reason': "",
             'Model_Notes': note,
+            'Boot_Engine': None,
+            'Boot_Draws': 0,
+            'Boot_Exceed': 0,
+            'Boot_Fit_Kind': None,
         }
         used_index_fp = _index_fingerprint(Xb.index)
         sex_cfg = {
@@ -3487,6 +3491,11 @@ def lrt_followup_worker(task):
         inference_family = None
         fit_full_use = None
         fit_red_use = None
+        p_stage2 = np.nan
+        boot_engine = None
+        boot_draws = 0
+        boot_exceed = 0
+        boot_fit_kind = None
         if df_lrt > 0:
             full_is_mle = bool(getattr(fit_full, "_final_is_mle", False)) and not bool(getattr(fit_full, "_used_firth", False))
             red_is_mle = bool(getattr(fit_red, "_final_is_mle", False)) and not bool(getattr(fit_red, "_used_firth", False))
@@ -3501,15 +3510,8 @@ def lrt_followup_worker(task):
                 inference_family = "mle"
                 fit_full_use = fit_full
                 fit_red_use = fit_red
-            else:
-                fit_full_firth = fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_full_zv, yb)
-                fit_red_firth = fit_red if bool(getattr(fit_red, "_used_firth", False)) else _firth_refit(X_red_zv, yb)
-                if (fit_full_firth is not None) and (fit_red_firth is not None):
-                    inference_family = "firth"
-                    fit_full_use = fit_full_firth
-                    fit_red_use = fit_red_firth
 
-        if inference_family is not None:
+        if inference_family == "mle":
             ll_full = float(getattr(fit_full_use, "llf", np.nan))
             ll_red = float(getattr(fit_red_use, "llf", np.nan))
             if np.isfinite(ll_full) and np.isfinite(ll_red):
@@ -3517,14 +3519,85 @@ def lrt_followup_worker(task):
                 p_stage2 = float(sp_stats.chi2.sf(stat, df_lrt))
                 out['P_LRT_AncestryxDosage'] = p_stage2
                 out['P_Stage2_Valid'] = np.isfinite(p_stage2)
-                out['P_Method'] = "lrt_mle" if inference_family == "mle" else "lrt_firth"
-                out['P_Source'] = out['P_Method']
-                out['Inference_Type'] = inference_family
+                out['P_Method'] = "lrt_mle"
+                out['P_Source'] = "lrt_mle"
+                out['Inference_Type'] = "mle"
                 out['LRT_df'] = df_lrt
             else:
                 out['LRT_Reason'] = "fit_failed"
+        elif df_lrt == 0:
+            out['LRT_Reason'] = "zero_df_lrt"
+        elif df_lrt == 1:
+            x_target_vec = None
+            if kept_interaction_cols:
+                int_col = kept_interaction_cols[0]
+                if int_col in X_full_zv.columns:
+                    x_target_vec = X_full_zv[int_col].to_numpy(dtype=np.float64, copy=False)
+            if x_target_vec is None:
+                out['LRT_Reason'] = "score_target_missing"
+            else:
+                p_sc, _ = _score_test_from_reduced(
+                    X_red_zv,
+                    yb,
+                    x_target_vec,
+                    const_ix=const_ix_red,
+                )
+                if np.isfinite(p_sc):
+                    out['P_LRT_AncestryxDosage'] = p_sc
+                    out['P_Stage2_Valid'] = True
+                    out['P_Method'] = "score_chi2"
+                    out['P_Source'] = "score_chi2"
+                    out['Inference_Type'] = "score"
+                    out['LRT_df'] = 1
+                    out['LRT_Reason'] = ""
+                else:
+                    boot_res = _score_bootstrap_from_reduced(
+                        X_red_zv,
+                        yb,
+                        x_target_vec,
+                        seed_key=("lrt_followup", s_name_safe, "stage2", target, "pval"),
+                    )
+                    p_emp = float(boot_res.get("p", np.nan))
+                    boot_draws = int(boot_res.get("draws", 0))
+                    boot_exceed = int(boot_res.get("exceed", 0))
+                    boot_fit_kind = boot_res.get("fit_kind")
+                    if np.isfinite(p_emp):
+                        p_stage2 = p_emp
+                        out['P_LRT_AncestryxDosage'] = p_stage2
+                        out['P_Stage2_Valid'] = True
+                        out['P_Method'] = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
+                        out['P_Source'] = out['P_Method']
+                        out['Inference_Type'] = "score_boot"
+                        out['LRT_df'] = 1
+                        out['LRT_Reason'] = ""
+                        boot_engine = "score_bootstrap"
+                    else:
+                        out['LRT_Reason'] = "score_boot_failed"
         else:
-            out['LRT_Reason'] = "zero_df_lrt" if df_lrt == 0 else "fit_failed"
+            out['LRT_Reason'] = "score_unavailable_multi_df"
+
+        out['Boot_Engine'] = boot_engine
+        out['Boot_Draws'] = int(boot_draws)
+        out['Boot_Exceed'] = int(boot_exceed)
+        out['Boot_Fit_Kind'] = boot_fit_kind
+
+        if not out['P_Stage2_Valid'] and not out['LRT_Reason']:
+            out['LRT_Reason'] = "fit_failed"
+
+        lrt_df_val = out.get('LRT_df')
+        if isinstance(lrt_df_val, (np.integer, int)):
+            stage2_df = int(lrt_df_val)
+        elif isinstance(lrt_df_val, (float, np.floating)) and np.isfinite(lrt_df_val):
+            stage2_df = int(lrt_df_val)
+        else:
+            stage2_df = None
+        meta_extra_common.update({
+            "stage2_df": stage2_df,
+            "stage2_inference_type": out.get('Inference_Type'),
+            "stage2_p_method": out.get('P_Method'),
+            "stage2_reason": out.get('LRT_Reason') or None,
+            "stage2_boot_engine": out.get('Boot_Engine'),
+        })
 
         for anc in levels_sorted:
             anc_mask = (anc_vec == anc).to_numpy()
