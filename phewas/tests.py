@@ -129,6 +129,28 @@ def test_drop_rank_deficient_respects_uniform_scaling():
     kept_scaled = models._drop_rank_deficient(scaled, keep_cols=('const',), always_keep=('target',))
     assert list(kept_scaled.columns) == list(base.columns)
 
+
+def test_drop_rank_deficient_drops_near_duplicates_even_after_scaling():
+    rng = np.random.default_rng(11)
+    n = 80
+    base = pd.DataFrame(
+        {
+            'const': np.ones(n, dtype=np.float64),
+            'target': rng.normal(0.0, 1.0, size=n),
+        }
+    )
+    base['pc1'] = rng.normal(0.0, 0.25, size=n)
+    # Introduce an almost perfectly collinear copy of target; the perturbation
+    # keeps the matrix full rank before pruning but should be removed.
+    base['dup_target'] = base['target'] + 1e-8 * rng.normal(0.0, 1.0, size=n)
+
+    kept = models._drop_rank_deficient(base, keep_cols=('const',), always_keep=('target',))
+    assert 'dup_target' not in kept.columns
+
+    scaled = base * 1e-3
+    kept_scaled = models._drop_rank_deficient(scaled, keep_cols=('const',), always_keep=('target',))
+    assert 'dup_target' not in kept_scaled.columns
+
 def make_synth_cohort(N=200, NUM_PCS=10, seed=42):
     rng = np.random.default_rng(seed)
     person_ids = [f"p{i:07d}" for i in range(1, N + 1)]
