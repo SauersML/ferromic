@@ -75,6 +75,8 @@ def preserve_run_globals():
     keys = [
         "MIN_CASES_FILTER",
         "MIN_CONTROLS_FILTER",
+        "DEFAULT_MIN_CASES_FILTER",
+        "DEFAULT_MIN_CONTROLS_FILTER",
         "FDR_ALPHA",
         "LRT_SELECT_ALPHA",
         "TARGET_INVERSION",
@@ -287,7 +289,9 @@ def prime_all_caches_for_run(core_data, phenos, cdr_codename, target_inversion, 
             "sanitized_name": s_name, "icd9_codes": "1.1", "icd10_codes": "A1.1"
         })
 
-    pan_cases = {"cardio": phenos["A_strong_signal"]["cases"] | phenos["B_insufficient"]["cases"], "neuro": phenos["C_moderate_signal"]["cases"]}
+    pan_cases = {}
+    for p_data in phenos.values():
+        pan_cases.setdefault(p_data["category"], set()).update(p_data["cases"])
     pd.to_pickle(pan_cases, Path(cache_dir) / f"pan_category_cases_{cdr_codename}.pkl")
 
     for d in ["results_atomic", "lrt_overall", "lrt_followup"]:
@@ -355,9 +359,10 @@ def test_cli_population_filter_matches_followup_effects():
         run.LOCK_DIR = os.path.join(run.CACHE_DIR, "locks")
         run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]
         run.NUM_PCS = core_data["pcs"].shape[1]
-        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 20
-        run.PER_ANC_MIN_CASES = 20
-        run.PER_ANC_MIN_CONTROLS = 20
+        run.DEFAULT_MIN_CASES_FILTER = run.DEFAULT_MIN_CONTROLS_FILTER = 10
+        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
+        run.PER_ANC_MIN_CASES = 5
+        run.PER_ANC_MIN_CONTROLS = 5
         run.MIN_NEFF_FILTER = 0
         run.MLE_REFIT_MIN_NEFF = 0
         run.FDR_ALPHA = 1.0
