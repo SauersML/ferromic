@@ -109,6 +109,26 @@ def write_tsv(path, df):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, sep='\t', index=False)
 
+def test_drop_rank_deficient_respects_uniform_scaling():
+    rng = np.random.default_rng(2024)
+    n = 60
+    base = pd.DataFrame(
+        {
+            'const': np.ones(n, dtype=np.float64),
+            'target': rng.normal(0.0, 1.0, size=n),
+            'PC1': rng.normal(0.0, 0.5, size=n),
+            'PC2': rng.normal(0.0, 0.5, size=n),
+            'PC3': rng.normal(0.0, 0.5, size=n),
+        }
+    )
+
+    kept_base = models._drop_rank_deficient(base, keep_cols=('const',), always_keep=('target',))
+    assert list(kept_base.columns) == list(base.columns)
+
+    scaled = base * 1e-3
+    kept_scaled = models._drop_rank_deficient(scaled, keep_cols=('const',), always_keep=('target',))
+    assert list(kept_scaled.columns) == list(base.columns)
+
 def make_synth_cohort(N=200, NUM_PCS=10, seed=42):
     rng = np.random.default_rng(seed)
     person_ids = [f"p{i:07d}" for i in range(1, N + 1)]
