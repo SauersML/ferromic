@@ -13,6 +13,7 @@ import traceback
 import json
 import importlib
 import importlib.util
+import hashlib
 from typing import Optional, Tuple
 try:
     import psutil
@@ -85,6 +86,20 @@ def _thread_excepthook(args):
     _global_excepthook(args.exc_type, args.exc_value, args.exc_traceback)
 
 threading.excepthook = _thread_excepthook
+
+
+def _stable_seed(*parts: object) -> int:
+    """Return a deterministic 32-bit seed derived from the provided parts."""
+    hasher = hashlib.blake2s(digest_size=4)
+    for part in parts:
+        if part is None:
+            data = b"<none>"
+        else:
+            data = str(part).encode("utf-8", "surrogatepass")
+        hasher.update(len(data).to_bytes(4, "big"))
+        hasher.update(data)
+    return int.from_bytes(hasher.digest(), "big")
+
 
 class SystemMonitor(threading.Thread):
     """
@@ -1071,7 +1086,8 @@ def _pipeline_once():
                                 )
                                 if null_structs:
                                     base_seed = int(tctx.get("CAT_SEED_BASE", 1729))
-                                    seed = (base_seed + (abs(hash((target_inversion, ctx.get("CTX_TAG")))) % (2 ** 32))) % (2 ** 32)
+                                    stable_component = _stable_seed(target_inversion, ctx.get("CTX_TAG"))
+                                    seed = (base_seed + stable_component) % (2 ** 32)
                                     cat_df = categories.compute_category_metrics(
                                         inv_df,
                                         p_col=p_col,
