@@ -15,7 +15,7 @@ from unittest.mock import patch, MagicMock
 import warnings
 import math
 from typing import List, Optional
-from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
+from statsmodels.tools.sm_exceptions import PerfectSeparationWarning, PerfectSeparationError
 
 import pytest
 import numpy as np
@@ -1029,17 +1029,31 @@ def test_cache_idempotency_on_mask_change(test_ctx):
 
 def test_ridge_intercept_is_zero(test_ctx):
     with temp_workspace():
-        X = pd.DataFrame({'const': 1.0, 'x1': [0, 0, 1, 1]}, index=pd.RangeIndex(4))
-        y = pd.Series([0, 0, 1, 1])
-        with patch('statsmodels.api.Logit') as mock_logit:
-            mock_logit.return_value.fit.side_effect = PerfectSeparationWarning()
-            models.CTX = test_ctx
-            models._fit_logit_ladder(X, y, ridge_ok=True)
-            assert mock_logit.return_value.fit_regularized.called
-            args, kwargs = mock_logit.return_value.fit_regularized.call_args
-            assert 'alpha' in kwargs
-            assert isinstance(kwargs['alpha'], float)
-            assert kwargs['alpha'] > 0.0
+        X = pd.DataFrame({'const': 1.0, 'x1': [-1.0, -1.0, 1.0, 1.0]}, index=pd.RangeIndex(4))
+        y = pd.Series([0, 1, 0, 1])
+        models.CTX = {**test_ctx, "PREFER_FIRTH_ON_RIDGE": False}
+        mle_fit = sm.Logit(y, X).fit(disp=0, method='newton', maxiter=200)
+
+        orig_logit_fit = models._logit_fit
+
+        def fail_mle(model, method, **kw):
+            if method in ('newton', 'bfgs'):
+                raise PerfectSeparationError('force ridge path')
+            return orig_logit_fit(model, method, **kw)
+
+        try:
+            models._logit_fit = fail_mle
+            ridge_fit, reason = models._fit_logit_ladder(X, y, ridge_ok=True)
+        finally:
+            models._logit_fit = orig_logit_fit
+
+        assert reason == 'ridge_only'
+        np.testing.assert_allclose(ridge_fit.params['const'], mle_fit.params['const'], rtol=1e-10, atol=1e-10)
+        zero_penalty_ixs = getattr(ridge_fit, '_ridge_zero_penalty_ixs')
+        assert zero_penalty_ixs == [0]
+        pen_weights = getattr(ridge_fit, '_ridge_penalty_weights')
+        assert pen_weights[0] == 0.0 and np.all(pen_weights[1:] > 0.0)
+        assert any('unpenalized' in tag for tag in getattr(ridge_fit, '_path_reasons', ()))
 
 def test_lrt_collinear_df_is_zero(test_ctx):
     with temp_workspace():
@@ -1707,6 +1721,7 @@ def test_ridge_seeded_refit_matches_mle():
         fit, reason = models._fit_logit_ladder(X, y, ridge_ok=True)
         assert reason in ('ridge_seeded_refit',)
         np.testing.assert_allclose(fit.params.values, fit_mle.params.values, rtol=1e-3, atol=1e-3)
+        np.testing.assert_allclose(fit.params['const'], fit_mle.params['const'], rtol=1e-4, atol=1e-4)
         assert abs(fit.llf - fit_mle.llf) < 1e-3
     finally:
         models._logit_fit = orig

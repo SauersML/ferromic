@@ -714,7 +714,16 @@ def _leverages_batched(X_np, XtWX_inv, W, batch=100_000):
         h[i0:i1] = np.clip(W[i0:i1] * s, 0.0, 1.0)
     return h
 
-def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer_mle_first=False, **kwargs):
+def _fit_logit_ladder(
+    X,
+    y,
+    ridge_ok=True,
+    const_ix=None,
+    target_ix=None,
+    prefer_mle_first=False,
+    ridge_zero_penalty_ixs=None,
+    **kwargs,
+):
     """
     Logistic fit ladder with an option to attempt unpenalized MLE first.
     If numpy arrays are provided, const_ix identifies the intercept column for zero-penalty.
@@ -726,6 +735,37 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer
 
     is_pandas = hasattr(X, "columns")
     prefer_firth_on_ridge = bool(CTX.get("PREFER_FIRTH_ON_RIDGE", DEFAULT_PREFER_FIRTH_ON_RIDGE))
+    if const_ix is None and is_pandas and "const" in getattr(X, "columns", []):
+        try:
+            const_ix = int(list(X.columns).index("const"))
+        except ValueError:
+            const_ix = None
+    elif const_ix is not None:
+        try:
+            const_ix = int(const_ix)
+        except (TypeError, ValueError):
+            const_ix = None
+
+    zero_penalty_ixs = set()
+    if const_ix is not None:
+        try:
+            zero_penalty_ixs.add(int(const_ix))
+        except (TypeError, ValueError):
+            pass
+    if ridge_zero_penalty_ixs is not None:
+        if np.isscalar(ridge_zero_penalty_ixs):
+            ridge_zero_penalty_ixs = [ridge_zero_penalty_ixs]
+        for ix in ridge_zero_penalty_ixs:
+            if isinstance(ix, str) and is_pandas:
+                try:
+                    ix = X.columns.get_loc(ix)
+                except KeyError:
+                    continue
+            try:
+                zero_penalty_ixs.add(int(ix))
+            except (TypeError, ValueError):
+                continue
+
     allow_mle = _mle_prefit_ok(X, y, target_ix=target_ix, const_ix=const_ix)
     prefit_gate_tags = [] if allow_mle else ["gate:mle_prefit_blocked"]
 
@@ -793,24 +833,42 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer
                     pass
 
         # Ridge-first pathway with strict MLE gating based on numerical diagnostics.
-        p = X.shape[1] - (1 if (is_pandas and "const" in X.columns) or (not is_pandas and const_ix is not None) else 0)
+        n_params = int(X.shape[1])
+        valid_zero_ixs = sorted(ix for ix in zero_penalty_ixs if isinstance(ix, int) and 0 <= ix < n_params)
+        penalized_param_count = n_params - len(valid_zero_ixs)
+        if penalized_param_count <= 0:
+            penalized_param_count = n_params or 1
         n = max(1, X.shape[0])
         pi = float(np.mean(y)) if len(y) > 0 else 0.5
         n_eff = max(1.0, 4.0 * float(len(y)) * pi * (1.0 - pi))
-        alpha_scalar = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / n_eff), 1e-6)
-        # DiscreteModel.fit_regularized expects scalar alpha; per-parameter weights are not reliably supported.
-        # Using scalar ridge is OK since we refit MLE (unpenalized) when possible.
-        ridge_fit = sm.Logit(y, X).fit_regularized(
-            alpha=float(alpha_scalar),
-            L1_wt=0.0,
-            maxiter=800,
-            disp=0,
-            start_params=user_start,
-            **kwargs,
-        )
+        alpha_scalar = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(penalized_param_count) / n_eff), 1e-6)
+        pen_weight = np.ones(n_params, dtype=np.float64)
+        if valid_zero_ixs:
+            pen_weight[valid_zero_ixs] = 0.0
+
+        fit_regularized_kwargs = dict(kwargs)
+        fit_regularized_kwargs.update({
+            "alpha": float(alpha_scalar),
+            "L1_wt": 0.0,
+            "maxiter": 800,
+            "disp": 0,
+            "start_params": user_start,
+            "pen_weight": pen_weight,
+        })
+
+        logit_model = sm.Logit(y, X)
+        try:
+            ridge_fit = logit_model.fit_regularized(**fit_regularized_kwargs)
+        except TypeError:
+            # Older statsmodels versions do not accept pen_weight but allow per-parameter alpha.
+            fit_regularized_kwargs.pop("pen_weight", None)
+            fit_regularized_kwargs["alpha"] = np.asarray(pen_weight * float(alpha_scalar), dtype=np.float64)
+            ridge_fit = logit_model.fit_regularized(**fit_regularized_kwargs)
 
         setattr(ridge_fit, "_ridge_alpha", float(alpha_scalar))
         setattr(ridge_fit, "_ridge_const_ix", None if const_ix is None else int(const_ix))
+        setattr(ridge_fit, "_ridge_zero_penalty_ixs", valid_zero_ixs)
+        setattr(ridge_fit, "_ridge_penalty_weights", pen_weight)
         setattr(ridge_fit, "_used_ridge", True)
         setattr(ridge_fit, "_final_is_mle", False)
 
@@ -822,12 +880,20 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer
         neff_gate = float(CTX.get("MLE_REFIT_MIN_NEFF", 0.0))
         gate_tags = _ridge_gate_reasons(max_abs_linpred, frac_lo, frac_hi, n_eff, neff_gate)
         blocked_by_gate = ((max_abs_linpred > 15.0) or (frac_lo > 0.02) or (frac_hi > 0.02) or (neff_gate > 0 and n_eff < neff_gate))
-        path_prefix = ["ridge_reached"] + gate_tags + prefit_gate_tags
+        ridge_unpenalized_tag = "ridge_unpenalized_terms" if valid_zero_ixs else None
+        path_prefix = ["ridge_reached"]
+        if ridge_unpenalized_tag is not None:
+            path_prefix.append(ridge_unpenalized_tag)
+        path_prefix.extend(gate_tags)
+        path_prefix.extend(prefit_gate_tags)
         if blocked_by_gate or (not allow_mle):
             firth_attempt = _maybe_firth(path_prefix)
             if firth_attempt is not None:
                 return firth_attempt
-            tags = ["ridge_only"] + gate_tags
+            tags = ["ridge_only"]
+            if ridge_unpenalized_tag is not None:
+                tags.append(ridge_unpenalized_tag)
+            tags += gate_tags
             if prefer_firth_on_ridge:
                 tags.append("firth_failed")
             setattr(ridge_fit, "_path_reasons", tags)
@@ -892,7 +958,10 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer
         if firth_attempt is not None:
             return firth_attempt
 
-        tags = ["ridge_only"] + gate_tags
+        tags = ["ridge_only"]
+        if ridge_unpenalized_tag is not None:
+            tags.append(ridge_unpenalized_tag)
+        tags += gate_tags
         if prefer_firth_on_ridge:
             tags.append("firth_failed")
         setattr(ridge_fit, "_path_reasons", tags)
