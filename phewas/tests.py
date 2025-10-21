@@ -1458,6 +1458,77 @@ def test_lrt_followup_firth_fit_keeps_ci(test_ctx):
         assert res.get('AFR_REASON') in (None, '')
         shm.close(); shm.unlink()
 
+
+def test_lrt_followup_stage2_separation_uses_score_fallback(test_ctx, monkeypatch):
+    """Stage-2 should surface score-based inference instead of penalized LRT under separation."""
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort(N=200, seed=123)
+
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+
+        core_df = pd.concat([
+            core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+            core_data['sex'],
+            core_data['pcs'],
+            core_data['inversion_main'],
+        ], axis=1)
+        core_df = sm.add_constant(core_df)
+
+        shm = _init_lrt_worker_from_df(core_df, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
+
+        task = {
+            "name": "C_moderate_signal",
+            "category": "neuro",
+            "cdr_codename": TEST_CDR_CODENAME,
+            "target": TEST_TARGET_INVERSION,
+        }
+
+        original_fit = models._fit_logit_ladder
+
+        def fake_fit(X, y, **kwargs):
+            fit, reason = original_fit(X, y, **kwargs)
+            cols = getattr(X, "columns", [])
+            if any(":" in str(c) for c in cols):
+                if fit is not None:
+                    setattr(fit, "_final_is_mle", False)
+                    setattr(fit, "_used_firth", True)
+            return fit, reason
+
+        monkeypatch.setattr(models, "_fit_logit_ladder", fake_fit)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", PerfectSeparationWarning)
+            models.lrt_followup_worker(task)
+
+        result_path = Path(test_ctx["LRT_FOLLOWUP_CACHE_DIR"]) / "C_moderate_signal.json"
+        meta_path = Path(test_ctx["LRT_FOLLOWUP_CACHE_DIR"]) / "C_moderate_signal.meta.json"
+        assert result_path.exists() and meta_path.exists()
+
+        with open(result_path) as f:
+            res = json.load(f)
+        with open(meta_path) as f:
+            meta = json.load(f)
+
+        assert res['P_Method'] != 'lrt_firth'
+        assert res['Inference_Type'] in {'score', 'score_boot', 'none'}
+        if res['Inference_Type'] in {'score', 'score_boot'}:
+            assert res['P_Stage2_Valid'] is True
+            assert np.isfinite(res['P_LRT_AncestryxDosage'])
+            assert res['P_Method'] in {'score_chi2', 'score_boot_mle', 'score_boot_firth'}
+            assert not res.get('LRT_Reason')
+        else:
+            assert res['P_Stage2_Valid'] is False
+            assert res.get('LRT_Reason')
+
+        assert meta.get('stage2_inference_type') == res['Inference_Type']
+        assert meta.get('stage2_p_method') == res['P_Method']
+        if res['Inference_Type'] in {'score', 'score_boot'}:
+            assert meta.get('stage2_reason') in (None, '', res.get('LRT_Reason'))
+        else:
+            assert meta.get('stage2_reason')
+
+        shm.close(); shm.unlink()
+
 # --- Integration Tests ---
 def test_fetcher_producer_drains_cache_only():
     with temp_workspace():
