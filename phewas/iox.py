@@ -7,6 +7,7 @@ import tempfile
 import time
 import uuid
 import hashlib
+import warnings
 from typing import Any, Optional, Tuple
 
 import numpy as np
@@ -740,7 +741,22 @@ def load_inversions(TARGET_INVERSION: str, INVERSION_DOSAGES_FILE: str) -> pd.Da
         df = pd.read_csv(INVERSION_DOSAGES_FILE, sep="\t", usecols=usecols)
         df[TARGET_INVERSION] = pd.to_numeric(df[TARGET_INVERSION], errors="coerce")
         df[id_col] = df[id_col].astype(str)
-        return df.set_index(id_col).rename_axis("person_id")
+
+        if not df[id_col].is_unique:
+            warnings.warn(
+                "Duplicate person_id values encountered while loading inversion dosages; "
+                "keeping the first occurrence for each duplicate.",
+                UserWarning,
+            )
+            df = df.drop_duplicates(subset=id_col, keep="first")
+
+        result = df.set_index(id_col).rename_axis("person_id")
+        if not result.index.is_unique:
+            raise RuntimeError(
+                "Inversion dosage table produced non-unique person_id values even after "
+                "deduplication."
+            )
+        return result
     except Exception as e:
         raise RuntimeError(f"Failed to load inversion data: {e}") from e
 
