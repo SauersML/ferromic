@@ -715,7 +715,7 @@ def _leverages_batched(X_np, XtWX_inv, W, batch=100_000):
     return h
 
 
- def _ridge_column_scales(X, const_ix=None, *, floor=1e-12):
+def _ridge_column_scales(X, const_ix=None, *, floor=1e-12):
     """Compute per-column scale factors used to standardize the ridge design."""
     X_np = X.to_numpy(dtype=np.float64, copy=False) if hasattr(X, "to_numpy") else np.asarray(X, dtype=np.float64)
     if X_np.ndim != 2:
