@@ -285,6 +285,38 @@ def _gbj_statistic(p_values: np.ndarray) -> float:
     return float(best)
 
 
+_MIN_TAIL_PROB = float(np.finfo(np.float64).tiny)
+_MAX_TAIL_PROB = 1.0 - 1e-16
+
+
+def _sanitize_z_cap(z_cap: Optional[float]) -> Optional[float]:
+    """Return a finite positive ceiling or ``None`` if clipping is disabled."""
+
+    if z_cap is None:
+        return None
+    try:
+        value = float(z_cap)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0.0 or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def _two_sided_p_to_z(p_value: float, *, z_cap: Optional[float]) -> float:
+    """Convert a (possibly extreme) two-sided p-value to a capped |Z| score."""
+
+    p = float(np.clip(p_value, _MIN_TAIL_PROB, _MAX_TAIL_PROB))
+    z = float(stats.norm.isf(p / 2.0))
+    if not math.isfinite(z):
+        return float("nan")
+    ceiling = _sanitize_z_cap(z_cap)
+    z_abs = abs(z)
+    if ceiling is not None:
+        return float(min(z_abs, ceiling))
+    return z_abs
+
+
 def _simulate_gbj_pvalue(
     observed_stat: float,
     correlation: np.ndarray,
@@ -306,10 +338,11 @@ def _simulate_gbj_pvalue(
         cov_pd = (eigvecs @ np.diag(eigvals)) @ eigvecs.T
         chol = np.linalg.cholesky(cov_pd)
     stats_obs = 0
+    ceiling = _sanitize_z_cap(z_cap)
     for _ in range(draws):
         sample = chol @ rng.standard_normal(p)
-        if z_cap is not None and z_cap > 0:
-            sample = np.clip(sample, -float(z_cap), float(z_cap))
+        if ceiling is not None:
+            sample = np.clip(sample, -ceiling, ceiling)
         pvals = 2.0 * stats.norm.sf(np.abs(sample))
         stat = _gbj_statistic(pvals)
         if stat >= observed_stat:
@@ -341,7 +374,7 @@ def compute_category_metrics(
     beta_col: str,
     null_structures: Mapping[str, CategoryNull],
     gbj_draws: int = 5000,
-    z_cap: float = 8.0,
+    z_cap: Optional[float] = None,
     rng_seed: Optional[int] = None,
     min_k: int = 3,
     fdr_method: str = "fdr_bh",
@@ -373,6 +406,8 @@ def compute_category_metrics(
             "Phenotypes_GLS",
         ])
 
+    ceiling = _sanitize_z_cap(z_cap)
+
     df = per_pheno_results.copy()
     if "Phenotype" in df.columns:
         df = df.set_index("Phenotype")
@@ -400,13 +435,11 @@ def compute_category_metrics(
             if not np.isfinite(pval):
                 missing.append(name)
                 continue
-            pval = float(np.clip(pval, 1e-300, 1.0 - 1e-16))
-            z_abs = float(stats.norm.isf(pval / 2.0))
+            pval = float(np.clip(pval, _MIN_TAIL_PROB, _MAX_TAIL_PROB))
+            z_abs = _two_sided_p_to_z(pval, z_cap=ceiling)
             if not np.isfinite(z_abs):
                 missing.append(name)
                 continue
-            if z_cap > 0:
-                z_abs = float(min(abs(z_abs), z_cap))
             gbj_indices.append(idx)
             gbj_z.append(z_abs)
             gbj_names.append(name)
@@ -435,7 +468,7 @@ def compute_category_metrics(
             gbj_corr,
             int(gbj_draws),
             rng,
-            z_cap=z_cap,
+            z_cap=ceiling,
         )
 
         gls_stat = float("nan")
@@ -461,7 +494,7 @@ def compute_category_metrics(
             "Shrinkage": struct.shrinkage,
             "Lambda": struct.lambda_value,
             "N_Individuals": struct.n_individuals,
-            "Z_Cap": z_cap,
+            "Z_Cap": float(ceiling) if ceiling is not None else float("nan"),
             "GBJ_Draws": int(gbj_draws),
             "Dropped": ";".join(struct.dropped + missing),
             "Phenotypes": ";".join(gbj_names),
