@@ -85,7 +85,6 @@ def preserve_run_globals():
     ]
     snapshot = {k: getattr(run, k) for k in keys if hasattr(run, k)}
     env_keys = [
-        "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE",
         "FERROMIC_POPULATION_FILTER",
     ]
     env_snapshot = {k: os.environ.get(k) for k in env_keys}
@@ -214,7 +213,7 @@ def read_rss_bytes():
         pass
     raise RuntimeError("Cannot measure RSS on this platform without psutil")
 
-def test_cli_min_cases_controls_only_updates_prefilter():
+def test_cli_min_cases_controls_updates_thresholds():
     with preserve_run_globals():
         run.MIN_CASES_FILTER = 10
         run.MIN_CONTROLS_FILTER = 20
@@ -222,20 +221,24 @@ def test_cli_min_cases_controls_only_updates_prefilter():
         run.POPULATION_FILTER = "eur"
         args = argparse.Namespace(min_cases_controls=30, pop_label=None)
         cli.apply_cli_configuration(args)
-        assert run.MIN_CASES_FILTER == 10
-        assert run.MIN_CONTROLS_FILTER == 20
+        assert run.MIN_CASES_FILTER == 30
+        assert run.MIN_CONTROLS_FILTER == 30
         assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE == 30
         assert run.POPULATION_FILTER == "all"
-        assert os.environ["FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE"] == "30"
+        assert "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE" not in os.environ
         assert "FERROMIC_POPULATION_FILTER" not in os.environ
 
 
 def test_cli_pop_label_sets_population_filter():
     with preserve_run_globals():
         run.POPULATION_FILTER = "all"
+        run.MIN_CASES_FILTER = 15
+        run.MIN_CONTROLS_FILTER = 25
         args = argparse.Namespace(min_cases_controls=None, pop_label="  EUR  ")
         cli.apply_cli_configuration(args)
         assert run.CLI_MIN_CASES_CONTROLS_OVERRIDE is None
+        assert run.MIN_CASES_FILTER == run.DEFAULT_MIN_CASES_FILTER
+        assert run.MIN_CONTROLS_FILTER == run.DEFAULT_MIN_CONTROLS_FILTER
         assert run.POPULATION_FILTER == "EUR"
         assert "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE" not in os.environ
         assert os.environ["FERROMIC_POPULATION_FILTER"] == "EUR"

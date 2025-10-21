@@ -27,8 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-cases-controls",
         type=_positive_int,
         help=(
-            "Minimum number of cases and controls required to prefilter phenotypes before Stage-1. "
-            "Adjusts which phenotypes are enqueued without modifying downstream model thresholds."
+            "Minimum number of cases and controls required throughout the PheWAS run. "
+            "Applies to both prefiltering and downstream model validation."
         ),
     )
     parser.add_argument(
@@ -50,10 +50,12 @@ def apply_cli_configuration(args: argparse.Namespace) -> None:
     if getattr(args, "min_cases_controls", None) is not None:
         threshold = int(args.min_cases_controls)
         run.CLI_MIN_CASES_CONTROLS_OVERRIDE = threshold
-        os.environ["FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE"] = str(threshold)
+        run.MIN_CASES_FILTER = threshold
+        run.MIN_CONTROLS_FILTER = threshold
     else:
         run.CLI_MIN_CASES_CONTROLS_OVERRIDE = None
-        os.environ.pop("FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE", None)
+        run.MIN_CASES_FILTER = run.DEFAULT_MIN_CASES_FILTER
+        run.MIN_CONTROLS_FILTER = run.DEFAULT_MIN_CONTROLS_FILTER
 
     raw_label = getattr(args, "pop_label", None)
     if raw_label is not None:
