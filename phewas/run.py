@@ -473,12 +473,18 @@ def _apply_population_filter(
     """Filter shared covariates and ancestry labels by the requested population."""
 
     normalized = _normalize_population_label(population_filter)
-    ancestry_series = ancestry_series.astype("string").str.strip().str.lower()
-    ancestry_series = ancestry_series.reindex(covariates_df.index)
+    ancestry_str = ancestry_series.astype("string").str.strip().str.lower()
+    ancestry_str = ancestry_str.reindex(covariates_df.index)
+
+    def _restore_object_dtype(series: pd.Series) -> pd.Series:
+        series_obj = series.astype(object)
+        # Ensure pandas uses ``np.nan`` sentinels for missing values to match historical behaviour.
+        return series_obj.where(~series.isna(), np.nan)
+
     if not normalized or normalized == "all":
-        return covariates_df, ancestry_series, "all", True
+        return covariates_df, _restore_object_dtype(ancestry_str), "all", True
     available_labels = sorted(
-        {label for label in ancestry_series.dropna().unique().tolist() if label is not None}
+        {label for label in ancestry_str.dropna().unique().tolist() if label is not None}
     )
     if normalized not in available_labels:
         raise RuntimeError(
@@ -487,10 +493,10 @@ def _apply_population_filter(
             "' does not match any available ancestry labels."
         )
 
-    mask = ancestry_series.eq(normalized)
-    keep_ids = ancestry_series.index[mask.fillna(False)]
+    mask = ancestry_str.eq(normalized)
+    keep_ids = ancestry_str.index[mask.fillna(False)]
     filtered_covariates = covariates_df.loc[keep_ids]
-    filtered_ancestry = ancestry_series.loc[keep_ids]
+    filtered_ancestry = ancestry_str.loc[keep_ids]
     if filtered_covariates.empty:
         raise RuntimeError(
             "Population filter '"
@@ -503,7 +509,7 @@ def _apply_population_filter(
         f"({len(filtered_covariates)} participants).",
         flush=True,
     )
-    return filtered_covariates, filtered_ancestry, normalized, False
+    return filtered_covariates, _restore_object_dtype(filtered_ancestry), normalized, False
 
 # --- Testing configuration (centralized in testing.py) ---
 _cat_env_overrides = {}
