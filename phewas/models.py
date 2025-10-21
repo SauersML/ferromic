@@ -958,8 +958,13 @@ def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), 
         svals = np.linalg.svd(M, compute_uv=False)
         if svals.size:
             scale = float(svals[0])
-            eps = np.finfo(M.dtype).eps if np.issubdtype(M.dtype, np.floating) else np.finfo(float).eps
-            tol = max(float(rtol), eps * max(M.shape) * scale)
+            if scale > 0.0:
+                eps = np.finfo(M.dtype).eps if np.issubdtype(M.dtype, np.floating) else np.finfo(float).eps
+                rel_tol = float(rtol) * scale
+                abs_tol = eps * max(M.shape) * scale
+                tol = max(rel_tol, abs_tol)
+            else:
+                tol = float(rtol)
             rank = int(np.sum(svals > tol))
         else:
             tol = float(rtol)
