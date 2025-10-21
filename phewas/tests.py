@@ -1041,6 +1041,63 @@ def test_ridge_intercept_is_zero(test_ctx):
             assert isinstance(kwargs['alpha'], float)
             assert kwargs['alpha'] > 0.0
 
+
+def test_ridge_mixed_scale_matches_standardized_fit(test_ctx):
+    ctx = dict(test_ctx)
+    ctx['EPV_MIN_FOR_MLE'] = 1e9
+    ctx['MLE_REFIT_MIN_NEFF'] = 1e9
+    ctx['PREFER_FIRTH_ON_RIDGE'] = False
+    models.CTX = ctx
+
+    n = 40
+    age = np.linspace(40.0, 80.0, n, dtype=np.float64)
+    age_c = age - np.mean(age)
+    age_c_sq = age_c ** 2 * 100.0
+    pc1 = np.concatenate([
+        np.full(n // 2, -1e-3, dtype=np.float64),
+        np.full(n - n // 2, 1e-3, dtype=np.float64),
+    ])
+
+    X = pd.DataFrame(
+        {
+            'const': np.ones(n, dtype=np.float64),
+            'PC1': pc1,
+            'AGE_c': age_c,
+            'AGE_c_sq': age_c_sq,
+        },
+        index=pd.RangeIndex(n),
+    )
+    y = pd.Series(np.concatenate([np.zeros(n // 2), np.ones(n - n // 2)]), index=X.index)
+
+    fit_orig, reason_orig = models._fit_logit_ladder(X, y, ridge_ok=True)
+    assert reason_orig == 'ridge_only'
+
+    scales = {}
+    X_scaled = X.copy()
+    for col in X.columns:
+        if col == 'const':
+            continue
+        scale = float(np.nanstd(X[col].to_numpy(dtype=np.float64)))
+        if not np.isfinite(scale) or scale <= 0.0:
+            scale = 1.0
+        scales[col] = scale
+        X_scaled[col] = X_scaled[col] / scale
+
+    fit_scaled, reason_scaled = models._fit_logit_ladder(X_scaled, y, ridge_ok=True)
+    assert reason_scaled == 'ridge_only'
+
+    params_scaled = fit_scaled.params.copy()
+    for col, scale in scales.items():
+        params_scaled[col] = params_scaled[col] / scale
+
+    for col in scales:
+        assert math.isclose(
+            float(fit_orig.params[col]),
+            float(params_scaled[col]),
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        )
+
 def test_lrt_collinear_df_is_zero(test_ctx):
     with temp_workspace():
         core_data, _ = make_synth_cohort()
