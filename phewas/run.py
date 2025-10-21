@@ -1094,13 +1094,17 @@ def _pipeline_once():
                                     base_seed = int(tctx.get("CAT_SEED_BASE", 1729))
                                     stable_component = _stable_seed(target_inversion, ctx.get("CTX_TAG"))
                                     seed = (base_seed + stable_component) % (2 ** 32)
+                                    z_cap_value = categories._sanitize_z_cap(
+                                        tctx.get("CAT_Z_CAP")
+                                    )
+
                                     cat_df = categories.compute_category_metrics(
                                         inv_df,
                                         p_col=p_col,
                                         beta_col="Beta",
                                         null_structures=null_structs,
                                         gbj_draws=int(tctx.get("CAT_GBJ_B", 5000)),
-                                        z_cap=float(tctx.get("CAT_Z_CAP", 8.0)),
+                                        z_cap=z_cap_value,
                                         rng_seed=seed,
                                         min_k=min_k,
                                     )
