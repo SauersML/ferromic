@@ -715,7 +715,7 @@ def _leverages_batched(X_np, XtWX_inv, W, batch=100_000):
     return h
 
 
- def _ridge_column_scales(X, const_ix=None, *, floor=1e-12):
+def _ridge_column_scales(X, const_ix=None, *, floor=1e-12):
     """Compute per-column scale factors used to standardize the ridge design."""
     X_np = X.to_numpy(dtype=np.float64, copy=False) if hasattr(X, "to_numpy") else np.asarray(X, dtype=np.float64)
     if X_np.ndim != 2:
@@ -870,54 +870,54 @@ def _fit_logit_ladder(
         alpha_scalar = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(penalized_param_count) / n_eff), 1e-6)
         pen_weight = np.ones(n_params, dtype=np.float64)
         if valid_zero_ixs:
-        pen_weight[valid_zero_ixs] = 0.0
+            pen_weight[valid_zero_ixs] = 0.0
 
         if const_ix is not None:
-        const_ix_eff = int(const_ix)
+            const_ix_eff = int(const_ix)
         elif is_pandas and "const" in X.columns:
-        const_ix_eff = int(X.columns.get_loc("const"))
+            const_ix_eff = int(X.columns.get_loc("const"))
         else:
-        const_ix_eff = None
+            const_ix_eff = None
         scales = _ridge_column_scales(X, const_ix=const_ix_eff)
 
         if scales is None:
-        X_ridge = X
-        start_scaled = user_start
+            X_ridge = X
+            start_scaled = user_start
         else:
-        X_np = X.to_numpy(dtype=np.float64, copy=False) if is_pandas else np.asarray(X, dtype=np.float64)
-        X_scaled_np = np.array(X_np, dtype=np.float64, copy=True)
-        for j, scale in enumerate(scales):
-        if scale != 1.0:
-        X_scaled_np[:, j] = X_scaled_np[:, j] / scale
-        if is_pandas:
-        X_ridge = pd.DataFrame(X_scaled_np, index=X.index, columns=X.columns)
-        else:
-        X_ridge = X_scaled_np
-        if user_start is None:
-        start_scaled = None
-        else:
-        start_arr = np.asarray(user_start, dtype=np.float64)
-        if start_arr.shape[-1] != len(scales):
-        start_scaled = start_arr
-        else:
-        start_scaled = start_arr * scales
+            X_np = X.to_numpy(dtype=np.float64, copy=False) if is_pandas else np.asarray(X, dtype=np.float64)
+            X_scaled_np = np.array(X_np, dtype=np.float64, copy=True)
+            for j, scale in enumerate(scales):
+                if scale != 1.0:
+                    X_scaled_np[:, j] = X_scaled_np[:, j] / scale
+            if is_pandas:
+                X_ridge = pd.DataFrame(X_scaled_np, index=X.index, columns=X.columns)
+            else:
+                X_ridge = X_scaled_np
+            if user_start is None:
+                start_scaled = None
+            else:
+                start_arr = np.asarray(user_start, dtype=np.float64)
+                if start_arr.shape[-1] != len(scales):
+                    start_scaled = start_arr
+                else:
+                    start_scaled = start_arr * scales
 
         logit_model = sm.Logit(y, X_ridge)
         fit_regularized_kwargs = dict(kwargs)
         fit_regularized_kwargs.update({
-        "alpha": float(alpha_scalar),
-        "L1_wt": 0.0,
-        "maxiter": 800,
-        "disp": 0,
-        "start_params": start_scaled,
-        "pen_weight": pen_weight,
+            "alpha": float(alpha_scalar),
+            "L1_wt": 0.0,
+            "maxiter": 800,
+            "disp": 0,
+            "start_params": start_scaled,
+            "pen_weight": pen_weight,
         })
         try:
-        ridge_fit = logit_model.fit_regularized(**fit_regularized_kwargs)
+            ridge_fit = logit_model.fit_regularized(**fit_regularized_kwargs)
         except TypeError:
-        fit_regularized_kwargs.pop("pen_weight", None)
-        fit_regularized_kwargs["alpha"] = np.asarray(pen_weight * float(alpha_scalar), dtype=np.float64)
-        ridge_fit = logit_model.fit_regularized(**fit_regularized_kwargs)
+            fit_regularized_kwargs.pop("pen_weight", None)
+            fit_regularized_kwargs["alpha"] = np.asarray(pen_weight * float(alpha_scalar), dtype=np.float64)
+            ridge_fit = logit_model.fit_regularized(**fit_regularized_kwargs)
 
 
         if scales is not None:
