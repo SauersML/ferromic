@@ -727,6 +727,16 @@ def _pipeline_once():
             demographics_df.index, pc_df.index, sex_df.index = [df.index.astype(str) for df in (demographics_df, pc_df, sex_df)]
             shared_covariates_df = demographics_df.join(pc_df, how="inner").join(sex_df, how="inner")
             shared_covariates_df = shared_covariates_df[~shared_covariates_df.index.isin(related_ids_to_remove)]
+            if not shared_covariates_df.index.is_unique:
+                dup_idx = shared_covariates_df.index[shared_covariates_df.index.duplicated()].unique()
+                dup_list = sorted(map(str, dup_idx))
+                sample = ", ".join(dup_list[:5])
+                if len(dup_list) > 5:
+                    sample += ", ..."
+                raise ValueError(
+                    "Duplicate person_id entries detected in shared covariates after merging: "
+                    f"{sample}"
+                )
 
             LABELS_URI = PCS_URI # Clarify that PCs and Ancestry labels are from the same source
             ancestry_cache = os.path.join(

@@ -783,11 +783,23 @@ def load_pcs(gcp_project: str, PCS_URI: str, NUM_PCS: int) -> pd.DataFrame:
             except Exception:
                 return [np.nan] * NUM_PCS
 
+        person_ids = raw_pcs["research_id"].astype(str)
+        dup_mask = person_ids.duplicated(keep=False)
+        if dup_mask.any():
+            duplicates = sorted({pid for pid in person_ids[dup_mask]})
+            sample = ", ".join(duplicates[:5])
+            if len(duplicates) > 5:
+                sample += ", ..."
+            raise ValueError(
+                "Duplicate person_id values encountered in genetic PCs: "
+                f"{sample}"
+            )
+
         pc_mat = pd.DataFrame(
             raw_pcs["pca_features"].apply(_parse_and_pad_fast).tolist(),
             columns=[f"PC{i}" for i in range(1, NUM_PCS + 1)],
         )
-        pc_df = pc_mat.assign(person_id=raw_pcs["research_id"].astype(str)).set_index("person_id")
+        pc_df = pc_mat.assign(person_id=person_ids).set_index("person_id")
         return pc_df
     except Exception as e:
         raise RuntimeError(f"Failed to load PCs: {e}") from e
@@ -810,6 +822,17 @@ def load_genetic_sex(gcp_project: str, SEX_URI: str) -> pd.DataFrame:
     sex_df = sex_df.rename(columns={"research_id": "person_id"})
     sex_df["person_id"] = sex_df["person_id"].astype(str)
 
+    dup_mask = sex_df["person_id"].duplicated(keep=False)
+    if dup_mask.any():
+        duplicates = sorted({pid for pid in sex_df.loc[dup_mask, "person_id"]})
+        sample = ", ".join(duplicates[:5])
+        if len(duplicates) > 5:
+            sample += ", ..."
+        raise ValueError(
+            "Duplicate person_id values encountered in genetic sex input: "
+            f"{sample}"
+        )
+
     return sex_df[["person_id", "sex"]].dropna().set_index("person_id")
 
 
@@ -824,6 +847,16 @@ def load_ancestry_labels(gcp_project: str, LABELS_URI: str) -> pd.DataFrame:
     )
     df = raw.rename(columns={"research_id": "person_id", "ancestry_pred": "ANCESTRY"})
     df["person_id"] = df["person_id"].astype(str)
+    dup_mask = df["person_id"].duplicated(keep=False)
+    if dup_mask.any():
+        duplicates = sorted({pid for pid in df.loc[dup_mask, "person_id"]})
+        sample = ", ".join(duplicates[:5])
+        if len(duplicates) > 5:
+            sample += ", ..."
+        raise ValueError(
+            "Duplicate person_id values encountered in ancestry labels: "
+            f"{sample}"
+        )
     df = df.dropna(subset=["ANCESTRY"])
     return df.set_index("person_id")[["ANCESTRY"]]
 
