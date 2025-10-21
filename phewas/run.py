@@ -906,6 +906,13 @@ def _pipeline_once():
                 )
                 inversion_df.index = inversion_df.index.astype(str)
                 core_df = shared_data['covariates'].join(inversion_df, how="inner")
+                if not core_df.index.is_unique:
+                    dupes = core_df.index[core_df.index.duplicated()].unique()
+                    sample = ", ".join(map(str, dupes[:5]))
+                    raise RuntimeError(
+                        "Join between covariates and inversion dosages produced non-unique "
+                        f"person_id entries (e.g., {sample})."
+                    )
 
                 age_mean = core_df['AGE'].mean()
                 core_df['AGE_c'] = core_df['AGE'] - age_mean
@@ -1293,6 +1300,13 @@ def _pipeline_once():
                 inversion_df.index = inversion_df.index.astype(str)
 
                 core_df = shared_covariates_df.join(inversion_df, how="inner")
+                if not core_df.index.is_unique:
+                    dupes = core_df.index[core_df.index.duplicated()].unique()
+                    sample = ", ".join(map(str, dupes[:5]))
+                    raise RuntimeError(
+                        "Join between covariates and inversion dosages produced non-unique "
+                        f"person_id entries (e.g., {sample})."
+                    )
                 age_mean = core_df['AGE'].mean()
                 core_df['AGE_c'] = core_df['AGE'] - age_mean
                 core_df['AGE_c_sq'] = core_df['AGE_c'] ** 2
