@@ -1246,10 +1246,28 @@ def _score_test_components(X_red: pd.DataFrame, y: pd.Series, target: str):
     fit_red, _ = _fit_logit_ladder(X_red, y, const_ix=const_ix, prefer_mle_first=True)
     if fit_red is None:
         raise ValueError('reduced fit failed')
-    eta = X_red.to_numpy(dtype=np.float64, copy=False) @ np.asarray(fit_red.params, dtype=np.float64)
+
+    used_ridge = bool(getattr(fit_red, "_used_ridge", False))
+    used_firth = bool(getattr(fit_red, "_used_firth", False))
+    final_is_mle = bool(getattr(fit_red, "_final_is_mle", False))
+    if used_ridge:
+        fit_type = "ridge"
+    elif used_firth:
+        fit_type = "firth"
+    elif final_is_mle:
+        fit_type = "mle"
+    else:
+        fit_type = "unknown"
+
+    if fit_type != "mle":
+        return fit_red, fit_type, None, None
+
+    beta = np.asarray(getattr(fit_red, "params", np.zeros(X_red.shape[1])), dtype=np.float64)
+    eta = X_red.to_numpy(dtype=np.float64, copy=False) @ beta
+    eta = np.clip(eta, -35.0, 35.0)
     p_hat = expit(eta)
     W = p_hat * (1.0 - p_hat)
-    return fit_red, p_hat, W
+    return fit_red, fit_type, p_hat, W
 
 
 def _efficient_score_vector(target_vec: np.ndarray, X_red_mat: np.ndarray, W: np.ndarray):
@@ -1449,16 +1467,20 @@ def _score_bootstrap_from_reduced(
     min_total=None,
 ):
     """Multiplier (wild) bootstrap of the Rao score statistic under the reduced model."""
+
+    def _invalid_result():
+        return {"p": np.nan, "T_obs": np.nan, "draws": 0, "exceed": 0, "fit_kind": None, "den": np.nan}
+
     Xr = X_red.to_numpy(dtype=np.float64, copy=False) if hasattr(X_red, "to_numpy") else np.asarray(X_red, dtype=np.float64)
     yv = np.asarray(y, dtype=np.float64)
     xt = np.asarray(x_target, dtype=np.float64)
     if Xr.ndim != 2 or yv.ndim != 1 or xt.ndim != 1 or Xr.shape[0] != yv.shape[0] or xt.shape[0] != yv.shape[0]:
-        return np.nan, np.nan
+        return _invalid_result()
     bits = _score_bootstrap_bits(Xr, yv, xt, 0.0, kind=kind)
     if bits is None and kind == "mle":
         bits = _score_bootstrap_bits(Xr, yv, xt, 0.0, kind="firth")
     if bits is None:
-        return np.nan, np.nan
+        return _invalid_result()
     alpha_target = float(alpha) if alpha is not None else float(CTX.get("FDR_ALPHA", 0.05))
     base_key = seed_key if seed_key is not None else ("score_boot", Xr.shape[0], Xr.shape[1], float(np.sum(np.abs(xt))))
     rng_local = rng if rng is not None else _bootstrap_rng((base_key, 0.0))
@@ -1471,7 +1493,14 @@ def _score_bootstrap_from_reduced(
         min_total=min_total,
         return_detail=True,
     )
-    return detail.get("p", np.nan), bits["T_obs"], detail.get("draws", 0), detail.get("exceed", 0)
+    return {
+        "p": detail.get("p", np.nan),
+        "T_obs": float(bits.get("T_obs", np.nan)),
+        "draws": int(detail.get("draws", 0)),
+        "exceed": int(detail.get("exceed", 0)),
+        "fit_kind": bits.get("fit_kind", kind),
+        "den": float(bits.get("den", np.nan)),
+    }
 
 
 def _score_boot_ci_beta(
@@ -2364,13 +2393,10 @@ def lrt_overall_worker(task):
                     x_target_vec,
                     seed_key=("lrt_overall", s_name_safe, target, "pval"),
                 )
-                if isinstance(boot_res, tuple):
-                    p_emp = boot_res[0]
-                else:
-                    p_emp = np.nan
+                p_emp = float(boot_res.get("p", np.nan))
                 if np.isfinite(p_emp):
                     p_value = p_emp
-                    p_source = "score_boot"
+                    p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
                     inference_family = "score_boot"
 
         if (
@@ -2848,45 +2874,126 @@ def bootstrap_overall_worker(task):
         red_cols = [c for c in X_full_zv.columns if c != target]
         X_red_zv = X_full_zv[red_cols]
 
-        fit_red, p_hat, W = _score_test_components(X_red_zv, yb, target)
+        fit_red, reduced_fit_type, p_hat, W = _score_test_components(X_red_zv, yb, target)
+        red_final_is_mle = bool(getattr(fit_red, "_final_is_mle", False))
+        red_used_firth = bool(getattr(fit_red, "_used_firth", False))
+        red_used_ridge = bool(getattr(fit_red, "_used_ridge", False))
+        if reduced_fit_type == "unknown":
+            if red_used_ridge:
+                reduced_fit_type = "ridge"
+            elif red_used_firth:
+                reduced_fit_type = "firth"
+            elif red_final_is_mle:
+                reduced_fit_type = "mle"
+
+        meta_extra_common.update({
+            "reduced_fit_type": reduced_fit_type,
+            "reduced_final_is_mle": red_final_is_mle,
+            "reduced_used_firth": red_used_firth,
+            "reduced_used_ridge": red_used_ridge,
+        })
+
         t_vec = X_full_zv[target].to_numpy(dtype=np.float64, copy=False)
         Xr = X_red_zv.to_numpy(dtype=np.float64, copy=False)
-        h, denom = _efficient_score_vector(t_vec, Xr, W)
-        if not np.isfinite(denom) or denom <= 1e-14:
-            io.atomic_write_json(result_path, {"Phenotype": s_name, "Reason": "nonpos_denom"})
-            return
-        resid = yb.to_numpy(dtype=np.float64, copy=False) - p_hat
-        S_obs = float(h @ resid)
-        T_obs = (S_obs * S_obs) / denom
 
-        pos = worker_core_df_index.get_indexer(X_red_zv.index)
-        pos = pos[pos >= 0]
-        B = U_boot.shape[1]
-        T_b = np.empty(B, dtype=np.float64)
-        for j0 in range(0, B, 64):
-            j1 = min(B, j0 + 64)
-            U_blk = U_boot[np.ix_(pos, np.arange(j0, j1))]
-            Ystar = (U_blk < p_hat[:, None]).astype(np.float64, copy=False)
-            R = Ystar - p_hat[:, None]
-            S = h @ R
-            T_b[j0:j1] = (S * S) / denom
-        p_emp = float((1.0 + np.sum(T_b >= T_obs)) / (1.0 + B))
+        p_emp = np.nan
+        T_obs = np.nan
+        boot_engine = None
+        boot_fit_kind = None
+        boot_draws = 0
+        boot_exceed = 0
+        p_valid = False
+        p_source = None
+        p_reason = None
 
-        io.atomic_write_json(result_path, {
+        if red_used_ridge or reduced_fit_type == "ridge":
+            p_reason = "penalized_reduced_null"
+        elif reduced_fit_type == "mle" and red_final_is_mle and not red_used_firth:
+            if p_hat is None or W is None:
+                p_reason = "missing_mle_probabilities"
+            else:
+                h, denom = _efficient_score_vector(t_vec, Xr, W)
+                if not np.isfinite(denom) or denom <= 1e-14:
+                    p_reason = "nonpos_denom"
+                else:
+                    resid = yb.to_numpy(dtype=np.float64, copy=False) - p_hat
+                    S_obs = float(h @ resid)
+                    T_obs = (S_obs * S_obs) / denom
+                    pos = worker_core_df_index.get_indexer(X_red_zv.index)
+                    pos = pos[pos >= 0]
+                    B = int(U_boot.shape[1]) if U_boot is not None else 0
+                    if B <= 0:
+                        p_reason = "invalid_bootstrap_matrix"
+                    else:
+                        T_b = np.empty(B, dtype=np.float64)
+                        for j0 in range(0, B, 64):
+                            j1 = min(B, j0 + 64)
+                            U_blk = U_boot[np.ix_(pos, np.arange(j0, j1))]
+                            Ystar = (U_blk < p_hat[:, None]).astype(np.float64, copy=False)
+                            R = Ystar - p_hat[:, None]
+                            S = h @ R
+                            T_b[j0:j1] = (S * S) / denom
+                        exceed = int(np.sum(T_b >= T_obs))
+                        p_emp = float((1.0 + exceed) / (1.0 + B))
+                        if np.isfinite(p_emp):
+                            p_valid = True
+                            p_source = "score_boot_mle"
+                            boot_engine = "bernoulli"
+                            boot_draws = B
+                            boot_exceed = exceed
+                            np.save(os.path.join(tnull_dir, f"{s_name_safe}.npy"), T_b.astype(np.float32, copy=False))
+                        else:
+                            p_reason = "bootstrap_failed"
+        elif reduced_fit_type == "firth" or red_used_firth:
+            boot_engine = "wild_refit"
+            boot_res = _score_bootstrap_from_reduced(
+                X_red_zv,
+                yb,
+                t_vec,
+                seed_key=("boot_overall", s_name_safe, target, "score"),
+                kind="mle",
+            )
+            boot_fit_kind = boot_res.get("fit_kind")
+            p_emp = float(boot_res.get("p", np.nan))
+            T_obs = float(boot_res.get("T_obs", np.nan))
+            boot_draws = int(boot_res.get("draws", 0))
+            boot_exceed = int(boot_res.get("exceed", 0))
+            if np.isfinite(p_emp):
+                p_valid = True
+                p_source = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
+            else:
+                p_reason = "bootstrap_failed"
+        else:
+            p_reason = "reduced_fit_unknown"
+
+        result_payload = {
             "Phenotype": s_name,
-            "T_OBS": T_obs,
-            "P_EMP": p_emp,
-            "B": int(B),
-            "Test_Stat": "score",
-            "Boot": "bernoulli",
-            "P_Source": "score_boot",
+            "T_OBS": float(T_obs) if np.isfinite(T_obs) else np.nan,
+            "P_EMP": float(p_emp) if np.isfinite(p_emp) else np.nan,
+            "P_Value": float(p_emp) if np.isfinite(p_emp) else np.nan,
+            "P_Valid": bool(p_valid),
+            "P_Source": p_source,
+            "Boot": boot_engine,
+            "Boot_Engine": boot_engine,
+            "Boot_Fit_Kind": boot_fit_kind,
+            "Boot_Draws": int(boot_draws),
+            "Boot_Exceed": int(boot_exceed),
+            "Reduced_Fit_Type": reduced_fit_type,
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
-            "Model_Notes": note or ""
-        })
-        np.save(os.path.join(tnull_dir, f"{s_name_safe}.npy"), T_b.astype(np.float32, copy=False))
+            "Model_Notes": note or "",
+        }
+        result_payload["Test_Stat"] = "score"
+        if boot_engine == "bernoulli":
+            result_payload["B"] = int(boot_draws)
+        if p_reason:
+            result_payload["Reason"] = p_reason
+        io.atomic_write_json(result_path, result_payload)
         _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
+
+        if not p_valid and p_reason == "penalized_reduced_null":
+            p_emp = np.nan
 
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
         target_ix_full = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
@@ -2909,7 +3016,7 @@ def bootstrap_overall_worker(task):
         ci_method = None
         ci_label = None
         ci_valid = False
-        if target in X_full_zv.columns and np.isfinite(beta_full):
+        if p_valid and target in X_full_zv.columns and np.isfinite(beta_full):
             try:
                 x_target_vec_ci = X_full_zv[target].to_numpy(dtype=np.float64, copy=False)
                 ci_info = _score_boot_ci_beta(
@@ -2959,6 +3066,18 @@ def bootstrap_overall_worker(task):
                     ci_method = wald["method"]
                     ci_label = None
                     ci_valid = True
+        if ci_valid and not p_valid:
+            ci_label = "fallback (no p-value)"
+
+        model_notes_parts = []
+        if reason_full:
+            model_notes_parts.append(reason_full)
+        if note:
+            model_notes_parts.append(note)
+        if (not p_valid) and p_reason:
+            model_notes_parts.append(p_reason)
+        model_notes = ";".join([part for part in model_notes_parts if part])
+
         io.atomic_write_json(res_path, {
             "Phenotype": s_name,
             "N_Total": n_total_pre,
@@ -2966,8 +3085,15 @@ def bootstrap_overall_worker(task):
             "N_Controls": n_ctrls_pre,
             "Beta": beta_full,
             "OR": or_val,
-            "P_Value": p_emp,
-            "P_Source": "score_boot",
+            "P_Value": float(p_emp) if (p_valid and np.isfinite(p_emp)) else np.nan,
+            "P_Source": p_source,
+            "P_Valid": bool(p_valid),
+            "P_Reason": p_reason if (not p_valid and p_reason) else None,
+            "Reduced_Fit_Type": reduced_fit_type,
+            "Boot_Engine": boot_engine,
+            "Boot_Draws": int(boot_draws),
+            "Boot_Exceed": int(boot_exceed),
+            "Boot_Fit_Kind": boot_fit_kind,
             "OR_CI95": or_ci95,
             "CI_Method": ci_method,
             "CI_Label": ci_label,
@@ -2977,11 +3103,11 @@ def bootstrap_overall_worker(task):
             "Used_Ridge": used_ridge_full,
             "Final_Is_MLE": bool(final_is_mle),
             "Used_Firth": used_firth_full,
-            "Inference_Type": "score_boot",
+            "Inference_Type": "score_boot" if p_valid else "none",
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
-            "Model_Notes": reason_full or note or ""
+            "Model_Notes": model_notes,
         })
 
     except Exception as e:
@@ -3423,13 +3549,10 @@ def lrt_followup_worker(task):
                         x_target_vec,
                         seed_key=("lrt_followup", s_name_safe, anc, target, "pval"),
                     )
-                    if isinstance(boot_res, tuple):
-                        p_emp = boot_res[0]
-                    else:
-                        p_emp = np.nan
+                    p_emp = float(boot_res.get("p", np.nan))
                     if np.isfinite(p_emp):
                         p_val = p_emp
-                        p_source = "score_boot"
+                        p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
                         inference_type = "score_boot"
 
             if (
