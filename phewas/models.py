@@ -714,6 +714,32 @@ def _leverages_batched(X_np, XtWX_inv, W, batch=100_000):
         h[i0:i1] = np.clip(W[i0:i1] * s, 0.0, 1.0)
     return h
 
+
+def _ridge_column_scales(X, const_ix=None, *, floor=1e-12):
+    """Compute per-column scale factors used to standardize the ridge design."""
+    X_np = X.to_numpy(dtype=np.float64, copy=False) if hasattr(X, "to_numpy") else np.asarray(X, dtype=np.float64)
+    if X_np.ndim != 2:
+        return None
+    p = X_np.shape[1]
+    scales = np.ones(p, dtype=np.float64)
+    const_ix_eff = None if const_ix is None else int(const_ix)
+    for j in range(p):
+        if const_ix_eff is not None and j == const_ix_eff:
+            scales[j] = 1.0
+            continue
+        col = X_np[:, j]
+        try:
+            scale = float(np.nanstd(col, dtype=np.float64))
+        except TypeError:
+            col = np.asarray(col, dtype=np.float64)
+            scale = float(np.nanstd(col))
+        if not np.isfinite(scale) or scale <= floor:
+            scales[j] = 1.0
+        else:
+            scales[j] = float(scale)
+    return scales
+
+
 def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer_mle_first=False, **kwargs):
     """
     Logistic fit ladder with an option to attempt unpenalized MLE first.
@@ -798,16 +824,55 @@ def _fit_logit_ladder(X, y, ridge_ok=True, const_ix=None, target_ix=None, prefer
         pi = float(np.mean(y)) if len(y) > 0 else 0.5
         n_eff = max(1.0, 4.0 * float(len(y)) * pi * (1.0 - pi))
         alpha_scalar = max(CTX.get("RIDGE_L2_BASE", 1.0) * (float(p) / n_eff), 1e-6)
-        # DiscreteModel.fit_regularized expects scalar alpha; per-parameter weights are not reliably supported.
-        # Using scalar ridge is OK since we refit MLE (unpenalized) when possible.
-        ridge_fit = sm.Logit(y, X).fit_regularized(
+        if const_ix is not None:
+            const_ix_eff = int(const_ix)
+        elif is_pandas and "const" in X.columns:
+            const_ix_eff = int(X.columns.get_loc("const"))
+        else:
+            const_ix_eff = None
+        scales = _ridge_column_scales(X, const_ix=const_ix_eff)
+        if scales is None:
+            X_ridge = X
+            start_scaled = user_start
+        else:
+            X_np = X.to_numpy(dtype=np.float64, copy=False) if is_pandas else np.asarray(X, dtype=np.float64)
+            X_scaled_np = np.array(X_np, dtype=np.float64, copy=True)
+            for j, scale in enumerate(scales):
+                if scale != 1.0:
+                    X_scaled_np[:, j] = X_scaled_np[:, j] / scale
+            if is_pandas:
+                X_ridge = pd.DataFrame(X_scaled_np, index=X.index, columns=X.columns)
+            else:
+                X_ridge = X_scaled_np
+            if user_start is None:
+                start_scaled = None
+            else:
+                start_arr = np.asarray(user_start, dtype=np.float64)
+                if start_arr.shape[-1] != len(scales):
+                    start_scaled = start_arr
+                else:
+                    start_scaled = start_arr * scales
+        ridge_fit = sm.Logit(y, X_ridge).fit_regularized(
             alpha=float(alpha_scalar),
             L1_wt=0.0,
             maxiter=800,
             disp=0,
-            start_params=user_start,
+            start_params=start_scaled,
             **kwargs,
         )
+
+        if scales is not None:
+            params_scaled = np.asarray(ridge_fit.params, dtype=np.float64)
+            if params_scaled.shape[-1] == len(scales):
+                params_unscaled = params_scaled / np.where(scales == 0.0, 1.0, scales)
+                if hasattr(ridge_fit, "params"):
+                    if isinstance(ridge_fit.params, pd.Series):
+                        ridge_fit.params = pd.Series(params_unscaled, index=ridge_fit.params.index)
+                    else:
+                        ridge_fit.params[:] = params_unscaled
+                if hasattr(ridge_fit, "_results") and hasattr(ridge_fit._results, "params"):
+                    ridge_fit._results.params[:] = params_unscaled
+                setattr(ridge_fit, "_ridge_scales", scales)
 
         setattr(ridge_fit, "_ridge_alpha", float(alpha_scalar))
         setattr(ridge_fit, "_ridge_const_ix", None if const_ix is None else int(const_ix))
