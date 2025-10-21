@@ -143,7 +143,7 @@ def make_synth_cohort(N=200, NUM_PCS=10, seed=42):
     return core_data, phenos
 
 
-def make_realistic_followup_dataset(N=600, seed=2025):
+def make_realistic_followup_dataset(N=7000, seed=2025):
     rng = np.random.default_rng(seed)
     person_ids = [f"p{i:05d}" for i in range(N)]
 
@@ -222,9 +222,42 @@ def make_realistic_followup_dataset(N=600, seed=2025):
         "Neuro_moderate": "neuro",
         "Inflammation_low": "immune",
     }
+    target_case_fracs = {
+        "Metabolic_strong": 0.60,
+        "Neuro_moderate": 0.50,
+        "Inflammation_low": 0.40,
+    }
+
     for name, logits in logit_terms.items():
         probs = sigmoid(logits)
-        mask = rng.random(N) < probs
+        target = max(int(round(target_case_fracs[name] * N)), 1)
+        target = min(target, N - 1)
+        top_idx = np.argpartition(probs, N - target)[N - target:]
+        mask = np.zeros(N, dtype=bool)
+        mask[top_idx] = True
+
+        for label in ("eur", "afr", "amr"):
+            anc_idx = np.flatnonzero(ancestry_labels == label)
+            if not len(anc_idx):
+                continue
+            anc_probs = probs[anc_idx]
+            anc_case_idx = anc_idx[mask[anc_idx]]
+            min_cases = min(len(anc_idx), 150)
+            if anc_case_idx.size < min_cases:
+                deficit = min_cases - anc_case_idx.size
+                take = anc_idx[np.argsort(anc_probs)[-deficit:]]
+                mask[take] = True
+
+            anc_case_idx = anc_idx[mask[anc_idx]]
+            anc_control_idx = anc_idx[~mask[anc_idx]]
+            min_controls = min(len(anc_idx), 150)
+            if anc_control_idx.size < min_controls and anc_case_idx.size > min_controls:
+                deficit = min_controls - anc_control_idx.size
+                case_probs = anc_probs[mask[anc_idx]]
+                order = np.argsort(case_probs)
+                drop = anc_case_idx[order[:deficit]]
+                mask[drop] = False
+
         cases = set(demographics.index[mask])
         phenos[name] = {
             "disease": name.replace("_", " "),
@@ -359,10 +392,6 @@ def test_cli_population_filter_matches_followup_effects():
         run.LOCK_DIR = os.path.join(run.CACHE_DIR, "locks")
         run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]
         run.NUM_PCS = core_data["pcs"].shape[1]
-        run.DEFAULT_MIN_CASES_FILTER = run.DEFAULT_MIN_CONTROLS_FILTER = 10
-        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 10
-        run.PER_ANC_MIN_CASES = 5
-        run.PER_ANC_MIN_CONTROLS = 5
         run.MIN_NEFF_FILTER = 0
         run.MLE_REFIT_MIN_NEFF = 0
         run.FDR_ALPHA = 1.0
