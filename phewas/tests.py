@@ -75,6 +75,8 @@ def preserve_run_globals():
     keys = [
         "MIN_CASES_FILTER",
         "MIN_CONTROLS_FILTER",
+        "DEFAULT_MIN_CASES_FILTER",
+        "DEFAULT_MIN_CONTROLS_FILTER",
         "FDR_ALPHA",
         "LRT_SELECT_ALPHA",
         "TARGET_INVERSION",
@@ -141,6 +143,141 @@ def make_synth_cohort(N=200, NUM_PCS=10, seed=42):
     return core_data, phenos
 
 
+def make_realistic_followup_dataset(N=7000, seed=2025):
+    rng = np.random.default_rng(seed)
+    person_ids = [f"p{i:05d}" for i in range(N)]
+
+    ancestry_labels = rng.choice(["eur", "afr", "amr"], size=N, p=[0.62, 0.23, 0.15])
+    ages = np.clip(rng.normal(55.0, 7.5, size=N), 35.0, 85.0)
+    sex_vec = rng.binomial(1, 0.52, size=N).astype(float)
+
+    demographics = pd.DataFrame(
+        {"AGE": ages, "AGE_sq": ages ** 2},
+        index=pd.Index(person_ids, name="person_id"),
+    )
+    sex = pd.DataFrame({"sex": sex_vec}, index=demographics.index)
+
+    pc_cols = [f"PC{i}" for i in range(1, 5)]
+    pcs_base = rng.normal(0.0, 0.08, size=(N, len(pc_cols)))
+    ancestry_shifts = {
+        "eur": np.array([0.02, -0.01, 0.00, 0.00]),
+        "afr": np.array([-0.18, 0.12, 0.05, -0.03]),
+        "amr": np.array([0.08, -0.05, 0.02, 0.04]),
+    }
+    for label, shift in ancestry_shifts.items():
+        pcs_base[ancestry_labels == label] += shift
+    pcs = pd.DataFrame(pcs_base, index=demographics.index, columns=pc_cols)
+
+    inv_base = rng.normal(0.0, 0.55, size=N)
+    inv_base += 0.35 * pcs["PC1"].to_numpy() - 0.22 * pcs["PC2"].to_numpy()
+    inv_base += 0.15 * pcs["PC3"].to_numpy()
+    anc_shift = np.select(
+        [ancestry_labels == "eur", ancestry_labels == "afr", ancestry_labels == "amr"],
+        [0.20, -0.25, 0.10],
+        default=0.0,
+    )
+    inv_vals = np.clip(inv_base + anc_shift, -2.5, 2.5)
+    inversion_main = pd.DataFrame({TEST_TARGET_INVERSION: inv_vals}, index=demographics.index)
+    inversion_const = pd.DataFrame({TEST_TARGET_INVERSION: np.zeros(N)}, index=demographics.index)
+
+    ancestry = pd.DataFrame({"ANCESTRY": ancestry_labels}, index=demographics.index)
+
+    shared_latent = (
+        0.60 * pcs["PC1"].to_numpy()
+        - 0.45 * pcs["PC2"].to_numpy()
+        + 0.25 * pcs["PC3"].to_numpy()
+        + rng.normal(0.0, 0.35, size=N)
+    )
+    age_centered = ages - ages.mean()
+
+    logit_terms = {
+        "Metabolic_strong": (
+            -0.70
+            + 1.15 * inv_vals
+            + 0.90 * shared_latent
+            + 0.008 * age_centered
+            - 0.33 * sex_vec
+            + rng.normal(0.0, 0.15, size=N)
+        ),
+        "Neuro_moderate": (
+            -0.50
+            + 0.55 * inv_vals
+            + 0.75 * shared_latent
+            - 0.22 * sex_vec
+            + 0.004 * age_centered
+            + rng.normal(0.0, 0.18, size=N)
+        ),
+        "Inflammation_low": (
+            -0.55
+            + 0.18 * inv_vals
+            + 0.80 * shared_latent
+            - 0.17 * sex_vec
+            + rng.normal(0.0, 0.20, size=N)
+        ),
+    }
+
+    phenos = {}
+    categories = {
+        "Metabolic_strong": "cardio",
+        "Neuro_moderate": "neuro",
+        "Inflammation_low": "immune",
+    }
+    target_case_fracs = {
+        "Metabolic_strong": 0.60,
+        "Neuro_moderate": 0.50,
+        "Inflammation_low": 0.40,
+    }
+
+    for name, logits in logit_terms.items():
+        probs = sigmoid(logits)
+        target = max(int(round(target_case_fracs[name] * N)), 1)
+        target = min(target, N - 1)
+        top_idx = np.argpartition(probs, N - target)[N - target:]
+        mask = np.zeros(N, dtype=bool)
+        mask[top_idx] = True
+
+        for label in ("eur", "afr", "amr"):
+            anc_idx = np.flatnonzero(ancestry_labels == label)
+            if not len(anc_idx):
+                continue
+            anc_probs = probs[anc_idx]
+            anc_case_idx = anc_idx[mask[anc_idx]]
+            min_cases = min(len(anc_idx), 150)
+            if anc_case_idx.size < min_cases:
+                deficit = min_cases - anc_case_idx.size
+                take = anc_idx[np.argsort(anc_probs)[-deficit:]]
+                mask[take] = True
+
+            anc_case_idx = anc_idx[mask[anc_idx]]
+            anc_control_idx = anc_idx[~mask[anc_idx]]
+            min_controls = min(len(anc_idx), 150)
+            if anc_control_idx.size < min_controls and anc_case_idx.size > min_controls:
+                deficit = min_controls - anc_control_idx.size
+                case_probs = anc_probs[mask[anc_idx]]
+                order = np.argsort(case_probs)
+                drop = anc_case_idx[order[:deficit]]
+                mask[drop] = False
+
+        cases = set(demographics.index[mask])
+        phenos[name] = {
+            "disease": name.replace("_", " "),
+            "category": categories[name],
+            "cases": cases,
+        }
+
+    core_data = {
+        "demographics": demographics,
+        "sex": sex,
+        "pcs": pcs,
+        "inversion_main": inversion_main,
+        "inversion_const": inversion_const,
+        "ancestry": ancestry,
+        "related_to_remove": set(),
+    }
+
+    return core_data, phenos
+
+
 def _init_lrt_worker_from_df(df, masks, anc_series, ctx):
     arr = df.to_numpy(dtype=np.float32, copy=True)
     meta, shm = io.create_shared_from_ndarray(arr, readonly=True)
@@ -185,7 +322,9 @@ def prime_all_caches_for_run(core_data, phenos, cdr_codename, target_inversion, 
             "sanitized_name": s_name, "icd9_codes": "1.1", "icd10_codes": "A1.1"
         })
 
-    pan_cases = {"cardio": phenos["A_strong_signal"]["cases"] | phenos["B_insufficient"]["cases"], "neuro": phenos["C_moderate_signal"]["cases"]}
+    pan_cases = {}
+    for p_data in phenos.values():
+        pan_cases.setdefault(p_data["category"], set()).update(p_data["cases"])
     pd.to_pickle(pan_cases, Path(cache_dir) / f"pan_category_cases_{cdr_codename}.pkl")
 
     for d in ["results_atomic", "lrt_overall", "lrt_followup"]:
@@ -242,6 +381,90 @@ def test_cli_pop_label_sets_population_filter():
         assert run.POPULATION_FILTER == "EUR"
         assert "FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE" not in os.environ
         assert os.environ["FERROMIC_POPULATION_FILTER"] == "EUR"
+
+
+def test_cli_population_filter_matches_followup_effects():
+    with temp_workspace() as tmpdir, preserve_run_globals():
+        core_data, phenos = make_realistic_followup_dataset()
+
+        cache_root = Path(tmpdir) / "phewas_cache"
+        run.CACHE_DIR = str(cache_root)
+        run.LOCK_DIR = os.path.join(run.CACHE_DIR, "locks")
+        run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]
+        run.NUM_PCS = core_data["pcs"].shape[1]
+        run.MIN_NEFF_FILTER = 0
+        run.MLE_REFIT_MIN_NEFF = 0
+        run.FDR_ALPHA = 1.0
+        run.LRT_SELECT_ALPHA = 1.0
+        run.MASTER_RESULTS_CSV = str(Path(tmpdir) / "master_results.tsv")
+        run.INVERSION_DOSAGES_FILE = str(Path(tmpdir) / "dosages.tsv")
+
+        defs_df = prime_all_caches_for_run(
+            core_data,
+            phenos,
+            TEST_CDR_CODENAME,
+            TEST_TARGET_INVERSION,
+            cache_dir=run.CACHE_DIR,
+        )
+        local_defs = make_local_pheno_defs_tsv(defs_df, tmpdir)
+        run.PHENOTYPE_DEFINITIONS_URL = str(local_defs)
+
+        dosages_df = (
+            core_data["inversion_main"].reset_index().rename(columns={"person_id": "SampleID"})
+        )
+        write_tsv(run.INVERSION_DOSAGES_FILE, dosages_df)
+
+        sanitized_names = defs_df["sanitized_name"].tolist()
+        eur_stage1_ors = {}
+
+        def _load_pcs_stub(gcp_project, PCS_URI, NUM_PCS, *_, **__):
+            return core_data["pcs"].iloc[:, :NUM_PCS]
+
+        def _load_sex_stub(gcp_project, SEX_URI, *_, **__):
+            return core_data["sex"]
+
+        def _load_anc_stub(gcp_project, LABELS_URI, *_, **__):
+            return core_data["ancestry"]
+
+        def _load_demo_stub(*args, **kwargs):
+            return core_data["demographics"]
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch("phewas.run.bigquery.Client", MagicMock()))
+            stack.enter_context(patch("phewas.run.io.load_related_to_remove", return_value=set()))
+            stack.enter_context(patch("phewas.run.io.load_pcs", _load_pcs_stub))
+            stack.enter_context(patch("phewas.run.io.load_genetic_sex", _load_sex_stub))
+            stack.enter_context(patch("phewas.run.io.load_ancestry_labels", _load_anc_stub))
+            stack.enter_context(patch("phewas.run.io.load_demographics_with_stable_age", _load_demo_stub))
+            stack.enter_context(patch("phewas.pheno.populate_caches_prepass", lambda *_, **__: None))
+            stack.enter_context(patch("phewas.run.supervisor_main", lambda: run._pipeline_once()))
+
+            cli.main(["--pop-label", "eur"])
+
+            safe_inv = models.safe_basename(TEST_TARGET_INVERSION)
+            results_dir = Path(run.CACHE_DIR) / safe_inv / "results_atomic"
+            assert results_dir.is_dir()
+            for sanitized in sanitized_names:
+                result_path = results_dir / f"{sanitized}.json"
+                assert result_path.exists(), f"Missing Stage-1 result for {sanitized}"
+                with open(result_path) as f:
+                    record = json.load(f)
+                or_val = float(record.get("OR", np.nan))
+                assert np.isfinite(or_val), f"Invalid OR for {sanitized}"
+                eur_stage1_ors[sanitized] = or_val
+
+            cli.main([])
+
+            follow_dir = Path(run.CACHE_DIR) / safe_inv / "lrt_followup"
+            assert follow_dir.is_dir()
+            for sanitized, stage1_or in eur_stage1_ors.items():
+                follow_path = follow_dir / f"{sanitized}.json"
+                assert follow_path.exists(), f"Missing follow-up result for {sanitized}"
+                with open(follow_path) as f:
+                    follow_record = json.load(f)
+                eur_or = float(follow_record.get("EUR_OR", np.nan))
+                assert np.isfinite(eur_or), f"Invalid EUR_OR for {sanitized}"
+                assert eur_or == pytest.approx(stage1_or, abs=0.01)
 
 
 def test_apply_population_filter_allows_full_cohort():
