@@ -15,7 +15,7 @@ from unittest.mock import patch, MagicMock
 import warnings
 import math
 from typing import List, Optional
-from statsmodels.tools.sm_exceptions import PerfectSeparationWarning, PerfectSeparationError
+from statsmodels.tools.sm_exceptions import PerfectSeparationWarning, PerfectSeparationError, ConvergenceWarning
 
 import pytest
 import numpy as np
@@ -1376,7 +1376,7 @@ def test_worker_reports_n_used_after_sex_restriction(test_ctx):
         shm.close(); shm.unlink()
 
 def test_lrt_overall_firth_fit_keeps_inference(test_ctx):
-    """Stage-1 Firth refits triggered by ridge should retain valid inference."""
+    """Stage-1 Firth refits triggered by ridge should fall back to score tests."""
     with temp_workspace():
         core_data, phenos = make_synth_cohort(N=100)
         cases = list(phenos["A_strong_signal"]["cases"])
@@ -1402,7 +1402,9 @@ def test_lrt_overall_firth_fit_keeps_inference(test_ctx):
         with open(result_path) as f:
             res = json.load(f)
 
-        assert res['Inference_Type'] == 'firth'
+        assert res['Inference_Type'] in {'score', 'score_boot'}
+        assert res['P_Source'] in {'score_chi2', 'score_boot_firth', 'score_boot_mle'}
+        assert res['P_Source'] != 'lrt_firth'
         assert np.isfinite(res['P_LRT_Overall'])
         assert res['P_Overall_Valid'] is True
         assert res.get('LRT_Overall_Reason') in (None, '',)
@@ -1412,9 +1414,79 @@ def test_lrt_overall_firth_fit_keeps_inference(test_ctx):
         with open(atomic_path) as f:
             atomic_res = json.load(f)
 
-        assert atomic_res['Inference_Type'] == 'firth'
+        assert atomic_res['Inference_Type'] in {'score', 'score_boot'}
         assert atomic_res['Used_Ridge'] is True
         assert np.isfinite(atomic_res['P_Value'])
+        assert atomic_res['P_Source'] in {'score_chi2', 'score_boot_firth', 'score_boot_mle'}
+        assert atomic_res['P_Source'] != 'lrt_firth'
+        shm.close(); shm.unlink()
+
+
+def test_lrt_overall_perfect_separation_uses_score_fallback(test_ctx):
+    """Perfect separation should trigger the score-based inference fallback."""
+    with temp_workspace():
+        core_data, phenos = make_synth_cohort(N=120)
+        idx = core_data['inversion_main'].index
+        cases = list(idx[:40])
+        controls = list(idx[40:])
+        case_set = set(cases)
+        core_data['inversion_main'].loc[cases, TEST_TARGET_INVERSION] = 8.0
+        core_data['inversion_main'].loc[controls, TEST_TARGET_INVERSION] = -8.0
+
+        phenos['Perfect_sep'] = {
+            'disease': 'Perfect separation',
+            'category': 'cardio',
+            'cases': case_set,
+        }
+
+        prime_all_caches_for_run(core_data, phenos, TEST_CDR_CODENAME, TEST_TARGET_INVERSION)
+
+        core_df = pd.concat(
+            [
+                core_data['demographics'][['AGE_c', 'AGE_c_sq']],
+                core_data['sex'],
+                core_data['pcs'],
+                core_data['inversion_main'],
+            ],
+            axis=1,
+        )
+        core_df = sm.add_constant(core_df)
+        anc_cols = pd.get_dummies(core_data['ancestry']['ANCESTRY'], prefix='ANC', drop_first=True, dtype=np.float64)
+        core_df = core_df.join(anc_cols)
+
+        shm = _init_lrt_worker_from_df(core_df, {}, core_data['ancestry']['ANCESTRY'], test_ctx)
+
+        task = {
+            'name': 'Perfect_sep',
+            'category': 'cardio',
+            'cdr_codename': TEST_CDR_CODENAME,
+            'target': TEST_TARGET_INVERSION,
+        }
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', (PerfectSeparationWarning, ConvergenceWarning))
+            models.lrt_overall_worker(task)
+
+        result_path = Path(test_ctx['LRT_OVERALL_CACHE_DIR']) / 'Perfect_sep.json'
+        assert result_path.exists()
+        with open(result_path) as fh:
+            res = json.load(fh)
+
+        assert res['Inference_Type'] in {'score', 'score_boot'}
+        assert res['P_Source'] in {'score_chi2', 'score_boot_firth', 'score_boot_mle', None}
+        assert res['P_Source'] != 'lrt_firth'
+        if res['P_Overall_Valid']:
+            assert np.isfinite(res['P_LRT_Overall'])
+        atomic_path = Path(test_ctx['RESULTS_CACHE_DIR']) / 'Perfect_sep.json'
+        assert atomic_path.exists()
+        with open(atomic_path) as fh:
+            atomic_res = json.load(fh)
+
+        assert atomic_res['Inference_Type'] in {'score', 'score_boot'}
+        assert atomic_res['Used_Firth'] is True
+        assert atomic_res['P_Source'] in {'score_chi2', 'score_boot_firth', 'score_boot_mle', None}
+        assert atomic_res['P_Source'] != 'lrt_firth'
+        if atomic_res['P_Valid']:
+            assert np.isfinite(atomic_res['P_Value'])
         shm.close(); shm.unlink()
 
 def test_lrt_followup_firth_fit_keeps_ci(test_ctx):

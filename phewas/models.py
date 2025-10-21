@@ -2482,14 +2482,10 @@ def lrt_overall_worker(task):
         or_ci95 = None
         beta_full = np.nan
         or_val = np.nan
+        inference_type = inference_family if inference_family is not None else None
 
         if inference_family is not None:
-            ll_full = float(getattr(fit_full_use, "llf", np.nan))
-            ll_red = float(getattr(fit_red_use, "llf", np.nan))
-            if np.isfinite(ll_full) and np.isfinite(ll_red):
-                stat = max(0.0, 2.0 * (ll_full - ll_red))
-                p_value = float(sp_stats.chi2.sf(stat, 1))
-                p_source = "lrt_mle" if inference_family == "mle" else "lrt_firth"
+            if target_ix is not None and fit_full_use is not None:
                 ci_info = _profile_ci_beta(X_full_zv, yb, target_ix, fit_full_use, kind=inference_family)
                 ci_method = ci_info.get("method")
                 ci_sided = ci_info.get("sided", "two")
@@ -2512,24 +2508,37 @@ def lrt_overall_worker(task):
                     or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
                     if ci_sided == "one":
                         ci_label = "one-sided (boundary)"
-                params = getattr(fit_full_use, "params", None)
-                if params is not None:
-                    try:
-                        if hasattr(params, "__getitem__"):
-                            beta_full = float(params[target]) if hasattr(params, "index") else float(params[target_ix])
-                        else:
-                            beta_full = float(np.asarray(params)[target_ix])
-                        or_val = float(np.exp(beta_full))
-                    except Exception:
-                        beta_full = np.nan
-                        or_val = np.nan
-            else:
-                inference_family = None
-                p_value = np.nan
-                p_source = None
+            params = getattr(fit_full_use, "params", None)
+            if params is not None and target_ix is not None:
+                try:
+                    if hasattr(params, "__getitem__"):
+                        beta_full = float(params[target]) if hasattr(params, "index") else float(params[target_ix])
+                    else:
+                        beta_full = float(np.asarray(params)[target_ix])
+                    or_val = float(np.exp(beta_full))
+                except Exception:
+                    beta_full = np.nan
+                    or_val = np.nan
+            if inference_family == "mle":
+                ll_full = float(getattr(fit_full_use, "llf", np.nan))
+                ll_red = float(getattr(fit_red_use, "llf", np.nan))
+                if np.isfinite(ll_full) and np.isfinite(ll_red):
+                    stat = max(0.0, 2.0 * (ll_full - ll_red))
+                    p_value = float(sp_stats.chi2.sf(stat, 1))
+                    p_source = "lrt_mle"
+                    inference_type = "mle"
+                else:
+                    inference_type = None
+            elif inference_family == "firth":
+                # Skip the nominal LRT for penalized fits; a score-based fallback
+                # is attempted below.
+                ll_full = float(getattr(fit_full_use, "llf", np.nan))
+                ll_red = float(getattr(fit_red_use, "llf", np.nan))
+                if not (np.isfinite(ll_full) and np.isfinite(ll_red)):
+                    inference_type = None
 
         if (
-            inference_family is None
+            (not np.isfinite(p_value))
             and target_ix is not None
             and target in X_full_zv.columns
         ):
@@ -2543,7 +2552,7 @@ def lrt_overall_worker(task):
             if np.isfinite(p_sc):
                 p_value = p_sc
                 p_source = "score_chi2"
-                inference_family = "score"
+                inference_type = "score"
             else:
                 boot_res = _score_bootstrap_from_reduced(
                     X_red_zv,
@@ -2555,7 +2564,8 @@ def lrt_overall_worker(task):
                 if np.isfinite(p_emp):
                     p_value = p_emp
                     p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
-                    inference_family = "score_boot"
+                    inference_type = "score_boot"
+
 
         if (
             (not np.isfinite(beta_full))
@@ -2578,7 +2588,8 @@ def lrt_overall_worker(task):
                     beta_full = np.nan
                     or_val = np.nan
 
-        inference_type = inference_family if inference_family is not None else "none"
+        if inference_type is None:
+            inference_type = inference_family if inference_family is not None else "none"
         p_valid = bool(np.isfinite(p_value))
 
         if inference_type == "score":
