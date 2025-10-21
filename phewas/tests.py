@@ -13,6 +13,8 @@ import platform
 import resource
 from unittest.mock import patch, MagicMock
 import warnings
+import math
+from typing import List, Optional
 from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
 
 import pytest
@@ -1679,6 +1681,70 @@ def test_covariance_and_metrics_basic(monkeypatch):
     assert np.isfinite(row["P_GBJ"])
     assert np.isfinite(row["P_GLS"])
     assert row["Phenotypes_GLS"] == "ph1;ph2;ph3"
+
+
+def test_two_sided_p_to_z_handles_extreme_values():
+    uncapped = categories._two_sided_p_to_z(1e-50, z_cap=None)
+    capped = categories._two_sided_p_to_z(1e-50, z_cap=8.0)
+    moderate = categories._two_sided_p_to_z(1e-5, z_cap=None)
+
+    assert uncapped > capped
+    assert uncapped > moderate
+    assert math.isclose(capped, 8.0, rel_tol=0, abs_tol=1e-12)
+
+
+def test_category_metrics_optional_z_cap_changes_meta_z(monkeypatch):
+    struct = categories.CategoryNull(
+        phenotypes=["p_strong", "p_support"],
+        correlation=np.array([[1.0, 0.25], [0.25, 1.0]], dtype=np.float64),
+        method="unit",
+        shrinkage="ridge",
+        lambda_value=0.05,
+        n_individuals=500,
+    )
+
+    inv = pd.DataFrame(
+        {
+            "Phenotype": ["p_strong", "p_support"],
+            "P_EMP": [1e-60, 5e-8],
+            "Beta": [0.4, 0.2],
+        }
+    )
+
+    captures: List[Optional[float]] = []
+
+    def fake_sim(stat, corr, draws, rng, *, z_cap):
+        captures.append(z_cap)
+        return 0.123
+
+    monkeypatch.setattr(categories, "_simulate_gbj_pvalue", fake_sim)
+
+    out_capped = categories.compute_category_metrics(
+        inv,
+        p_col="P_EMP",
+        beta_col="Beta",
+        null_structures={"Cat": struct},
+        gbj_draws=200,
+        z_cap=8.0,
+        rng_seed=7,
+        min_k=1,
+    )
+
+    out_uncapped = categories.compute_category_metrics(
+        inv,
+        p_col="P_EMP",
+        beta_col="Beta",
+        null_structures={"Cat": struct},
+        gbj_draws=200,
+        z_cap=None,
+        rng_seed=7,
+        min_k=1,
+    )
+
+    assert captures == [8.0, None]
+    assert out_capped.loc[0, "Z_Cap"] == 8.0
+    assert np.isnan(out_uncapped.loc[0, "Z_Cap"])
+    assert abs(out_uncapped.loc[0, "T_GLS"]) > abs(out_capped.loc[0, "T_GLS"])
 
 
 def test_plan_category_sets_respects_min_k_and_dedup(tmp_path):
