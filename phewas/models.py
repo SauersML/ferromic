@@ -956,8 +956,14 @@ def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), 
         import scipy.linalg as sp_linalg
         Q, R, piv = sp_linalg.qr(M, mode='economic', pivoting=True)
         svals = np.linalg.svd(M, compute_uv=False)
-        tol = float(rtol) * (svals[0] if svals.size else 0.0)
-        rank = int(np.sum(svals > tol))
+        if svals.size:
+            scale = float(svals[0])
+            eps = np.finfo(M.dtype).eps if np.issubdtype(M.dtype, np.floating) else np.finfo(float).eps
+            tol = max(float(rtol), eps * max(M.shape) * scale)
+            rank = int(np.sum(svals > tol))
+        else:
+            tol = float(rtol)
+            rank = 0
         piv = list(piv[:rank])
     except Exception:
         piv = list(range(len(ordered)))
