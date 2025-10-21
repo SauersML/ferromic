@@ -111,6 +111,33 @@ def write_tsv(path, df):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, sep='\t', index=False)
 
+
+def test_load_pcs_rejects_duplicate_ids():
+    pcs_df = pd.DataFrame(
+        {
+            "research_id": ["1001", "1001"],
+            "pca_features": ["[0.1,0.2]", "[0.3,0.4]"],
+        }
+    )
+
+    with patch.object(pd, "read_csv", return_value=pcs_df):
+        with pytest.raises(RuntimeError, match="Duplicate person_id"):
+            io.load_pcs("project", "gs://bucket/pcs.tsv", NUM_PCS=2)
+
+
+def test_load_genetic_sex_rejects_duplicate_ids():
+    sex_df = pd.DataFrame(
+        {
+            "research_id": ["1001", "1001"],
+            "dragen_sex_ploidy": ["XX", "XY"],
+        }
+    )
+
+    with patch.object(pd, "read_csv", return_value=sex_df):
+        with pytest.raises(ValueError, match="Duplicate person_id"):
+            io.load_genetic_sex("project", "gs://bucket/sex.tsv")
+
+
 def test_drop_rank_deficient_respects_uniform_scaling():
     rng = np.random.default_rng(2024)
     n = 60
@@ -509,6 +536,59 @@ def test_cli_population_filter_matches_followup_effects():
                 eur_or = float(follow_record.get("EUR_OR", np.nan))
                 assert np.isfinite(eur_or), f"Invalid EUR_OR for {sanitized}"
                 assert eur_or == pytest.approx(stage1_or, abs=0.01)
+
+
+def test_shared_covariates_reject_duplicate_indices():
+    with temp_workspace() as tmpdir, preserve_run_globals():
+        core_data, _ = make_synth_cohort(N=50, NUM_PCS=5)
+        defs_df = pd.DataFrame(
+            {
+                "disease": ["Example condition"],
+                "disease_category": ["example"],
+                "icd9_codes": ["1.1"],
+                "icd10_codes": ["A1.1"],
+            }
+        )
+        defs_path = Path(tmpdir) / "defs.tsv"
+        write_tsv(defs_path, defs_df)
+
+        run.CACHE_DIR = str(Path(tmpdir) / "phewas_cache")
+        run.LOCK_DIR = os.path.join(run.CACHE_DIR, "locks")
+        run.TARGET_INVERSIONS = [TEST_TARGET_INVERSION]
+        run.NUM_PCS = core_data["pcs"].shape[1]
+        run.PHENOTYPE_DEFINITIONS_URL = str(defs_path)
+        run.INVERSION_DOSAGES_FILE = str(Path(tmpdir) / "dosages.tsv")
+        run.MASTER_RESULTS_CSV = str(Path(tmpdir) / "master.tsv")
+        run.MIN_CASES_FILTER = run.MIN_CONTROLS_FILTER = 0
+
+        inversion_df = core_data["inversion_main"].reset_index().rename(columns={"person_id": "SampleID"})
+        write_tsv(run.INVERSION_DOSAGES_FILE, inversion_df)
+
+        def passthrough_cache(cache_path, func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        def duplicate_pcs_loader(gcp_project, PCS_URI, NUM_PCS, *args, **kwargs):
+            pcs = core_data["pcs"].iloc[:, :NUM_PCS]
+            dup = pd.concat([pcs, pcs.iloc[[0]]])
+            dup.index.name = pcs.index.name
+            return dup
+
+        def _rethrow_traceback(*_args, **_kwargs):
+            raise
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch("phewas.run.bigquery.Client", MagicMock()))
+            stack.enter_context(patch("phewas.run.io.get_cached_or_generate", passthrough_cache))
+            stack.enter_context(patch("phewas.run.io.load_related_to_remove", return_value=set()))
+            stack.enter_context(patch("phewas.run.io.load_demographics_with_stable_age", lambda *a, **k: core_data["demographics"]))
+            stack.enter_context(patch("phewas.run.io.load_pcs", duplicate_pcs_loader))
+            stack.enter_context(patch("phewas.run.io.load_genetic_sex", lambda *a, **k: core_data["sex"]))
+            stack.enter_context(patch("phewas.run.io.load_ancestry_labels", lambda *a, **k: core_data["ancestry"]))
+            stack.enter_context(patch("phewas.pheno.populate_caches_prepass", lambda *a, **k: None))
+            stack.enter_context(patch("phewas.run.traceback.print_exc", _rethrow_traceback))
+
+            with pytest.raises(ValueError, match="Duplicate person_id entries detected"):
+                run._pipeline_once()
 
 
 def test_apply_population_filter_allows_full_cohort():
