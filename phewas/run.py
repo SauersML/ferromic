@@ -441,24 +441,16 @@ CACHE_VERSION_TAG = io.CACHE_VERSION_TAG
 
 # --- Model parameters ---
 NUM_PCS = 16
-MIN_CASES_FILTER = pheno.MIN_CASES_FILTER
-MIN_CONTROLS_FILTER = pheno.MIN_CONTROLS_FILTER
+DEFAULT_MIN_CASES_FILTER = int(pheno.MIN_CASES_FILTER)
+DEFAULT_MIN_CONTROLS_FILTER = int(pheno.MIN_CONTROLS_FILTER)
+MIN_CASES_FILTER = DEFAULT_MIN_CASES_FILTER
+MIN_CONTROLS_FILTER = DEFAULT_MIN_CONTROLS_FILTER
 CLI_MIN_CASES_CONTROLS_OVERRIDE: Optional[int] = None
 MIN_NEFF_FILTER = 0 # Default off
 FDR_ALPHA = 0.05
 
 # --- Population filter ---
 POPULATION_FILTER = "all"
-
-_cli_override_env = os.getenv("FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE")
-if _cli_override_env is not None:
-    try:
-        CLI_MIN_CASES_CONTROLS_OVERRIDE = int(_cli_override_env)
-    except ValueError:
-        print(
-            f"[Config WARN] Ignoring invalid FERROMIC_CLI_MIN_CASES_CONTROLS_OVERRIDE={_cli_override_env!r}",
-            flush=True,
-        )
 
 _pop_filter_env = os.getenv("FERROMIC_POPULATION_FILTER")
 if _pop_filter_env is not None:
@@ -607,12 +599,17 @@ def _source_key(*parts) -> str:
     return io.stable_hash({"parts": parts, "version": CACHE_VERSION_TAG})
 
 
-def _prefilter_thresholds() -> Tuple[int, int]:
-    """Return the case/control thresholds used to prefilter phenotypes."""
+def _effective_case_control_thresholds() -> Tuple[int, int]:
+    """Return the minimum case/control thresholds enforced for this run."""
     if CLI_MIN_CASES_CONTROLS_OVERRIDE is not None:
         threshold = int(CLI_MIN_CASES_CONTROLS_OVERRIDE)
         return threshold, threshold
-    return int(pheno.MIN_CASES_FILTER), int(pheno.MIN_CONTROLS_FILTER)
+    return int(MIN_CASES_FILTER), int(MIN_CONTROLS_FILTER)
+
+
+def _prefilter_thresholds() -> Tuple[int, int]:
+    """Return the case/control thresholds used to prefilter phenotypes."""
+    return _effective_case_control_thresholds()
 
 
 def _pipeline_once():
@@ -622,8 +619,12 @@ def _pipeline_once():
     script_start_time = time.time()
 
     # Keep the phenotype module thresholds in sync with any overrides applied here.
-    pheno.MIN_CASES_FILTER = MIN_CASES_FILTER
-    pheno.MIN_CONTROLS_FILTER = MIN_CONTROLS_FILTER
+    global MIN_CASES_FILTER, MIN_CONTROLS_FILTER
+    effective_min_cases, effective_min_ctrls = _effective_case_control_thresholds()
+    MIN_CASES_FILTER = effective_min_cases
+    MIN_CONTROLS_FILTER = effective_min_ctrls
+    pheno.MIN_CASES_FILTER = effective_min_cases
+    pheno.MIN_CONTROLS_FILTER = effective_min_ctrls
     prefilter_min_cases, prefilter_min_ctrls = _prefilter_thresholds()
 
     if PSUTIL_AVAILABLE:
