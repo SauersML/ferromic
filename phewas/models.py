@@ -2055,7 +2055,7 @@ def lrt_overall_worker(task):
         base_ix = [col_ix[c] for c in base_cols]
 
         X_base = pd.DataFrame(
-            X_all[np.ix_(valid_mask, base_ix)],
+            X_all[valid_mask][:, base_ix],
             index=worker_core_df_index[valid_mask],
             columns=base_cols,
         ).astype(np.float64, copy=False)
@@ -2819,7 +2819,7 @@ def bootstrap_overall_worker(task):
         base_cols += _existing(anc_cols)
         base_ix = [col_ix[c] for c in base_cols]
         X_base = pd.DataFrame(
-            X_all[np.ix_(valid_mask, base_ix)],
+            X_all[valid_mask][:, base_ix],
             index=worker_core_df_index[valid_mask],
             columns=base_cols,
         ).astype(np.float64, copy=False)
@@ -3191,7 +3191,7 @@ def lrt_followup_worker(task):
         base_cols += _existing(['AGE_c', 'AGE_c_sq'])
         base_ix = [col_ix[c] for c in base_cols]
         X_base_df = pd.DataFrame(
-            X_all[np.ix_(valid_mask, base_ix)],
+            X_all[valid_mask][:, base_ix],
             index=worker_core_df_index[valid_mask],
             columns=base_cols,
         ).astype(np.float64, copy=False)
