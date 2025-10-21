@@ -952,17 +952,33 @@ def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), 
         return X.iloc[:, :0]
 
     M = X[ordered].to_numpy(dtype=np.float64, copy=False)
+    # Work on a scaled copy so that the rank decision is insensitive to the
+    # overall magnitude of the optional predictors.  Keep/always_keep columns
+    # (e.g., the intercept or the target) are left on their native scale to
+    # preserve any exact-constraint semantics.
+    M_scaled = np.array(M, copy=True)
+    if optional:
+        for idx, col in enumerate(ordered):
+            if col not in optional:
+                continue
+            col_vals = M_scaled[:, idx]
+            if col_vals.size == 0:
+                continue
+            col_std = float(np.nanstd(col_vals))
+            if not np.isfinite(col_std) or col_std <= 0.0:
+                continue
+            M_scaled[:, idx] = col_vals / col_std
     try:
         import scipy.linalg as sp_linalg
-        Q, R, piv = sp_linalg.qr(M, mode='economic', pivoting=True)
-        svals = np.linalg.svd(M, compute_uv=False)
+        Q, R, piv = sp_linalg.qr(M_scaled, mode='economic', pivoting=True)
+        svals = np.linalg.svd(M_scaled, compute_uv=False)
         if svals.size:
             scale = float(svals[0])
             if scale > 0.0:
-                eps = np.finfo(M.dtype).eps if np.issubdtype(M.dtype, np.floating) else np.finfo(float).eps
+                eps = np.finfo(M_scaled.dtype).eps if np.issubdtype(M_scaled.dtype, np.floating) else np.finfo(float).eps
                 rel_tol = float(rtol) * scale
                 abs_tol = eps * max(M.shape) * scale
-                tol = max(rel_tol, abs_tol)
+                tol = max(float(rtol), rel_tol, abs_tol)
             else:
                 tol = float(rtol)
             rank = int(np.sum(svals > tol))
