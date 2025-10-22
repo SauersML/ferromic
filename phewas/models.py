@@ -3245,7 +3245,7 @@ def bootstrap_overall_worker(task):
                 p_valid = True
                 p_source = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
             else:
-            p_reason = "bootstrap_failed"
+                p_reason = "bootstrap_failed"
         else:
             p_reason = "reduced_fit_unknown"
 
