@@ -36,6 +36,11 @@ test = [
     "patchelf; platform_system == 'Linux'",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "timeout: mark tests to enforce a timeout",
+]
+
 [tool.maturin]
 bindings = "pyo3"
 profile = "release"
