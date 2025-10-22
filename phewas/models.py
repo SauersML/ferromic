@@ -260,9 +260,10 @@ def _logit_mle_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
         beta = beta_new
     if not converged:
         raise RuntimeError("MLE offset refit failed to converge")
-    eta = np.clip(offset + X_np @ beta, -35.0, 35.0)
-    p_hat = expit(eta)
-    llf = float(np.sum(y_np * np.log(p_hat) + (1.0 - y_np) * np.log(1.0 - p_hat)))
+    eta = offset + X_np @ beta
+    eta_work = np.clip(eta, -35.0, 35.0)
+    p_hat = expit(eta_work)
+    llf = float(np.sum(y_np * eta - np.logaddexp(0.0, eta)))
     W = p_hat * (1.0 - p_hat)
     XTW = X_np.T * W
     XtWX = XTW @ X_np
@@ -321,17 +322,13 @@ def _firth_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
         beta = beta_new
     if not converged:
         raise RuntimeError("Firth offset refit failed to converge")
-    eta = np.clip(offset + X_np @ beta, -35.0, 35.0)
-    p_hat = np.clip(expit(eta), 1e-12, 1.0 - 1e-12)
+    eta = offset + X_np @ beta
+    eta_work = np.clip(eta, -35.0, 35.0)
+    p_hat = np.clip(expit(eta_work), 1e-12, 1.0 - 1e-12)
     W = p_hat * (1.0 - p_hat)
     XTW = X_np.T * W
     XtWX = XTW @ X_np
-    try:
-        cov = np.linalg.inv(XtWX)
-    except np.linalg.LinAlgError:
-        cov = np.linalg.pinv(XtWX)
-    bse = np.sqrt(np.clip(np.diag(cov), 0.0, np.inf))
-    loglik = float(np.sum(y_np * np.log(p_hat) + (1.0 - y_np) * np.log(1.0 - p_hat)))
+    loglik = float(np.sum(y_np * eta - np.logaddexp(0.0, eta)))
     sign_det, logdet = np.linalg.slogdet(XtWX)
     pll = loglik + 0.5 * logdet if sign_det > 0 else -np.inf
 
@@ -340,7 +337,8 @@ def _firth_refit_offset(X, y, offset=None, maxiter=200, tol=1e-8):
 
     res = _Res()
     res.params = beta
-    res.bse = bse
+    p_dim = X_np.shape[1]
+    res.bse = np.full(p_dim, np.nan)
     res.llf = float(pll)
     setattr(res, "_final_is_mle", False)
     setattr(res, "_used_firth", True)
@@ -1123,6 +1121,9 @@ def _wald_ci_or_from_fit(fit, target_ix, alpha=0.05, *, penalized=False):
     if fit is None or (not hasattr(fit, "params")) or (not hasattr(fit, "bse")):
         return {"valid": False}
 
+    if bool(getattr(fit, "_used_firth", False)) or bool(getattr(fit, "_used_ridge", False)):
+        return {"valid": False}
+
     try:
         params = np.asarray(fit.params, dtype=np.float64).ravel()
         bse = np.asarray(fit.bse, dtype=np.float64).ravel()
@@ -1141,27 +1142,7 @@ def _wald_ci_or_from_fit(fit, target_ix, alpha=0.05, *, penalized=False):
     hi_or = float(np.exp(hi_beta))
     ok = np.isfinite(lo_or) and np.isfinite(hi_or) and (lo_or > 0.0) and (hi_or > 0.0)
 
-    is_ridge = bool(getattr(fit, "_used_ridge", False))
-    is_firth = bool(getattr(fit, "_used_firth", False))
-
-    if ok and penalized and is_ridge and not is_firth:
-        span = hi_or / max(lo_or, 1e-300)
-        if span > float(CTX.get("PENALIZED_CI_SPAN_RATIO", PENALIZED_CI_SPAN_RATIO)):
-            ok = False
-        if lo_or < float(CTX.get("PENALIZED_CI_LO_OR_MAX", PENALIZED_CI_LO_OR_MAX)):
-            ok = False
-        if hi_or > float(CTX.get("PENALIZED_CI_HI_OR_MIN", PENALIZED_CI_HI_OR_MIN)):
-            ok = False
-
-    method = (
-        "wald_firth"
-        if bool(getattr(fit, "_used_firth", False))
-        else ("wald_penalized" if bool(getattr(fit, "_used_ridge", False)) else "wald_mle")
-    )
-    if ok and method == "wald_penalized" and not bool(
-        CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)
-    ):
-        ok = False
+    method = "wald_mle"
     return {
         "valid": ok,
         "lo_or": lo_or if ok else np.nan,
@@ -1229,22 +1210,13 @@ def _firth_refit(X, y):
     if not converged_firth:
         return None
 
-    eta = np.clip(X_np @ beta, -35.0, 35.0)
-    p = expit(eta)
-    p = np.clip(p, 1e-12, 1.0 - 1e-12)
+    eta = X_np @ beta
+    eta_work = np.clip(eta, -35.0, 35.0)
+    p = np.clip(expit(eta_work), 1e-12, 1.0 - 1e-12)
     W = p * (1.0 - p)
     XTW = X_np.T * W
     XtWX = XTW @ X_np
-    try:
-        cov = np.linalg.inv(XtWX)
-    except np.linalg.LinAlgError:
-        cov = np.linalg.pinv(XtWX)
-    bse = np.sqrt(np.clip(np.diag(cov), 0.0, np.inf))
-    with np.errstate(divide="ignore", invalid="ignore"):
-        z = np.divide(beta, bse, out=np.zeros_like(beta), where=bse > 0)
-    pvals = 2.0 * sp_stats.norm.sf(np.abs(z))
-    with np.errstate(divide="ignore", invalid="ignore"):
-        loglik = float(np.sum(y_np * np.log(p) + (1.0 - y_np) * np.log(1.0 - p)))
+    loglik = float(np.sum(y_np * eta - np.logaddexp(0.0, eta)))
     sign_det, logdet = np.linalg.slogdet(XtWX)
     pll = loglik + 0.5 * logdet if sign_det > 0 else -np.inf
 
@@ -1255,13 +1227,14 @@ def _firth_refit(X, y):
 
     firth_res = _Result()
     if hasattr(X, "columns"):
-        firth_res.params = pd.Series(beta, index=X.columns)
-        firth_res.bse = pd.Series(bse, index=X.columns)
-        firth_res.pvalues = pd.Series(pvals, index=X.columns)
+        idx = X.columns
+        firth_res.params = pd.Series(beta, index=idx)
+        firth_res.bse = pd.Series(np.full(beta.shape, np.nan), index=idx)
+        firth_res.pvalues = pd.Series(np.full(beta.shape, np.nan), index=idx)
     else:
         firth_res.params = beta
-        firth_res.bse = bse
-        firth_res.pvalues = pvals
+        firth_res.bse = np.full(beta.shape, np.nan)
+        firth_res.pvalues = np.full(beta.shape, np.nan)
     setattr(firth_res, "llf", float(pll))
     setattr(firth_res, "_final_is_mle", False)
     setattr(firth_res, "_used_firth", True)
