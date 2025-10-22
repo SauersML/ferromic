@@ -1078,91 +1078,19 @@ def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), e
 
 
 def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), rtol=1e-2):
-    """Selects a full-rank subset of columns while preserving required predictors."""
+    """
+    Detects rank deficiency but NEVER drops covariates.
+    
+    Returns the original DataFrame unchanged. If rank deficiency is detected,
+    downstream fitting will fail appropriately rather than silently dropping covariates.
+    
+    This function is kept for API compatibility but no longer modifies the design matrix.
+    """
     if X.shape[1] == 0:
         return X
-
-    keep_priority = []
-    seen = set()
-    for col in list(keep_cols) + list(always_keep):
-        if col in X.columns and col not in seen:
-            keep_priority.append(col)
-            seen.add(col)
-
-    optional = [c for c in X.columns if c not in seen]
-    if optional:
-        stds = {c: float(np.nanstd(X[c].to_numpy(dtype=np.float64, copy=False))) for c in optional}
-        optional.sort(key=lambda c: stds.get(c, 0.0), reverse=True)
-
-    ordered = keep_priority + optional
-    if not ordered:
-        return X.iloc[:, :0]
-
-    M = X[ordered].to_numpy(dtype=np.float64, copy=False)
-    # Work on a scaled copy so that the rank decision is insensitive to the
-    # overall magnitude of the optional predictors.  Keep/always_keep columns
-    # (e.g., the intercept or the target) are left on their native scale to
-    # preserve any exact-constraint semantics.
-    M_scaled = np.array(M, copy=True)
-    if optional:
-        for idx, col in enumerate(ordered):
-            if col not in optional:
-                continue
-            col_vals = M_scaled[:, idx]
-            if col_vals.size == 0:
-                continue
-            col_std = float(np.nanstd(col_vals))
-            if not np.isfinite(col_std) or col_std <= 0.0:
-                continue
-            M_scaled[:, idx] = col_vals / col_std
-    try:
-        import scipy.linalg as sp_linalg
-        Q, R, piv = sp_linalg.qr(M_scaled, mode='economic', pivoting=True)
-        svals = np.linalg.svd(M_scaled, compute_uv=False)
-        if svals.size:
-            scale = float(svals[0])
-            if scale > 0.0:
-                eps = np.finfo(M_scaled.dtype).eps if np.issubdtype(M_scaled.dtype, np.floating) else np.finfo(float).eps
-                rel_tol = float(rtol) * scale
-                abs_tol = eps * max(M.shape) * scale
-                tol = max(float(rtol), rel_tol, abs_tol)
-            else:
-                tol = float(rtol)
-            rank = int(np.sum(svals > tol))
-        else:
-            tol = float(rtol)
-            rank = 0
-        piv = list(piv[:rank])
-    except Exception:
-        piv = list(range(len(ordered)))
-        rank = len(ordered)
-
-    selected = [ordered[i] for i in piv]
-    # Ensure required columns are retained even if numerically dependent.
-    for col in keep_priority:
-        if col in X.columns and col not in selected:
-            selected.insert(0, col)
     
-    # If adding back required columns exceeded the rank, drop the lowest-priority
-    # optional columns to maintain numerical stability.
-    if len(selected) > rank and rank > 0:
-        # Keep all keep_priority columns, drop excess from the end
-        n_required = sum(1 for c in selected if c in keep_priority)
-        if len(selected) > n_required:
-            # Keep first n_required (the keep_priority cols) + enough optional to reach rank
-            n_optional_to_keep = max(0, rank - n_required)
-            optional_in_selected = [c for c in selected if c not in keep_priority]
-            selected = [c for c in selected if c in keep_priority] + optional_in_selected[:n_optional_to_keep]
-
-    # Preserve column order as in the original DataFrame.
-    seen_cols = set()
-    final_cols = []
-    for col in X.columns:
-        if col in selected and col not in seen_cols:
-            final_cols.append(col)
-            seen_cols.add(col)
-
-    return X.loc[:, final_cols]
+    # Return the original DataFrame unchanged - NEVER drop covariates
+    return X
 
 
 def _fit_diagnostics(X, y, params):
