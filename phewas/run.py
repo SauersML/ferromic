@@ -101,6 +101,31 @@ def _stable_seed(*parts: object) -> int:
     return int.from_bytes(hasher.digest(), "big")
 
 
+def _infer_bootstrap_ceiling(num_phenotypes: int, num_inversions: int, alpha: float) -> int:
+    """Return a bootstrap draw ceiling that resolves BH-adjusted discoveries."""
+    try:
+        phenos = max(1, int(num_phenotypes))
+        inversions = max(1, int(num_inversions))
+    except Exception:
+        return models.BOOTSTRAP_MAX_B
+
+    total_tests = phenos * inversions
+    if total_tests <= 0:
+        return models.BOOTSTRAP_MAX_B
+
+    alpha_eff = float(alpha) if alpha and float(alpha) > 0 else 0.05
+    alpha_eff = max(alpha_eff, 1e-9)
+    required = math.ceil(total_tests / alpha_eff)
+    required = max(required, models.BOOTSTRAP_MAX_B)
+
+    # The worker doubles its target draw count, so round up to the next power of two
+    if required & (required - 1):
+        required = 1 << (required - 1).bit_length()
+
+    hard_cap = 1 << 31  # ~2.1 billion draws; protects against runaway estimates
+    return int(min(required, hard_cap))
+
+
 class SystemMonitor(threading.Thread):
     """
     A thread that monitors and reports system resource usage periodically.
@@ -683,10 +708,22 @@ def _pipeline_once():
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(LOCK_DIR, exist_ok=True)
 
+    bootstrap_draw_cap = models.BOOTSTRAP_MAX_B
+
     try:
         with Timer() as t_setup:
             print("\n--- Loading shared data... ---")
             pheno_defs_df = pheno.load_definitions(PHENOTYPE_DEFINITIONS_URL)
+            bootstrap_draw_cap = _infer_bootstrap_ceiling(
+                num_phenotypes=pheno_defs_df.shape[0],
+                num_inversions=len(run.TARGET_INVERSIONS),
+                alpha=FDR_ALPHA,
+            )
+            print(
+                f"[Config] Bootstrap draw ceiling set to {bootstrap_draw_cap} "
+                f"for {pheno_defs_df.shape[0]} phenotypes across {len(run.TARGET_INVERSIONS)} inversions (alpha={FDR_ALPHA}).",
+                flush=True,
+            )
             cdr_dataset_id = os.environ["WORKSPACE_CDR"]
             gcp_project = os.environ["GOOGLE_PROJECT"]
             bq_client = bigquery.Client(project=gcp_project)
@@ -890,6 +927,7 @@ def _pipeline_once():
                     "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir,
                     "BOOT_OVERALL_CACHE_DIR": boot_overall_cache_dir,
                     "BOOTSTRAP_B": tctx["BOOTSTRAP_B"],
+                    "BOOTSTRAP_B_MAX": bootstrap_draw_cap,
                     "BOOT_SEED_BASE": tctx["BOOT_SEED_BASE"],
                     "cdr_codename": shared_data['cdr_codename'],
                     "REPAIR_META_IF_MISSING": True,
