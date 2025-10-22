@@ -24,6 +24,16 @@ allowed_fp_by_cat = {}
 DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_ALLOW_PENALIZED_WALD = False
 
+ALLOWED_P_SOURCES = {"lrt_mle", "score_chi2", "score_boot_mle", "score_boot_firth"}
+ALLOWED_CI_METHODS = {
+    "profile",
+    "profile_penalized",
+    "score_inversion",
+    "score_boot_multiplier",
+    "wald_mle",
+    "wald_firth_fallback",
+}
+
 # Thresholds to detect unusable confidence intervals from penalized fits
 PENALIZED_CI_SPAN_RATIO = 1e3
 PENALIZED_CI_LO_OR_MAX = 1e-3
@@ -1209,6 +1219,10 @@ def _wald_ci_or_from_fit(fit, target_ix, alpha=0.05, *, penalized=False):
         if bool(getattr(fit, "_used_firth", False))
         else ("wald_penalized" if bool(getattr(fit, "_used_ridge", False)) else "wald_mle")
     )
+    if ok and method == "wald_penalized" and not bool(
+        CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)
+    ):
+        ok = False
     return {
         "valid": ok,
         "lo_or": lo_or if ok else np.nan,
@@ -2590,7 +2604,11 @@ def lrt_overall_worker(task):
 
         if inference_type is None:
             inference_type = inference_family if inference_family is not None else "none"
-        p_valid = bool(np.isfinite(p_value))
+
+        p_finite = bool(np.isfinite(p_value))
+        p_valid = bool(p_finite and (p_source in ALLOWED_P_SOURCES))
+
+        used_firth_for_ci = False
 
         if inference_type == "score":
             if (
@@ -2683,16 +2701,32 @@ def lrt_overall_worker(task):
                 ci_method = None
 
         if (not ci_valid) and (target_ix is not None):
-            cand_fit_for_wald = fit_full_use if (fit_full_use is not None) else fit_full
-            if cand_fit_for_wald is not None:
-                wald = _wald_ci_or_from_fit(
-                    cand_fit_for_wald,
-                    target_ix,
-                    alpha=0.05,
-                    penalized=bool(getattr(cand_fit_for_wald, "_used_ridge", False)),
-                )
-            else:
-                wald = {"valid": False}
+            wald = {"valid": False}
+            wald_fit = None
+            if fit_full is not None and not bool(getattr(fit_full, "_used_ridge", False)) and not bool(
+                getattr(fit_full, "_used_firth", False)
+            ):
+                if _ok_mle_fit(fit_full, X_full_zv, yb, target_ix=target_ix):
+                    wald_fit = fit_full
+            if (
+                wald_fit is None
+                and fit_full_use is not None
+                and not bool(getattr(fit_full_use, "_used_ridge", False))
+                and not bool(getattr(fit_full_use, "_used_firth", False))
+            ):
+                if _ok_mle_fit(fit_full_use, X_full_zv, yb, target_ix=target_ix):
+                    wald_fit = fit_full_use
+            if wald_fit is not None:
+                wald = _wald_ci_or_from_fit(wald_fit, target_ix, alpha=0.05, penalized=False)
+            elif bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)):
+                for candidate in (fit_full, fit_full_use):
+                    if candidate is None or not bool(getattr(candidate, "_used_ridge", False)):
+                        continue
+                    wald = _wald_ci_or_from_fit(candidate, target_ix, alpha=0.05, penalized=True)
+                    if wald.get("valid", False):
+                        break
+                else:
+                    wald = {"valid": False}
             if wald.get("valid", False):
                 ci_valid = True
                 ci_method = wald["method"]
@@ -2701,21 +2735,78 @@ def lrt_overall_worker(task):
                 ci_hi_or = float(wald["hi_or"])
                 or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
 
+        if (not ci_valid) and (target_ix is not None) and (not p_valid):
+            firth_for_ci = (
+                fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_full_zv, yb)
+            )
+            if firth_for_ci is not None:
+                wald = _wald_ci_or_from_fit(firth_for_ci, target_ix, alpha=0.05, penalized=True)
+                if wald.get("valid", False):
+                    ci_valid = True
+                    ci_method = "wald_firth_fallback"
+                    ci_sided = "two"
+                    ci_lo_or = float(wald["lo_or"])
+                    ci_hi_or = float(wald["hi_or"])
+                    or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
+                    ci_label = "fallback (no p-value)"
+                    params_firth = getattr(firth_for_ci, "params", None)
+                    if params_firth is not None:
+                        try:
+                            if hasattr(params_firth, "__getitem__"):
+                                if hasattr(params_firth, "index") and target in params_firth.index:
+                                    beta_full = float(params_firth[target])
+                                else:
+                                    beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix)])
+                            else:
+                                beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix)])
+                            or_val = float(np.exp(beta_full))
+                        except Exception:
+                            beta_full = np.nan
+                            or_val = np.nan
+                    else:
+                        beta_full = np.nan
+                        or_val = np.nan
+                    used_firth_for_ci = True
+
+        if ci_valid:
+            method_allowed = (
+                (ci_method in ALLOWED_CI_METHODS)
+                or (
+                    ci_method == "wald_penalized"
+                    and bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
+                )
+            )
+            if not method_allowed:
+                ci_valid = False
+                ci_method = None
+                ci_label = ""
+                ci_sided = None
+                ci_lo_or = np.nan
+                ci_hi_or = np.nan
+                or_ci95 = None
+
         ridge_in_path_full = bool(getattr(fit_full, "_used_ridge", False))
         used_firth_full = (
             bool(getattr(fit_full, "_used_firth", False))
             or bool(getattr(fit_full_use, "_used_firth", False))
-            or (inference_type == "firth")
+            or (inference_family == "firth")
+            or used_firth_for_ci
         )
+
+        p_lrt_overall = float(p_value) if (p_valid and p_source == "lrt_mle") else np.nan
+        p_value_for_output = float(p_value) if p_valid else np.nan
+        inference_type_out = inference_type if p_valid else "none"
+        inference_type = inference_type_out
 
         out = {
             "Phenotype": s_name,
-            "P_LRT_Overall": float(p_value) if np.isfinite(p_value) else np.nan,
-            "P_Overall_Valid": p_valid,
+            "P_LRT_Overall": p_lrt_overall,
+            "P_Value": p_value_for_output,
+            "P_Overall_Valid": bool(p_valid),
             "P_Source": p_source,
-            "P_Method": p_source,
-            "LRT_df_Overall": 1 if p_valid else np.nan,
-            "Inference_Type": inference_type,
+            "P_Method": p_source if p_source is not None else None,
+            "LRT_df_Overall": 1 if (p_valid and p_source == "lrt_mle") else np.nan,
+            "Inference_Type": inference_type_out,
             "CI_Method": ci_method,
             "CI_Sided": ci_sided,
             "CI_Label": ci_label,
@@ -2735,7 +2826,7 @@ def lrt_overall_worker(task):
             model_notes.append(reason_full)
         if isinstance(reason_red, str) and reason_red:
             model_notes.append(reason_red)
-        model_notes.append(f"inference={inference_type}")
+        model_notes.append(f"inference={inference_type_out}")
         if ci_method:
             model_notes.append(f"ci={ci_method}")
 
@@ -2749,8 +2840,8 @@ def lrt_overall_worker(task):
             "N_Controls": n_ctrls_pre,
             "Beta": beta_full,
             "OR": or_val,
-            "P_Value": float(p_value) if np.isfinite(p_value) else p_value,
-            "P_Valid": p_valid,
+            "P_Value": p_value_for_output,
+            "P_Valid": bool(p_valid),
             "P_Source": p_source,
             "OR_CI95": or_ci95,
             "CI_Method": ci_method,
@@ -2760,9 +2851,9 @@ def lrt_overall_worker(task):
             "CI_LO_OR": ci_lo_or,
             "CI_HI_OR": ci_hi_or,
             "Used_Ridge": ridge_in_path_full,
-            "Final_Is_MLE": inference_type == "mle",
+            "Final_Is_MLE": inference_type_out == "mle",
             "Used_Firth": used_firth_full,
-            "Inference_Type": inference_type,
+            "Inference_Type": inference_type_out,
             "N_Total_Used": n_total_used,
             "N_Cases_Used": n_cases_used,
             "N_Controls_Used": n_ctrls_used,
@@ -2781,6 +2872,7 @@ def lrt_overall_worker(task):
             out.update(
                 {
                     "P_LRT_Overall": np.nan,
+                    "P_Value": np.nan,
                     "P_Overall_Valid": False,
                     "P_Source": None,
                     "P_Method": None,
@@ -2810,12 +2902,30 @@ def lrt_overall_worker(task):
             rec_notes = res_record.get("Model_Notes")
             res_record["Model_Notes"] = f"{rec_notes};{reason_tag}" if rec_notes else reason_tag
 
-            if bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)) and (target_ix is not None):
-                cand_fit = fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_full_zv, yb)
-                firth_for_ci = cand_fit
+            if target_ix is not None:
+                firth_for_ci = (
+                    fit_full if bool(getattr(fit_full, "_used_firth", False)) else _firth_refit(X_full_zv, yb)
+                )
                 if firth_for_ci is not None:
                     wald = _wald_ci_or_from_fit(firth_for_ci, target_ix, alpha=0.05, penalized=True)
                     if wald.get("valid", False):
+                        params_firth = getattr(firth_for_ci, "params", None)
+                        if params_firth is not None:
+                            try:
+                                if hasattr(params_firth, "__getitem__"):
+                                    if hasattr(params_firth, "index") and target in params_firth.index:
+                                        beta_full = float(params_firth[target])
+                                    else:
+                                        beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix)])
+                                else:
+                                    beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix)])
+                                or_val = float(np.exp(beta_full))
+                            except Exception:
+                                beta_full = np.nan
+                                or_val = np.nan
+                        else:
+                            beta_full = np.nan
+                            or_val = np.nan
                         ci_valid = True
                         ci_method = "wald_firth_fallback"
                         ci_sided = "two"
@@ -2823,6 +2933,7 @@ def lrt_overall_worker(task):
                         ci_hi_or = float(wald["hi_or"])
                         ci_label = "fallback (no p-value)"
                         or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
+                        used_firth_full = True
                         out.update(
                             {
                                 "CI_Method": ci_method,
@@ -2835,6 +2946,8 @@ def lrt_overall_worker(task):
                         )
                         res_record.update(
                             {
+                                "Beta": beta_full,
+                                "OR": or_val,
                                 "OR_CI95": or_ci95,
                                 "CI_Method": ci_method,
                                 "CI_Sided": ci_sided,
@@ -2842,6 +2955,7 @@ def lrt_overall_worker(task):
                                 "CI_Valid": True,
                                 "CI_LO_OR": ci_lo_or,
                                 "CI_HI_OR": ci_hi_or,
+                                "Used_Firth": True,
                             }
                         )
             if not (out.get("CI_Valid", False)):
@@ -3131,15 +3245,23 @@ def bootstrap_overall_worker(task):
                 p_valid = True
                 p_source = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
             else:
-                p_reason = "bootstrap_failed"
+            p_reason = "bootstrap_failed"
         else:
             p_reason = "reduced_fit_unknown"
+
+        p_finite = np.isfinite(p_emp)
+        p_valid = bool(p_finite and (p_source in ALLOWED_P_SOURCES))
+        if (not p_valid) and p_reason == "penalized_reduced_null":
+            p_emp = np.nan
+            p_finite = False
+        if not p_valid:
+            p_source = None
 
         result_payload = {
             "Phenotype": s_name,
             "T_OBS": float(T_obs) if np.isfinite(T_obs) else np.nan,
-            "P_EMP": float(p_emp) if np.isfinite(p_emp) else np.nan,
-            "P_Value": float(p_emp) if np.isfinite(p_emp) else np.nan,
+            "P_EMP": float(p_emp) if (p_valid and np.isfinite(p_emp)) else np.nan,
+            "P_Value": float(p_emp) if (p_valid and np.isfinite(p_emp)) else np.nan,
             "P_Valid": bool(p_valid),
             "P_Source": p_source,
             "Boot": boot_engine,
@@ -3160,9 +3282,6 @@ def bootstrap_overall_worker(task):
             result_payload["Reason"] = p_reason
         io.atomic_write_json(result_path, result_payload)
         _write_meta(meta_path, "boot_overall", s_name, cat, target, worker_core_df_cols, _index_fingerprint(worker_core_df_index), case_fp, extra=dict(meta_extra_common))
-
-        if not p_valid and p_reason == "penalized_reduced_null":
-            p_emp = np.nan
 
         const_ix_full = X_full_zv.columns.get_loc('const') if 'const' in X_full_zv.columns else None
         target_ix_full = X_full_zv.columns.get_loc(target) if target in X_full_zv.columns else None
@@ -3212,31 +3331,74 @@ def bootstrap_overall_worker(task):
                 ci_method = ci_info.get("method", "score_boot_multiplier")
                 ci_label = "score bootstrap (inverted)"
                 ci_valid = True
-        if fit_full is not None and target in X_full_zv.columns:
-            wald = _wald_ci_or_from_fit(
-                fit_full,
-                target_ix_full,
-                alpha=0.05,
-                penalized=bool(getattr(fit_full, "_used_ridge", False)),
-            )
-            if not ci_valid:
-                if (
-                    not wald.get("valid", False)
-                    and bool(getattr(fit_full, "_used_ridge", False))
-                    and bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
-                ):
-                    firth_for_ci = _firth_refit(X_full_zv, yb)
-                    if firth_for_ci is not None:
-                        wald = _wald_ci_or_from_fit(firth_for_ci, target_ix_full, alpha=0.05, penalized=True)
+        if (not ci_valid) and p_valid and fit_full is not None and target in X_full_zv.columns:
+            wald = {"valid": False}
+            if (
+                not bool(getattr(fit_full, "_used_ridge", False))
+                and not bool(getattr(fit_full, "_used_firth", False))
+                and _ok_mle_fit(fit_full, X_full_zv, yb, target_ix=target_ix_full)
+            ):
+                wald = _wald_ci_or_from_fit(fit_full, target_ix_full, alpha=0.05, penalized=False)
+            elif bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)) and bool(
+                getattr(fit_full, "_used_ridge", False)
+            ):
+                wald = _wald_ci_or_from_fit(fit_full, target_ix_full, alpha=0.05, penalized=True)
+            if wald.get("valid", False):
+                ci_valid = True
+                ci_method = wald["method"]
+                ci_sided = "two"
+                ci_lo_or = float(wald["lo_or"])
+                ci_hi_or = float(wald["hi_or"])
+                or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
+                ci_label = None
+
+        if (not ci_valid) and (not p_valid) and target in X_full_zv.columns:
+            firth_for_ci = _firth_refit(X_full_zv, yb)
+            if firth_for_ci is not None:
+                wald = _wald_ci_or_from_fit(firth_for_ci, target_ix_full, alpha=0.05, penalized=True)
                 if wald.get("valid", False):
+                    params_firth = getattr(firth_for_ci, "params", None)
+                    if params_firth is not None:
+                        try:
+                            if hasattr(params_firth, "__getitem__"):
+                                if hasattr(params_firth, "index") and target in params_firth.index:
+                                    beta_full = float(params_firth[target])
+                                else:
+                                    beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix_full)])
+                            else:
+                                beta_full = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix_full)])
+                            or_val = float(np.exp(beta_full))
+                        except Exception:
+                            beta_full = np.nan
+                            or_val = np.nan
+                    else:
+                        beta_full = np.nan
+                        or_val = np.nan
+                    ci_valid = True
+                    ci_method = "wald_firth_fallback"
+                    ci_sided = "two"
                     ci_lo_or = float(wald["lo_or"])
                     ci_hi_or = float(wald["hi_or"])
+                    ci_label = "fallback (no p-value)"
                     or_ci95 = _fmt_ci(ci_lo_or, ci_hi_or)
-                    ci_method = wald["method"]
-                    ci_label = None
-                    ci_valid = True
-        if ci_valid and not p_valid:
-            ci_label = "fallback (no p-value)"
+                    used_firth_full = True
+
+        if ci_valid:
+            method_allowed = (
+                (ci_method in ALLOWED_CI_METHODS)
+                or (
+                    ci_method == "wald_penalized"
+                    and bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
+                )
+            )
+            if not method_allowed:
+                ci_valid = False
+                ci_method = None
+                ci_label = None
+                ci_sided = None
+                ci_lo_or = np.nan
+                ci_hi_or = np.nan
+                or_ci95 = None
 
         model_notes_parts = []
         if reason_full:
@@ -3491,11 +3653,13 @@ def lrt_followup_worker(task):
         inference_family = None
         fit_full_use = None
         fit_red_use = None
-        p_stage2 = np.nan
         boot_engine = None
         boot_draws = 0
         boot_exceed = 0
         boot_fit_kind = None
+        p_val = np.nan
+        p_source = None
+        inference_type = "none"
         if df_lrt > 0:
             full_is_mle = bool(getattr(fit_full, "_final_is_mle", False)) and not bool(getattr(fit_full, "_used_firth", False))
             red_is_mle = bool(getattr(fit_red, "_final_is_mle", False)) and not bool(getattr(fit_red, "_used_firth", False))
@@ -3516,12 +3680,9 @@ def lrt_followup_worker(task):
             ll_red = float(getattr(fit_red_use, "llf", np.nan))
             if np.isfinite(ll_full) and np.isfinite(ll_red):
                 stat = max(0.0, 2.0 * (ll_full - ll_red))
-                p_stage2 = float(sp_stats.chi2.sf(stat, df_lrt))
-                out['P_LRT_AncestryxDosage'] = p_stage2
-                out['P_Stage2_Valid'] = np.isfinite(p_stage2)
-                out['P_Method'] = "lrt_mle"
-                out['P_Source'] = "lrt_mle"
-                out['Inference_Type'] = "mle"
+                p_val = float(sp_stats.chi2.sf(stat, df_lrt))
+                p_source = "lrt_mle"
+                inference_type = "mle"
                 out['LRT_df'] = df_lrt
             else:
                 out['LRT_Reason'] = "fit_failed"
@@ -3543,12 +3704,9 @@ def lrt_followup_worker(task):
                     const_ix=const_ix_red,
                 )
                 if np.isfinite(p_sc):
-                    out['P_LRT_AncestryxDosage'] = p_sc
-                    out['P_Stage2_Valid'] = True
-                    out['P_Method'] = "score_chi2"
-                    out['P_Source'] = "score_chi2"
-                    out['Inference_Type'] = "score"
-                    out['LRT_df'] = 1
+                    p_val = p_sc
+                    p_source = "score_chi2"
+                    inference_type = "score"
                     out['LRT_Reason'] = ""
                 else:
                     boot_res = _score_bootstrap_from_reduced(
@@ -3562,13 +3720,9 @@ def lrt_followup_worker(task):
                     boot_exceed = int(boot_res.get("exceed", 0))
                     boot_fit_kind = boot_res.get("fit_kind")
                     if np.isfinite(p_emp):
-                        p_stage2 = p_emp
-                        out['P_LRT_AncestryxDosage'] = p_stage2
-                        out['P_Stage2_Valid'] = True
-                        out['P_Method'] = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
-                        out['P_Source'] = out['P_Method']
-                        out['Inference_Type'] = "score_boot"
-                        out['LRT_df'] = 1
+                        p_val = p_emp
+                        p_source = "score_boot_firth" if boot_fit_kind == "firth" else "score_boot_mle"
+                        inference_type = "score_boot"
                         out['LRT_Reason'] = ""
                         boot_engine = "score_bootstrap"
                     else:
@@ -3581,6 +3735,16 @@ def lrt_followup_worker(task):
         out['Boot_Exceed'] = int(boot_exceed)
         out['Boot_Fit_Kind'] = boot_fit_kind
 
+        p_finite = bool(np.isfinite(p_val))
+        p_valid = bool(p_finite and (p_source in ALLOWED_P_SOURCES))
+        if not p_valid:
+            p_source = None
+            out['LRT_df'] = np.nan
+        out['P_LRT_AncestryxDosage'] = float(p_val) if p_valid else np.nan
+        out['P_Stage2_Valid'] = bool(p_valid)
+        out['P_Method'] = p_source
+        out['P_Source'] = p_source
+        out['Inference_Type'] = inference_type if p_valid else "none"
         if not out['P_Stage2_Valid'] and not out['LRT_Reason']:
             out['LRT_Reason'] = "fit_failed"
 
@@ -3739,10 +3903,13 @@ def lrt_followup_worker(task):
                 ll_full = float(getattr(fit_full_use, "llf", np.nan))
                 ll_red = float(getattr(fit_red_use, "llf", np.nan))
                 if np.isfinite(ll_full) and np.isfinite(ll_red):
-                    stat = max(0.0, 2.0 * (ll_full - ll_red))
-                    p_val = float(sp_stats.chi2.sf(stat, 1))
-                    p_source = "lrt_mle" if inference_family == "mle" else "lrt_firth"
-                    inference_type = inference_family
+                    if inference_family == "mle":
+                        stat = max(0.0, 2.0 * (ll_full - ll_red))
+                        p_val = float(sp_stats.chi2.sf(stat, 1))
+                        p_source = "lrt_mle"
+                        inference_type = "mle"
+                    else:
+                        inference_type = inference_family
                     ci_info = _profile_ci_beta(X_anc_zv, y_anc, target_ix_anc, fit_full_use, kind=inference_family)
                     ci_method = ci_info.get("method")
                     ci_sided = ci_info.get("sided", "two")
@@ -3902,21 +4069,22 @@ def lrt_followup_worker(task):
                     ci_str = None
                     ci_method = None
 
-            if (
-                inference_type == "firth"
-                and not ci_valid
-                and target_ix_anc is not None
-                and target in X_anc_zv.columns
-            ):
-                wald = _wald_ci_or_from_fit(fit_full_use, target_ix_anc, alpha=0.05, penalized=False)
-                if wald.get("valid", False):
-                    ci_valid = True
-                    ci_method = wald.get("method")
-                    ci_sided = "two"
-                    ci_lo_or = float(wald["lo_or"])
-                    ci_hi_or = float(wald["hi_or"])
-                    ci_str = _fmt_ci(ci_lo_or, ci_hi_or)
-                    ci_label = "wald fallback"
+            if ci_valid:
+                method_allowed = (
+                    (ci_method in ALLOWED_CI_METHODS)
+                    or (
+                        ci_method == "wald_penalized"
+                        and bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD))
+                    )
+                )
+                if not method_allowed:
+                    ci_valid = False
+                    ci_method = None
+                    ci_label = ""
+                    ci_sided = None
+                    ci_lo_or = np.nan
+                    ci_hi_or = np.nan
+                    ci_str = None
 
             if inference_type == "mle":
                 ridge_inference = any(
@@ -3940,7 +4108,7 @@ def lrt_followup_worker(task):
                 ci_lo_or = np.nan
                 ci_hi_or = np.nan
                 ci_str = None
-                if bool(CTX.get("ALLOW_PENALIZED_WALD", DEFAULT_ALLOW_PENALIZED_WALD)) and (target_ix_anc is not None):
+                if target_ix_anc is not None:
                     firth_for_ci = _firth_refit(X_anc_zv, y_anc)
                     if firth_for_ci is not None:
                         wald = _wald_ci_or_from_fit(
@@ -3950,6 +4118,23 @@ def lrt_followup_worker(task):
                             penalized=True,
                         )
                         if wald.get("valid", False):
+                            params_firth = getattr(firth_for_ci, "params", None)
+                            if params_firth is not None:
+                                try:
+                                    if hasattr(params_firth, "__getitem__"):
+                                        if hasattr(params_firth, "index") and target in params_firth.index:
+                                            beta_val = float(params_firth[target])
+                                        else:
+                                            beta_val = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix_anc)])
+                                    else:
+                                        beta_val = float(np.asarray(params_firth, dtype=np.float64)[int(target_ix_anc)])
+                                    or_val = float(np.exp(beta_val))
+                                except Exception:
+                                    beta_val = np.nan
+                                    or_val = np.nan
+                            else:
+                                beta_val = np.nan
+                                or_val = np.nan
                             ci_valid = True
                             ci_method = "wald_firth_fallback"
                             ci_sided = "two"
@@ -3962,17 +4147,20 @@ def lrt_followup_worker(task):
                 if not out[f"{anc_upper}_REASON"]:
                     out[f"{anc_upper}_REASON"] = "penalized_fit"
 
-            p_valid = bool(np.isfinite(p_val))
+            p_finite = bool(np.isfinite(p_val))
+            p_valid = bool(p_finite and (p_source in ALLOWED_P_SOURCES))
+            if not p_valid:
+                p_source = None
             if (not p_valid) and (not ci_valid):
                 if not out[f"{anc_upper}_REASON"]:
                     out[f"{anc_upper}_REASON"] = "subset_fit_failed"
                 continue
 
             out[f"{anc_upper}_OR"] = or_val
-            out[f"{anc_upper}_P"] = float(p_val) if np.isfinite(p_val) else np.nan
+            out[f"{anc_upper}_P"] = float(p_val) if p_valid else np.nan
             out[f"{anc_upper}_P_Valid"] = bool(p_valid)
             out[f"{anc_upper}_P_Source"] = p_source
-            out[f"{anc_upper}_Inference_Type"] = inference_type
+            out[f"{anc_upper}_Inference_Type"] = inference_type if p_valid else "none"
             out[f"{anc_upper}_CI_Method"] = ci_method
             out[f"{anc_upper}_CI_Sided"] = ci_sided
             out[f"{anc_upper}_CI_Label"] = ci_label
