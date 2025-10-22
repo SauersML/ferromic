@@ -1518,7 +1518,8 @@ def test_lrt_overall_firth_fit_keeps_inference(test_ctx):
         assert res['Inference_Type'] in {'score', 'score_boot'}
         assert res['P_Source'] in {'score_chi2', 'score_boot_firth', 'score_boot_mle'}
         assert res['P_Source'] != 'lrt_firth'
-        assert np.isfinite(res['P_LRT_Overall'])
+        assert pd.isna(res['P_LRT_Overall'])
+        assert np.isfinite(res['P_Value'])
         assert res['P_Overall_Valid'] is True
         assert res.get('LRT_Overall_Reason') in (None, '',)
 
@@ -1588,7 +1589,7 @@ def test_lrt_overall_perfect_separation_uses_score_fallback(test_ctx):
         assert res['P_Source'] in {'score_chi2', 'score_boot_firth', 'score_boot_mle', None}
         assert res['P_Source'] != 'lrt_firth'
         if res['P_Overall_Valid']:
-            assert np.isfinite(res['P_LRT_Overall'])
+            assert np.isfinite(res['P_Value'])
         atomic_path = Path(test_ctx['RESULTS_CACHE_DIR']) / 'Perfect_sep.json'
         assert atomic_path.exists()
         with open(atomic_path) as fh:
@@ -1981,14 +1982,14 @@ def test_multi_inversion_pipeline_produces_master_file():
         # Assert global Q value was computed correctly
         assert 'Q_GLOBAL' in df.columns
         # All valid (non-NA) p-values should have been included in a single correction run
-        valid_ps = df['P_LRT_Overall'].notna()
+        valid_ps = df['P_Value'].notna()
         assert df.loc[valid_ps, 'Q_GLOBAL'].nunique() >= 1 # Should have some q-values
 
         # A_strong_signal should be a hit for INV_A but not INV_B
         strong_hit_a = df[(df['Phenotype'] == 'A_strong_signal') & (df['Inversion'] == INV_A)]
         strong_hit_b = df[(df['Phenotype'] == 'A_strong_signal') & (df['Inversion'] == INV_B)]
-        assert strong_hit_a['P_LRT_Overall'].iloc[0] < 0.1
-        assert pd.isna(strong_hit_b['P_LRT_Overall'].iloc[0]), "P-value for constant inversion should be NaN"
+        assert strong_hit_a['P_Value'].iloc[0] < 0.1
+        assert pd.isna(strong_hit_b['P_Value'].iloc[0]), "P-value for constant inversion should be NaN"
 
 def test_demographics_age_clipping():
     """Tests that age is correctly clipped to [0, 120] in io.load_demographics_with_stable_age."""
