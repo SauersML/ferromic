@@ -813,9 +813,9 @@ def _fit_logit_ladder(
             return None
         tags = list(path_tags)
         tags.append("firth_refit")
-        # Firth refits triggered from the ridge pathway are still penalized fits.
-        # Mark the result accordingly so downstream consumers suppress inference.
-        setattr(firth_res, "_used_ridge", True)
+        # Firth refits triggered from the ridge pathway should allow inference.
+        # Mark that ridge was in the path, but don't suppress Firth inference.
+        setattr(firth_res, "_ridge_in_path", True)
         setattr(firth_res, "_path_reasons", tags)
         return firth_res, "firth_refit"
 
@@ -1142,6 +1142,17 @@ def _drop_rank_deficient(X: pd.DataFrame, keep_cols=('const',), always_keep=(), 
     for col in keep_priority:
         if col in X.columns and col not in selected:
             selected.insert(0, col)
+    
+    # If adding back required columns exceeded the rank, drop the lowest-priority
+    # optional columns to maintain numerical stability.
+    if len(selected) > rank and rank > 0:
+        # Keep all keep_priority columns, drop excess from the end
+        n_required = sum(1 for c in selected if c in keep_priority)
+        if len(selected) > n_required:
+            # Keep first n_required (the keep_priority cols) + enough optional to reach rank
+            n_optional_to_keep = max(0, rank - n_required)
+            optional_in_selected = [c for c in selected if c not in keep_priority]
+            selected = [c for c in selected if c in keep_priority] + optional_in_selected[:n_optional_to_keep]
 
     # Preserve column order as in the original DataFrame.
     seen_cols = set()
@@ -1251,7 +1262,7 @@ def _firth_refit(X, y):
         return None
 
     beta = np.zeros(X_np.shape[1], dtype=np.float64)
-    maxiter_firth = 200
+    maxiter_firth = 400  # Increased from 200 to handle slow convergence in perfect separation scenarios
     tol_firth = 1e-8
     converged_firth = False
 
@@ -2545,11 +2556,11 @@ def lrt_overall_worker(task):
                     inference_type = None
             elif inference_family == "firth":
                 # Skip the nominal LRT for penalized fits; a score-based fallback
-                # is attempted below.
+                # is attempted below. Keep inference_type = "firth" to indicate
+                # that Firth regression was used for coefficient estimates and CIs.
                 ll_full = float(getattr(fit_full_use, "llf", np.nan))
                 ll_red = float(getattr(fit_red_use, "llf", np.nan))
-                if not (np.isfinite(ll_full) and np.isfinite(ll_red)):
-                    inference_type = None
+                # Don't set inference_type = None here; preserve "firth"
 
         if (
             (not np.isfinite(p_value))
@@ -2566,7 +2577,9 @@ def lrt_overall_worker(task):
             if np.isfinite(p_sc):
                 p_value = p_sc
                 p_source = "score_chi2"
-                inference_type = "score"
+                # Preserve inference_type if already set (e.g., "firth")
+                if inference_type is None:
+                    inference_type = "score"
             else:
                 boot_res = _score_bootstrap_from_reduced(
                     X_red_zv,
@@ -2578,7 +2591,9 @@ def lrt_overall_worker(task):
                 if np.isfinite(p_emp):
                     p_value = p_emp
                     p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
-                    inference_type = "score_boot"
+                    # Preserve inference_type if already set (e.g., "firth")
+                    if inference_type is None:
+                        inference_type = "score_boot"
 
 
         if (
@@ -2785,7 +2800,7 @@ def lrt_overall_worker(task):
                 ci_hi_or = np.nan
                 or_ci95 = None
 
-        ridge_in_path_full = bool(getattr(fit_full, "_used_ridge", False))
+        ridge_in_path_full = bool(getattr(fit_full, "_used_ridge", False)) or bool(getattr(fit_full, "_ridge_in_path", False))
         used_firth_full = (
             bool(getattr(fit_full, "_used_firth", False))
             or bool(getattr(fit_full_use, "_used_firth", False))
@@ -2795,7 +2810,8 @@ def lrt_overall_worker(task):
 
         p_lrt_overall = float(p_value) if (p_valid and p_source == "lrt_mle") else np.nan
         p_value_for_output = float(p_value) if p_valid else np.nan
-        inference_type_out = inference_type if p_valid else "none"
+        # Report inference_type even if p-value is invalid, as long as CI is valid
+        inference_type_out = inference_type if (p_valid or ci_valid) else "none"
         inference_type = inference_type_out
 
         out = {
@@ -3909,6 +3925,8 @@ def lrt_followup_worker(task):
                         p_source = "lrt_mle"
                         inference_type = "mle"
                     else:
+                        # For Firth, set inference_type but don't compute LRT p-value
+                        # (will fall through to score tests below)
                         inference_type = inference_family
                     ci_info = _profile_ci_beta(X_anc_zv, y_anc, target_ix_anc, fit_full_use, kind=inference_family)
                     ci_method = ci_info.get("method")
@@ -3939,7 +3957,8 @@ def lrt_followup_worker(task):
                 else:
                     inference_family = None
 
-            if inference_family is None:
+            # Attempt score tests if no p-value yet (including for Firth)
+            if not np.isfinite(p_val):
                 x_target_vec = X_anc_zv.iloc[:, int(target_ix_anc)].to_numpy(dtype=np.float64, copy=False)
                 p_sc, _ = _score_test_from_reduced(
                     X_anc_red,
@@ -3950,7 +3969,9 @@ def lrt_followup_worker(task):
                 if np.isfinite(p_sc):
                     p_val = p_sc
                     p_source = "score_chi2"
-                    inference_type = "score"
+                    # Only set inference_type if not already set (e.g., preserve "firth")
+                    if inference_type == "none":
+                        inference_type = "score"
                 else:
                     boot_res = _score_bootstrap_from_reduced(
                         X_anc_red,
@@ -3962,7 +3983,9 @@ def lrt_followup_worker(task):
                     if np.isfinite(p_emp):
                         p_val = p_emp
                         p_source = "score_boot_firth" if boot_res.get("fit_kind") == "firth" else "score_boot_mle"
-                        inference_type = "score_boot"
+                        # Only set inference_type if not already set (e.g., preserve "firth")
+                        if inference_type == "none":
+                            inference_type = "score_boot"
 
             if (
                 (not np.isfinite(beta_val))
@@ -4160,7 +4183,8 @@ def lrt_followup_worker(task):
             out[f"{anc_upper}_P"] = float(p_val) if p_valid else np.nan
             out[f"{anc_upper}_P_Valid"] = bool(p_valid)
             out[f"{anc_upper}_P_Source"] = p_source
-            out[f"{anc_upper}_Inference_Type"] = inference_type if p_valid else "none"
+            # Report inference_type even if p-value is invalid, as long as CI is valid
+            out[f"{anc_upper}_Inference_Type"] = inference_type if (p_valid or ci_valid) else "none"
             out[f"{anc_upper}_CI_Method"] = ci_method
             out[f"{anc_upper}_CI_Sided"] = ci_sided
             out[f"{anc_upper}_CI_Label"] = ci_label
