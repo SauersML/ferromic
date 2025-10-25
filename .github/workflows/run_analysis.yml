@@ -137,6 +137,110 @@ jobs:
               shutil.copytree(downloads_src, downloads_dest)
           PY
 
+      - name: Prepare figures for Next.js site
+        if: success()
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import shutil
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          repo_root = Path('.')
+          figures_root = repo_root / 'artifacts' / 'figures'
+          project_root = repo_root / 'web' / 'figures-site'
+          public_figures_root = project_root / 'public' / 'figures'
+          manifest_path = project_root / 'data' / 'figures.json'
+
+          allowed_exts = {'.png', '.svg', '.pdf'}
+          figure_files = []
+          if figures_root.exists():
+              for path in figures_root.rglob('*'):
+                  if path.is_file() and path.suffix.lower() in allowed_exts:
+                      figure_files.append(path)
+
+          shutil.rmtree(public_figures_root, ignore_errors=True)
+          public_figures_root.mkdir(parents=True, exist_ok=True)
+          manifest_path.parent.mkdir(parents=True, exist_ok=True)
+
+          generated_at = datetime.now(timezone.utc).isoformat()
+
+          if not figure_files:
+              manifest_path.write_text(
+                  json.dumps({"generatedAt": generated_at, "groups": []}, indent=2),
+                  encoding='utf-8'
+              )
+              print('No figures found; wrote empty manifest for Next.js site.')
+              raise SystemExit(0)
+
+          figures_by_dir: dict[Path, list[Path]] = {}
+          for file_path in figure_files:
+              relative = file_path.relative_to(figures_root)
+              destination = public_figures_root / relative
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(file_path, destination)
+              figures_by_dir.setdefault(relative.parent, []).append(relative)
+
+          def slugify(path_obj: Path) -> str:
+              if str(path_obj) in {'.', ''}:
+                  return 'top-level-figures'
+              slug = re.sub(r'[^a-z0-9]+', '-', path_obj.as_posix().lower()).strip('-')
+              return slug or 'figures'
+
+          manifest_groups = []
+          for directory in sorted(figures_by_dir.keys(), key=lambda p: p.as_posix()):
+              dir_str = directory.as_posix()
+              title = 'Top-level figures' if dir_str in {'.', ''} else dir_str
+              slug = slugify(directory)
+              items = []
+              for rel_path in sorted(figures_by_dir[directory], key=lambda p: p.as_posix()):
+                  rel_posix = rel_path.as_posix()
+                  href = f"figures/{rel_posix}"
+                  file_type = 'pdf' if rel_path.suffix.lower() == '.pdf' else 'image'
+                  items.append(
+                      {
+                          'name': rel_path.name,
+                          'href': href,
+                          'preview': href,
+                          'type': file_type,
+                      }
+                  )
+
+              manifest_groups.append(
+                  {
+                      'title': title,
+                      'slug': slug,
+                      'items': items,
+                  }
+              )
+
+          manifest = {
+              'generatedAt': generated_at,
+              'groups': manifest_groups,
+          }
+
+          manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+          PY
+
+      - name: Set up Node.js
+        if: success()
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/figures-site/package-lock.json
+
+      - name: Install Next.js dependencies
+        if: success()
+        working-directory: web/figures-site
+        run: npm ci
+
+      - name: Build Next.js figures site
+        if: success()
+        working-directory: web/figures-site
+        run: npm run build
+
       - name: Upload figure artefacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -152,3 +256,27 @@ jobs:
           name: analysis-downloads
           path: artifacts/downloads
           if-no-files-found: warn
+
+      - name: Upload GitHub Pages artifact
+        if: success()
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/figures-site/out
+          name: github-pages
+
+  deploy-pages:
+    needs: run-figures
+    if: ${{ needs.run-figures.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages
