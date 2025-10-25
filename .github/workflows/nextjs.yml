@@ -8,6 +8,12 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
+  # Rebuild when the analysis workflow finishes so newly generated figures are published
+  workflow_run:
+    workflows: ["run-analysis"]
+    types:
+      - completed
+
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
@@ -23,9 +29,11 @@ concurrency:
 jobs:
   # Build job
   build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       site-exists: ${{ steps.check-site.outputs.exists }}
+      manifest-generated: ${{ steps.check-manifest.outputs.generated }}
     env:
       NEXT_APP_PATH: web/figures-site
     steps:
@@ -67,23 +75,104 @@ jobs:
             echo "Unable to determine package manager"
             exit 1
           fi
-      
-      - name: Setup Node
+
+      - name: Restore latest analysis figures
         if: steps.check-site.outputs.exists == 'true'
+        id: restore-figures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APP_PATH="${{ env.NEXT_APP_PATH }}"
+          MANIFEST_PATH="$APP_PATH/data/figures.json"
+          FIGURES_DEST="$APP_PATH/public/figures"
+          mkdir -p "$(dirname "$MANIFEST_PATH")"
+          mkdir -p "$APP_PATH/public"
+
+          RUN_ID="${{ github.event.workflow_run.id || '' }}"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh run list --workflow "run-analysis" --limit 20 --json databaseId,conclusion \
+              --jq '.[] | select(.conclusion == "success") | .databaseId' | head -n 1 || true)
+          fi
+
+          if [ -z "$RUN_ID" ]; then
+            echo "restored=false" >> "$GITHUB_OUTPUT"
+            echo "No successful run-analysis workflow runs found; leaving existing manifest in place."
+            exit 0
+          fi
+
+          echo "Downloading artifacts from run-analysis run $RUN_ID"
+          WORK_DIR=$(mktemp -d)
+          if ! gh run download "$RUN_ID" --name figure-outputs --dir "$WORK_DIR"; then
+            echo "restored=false" >> "$GITHUB_OUTPUT"
+            echo "Unable to download figure-outputs artifact; skipping restoration."
+            exit 0
+          fi
+
+          FIGURES_ROOT=$(find "$WORK_DIR" -type d -path "*/artifacts/figures" -print -quit)
+          if [ -z "$FIGURES_ROOT" ]; then
+            echo "restored=false" >> "$GITHUB_OUTPUT"
+            echo "Figures directory not found in artifact; skipping restoration."
+            exit 0
+          fi
+
+          python3 scripts/prepare_figures_manifest.py \
+            --figures-root "$FIGURES_ROOT" \
+            --public-root "$FIGURES_DEST" \
+            --manifest-path "$MANIFEST_PATH"
+
+          echo "restored=true" >> "$GITHUB_OUTPUT"
+          echo "Manifest and figures restored from run-analysis artifacts."
+
+      - name: Check manifest status
+        if: steps.check-site.outputs.exists == 'true'
+        id: check-manifest
+        run: |
+          set -euo pipefail
+          APP_PATH="${{ env.NEXT_APP_PATH }}"
+          MANIFEST="$APP_PATH/data/figures.json"
+
+          if [ ! -f "$MANIFEST" ]; then
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+            echo "Manifest not found at $MANIFEST; skipping deployment."
+            exit 0
+          fi
+
+          export MANIFEST
+          GENERATED=$(python3 - <<'PY'
+import json
+import os
+
+path = os.environ["MANIFEST"]
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+print("true" if data.get("generatedAt") else "false")
+PY
+)
+
+          echo "generated=$GENERATED" >> "$GITHUB_OUTPUT"
+
+          if [ "$GENERATED" != "true" ]; then
+            echo "Manifest is missing a generatedAt timestamp; skipping deployment."
+          fi
+
+      - name: Setup Node
+        if: steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: ${{ steps.detect-package-manager.outputs.manager }}
           cache-dependency-path: ${{ env.NEXT_APP_PATH }}/${{ steps.detect-package-manager.outputs.manager == 'yarn' && 'yarn.lock' || 'package-lock.json' }}
-      
+
       - name: Setup Pages
-        if: steps.check-site.outputs.exists == 'true'
+        if: steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
         uses: actions/configure-pages@v5
         with:
           static_site_generator: next
-      
+
       - name: Restore cache
-        if: steps.check-site.outputs.exists == 'true'
+        if: steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -91,26 +180,26 @@ jobs:
           key: ${{ runner.os }}-nextjs-${{ hashFiles('web/figures-site/package-lock.json', 'web/figures-site/yarn.lock') }}-${{ hashFiles('web/figures-site/**/*.[jt]s', 'web/figures-site/**/*.[jt]sx') }}
           restore-keys: |
             ${{ runner.os }}-nextjs-${{ hashFiles('web/figures-site/package-lock.json', 'web/figures-site/yarn.lock') }}-
-      
+
       - name: Install dependencies
-        if: steps.check-site.outputs.exists == 'true'
+        if: steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
         working-directory: ${{ env.NEXT_APP_PATH }}
         run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
-      
+
       - name: Build with Next.js
-        if: steps.check-site.outputs.exists == 'true'
+        if: steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
         working-directory: ${{ env.NEXT_APP_PATH }}
         run: ${{ steps.detect-package-manager.outputs.runner }} next build
-      
+
       - name: Upload artifact
-        if: steps.check-site.outputs.exists == 'true'
+        if: steps.check-site.outputs.exists == 'true' && steps.check-manifest.outputs.generated == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ env.NEXT_APP_PATH }}/out
 
   # Deployment job
   deploy:
-    if: needs.build.outputs.site-exists == 'true'
+    if: needs.build.outputs.site-exists == 'true' && needs.build.outputs.manifest-generated == 'true'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
