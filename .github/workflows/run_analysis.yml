@@ -137,200 +137,109 @@ jobs:
               shutil.copytree(downloads_src, downloads_dest)
           PY
 
-      - name: Build figures website
+      - name: Prepare figures for Next.js site
         if: success()
         run: |
           python - <<'PY'
-          import html
+          import json
+          import re
           import shutil
           from datetime import datetime, timezone
           from pathlib import Path
 
           repo_root = Path('.')
           figures_root = repo_root / 'artifacts' / 'figures'
-          site_root = repo_root / 'site'
-          site_figures_root = site_root / 'figures'
-
-          if not figures_root.exists():
-              raise SystemExit('No generated figures found in artifacts/figures')
-
-          shutil.rmtree(site_root, ignore_errors=True)
-          site_figures_root.mkdir(parents=True, exist_ok=True)
+          project_root = repo_root / 'web' / 'figures-site'
+          public_figures_root = project_root / 'public' / 'figures'
+          manifest_path = project_root / 'data' / 'figures.json'
 
           allowed_exts = {'.png', '.svg', '.pdf'}
-          files_by_dir = {}
+          figure_files = []
+          if figures_root.exists():
+              for path in figures_root.rglob('*'):
+                  if path.is_file() and path.suffix.lower() in allowed_exts:
+                      figure_files.append(path)
 
-          for path in sorted(figures_root.rglob('*')):
-              if not path.is_file() or path.suffix.lower() not in allowed_exts:
-                  continue
-              rel = path.relative_to(figures_root)
-              dest = site_figures_root / rel
-              dest.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copy2(path, dest)
-              files_by_dir.setdefault(str(rel.parent), []).append(rel)
+          shutil.rmtree(public_figures_root, ignore_errors=True)
+          public_figures_root.mkdir(parents=True, exist_ok=True)
+          manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
-          css = '''
-          :root {
-            color-scheme: light dark;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: #f5f5f5;
-            padding: 0;
-            margin: 0;
-          }
-          body {
-            margin: 0;
-            padding: 0 1rem 4rem;
-            background: inherit;
-            color: #111;
-          }
-          header {
-            padding: 2rem 0 1rem;
-            text-align: center;
-          }
-          nav ul {
-            list-style: none;
-            padding: 0;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 1rem;
-          }
-          nav a {
-            text-decoration: none;
-            color: #0055aa;
-          }
-          main {
-            max-width: 1200px;
-            margin: 0 auto;
-          }
-          section {
-            margin-top: 3rem;
-          }
-          .figure-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 2rem;
-          }
-          figure {
-            background: white;
-            border-radius: 8px;
-            padding: 1rem;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-          }
-          figure img {
-            width: 100%;
-            height: auto;
-            display: block;
-            border-radius: 4px;
-            background: #fdfdfd;
-          }
-          figure object {
-            width: 100%;
-            height: 400px;
-            border: none;
-            border-radius: 4px;
-            background: #fdfdfd;
-          }
-          figure figcaption {
-            margin-bottom: 0.5rem;
-            font-weight: 600;
-          }
-          .download {
-            margin-top: 0.75rem;
-          }
-          footer {
-            margin-top: 4rem;
-            text-align: center;
-            font-size: 0.9rem;
-            color: #444;
-          }
-          '''
+          generated_at = datetime.now(timezone.utc).isoformat()
 
-          generated_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-
-          if not files_by_dir:
-              site_root.mkdir(parents=True, exist_ok=True)
-              index_html = f'''<!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Ferromic Analysis Figures</title>
-            <style>{css}</style>
-          </head>
-          <body>
-            <header>
-              <h1>Ferromic Analysis Figures</h1>
-              <p>No figure outputs were generated during this workflow run.</p>
-            </header>
-          </body>
-          </html>
-          '''
-              (site_root / 'index.html').write_text(index_html, encoding='utf-8')
+          if not figure_files:
+              manifest_path.write_text(
+                  json.dumps({"generatedAt": generated_at, "groups": []}, indent=2),
+                  encoding='utf-8'
+              )
+              print('No figures found; wrote empty manifest for Next.js site.')
               raise SystemExit(0)
 
-          nav_links = []
-          sections = []
-          for directory in sorted(files_by_dir):
-              display_dir = directory if directory != '.' else 'Top-level figures'
-              anchor = display_dir.replace('/', '-').replace(' ', '-').lower()
-              nav_links.append(f'<li><a href="#{anchor}">{html.escape(display_dir)}</a></li>')
+          figures_by_dir: dict[Path, list[Path]] = {}
+          for file_path in figure_files:
+              relative = file_path.relative_to(figures_root)
+              destination = public_figures_root / relative
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(file_path, destination)
+              figures_by_dir.setdefault(relative.parent, []).append(relative)
 
-              figure_entries = []
-              for rel in sorted(files_by_dir[directory]):
-                  figure_path = 'figures/' + '/'.join(rel.parts)
-                  name = rel.name
-                  escaped_name = html.escape(name)
-                  if rel.suffix.lower() == '.pdf':
-                      preview = f'<object data="{figure_path}" type="application/pdf"></object>'
-                  else:
-                      preview = f'<img src="{figure_path}" alt="{escaped_name}">'
-                  figure_entries.append(
-                      f'<figure>\n'
-                      f'  <figcaption>{escaped_name}</figcaption>\n'
-                      f'  <a href="{figure_path}">{preview}</a>\n'
-                      f'  <p class="download"><a href="{figure_path}">Download</a></p>\n'
-                      f'</figure>'
+          def slugify(path_obj: Path) -> str:
+              if str(path_obj) in {'.', ''}:
+                  return 'top-level-figures'
+              slug = re.sub(r'[^a-z0-9]+', '-', path_obj.as_posix().lower()).strip('-')
+              return slug or 'figures'
+
+          manifest_groups = []
+          for directory in sorted(figures_by_dir.keys(), key=lambda p: p.as_posix()):
+              dir_str = directory.as_posix()
+              title = 'Top-level figures' if dir_str in {'.', ''} else dir_str
+              slug = slugify(directory)
+              items = []
+              for rel_path in sorted(figures_by_dir[directory], key=lambda p: p.as_posix()):
+                  rel_posix = rel_path.as_posix()
+                  href = f"figures/{rel_posix}"
+                  file_type = 'pdf' if rel_path.suffix.lower() == '.pdf' else 'image'
+                  items.append(
+                      {
+                          'name': rel_path.name,
+                          'href': href,
+                          'preview': href,
+                          'type': file_type,
+                      }
                   )
 
-              sections.append(
-                  f'<section id="{anchor}">\n'
-                  f'  <h2>{html.escape(display_dir)}</h2>\n'
-                  f'  <div class="figure-grid">' + '\n'.join(figure_entries) + '\n  </div>\n'
-                  f'</section>'
+              manifest_groups.append(
+                  {
+                      'title': title,
+                      'slug': slug,
+                      'items': items,
+                  }
               )
 
-          index_html = f'''<!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Ferromic Analysis Figures</title>
-            <style>{css}</style>
-          </head>
-          <body>
-            <header>
-              <h1>Ferromic Analysis Figures</h1>
-              <p>Auto-generated from the Ferromic analysis workflows. Last updated {generated_at}.</p>
-            </header>
-            <nav>
-              <ul>
-                {''.join(nav_links)}
-              </ul>
-            </nav>
-            <main>
-              {''.join(sections)}
-            </main>
-            <footer>
-              <p>Source: <a href="https://github.com/${{ github.repository }}">${{ github.repository }}</a></p>
-            </footer>
-          </body>
-          </html>
-          '''
+          manifest = {
+              'generatedAt': generated_at,
+              'groups': manifest_groups,
+          }
 
-          site_root.mkdir(parents=True, exist_ok=True)
-          (site_root / 'index.html').write_text(index_html, encoding='utf-8')
+          manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
           PY
+
+      - name: Set up Node.js
+        if: success()
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/figures-site/package-lock.json
+
+      - name: Install Next.js dependencies
+        if: success()
+        working-directory: web/figures-site
+        run: npm ci
+
+      - name: Build Next.js figures site
+        if: success()
+        working-directory: web/figures-site
+        run: npm run build
 
       - name: Upload figure artefacts
         if: always()
@@ -352,7 +261,7 @@ jobs:
         if: success()
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: web/figures-site/out
           name: github-pages
 
   deploy-pages:

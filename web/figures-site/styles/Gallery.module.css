@@ -1,0 +1,128 @@
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.header h1 {
+  margin-bottom: 0.5rem;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.header p {
+  margin: 0.5rem 0;
+  color: #374151;
+}
+
+.timestamp {
+  font-size: 0.9rem;
+  color: #6b7280;
+}
+
+.nav {
+  margin: 2rem 0 3rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 1rem 0;
+}
+
+.nav ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  justify-content: center;
+}
+
+.nav a {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.nav a:hover,
+.nav a:focus {
+  text-decoration: underline;
+}
+
+.section {
+  margin-bottom: 4rem;
+}
+
+.section h2 {
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+  margin-bottom: 1.5rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.5rem;
+}
+
+.figure {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.figure figcaption {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.preview {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #f9fafb;
+  display: block;
+}
+
+.preview img,
+.preview object {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.preview object {
+  height: 360px;
+}
+
+.links {
+  margin-top: auto;
+}
+
+.links a {
+  font-weight: 600;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 4rem 1rem;
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 12px;
+  color: #1f2937;
+}
+
+.footer {
+  margin-top: 4rem;
+  text-align: center;
+  color: #6b7280;
+}
+
+.footer a {
+  color: inherit;
+  text-decoration: underline;
+}
