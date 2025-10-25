@@ -75,7 +75,11 @@ jobs:
             out="analysis_downloads/${rel}"
             mkdir -p "$(dirname "$out")"
             echo "Fetching $url"
-            curl -fSL --retry 3 "$url" -o "$out"
+            if ! curl -fSL --retry 3 "$url" -o "$out"; then
+              echo "Warning: failed to fetch $url; continuing"
+              rm -f "$out"
+              continue
+            fi
             echo "$out" >> analysis_downloads/.downloaded_files
           done
 
