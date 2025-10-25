@@ -22,4 +22,7 @@ env/
 *.tsv
 *.vcf
 *.bed
+*.png
+*.pdf
+*.txt
 .DS_Store
