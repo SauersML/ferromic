@@ -89,6 +89,7 @@ jobs:
         run: python replicate_figures.py --skip-downloads
 
       - name: Post-run diagnostics
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -104,6 +105,7 @@ jobs:
           du -h --max-depth=1
 
       - name: Collect generated outputs
+        if: always()
         run: |
           python - <<'PY'
           import shutil
@@ -112,9 +114,12 @@ jobs:
           root = Path('.')
           figures_dest = Path('artifacts/figures')
           figures_dest.mkdir(parents=True, exist_ok=True)
-          for pattern in ('*.png', '*.pdf', '*.svg'):
+          skip_dirs = {'analysis_downloads', 'artifacts'}
+          for pattern in ('*.png', '*.pdf', '*.svg', '*.txt', '*.tsv', '*.csv'):
               for path in root.rglob(pattern):
                   if path.is_file():
+                      if any(part in skip_dirs for part in path.parts):
+                          continue
                       rel = path.relative_to(root)
                       target = figures_dest / rel
                       target.parent.mkdir(parents=True, exist_ok=True)
@@ -129,13 +134,17 @@ jobs:
           PY
 
       - name: Upload figure artefacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: figure-outputs
           path: artifacts/figures
+          if-no-files-found: warn
 
       - name: Upload downloaded data artefacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: analysis-downloads
           path: artifacts/downloads
+          if-no-files-found: warn
