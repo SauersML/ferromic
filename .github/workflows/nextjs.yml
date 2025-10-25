@@ -1,7 +1,3 @@
-# Sample workflow for building and deploying a Next.js site to GitHub Pages
-#
-# To get started with Next.js see: https://nextjs.org/docs/getting-started
-#
 name: Deploy Next.js site to Pages
 
 on:
@@ -27,14 +23,28 @@ concurrency:
 jobs:
   # Build job
   build:
-    if: ${{ hashFiles('web/figures-site/package.json') != '' }}
     runs-on: ubuntu-latest
+    outputs:
+      site-exists: ${{ steps.check-site.outputs.exists }}
     env:
       NEXT_APP_PATH: web/figures-site
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      
+      - name: Check if Next.js site exists
+        id: check-site
+        run: |
+          if [ -f "${{ env.NEXT_APP_PATH }}/package.json" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Next.js site detected"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "No Next.js site detected"
+          fi
+      
       - name: Detect package manager
+        if: steps.check-site.outputs.exists == 'true'
         id: detect-package-manager
         run: |
           APP_PATH="${{ env.NEXT_APP_PATH }}"
@@ -42,62 +52,65 @@ jobs:
             echo "manager=yarn" >> $GITHUB_OUTPUT
             echo "command=install" >> $GITHUB_OUTPUT
             echo "runner=yarn" >> $GITHUB_OUTPUT
-            echo "working-directory=$APP_PATH" >> $GITHUB_OUTPUT
             exit 0
           elif [ -f "$APP_PATH/package-lock.json" ]; then
             echo "manager=npm" >> $GITHUB_OUTPUT
             echo "command=ci" >> $GITHUB_OUTPUT
             echo "runner=npx --no-install" >> $GITHUB_OUTPUT
-            echo "working-directory=$APP_PATH" >> $GITHUB_OUTPUT
             exit 0
           elif [ -f "$APP_PATH/package.json" ]; then
             echo "manager=npm" >> $GITHUB_OUTPUT
             echo "command=install" >> $GITHUB_OUTPUT
             echo "runner=npx --no-install" >> $GITHUB_OUTPUT
-            echo "working-directory=$APP_PATH" >> $GITHUB_OUTPUT
             exit 0
           else
             echo "Unable to determine package manager"
             exit 1
           fi
+      
       - name: Setup Node
+        if: steps.check-site.outputs.exists == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: ${{ steps.detect-package-manager.outputs.manager }}
-          cache-dependency-path: ${{ env.NEXT_APP_PATH }}/package-lock.json
+          cache-dependency-path: ${{ env.NEXT_APP_PATH }}/${{ steps.detect-package-manager.outputs.manager == 'yarn' && 'yarn.lock' || 'package-lock.json' }}
+      
       - name: Setup Pages
+        if: steps.check-site.outputs.exists == 'true'
         uses: actions/configure-pages@v5
         with:
-          # Automatically inject basePath in your Next.js configuration file and disable
-          # server side image optimization (https://nextjs.org/docs/api-reference/next/image#unoptimized).
-          #
-          # You may remove this line if you want to manage the configuration yourself.
           static_site_generator: next
+      
       - name: Restore cache
+        if: steps.check-site.outputs.exists == 'true'
         uses: actions/cache@v4
         with:
           path: |
             ${{ env.NEXT_APP_PATH }}/.next/cache
-          # Generate a new cache whenever packages or source files change.
           key: ${{ runner.os }}-nextjs-${{ hashFiles('web/figures-site/package-lock.json', 'web/figures-site/yarn.lock') }}-${{ hashFiles('web/figures-site/**/*.[jt]s', 'web/figures-site/**/*.[jt]sx') }}
-          # If source files changed but packages didn't, rebuild from a prior cache.
           restore-keys: |
             ${{ runner.os }}-nextjs-${{ hashFiles('web/figures-site/package-lock.json', 'web/figures-site/yarn.lock') }}-
+      
       - name: Install dependencies
+        if: steps.check-site.outputs.exists == 'true'
         working-directory: ${{ env.NEXT_APP_PATH }}
         run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
+      
       - name: Build with Next.js
+        if: steps.check-site.outputs.exists == 'true'
         working-directory: ${{ env.NEXT_APP_PATH }}
         run: ${{ steps.detect-package-manager.outputs.runner }} next build
+      
       - name: Upload artifact
+        if: steps.check-site.outputs.exists == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ env.NEXT_APP_PATH }}/out
 
   # Deployment job
   deploy:
-    if: ${{ needs.build.result == 'success' }}
+    if: needs.build.outputs.site-exists == 'true'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -107,10 +120,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
-  no-site-detected:
-    if: ${{ hashFiles('web/figures-site/package.json') == '' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Skip deployment
-        run: echo "No Next.js project detected. Skipping deployment."
