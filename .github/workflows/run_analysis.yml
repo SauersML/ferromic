@@ -4,17 +4,30 @@ on:
   workflow_dispatch:
 
 jobs:
-  fetch-and-head:
+  run-figures:
     runs-on: ubuntu-latest
     steps:
-      - name: Download files over HTTPS and print head
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[test]
+          pip install seaborn matplotlib
+
+      - name: Download analysis artefacts
         shell: bash
         run: |
           set -euo pipefail
 
           base='https://sharedspace.s3.msi.umn.edu'
 
-          # Each file path is specified explicitly
           mapfile -t URLS <<'EOF'
           https://sharedspace.s3.msi.umn.edu/public_internet/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/pairwise_glm_contrasts_fdr.tsv
@@ -49,22 +62,80 @@ jobs:
           https://sharedspace.s3.msi.umn.edu/public_internet/inversion_statistical_results.csv
           https://sharedspace.s3.msi.umn.edu/public_internet/inv_info.csv
           https://sharedspace.s3.msi.umn.edu/public_internet/output.csv
+          https://sharedspace.s3.msi.umn.edu/public_internet/all_pairwise_results.csv
+          https://sharedspace.s3.msi.umn.edu/public_internet/per_site_diversity_output.falsta
+          https://sharedspace.s3.msi.umn.edu/public_internet/per_site_fst_output.falsta
           EOF
 
-          mkdir -p downloaded
-          : > filelist.txt
+          mkdir -p analysis_downloads
+          : > analysis_downloads/.downloaded_files
 
           for url in "${URLS[@]}"; do
             rel="${url#${base}/}"
-            out="downloaded/${rel}"
+            out="analysis_downloads/${rel}"
             mkdir -p "$(dirname "$out")"
             echo "Fetching $url"
             curl -fSL --retry 3 "$url" -o "$out"
-            echo "$out" >> filelist.txt
+            echo "$out" >> analysis_downloads/.downloaded_files
           done
 
           while IFS= read -r f; do
             echo "===== HEAD: $f ====="
-            head -n 10 "$f"
+            head -n 10 "$f" || true
             echo
-          done < filelist.txt
+          done < analysis_downloads/.downloaded_files
+
+      - name: Run replicate_figures.py
+        run: python replicate_figures.py --skip-downloads
+
+      - name: Post-run diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== Repository root contents ==='
+          ls -al
+          echo '=== Generated figures (top level) ==='
+          find . -maxdepth 1 -type f \( -name '*.png' -o -name '*.pdf' -o -name '*.svg' \) -print
+          echo '=== Generated figures (within subdirectories) ==='
+          find stats -maxdepth 3 -type f \( -name '*.png' -o -name '*.pdf' -o -name '*.svg' \) -print || true
+          echo '=== Download directory structure ==='
+          find analysis_downloads -maxdepth 2 -type f -print
+          echo '=== Disk usage summary ==='
+          du -h --max-depth=1
+
+      - name: Collect generated outputs
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+
+          root = Path('.')
+          figures_dest = Path('artifacts/figures')
+          figures_dest.mkdir(parents=True, exist_ok=True)
+          for pattern in ('*.png', '*.pdf', '*.svg'):
+              for path in root.rglob(pattern):
+                  if path.is_file():
+                      rel = path.relative_to(root)
+                      target = figures_dest / rel
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      shutil.copy2(path, target)
+
+          downloads_src = Path('analysis_downloads')
+          downloads_dest = Path('artifacts/downloads')
+          if downloads_src.exists():
+              if downloads_dest.exists():
+                  shutil.rmtree(downloads_dest)
+              shutil.copytree(downloads_src, downloads_dest)
+          PY
+
+      - name: Upload figure artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: figure-outputs
+          path: artifacts/figures
+
+      - name: Upload downloaded data artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-downloads
+          path: artifacts/downloads
