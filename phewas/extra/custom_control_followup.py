@@ -473,6 +473,20 @@ def run() -> None:
             y = phenotype_status.loc[design.index].astype(np.int8)
             X = design.copy()
 
+            intercept = "const" in X.columns
+            ordered_terms = [col for col in X.columns if col != "const"]
+            if "dosage" in ordered_terms:
+                ordered_terms.insert(0, ordered_terms.pop(ordered_terms.index("dosage")))
+            formula_terms: list[str] = []
+            if intercept:
+                formula_terms.append("1")
+            formula_terms.extend(ordered_terms)
+            formula_repr = " + ".join(formula_terms) if formula_terms else "<empty design>"
+            info(
+                "Model specification: logit(P("
+                f"{cfg.phenotype}=1)) ~ {formula_repr}"
+            )
+
             try:
                 fit, fit_method = _fit_logistic(X, y)
             except RuntimeError as exc:
