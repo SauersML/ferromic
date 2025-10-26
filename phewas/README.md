@@ -1,22 +1,19 @@
 ```
-# Pre-create empty files (truncate to zero bytes if they already exist)
-for f in iox.py models.py pheno.py pipes.py run.py score.py test_setup.sh tests.py; do
-  : > "$f"
-done
-
-# Then run your original command
-for f in ./*.py; do [ -e "$f" ] && rm -- "$f"; done && \
-curl -fsSL 'https://api.github.com/repos/SauersML/ferromic/contents/phewas?ref=main' | \
-python3 -c 'import sys, json, urllib.request, os, pathlib
-for it in json.load(sys.stdin):
-    name = it.get("name",""); url = it.get("download_url")
-    if not (name.endswith(".py") and url):
+# Mirror the repo's phewas/ directory locally
+rm -rf -- phewas && mkdir -p phewas && \
+curl -fsSL 'https://api.github.com/repos/SauersML/ferromic/git/trees/main?recursive=1' | \
+python3 -c 'import sys, json, os, pathlib, urllib.request
+root = "phewas/"
+tree = json.load(sys.stdin)["tree"]
+for it in tree:
+    p = it.get("path","")
+    if not (p.startswith(root) and it.get("type") == "blob"):
         continue
-    base = pathlib.Path(name).name               # basename only
-    data = urllib.request.urlopen(url).read()
-    fd = os.open(base, os.O_CREAT|os.O_EXCL|os.O_WRONLY, 0o644)  # refuse if anything exists (incl. symlinks)
-    with os.fdopen(fd, "wb") as f: f.write(data)'
-
+    dest = pathlib.Path(p)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    url = f"https://raw.githubusercontent.com/SauersML/ferromic/main/{p}"
+    with urllib.request.urlopen(url) as r, open(dest, "wb") as f:
+        f.write(r.read())'
 ```
 
 ## Running the PheWAS pipeline from the command line
