@@ -90,7 +90,7 @@ jobs:
           done < analysis_downloads/.downloaded_files
 
       - name: Run replicate_figures.py
-        run: python replicate_figures.py --skip-downloads
+        run: python scripts/replicate_figures.py --skip-downloads
 
       - name: Post-run diagnostics
         if: always()

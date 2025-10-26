@@ -25,7 +25,19 @@ from urllib.parse import urljoin, urlparse
 # Configuration
 # ---------------------------------------------------------------------------
 
-REPO_ROOT = Path(__file__).resolve().parent
+# Infer the repository root so the script can be relocated without breaking
+# path resolution.  We look for common project markers as we ascend from the
+# script's directory.
+def _detect_repo_root(start: Path) -> Path:
+    markers = ("pyproject.toml", "Cargo.toml", ".git")
+    for candidate in [start, *start.parents]:
+        if any((candidate / marker).exists() for marker in markers):
+            return candidate
+    return start
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = _detect_repo_root(SCRIPT_DIR)
 DOWNLOAD_ROOT = REPO_ROOT / "analysis_downloads"
 BASE_URL = "https://sharedspace.s3.msi.umn.edu/"
 
@@ -327,7 +339,7 @@ def run_task(task: FigureTask, env: Dict[str, str]) -> tuple[str, str]:
     missing: List[str] = []
     invalid: List[str] = []
     for dep in task.dependencies:
-        dep_path = Path(dep)
+        dep_path = REPO_ROOT / dep
         if not dep_path.exists():
             missing.append(dep)
         elif not is_valid_data_file(dep_path):
@@ -343,7 +355,7 @@ def run_task(task: FigureTask, env: Dict[str, str]) -> tuple[str, str]:
     optional_missing = [
         dep
         for dep in task.optional_dependencies
-        if not Path(dep).exists() or not is_valid_data_file(Path(dep))
+        if not (REPO_ROOT / dep).exists() or not is_valid_data_file(REPO_ROOT / dep)
     ]
     if optional_missing:
         print(f"[INFO] Optional dependencies unavailable for {task.name}: {', '.join(optional_missing)}")
@@ -452,7 +464,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for task in selected_tasks:
         print(f"\n--- {task.name} ---")
         for dep in task.dependencies:
-            dep_path = Path(dep)
+            dep_path = REPO_ROOT / dep
             if not dep_path.exists():
                 dep_status = "missing"
             elif not is_valid_data_file(dep_path):
