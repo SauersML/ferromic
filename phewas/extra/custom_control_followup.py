@@ -79,9 +79,9 @@ PHENOTYPE_PATTERNS: Sequence[PhenotypePattern] = (
 )
 
 CATEGORY_PGS_IDS: dict[str, Sequence[str]] = {
-    "breast_cancer": ("PGS000007", "PGS000317"),
-    "alzheimers": ("PGS004146", "PGS004898"),
-    "obesity": ("PGS005198", "PGS004378"),
+    "breast_cancer": ("PGS004869", "PGS000507"),
+    "alzheimers": ("PGS004146", "PGS004229"),
+    "obesity": ("PGS004378", "PGS005198"),
 }
 
 SCORES_FILE = Path("scores.tsv")
