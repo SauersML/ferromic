@@ -123,6 +123,142 @@ def die(message: str) -> None:
     warn(message)
     sys.exit(1)
 
+
+def _compute_condition_number(matrix: np.ndarray) -> float:
+    if matrix.size == 0:
+        return float("nan")
+    with np.errstate(all="ignore"):
+        singular_values = np.linalg.svd(matrix, compute_uv=False)
+    finite = singular_values[np.isfinite(singular_values)]
+    if finite.size == 0:
+        return float("nan")
+    smallest = finite.min(initial=0.0)
+    largest = finite.max(initial=0.0)
+    if smallest == 0.0:
+        return float("inf")
+    return float(largest / smallest)
+
+
+def _estimate_rank(matrix: np.ndarray) -> int:
+    if matrix.size == 0:
+        return 0
+    with np.errstate(all="ignore"):
+        singular_values = np.linalg.svd(matrix, compute_uv=False)
+    if singular_values.size == 0:
+        return 0
+    eps = np.finfo(matrix.dtype).eps if matrix.dtype.kind == "f" else np.finfo(np.float64).eps
+    tolerance = singular_values.max(initial=0.0) * max(matrix.shape) * eps
+    return int(np.sum(singular_values > tolerance))
+
+
+def _summarise_column(values: pd.Series) -> dict[str, object]:
+    finite = pd.to_numeric(values, errors="coerce")
+    stats: dict[str, object] = {
+        "dtype": str(values.dtype),
+        "unique": int(values.nunique(dropna=False)),
+    }
+    if finite.notna().any():
+        stats.update(
+            {
+                "min": float(finite.min(skipna=True)),
+                "max": float(finite.max(skipna=True)),
+                "mean": float(finite.mean(skipna=True)),
+                "std": float(finite.std(skipna=True)),
+            }
+        )
+    return stats
+
+
+def _summarise_design_matrix(X: pd.DataFrame, y: pd.Series | None = None) -> str:
+    matrix = X.to_numpy(dtype=np.float64, copy=False)
+    diagnostics = X.attrs.get("diagnostics", {})
+    condition_number = diagnostics.get("condition_number", _compute_condition_number(matrix))
+    rank = diagnostics.get("matrix_rank", _estimate_rank(matrix))
+    lines = [
+        f"Design matrix shape: rows={X.shape[0]}, columns={X.shape[1]}",
+        f"Estimated rank: {rank}",
+        f"Condition number: {condition_number:.3e}" if np.isfinite(condition_number) else f"Condition number: {condition_number}",
+    ]
+    if y is not None:
+        y_cases = int(pd.to_numeric(y, errors="coerce").sum())
+        lines.append(f"Outcome summary: cases={y_cases}, controls={len(y) - y_cases}")
+
+    if diagnostics:
+        dropped_non_finite = diagnostics.get("dropped_non_finite", 0)
+        if dropped_non_finite:
+            lines.append(f"Rows dropped for non-finite covariates: {dropped_non_finite}")
+        for key in ("dropped_constant", "dropped_duplicates", "dropped_collinear"):
+            values = diagnostics.get(key)
+            if values:
+                label = key.replace("_", " ")
+                lines.append(f"{label.title()}: {', '.join(values)}")
+        if diagnostics.get("ancestry_constants"):
+            lines.append(
+                "Ancestry dummies constant after alignment: "
+                + ", ".join(diagnostics["ancestry_constants"])
+            )
+
+    preview_columns = []
+    for col in X.columns:
+        preview_columns.append(f"{col} -> {_summarise_column(X[col])}")
+    lines.extend(preview_columns)
+    return "\n".join(lines)
+
+
+def _remove_collinear_columns(
+    df: pd.DataFrame,
+    *,
+    tolerance: float = 1e-8,
+    protected: Sequence[str] = ("dosage",),
+) -> tuple[pd.DataFrame, list[str]]:
+    if df.shape[1] <= 1:
+        return df, []
+
+    values = df.to_numpy(dtype=np.float64, copy=False)
+    columns = list(df.columns)
+    removed: list[str] = []
+
+    for idx, column in enumerate(columns):
+        if column in removed or column == "const":
+            continue
+
+        others = [i for i, col in enumerate(columns) if col != column and col not in removed]
+        if not others:
+            continue
+
+        predictors = values[:, others]
+        target = values[:, idx]
+        if predictors.size == 0:
+            continue
+
+        try:
+            solution, *_ = np.linalg.lstsq(predictors, target, rcond=None)
+        except np.linalg.LinAlgError:
+            continue
+
+        approximation = predictors @ solution
+        target_norm = np.linalg.norm(target)
+        residual_norm = np.linalg.norm(target - approximation)
+        relative_error = residual_norm / max(target_norm, 1.0)
+
+        if relative_error <= tolerance:
+            if column in protected:
+                raise RuntimeError(
+                    f"{column!r} covariate is a linear combination of other predictors after alignment."
+                )
+            removed.append(column)
+
+    if removed:
+        df = df.drop(columns=removed)
+
+    return df, removed
+
+
+def _format_logistic_failure(exc: Exception, X: pd.DataFrame, y: pd.Series) -> str:
+    summary_lines = _summarise_design_matrix(X, y).splitlines()
+    indented = "\n    ".join(summary_lines)
+    return f"Logistic regression failed: {exc}\n    {indented}"
+
 def _normalize_label(value: str) -> str:
     return " ".join(str(value).lower().replace("_", " ").split())
 
@@ -215,8 +351,11 @@ def _fit_logistic(X: pd.DataFrame, y: pd.Series):
     try:
         result = model.fit(disp=False, maxiter=100)
         return result, "logit_mle"
-    except (PerfectSeparationError, np.linalg.LinAlgError, ValueError):
-        warn("Logit MLE failed – retrying with L2-regularised fit.")
+    except (PerfectSeparationError, np.linalg.LinAlgError, ValueError) as initial_error:
+        warn(
+            "Logit MLE failed – retrying with L2-regularised fit. "
+            f"(reason: {initial_error})"
+        )
         try:
             # ``fit_regularized`` only accepts L1-oriented solvers.  Setting
             # ``L1_wt`` to 0 switches the penalty to pure L2 while keeping the
@@ -226,7 +365,11 @@ def _fit_logistic(X: pd.DataFrame, y: pd.Series):
             result = model.fit_regularized(alpha=1e-4, L1_wt=0.0, maxiter=200)
             return result, "logit_l2"
         except Exception as exc:
-            raise RuntimeError(f"Logistic regression failed: {exc}") from exc
+            message = _format_logistic_failure(exc, X, y)
+            message += f"\n    Initial MLE failure: {initial_error}"
+            raise RuntimeError(message) from exc
+    except Exception as exc:
+        raise RuntimeError(_format_logistic_failure(exc, X, y)) from exc
 
 
 @dataclass
@@ -357,6 +500,14 @@ def _build_design_matrix(
     anc_slice = ancestry_dummies.reindex(design.index).fillna(0.0).astype(np.float32)
     out = pd.concat([design, anc_slice], axis=1)
 
+    diagnostics: dict[str, object] = {
+        "dropped_non_finite": 0,
+        "dropped_constant": [],
+        "dropped_duplicates": [],
+        "dropped_collinear": [],
+        "ancestry_constants": [],
+    }
+
     if not custom_controls.empty:
         aligned_custom = custom_controls.reindex(out.index)
         aligned_custom = aligned_custom.dropna(axis=0, how="any")
@@ -367,7 +518,9 @@ def _build_design_matrix(
     if not finite_mask.all():
         before = len(out)
         out = out.loc[finite_mask]
-        warn(f"Dropped {before - len(out):,} participants with non-finite covariates.")
+        dropped = before - len(out)
+        diagnostics["dropped_non_finite"] = dropped
+        warn(f"Dropped {dropped:,} participants with non-finite covariates.")
 
     # Statsmodels fails with a ``Singular matrix`` error when any covariate column is
     # constant (all zeros/ones) after aligning the custom controls and ancestry
@@ -390,6 +543,7 @@ def _build_design_matrix(
     ancestry_constants = [col for col in ancestry_columns if col in constant_cols]
 
     if ancestry_columns and ancestry_constants:
+        ancestry_details: list[str] = []
         if all(out[col].eq(0.0).all() for col in ancestry_columns):
             if reference_ancestry:
                 warn(
@@ -400,6 +554,7 @@ def _build_design_matrix(
                 warn(
                     "All participants fall into a single ancestry stratum after filtering; ancestry covariates will be dropped."
                 )
+            ancestry_details.append("all ancestry dummies = 0")
         else:
             details: list[str] = []
             for col in ancestry_constants:
@@ -411,19 +566,64 @@ def _build_design_matrix(
                     details.append(f"{label}=1 (all participants)")
                 else:
                     details.append(f"{label} constant at {value}")
+                ancestry_details.append(f"{col} -> {details[-1]}")
             warn(
                 "One or more ancestry dummy covariates became constant after aligning "
                 "with the phenotype/custom controls: "
                 + "; ".join(details)
             )
+        diagnostics["ancestry_constants"] = ancestry_details or [col for col in ancestry_constants]
 
     removable = [col for col in constant_cols if col != "const"]
     if removable:
         out = out.drop(columns=removable)
+        diagnostics["dropped_constant"] = sorted(removable)
         warn(
             "Dropped constant covariate columns to avoid singular design: "
             + ", ".join(sorted(removable))
         )
+
+    signature_owner: dict[bytes, str] = {}
+    duplicate_cols: list[str] = []
+    duplicate_descriptions: list[str] = []
+    for column in out.columns:
+        signature = out[column].to_numpy(dtype=np.float64, copy=False).tobytes()
+        owner = signature_owner.get(signature)
+        if owner is None:
+            signature_owner[signature] = column
+            continue
+        duplicate_cols.append(column)
+        duplicate_descriptions.append(f"{column} == {owner}")
+
+    if duplicate_cols:
+        if "dosage" in duplicate_cols:
+            raise RuntimeError(
+                "Dosage covariate duplicates another predictor after alignment; cannot fit logistic model."
+            )
+        out = out.drop(columns=duplicate_cols)
+        diagnostics["dropped_duplicates"] = sorted(duplicate_cols)
+        warn(
+            "Dropped duplicate covariate columns to avoid singular design: "
+            + ", ".join(duplicate_descriptions)
+        )
+
+    try:
+        out, removed_collinear = _remove_collinear_columns(out)
+    except RuntimeError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    if removed_collinear:
+        diagnostics["dropped_collinear"] = sorted(removed_collinear)
+        warn(
+            "Dropped linearly dependent covariates detected via least-squares check: "
+            + ", ".join(sorted(removed_collinear))
+        )
+
+    final_matrix = out.to_numpy(dtype=np.float64, copy=False)
+    diagnostics["matrix_rank"] = _estimate_rank(final_matrix)
+    diagnostics["condition_number"] = _compute_condition_number(final_matrix)
+    diagnostics["final_columns"] = list(out.columns)
+    out.attrs["diagnostics"] = diagnostics
 
     return out
 
