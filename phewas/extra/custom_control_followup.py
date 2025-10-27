@@ -218,7 +218,12 @@ def _fit_logistic(X: pd.DataFrame, y: pd.Series):
     except (PerfectSeparationError, np.linalg.LinAlgError, ValueError):
         warn("Logit MLE failed – retrying with L2-regularised fit.")
         try:
-            result = model.fit_regularized(method="l2", alpha=1e-4, maxiter=200)
+            # ``fit_regularized`` only accepts L1-oriented solvers.  Setting
+            # ``L1_wt`` to 0 switches the penalty to pure L2 while keeping the
+            # solver happy.  ``method="l2"`` previously used here triggers a
+            # ``ValueError`` because statsmodels does not implement such an
+            # option.
+            result = model.fit_regularized(alpha=1e-4, L1_wt=0.0, maxiter=200)
             return result, "logit_l2"
         except Exception as exc:
             raise RuntimeError(f"Logistic regression failed: {exc}") from exc
