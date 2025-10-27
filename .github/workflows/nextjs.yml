@@ -109,11 +109,27 @@ jobs:
             exit 0
           fi
 
-          FIGURES_ROOT=$(find "$WORK_DIR" -type d -path "*/artifacts/figures" -print -quit)
+          SEARCH_ROOT="$WORK_DIR"
+
+          ZIP_ARCHIVE=$(find "$WORK_DIR" -maxdepth 2 -type f -name '*.zip' -print -quit)
+          if [ -n "$ZIP_ARCHIVE" ]; then
+            echo "Extracting artifact archive $ZIP_ARCHIVE"
+            EXTRACT_DIR=$(mktemp -d)
+            if unzip -q "$ZIP_ARCHIVE" -d "$EXTRACT_DIR"; then
+              SEARCH_ROOT="$EXTRACT_DIR"
+            else
+              echo "Warning: failed to extract $ZIP_ARCHIVE; continuing with downloaded directory structure."
+            fi
+          fi
+
+          FIGURES_ROOT=$(find "$SEARCH_ROOT" -type d -path "*/artifacts/figures" -print -quit)
           if [ -z "$FIGURES_ROOT" ]; then
-            echo "restored=false" >> "$GITHUB_OUTPUT"
-            echo "Figures directory not found in artifact; skipping restoration."
-            exit 0
+            FIGURES_ROOT=$(find "$SEARCH_ROOT" -maxdepth 5 -type d -name figures -print -quit)
+          fi
+
+          if [ -z "$FIGURES_ROOT" ]; then
+            echo "Figures directory not found in artifact; generating empty manifest."
+            FIGURES_ROOT=$(mktemp -d)
           fi
 
           python3 scripts/prepare_figures_manifest.py \
