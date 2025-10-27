@@ -280,6 +280,12 @@ def _impute_and_predict(model_name: str, expected_sample_count: int) -> Dict[str
     return result
 
 
+def _impute_and_predict_from_tuple(args: Tuple[str, int]) -> Dict[str, object]:
+    """Helper to unpack tuple arguments when using Pool.imap_unordered."""
+    model_name, expected_sample_count = args
+    return _impute_and_predict(model_name, expected_sample_count)
+
+
 def main() -> None:
     """
     Launches the imputation pipeline with robust, restartable, and crash-safe behavior.
@@ -400,13 +406,9 @@ def main() -> None:
         # Stream results as they complete to keep memory bounded and ensure frequent durable progress.
         with mp.Pool(processes=num_workers) as pool:
             for res in tqdm(pool.imap_unordered(
-                func=_impute_and_predict,
+                func=_impute_and_predict_from_tuple,
                 iterable=[(m, len(sample_ids)) for m in pending],
             ), total=len(pending), desc="Predicting Inversions", unit="model"):
-                # The worker signature expects two arguments; wrap to unpack when using pool.imap_unordered.
-                if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], str):
-                    # Compatibility guard if pool passes tuples through unchanged.
-                    res = _impute_and_predict(res[0], expected_sample_count=res[1])
 
                 model_name = res.get("model_name", "")
                 if not model_name:
