@@ -89,6 +89,71 @@ def _thread_excepthook(args):
 threading.excepthook = _thread_excepthook
 
 
+def _merge_followup_results(
+    stage1_df: pd.DataFrame, follow_df: pd.DataFrame
+) -> pd.DataFrame:
+    """Merge stage-2 follow-up metrics into the consolidated stage-1 dataframe.
+
+    The follow-up cache reuses generic column names (for example, "P_Source")
+    that also exist in the stage-1 results.  Pandas will raise a ``MergeError``
+    when it encounters overlapping column names and the default suffixes would
+    still collide.  To keep the merge well-defined and preserve the stage-1
+    metrics, rename the follow-up columns under a "Stage2_"-prefixed namespace.
+    If a unique prefixed column cannot be created (for instance, because the
+    follow-up file already includes that name), fall back to appending a
+    numerical suffix.  As a final guard, drop any columns that still collide
+    after renaming.
+
+    Parameters
+    ----------
+    stage1_df:
+        The dataframe that aggregates all stage-1 results.
+    follow_df:
+        The dataframe containing the stage-2 follow-up metrics to merge.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A new dataframe containing all stage-1 results with follow-up metrics
+        merged in on ``["Phenotype", "Inversion"]``.
+    """
+
+    if follow_df.empty:
+        return stage1_df
+
+    sanitized_follow = follow_df.copy()
+    stage1_cols = set(stage1_df.columns)
+
+    overlap_cols = (
+        set(sanitized_follow.columns).intersection(stage1_cols)
+        - {"Phenotype", "Inversion"}
+    )
+
+    rename_map: dict[str, str] = {}
+    for col in sorted(overlap_cols):
+        base_name = f"Stage2_{col}"
+        candidate = base_name
+        suffix = 2
+        while candidate in sanitized_follow.columns or candidate in stage1_cols:
+            candidate = f"{base_name}_{suffix}"
+            suffix += 1
+        rename_map[col] = candidate
+
+    if rename_map:
+        sanitized_follow = sanitized_follow.rename(columns=rename_map)
+
+    residual_overlap = (
+        set(sanitized_follow.columns).intersection(stage1_cols)
+        - {"Phenotype", "Inversion"}
+    )
+    if residual_overlap:
+        sanitized_follow = sanitized_follow.drop(
+            columns=list(residual_overlap), errors="ignore"
+        )
+
+    return stage1_df.merge(sanitized_follow, on=["Phenotype", "Inversion"], how="left")
+
+
 def _stable_seed(*parts: object) -> int:
     """Return a deterministic 32-bit seed derived from the provided parts."""
     hasher = hashlib.blake2s(digest_size=4)
@@ -1437,7 +1502,7 @@ def _pipeline_once():
                 if follow_records:
                     follow_df = pd.DataFrame(follow_records)
                     print(f"Collected {len(follow_df)} follow-up records.")
-                    df = df.merge(follow_df, on=["Phenotype", "Inversion"], how="left")
+                    df = _merge_followup_results(df, follow_df)
             else:
                 print("\n--- Stage-2 ancestry follow-up consolidation skipped due to population filter. ---")
 
