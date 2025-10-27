@@ -140,16 +140,16 @@ jobs:
 
           export MANIFEST
           GENERATED=$(python3 - <<'PY'
-import json
-import os
+          import json
+          import os
 
-path = os.environ["MANIFEST"]
-with open(path, "r", encoding="utf-8") as fh:
-    data = json.load(fh)
+          path = os.environ["MANIFEST"]
+          with open(path, "r", encoding="utf-8") as fh:
+              data = json.load(fh)
 
-print("true" if data.get("generatedAt") else "false")
-PY
-)
+          print("true" if data.get("generatedAt") else "false")
+          PY
+          )
 
           echo "generated=$GENERATED" >> "$GITHUB_OUTPUT"
 
