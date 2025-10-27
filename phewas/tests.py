@@ -487,6 +487,19 @@ def test_cli_pop_label_sets_population_filter():
         assert os.environ["FERROMIC_POPULATION_FILTER"] == "EUR"
 
 
+def test_run_main_applies_cli_overrides():
+    with preserve_run_globals():
+        run.POPULATION_FILTER = "all"
+        os.environ.pop("FERROMIC_POPULATION_FILTER", None)
+
+        with patch("phewas.run.supervisor_main") as mock_supervisor:
+            run.main(["--pop-label", "eur"])
+
+        assert run.POPULATION_FILTER == "eur"
+        assert os.environ["FERROMIC_POPULATION_FILTER"] == "eur"
+        mock_supervisor.assert_called_once_with()
+
+
 def test_cli_population_filter_matches_followup_effects():
     with temp_workspace() as tmpdir, preserve_run_globals():
         core_data, phenos = make_realistic_followup_dataset()
