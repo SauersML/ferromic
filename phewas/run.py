@@ -15,7 +15,7 @@ import json
 import importlib
 import importlib.util
 import hashlib
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -1588,9 +1588,23 @@ def supervisor_main(max_restarts=100, backoff_sec=10):
             time.sleep(0.2)
 
 
-def main():
+def main(argv: Sequence[str] | None = None) -> None:
+    """Entry point for running the pipeline directly via ``python -m phewas.run``."""
+
+    if argv is None:
+        argv = []
+
+    if argv:
+        # Import locally to avoid circular imports at module load time.
+        from . import cli as _cli
+
+        args = _cli.parse_args(argv)
+        _cli.apply_cli_configuration(args)
+
     supervisor_main()
 
 
 if __name__ == "__main__":
-    supervisor_main()
+    import sys
+
+    main(sys.argv[1:])
