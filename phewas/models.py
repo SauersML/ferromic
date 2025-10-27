@@ -23,6 +23,7 @@ allowed_fp_by_cat = {}
 # --- inference behavior toggles ---
 DEFAULT_PREFER_FIRTH_ON_RIDGE = True
 DEFAULT_ALLOW_PENALIZED_WALD = False
+DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT = True
 
 ALLOWED_P_SOURCES = {"lrt_mle", "score_chi2", "score_boot_mle", "score_boot_firth"}
 ALLOWED_CI_METHODS = {
@@ -769,6 +770,9 @@ def _fit_logit_ladder(
 
     is_pandas = hasattr(X, "columns")
     prefer_firth_on_ridge = bool(CTX.get("PREFER_FIRTH_ON_RIDGE", DEFAULT_PREFER_FIRTH_ON_RIDGE))
+    allow_post_firth_mle = bool(
+        CTX.get("ALLOW_POST_FIRTH_MLE_REFIT", DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT)
+    )
     if const_ix is None and is_pandas and "const" in getattr(X, "columns", []):
         try:
             const_ix = int(list(X.columns).index("const"))
@@ -815,6 +819,62 @@ def _fit_logit_ladder(
         # Mark that ridge was in the path, but don't suppress Firth inference.
         setattr(firth_res, "_ridge_in_path", True)
         setattr(firth_res, "_path_reasons", tags)
+        if allow_post_firth_mle:
+            params = getattr(firth_res, "params", None)
+            if params is not None:
+                try:
+                    start = np.asarray(params, dtype=np.float64)
+                    if start.shape[0] != int(X.shape[1]):
+                        start = None
+                except Exception:
+                    start = None
+            else:
+                start = None
+            if start is not None and np.all(np.isfinite(start)):
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("error", category=PerfectSeparationWarning)
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="overflow encountered in exp",
+                        category=RuntimeWarning,
+                        module=r"statsmodels\.discrete\.discrete_model",
+                    )
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="divide by zero encountered in log",
+                        category=RuntimeWarning,
+                        module=r"statsmodels\.discrete\.discrete_model",
+                    )
+                    solver_kwargs = dict(kwargs)
+                    extra_flag = (
+                        {}
+                        if ("_already_failed" in solver_kwargs)
+                        else {"_already_failed": True}
+                    )
+                    solver_kwargs.update(extra_flag)
+                    for method, fit_kwargs in (
+                        ("newton", {"maxiter": 200, "tol": 1e-8}),
+                        ("bfgs", {"maxiter": 400, "gtol": 1e-8}),
+                    ):
+                        try:
+                            refit = _logit_fit(
+                                sm.Logit(y, X),
+                                method,
+                                start_params=start,
+                                **fit_kwargs,
+                                **solver_kwargs,
+                            )
+                        except (Exception, PerfectSeparationWarning):
+                            continue
+                        if _converged(refit) and _ok_mle_fit(
+                            refit, X, y, target_ix=target_ix
+                        ):
+                            setattr(refit, "_final_is_mle", True)
+                            setattr(refit, "_ridge_in_path", True)
+                            setattr(refit, "_firth_in_path", True)
+                            setattr(refit, "_path_reasons", tags + ["firth_seeded_refit"])
+                            setattr(refit, "_firth_seeded_refit", True)
+                            return refit, "firth_seeded_refit"
         return firth_res, "firth_refit"
 
     if not ridge_ok:
@@ -1056,6 +1116,30 @@ def _is_ridge_fit(fit):
     if bool(getattr(fit, "_used_firth", False)):
         return False
     return True
+
+
+def _final_stage_penalized(fit, reason_tag=None):
+    """Return True if the terminal fit in a ladder relied on penalization."""
+    if fit is None:
+        return True
+    if bool(getattr(fit, "_final_is_mle", False)):
+        return False
+    if bool(getattr(fit, "_used_firth", False)):
+        return True
+    if bool(getattr(fit, "_used_ridge", False)):
+        return True
+    path = getattr(fit, "_path_reasons", None)
+    last_tag = None
+    if isinstance(path, (list, tuple)) and path:
+        last_tag = path[-1]
+    elif isinstance(reason_tag, str) and reason_tag:
+        last_tag = reason_tag
+    if isinstance(last_tag, str):
+        if last_tag.startswith("ridge"):
+            return True
+        if last_tag in {"firth_refit"}:
+            return True
+    return False
 
 def _drop_zero_variance(X: pd.DataFrame, keep_cols=('const',), always_keep=(), eps=1e-12):
     """Drops columns with no or near-zero variance, keeping specified columns."""
@@ -2778,13 +2862,28 @@ def lrt_overall_worker(task):
         }
 
         if inference_type == "mle":
-            penalized = any(_is_ridge_fit(candidate) for candidate in (fit_full_use, fit_red_use))
+            penalized = any(
+                _final_stage_penalized(candidate, reason)
+                for candidate, reason in (
+                    (
+                        fit_full_use if fit_full_use is not None else fit_full,
+                        reason_full,
+                    ),
+                    (
+                        fit_red_use if fit_red_use is not None else fit_red,
+                        reason_red,
+                    ),
+                )
+            )
         elif inference_type == "firth":
-            penalized = False
+            penalized = True
         elif inference_type in {"score", "score_boot"}:
             penalized = False
         else:
-            penalized = _is_ridge_fit(fit_full)
+            penalized = _final_stage_penalized(
+                fit_full_use if fit_full_use is not None else fit_full,
+                reason_full,
+            )
         if penalized:
             out.update(
                 {
@@ -4011,18 +4110,29 @@ def lrt_followup_worker(task):
                     ci_str = None
 
             if inference_type == "mle":
-                ridge_inference = any(
-                    _is_ridge_fit(candidate) for candidate in (fit_full_use, fit_red_use)
+                penalized_inference = any(
+                    _final_stage_penalized(candidate, reason)
+                    for candidate, reason in (
+                        (
+                            fit_full_use if fit_full_use is not None else fit_full,
+                            reason_full,
+                        ),
+                        (
+                            fit_red_use if fit_red_use is not None else fit_red,
+                            reason_red,
+                        ),
+                    )
                 )
             elif inference_type == "firth":
-                ridge_inference = False
+                penalized_inference = True
             elif inference_type in {"score", "score_boot"}:
-                ridge_inference = False
+                penalized_inference = False
             else:
-                ridge_inference = any(
-                    _is_ridge_fit(candidate) for candidate in (fit_full, fit_red)
+                penalized_inference = _final_stage_penalized(
+                    fit_full_use if fit_full_use is not None else fit_full,
+                    reason_full,
                 )
-            if ridge_inference:
+            if penalized_inference:
                 p_val = np.nan
                 p_source = None
                 ci_method = None
