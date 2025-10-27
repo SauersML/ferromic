@@ -3,6 +3,7 @@ import sys
 import time
 import gc
 import math
+import shutil
 import multiprocessing as mp
 from typing import List, Tuple, Optional, Dict
 
@@ -10,9 +11,15 @@ import joblib
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 # --- CONFIGURATION ---
 MODEL_DIR = "impute"
+MODEL_MANIFEST_URL = os.getenv(
+    "MODEL_MANIFEST_URL",
+    "https://sharedspace.s3.msi.umn.edu/public_internet/final_imputation_models.manifest.txt",
+)
 GENOTYPE_DIR = "genotype_matrices"
 PLINK_PREFIX = "subset"
 OUTPUT_FILE = "imputed_inversion_dosages.tsv"
@@ -189,6 +196,67 @@ def _decide_num_workers(pending_models: List[str]) -> int:
     return int(max(1, min(max_concurrency_by_mem, max_concurrency_by_cpu)))
 
 
+def _download_url_to_path(url: str, dest_path: str) -> None:
+    """Download ``url`` atomically to ``dest_path``."""
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    tmp_path = f"{dest_path}.tmp"
+    req = Request(url, headers={"User-Agent": "ferromic-infer/1.0"})
+    with urlopen(req, timeout=300) as resp, open(tmp_path, "wb") as f:
+        shutil.copyfileobj(resp, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, dest_path)
+
+
+def _load_model_manifest(url: str) -> Dict[str, str]:
+    """Return mapping of model name -> .model.joblib URL from a manifest."""
+    try:
+        req = Request(url, headers={"User-Agent": "ferromic-infer/1.0"})
+        with urlopen(req, timeout=120) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        print(f"[FATAL] Unable to fetch model manifest from '{url}': {exc}")
+        sys.exit(1)
+
+    mapping: Dict[str, str] = {}
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or not s.endswith(".model.joblib"):
+            continue
+        base = os.path.basename(urlparse(s).path)
+        if not base.endswith(".model.joblib"):
+            continue
+        model_name = base[:-13]
+        mapping[model_name] = s
+    return mapping
+
+
+def _ensure_models_available(models: List[str]) -> None:
+    """Ensure that every model in ``models`` has a local .model.joblib file."""
+    missing = [m for m in models if not os.path.exists(os.path.join(MODEL_DIR, f"{m}.model.joblib"))]
+    if not missing:
+        return
+
+    print(f"Need to download {len(missing)} model(s). Fetching manifest...")
+    manifest = _load_model_manifest(MODEL_MANIFEST_URL)
+
+    for model_name in missing:
+        url = manifest.get(model_name)
+        if not url:
+            print(
+                f"[FATAL] Model '{model_name}' not found in manifest '{MODEL_MANIFEST_URL}'."
+            )
+            sys.exit(1)
+
+        dest = os.path.join(MODEL_DIR, f"{model_name}.model.joblib")
+        print(f"  - Downloading {model_name} from {url} ...")
+        try:
+            _download_url_to_path(url, dest)
+        except Exception as exc:
+            print(f"[FATAL] Failed to download model '{model_name}': {exc}")
+            sys.exit(1)
+
+
 def _impute_and_predict(model_name: str, expected_sample_count: int) -> Dict[str, object]:
     """
     Worker function. Loads the model and genotype matrix, imputes missing values with column means,
@@ -297,8 +365,8 @@ def main() -> None:
 
     # --- 1. Pre-flight Checks ---
     if not os.path.isdir(MODEL_DIR):
-        print(f"[FATAL] Model directory not found: '{MODEL_DIR}'")
-        sys.exit(1)
+        print(f"Model directory '{MODEL_DIR}' not found. Creating it.")
+        os.makedirs(MODEL_DIR, exist_ok=True)
     if not os.path.isdir(GENOTYPE_DIR):
         print(f"[FATAL] Genotype matrix directory not found: '{GENOTYPE_DIR}'")
         sys.exit(1)
@@ -342,6 +410,9 @@ def main() -> None:
         sys.exit(1)
 
     print(f"After filtering, {len(models_to_process)} models will be processed.")
+
+    # Ensure required models are present locally (download if needed).
+    _ensure_models_available(models_to_process)
 
     # --- 4. Initialize or recover output file, and determine already completed models ---
     print(f"Initializing output file: {OUTPUT_FILE}")
