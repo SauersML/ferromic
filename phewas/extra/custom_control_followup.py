@@ -235,7 +235,7 @@ class PhenotypeRun:
     category: str
 
 
-def _load_shared_covariates() -> tuple[pd.DataFrame, pd.DataFrame]:
+def _load_shared_covariates() -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
     project_id = os.getenv("GOOGLE_PROJECT")
     cdr_id = os.getenv("WORKSPACE_CDR")
     if not project_id or not cdr_id:
@@ -312,7 +312,13 @@ def _load_shared_covariates() -> tuple[pd.DataFrame, pd.DataFrame]:
     )
     anc_dummies.index = anc_dummies.index.astype(str)
 
-    return shared, anc_dummies
+    reference_ancestry: str | None
+    if anc_cat.categories.size:
+        reference_ancestry = str(anc_cat.categories[0])
+    else:
+        reference_ancestry = None
+
+    return shared, anc_dummies, reference_ancestry
 
 
 def _load_inversion(target: str) -> pd.DataFrame:
@@ -333,6 +339,7 @@ def _build_design_matrix(
     core: pd.DataFrame,
     ancestry_dummies: pd.DataFrame,
     custom_controls: pd.DataFrame,
+    reference_ancestry: str | None,
 ) -> pd.DataFrame:
     df = core.copy()
     age_mean = df["AGE"].mean()
@@ -361,6 +368,62 @@ def _build_design_matrix(
         before = len(out)
         out = out.loc[finite_mask]
         warn(f"Dropped {before - len(out):,} participants with non-finite covariates.")
+
+    # Statsmodels fails with a ``Singular matrix`` error when any covariate column is
+    # constant (all zeros/ones) after aligning the custom controls and ancestry
+    # dummies.  This situation arose in production when every participant belonged to
+    # the same ancestry stratum, leaving the corresponding dummy columns as all
+    # zeros.  The original code surfaced as a logistic regression failure for every
+    # affected phenotype, obscuring the underlying data issue.  We proactively drop
+    # non-informative constant columns so that the model has full rank.  If the
+    # dosage column itself is constant then the analysis cannot produce a meaningful
+    # estimate, so we abort early to avoid misleading output.
+    constant_counts = out.nunique(dropna=False)
+    constant_cols = [col for col, count in constant_counts.items() if count <= 1]
+
+    if "dosage" in constant_cols:
+        raise RuntimeError(
+            "Inversion dosage is constant after filtering; cannot fit logistic model."
+        )
+
+    ancestry_columns = [col for col in out.columns if col.startswith("ANC_")]
+    ancestry_constants = [col for col in ancestry_columns if col in constant_cols]
+
+    if ancestry_columns and ancestry_constants:
+        if all(out[col].eq(0.0).all() for col in ancestry_columns):
+            if reference_ancestry:
+                warn(
+                    "All participants fall into the reference ancestry stratum "
+                    f"('{reference_ancestry}') after filtering; ancestry covariates will be dropped."
+                )
+            else:
+                warn(
+                    "All participants fall into a single ancestry stratum after filtering; ancestry covariates will be dropped."
+                )
+        else:
+            details: list[str] = []
+            for col in ancestry_constants:
+                label = col.split("ANC_", 1)[-1]
+                value = float(out[col].iloc[0]) if len(out[col]) else float("nan")
+                if value == 0.0:
+                    details.append(f"{label}=0 (no participants)")
+                elif value == 1.0:
+                    details.append(f"{label}=1 (all participants)")
+                else:
+                    details.append(f"{label} constant at {value}")
+            warn(
+                "One or more ancestry dummy covariates became constant after aligning "
+                "with the phenotype/custom controls: "
+                + "; ".join(details)
+            )
+
+    removable = [col for col in constant_cols if col != "const"]
+    if removable:
+        out = out.drop(columns=removable)
+        warn(
+            "Dropped constant covariate columns to avoid singular design: "
+            + ", ".join(sorted(removable))
+        )
 
     return out
 
@@ -419,7 +482,7 @@ def run() -> None:
     if not project_id or not cdr_id:
         die("GOOGLE_PROJECT and WORKSPACE_CDR must be defined in the environment.")
 
-    shared_covariates, anc_dummies = _load_shared_covariates()
+    shared_covariates, anc_dummies, reference_ancestry = _load_shared_covariates()
     definitions = pheno.load_definitions(PHENOTYPE_DEFINITIONS_URL)
     target_runs = _resolve_target_runs(definitions)
     if not target_runs:
@@ -458,7 +521,16 @@ def run() -> None:
                 project_id,
             )
 
-            design = _build_design_matrix(core, anc_dummies, custom_controls)
+            try:
+                design = _build_design_matrix(
+                    core,
+                    anc_dummies,
+                    custom_controls,
+                    reference_ancestry,
+                )
+            except RuntimeError as exc:
+                warn(f"Skipping {cfg.phenotype}: {exc}")
+                continue
             phenotype_status = _load_case_status(
                 cfg.phenotype,
                 cdr_codename,
