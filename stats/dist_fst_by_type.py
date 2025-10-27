@@ -1,10 +1,12 @@
+import logging
+import os
+import re
+import sys
+import time
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import logging
-import sys
-import os
-import time
 from scipy.stats import shapiro
 
 def paired_permutation_test(x, y, num_permutations=10000):
@@ -43,32 +45,118 @@ cat_mapping = {
     'Single-event': 'single_event'
 }
 
+HEADER_PATTERN = re.compile(
+    r">.*?_chr_?([\w\.\-]+)_start_(\d+)_end_(\d+)", re.IGNORECASE
+)
+
+
 def normalize_chromosome(chrom):
+    if chrom is None:
+        return None
+    if pd.isna(chrom):
+        return None
+    if not isinstance(chrom, str):
+        chrom = str(chrom)
     chrom = chrom.strip()
-    if chrom.startswith('chr_'):
-        chrom = chrom[4:]
-    elif chrom.startswith('chr'):
-        chrom = chrom[3:]
-    return f"chr{chrom}"
+    if not chrom:
+        return None
+    lower = chrom.lower()
+    if lower.startswith('chr_'):
+        chrom_part = lower[4:]
+    elif lower.startswith('chr'):
+        chrom_part = lower[3:]
+    else:
+        chrom_part = lower
+    chrom_part = chrom_part.replace('__', '_')
+    if not chrom_part:
+        logger.warning("Encountered empty chromosome string after normalization")
+        return None
+    return f"chr{chrom_part}"
+
 
 def extract_coordinates_from_header(header):
-    parts = header.strip().split('_')
-    try:
-        chrom = parts[2]
-        start = int(parts[4])
-        end = int(parts[6])
-        return {'chrom': normalize_chromosome(chrom), 'start': start, 'end': end}
-    except Exception as e:
-        logger.warning(f"Failed parsing header: {header} - {e}")
+    match = HEADER_PATTERN.search(header.strip())
+    if not match:
+        logger.warning(f"Failed parsing header: {header}")
         return None
 
+    chrom_raw, start_str, end_str = match.groups()
+    chrom = normalize_chromosome(chrom_raw)
+    try:
+        start = int(start_str)
+        end = int(end_str)
+    except ValueError as exc:
+        logger.warning(f"Invalid coordinates in header {header}: {exc}")
+        return None
+
+    if chrom is None:
+        return None
+    if start >= end:
+        logger.warning(
+            f"Invalid interval in header {header}: start ({start}) >= end ({end})"
+        )
+        return None
+
+    return {'chrom': chrom, 'start': start, 'end': end}
+
+def _find_column(df, candidates, label):
+    for col in candidates:
+        if col in df.columns:
+            return col
+    raise KeyError(f"inv_info.tsv missing required column for {label}; looked for {candidates}")
+
+
 def map_regions_to_inversions(inversion_df):
+    """Return lookup dictionaries for recurrent and single-event inversions.
+
+    The inversion metadata files shipped with different pipelines sometimes use
+    alternate column headings (e.g. ``Chromosome`` instead of ``chr``).  The
+    workflow that executes this script may therefore feed us either naming
+    scheme.  The original implementation only supported the ``chr``/``region``
+    convention which caused a ``KeyError`` when the consensus columns were
+    provided.  We reconcile the differences here so the script behaves the same
+    regardless of which version of ``inv_info.tsv`` is present.
+    """
+
+    chrom_col = _find_column(
+        inversion_df,
+        ['chr', 'Chromosome', 'chrom', 'chromosome'],
+        'chromosome',
+    )
+    start_col = _find_column(
+        inversion_df,
+        ['region_start', 'Start', 'start'],
+        'region start',
+    )
+    end_col = _find_column(
+        inversion_df,
+        ['region_end', 'End', 'end'],
+        'region end',
+    )
+    recur_col = _find_column(
+        inversion_df,
+        ['0_single_1_recur', '0_single_1_recur_consensus', 'RecurrenceCode'],
+        'recurrence flag',
+    )
+
+    subset = inversion_df[[chrom_col, start_col, end_col, recur_col]].copy()
+    subset.columns = ['chr', 'region_start', 'region_end', 'recurrence']
+
+    subset['region_start'] = pd.to_numeric(subset['region_start'], errors='coerce')
+    subset['region_end'] = pd.to_numeric(subset['region_end'], errors='coerce')
+    subset['recurrence'] = pd.to_numeric(subset['recurrence'], errors='coerce')
+    subset.dropna(subset=['chr', 'region_start', 'region_end', 'recurrence'], inplace=True)
+    subset['recurrence'] = subset['recurrence'].astype(int)
+
     recurrent_regions = {}
     single_event_regions = {}
-    for _, row in inversion_df.iterrows():
-        chrom = normalize_chromosome(str(row['chr']))
+
+    for _, row in subset.iterrows():
+        chrom = normalize_chromosome(row['chr'])
+        if chrom is None:
+            continue
         start, end = int(row['region_start']), int(row['region_end'])
-        if row['0_single_1_recur'] == 1:
+        if row['recurrence'] == 1:
             recurrent_regions.setdefault(chrom, []).append((start, end))
         else:
             single_event_regions.setdefault(chrom, []).append((start, end))
