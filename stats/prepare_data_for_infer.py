@@ -9,6 +9,7 @@ from tqdm import tqdm
 from numpy.lib.format import open_memmap
 
 # Fast PLINK reader (Rust backend)
+# pip install bed_reader
 from bed_reader import open_bed
 
 # ------------------------------------------------------------
