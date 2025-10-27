@@ -947,6 +947,12 @@ def _pipeline_once():
                 "FDR_ALPHA": FDR_ALPHA,
                 "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA,
                 "RIDGE_L2_BASE": RIDGE_L2_BASE,
+                "ALLOW_POST_FIRTH_MLE_REFIT": bool(
+                    tctx.get(
+                        "ALLOW_POST_FIRTH_MLE_REFIT",
+                        models.DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT,
+                    )
+                ),
                 "MODE": tctx.get("MODE"),
                 "SELECTION": tctx.get("SELECTION"),
                 "BOOTSTRAP_B": tctx.get("BOOTSTRAP_B"),
@@ -988,6 +994,12 @@ def _pipeline_once():
                     "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA,
                     "CACHE_DIR": CACHE_DIR,
                     "RIDGE_L2_BASE": RIDGE_L2_BASE,
+                    "ALLOW_POST_FIRTH_MLE_REFIT": bool(
+                        tctx.get(
+                            "ALLOW_POST_FIRTH_MLE_REFIT",
+                            models.DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT,
+                        )
+                    ),
                     "RESULTS_CACHE_DIR": results_cache_dir,
                     "LRT_OVERALL_CACHE_DIR": lrt_overall_cache_dir,
                     "LRT_FOLLOWUP_CACHE_DIR": lrt_followup_cache_dir,
@@ -1447,6 +1459,12 @@ def _pipeline_once():
                     "MIN_NEFF_FILTER": MIN_NEFF_FILTER,
                     "FDR_ALPHA": FDR_ALPHA, "PER_ANC_MIN_CASES": PER_ANC_MIN_CASES, "PER_ANC_MIN_CONTROLS": PER_ANC_MIN_CONTROLS,
                     "LRT_SELECT_ALPHA": LRT_SELECT_ALPHA, "CACHE_DIR": CACHE_DIR, "RIDGE_L2_BASE": RIDGE_L2_BASE,
+                    "ALLOW_POST_FIRTH_MLE_REFIT": bool(
+                        tctx.get(
+                            "ALLOW_POST_FIRTH_MLE_REFIT",
+                            models.DEFAULT_ALLOW_POST_FIRTH_MLE_REFIT,
+                        )
+                    ),
                     "RESULTS_CACHE_DIR": os.path.join(inversion_cache_dir, "results_atomic"),
                     "LRT_OVERALL_CACHE_DIR": os.path.join(inversion_cache_dir, "lrt_overall"),
                     "LRT_FOLLOWUP_CACHE_DIR": os.path.join(inversion_cache_dir, "lrt_followup"),

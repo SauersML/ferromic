@@ -686,6 +686,7 @@ def test_ctx():
         "LRT_FOLLOWUP_CACHE_DIR": "./phewas_cache/lrt_followup",
         "BOOT_OVERALL_CACHE_DIR": "./phewas_cache/boot_overall",
         "RIDGE_L2_BASE": 1.0,
+        "ALLOW_POST_FIRTH_MLE_REFIT": True,
         # Disable new filters for tests by default.
         # We will override these in specific tests that check the filters.
         "MIN_NEFF_FILTER": 0,
@@ -2059,6 +2060,37 @@ def test_ridge_seeded_refit_matches_mle():
         models._logit_fit = orig
 
 
+def test_post_firth_refit_promotes_mle():
+    rng = np.random.default_rng(123)
+    n = 120
+    x = rng.normal(size=n)
+    X = pd.DataFrame({'const': 1.0, 'x': x})
+    logits = -0.4 + 0.9 * x
+    p = 1 / (1 + np.exp(-logits))
+    y = pd.Series(rng.binomial(1, p))
+
+    import phewas.models as models
+
+    prev_ctx = models.CTX
+    try:
+        models.CTX = {
+            "RIDGE_L2_BASE": 1.0,
+            "EPV_MIN_FOR_MLE": 1e6,  # Force the gate to veto direct MLE attempts
+            "PREFER_FIRTH_ON_RIDGE": True,
+            "MLE_REFIT_MIN_NEFF": 0,
+            "ALLOW_POST_FIRTH_MLE_REFIT": True,
+        }
+        fit, reason = models._fit_logit_ladder(X, y, ridge_ok=True, prefer_mle_first=True)
+        assert reason == "firth_seeded_refit"
+        assert getattr(fit, "_final_is_mle", False)
+        assert not bool(getattr(fit, "_used_firth", False))
+        path = getattr(fit, "_path_reasons", [])
+        assert path and path[-1] == "firth_seeded_refit"
+        assert any(tag == "firth_refit" for tag in path)
+    finally:
+        models.CTX = prev_ctx
+
+
 def test_lrt_allows_when_ridge_seeded_but_final_is_mle(test_ctx):
     with temp_workspace():
         core_data, phenos = make_synth_cohort()
@@ -2100,6 +2132,9 @@ def test_lrt_allows_when_ridge_seeded_but_final_is_mle(test_ctx):
             res = json.load(open(Path(ctx["LRT_OVERALL_CACHE_DIR"]) / "A_strong_signal.json"))
             assert np.isfinite(res['P_LRT_Overall'])
             assert res.get('LRT_Overall_Reason') in (None, '',) or pd.isna(res['LRT_Overall_Reason'])
+            assert res['P_Overall_Valid'] is True
+            assert np.isfinite(res['P_Value'])
+            assert 'ridge_seeded_refit' in res['Model_Notes']
         finally:
             M._logit_fit = orig
             shm.close(); shm.unlink()
