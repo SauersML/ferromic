@@ -134,12 +134,18 @@ def _phi_covariance_for_category(
     lambda_value: float,
     min_k: int,
 ) -> Optional[CategoryNull]:
-    if allowed_mask is not None:
-        analysis_mask = allowed_mask.astype(bool, copy=True)
-    elif global_mask is not None:
-        analysis_mask = global_mask.astype(bool, copy=True)
+    if global_mask is not None:
+        base_mask = global_mask.astype(bool, copy=True)
     else:
-        analysis_mask = np.ones(core_index_size, dtype=bool)
+        base_mask = np.ones(core_index_size, dtype=bool)
+
+    if allowed_mask is not None:
+        control_mask = allowed_mask.astype(bool, copy=True)
+        control_mask &= base_mask
+    else:
+        control_mask = base_mask.copy()
+
+    case_mask = np.zeros(core_index_size, dtype=bool)
 
     dropped: List[str] = []
     candidate_names: List[str] = []
@@ -150,13 +156,15 @@ def _phi_covariance_for_category(
         if idx is None or idx.size == 0:
             dropped.append(name)
             continue
-        idx = idx[analysis_mask[idx]]
+        idx = idx[base_mask[idx]]
         if idx.size == 0:
             dropped.append(name)
             continue
         candidate_names.append(name)
         candidate_indices[name] = np.unique(idx).astype(np.int32, copy=False)
+        case_mask[idx] = True
 
+    analysis_mask = control_mask | case_mask
     used_idx = np.flatnonzero(analysis_mask)
     if used_idx.size == 0:
         return None

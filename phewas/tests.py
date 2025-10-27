@@ -2152,6 +2152,68 @@ def test_covariance_and_metrics_basic(monkeypatch):
     assert row["Phenotypes_GLS"] == "ph1;ph2;ph3"
 
 
+def test_category_metrics_keep_cases_with_allowed_mask(monkeypatch):
+    core = pd.DataFrame(
+        {
+            "const": np.ones(8, dtype=np.float32),
+        },
+        index=[f"p{i}" for i in range(8)],
+    )
+
+    allowed_mask = np.ones(len(core), dtype=bool)
+    # Simulate pan-category controls that exclude existing cases from the pool.
+    allowed_mask[[0, 1, 2, 5]] = False
+    allowed_by_cat = {"Cat": allowed_mask}
+
+    case_map = {
+        "ph1": ("p0", "p3", "p4"),
+        "ph2": ("p1", "p4", "p6"),
+        "ph3": ("p2", "p5", "p7"),
+    }
+
+    monkeypatch.setattr(pheno, "_case_ids_cached", lambda name, *_: case_map.get(name, tuple()))
+
+    cat_sets = {"Cat": ["ph1", "ph2", "ph3"]}
+    nulls = categories.build_category_null_structure(
+        core,
+        allowed_by_cat,
+        cat_sets,
+        cache_dir=".",
+        cdr_codename="TEST",
+        method="fast_phi",
+        shrinkage="ridge",
+        lambda_value=0.05,
+        min_k=2,
+        global_mask=np.ones(len(core), dtype=bool),
+    )
+
+    assert "Cat" in nulls
+    struct = nulls["Cat"]
+    assert set(struct.phenotypes) == {"ph1", "ph2", "ph3"}
+
+    inv = pd.DataFrame(
+        {
+            "Phenotype": ["ph1", "ph2", "ph3"],
+            "P_EMP": [1e-5, 2e-4, 0.03],
+            "Beta": [0.2, 0.1, -0.05],
+        }
+    )
+
+    out = categories.compute_category_metrics(
+        inv,
+        p_col="P_EMP",
+        beta_col="Beta",
+        null_structures=nulls,
+        gbj_draws=200,
+        z_cap=None,
+        rng_seed=7,
+        min_k=2,
+    )
+
+    assert out.shape[0] == 1
+    assert out.loc[0, "Category"] == "Cat"
+
+
 def test_two_sided_p_to_z_handles_extreme_values():
     uncapped = categories._two_sided_p_to_z(1e-50, z_cap=None)
     capped = categories._two_sided_p_to_z(1e-50, z_cap=8.0)
