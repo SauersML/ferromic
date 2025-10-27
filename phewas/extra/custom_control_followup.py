@@ -453,7 +453,15 @@ def _load_shared_covariates() -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
         drop_first=True,
         dtype=np.float32,
     )
-    anc_dummies.index = anc_dummies.index.astype(str)
+    # ``pd.get_dummies`` uses a fresh ``RangeIndex`` by default, which discards the
+    # participant identifiers associated with ``anc_series``.  The downstream design
+    # matrix logic relies on aligning ancestry dummies by ``person_id``; without
+    # restoring the original index, the subsequent ``reindex`` call treats every row
+    # as missing and fills the ancestry covariates with zeros.  This manifested as the
+    # pipeline claiming that all participants belonged to the reference ancestry
+    # stratum, even when other ancestries were present.  Reapply the ``shared`` index
+    # so that ancestry indicators stay aligned with the rest of the covariates.
+    anc_dummies.index = anc_series.index.astype(str)
 
     reference_ancestry: str | None
     if anc_cat.categories.size:
