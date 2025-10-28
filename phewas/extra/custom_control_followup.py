@@ -80,6 +80,12 @@ PHENOTYPE_PATTERNS: Sequence[PhenotypePattern] = (
     PhenotypePattern("Dementias", "alzheimers"),
 )
 
+CUSTOM_PHENOTYPE_BLACKLIST: frozenset[str] = frozenset(
+    {
+        "Obesity_hypoventilation_syndrome_OHS",
+    }
+)
+
 CATEGORY_PGS_IDS: dict[str, Sequence[str]] = {
     "breast_cancer": ("PGS004869", "PGS000507"),
     "alzheimers": ("PGS004146", "PGS004229"),
@@ -96,6 +102,21 @@ CONFIDENCE_Z = 1.959963984540054  # scipy.stats.norm.ppf(0.975)
 MIN_LOG_FLOAT = math.log(sys.float_info.min)
 MAX_LOG_FLOAT = math.log(sys.float_info.max)
 DECIMAL_CONTEXT = Context(prec=50, Emin=-999999, Emax=999999)
+
+# Logistic models occasionally reach extremely large coefficient estimates when the
+# outcome is nearly separated.  ``MAX_ABS_DOSAGE_BETA`` bounds what we consider a
+# numerically stable dosage coefficient; larger values trigger progressively
+# stronger L2 penalties until the estimate returns to a reasonable scale.
+MAX_ABS_DOSAGE_BETA = 15.0
+REGULARIZATION_ALPHAS: Sequence[float] = (
+    1e-4,
+    1e-3,
+    1e-2,
+    1e-1,
+    1.0,
+    10.0,
+    100.0,
+)
 
 
 def _base_covariate_columns(num_pcs: int = NUM_PCS) -> list[str]:
@@ -338,6 +359,29 @@ def _compute_standard_error(result, term: str) -> float:
     return math.nan
 
 
+def _logit_result_converged(result) -> bool:
+    converged = getattr(result, "converged", None)
+    if converged is None:
+        mle_retvals = getattr(result, "mle_retvals", {})
+        if isinstance(mle_retvals, dict):
+            converged = mle_retvals.get("converged")
+    if converged is None:
+        return True
+    return bool(converged)
+
+
+def _logit_result_is_stable(result, term: str = "dosage") -> bool:
+    if not _logit_result_converged(result):
+        return False
+    beta = _extract_parameter(result, term)
+    se = _compute_standard_error(result, term)
+    if not math.isfinite(beta) or not math.isfinite(se) or se <= 0:
+        return False
+    if abs(beta) > MAX_ABS_DOSAGE_BETA:
+        return False
+    return True
+
+
 def _summarise_term(result, term: str) -> dict[str, float | str | None]:
     beta = _extract_parameter(result, term)
     se = _compute_standard_error(result, term)
@@ -454,7 +498,11 @@ def _resolve_target_runs(definitions: pd.DataFrame) -> list["PhenotypeRun"]:
     matched_patterns: set[str] = set()
     for _, row in definitions.iterrows():
         sanitized = str(row.get("sanitized_name", ""))
+        if sanitized in CUSTOM_PHENOTYPE_BLACKLIST:
+            continue
         disease = str(row.get("disease", ""))
+        if disease in CUSTOM_PHENOTYPE_BLACKLIST:
+            continue
         for pattern in PHENOTYPE_PATTERNS:
             if not pattern.pattern:
                 continue
@@ -529,25 +577,50 @@ def _build_category_controls(scores: pd.DataFrame) -> dict[str, pd.DataFrame]:
 def _fit_logistic(X: pd.DataFrame, y: pd.Series):
     model = sm.Logit(y, X)
     try:
-        result = model.fit(disp=False, maxiter=100)
-        return result, "logit_mle"
-    except (PerfectSeparationError, np.linalg.LinAlgError, ValueError) as initial_error:
-        warn(
-            "Logit MLE failed – retrying with L2-regularised fit. "
-            f"(reason: {initial_error})"
-        )
+        initial_error: Exception | None = None
         try:
-            # ``fit_regularized`` only accepts L1-oriented solvers.  Setting
-            # ``L1_wt`` to 0 switches the penalty to pure L2 while keeping the
-            # solver happy.  ``method="l2"`` previously used here triggers a
-            # ``ValueError`` because statsmodels does not implement such an
-            # option.
-            result = model.fit_regularized(alpha=1e-4, L1_wt=0.0, maxiter=200)
-            return result, "logit_l2"
-        except Exception as exc:
-            message = _format_logistic_failure(exc, X, y)
-            message += f"\n    Initial MLE failure: {initial_error}"
-            raise RuntimeError(message) from exc
+            result = model.fit(disp=False, maxiter=100)
+            if _logit_result_is_stable(result):
+                return result, "logit_mle"
+            warn(
+                "Logit MLE converged but produced an unstable dosage estimate; "
+                "retrying with L2-regularised fits."
+            )
+            initial_error = RuntimeError("Unstable dosage estimate after logit MLE fit")
+        except (PerfectSeparationError, np.linalg.LinAlgError, ValueError) as exc:
+            warn(
+                "Logit MLE failed – retrying with L2-regularised fit. "
+                f"(reason: {exc})"
+            )
+            initial_error = exc
+        if initial_error is None:
+            raise RuntimeError("Unexpected state: logit fit neither returned nor failed.")
+
+        regularization_errors: list[str] = []
+        last_error: Exception | None = initial_error
+        for alpha in REGULARIZATION_ALPHAS:
+            try:
+                # ``fit_regularized`` only supports solvers geared towards L1
+                # penalties.  Setting ``L1_wt`` to 0 switches the problem to
+                # pure L2 regularisation while keeping the available solvers
+                # satisfied.
+                result = model.fit_regularized(alpha=alpha, L1_wt=0.0, maxiter=200)
+            except Exception as exc:  # pragma: no cover - defensive branch
+                regularization_errors.append(f"alpha={alpha:g}: {exc}")
+                last_error = exc
+                continue
+            if _logit_result_is_stable(result):
+                return result, f"logit_l2_alpha_{alpha:g}"
+            beta = _extract_parameter(result, "dosage")
+            warn(
+                "Regularised logit fit with alpha={alpha:g} remained unstable "
+                f"(beta={beta!r}); increasing penalty.".format(alpha=alpha, beta=beta)
+            )
+        message = _format_logistic_failure(last_error or initial_error, X, y)
+        if regularization_errors:
+            message += "\n    Regularisation attempts: " + "; ".join(regularization_errors)
+        message += f"\n    Initial MLE failure: {initial_error}"
+        raise RuntimeError(message)
     except Exception as exc:
         raise RuntimeError(_format_logistic_failure(exc, X, y)) from exc
 
