@@ -43,6 +43,9 @@ BASE_URL = "https://sharedspace.s3.msi.umn.edu/"
 
 # Files mirrored from the run_analysis GitHub Actions workflow plus a few
 # additional artefacts that the figure scripts expect.
+HOME = Path.home()
+
+
 REMOTE_PATHS: Sequence[str] = [
     "public_internet/variants_freeze4inv_sv_inv_hg38_processed_arbigent_filtered_manualDotplot_filtered_"
     "PAVgenAdded_withInvCategs_syncWithWH.fixedPH.simpleINV.mod.tsv",
@@ -83,6 +86,7 @@ REMOTE_PATHS: Sequence[str] = [
     "public_internet/all_pairwise_results.csv",
     "public_internet/per_site_diversity_output.falsta",
     "public_internet/per_site_fst_output.falsta",
+    "public_internet/per_site_output.falsta",
 ]
 
 
@@ -107,6 +111,7 @@ class FigureTask:
     optional_dependencies: Sequence[str] = field(default_factory=tuple)
     required: bool = True
     note: str = ""
+    long_running: bool = False
 
 
 FIGURE_TASKS: Sequence[FigureTask] = (
@@ -217,6 +222,31 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "per_site_fst_output.falsta",
             "inv_info.tsv",
         ),
+        long_running=True,
+    ),
+    FigureTask(
+        name="Per-site diversity scatterplot",
+        script=Path("stats/diversity_scatterplot.py"),
+        outputs=(HOME / "distance_plots_10K_beautiful.png",),
+        dependencies=("per_site_diversity_output.falsta",),
+        long_running=True,
+    ),
+    FigureTask(
+        name="Per-site diversity top-N sequences",
+        script=Path("stats/top_n_pi.py"),
+        outputs=(HOME / "top_filtered_pi_smoothed.png",),
+        dependencies=("per_site_diversity_output.falsta",),
+        long_running=True,
+    ),
+    FigureTask(
+        name="Per-site diversity vs distance",
+        script=Path("stats/distance_diversity.py"),
+        outputs=(
+            HOME / "distance_plot_theta_some number.png",
+            HOME / "distance_plot_pi_some number.png",
+        ),
+        dependencies=("per_site_diversity_output.falsta",),
+        long_running=True,
     ),
     FigureTask(
         name="Normalized per-site diversity/FST trends",
@@ -236,6 +266,16 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "per_site_fst_output.falsta",
             "inv_info.tsv",
         ),
+        long_running=True,
+    ),
+    FigureTask(
+        name="Long-region per-site π overview",
+        script=Path("stats/regions_plot.py"),
+        outputs=(Path("filtered_pi_beginning_middle_end.png"),),
+        dependencies=("per_site_output.falsta",),
+        required=False,
+        note="Requires per_site_output.falsta, which is not included in the public archive.",
+        long_running=True,
     ),
     FigureTask(
         name="Per-inversion distance trends",
@@ -245,12 +285,14 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "per_site_diversity_output.falsta",
             "per_site_fst_output.falsta",
         ),
+        long_running=True,
     ),
     FigureTask(
         name="Middle vs flank π quadrant violins",
         script=Path("stats/middle_vs_flank_pi.py"),
         outputs=("pi_analysis_results_exact_mf_quadrants/total_*/pi_mf_quadrant_violins_total_*.pdf",),
         dependencies=("per_site_diversity_output.falsta", "inv_info.tsv"),
+        long_running=True,
     ),
     FigureTask(
         name="Middle vs flank π recurrence violins",
@@ -260,12 +302,14 @@ FIGURE_TASKS: Sequence[FigureTask] = (
             "pi_analysis_results_exact_mf_quadrants/total_*/pi_mf_overall_violins_total_*.pdf",
         ),
         dependencies=("per_site_diversity_output.falsta", "inv_info.tsv"),
+        long_running=True,
     ),
     FigureTask(
         name="Middle vs flank FST quadrant violins",
         script=Path("stats/middle_vs_flank_fst.py"),
         outputs=("fst_analysis_results_exact_mf_quadrants/total_*/fst_mf_quadrant_violins_total_*.pdf",),
         dependencies=("per_site_fst_output.falsta", "inv_info.tsv"),
+        long_running=True,
     ),
     FigureTask(
         name="Flanking region Hudson FST bar plot",
@@ -551,6 +595,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         metavar="NAME",
         help="Run only the task whose name contains the provided substring (case insensitive).",
     )
+    parser.add_argument(
+        "--skip-long",
+        action="store_true",
+        help="Skip figure tasks that are flagged as long-running (per-site summaries).",
+    )
     return parser.parse_args(argv)
 
 
@@ -600,6 +649,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not selected_tasks:
             print(f"No tasks match substring '{args.only}'.")
             return 1
+
+    if args.skip_long:
+        skipped = [task for task in selected_tasks if task.long_running]
+        selected_tasks = tuple(task for task in selected_tasks if not task.long_running)
+        if skipped:
+            print("Skipping long-running tasks: " + ", ".join(task.name for task in skipped))
+        else:
+            print("No long-running tasks matched the current selection.")
 
     summary: List[tuple[FigureTask, str, str]] = []
     for task in selected_tasks:

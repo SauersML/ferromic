@@ -9,7 +9,6 @@ import time
 def parse_header(line):
     # Parse only lines explicitly labeled as filtered_pi
     if not line.strip().startswith(">filtered_pi"):
-        print(f"DEBUG: Skipping non-filtered_pi line: {line.strip()[:50]}...")
         return None, None
     parts = line.strip().split('_')
     try:
@@ -44,10 +43,12 @@ def get_top_n_sequences(file_path, n=6):
                 entry = (length, header, data_offset)
                 if len(top_n) < n:
                     heapq.heappush(top_n, entry)
-                    print(f"DEBUG: Added filtered_pi sequence {header_count}, length={length}, heap size={len(top_n)}")
+                    if header_count <= 20:
+                        print(f"DEBUG: Added filtered_pi sequence {header_count}, length={length}, heap size={len(top_n)}")
                 elif length > top_n[0][0]:
                     old = heapq.heapreplace(top_n, entry)
-                    print(f"DEBUG: Replaced length={old[0]} with length={length}, header={header[:50]}...")
+                    if header_count <= 20:
+                        print(f"DEBUG: Replaced length={old[0]} with length={length}, header={header[:50]}...")
                 file_offset += len(line.encode('utf-8'))
             line_count += 1
             if line_count % 10000 == 0:
@@ -70,19 +71,23 @@ def load_data_for_headers(file_path, top_n):
     data_dict = {}
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         for length, header, offset in top_n:
-            print(f"DEBUG: Seeking to offset {offset} for header: {header[:50]}...")
+            if len(data_dict) < 20:
+                print(f"DEBUG: Seeking to offset {offset} for header: {header[:50]}...")
             f.seek(offset)
             data_line = f.readline().strip()
-            print(f"DEBUG: Read data line with {len(data_line)} chars")
+            if len(data_dict) < 20:
+                print(f"DEBUG: Read data line with {len(data_line)} chars")
             # Split and inspect data
             data_split = data_line.split(',')
-            print(f"DEBUG: Split into {len(data_split)} values, first few: {data_split[:5]}")
+            if len(data_dict) < 20:
+                print(f"DEBUG: Split into {len(data_split)} values, first few: {data_split[:5]}")
             # Handle empty strings and 'NA'
             try:
                 data = [float(x) if x != 'NA' and x != '' else np.nan for x in data_split]
                 data = np.array(data, dtype=np.float32)
                 data_dict[header] = (length, data)
-                print(f"DEBUG: Loaded {len(data)} values for length={length}, header={header[:50]}...")
+                if len(data_dict) <= 20:
+                    print(f"DEBUG: Loaded {len(data)} values for length={length}, header={header[:50]}...")
             except ValueError as e:
                 print(f"ERROR: Failed to parse data for {header[:50]}...: {e}")
                 print(f"DEBUG: Problematic data sample: {data_split[:10]}")
@@ -100,7 +105,8 @@ def plot_top_n_sequences(data_dict):
     fig, ax = plt.subplots(figsize=(14, 8))
     
     for i, (header, (length, data)) in enumerate(data_dict.items()):
-        print(f"DEBUG: Processing filtered_pi sequence {i+1}, length={length}, points={len(data)}")
+        if i < 20:
+            print(f"DEBUG: Processing filtered_pi sequence {i+1}, length={length}, points={len(data)}")
         if len(data) == 0:
             print(f"WARNING: No data to plot for {header[:50]}...")
             continue
@@ -109,7 +115,8 @@ def plot_top_n_sequences(data_dict):
         positions = np.arange(len(data))
         color = plt.cm.Set1(i % 9)
         ax.plot(positions, smoothed, color=color, label=header, lw=2)
-        print(f"DEBUG: Plotted smoothed data for {header[:50]}... with {len(smoothed)} points")
+        if i < 20:
+            print(f"DEBUG: Plotted smoothed data for {header[:50]}... with {len(smoothed)} points")
     
     ax.set_xlabel("Position (bp)", fontsize=16)
     ax.set_ylabel("Smoothed Pi Value (1000 bp window)", fontsize=16)
