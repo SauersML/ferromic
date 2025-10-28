@@ -147,6 +147,12 @@ jobs:
           echo "restored=true" >> "$GITHUB_OUTPUT"
           echo "Manifest and figures restored from run-analysis artifacts."
 
+      - name: Verify figures restored for workflow_run trigger
+        if: github.event_name == 'workflow_run' && steps.restore-figures.outputs.restored != 'true'
+        run: |
+          echo "Expected figure artifacts from run-analysis workflow ${{ github.event.workflow_run.id }} but none were available." >&2
+          exit 1
+
       - name: Check manifest status
         if: steps.check-site.outputs.exists == 'true'
         id: check-manifest
