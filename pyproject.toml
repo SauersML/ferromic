@@ -32,6 +32,8 @@ test = [
     "pandas",
     "statsmodels",
     "pyarrow",
+    "tqdm",
+    "numba",
     "pytest-benchmark",
     "patchelf; platform_system == 'Linux'",
 ]
