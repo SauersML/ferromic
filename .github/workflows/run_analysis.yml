@@ -62,6 +62,7 @@ jobs:
           https://sharedspace.s3.msi.umn.edu/public_internet/inversion_statistical_results.csv
           https://sharedspace.s3.msi.umn.edu/public_internet/inv_info.csv
           https://sharedspace.s3.msi.umn.edu/public_internet/output.csv
+          https://sharedspace.s3.msi.umn.edu/public_internet/phewas_results.tsv
           https://sharedspace.s3.msi.umn.edu/public_internet/all_pairwise_results.csv
           https://sharedspace.s3.msi.umn.edu/public_internet/per_site_diversity_output.falsta
           https://sharedspace.s3.msi.umn.edu/public_internet/per_site_fst_output.falsta
@@ -137,32 +138,6 @@ jobs:
               shutil.copytree(downloads_src, downloads_dest)
           PY
 
-      - name: Prepare figures for Next.js site
-        if: success()
-        run: |
-          python3 scripts/prepare_figures_manifest.py \
-            --figures-root artifacts/figures \
-            --public-root web/figures-site/public/figures \
-            --manifest-path web/figures-site/data/figures.json
-
-      - name: Set up Node.js
-        if: success()
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: web/figures-site/package-lock.json
-
-      - name: Install Next.js dependencies
-        if: success()
-        working-directory: web/figures-site
-        run: npm ci
-
-      - name: Build Next.js figures site
-        if: success()
-        working-directory: web/figures-site
-        run: npm run build
-
       - name: Upload figure artefacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -179,26 +154,3 @@ jobs:
           path: artifacts/downloads
           if-no-files-found: warn
 
-      - name: Upload GitHub Pages artifact
-        if: success()
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: web/figures-site/out
-          name: github-pages
-
-  deploy-pages:
-    needs: run-figures
-    if: ${{ needs.run-figures.result == 'success' }}
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-        with:
-          artifact_name: github-pages
