@@ -21,10 +21,29 @@ working directory.
 from __future__ import annotations
 
 import os
+
+# ---------------------------------------------------------------------------
+# Cap native BLAS/OpenMP threads before importing NumPy/SciPy.
+# ---------------------------------------------------------------------------
+
+_THREAD_ENV_DEFAULTS = {
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1",
+    "BLIS_NUM_THREADS": "1",
+}
+
+for _env_var, _default in _THREAD_ENV_DEFAULTS.items():
+    if not os.environ.get(_env_var):
+        os.environ[_env_var] = _default
+
 import sys
 import math
 import warnings
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+import multiprocessing
 from dataclasses import dataclass
 from decimal import Context, Decimal, localcontext
 from fnmatch import fnmatch
@@ -109,10 +128,17 @@ MIN_LOG_FLOAT = math.log(sys.float_info.min)
 MAX_LOG_FLOAT = math.log(sys.float_info.max)
 DECIMAL_CONTEXT = Context(prec=50, Emin=-999999, Emax=999999)
 
-LRT_BOOTSTRAP_REPLICATES = 1000
+LRT_BOOTSTRAP_REPLICATES = 200
+LRT_BOOTSTRAP_REDUCED_REPLICATES = 50
+LRT_BOOTSTRAP_REDUCED_THRESHOLD = 50_000
+LRT_BOOTSTRAP_DISABLE_THRESHOLD = 100_000
+LRT_BOOTSTRAP_MAX_ABS_ETA_DISABLE = 12.0
 LRT_BOOTSTRAP_SEED = 13579
 
-RIDGE_PARAMETRIC_BOOTSTRAP_REPLICATES = 500
+RIDGE_PARAMETRIC_BOOTSTRAP_REPLICATES = 100
+RIDGE_PARAMETRIC_BOOTSTRAP_REDUCED_REPLICATES = 25
+RIDGE_PARAMETRIC_BOOTSTRAP_REDUCED_THRESHOLD = 50_000
+RIDGE_PARAMETRIC_BOOTSTRAP_DISABLE_THRESHOLD = 100_000
 RIDGE_PARAMETRIC_BOOTSTRAP_SEED = 424242
 
 # Logistic models occasionally reach extremely large coefficient estimates when the
@@ -124,6 +150,27 @@ MAX_ABS_DOSAGE_BETA = 15.0
 RIDGE_ALPHA = 1e-6
 GRADIENT_NORM_THRESHOLD = 1e-6
 HESSIAN_CONDITION_THRESHOLD = 1e8
+
+
+def _resolve_lrt_bootstrap_replicates(n_obs: int, max_abs_eta: float | None = None) -> int:
+    replicates = LRT_BOOTSTRAP_REPLICATES
+    if n_obs >= LRT_BOOTSTRAP_DISABLE_THRESHOLD:
+        return 0
+    if max_abs_eta is not None and math.isfinite(max_abs_eta):
+        if max_abs_eta >= LRT_BOOTSTRAP_MAX_ABS_ETA_DISABLE:
+            return 0
+    if n_obs >= LRT_BOOTSTRAP_REDUCED_THRESHOLD:
+        replicates = min(replicates, LRT_BOOTSTRAP_REDUCED_REPLICATES)
+    return replicates
+
+
+def _resolve_penalized_bootstrap_replicates(n_obs: int) -> int:
+    replicates = RIDGE_PARAMETRIC_BOOTSTRAP_REPLICATES
+    if n_obs >= RIDGE_PARAMETRIC_BOOTSTRAP_DISABLE_THRESHOLD:
+        return 0
+    if n_obs >= RIDGE_PARAMETRIC_BOOTSTRAP_REDUCED_THRESHOLD:
+        replicates = min(replicates, RIDGE_PARAMETRIC_BOOTSTRAP_REDUCED_REPLICATES)
+    return replicates
 
 # ---------------------------------------------------------------------------
 # Data source configuration (mirrors ``phewas.run`` defaults)
@@ -790,11 +837,20 @@ def _summarise_term(
     }
 
     bootstrap_meta: dict[str, float | int | None] | None = None
+    penalized_replicates: int | None = None
     if _is_penalized_result(result) and design is not None and response is not None:
-        try:
-            bootstrap_meta = _compute_penalized_parametric_bootstrap(result, design, response, term)
-        except Exception:
-            bootstrap_meta = None
+        penalized_replicates = _resolve_penalized_bootstrap_replicates(len(response))
+        if penalized_replicates > 0:
+            try:
+                bootstrap_meta = _compute_penalized_parametric_bootstrap(
+                    result,
+                    design,
+                    response,
+                    term,
+                    replicates=penalized_replicates,
+                )
+            except Exception:
+                bootstrap_meta = None
         if bootstrap_meta:
             se = float(bootstrap_meta.get("se", se))
             if math.isfinite(se) and se > 0:
@@ -815,6 +871,8 @@ def _summarise_term(
             summary["penalized_bootstrap_successes"] = bootstrap_meta.get("successes")
             summary["penalized_bootstrap_attempts"] = bootstrap_meta.get("attempts")
             summary["penalized_bootstrap_replicates"] = bootstrap_meta.get("replicates")
+        elif penalized_replicates is not None and penalized_replicates <= 0:
+            summary["penalized_bootstrap_replicates"] = penalized_replicates
 
     conf_int = getattr(result, "conf_int", None)
     if callable(conf_int) and not bootstrap_meta:
@@ -842,6 +900,12 @@ def _summarise_term(
         summary["ci_lower"] = _format_exp(ci_low)
     if math.isfinite(ci_high):
         summary["ci_upper"] = _format_exp(ci_high)
+
+    if (
+        penalized_replicates is not None
+        and "penalized_bootstrap_replicates" not in summary
+    ):
+        summary["penalized_bootstrap_replicates"] = penalized_replicates
 
     return summary
 
@@ -1017,9 +1081,11 @@ def _compute_lrt_bootstrap_pvalue(
     reduced_fit,
     observed_stat: float,
     *,
-    replicates: int = LRT_BOOTSTRAP_REPLICATES,
+    replicates: int | None = None,
     seed: int | None = LRT_BOOTSTRAP_SEED,
 ) -> tuple[float, int, int]:
+    if replicates is None:
+        replicates = LRT_BOOTSTRAP_REPLICATES
     if replicates <= 0:
         return math.nan, 0, 0
 
@@ -1071,9 +1137,11 @@ def _compute_penalized_parametric_bootstrap(
     y: pd.Series,
     term: str,
     *,
-    replicates: int = RIDGE_PARAMETRIC_BOOTSTRAP_REPLICATES,
+    replicates: int | None = None,
     seed: int | None = RIDGE_PARAMETRIC_BOOTSTRAP_SEED,
 ):
+    if replicates is None:
+        replicates = RIDGE_PARAMETRIC_BOOTSTRAP_REPLICATES
     if replicates <= 0:
         return None
 
@@ -1977,18 +2045,48 @@ def _analyse_single_phenotype(
             reduced_ll = getattr(reduced_fit, "llf", math.nan)
             if math.isfinite(full_ll) and math.isfinite(reduced_ll):
                 lrt_statistic = max(0.0, 2.0 * (float(full_ll) - float(reduced_ll)))
-                (
-                    lrt_bootstrap_pvalue,
-                    lrt_bootstrap_successes,
-                    lrt_bootstrap_attempts,
-                ) = _compute_lrt_bootstrap_pvalue(
-                    X,
-                    reduced_design,
-                    y,
-                    reduced_fit,
-                    lrt_statistic,
+                raw_max_abs_eta = (
+                    reduced_diag.get("max_abs_eta")
+                    if isinstance(reduced_diag, Mapping)
+                    else None
                 )
-                lrt_bootstrap_ran = True
+                try:
+                    max_abs_eta = (
+                        float(raw_max_abs_eta)
+                        if raw_max_abs_eta is not None
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    max_abs_eta = None
+                effective_replicates = _resolve_lrt_bootstrap_replicates(
+                    len(reduced_design),
+                    max_abs_eta,
+                )
+                if effective_replicates <= 0:
+                    _log_lines(
+                        prefix,
+                        "Skipping LRT bootstrap (cohort too large or predictions saturated).",
+                    )
+                else:
+                    if effective_replicates < LRT_BOOTSTRAP_REPLICATES:
+                        _log_lines(
+                            prefix,
+                            "Running LRT bootstrap with "
+                            f"{effective_replicates} replicates (down from {LRT_BOOTSTRAP_REPLICATES}).",
+                        )
+                    (
+                        lrt_bootstrap_pvalue,
+                        lrt_bootstrap_successes,
+                        lrt_bootstrap_attempts,
+                    ) = _compute_lrt_bootstrap_pvalue(
+                        X,
+                        reduced_design,
+                        y,
+                        reduced_fit,
+                        lrt_statistic,
+                        replicates=effective_replicates,
+                    )
+                    lrt_bootstrap_ran = True
             else:
                 _log_lines(
                     prefix,
@@ -2206,27 +2304,27 @@ def run() -> None:
                 warn(f"No analysable phenotypes remained for inversion {inv}; skipping.")
                 continue
 
-            pending: dict[Future, PhenotypeRun] = {}
-            with ProcessPoolExecutor(
-                max_workers=max(1, min(4, len(ready_runs), os.cpu_count() or 1))
-            ) as executor:
-                for cfg, control_names in ready_runs:
-                    future = executor.submit(
-                        _analyse_single_phenotype,
-                        cfg=cfg,
-                        inv=inv,
-                        preconditioner=preconditioner,
-                        custom_control_names=control_names,
-                        definitions=definitions,
-                        cdr_id=cdr_id,
-                        scores_path=scores_path,
-                    )
-                    pending[future] = cfg
+            max_workers_env = os.getenv("CUSTOM_FOLLOWUP_MAX_WORKERS")
+            try:
+                configured_workers = int(max_workers_env) if max_workers_env else 1
+            except (TypeError, ValueError):
+                configured_workers = 1
+            configured_workers = max(1, configured_workers)
+            cpu_cap = os.cpu_count() or 1
+            max_workers = max(1, min(configured_workers, len(ready_runs), cpu_cap, 4))
 
-                for future in as_completed(pending):
-                    cfg = pending[future]
+            if max_workers == 1:
+                for cfg, control_names in ready_runs:
                     try:
-                        result, summary_lines = future.result()
+                        result, summary_lines = _analyse_single_phenotype(
+                            cfg=cfg,
+                            inv=inv,
+                            preconditioner=preconditioner,
+                            custom_control_names=control_names,
+                            definitions=definitions,
+                            cdr_id=cdr_id,
+                            scores_path=scores_path,
+                        )
                     except Exception as exc:  # pragma: no cover - defensive guard
                         warn(f"Unhandled error in {cfg.phenotype} analysis: {exc}")
                         continue
@@ -2237,6 +2335,40 @@ def run() -> None:
                     results.append(result)
                     for line in summary_lines:
                         _log_lines(cfg.phenotype, line)
+            else:
+                mp_context = multiprocessing.get_context("spawn")
+                pending: dict[Future, PhenotypeRun] = {}
+                with ProcessPoolExecutor(
+                    max_workers=max_workers,
+                    mp_context=mp_context,
+                ) as executor:
+                    for cfg, control_names in ready_runs:
+                        future = executor.submit(
+                            _analyse_single_phenotype,
+                            cfg=cfg,
+                            inv=inv,
+                            preconditioner=preconditioner,
+                            custom_control_names=control_names,
+                            definitions=definitions,
+                            cdr_id=cdr_id,
+                            scores_path=scores_path,
+                        )
+                        pending[future] = cfg
+
+                    for future in as_completed(pending):
+                        cfg = pending[future]
+                        try:
+                            result, summary_lines = future.result()
+                        except Exception as exc:  # pragma: no cover - defensive guard
+                            warn(f"Unhandled error in {cfg.phenotype} analysis: {exc}")
+                            continue
+
+                        if not result:
+                            continue
+
+                        results.append(result)
+                        for line in summary_lines:
+                            _log_lines(cfg.phenotype, line)
 
         if not results:
             warn("No successful analyses were produced; skipping output file.")
