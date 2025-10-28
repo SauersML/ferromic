@@ -8,7 +8,7 @@ down to a minimal, targeted workflow:
 * Each phenotype category draws two additional polygenic score controls from
   ``scores.tsv``. These are selected according to ``CATEGORY_PGS_IDS`` and use
   ``<PGS_ID>_AVG`` columns matched case-insensitively.
-* No multiple-testing or FDR correction is applied – raw p-values are reported.
+* P-values are adjusted for multiple testing via the Benjamini–Hochberg FDR procedure.
 
 All configuration is expressed as module-level globals; there is no CLI entry
 point by design.
@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy.special import log_ndtr
+from statsmodels.stats.multitest import multipletests
 from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationError
 from patsy import dmatrix
 
@@ -1364,22 +1365,39 @@ class DesignPreconditioner:
     ancestry_columns: list[str]
     sex_column: str | None
 
-    def build_design(self, control_columns: Sequence[str]) -> pd.DataFrame:
+    def build_design(
+        self,
+        control_columns: Sequence[str],
+        *,
+        include_sex: bool = True,
+        restrict_index: pd.Index | Sequence[str] | None = None,
+    ) -> pd.DataFrame:
         selected_controls = [col for col in self.control_order if col in control_columns]
 
-        frames: list[pd.DataFrame] = [self.dosage.to_frame(name="dosage"), self.age_basis]
-        if self.sex is not None:
-            frames.append(self.sex.to_frame(name=self.sex.name))
+        if restrict_index is not None:
+            subset_index = self.index.intersection(pd.Index(restrict_index))
+        else:
+            subset_index = self.index
+
+        if subset_index.empty:
+            raise RuntimeError("No participants remain after applying analysis subset.")
+
+        frames: list[pd.DataFrame] = [
+            self.dosage.loc[subset_index].to_frame(name="dosage"),
+            self.age_basis.loc[subset_index],
+        ]
+        if include_sex and self.sex is not None:
+            frames.append(self.sex.loc[subset_index].to_frame(name=self.sex.name))
         if not self.pcs_resid.empty:
-            frames.append(self.pcs_resid)
+            frames.append(self.pcs_resid.loc[subset_index])
         if selected_controls:
-            frames.append(self.scaled_controls[selected_controls])
+            frames.append(self.scaled_controls.loc[subset_index, selected_controls])
         if not self.ancestry_dummies.empty:
-            frames.append(self.ancestry_dummies)
+            frames.append(self.ancestry_dummies.loc[subset_index])
 
         design = pd.concat(frames, axis=1)
         order: list[str] = ["dosage", *self.age_columns]
-        if self.sex_column:
+        if include_sex and self.sex_column:
             order.append(self.sex_column)
         order.extend(self.pc_columns)
         order.extend(selected_controls)
@@ -1402,6 +1420,7 @@ class DesignPreconditioner:
                 "effective_rank": rank,
                 "final_columns": ["const", *order],
                 "selected_custom_controls": selected_controls,
+                "analysis_rows": len(subset_index),
             }
         )
         design.attrs["diagnostics"] = diagnostics
@@ -1718,8 +1737,42 @@ def _analyse_single_phenotype(
         project_id,
     )
 
+    analysis_index = preconditioner.index
+    include_sex = True
+    if cfg.category == "breast_cancer":
+        include_sex = False
+        sex_series = preconditioner.sex
+        if sex_series is not None:
+            total_available = len(analysis_index)
+            female_mask = sex_series == 0
+            female_index = sex_series.index[female_mask]
+            filtered_index = analysis_index.intersection(female_index)
+            _log_lines(
+                prefix,
+                "Restricting to genetically inferred females; "
+                f"retained {len(filtered_index)} of {total_available} participants ("
+                f"dropped {total_available - len(filtered_index)}).",
+            )
+            if filtered_index.empty:
+                _log_lines(
+                    prefix,
+                    "No genetically inferred female participants remain after filtering; skipping.",
+                    level="warn",
+                )
+                return None, []
+            analysis_index = filtered_index
+        else:
+            _log_lines(
+                prefix,
+                "Sex covariate absent after conditioning; assuming cohort already restricted to a single sex.",
+            )
+
     try:
-        design = preconditioner.build_design(custom_control_names)
+        design = preconditioner.build_design(
+            custom_control_names,
+            include_sex=include_sex,
+            restrict_index=analysis_index,
+        )
     except RuntimeError as exc:
         _log_lines(prefix, f"Skipping phenotype due to design matrix issue: {exc}", level="warn")
         return None, []
@@ -1728,7 +1781,7 @@ def _analyse_single_phenotype(
     phenotype_status = _load_case_status(
         cfg.phenotype,
         cdr_codename,
-        preconditioner.index,
+        analysis_index,
     )
 
     n_cases = int(phenotype_status.sum())
@@ -1816,7 +1869,11 @@ def _analyse_single_phenotype(
     baseline_method: str | None = None
     baseline_control_names: list[str] = []
     try:
-        baseline_design = preconditioner.build_design(baseline_control_names)
+        baseline_design = preconditioner.build_design(
+            baseline_control_names,
+            include_sex=include_sex,
+            restrict_index=analysis_index,
+        )
     except RuntimeError as exc:
         _log_lines(
             prefix,
@@ -1997,6 +2054,13 @@ def run() -> None:
         return
 
     output_df = pd.DataFrame(results)
+    pvals = pd.to_numeric(output_df.get("P_Value"), errors="coerce")
+    output_df["BH_FDR_Q"] = np.nan
+    mask = pvals.notna() & np.isfinite(pvals)
+    if mask.any():
+        _, qvals, _, _ = multipletests(pvals.loc[mask], alpha=0.05, method="fdr_bh")
+        output_df.loc[mask, "BH_FDR_Q"] = qvals
+
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     output_df.to_csv(OUTPUT_PATH, sep="\t", index=False)
     info(f"Wrote {len(output_df)} rows to {OUTPUT_PATH}")
