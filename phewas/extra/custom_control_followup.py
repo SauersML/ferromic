@@ -27,13 +27,13 @@ from dataclasses import dataclass
 from decimal import Context, Decimal, localcontext
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy.special import log_ndtr
-from statsmodels.tools.sm_exceptions import PerfectSeparationError
+from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationError
 
 from .. import iox as io
 from .. import pheno
@@ -155,28 +155,24 @@ def die(message: str) -> None:
 def _compute_condition_number(matrix: np.ndarray) -> float:
     if matrix.size == 0:
         return float("nan")
-    with np.errstate(all="ignore"):
-        singular_values = np.linalg.svd(matrix, compute_uv=False)
-    finite = singular_values[np.isfinite(singular_values)]
-    if finite.size == 0:
-        return float("nan")
-    smallest = finite.min(initial=0.0)
-    largest = finite.max(initial=0.0)
-    if smallest == 0.0:
+    try:
+        with np.errstate(all="ignore"):
+            value = float(np.linalg.cond(matrix))
+    except np.linalg.LinAlgError:
         return float("inf")
-    return float(largest / smallest)
+    if not np.isfinite(value):
+        return float("inf")
+    return value
 
 
 def _estimate_rank(matrix: np.ndarray) -> int:
     if matrix.size == 0:
         return 0
-    with np.errstate(all="ignore"):
-        singular_values = np.linalg.svd(matrix, compute_uv=False)
-    if singular_values.size == 0:
+    try:
+        with np.errstate(all="ignore"):
+            return int(np.linalg.matrix_rank(matrix))
+    except np.linalg.LinAlgError:
         return 0
-    eps = np.finfo(matrix.dtype).eps if matrix.dtype.kind == "f" else np.finfo(np.float64).eps
-    tolerance = singular_values.max(initial=0.0) * max(matrix.shape) * eps
-    return int(np.sum(singular_values > tolerance))
 
 
 def _summarise_column(values: pd.Series) -> dict[str, object]:
@@ -231,6 +227,42 @@ def _summarise_design_matrix(X: pd.DataFrame, y: pd.Series | None = None) -> str
                 "Ancestry dummies constant after alignment: "
                 + ", ".join(diagnostics["ancestry_constants"])
             )
+        details: Mapping[str, dict[str, object]] | None = diagnostics.get("non_finite_details")  # type: ignore[assignment]
+        if details:
+            for column, info_dict in details.items():
+                pieces: list[str] = []
+                nan_count = info_dict.get("nan")
+                if nan_count:
+                    pieces.append(f"NaN={nan_count}")
+                pos_inf = info_dict.get("pos_inf")
+                if pos_inf:
+                    pieces.append(f"+inf={pos_inf}")
+                neg_inf = info_dict.get("neg_inf")
+                if neg_inf:
+                    pieces.append(f"-inf={neg_inf}")
+                examples = info_dict.get("examples")
+                if examples:
+                    pieces.append("examples=" + ", ".join(map(str, examples)))
+                if pieces:
+                    lines.append(f"Non-finite values in {column}: " + "; ".join(pieces))
+        example_rows = diagnostics.get("non_finite_examples")
+        if example_rows:
+            lines.append(
+                "Example participants removed for non-finite covariates: "
+                + "; ".join(str(row) for row in example_rows)
+            )
+
+    return "\n".join(lines)
+
+
+def _format_non_finite_value(value: float) -> str:
+    if pd.isna(value):
+        return "NaN"
+    if np.isposinf(value):
+        return "+inf"
+    if np.isneginf(value):
+        return "-inf"
+    return f"{float(value):.6g}"
 
 
 def _decimal_to_string(value: Decimal) -> str:
@@ -359,6 +391,18 @@ def _compute_standard_error(result, term: str) -> float:
     return math.nan
 
 
+def _extract_series_value(result, attribute: str, term: str) -> float:
+    values = getattr(result, attribute, None)
+    if isinstance(values, pd.Series):
+        candidate = values.get(term)
+        if candidate is None:
+            return math.nan
+        return float(candidate)
+    if isinstance(values, np.ndarray):
+        index = _get_term_index(result, term)
+        if index is not None and 0 <= index < len(values):
+            return float(values[index])
+    return math.nan
 def _logit_result_converged(result) -> bool:
     converged = getattr(result, "converged", None)
     if converged is None:
@@ -384,14 +428,36 @@ def _logit_result_is_stable(result, term: str = "dosage") -> bool:
 
 def _summarise_term(result, term: str) -> dict[str, float | str | None]:
     beta = _extract_parameter(result, term)
-    se = _compute_standard_error(result, term)
-    log_p: float | None = None
-    z_value = float("nan")
-    if math.isfinite(beta) and math.isfinite(se) and se > 0:
+    se = _extract_series_value(result, "bse", term)
+    if not math.isfinite(se) or se <= 0:
+        se = _compute_standard_error(result, term)
+
+    p_value = _extract_series_value(result, "pvalues", term)
+    z_value = _extract_series_value(result, "tvalues", term)
+    log_p: float | None
+
+    if math.isfinite(p_value) and p_value > 0:
+        log_p = math.log(p_value)
+    else:
+        log_p = None
+
+    if (log_p is None or not math.isfinite(log_p)) and math.isfinite(z_value):
+        log_sf = float(log_ndtr(-abs(z_value)))
+        log_p = math.log(2.0) + log_sf
+        if log_p > MIN_LOG_FLOAT:
+            p_value = math.exp(log_p)
+        else:
+            p_value = math.nan
+
+    if not math.isfinite(z_value) and math.isfinite(beta) and math.isfinite(se) and se > 0:
         z_value = beta / se
         if math.isfinite(z_value):
             log_sf = float(log_ndtr(-abs(z_value)))
             log_p = math.log(2.0) + log_sf
+            if log_p > MIN_LOG_FLOAT:
+                p_value = math.exp(log_p)
+            else:
+                p_value = math.nan
 
     summary: dict[str, float | str | None] = {
         "beta": beta,
@@ -400,13 +466,36 @@ def _summarise_term(result, term: str) -> dict[str, float | str | None]:
         "odds_ratio": _format_exp(beta) if math.isfinite(beta) else math.nan,
         "ci_lower": math.nan,
         "ci_upper": math.nan,
-        "log_p": log_p,
+        "log_p": log_p if log_p is not None and math.isfinite(log_p) else None,
     }
 
-    if math.isfinite(beta) and math.isfinite(se) and se > 0:
-        half_width = CONFIDENCE_Z * se
-        summary["ci_lower"] = _format_exp(beta - half_width)
-        summary["ci_upper"] = _format_exp(beta + half_width)
+    conf_int = getattr(result, "conf_int", None)
+    ci_low = ci_high = math.nan
+    if callable(conf_int):
+        try:
+            interval = conf_int(alpha=0.05)
+        except Exception:
+            interval = None
+        if isinstance(interval, pd.DataFrame):
+            if term in interval.index:
+                ci_low = float(interval.loc[term, 0])
+                ci_high = float(interval.loc[term, 1])
+        elif isinstance(interval, np.ndarray):
+            index = _get_term_index(result, term)
+            if index is not None and 0 <= index < interval.shape[0]:
+                ci_low = float(interval[index, 0])
+                ci_high = float(interval[index, 1])
+
+    if not math.isfinite(ci_low) or not math.isfinite(ci_high):
+        if math.isfinite(beta) and math.isfinite(se) and se > 0:
+            half_width = CONFIDENCE_Z * se
+            ci_low = beta - half_width
+            ci_high = beta + half_width
+
+    if math.isfinite(ci_low):
+        summary["ci_lower"] = _format_exp(ci_low)
+    if math.isfinite(ci_high):
+        summary["ci_upper"] = _format_exp(ci_high)
 
     return summary
 
@@ -482,6 +571,65 @@ def _format_logistic_failure(exc: Exception, X: pd.DataFrame, y: pd.Series) -> s
     summary_lines = _summarise_design_matrix(X, y).splitlines()
     indented = "\n    ".join(summary_lines)
     return f"Logistic regression failed: {exc}\n    {indented}"
+
+
+def _collect_convergence_metadata(result) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    for attr in ("mle_retvals", "fit_history"):
+        value = getattr(result, attr, None)
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                metadata.setdefault(str(key), item)
+    converged_attr = getattr(result, "converged", None)
+    if converged_attr is not None:
+        metadata.setdefault("converged", bool(converged_attr))
+    return metadata
+
+
+def _fit_has_converged(result) -> bool:
+    metadata = _collect_convergence_metadata(result)
+    converged = metadata.get("converged")
+    if isinstance(converged, (bool, np.bool_)):
+        return bool(converged)
+    return True
+
+
+def _report_fit_diagnostics(result, label: str) -> None:
+    metadata = _collect_convergence_metadata(result)
+    converged = metadata.get("converged")
+    if isinstance(converged, (bool, np.bool_)) and converged:
+        return
+
+    warnflag = metadata.get("warnflag")
+    reason_parts: list[str] = []
+    if isinstance(warnflag, (int, np.integer)):
+        warnflag_map = {
+            1: "iteration limit reached before convergence",
+            2: "parameter change below tolerance but gradient not close to zero",
+            3: "likelihood failed to increase; possible separation or collinearity",
+        }
+        reason_parts.append(warnflag_map.get(int(warnflag), f"warnflag={warnflag}"))
+    for key in ("iterations", "criterion", "deviance", "score", "score_norm", "step"):
+        value = metadata.get(key)
+        if value is None:
+            continue
+        if isinstance(value, (float, np.floating)):
+            reason_parts.append(f"{key}={float(value):.3e}")
+        else:
+            reason_parts.append(f"{key}={value}")
+
+    try:
+        score_vec = result.model.score(result.params)  # type: ignore[call-arg]
+        score_norm = float(np.linalg.norm(np.asarray(score_vec, dtype=np.float64)))
+        if math.isfinite(score_norm):
+            reason_parts.append(f"score_norm={score_norm:.3e}")
+    except Exception:
+        pass
+
+    if not reason_parts:
+        reason_parts.append("no convergence diagnostics available")
+
+    warn(f"{label} logistic fit did not converge ({'; '.join(reason_parts)})")
 
 def _normalize_label(value: str) -> str:
     return " ".join(str(value).lower().replace("_", " ").split())
@@ -622,7 +770,21 @@ def _fit_logistic(X: pd.DataFrame, y: pd.Series):
         message += f"\n    Initial MLE failure: {initial_error}"
         raise RuntimeError(message)
     except Exception as exc:
-        raise RuntimeError(_format_logistic_failure(exc, X, y)) from exc
+        attempts.append(("glm_binomial", exc))
+    else:
+        if _fit_has_converged(glm_result):
+            warn("Falling back to GLM binomial fit for converged estimates.")
+            return glm_result, "glm_binomial"
+        _report_fit_diagnostics(glm_result, "GLM binomial")
+        attempts.append(("glm_binomial", RuntimeError("did not converge")))
+
+    if attempts:
+        failure_lines = [f"{label}: {exc}" for label, exc in attempts]
+        message = "All logistic solvers failed:\n    " + "\n    ".join(failure_lines)
+    else:
+        message = "Logistic solver failed for unknown reasons"
+
+    raise RuntimeError(_format_logistic_failure(RuntimeError(message), X, y))
 
 
 @dataclass
@@ -810,11 +972,76 @@ def _build_design_matrix(
 
     finite_mask = np.isfinite(out.to_numpy(dtype=np.float64)).all(axis=1)
     if not finite_mask.all():
+        failing_rows = out.loc[~finite_mask]
+        non_finite_details: dict[str, dict[str, object]] = {}
+        example_rows: list[str] = []
+        for pid, row in failing_rows.head(5).iterrows():
+            issues: list[str] = []
+            for column, value in row.items():
+                if pd.isna(value):
+                    issues.append(f"{column}=NaN")
+                elif np.isposinf(value):
+                    issues.append(f"{column}=+inf")
+                elif np.isneginf(value):
+                    issues.append(f"{column}=-inf")
+            if issues:
+                example_rows.append(f"{pid}: {', '.join(issues)}")
+
+        for column in out.columns:
+            column_values = failing_rows[column]
+            if column_values.empty:
+                continue
+            details: dict[str, object] = {}
+            nan_count = int(column_values.isna().sum())
+            if nan_count:
+                details["nan"] = nan_count
+            pos_inf_count = int(np.isposinf(column_values.to_numpy(dtype=np.float64, copy=False)).sum())
+            if pos_inf_count:
+                details["pos_inf"] = pos_inf_count
+            neg_inf_count = int(np.isneginf(column_values.to_numpy(dtype=np.float64, copy=False)).sum())
+            if neg_inf_count:
+                details["neg_inf"] = neg_inf_count
+            if details:
+                examples: list[str] = []
+                for value in column_values.iloc[:3]:
+                    examples.append(_format_non_finite_value(value))
+                details["examples"] = examples
+                non_finite_details[column] = details
+
         before = len(out)
         out = out.loc[finite_mask]
         dropped = before - len(out)
         diagnostics["dropped_non_finite"] = dropped
-        warn(f"Dropped {dropped:,} participants with non-finite covariates.")
+        if non_finite_details:
+            diagnostics["non_finite_details"] = non_finite_details
+        if example_rows:
+            diagnostics["non_finite_examples"] = example_rows
+
+        message_lines = [
+            f"Dropped {dropped:,} participants with non-finite covariates.",
+        ]
+        if non_finite_details:
+            column_summaries: list[str] = []
+            for column, details in non_finite_details.items():
+                pieces: list[str] = []
+                if details.get("nan"):
+                    pieces.append(f"NaN={details['nan']}")
+                if details.get("pos_inf"):
+                    pieces.append(f"+inf={details['pos_inf']}")
+                if details.get("neg_inf"):
+                    pieces.append(f"-inf={details['neg_inf']}")
+                if pieces:
+                    column_summaries.append(f"{column} ({', '.join(pieces)})")
+            if column_summaries:
+                message_lines.append("Problem columns: " + "; ".join(column_summaries))
+        if example_rows:
+            message_lines.append("Example participants: " + "; ".join(example_rows))
+        warn("\n".join(message_lines))
+
+        if out.empty:
+            raise RuntimeError(
+                "All participants removed after filtering non-finite covariates."
+            )
 
     # Statsmodels fails with a ``Singular matrix`` error when any covariate column is
     # constant (all zeros/ones) after aligning the custom controls and ancestry
@@ -1088,7 +1315,7 @@ def run() -> None:
                 baseline_summary = _summarise_term(baseline_fit, "dosage")
             except RuntimeError as exc:
                 warn(
-                    "Unadjusted logistic regression failed for "
+                    "Normal-control logistic regression (without custom PGS covariates) failed for "
                     f"{cfg.phenotype}: {exc}"
                 )
 
@@ -1114,12 +1341,12 @@ def run() -> None:
                     "Fit_Method": fit_method,
                     "Control_File": str(scores_path),
                     "Custom_Covariates": ",".join(custom_cols),
-                    "OR_Unadjusted": baseline_summary.get("odds_ratio", math.nan),
-                    "OR_Unadjusted_95CI_Lower": baseline_summary.get("ci_lower", math.nan),
-                    "OR_Unadjusted_95CI_Upper": baseline_summary.get("ci_upper", math.nan),
-                    "P_Value_Unadjusted": baseline_summary.get("p_value", math.nan),
-                    "Log_P_Value_Unadjusted": baseline_log_p,
-                    "Fit_Method_Unadjusted": baseline_method,
+                    "OR_NoCustomControls": baseline_summary.get("odds_ratio", math.nan),
+                    "OR_NoCustomControls_95CI_Lower": baseline_summary.get("ci_lower", math.nan),
+                    "OR_NoCustomControls_95CI_Upper": baseline_summary.get("ci_upper", math.nan),
+                    "P_Value_NoCustomControls": baseline_summary.get("p_value", math.nan),
+                    "Log_P_Value_NoCustomControls": baseline_log_p,
+                    "Fit_Method_NoCustomControls": baseline_method,
                 }
             )
 
