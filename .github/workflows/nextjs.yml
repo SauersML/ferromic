@@ -124,12 +124,18 @@ jobs:
 
           FIGURES_ROOT=$(find "$SEARCH_ROOT" -type d -path "*/artifacts/figures" -print -quit)
           if [ -z "$FIGURES_ROOT" ]; then
-            FIGURES_ROOT=$(find "$SEARCH_ROOT" -maxdepth 5 -type d -name figures -print -quit)
+            FIGURES_ROOT=$(find "$SEARCH_ROOT" -maxdepth 8 -type d -name figures -print -quit)
+          fi
+
+          if [ -z "$FIGURES_ROOT" ]; then
+            FIGURES_ROOT=$(python3 scripts/find_figures_root.py --search-root "$SEARCH_ROOT")
           fi
 
           if [ -z "$FIGURES_ROOT" ]; then
             echo "Figures directory not found in artifact; generating empty manifest."
             FIGURES_ROOT=$(mktemp -d)
+          else
+            echo "Using figures root: $FIGURES_ROOT"
           fi
 
           python3 scripts/prepare_figures_manifest.py \
